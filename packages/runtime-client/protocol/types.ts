@@ -189,7 +189,6 @@ export type InitializationData = {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
-    eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern (home included) forward in place
     // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;

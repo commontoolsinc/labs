@@ -23,15 +23,11 @@ merged 2026-07-09) — do not merge scopes.
 
 ## 0. TL;DR
 
-- **A′ is a debug-correctness line, not a boot-floor line.** The boot-floor arc
-  is merged and done (~165ms floor, ~25ms/cold-boot banked by #4458 — historical
-  numbers, re-derive before quoting). What remains wrong: dev builds still pay
-  eager `.src` resolution (`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`, on by default
-  in dev — `packages/shell/src/lib/env.ts`, gate in
-  `packages/runner/src/builder/module.ts` `setEagerSourceAnnotation`), and what
-  it computes is often wrong (historical finding: 64/82 lunch-poll primitives
-  hit the expensive fallback; the 18 "cheap successes" all returned the same
-  colliding runtime-factory frame).
+- **A′ is a debug-correctness line, not a boot-floor line.** The historical
+  runtime resolver captured one stack and walked source maps per primitive; its
+  cheap successes could still point at a colliding runtime-factory frame. The
+  current design records authored sites once in a compiler-generated sidecar and
+  serves `.src` from a debug-only runtime map.
 - **The prerequisite**: transform-time injection needs the transformer pipeline
   to know, at the hoisting stage, where each builder call/callback was authored.
   Probe-verified on current main: **it doesn't** — all hoisted builder origins
@@ -424,21 +420,18 @@ patterns) and the full fixture suite green.
      `getSourceMapRange`, do NOT rely on original chains (dropped at most sites
      by design), and note the authored binding name for the `fn.name` gap now
      comes from position→source-text lookup, not from an original node.
-   - _What shape_: open — candidates: extra argument on the builder call
-     (schema-injection-style splice; runtime signature change), a property in
-     the `__cfReg` registration (registrar contract change — note exported
-     builders bypass `__cfReg`, so registration-only coverage is incomplete), or
-     a sibling annotation call. Decide with runner owners; the
-     `{identity, symbol}` provenance plumbing from #4436/#4458 is the natural
-     rendezvous.
+   - _What shape_: `BuilderSourceSitesV1`, a versioned per-module compiler
+     sidecar keyed by the runtime symbol (`__cfReg` name, export alias, or
+     `default`). It travels beside JavaScript and therefore changes neither
+     builder signatures nor verifier-visible module bytes.
    - _What content_: file + line:col of the authored callback (and the authored
      binding name — closes the empty-`fn.name` debug-name gap).
-3. **Runtime read side**: `fn.src` lazy getter reads injected data instead of
-   eval-frame resolution (CT-1754 machinery in `harness/engine.ts` becomes dead
-   on this path).
-4. **Delete the dev-build eager resolution**:
-   `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` and `setEagerSourceAnnotation` gate
-   (~25ms dev cold-boot, historical — re-derive).
+3. **Runtime read side**: `fn.src` and the authored `fn.name` lazy getters read
+   the sidecar-backed `authored-debug-source` map instead of eval-frame
+   resolution.
+4. **Delete the dev-build eager resolution**: the former eager-source flag and
+   per-primitive stack/source-map walk are removed; source maps remain lazy for
+   thrown-error stack mapping.
 5. **seefeld's directive**: remove the expensive fallback; error instead. Gated
    on 2–3 making the cheap path correct.
 6. **Boundaries**: CT-1819 / PR #4560 (lazy source-map compose) is a sibling —

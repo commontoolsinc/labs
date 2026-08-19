@@ -1,6 +1,9 @@
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
 import { getLogger } from "@commonfabric/utils/logger";
 import type ts from "typescript";
 
@@ -390,10 +393,12 @@ export interface CompileSourcesOptions {
   precompiledBodies?: Map<string, string>;
   /**
    * Per-source source map (from `compileToModules`), keyed by source name. Used
-   * to compose a per-load bundle source map so `fn.src` / CFC verified-source
-   * coordinates resolve back to the original authored files.
+   * to compose per-load maps so error stacks resolve back to the original
+   * authored files.
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
+  /** Debug-only authored builder sites per source name. */
+  precompiledBuilderSourceSites?: Map<string, BuilderSourceSitesV1>;
   /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
    * module's path *for content-addressed identity only*. The compile path
@@ -405,7 +410,7 @@ export interface CompileSourcesOptions {
    * the entry-point-independent identity the spec mandates
    * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
    * identities while every other artifact (record sourceUrls, source-map keys,
-   * `fn.src` resolution) keeps the prefixed path untouched.
+   * error-stack mapping) keeps the prefixed path untouched.
    */
   idPrefix?: string;
   /**
@@ -430,6 +435,8 @@ export interface CompiledModuleGraph {
   compiledBodies: Map<string, string>;
   /** Per-specifier source map (compiled body → original source), when available. */
   moduleSourceMaps: Map<string, SourceMap>;
+  /** Debug-only authored builder sites per content-addressed module identity. */
+  builderSourceSitesByIdentity: Map<string, BuilderSourceSitesV1>;
   /**
    * Hoist registrations, populated as the graph's modules evaluate (`__cfReg`).
    * Empty until `importNow` runs each module's `execute`. The engine reads it
@@ -714,6 +721,10 @@ export function compileSourcesToRecords(
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
+  const builderSourceSitesByIdentity = new Map<
+    string,
+    BuilderSourceSitesV1
+  >();
   const registrationSink: HoistRegistrationSink = new Map();
   const registrationApproved = new Set<string>();
   for (const source of sources) {
@@ -721,6 +732,12 @@ export function compileSourcesToRecords(
     const moduleHash = identityByPath.get(source.name)!;
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
+    const builderSourceSites = options.precompiledBuilderSourceSites?.get(
+      source.name,
+    );
+    if (builderSourceSites) {
+      builderSourceSitesByIdentity.set(moduleHash, builderSourceSites);
+    }
     const precompiled = options.precompiledBodies?.get(source.name);
     const exportNames = resolveFullExports(source.name);
     let compiled: string;
@@ -775,23 +792,12 @@ export function compileSourcesToRecords(
     // rather than wrapping the whole namespace. Authored sources are ESM.
     const namespaceExports = [...exportNames, "__esModule"];
 
-    // Tag the eval with a sourceURL = the (prefixed) source path. Under Deno's
-    // tamed SES `errorTaming` this is stripped from `new Error().stack`, so the
-    // stack-based resolver (`resolveSourceLocationFromStack`) does not fire there
-    // — but full source-location fidelity under the ESM loader is nonetheless
-    // achieved (scheduler content-addressed implementation hash + CFC
-    // verified-source) via two mechanisms, so this is NOT a remaining blocker for
-    // enabling the flag by default:
-    //   1. Deno: the `indexOf`-into-`script` fallback in
-    //      `resolveLocationFromFunctionSource` (builder/module.ts) maps `fn.src`
-    //      to the canonical `cf:module/<hash>/<path>` form via the per-load
-    //      `sourceLocationContext` the engine pushes.
-    //   2. Browsers (which DO surface the per-module eval frame in stacks): the
-    //      engine registers a per-module source map keyed on THIS `sourceURL`
-    //      (engine.ts, near `loadSourceMap`), so the stack-based resolver
-    //      translates the eval coordinate back to the authored source.
-    // Both paths are covered: `esm-source-location.test.ts` (CFC verified-source
-    // parity, flag-on) and `action-fingerprint.test.ts` (scheduler hash).
+    // Tag the eval with a sourceURL = the (prefixed) source path. Browsers name
+    // this URL in `new Error().stack`, and the engine registers a per-module
+    // source map keyed on it so a pattern's stack traces read in authored
+    // coordinates. Under Deno's tamed SES `errorTaming` the URL is stripped
+    // from stacks; debug function locations do not depend on it because they
+    // come from the compiler sidecar.
     //
     // SECURITY: strip JS line terminators before interpolating into the
     // `//# sourceURL=` line comment. A newline (or U+2028/U+2029) in
@@ -867,6 +873,7 @@ export function compileSourcesToRecords(
     specifierByPath,
     compiledBodies,
     moduleSourceMaps,
+    builderSourceSitesByIdentity,
     registrationSink,
     registrationApproved,
     dataByPath: new Map(options.dataFiles ?? []),
@@ -909,6 +916,8 @@ export interface CachedCompiledModule {
    * resolve to source lines. Absent whenever `code` is uninstrumented.
    */
   patternCoverageSpans?: readonly PatternCoverageSpan[];
+  /** Debug-only authored builder sites carried from the cached document. */
+  builderSourceSites?: BuilderSourceSitesV1;
 }
 
 /**
@@ -916,9 +925,9 @@ export interface CachedCompiledModule {
  * closure has unique filenames, but a fabric importer's closure also carries
  * its imported subtrees' modules, which routinely share names (`/main.tsx`).
  * The cached record path keys several side tables by source name
- * (`specifierByPath` → per-module source maps, export map,
- * `exportsByIdentity`; the engine's fn.src canonicalization) — a name
- * collision silently drops one module from all of them. Disambiguate
+ * (`specifierByPath` → per-module source maps, export map, and
+ * `exportsByIdentity`) — a name collision silently drops one module from all
+ * of them. Disambiguate
  * colliding names with the mount-root convention; a collision-free closure
  * keeps plain filenames (byte-identical to pre-fabric behavior).
  */
@@ -1042,6 +1051,10 @@ export function buildRecordsFromCompiled(
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
+  const builderSourceSitesByIdentity = new Map<
+    string,
+    BuilderSourceSitesV1
+  >();
   const specifierByPath = new Map<string, string>();
   const registrationSink: HoistRegistrationSink = new Map();
   const registrationApproved = new Set<string>();
@@ -1051,6 +1064,9 @@ export function buildRecordsFromCompiled(
     specifierByPath.set(sourceNames.get(m.identity)!, specifier);
     compiledBodies.set(specifier, m.code);
     if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
+    if (m.builderSourceSites) {
+      builderSourceSitesByIdentity.set(m.identity, m.builderSourceSites);
+    }
 
     const surface = persistedSurface(m);
     const importSpecs = surface
@@ -1119,6 +1135,7 @@ export function buildRecordsFromCompiled(
     specifierByPath,
     compiledBodies,
     moduleSourceMaps,
+    builderSourceSitesByIdentity,
     registrationSink,
     registrationApproved,
     dataByPath,

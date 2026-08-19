@@ -41,8 +41,7 @@ export const getCompilerOptions = (): CompilerOptions => {
     // explicitly via checker.declarationCheck() instead.
     declaration: false,
     // Enable source map generation. The mappings are load-bearing: stack-frame
-    // mapping and CFC verified-source / fn.src resolution map compiled
-    // positions back to canonical `cf:module/<id>` coordinates through them.
+    // mapping uses them to recover authored positions from compiled code.
     sourceMap: true,
     // Do not embed the authored source in the map. `sourcesContent` has no
     // reader: the only code that touches it (composeBundleSourceMap) copies it

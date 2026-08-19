@@ -1,0 +1,68 @@
+/**
+ * Debug-only authored source metadata for verified builder implementations.
+ * Nothing in this module participates in identity, authorization, or
+ * scheduling.
+ */
+
+/** Authored debug fields served by a builder implementation. */
+export interface AuthoredDebugSource {
+  /** Canonical `cf:module/.../<path>:<line>:<col>` source location. */
+  readonly src?: string;
+  /** Authored declaration name, when the function has one. */
+  readonly bindingName?: string;
+}
+
+const authoredDebugSourceByFn = new WeakMap<object, AuthoredDebugSource>();
+
+/** Records debug source metadata for a function, with first write winning. */
+export function recordAuthoredDebugSource(
+  fn: unknown,
+  entry: AuthoredDebugSource,
+): void {
+  if (typeof fn !== "function") return;
+  if (!authoredDebugSourceByFn.has(fn)) {
+    authoredDebugSourceByFn.set(fn, entry);
+  }
+}
+
+/** Returns the authored debug metadata recorded for `fn`. */
+export function getAuthoredDebugSource(
+  fn: unknown,
+): AuthoredDebugSource | undefined {
+  return typeof fn === "function" ? authoredDebugSourceByFn.get(fn) : undefined;
+}
+
+/**
+ * Installs lazy `.src` and `.name` accessors while `fn` is still extensible.
+ * The engine records their values only after the defining module evaluates.
+ */
+export function defineAuthoredDebugAccessors(
+  fn: (...args: any[]) => unknown,
+): void {
+  const fallbackName = fn.name;
+  defineDebugAccessor(
+    fn,
+    "src",
+    () => getAuthoredDebugSource(fn)?.src,
+  );
+  defineDebugAccessor(
+    fn,
+    "name",
+    () => getAuthoredDebugSource(fn)?.bindingName ?? fallbackName,
+  );
+}
+
+/** Defines one lazy debug property when its existing descriptor permits it. */
+function defineDebugAccessor(
+  fn: (...args: any[]) => unknown,
+  property: "src" | "name",
+  get: () => string | undefined,
+): void {
+  const existing = Object.getOwnPropertyDescriptor(fn, property);
+  if (existing !== undefined && existing.configurable !== true) return;
+  Object.defineProperty(fn, property, {
+    get,
+    enumerable: false,
+    configurable: true,
+  });
+}

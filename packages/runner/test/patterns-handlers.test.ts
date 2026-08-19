@@ -10,8 +10,8 @@ import { getPatternIdentityRef } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
-import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import { type Cell } from "../src/builder/types.ts";
+import { recordAuthoredDebugSource } from "../src/harness/authored-debug-source.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -43,7 +43,6 @@ describe("Pattern Runner - Handlers", () => {
   });
 
   afterEach(async () => {
-    setEagerSourceAnnotation(false);
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
@@ -180,13 +179,19 @@ describe("Pattern Runner - Handlers", () => {
     addEventHandlerSpy.restore();
   });
 
-  it("should propagate handler source location to scheduler via .name", async () => {
-    // `.name` source-location propagation is a debug feature; its eager
-    // resolution is off by default (the boot lever), so enable it for this test.
-    setEagerSourceAnnotation(true);
+  it("propagates a handler's authored source location to the scheduler as its name", async () => {
     // Spy on addEventHandler to capture the handler passed to it
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
 
+    // This handler is built directly in test code rather than compiled, so
+    // record the same debug-sidecar entry the engine would supply.
+    const incImplementation = (
+      { amount }: { amount: number },
+      { counter }: { counter: Cell<{ value: number }> },
+    ) => {
+      const value = counter.key("value");
+      value.set(value.get() + amount);
+    };
     const incHandler = handler<
       { amount: number },
       { counter: Cell<{ value: number }> }
@@ -196,11 +201,11 @@ describe("Pattern Runner - Handlers", () => {
         type: "object",
         properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      ({ amount }, { counter }) => {
-        const value = counter.key("value");
-        value.set(value.get() + amount);
-      },
+      incImplementation,
     );
+    recordAuthoredDebugSource(incImplementation, {
+      src: "cf:module/HASH/patterns-handlers.tsx:12:4",
+    });
 
     const incPattern = pattern<{ counter: { value: number } }>(
       ({ counter }) => {
@@ -223,9 +228,8 @@ describe("Pattern Runner - Handlers", () => {
     expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
     const registeredHandler = addEventHandlerSpy.calls[0].args[0];
 
-    // The handler's .name should be set to handler:source_location (file:line:col)
-    expect(registeredHandler.name).toMatch(
-      /^handler:.*patterns-handlers\.test\.ts:\d+:\d+$/,
+    expect(registeredHandler.name).toBe(
+      "handler:cf:module/HASH/patterns-handlers.tsx:12:4",
     );
 
     addEventHandlerSpy.restore();

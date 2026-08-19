@@ -285,21 +285,17 @@ export function getComposeBundleSourceMapCallsForTesting(): number {
  * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
  * module's generated lines by its starting line in the concatenation.
  *
- * The module-record loader resolves a function's location by `indexOf`-ing
- * its source into the concatenated bundle `script`, then calling
- * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
- * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
- * rejects. Registering this composed map resolves it back to the original
- * authored source (e.g. `/main.tsx:6:2`).
+ * Runtime stack frames report positions in the concatenated bundle. Registering
+ * this composed map resolves those positions back to the original authored
+ * source (e.g. `/main.tsx:6:2`).
  *
  * Returns `undefined` if no module contributed a map.
  */
 export function composeBundleSourceMap(
   // `source`, when set, overrides the map's recorded source path for ALL of that
-  // module's mappings. The per-module compiler maps record only the basename
-  // (e.g. `main.tsx`), but the CFC verified-source set is keyed by the full
-  // module path (e.g. `/<id>/dir/main.tsx`); overriding makes resolved
-  // coordinates match the set so verified-source identity holds.
+  // module's mappings. The per-module compiler maps can record only the
+  // basename (e.g. `main.tsx`); overriding preserves the full authored module
+  // path in mapped stack frames (e.g. `/<id>/dir/main.tsx`).
   modules: ReadonlyArray<ComposeModuleEntry>,
   bundleFilename: string,
   // Generated-line offset applied to the FIRST module. Use this when the
@@ -320,15 +316,8 @@ export function composeBundleSourceMap(
 /**
  * Build an IDENTITY source map for a compiled body whose authored source map
  * was not retained — every generated line maps to the same line/column of
- * `source`. Used by the warm/cached module-record load path, where the
- * content-addressed cache stores compiled bodies but not their per-module
- * source maps: without a registered frame the ESM loader resolves `fn.src` to
- * the raw bundle coordinate (`<evalId>.js:..`), which the harness cannot
- * canonicalize, and CFC verified-source identity fails closed. An identity map
- * makes `mapPosition(<name>, line, col)` resolve to `<name>:line:col`, which
- * the engine then rewrites to the canonical `cf:module/<id>/<path>` form via
- * its per-module name → canonical table (parity with the source-compile path,
- * which carries a real authored map).
+ * `source`. Used by the warm/cached module-record load path so error stacks
+ * name the module source rather than a raw bundle coordinate.
  *
  * Line/column coordinates are preserved verbatim (the compiled body IS the
  * eval'd text under this load), so no positional information is invented — the
@@ -370,7 +359,7 @@ export function identitySourceMap(
  * `1 + moduleCount` entries that must all stay live until `loadModuleGraph`
  * annotates functions; a small cap (the old value was 50) would evict the bundle
  * map — and early per-module maps — mid-load for larger graphs, regressing
- * `fn.src` to raw bundle coordinates and breaking CFC verified-source identity.
+ * mapped stacks to lose their authored module names.
  * This bound comfortably exceeds realistic per-load module counts while still
  * capping total memory across loads (stale maps from superseded loads evict via
  * LRU; the parser is also fully cleared on runtime dispose).

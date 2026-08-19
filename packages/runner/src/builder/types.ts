@@ -352,11 +352,12 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
-export type SourceLocationContext = {
-  script: string;
-  filename: string;
-  nextSearchOffset: number;
-};
+/**
+ * Marks a module-evaluation frame. Its presence is how the action-execution
+ * guard admits the transformer's module-scope builder mints while an action is
+ * suspended; `filename` names the evaluation for diagnostics.
+ */
+export type SourceLocationContext = { filename: string };
 
 export type Frame = {
   parent?: Frame;

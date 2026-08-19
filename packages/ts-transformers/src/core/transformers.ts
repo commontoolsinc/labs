@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 import { CrossStageState } from "./cross-stage-state.ts";
+import type { BuilderSourceSite } from "./runtime-contract.ts";
 
 /**
  * Hints for schema generation that override default behavior.
@@ -104,6 +105,14 @@ export type PatternCoverageOptions = {
   readonly registerSpan: (span: PatternCoverageSpan) => void;
 };
 
+/** Coordinate normalization for builder source-site compiler output. */
+export interface BuilderSourceSiteOptions {
+  readonly mapSite?: (
+    sourceFileName: string,
+    site: BuilderSourceSite,
+  ) => BuilderSourceSite | undefined;
+}
+
 /**
  * Registry for passing schema hints between transformer stages.
  * Keyed by TypeNode (unique per usage) to avoid conflicts when the same
@@ -129,6 +138,7 @@ export type TransformationOptions = {
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
   readonly patternCoverage?: PatternCoverageOptions;
+  readonly builderSourceSites?: BuilderSourceSiteOptions;
   /**
    * Whether an `assert(...)` body records its operands, so that a failing
    * pattern-test assertion can report them. Defaults to true.

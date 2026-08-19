@@ -81,11 +81,7 @@ describe("builder calls inside a running action throw", () => {
       await clock.settle();
     });
     const frame = pushFrame({
-      sourceLocationContext: {
-        script: "",
-        filename: "interleaved.js",
-        nextSearchOffset: 0,
-      },
+      sourceLocationContext: { filename: "interleaved.js" },
     } as never);
     try {
       expect(() => lift((x: number) => x)).not.toThrow();

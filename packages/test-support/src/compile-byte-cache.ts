@@ -20,7 +20,16 @@ export interface SerializedModuleBytes {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  builderSourceSites?: CachedBuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
+}
+
+export interface CachedBuilderSourceSitesV1 {
+  formatVersion: 1;
+  sites: Record<
+    string,
+    { line: number; col: number; bindingName?: string }
+  >;
 }
 
 export interface CachedPatternCoverageSpan {
@@ -37,6 +46,7 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  builderSourceSites?: CachedBuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
 }
 
@@ -87,6 +97,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     }
     if (artifact.patternCoverageSpans !== undefined) {
       size += JSON.stringify(artifact.patternCoverageSpans).length;
+    }
+    if (artifact.builderSourceSites !== undefined) {
+      size += JSON.stringify(artifact.builderSourceSites).length;
     }
     if (artifact.policyManifests !== undefined) {
       size += JSON.stringify(artifact.policyManifests).length;
@@ -184,6 +197,11 @@ export class ProcessModuleByteCache implements ModuleByteCache {
           copyPatternCoverageSpan,
         );
       }
+      if (artifact.builderSourceSites !== undefined) {
+        serialized.builderSourceSites = copyBuilderSourceSites(
+          artifact.builderSourceSites,
+        );
+      }
       if (artifact.policyManifests !== undefined) {
         serialized.policyManifests = artifact.policyManifests;
       }
@@ -204,9 +222,15 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       const patternCoverageSpans = normalizePatternCoverageSpans(
         e.patternCoverageSpans,
       );
+      const builderSourceSites = normalizeBuilderSourceSites(
+        e.builderSourceSites,
+      );
       if (
         e.patternCoverageSpans !== undefined &&
         patternCoverageSpans === undefined
+      ) continue;
+      if (
+        e.builderSourceSites !== undefined && builderSourceSites === undefined
       ) continue;
       if (
         e.policyManifests !== undefined &&
@@ -216,6 +240,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (e.sourceMap !== undefined) artifact.sourceMap = e.sourceMap;
       if (patternCoverageSpans !== undefined) {
         artifact.patternCoverageSpans = patternCoverageSpans;
+      }
+      if (builderSourceSites !== undefined) {
+        artifact.builderSourceSites = builderSourceSites;
       }
       if (e.policyManifests !== undefined) {
         artifact.policyManifests = [...e.policyManifests];
@@ -246,6 +273,11 @@ function artifactFromModule(
   if (module.patternCoverageSpans !== undefined) {
     artifact.patternCoverageSpans = module.patternCoverageSpans.map(
       copyPatternCoverageSpan,
+    );
+  }
+  if (module.builderSourceSites !== undefined) {
+    artifact.builderSourceSites = copyBuilderSourceSites(
+      module.builderSourceSites,
     );
   }
   if (module.policyManifests !== undefined) {
@@ -293,6 +325,55 @@ function copyPatternCoverageSpan(
     startColumn: span.startColumn,
     endColumn: span.endColumn,
   };
+}
+
+function normalizeBuilderSourceSites(
+  value: unknown,
+): CachedBuilderSourceSitesV1 | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const sidecar = value as Partial<CachedBuilderSourceSitesV1>;
+  if (
+    sidecar.formatVersion !== 1 || sidecar.sites === null ||
+    typeof sidecar.sites !== "object" || Array.isArray(sidecar.sites)
+  ) {
+    return undefined;
+  }
+  const sites = Object.create(null) as CachedBuilderSourceSitesV1["sites"];
+  for (const [symbol, value] of Object.entries(sidecar.sites)) {
+    if (symbol.length === 0 || value === null || typeof value !== "object") {
+      return undefined;
+    }
+    const site = value as {
+      line?: unknown;
+      col?: unknown;
+      bindingName?: unknown;
+    };
+    if (
+      !Number.isInteger(site.line) || (site.line as number) < 1 ||
+      !Number.isInteger(site.col) || (site.col as number) < 0 ||
+      (site.bindingName !== undefined &&
+        (typeof site.bindingName !== "string" || site.bindingName.length === 0))
+    ) {
+      return undefined;
+    }
+    sites[symbol] = {
+      line: site.line as number,
+      col: site.col as number,
+      ...(site.bindingName === undefined
+        ? {}
+        : { bindingName: site.bindingName }),
+    };
+  }
+  return { formatVersion: 1, sites };
+}
+
+function copyBuilderSourceSites(
+  sidecar: CachedBuilderSourceSitesV1,
+): CachedBuilderSourceSitesV1 {
+  return normalizeBuilderSourceSites(sidecar)!;
 }
 
 /**

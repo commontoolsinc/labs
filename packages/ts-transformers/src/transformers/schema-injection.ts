@@ -16,13 +16,13 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
+  isCallbackReference,
   isCellLikeType,
   isFunctionLikeExpression,
   isSyntheticNode,
   isUnresolvedSchemaType,
   preserveSourceMapRange,
   registerSyntheticCallType,
-  resolveCallbackFunctionExpression,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
   widenLiteralType,
@@ -2610,33 +2610,6 @@ function resolveLiftAppliedInputAndCallback(
  * fallback catches an IMPORTED one — the resolver cannot cross modules,
  * but the aliased symbol's declaration still says what the value is.
  */
-function isCallbackReference(
-  expression: ts.Expression | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  if (!expression) return false;
-  if (resolveCallbackFunctionExpression(expression, checker)) return true;
-  const unwrapped = unwrapExpression(expression);
-  const type = checker.getTypeAtLocation(unwrapped);
-  if (type.getCallSignatures().length > 0) return true;
-  if (!ts.isIdentifier(unwrapped)) return false;
-  let symbol = checker.getSymbolAtLocation(unwrapped);
-  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-    symbol = checker.getAliasedSymbol(symbol);
-  }
-  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  if (declaration === undefined) return false;
-  if (ts.isFunctionDeclaration(declaration)) return true;
-  // The initializer goes through the wrapper-stripping resolver rather than
-  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
-  // helper around the function must not hide it. The resolver works on a
-  // foreign file's node — the checker is program-wide.
-  return ts.isVariableDeclaration(declaration) &&
-    declaration.initializer !== undefined &&
-    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
-      undefined;
-}
-
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,

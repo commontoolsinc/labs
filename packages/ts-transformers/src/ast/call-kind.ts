@@ -719,6 +719,30 @@ function unwrapHardenedCallbackExpression(
   return expression.arguments[0];
 }
 
+/** Returns whether `expression` denotes a callable callback value. */
+export function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
+}
+
 export function isWildcardTraversalCall(
   call: ts.CallExpression,
   checker?: ts.TypeChecker,

@@ -1598,6 +1598,55 @@ for transform-time source annotation (A′, CT-1870), and the same fallback
 family §16.2's coverage spans use. Rationale, per-site table, and the probe
 rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
+### 11.6 Builder source-site sidecar
+
+The hoisting stage consumes that lineage to produce `BuilderSourceSitesV1`, a
+versioned, debug-only compiler artifact that travels **beside** emitted
+JavaScript. It never injects metadata calls or helper implementations into the
+module body. Its wire shape is:
+
+```ts
+interface BuilderSourceSitesV1 {
+  formatVersion: 1;
+  sites: Record<string, {
+    line: number; // authored, 1-based
+    col: number; // authored, 0-based
+    bindingName?: string;
+  }>;
+}
+```
+
+`sites` is keyed by the symbol the verified-evaluation provenance walk uses:
+generated hoist names (`__cfLift_1`, `__cfHandler_1`, `__cfPattern_1`),
+non-exported authored `__cfReg` names, every namespace export alias, or
+`default`. A same-file callback declaration supplies its function position;
+inline functions use their own position; a callback reference whose declaration
+cannot be recovered falls back to the builder call. `bindingName`, when
+recoverable from authored syntax, is the authored declaration name rather than
+the generated hoist name.
+
+The compiler caller may provide `builderSourceSites.mapSite` to translate the
+position before it is recorded. The runner uses this at compile time to remove
+its injected helper prelude, so cached artifacts already contain authored
+coordinates and a source-free warm load needs neither source text nor a source
+map to serve them.
+
+The JavaScript compiler exposes the sidecar through
+`CompiledTypeScriptModule.builderSourceSites`. Runner module artifacts persist
+it with module bytes through the in-memory and cell-backed caches; invalid or
+unknown sidecar data is discarded as debug-data loss without affecting module
+execution. After verified evaluation, `Engine.recordModuleProvenance` joins the
+module identity, runtime symbol, and source path into
+`cf:module/<identity>/<path>:<line>:<col>` and records it in the separate
+debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
+accessors read that map. Verified provenance, authorization, scheduling, and
+artifact hardening do not read it.
+
+This is deliberately separate from the trusted-binding annotation in §17.3.
+`__cfBindVerifiedBinding` remains a rare authority-bearing helper emitted only
+for `WriteAuthorizedBy` trusted bindings; ordinary transformed patterns do not
+carry a repeated source-metadata helper implementation.
+
 ## 12. Schema Generation
 
 `SchemaGeneratorTransformer` replaces `toSchema<T>(options?)` calls with JSON
@@ -3131,9 +3180,8 @@ lists).
   diagnosed at stage 13 (§6.8).
 - The hardening wrapper preserves evaluation semantics (`return fn`), so
   wrapped initializers remain direct-function-classifiable to the verifier,
-  and `Function.prototype.toString`-based `fn.src` resolution (see the
-  module-loading doc) still finds the authored body text inside the wrapper
-  argument.
+  while debug `fn.src` is resolved independently through the compiler sidecar
+  (§11.6).
 
 
 ## 18. Diagnostics Message Transformation (Optional Consumer Layer)
