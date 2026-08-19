@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -281,9 +282,9 @@ describe("run-pattern", () => {
     it("returns a sealed string position as the address of that position rather than an opaque link", async () => {
       // The schema declares `label` as an unconstrained string, which the
       // sanitizer withholds as text. The result is fabric-backed, so the
-      // withheld position goes over as its own address — resultRef plus the
-      // sealed path — which describe_handle answers and a later run_pattern
-      // wires by reference. Foreign seals are a different thing and stay
+      // withheld position goes over as a whole `@link` object addressing it
+      // — resultRef plus the sealed path — which the outbound swap mints
+      // into a token in one piece, whitespace in property names and all. Foreign seals are a different thing and stay
       // refused at input; only seals this sanitization minted are addressed.
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -311,8 +312,64 @@ describe("run-pattern", () => {
       expect(output.status).toBe("ok");
       const value = output.value as { doubled: number; label: string };
       expect(value.doubled).toBe(42);
-      expect(value.label).toBe(`${output.resultRef}/label`);
+      expect(value.label).toEqual({ "@link": `${output.resultRef}/label` });
       expect(output.linkedStringCount).toBe(1);
+    });
+
+    it("addresses a sealed property whose name carries whitespace without truncating the path", async () => {
+      // "full name" is a valid JSON key the free-text scanner would cut an
+      // address short at; the whole `@link` object keeps it in one piece.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "interface Output { 'full name': string; }",
+          "export default pattern<Input, Output>(({ n }) => ({",
+          "  'full name': computed(() => `holder ${n}`),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { n: 3 },
+        resultSchema: {
+          type: "object",
+          properties: { "full name": { type: "string" } },
+          required: ["full name"],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as Record<string, unknown>)["full name"]).toEqual({
+        "@link": `${output.resultRef}/full name`,
+      });
+    });
+
+    it("keeps the seal for a property the link grammar cannot round-trip", async () => {
+      // An empty property name is valid JSON, but its address serializes
+      // with a trailing slash the link parse discards — the reference would
+      // name the parent. The position keeps its seal instead.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "interface Output { '': string; }",
+          "export default pattern<Input, Output>(({ n }) => ({",
+          "  '': computed(() => `anon ${n}`),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { n: 5 },
+        resultSchema: {
+          type: "object",
+          properties: { "": { type: "string" } },
+          required: [""],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      const sealed = (output.value as Record<string, unknown>)[""];
+      expect(isSealedOpaqueLinkObject(sealed)).toBe(true);
     });
 
     it("returns a structured error for a plain-function pattern whose compiled argument schema is undefined, rather than throwing out of the run", async () => {

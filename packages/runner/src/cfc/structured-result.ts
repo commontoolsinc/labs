@@ -433,7 +433,11 @@ const sanitizeValueWithOpaqueLinks = (
         NO_RESERVED_KEYS,
       );
       linkedStringCount += sanitized.linkedStringCount;
-      sealedPaths.push(...sanitized.sealedPaths);
+      // Appended one by one: a spread passes every path as a call argument,
+      // and a large sealed subtree overflows the argument limit.
+      for (const sealed of sanitized.sealedPaths) {
+        sealedPaths.push(sealed);
+      }
       return sanitized.value;
     });
     return { value: items, linkedStringCount, sealedPaths };
@@ -478,7 +482,9 @@ const sanitizeValueWithOpaqueLinks = (
           NO_RESERVED_KEYS,
         );
         linkedStringCount += sanitized.linkedStringCount;
-        sealedPaths.push(...sanitized.sealedPaths);
+        for (const sealed of sanitized.sealedPaths) {
+          sealedPaths.push(sealed);
+        }
         return [key, sanitized.value] as const;
       });
     return {

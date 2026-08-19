@@ -7,6 +7,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { addressSealedPositions } from "../src/structured-result.ts";
+import { sealedPositionLink } from "../src/tools/run-pattern.ts";
+
+const SPACE =
+  "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" as Parameters<
+    typeof sealedPositionLink
+  >[2];
 
 const seal = (fragment: string) => ({
   "@link": `opaque:run-1%3Arun_pattern%3A3${fragment}`,
@@ -51,6 +57,33 @@ describe("structured-result", () => {
         note: "/of:fid1:result/note",
         n: 1,
       });
+    });
+
+    it("keeps the seal when the position's link cannot be stated", () => {
+      // sealedPositionLink answers undefined for a link the grammar cannot
+      // state at all, not only one it round-trips wrongly.
+      expect(sealedPositionLink(
+        {
+          id: "not-an-entity-address",
+          path: [],
+          space: SPACE,
+        } as unknown as Parameters<typeof sealedPositionLink>[0],
+        ["label"],
+        SPACE,
+      )).toBeUndefined();
+    });
+
+    it("keeps the seal where buildRef answers undefined", () => {
+      // A path the link grammar cannot round-trip gets no address; the seal
+      // stays, because no reference beats a reference to the wrong cell.
+      const value = { a: seal("#/a"), b: seal("#/b") };
+      expect(
+        addressSealedPositions(
+          value,
+          [["a"], ["b"]],
+          (path) => path[0] === "a" ? "/of:fid1:result/a" : undefined,
+        ),
+      ).toEqual({ a: "/of:fid1:result/a", b: seal("#/b") });
     });
 
     it("leaves the value unchanged for a path it does not hold", () => {

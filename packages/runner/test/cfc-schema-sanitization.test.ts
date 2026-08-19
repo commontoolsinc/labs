@@ -1966,6 +1966,28 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({ value: { tag: 7 }, linkedStringCount: 0, sealedPaths: [] });
   });
 
+  it("seals a very large array without overflowing the argument limit", () => {
+    // 150k sealed siblings under one parent: a spread-append of the child's
+    // sealed paths passes each as a call argument and throws RangeError.
+    const size = 150_000;
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: {
+        type: "object",
+        properties: {
+          notes: { type: "array", items: { type: "string" } },
+        },
+        required: ["notes"],
+        additionalProperties: false,
+      },
+      value: { notes: Array.from({ length: size }, (_, i) => `note ${i}`) },
+      opaqueHandleId: "run-1",
+    });
+    expect(sanitized.linkedStringCount).toBe(size);
+    expect(sanitized.sealedPaths.length).toBe(size);
+    expect(sanitized.sealedPaths[0]).toEqual(["notes", 0]);
+    expect(sanitized.sealedPaths[size - 1]).toEqual(["notes", size - 1]);
+  });
+
   it("preserves an opaque link an allOf or oneOf branch declares", () => {
     const opaqueLinkSchema = {
       type: "object",

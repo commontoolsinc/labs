@@ -67,8 +67,9 @@ export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
 };
 
 /**
- * Replaces each position a sanitization reports having sealed with the
- * fabric address `buildRef` states for that path. Provenance comes from the
+ * Replaces each position a sanitization reports having sealed with whatever
+ * `buildRef` answers for that path — an addressed form of the position — or
+ * keeps the seal where it answers `undefined`. Provenance comes from the
  * sanitizer's own `sealedPaths`, never from inspecting the value: a sealed
  * link an author declared in the schema — even one spelled with the same
  * handle id — is preserved by the sanitizer, absent from `sealedPaths`, and
@@ -89,7 +90,7 @@ export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
 export const addressSealedPositions = (
   value: unknown,
   sealedPaths: readonly (readonly (string | number)[])[],
-  buildRef: (path: readonly (string | number)[]) => string,
+  buildRef: (path: readonly (string | number)[]) => unknown | undefined,
 ): unknown => {
   if (sealedPaths.length === 0) {
     return value;
@@ -125,10 +126,12 @@ interface ReplaceNode {
 const applyReplacements = (
   value: unknown,
   at: ReplaceNode,
-  buildRef: (path: readonly (string | number)[]) => string,
+  buildRef: (path: readonly (string | number)[]) => unknown | undefined,
 ): unknown => {
   if (at.replaceWith !== undefined) {
-    return buildRef(at.replaceWith);
+    // A path `buildRef` answers nothing for keeps its seal: no address is
+    // better than an address naming the wrong cell.
+    return buildRef(at.replaceWith) ?? value;
   }
   if (Array.isArray(value)) {
     let items: unknown[] | undefined;

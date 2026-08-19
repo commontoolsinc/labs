@@ -10,6 +10,7 @@ import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
   matchLLMFriendlyLink,
+  type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -243,6 +244,36 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
     }],
   } satisfies JSONSchema,
   tags: ["fabric", "pattern", "piece"],
+};
+
+/**
+ * The `@link` object addressing one sealed position of a result: the result
+ * cell's link extended by the sealed path. It rides as a whole object, which
+ * the outbound swap mints from in one piece — the free-text scanner would
+ * stop an address short at a property name's whitespace. A path the link
+ * grammar cannot round-trip — an empty final segment parses back as its
+ * parent — answers `undefined`, keeping the seal rather than becoming a
+ * reference to the wrong cell.
+ */
+export const sealedPositionLink = (
+  resultLink: NormalizedFullLink,
+  path: readonly (string | number)[],
+  space: NormalizedFullLink["space"],
+): { "@link": string } | undefined => {
+  const segments = [...resultLink.path, ...path.map(String)];
+  const ref = createLLMFriendlyLink({ ...resultLink, path: segments }, space);
+  try {
+    const parsed = parseLLMFriendlyLink(ref, space);
+    if (
+      parsed.path.length !== segments.length ||
+      parsed.path.some((segment, i) => segment !== segments[i])
+    ) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return { "@link": ref };
 };
 
 const errorMessage = (error: unknown): string =>
@@ -950,14 +981,7 @@ export const runPatternTool: HarnessToolDefinition<
         value = addressSealedPositions(
           sanitized.value,
           sanitized.sealedPaths,
-          (path) =>
-            createLLMFriendlyLink(
-              {
-                ...resultLink,
-                path: [...resultLink.path, ...path.map(String)],
-              },
-              space,
-            ),
+          (path) => sealedPositionLink(resultLink, path, space),
         );
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
