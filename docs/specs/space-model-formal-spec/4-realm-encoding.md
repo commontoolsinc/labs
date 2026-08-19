@@ -205,10 +205,14 @@ Arrays and plain objects are carried directly.
   of every object.
 - **A `/`-prefixed key is ordinary.** This format reserves no key.
 
-A key this runtime reserves — `__proto__` or `constructor` — is refused on both
-sides, because a rebuild by assignment cannot reproduce one faithfully. Like
-every rule in this section, that applies to a container the walk *traverses*;
-Section 3.3 says which values those are.
+`__proto__` and `constructor` are nonetheless refused on both sides, and that
+is a limit of this implementation rather than of the format. The two are
+refused for different reasons: `__proto__` cannot be rebuilt by the assignment
+this implementation copies records with, while `constructor` copies faithfully
+and is refused because boundaries further on drop it. Section 4 of
+`3-json-encoding.md` gives the fuller account, which is about the host and so
+holds for either format. Like every rule in this section, the refusal applies
+to a container the walk *traverses*; Section 3.3 says which values those are.
 
 ### 3.3 The Tagged Form
 
