@@ -26,6 +26,22 @@ const isCfcMetadata = (value: unknown): value is CfcMetadata =>
   isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
 
+/**
+ * The metadata a `["cfc"]` read answered with, decided by shape. A caller that
+ * resolves the path is handed the member; a path-blind one is handed the whole
+ * envelope to take `cfc` from. A value of neither shape reports no metadata.
+ */
+export const cfcMetadataFromCfcRead = (
+  value: unknown,
+): CfcMetadata | undefined => {
+  if (isCfcMetadata(value)) {
+    return value;
+  }
+  return isObjectOrArray(value) && isCfcMetadata(value.cfc)
+    ? value.cfc
+    : undefined;
+};
+
 export const readStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -33,8 +49,8 @@ export const readStoredCfcMetadata = (
     id: string;
     scope?: NormalizedFullLink["scope"];
   },
-): CfcMetadata | undefined => {
-  const document = tx.readOrThrow({
+): CfcMetadata | undefined =>
+  cfcMetadataFromCfcRead(tx.readOrThrow({
     space: target.space,
     id: target.id as URI,
     scope: normalizeCellScope(target.scope),
@@ -42,14 +58,7 @@ export const readStoredCfcMetadata = (
     path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
-  });
-  if (isCfcMetadata(document)) {
-    return document;
-  }
-  return isObjectOrArray(document) && isCfcMetadata(document.cfc)
-    ? document.cfc
-    : undefined;
-};
+  }));
 
 export const storedCfcMetadataAppliesToPath = (
   tx: IExtendedStorageTransaction,

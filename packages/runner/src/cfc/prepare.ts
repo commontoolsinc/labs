@@ -79,6 +79,7 @@ import {
   transformCfcLabelForCrossSpacePersist,
 } from "./label-representation.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
+import { cfcMetadataFromCfcRead } from "./metadata.ts";
 import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
@@ -800,18 +801,20 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  const document = tx.readOrThrow({
+  // Read the `["cfc"]` surface, never the document root: a recursive root
+  // read depends on every path in the document, so it enters the commit's
+  // confirmed conflict reads and makes two concurrent mergeable writes to one
+  // document conflict. The read keeps this module's own metadata, which the
+  // scheduler ignores, so it is not shared with `readStoredCfcMetadata`.
+  return cfcMetadataFromCfcRead(tx.readOrThrow({
     space,
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
-  });
-  return isObjectOrArray(document) && isObjectOrArray(document.cfc)
-    ? document.cfc as CfcMetadata
-    : undefined;
+  }));
 };
 
 /**
@@ -4250,19 +4253,18 @@ const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
   source: LinkWritePolicyInput["source"],
 ): JSONSchema | undefined => {
-  const document = tx.readOrThrow({
+  // Read the `["schema"]` surface, never the document root: a recursive
+  // root read enters the commit's confirmed conflict reads and makes
+  // concurrent writes to the source document conflict with this one.
+  const schema = tx.readOrThrow({
     space: source.space,
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: [],
+    path: ["schema"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(document)) {
-    return undefined;
-  }
-  const schema = (document as Record<string, unknown>).schema;
   return schema === undefined || schema === null
     ? undefined
     : schema as JSONSchema;
