@@ -4332,9 +4332,27 @@ supply; OW29/OW32/OW34 closed):
     RED on a standing echo (7–16 ms on the pre-W2.1 tip), green only on
     the real landing (3.3–5.1 s across 6/6 green runs at the W2.1 tip
     without (α); 253–255 ms across the 6 green runs at loads ≤ 12 on
-    the W2.1 + (α) scratch — each ≥ a server round trip; the scratch's
-    later load-dominated runs are in the report); the ON skip entry is
-    W3's to lift. Counters:
+    the W2.1 + (α) scratch — each ≥ a server round trip); the ON skip
+    entry is W3's to lift — and **must NOT lift on these runs:
+    BLOCKER-class flag (2026-08-19, W2.1 report §6b) — on the W2.1 +
+    (α) scratch the gate is RED at "both voters' swatches visible" in
+    5 of 13 runs (60-s timeout; the store clean in every one, both
+    votes durable, "2 love it" rendered on both browsers 300–700 ms
+    after the clicks), while W3's own tip is 3/3 green under HIGHER
+    load and W2-on-W3 WITHOUT W2.1 2/2 green under far higher load:
+    the stall is attributable to W2.1 in the (α) configuration — the
+    voter's own vote ECHO retired at the click's mark (the designed
+    flicker; the purged castVote child lands a wave later), and the
+    CONFIRMED own vote then not rendering its swatch on that browser
+    within 60 s. Not root-caused; candidates named in the report (the
+    confirmed own-vote entity doc — a new id the client never read —
+    not reaching the voter's replica after the echo's entity layer
+    dropped; or the swatch re-derivation after the superseded flip
+    racing the next frame). Before W2.1 the stranded echo carried the
+    own swatch forever, so every baseline is green by masking. (b)
+    would remove the exposure (the echo stands until the child's own
+    landing). Owner / W3 / W2 call; the evidence, the three baseline
+    worktrees and binaries are in the report.** Counters:
     `speculation-overlay/cascade-echo-retired` and
     `…/cascade-echo-retired-unarrived` (the flicker witness, armed only
     on a consequenced non-error parent: no doc the echo wrote held a

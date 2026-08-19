@@ -1504,7 +1504,11 @@ no mark names, writing a frame-caused entity doc the arrival gate never
 sees) — fixed as shape (a): `retireIntent(P)` also retires P's client
 cascade descendants (speculation.md §4 step 2's dated clarification);
 shape (b), deterministic cascade ids on both sides, is the owner-level
-alternative (register, W2 block). Report:
+alternative (register, W2 block). FLAGGED there, blocker-class for the
+lift configuration: on W2.1 + (α) the lunch gate's swatch step stalls
+in ~5 of 13 runs (bisected to W2.1 by W3-alone and W2-on-W3 baselines
+green under higher load) — the confirmed own vote not rendering after
+its echo's retirement; not root-caused. Report:
 `docs/history/plans/server-execution-v2/stage-c/w2-1-cascade-echo-report.md`.*
 
 **(a) A non-reactive storage-notification listener** — feasible,
