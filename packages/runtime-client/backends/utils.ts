@@ -1,3 +1,4 @@
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import {
   Cell,
   JSONSchema,
@@ -35,16 +36,24 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     // ref's (inv-12 Stage 0) — drop it so it never becomes a link-write
     // policy input.
     return stripSigilCfcLabelViews(value);
+  } else if (value instanceof FabricPrimitive) {
+    // Atomic, so there is nothing under it to map and handing it back whole is
+    // the complete answer rather than a deferral. It goes _before_ the record
+    // branch: one is also a record, and that branch rebuilds from enumerable
+    // own properties a fabric class does not have, which would put `{}` here in
+    // place of the value.
+    return value;
   } else if (typeof value === "object" && value) {
     // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-    // which point this becomes a walk rather than a silent flattening. The
-    // rebuild below reads own enumerable properties, which for a fabric class
-    // are not its contents -- a `FabricBytes` arriving here leaves as `{}`,
-    // neither refused nor carried. What keeps that from happening today is
-    // `CellHandle.serialize()` in `../cell-handle.ts`, which refuses a
-    // `FabricSpecialObject` before it can reach this walk; the marker on
-    // `WireCellValue` in `../protocol/types.ts` states the same gap at the
-    // type.
+    // which point this becomes a walk rather than a silent flattening. Unlike
+    // the primitive above, an instance can hold a link in its contents, so
+    // handing one back whole would leave that link unmapped -- and the rebuild
+    // below reads enumerable own properties it does not have, so it leaves as
+    // `{}` instead. Neither disposition is right, and which to take meanwhile
+    // is open. What keeps it from arising today is `CellHandle.serialize()` in
+    // `../cell-handle.ts`, which refuses a `FabricSpecialObject` before it can
+    // reach this walk; the marker on `WireCellValue` in `../protocol/types.ts`
+    // states the same gap at the type.
     return Object.entries(value).reduce((acc: Record<string, any>, [k, v]) => {
       acc[k] = mapCellRefsToSigilLinks(v);
       return acc;
