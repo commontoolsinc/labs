@@ -971,8 +971,7 @@ legal, and a rule written without them breaks working patterns:
 - **Below the root.** A reserved key one level down names a field of another
   piece, where `unknown` is what keeps the field a reference to that piece's own
   screen rather than a copy, so the controls in it stay bound to the piece that
-  owns them. `packages/patterns/record.tsx` reads a sub-piece's settings screen
-  that way.
+  owns them.
 
 Root-ness follows a `$ref` into `$defs`, because a `$ref` measures the same
 value against another schema — a recursive result type emits exactly that

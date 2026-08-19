@@ -68,6 +68,11 @@
     "check-baselines-append-only": "deno run --allow-read --allow-run=git ./tasks/check-baselines-append-only.ts",
     "check-test-aliases": "deno run --allow-read --allow-run=git ./tasks/check-test-aliases.ts",
     "check-test-topology": "deno run --allow-read --allow-env --allow-net ./tasks/check-test-topology.ts",
+    "check-pattern-tiers": "deno run --allow-read ./tasks/check-pattern-tiers.ts",
+    // The gate above is what CI runs, and it cannot write. Applying a marker is
+    // this separate task, so the permission to rewrite a pattern comes with
+    // asking for it.
+    "fix-pattern-tiers": "deno run --allow-read --allow-write ./tasks/check-pattern-tiers.ts --write",
     "check-skill-facts": "deno run --allow-read --allow-run=git ./tasks/check-skill-facts.ts",
     "check-verb-session-sync": "deno run --allow-read ./tasks/check-verb-session-sync.ts",
     // Building the CLI's command tree is what this walks, and mounting it
@@ -128,8 +133,7 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./tmp/",
-      "./packages/patterns/record/"
+      "./tmp/"
     ],
     "rules": {
       "tags": [

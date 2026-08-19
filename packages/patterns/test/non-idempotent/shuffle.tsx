@@ -1,3 +1,5 @@
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
 // WARNING: This pattern is INTENTIONALLY non-idempotent.
 // It exists to test detectNonIdempotent() diagnosis tooling.
 // Do NOT use as a reference for correct pattern development.

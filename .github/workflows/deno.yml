@@ -168,6 +168,10 @@ jobs:
           deno task run-recorded gate repo check-verb-session-sync --
           deno task check-verb-session-sync
 
+      - name: 🔎 Check pattern tier markers
+        timeout-minutes: *work-timeout
+        run: deno task check-pattern-tiers
+
       - name: 🔎 Check for unused import map dependencies
         timeout-minutes: *work-timeout
         run: >-

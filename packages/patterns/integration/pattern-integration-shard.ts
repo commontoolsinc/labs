@@ -3,11 +3,16 @@ export interface PatternIntegrationShard {
   total: number;
 }
 
+/**
+ * Root patterns pinned to a named shard, overriding the round-robin in
+ * `selectPatternIntegrationShard`. A pin holds a measured-expensive pattern
+ * away from whichever shard already carries the heavy work. `all.test.ts`
+ * rejects a key that names a pattern it does not run, so an entry here cannot
+ * outlive its pattern. Empty means every root pattern takes the round-robin.
+ */
 export const COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS: Readonly<
   Record<string, number>
-> = {
-  "emoji-picker.tsx": 3,
-};
+> = {};
 
 export function parsePatternIntegrationShard(
   raw: string | undefined,

@@ -1,3 +1,5 @@
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
 /**
  * Minimal pattern exposing a computed array and a string output.
  * Used to reproduce the .length bug on reactive proxy values.

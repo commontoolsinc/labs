@@ -2182,9 +2182,9 @@ describe("Phase 2 speculation overlay", () => {
     // that catches it retires the whole piece registration — which takes
     // the event handlers the graph installed with it, so the next send
     // to one of those streams finds no handler and drops. That is the
-    // shape the record-module-chrome integration test hit on the ON
-    // lane: a dropped `addModule` send three milliseconds after a
-    // `SpeculativeBasisError` on `piece-instantiate/...`.
+    // shape observed on the ON lane: a dropped module-add send three
+    // milliseconds after a `SpeculativeBasisError` on
+    // `piece-instantiate/...`.
     //
     // The piece is a hand-built witness whose one raw node reads a shared
     // document through the instantiation's own transaction and writes a

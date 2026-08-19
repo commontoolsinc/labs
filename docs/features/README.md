@@ -85,9 +85,6 @@ Add a line for each new document to the index below.
 
 ## Patterns, components, and hosts
 
-- [`canonical-base-patterns.md`](canonical-base-patterns.md) — the design for
-  a set of base patterns built from a container, minimal interface types, and
-  record-level upgrade
 - [`invoking-handlers-outside-a-pattern.md`](invoking-handlers-outside-a-pattern.md)
   — calling a handler stream from `RuntimeProcessor`, or from anywhere else
   outside a pattern body

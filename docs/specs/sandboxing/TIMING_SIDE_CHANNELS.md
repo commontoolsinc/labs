@@ -252,7 +252,7 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     A renderer or root event captures a fresh coarse instant at creation; across
     separate events time still advances, bounded by how fast events arrive (which
     the delivery shaper already floors). The check is dynamic (call-time) because
-    shared helpers are reached from both contexts (e.g. `occurrence-tracker.tsx`).
+    shared helpers are reached from both contexts.
     Tested in `packages/runner/test/time-capability.test.ts` (frozen across
     reads) and `packages/patterns/integration/time-capability-intrinsics.test.ts`
     (a handler reads the event's coarse time; the instant is carried forward to
@@ -293,8 +293,7 @@ Landing order, smallest and safest first. Each is its own commit/PR.
       `getTodayDate` (`schemas.tsx`) + `expense-form.tsx` — each helper takes
       `nowMs`; lift callers pass `#now`, handler callers pass `Date.now()`.
     - **Exempt (no migration needed).** `notes/schemas` `generateId` is dead (no
-      caller). `age-category` `calculateAge` is exported with no in-repo caller, so
-      its clock read is never reached from a pattern lift. The other `generateId`
+      caller). The other `generateId`
       helpers (`imported-calendar`, `self-improving-classifier`, parking-coordinator
       `genId`, weekly-calendar/`event.tsx`) are only called from handler/action
       contexts.

@@ -1,3 +1,5 @@
+// PATTERN TIER: legacy — superseded or non-idiomatic; kept for what
+// depends on it. Do not copy from this file. Tiers: packages/patterns/index.md
 import {
   action,
   type AddIntegrity,
@@ -766,7 +768,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       // Persist ONLY the lightweight blob reference (`url` + `name`), never the
       // inline base64 `data` — a ~700KB data-URL inline in this perSpace array
       // destabilizes the cell's sync. The draft kept `data` for transient use
-      // (Phase 2 LLM); the stored record stays light. (Idiom: photo.tsx.)
+      // (Phase 2 LLM); the stored record stays light. (Idiom: group-chat-room.tsx.)
       const lightImage = { url: image?.url ?? "", name: image?.name ?? "" };
 
       const sighting: Sighting = {
@@ -1590,7 +1592,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               /* `includeData` gives the draft both `url` (blob
                                 store) and inline `data` for transient LLM use.
                                 We persist only the `url` into the sighting; see
-                                captureSighting. Idiom per photo.tsx. */
+                                captureSighting. Idiom per group-chat-room.tsx. */
                             }
                             <cf-image-input
                               capture="environment"
