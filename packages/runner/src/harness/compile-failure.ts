@@ -11,12 +11,13 @@
  * Boot-safe: no TypeScript or compiler-stack imports.
  */
 
-// Deliberately module-private, rather than Symbol.for(): outside code must not
-// be able to forge a deterministic classification. A duplicated module graph
-// can only cause a missed classification, which safely fails toward retrying.
-const DETERMINISTIC_COMPILE_FAILURE: unique symbol = Symbol(
-  "cf.deterministicCompileFailure",
-);
+// Deliberately a module-private WeakSet rather than a marker property: outside
+// code must not be able to forge the classification, and set membership cannot
+// be faked the way a property read can — a lying proxy trap or an inherited
+// marker never answers for object identity. Frozen errors classify fine, since
+// membership never touches the object. A duplicated module graph can only
+// cause a missed classification, which safely fails toward retrying.
+const deterministicCompileFailures = new WeakSet<object>();
 
 // An allocation failure is a function of heap pressure, not of the verified
 // source bytes, so it must never be classified as deterministic. The messages
@@ -44,26 +45,21 @@ export function markDeterministicCompileFailure<T>(error: T): T {
     typeof error === "object" && error !== null && !isAllocationFailure(error)
   ) {
     try {
-      Object.defineProperty(error, DETERMINISTIC_COMPILE_FAILURE, {
-        value: true,
-        enumerable: false,
-      });
+      deterministicCompileFailures.add(error);
     } catch {
-      // Frozen/sealed error: leave unmarked and therefore retryable.
+      // Revoked proxy or otherwise unweakable throwable: leave it retryable.
     }
   }
   return error;
 }
 
-/** True only for errors stamped by this module. */
+/** True only for throwables stamped by this module. */
 export function isDeterministicCompileFailure(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   try {
-    return (error as Record<PropertyKey, unknown>)[
-      DETERMINISTIC_COMPILE_FAILURE
-    ] === true;
+    return deterministicCompileFailures.has(error);
   } catch {
-    // Exotic/proxy throwable: fail toward retrying.
+    // Revoked proxy: fail toward retrying.
     return false;
   }
 }

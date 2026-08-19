@@ -14,10 +14,13 @@ describe("markDeterministicCompileFailure", () => {
     expect(isDeterministicCompileFailure(marked)).toBe(true);
   });
 
-  it("fails open for frozen errors and non-object throwables", () => {
+  it("classifies frozen errors", () => {
     const frozen = Object.freeze(new Error("frozen"));
     expect(markDeterministicCompileFailure(frozen)).toBe(frozen);
-    expect(isDeterministicCompileFailure(frozen)).toBe(false);
+    expect(isDeterministicCompileFailure(frozen)).toBe(true);
+  });
+
+  it("fails open for non-object throwables", () => {
     expect(markDeterministicCompileFailure("boom")).toBe("boom");
     expect(isDeterministicCompileFailure("boom")).toBe(false);
     expect(markDeterministicCompileFailure(undefined)).toBe(undefined);
@@ -46,6 +49,16 @@ describe("markDeterministicCompileFailure", () => {
       },
     });
     expect(isDeterministicCompileFailure(throwingProxy)).toBe(false);
+  });
+
+  it("cannot be forged by a proxy that affirms every property", () => {
+    const lyingProxy = new Proxy({}, { get: () => true });
+    expect(isDeterministicCompileFailure(lyingProxy)).toBe(false);
+  });
+
+  it("does not classify an object inheriting from a marked error", () => {
+    const marked = markDeterministicCompileFailure(new Error("root cause"));
+    expect(isDeterministicCompileFailure(Object.create(marked))).toBe(false);
   });
 
   it("cannot be forged with a same-named registry symbol or property", () => {
