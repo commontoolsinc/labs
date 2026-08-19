@@ -1,6 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
-  MappedPosition,
   Program,
   ProgramResolver,
   Source,
@@ -1794,17 +1793,6 @@ export class Engine extends EventTarget {
       (source.startsWith("/")
         ? undefined
         : this.canonicalSourceByPrefixed.get(`/${source}`));
-  }
-
-  // Map a single position to its original source location.
-  // Returns null if no source map is loaded for the filename.
-  mapPosition(
-    filename: string,
-    line: number,
-    column: number,
-  ): MappedPosition | null {
-    if (!this.runtimeInternals) return null;
-    return this.runtimeInternals.runtime.mapPosition(filename, line, column);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
