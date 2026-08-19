@@ -2913,19 +2913,23 @@ describe("assertFabricLoggerFlags", () => {
     );
   });
 
-  it("throws naming `FabricPlainObject` for metadata of the wrong shape", () => {
-    // A `FabricValue` that is not a record. The deep walk accepts it and the
-    // shape check is what refuses, which is why the two are separate calls and
-    // report separately.
-    const flags = { runner: { sample: { "id:1": ["not", "a", "record"] } } };
+  it("throws about the breakdown when no single flag accounts for it", () => {
+    // Every metadata value vets on its own; what fails is a record the walk
+    // descends through, so there is no flag to name and the message says so
+    // rather than picking one arbitrarily.
+    const flags: Record<string, unknown> = {
+      runner: { sample: { "id:1": { a: 1 } } },
+    };
+    flags[Symbol("nope") as unknown as string] = 1;
+    Object.defineProperty(flags, "hidden", { value: 1, enumerable: false });
 
     expect(() =>
       assertFabricLoggerFlags(
         flags as unknown as Parameters<typeof assertFabricLoggerFlags>[0],
       )
     ).toThrow(
-      "Cannot send logger flag metadata on this connection: `runner` " +
-        "`sample` `id:1` is not a `FabricPlainObject`.",
+      "Cannot send logger flags on this connection: the breakdown is not a " +
+        "`FabricValue`.",
     );
   });
 

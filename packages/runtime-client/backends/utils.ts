@@ -2,7 +2,6 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
-  isFabricPlainObject,
   isFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import {
@@ -94,20 +93,17 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
 }
 
 /**
- * Asserts that a logger flag breakdown is carriable on the connection. A
- * flag's metadata is whatever its caller passed -- `Logger` takes a
- * `Record<string, unknown>` and constrains it no further -- so this is where it
- * is established to be a `FabricValue` or the read fails.
+ * Asserts that a logger flag breakdown is carriable on the connection. Its
+ * shape is the declaration's -- `getLoggerFlagsBreakdown()` reports records to
+ * the leaf -- and what the declaration leaves open is the leaves themselves,
+ * `Logger` taking a `Record<string, unknown>` and constraining it no further.
+ * So the whole question is whether the breakdown is a `FabricValue`, and one
+ * walk answers it.
  *
- * Metadata that does not vet throws rather than travelling as `null`. Nulling
- * it would lose the metadata while the payload went on reporting the flag,
- * which is the silent loss "Death before confusion!" rules out; the throw names
- * the flag whose metadata cannot travel, which is what a reader needs in order
- * to fix it.
- *
- * `isFabricValue()` walks the whole breakdown once and so validates every
- * metadata value in it, leaving each leaf to be checked only for its shape.
- * The per-leaf walk that names a culprit runs only on the way to throwing.
+ * A breakdown that is not one throws rather than travelling with the offending
+ * metadata dropped. Dropping it would leave the payload reporting a flag whose
+ * metadata had silently gone, which is the loss "Death before confusion!"
+ * rules out.
  *
  * Nothing reaches the throw today, de facto rather than by construction: no
  * flag gates it, and every producer that raises a flag with metadata passes
@@ -119,41 +115,30 @@ export function assertFabricLoggerFlags(
     Record<string, Record<string, Record<string, unknown> | null>>
   >,
 ): asserts breakdown is LoggerFlagsData {
-  const deepOk = isFabricValue(breakdown);
+  if (isFabricValue(breakdown)) return;
 
+  // Failed, so walk it again to say which flag is responsible -- a reader has
+  // to know which one to go fix, and the walk above reports only a verdict.
+  // This runs on the way to throwing and never on the way to returning.
   for (const [logger, flags] of Object.entries(breakdown)) {
     for (const [flag, byId] of Object.entries(flags)) {
       for (const [id, metadata] of Object.entries(byId)) {
-        // A flag raised without metadata, which is what `null` means here.
-        if (metadata === null) continue;
-
-        if (!deepOk && !isFabricValue(metadata)) {
-          throw new Error(unsendableFlag(logger, flag, id, "FabricValue"));
-        }
-
-        // A `FabricValue` by here, whether the one walk established it or the
-        // per-leaf call above did, which is what `isFabricPlainObject()` asks
-        // of its argument. What it adds is the shape: a `FabricValue` that is
-        // a string or an array is not what this payload carries.
-        if (!isFabricPlainObject(metadata as FabricValue)) {
-          throw new Error(
-            unsendableFlag(logger, flag, id, "FabricPlainObject"),
-          );
-        }
+        if ((metadata === null) || isFabricValue(metadata)) continue;
+        throw new Error(
+          "Cannot send logger flag metadata on this connection: " +
+            `\`${logger}\` \`${flag}\` \`${id}\` is not a \`FabricValue\`.`,
+        );
       }
     }
   }
-}
 
-/** The refusal a flag gets when its metadata cannot cross. */
-function unsendableFlag(
-  logger: string,
-  flag: string,
-  id: string,
-  wanted: string,
-): string {
-  return "Cannot send logger flag metadata on this connection: " +
-    `\`${logger}\` \`${flag}\` \`${id}\` is not a \`${wanted}\`.`;
+  // Every metadata value vets on its own, so what does not vet is the
+  // breakdown around them -- a symbol-keyed or non-enumerable property on one
+  // of the records the walk descends through.
+  throw new Error(
+    "Cannot send logger flags on this connection: the breakdown is not a " +
+      "`FabricValue`.",
+  );
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
