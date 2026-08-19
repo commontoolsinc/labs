@@ -352,10 +352,15 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
+/**
+ * Marks a frame as a MODULE-EVALUATION frame. Its presence is the
+ * discriminator `assertNotInActionExecution` uses to admit the transformer's
+ * module-scope builder mints while an action is suspended
+ * (`builder/action-context.ts`); `filename` names the evaluation for
+ * diagnostics.
+ */
 export type SourceLocationContext = {
-  script: string;
   filename: string;
-  nextSearchOffset: number;
 };
 
 export type Frame = {

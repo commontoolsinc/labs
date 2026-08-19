@@ -1285,11 +1285,10 @@ export class Engine extends EventTarget {
       // recorded below.
       const evalId = `${ctx.evalIdPrefix}:esm:${this.nextEvalId++}`;
       // Register per-module content hashes — this wires the scheduler's
-      // content-addressed implementation hash. Source-location resolution (the
-      // `indexOf`-into-`script` fallback plus the per-module source maps
-      // registered below) resolves `fn.src` to the canonical
-      // `cf:module/<hash>/<path>` form these hashes key on. Covered by
-      // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
+      // content-addressed implementation hash, and populates the canonical
+      // `cf:module/<hash>/<path>` table that names each module in provenance
+      // and in `fn.src`. Covered by `action-fingerprint.test.ts` and
+      // `authored-source-annotation.test.ts`.
       ctx.registerHashes();
 
       const patternCoverage = this.patternCoverageByGraph.get(graph);
@@ -1299,16 +1298,12 @@ export class Engine extends EventTarget {
           ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
           : {}),
       });
-      // Concatenated module bodies give the source-location frame a `script`
-      // for fn.src `indexOf` resolution. (Insertion order need not match the
-      // import-execution order; resolveLocationFromFunctionSource falls back to
-      // a from-zero scan, and any mis-attribution degrades fail-closed at the
-      // CFC identity layer — see the fn.src note in the design doc.)
-      const script = [...graph.compiledBodies.values()].join("\n");
-      // Register a composed bundle source map for `${evalId}.js` so that
-      // `fn.src` coordinates (resolved against `script`) map back to the
-      // original authored sources — without this the ESM loader yields raw
-      // bundle coordinates and the CFC provenance src check fails closed.
+      // Register a composed bundle source map for `${evalId}.js` so that a
+      // stack coordinate from this evaluation maps back to the authored source.
+      // Its consumer is ERROR MAPPING: `mapThrownError` for a throw that
+      // escapes module evaluation or an invoke, and `parseStack` for the
+      // scheduler's action diagnostics. Without it a pattern's stack traces
+      // read as raw `${evalId}.js:line:col` bundle coordinates.
       // Full module path per specifier.
       const sourceNameBySpecifier = new Map<string, string>();
       for (const [name, specifier] of graph.specifierByPath) {
@@ -1316,31 +1311,15 @@ export class Engine extends EventTarget {
       }
       // On the warm/cached record load (`buildRecordsFromCompiled`) no authored
       // per-module map is retained, so fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without a registered bundle map the
-      // ESM loader leaves `fn.src` as the raw `${evalId}.js:line:col` bundle
-      // coordinate, which the engine's name → canonical table cannot resolve, so
-      // identity downgrades to `unsupported` and CFC verified-source identity
-      // fails closed (the inSpace-child owner-protected write regression,
-      // CT-1754). The identity map preserves coordinates verbatim and only
-      // re-labels the bundle frame with the canonical source name, so the
-      // EXISTING verified-binding check passes for legitimately compiled modules
-      // without weakening it.
+      // module's per-module source `name`: it preserves coordinates verbatim and
+      // only re-labels the bundle frame with the canonical source name, which is
+      // what lets a warm-loaded module's stacks name their own file.
       // Composition + registration are DEFERRED (CT-1819): composing these
       // maps is a per-segment VLQ transcode over every module (~16-22ms per
-      // cold boot post-#4455/#4460), while their only consumers are
-      // on-demand \u2014 error mapping (`parseStack`/`mapThrownError`) and debug
-      // `fn.src` resolution (`mapPosition`; eager only when
-      // EXPERIMENTAL_EAGER_SOURCE_ANNOTATION is on, i.e. dev shells, which
-      // then materialize these providers during boot and keep today's
-      // behavior). Identity no longer needs the maps at boot: scheduler and
-      // CFC verified-source are provenance-rooted (#4436/#4458). The
-      // CT-1754 fail-closed notes below explain why the REGISTRATION must
-      // exist at all \u2014 they are satisfied by lazy materialization, since the
-      // fail-closed check only runs when `fn.src` is resolved, which is
-      // itself what materializes the map. Providers capture per-module LINE
-      // COUNTS and raw maps, never compiled bodies, so the closures retain
-      // KBs, not the bundle text; each is one-shot and dropped after first
-      // use.
+      // cold boot post-#4455/#4460), while error mapping only ever asks for one
+      // after a throw. Providers capture per-module LINE COUNTS and raw maps,
+      // never compiled bodies, so the closures retain KBs, not the bundle text;
+      // each is one-shot and dropped after first use.
       const lineCountBySpecifier = new Map<string, number>();
       for (const [specifier, body] of graph.compiledBodies) {
         lineCountBySpecifier.set(
@@ -1372,26 +1351,17 @@ export class Engine extends EventTarget {
           ),
       );
       // ALSO register each module's map under its eval `//# sourceURL` (its
-      // sanitized source name). The browser surfaces the per-module eval frame
-      // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
-      // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
-      // `${evalId}.js` covers only wins when the stack frame is absent, e.g.
-      // under Deno's tamed SES stacks). The frame is keyed on the per-module
-      // sourceURL with eval-relative line numbers, so register the per-module
-      // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      // sanitized source name). Browsers surface the per-module eval frame in
+      // `new Error().stack` rather than the bundle frame, so a stack from a
+      // pattern names the per-module sourceURL and needs a map registered under
+      // it. Those coordinates are eval-relative, so register the per-module map
+      // shifted by the factory-wrapper line (`(function (...) {\n` = +1).
       //
-      // When no authored map exists for a module (the warm/cached record load \u2014
+      // When no authored map exists for a module (the warm/cached record load —
       // `buildRecordsFromCompiled` populates `moduleSourceMaps` only for cached
       // bodies that retained one), fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without this the eval frame stays a
-      // raw `${evalId}.js:line:col` bundle coordinate that the engine's
-      // per-module name \u2192 canonical table cannot canonicalize, so `fn.src`
-      // never reaches `cf:module/<id>/<path>` and CFC verified-source identity
-      // downgrades to `unsupported` \u2014 the inSpace-child owner-protected write
-      // regression (CT-1754). The identity map preserves coordinates verbatim;
-      // it only re-labels the bundle frame with the module's canonical source
-      // name, so the EXISTING verified-binding check passes for legitimately
-      // compiled modules without weakening it.
+      // module's per-module source `name`, so the frame is still re-labeled with
+      // the module's canonical source instead of a raw bundle coordinate.
       for (const [name, specifier] of graph.specifierByPath) {
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const bodyLineCount = lineCountBySpecifier.get(specifier) ?? 1;
@@ -1408,11 +1378,7 @@ export class Engine extends EventTarget {
 
       const frame = pushFrame({
         runtime: this.ctRuntime,
-        sourceLocationContext: {
-          script,
-          filename: `${evalId}.js`,
-          nextSearchOffset: 0,
-        },
+        sourceLocationContext: { filename: `${evalId}.js` },
       });
 
       let loaded: ReturnType<typeof loadModuleGraph>;

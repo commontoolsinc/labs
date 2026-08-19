@@ -775,23 +775,14 @@ export function compileSourcesToRecords(
     // rather than wrapping the whole namespace. Authored sources are ESM.
     const namespaceExports = [...exportNames, "__esModule"];
 
-    // Tag the eval with a sourceURL = the (prefixed) source path. Under Deno's
-    // tamed SES `errorTaming` this is stripped from `new Error().stack`, so the
-    // stack-based resolver (`resolveSourceLocationFromStack`) does not fire there
-    // — but full source-location fidelity under the ESM loader is nonetheless
-    // achieved (scheduler content-addressed implementation hash + CFC
-    // verified-source) via two mechanisms, so this is NOT a remaining blocker for
-    // enabling the flag by default:
-    //   1. Deno: the `indexOf`-into-`script` fallback in
-    //      `resolveLocationFromFunctionSource` (builder/module.ts) maps `fn.src`
-    //      to the canonical `cf:module/<hash>/<path>` form via the per-load
-    //      `sourceLocationContext` the engine pushes.
-    //   2. Browsers (which DO surface the per-module eval frame in stacks): the
-    //      engine registers a per-module source map keyed on THIS `sourceURL`
-    //      (engine.ts, near `loadSourceMap`), so the stack-based resolver
-    //      translates the eval coordinate back to the authored source.
-    // Both paths are covered: `esm-source-location.test.ts` (CFC verified-source
-    // parity, flag-on) and `action-fingerprint.test.ts` (scheduler hash).
+    // Tag the eval with a sourceURL = the (prefixed) source path. Browsers name
+    // this URL in `new Error().stack`, and the engine registers a per-module
+    // source map keyed on it (engine.ts, near `loadSourceMapLazy`), so a
+    // pattern's stack traces read in authored coordinates. Under Deno's tamed
+    // SES `errorTaming` the URL is stripped from stacks; nothing else depends
+    // on it, because source LOCATIONS come from the transformer's authored
+    // annotation rather than from stack walking (`fn.src`,
+    // `harness/authored-debug-source.ts`).
     //
     // SECURITY: strip JS line terminators before interpolating into the
     // `//# sourceURL=` line comment. A newline (or U+2028/U+2029) in
