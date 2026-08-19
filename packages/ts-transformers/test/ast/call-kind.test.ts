@@ -10,6 +10,7 @@ import {
   getCapabilitySummaryCallbackArgument,
   getLiftAppliedInputAndCallback,
   getPatternBuilderCallbackArgument,
+  resolveCallbackFunctionExpression,
 } from "../../src/ast/mod.ts";
 import { getWithPatternHoistablePatternCall } from "../../src/ast/call-kind.ts";
 
@@ -71,6 +72,27 @@ function findInitializer(
 
   if (!found) {
     throw new Error(`Initializer for ${declarationName} not found`);
+  }
+
+  return found;
+}
+
+function findFirstArrowFunction(sourceFile: ts.SourceFile): ts.ArrowFunction {
+  let found: ts.ArrowFunction | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isArrowFunction(node)) {
+      found = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  if (!found) {
+    throw new Error("Arrow function not found");
   }
 
   return found;
@@ -484,4 +506,50 @@ Deno.test("detectCallKind ignores a builder-named import from a foreign module",
   }
 
   assertEquals(detectCallKind(expression, checker), undefined);
+});
+
+Deno.test("resolveCallbackFunctionExpression sees through a `satisfies` cast", () => {
+  // `satisfies T` states a constraint and leaves the value alone, so it hides
+  // a callback no more than `as T` or parentheses do. Callers that ask "is
+  // this argument the callback?" must answer yes through every one of those
+  // spellings, and callers that go on to use the returned node as an anchor
+  // need the authored arrow itself, not a wrapper standing in front of it.
+  const { sourceFile, checker } = createProgram(`
+    type Handler = (event: { word: string }, state: { count: number }) => void;
+
+    const value = ((event, state) => {}) satisfies Handler;
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isSatisfiesExpression(expression)) {
+    throw new Error("Expected satisfies expression initializer");
+  }
+
+  assertEquals(
+    resolveCallbackFunctionExpression(expression, checker),
+    findFirstArrowFunction(sourceFile),
+  );
+});
+
+Deno.test("resolveCallbackFunctionExpression sees through a `satisfies`-wrapped alias initializer", () => {
+  // The alias is annotated `any`, so the type carries no call signatures and
+  // the only route to the callback is the syntactic one: identifier to
+  // variable initializer, then through the wrapper.
+  const { sourceFile, checker } = createProgram(`
+    type Handler = (event: { word: string }, state: { count: number }) => void;
+
+    const callback: any = ((event, state) => {}) satisfies Handler;
+
+    const value = callback;
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isIdentifier(expression)) {
+    throw new Error("Expected identifier initializer");
+  }
+
+  assertEquals(
+    resolveCallbackFunctionExpression(expression, checker),
+    findFirstArrowFunction(sourceFile),
+  );
 });

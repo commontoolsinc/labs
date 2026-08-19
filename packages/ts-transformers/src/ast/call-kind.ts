@@ -36,6 +36,7 @@ import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { getCallArgumentPosition } from "./call-arguments.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
@@ -1522,26 +1523,21 @@ function isMultiApplicationChain(outerCall: ts.CallExpression): boolean {
   return ts.isCallExpression(innerCalleeCallee);
 }
 
+/**
+ * Peels the non-semantic wrappers that can stand between a call site and the
+ * expression it is really about — parentheses, `as T`, `<T>x`, `satisfies T`,
+ * and `!`. Classification asks what an expression *is*, and none of these
+ * change that, so all of them come off before any node-kind test runs.
+ *
+ * Delegates to the shared {@link unwrapExpression} so the wrapper list has a
+ * single definition and a wrapper spelling cannot be handled in one resolver
+ * and missed in another. `includePartiallyEmitted` stays off: a
+ * PartiallyEmittedExpression marks a node the emit pipeline has already
+ * rewritten, which is a different question from the authored shapes classified
+ * here.
+ */
 function stripWrappers(expression: ts.Expression): ts.Expression {
-  let current: ts.Expression = expression;
-
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    break;
-  }
-
-  return current;
+  return unwrapExpression(expression, { includePartiallyEmitted: false });
 }
 
 function stripInitializerAccess(expression: ts.Expression): ts.Expression {
