@@ -1971,6 +1971,18 @@ export interface ChurnCounters {
   /** Stage C design (e): intent-origin echoes retired by the watermark
    * BACKSTOP instead (`speculation-overlay/intent-echo-retired-by-backstop`). */
   overlayIntentEchoBackstops: number;
+  /** Stage C W2.1: client CASCADE-child echoes retired because an ancestor
+   * intent's terminal consequence arrived (`speculation-overlay/
+   * cascade-echo-retired`) — the W0 l3 "duplicate join" class: the join is
+   * the click handler's cascade child, its echo carries a client-minted id
+   * no mark ever names and writes an entity doc the server never writes. */
+  overlayCascadeEchoRetired: number;
+  /** Stage C W2.1: the subset retired while NO doc the echo wrote had yet
+   * moved past its basis (`speculation-overlay/cascade-echo-retired-
+   * unarrived`) — the FLICKER witness: the server's cascade child had not
+   * landed at this client when its echo went (the purged-LT1-leftover
+   * shape, W3's α1: drained a wave after the parent's consequence). */
+  overlayCascadeEchoFlickers: number;
 }
 
 export interface BrowserLoadSummary {
@@ -2113,6 +2125,8 @@ export async function collectBrowserLoadSummary(
       overlayIntentChecks: 0,
       overlayIntentsByConsequenceOf: 0,
       overlayIntentEchoBackstops: 0,
+      overlayCascadeEchoRetired: 0,
+      overlayCascadeEchoFlickers: 0,
     };
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
@@ -2184,6 +2198,14 @@ export async function collectBrowserLoadSummary(
       churn.overlayIntentEchoBackstops = countOf(
         "speculation-overlay",
         "intent-echo-retired-by-backstop",
+      );
+      churn.overlayCascadeEchoRetired = countOf(
+        "speculation-overlay",
+        "cascade-echo-retired",
+      );
+      churn.overlayCascadeEchoFlickers = countOf(
+        "speculation-overlay",
+        "cascade-echo-retired-unarrived",
       );
     } catch {
       // Worker may be disposed during teardown — main-thread IPC still tells
@@ -2261,7 +2283,9 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` overlayArrivalSweeps=${c.overlayArrivalSweeps}` +
     ` overlayIntentChecks=${c.overlayIntentChecks}` +
     ` overlayIntentsByConsequenceOf=${c.overlayIntentsByConsequenceOf}` +
-    ` overlayIntentEchoBackstops=${c.overlayIntentEchoBackstops}`;
+    ` overlayIntentEchoBackstops=${c.overlayIntentEchoBackstops}` +
+    ` overlayCascadeEchoRetired=${c.overlayCascadeEchoRetired}` +
+    ` overlayCascadeEchoFlickers=${c.overlayCascadeEchoFlickers}`;
   const pendingLine = summary.pendingIpc.length === 0
     ? "    (none)"
     : summary.pendingIpc.map((row) =>

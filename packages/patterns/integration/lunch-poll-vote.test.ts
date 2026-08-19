@@ -76,6 +76,35 @@ const voteSwatchVoters = (page: Page): Promise<string[]> =>
     return [...names];
   });
 
+// The participant chips currently rendered in the board's participants strip
+// (`data-participant-guest` — typed-name joins are guests; profile-backed
+// participants render `data-participant-badge`), descending through shadow
+// roots, DUPLICATES KEPT: under server execution the joiner's own browser
+// renders its speculative join echo and the confirmed join through one read
+// path, so a stranded echo shows as the SAME name twice (W0 l3: "3 joined,
+// Alice, Alice, Bob"). The confirmed roster is exactly one chip per name.
+const participantChipNames = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    const names: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (
+        const el of root.querySelectorAll(
+          "[data-participant-guest], [data-participant-badge]",
+        )
+      ) {
+        const name = el.getAttribute("data-participant-guest") ??
+          el.getAttribute("data-participant-badge");
+        if (name) names.push(name);
+      }
+      for (const el of root.querySelectorAll("*")) {
+        const sr = (el as HTMLElement).shadowRoot;
+        if (sr) walk(sr);
+      }
+    };
+    walk(document);
+    return names;
+  });
+
 describe("lunch poll: two users vote on a shared option", () => {
   const hostShell = new ShellIntegration({
     presentation: { id: "alice", label: "Alice", color: "#7c3aed" },
@@ -199,19 +228,39 @@ describe("lunch poll: two users vote on a shared option", () => {
         () => waitForSettledText(hostPage, "body", HOST),
       );
 
-      // Guest joins second via the same guest path. The board shows a
-      // participant count, not a full roster, so the host's join landing is
-      // observed as "2 joined" (and the guest's own page shows its name plus
-      // "hosted by Alice").
+      // Guest joins second via the same guest path. Both joins LANDED is the
+      // CONFIRMED roster on BOTH browsers: the participants strip shows
+      // exactly one chip per name — {Alice, Bob} — and the count reads "2
+      // joined". Not a count alone: under server execution the joiner's own
+      // speculative echo satisfied "2 joined" on the host (spec-Alice +
+      // confirmed Alice) in 7–16 ms, BEFORE the guest's join had landed
+      // anywhere (W0 l3's "3 joined, Alice, Alice, Bob" when it did) — the
+      // step passed spuriously on the echo and failed when the probe missed
+      // the transient. The exact-chip form is RED on a standing echo (a
+      // duplicated name, or three chips) and green only on the real
+      // landing, so its wall time is at least a server round trip.
       await clickCfButton(guestPage, "#lp-guest-button");
       await fillCfInput(guestPage, "#lp-join-name", GUEST);
       await clickCfButton(guestPage, "#lp-join-button");
+      const confirmedRoster = async (page: Page): Promise<boolean> => {
+        const chips = await participantChipNames(page);
+        return chips.length === 2 && chips.includes(HOST) &&
+          chips.includes(GUEST);
+      };
       await timer.run(
-        "both join lands (count reaches 2)",
+        "both join lands (confirmed roster: exactly {Alice, Bob} on both)",
         () =>
           Promise.all([
+            waitFor(() => confirmedRoster(hostPage), {
+              timeout: PROPAGATION_TIMEOUT,
+              delay: 250,
+            }),
+            waitFor(() => confirmedRoster(guestPage), {
+              timeout: PROPAGATION_TIMEOUT,
+              delay: 250,
+            }),
             waitForSettledText(hostPage, "body", "2 joined"),
-            waitForSettledText(guestPage, "body", GUEST),
+            waitForSettledText(guestPage, "body", "2 joined"),
           ]),
       );
 
