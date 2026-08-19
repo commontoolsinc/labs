@@ -30,6 +30,22 @@
 
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 import { ACCEPTED_STATE_DROPS } from "./pattern-vintage-accepted-drops.ts";
+import { fromFileUrl } from "@std/path/from-file-url";
+import {
+  reportUnmappedUrls,
+  requiredPatternKeys,
+  unmappedPatternUrls,
+} from "./pattern-vintage-lib.ts";
+
+/**
+ * The repository root, absolute. Derived from this module's own location so
+ * every gate resolves a record to the same file whatever directory the task
+ * was invoked from — the workspace runner does not run them from the root.
+ */
+const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
+  /\/$/,
+  "",
+);
 
 /** The registry-independent shape both kinds of entry share. */
 export interface BreakRegistryEntry {
@@ -104,7 +120,18 @@ export function guardBreakRegistryEntries(options: {
 }): BreakRegistryFinding[] {
   const findings: BreakRegistryFinding[] = [];
   for (const entry of options.entries) {
-    if (options.requiredPatternKeys.has(entry.pattern)) {
+    // Membership is judged the way the REGISTRIES' own consumers resolve a
+    // key, not by string equality. `acceptedDropsFor` claims an entry whose
+    // key is a path SUFFIX of the manifest's pattern path, so a Tier 2 entry
+    // written `home.tsx` forgives drops on `system/home.tsx` — and an exact
+    // `has()` would let the shorter spelling walk around this floor. Tier 1
+    // keys exactly, so a suffix-written entry there forgives nothing today
+    // and refusing it costs nothing; judging both registries by the looser
+    // rule keeps the floor ahead of either consumer.
+    const namesRequired = [...options.requiredPatternKeys].some((key) =>
+      key === entry.pattern || key.endsWith(`/${entry.pattern}`)
+    );
+    if (namesRequired) {
       findings.push({
         registry: entry.registry,
         pattern: entry.pattern,
@@ -151,4 +178,43 @@ export function reportBreakRegistryFindings(options: {
   return `${findings.length} accepted-break registry entr` +
     `${findings.length === 1 ? "y is" : "ies are"} not permitted:\n\n` +
     lines.join("\n");
+}
+
+/**
+ * The required-pattern set both gates hold their registries to, or the report
+ * to fail with.
+ *
+ * Derived here rather than in each gate so the two cannot come to different
+ * answers about what auto-updates. The unmapped check is part of the
+ * derivation and not a separate courtesy: a runtime constant that stops
+ * naming a patterns route would leave `requiredPatternKeys` returning a
+ * SHORTER list, and a floor that silently requires nothing is worse than no
+ * floor.
+ */
+export function deriveRequiredPatternKeys(
+  systemPatternUrls: readonly string[],
+): { keys: ReadonlySet<string> } | { error: string } {
+  const unmapped = unmappedPatternUrls(systemPatternUrls);
+  if (unmapped.length > 0) return { error: reportUnmappedUrls(unmapped) };
+  return { keys: new Set(requiredPatternKeys(systemPatternUrls)) };
+}
+
+/**
+ * An existence probe for records, resolved against an ABSOLUTE repo root.
+ *
+ * Shared so the gates cannot disagree about what a repo-relative record path
+ * resolves to. A probe built from a bare relative path answers differently
+ * depending on the directory the task was invoked from, and the workspace
+ * runner does not invoke these from the repo root.
+ */
+export function recordExistsUnder(
+  repoRoot: string = REPO_ROOT,
+): (repoRelativePath: string) => boolean {
+  return (repoRelativePath) => {
+    try {
+      return Deno.statSync(`${repoRoot}/${repoRelativePath}`).isFile;
+    } catch {
+      return false;
+    }
+  };
 }

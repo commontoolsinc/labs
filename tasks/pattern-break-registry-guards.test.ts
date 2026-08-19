@@ -3,16 +3,14 @@ import { expect } from "@std/expect";
 import {
   type BreakRegistryEntry,
   collectBreakRegistryEntries,
+  deriveRequiredPatternKeys,
   guardBreakRegistryEntries,
+  recordExistsUnder,
 } from "./pattern-break-registry-guards.ts";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
 } from "../packages/piece/src/system-pattern-url.ts";
-import { requiredPatternKeys } from "./pattern-vintage-lib.ts";
-import { fromFileUrl } from "@std/path/from-file-url";
-
-const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 const entry = (overrides: Partial<BreakRegistryEntry>): BreakRegistryEntry => ({
   registry: "pattern-compat-accepted-breaks",
@@ -124,24 +122,56 @@ describe("pattern-break-registry-guards", () => {
       requiredPatternKeys: new Set(["system/home.tsx"]),
       recordExists: () => false,
     });
-    // The first entry also fails the existence probe, so three findings.
-    expect(findings.length).toBe(3);
+    // Asserted by CONTENT, not by count: the first entry also fails the
+    // existence probe, so a bare `length === 3` passes on the wrong three.
+    expect(findings.map((finding) => `${finding.pattern} ${finding.detail}`))
+      .toEqual([
+        "system/home.tsx names a required pattern — the auto-updating roots " +
+        "are never eligible for an accepted break",
+        'system/home.tsx record "docs/history/topics-crossref-identity-break' +
+        '.md" does not exist — an accepted break carries its deliberation, ' +
+        "not just its declaration",
+        'lunch-poll/main.tsx record "docs/history/never-written.md" does not ' +
+        "exist — an accepted break carries its deliberation, not just its " +
+        "declaration",
+      ]);
+  });
+
+  it("refuses a required pattern written as a bare suffix key", () => {
+    // `acceptedDropsFor` claims an entry by path SUFFIX, so `home.tsx` really
+    // does forgive drops on `system/home.tsx`. An exact-match floor would let
+    // the shorter spelling walk straight around it.
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({ pattern: "home.tsx" })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("required pattern");
+  });
+
+  it("allows a pattern the required key merely ends with textually", () => {
+    // The boundary the suffix rule needs: `home.tsx` is claimed because the
+    // separator lines up, but `whome.tsx` is a different pattern that no
+    // required key addresses.
+    expect(guardBreakRegistryEntries({
+      entries: [entry({ pattern: "whome.tsx" })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    })).toEqual([]);
   });
 
   it("accepts the shipped registries against the real tree", () => {
-    const findings = guardBreakRegistryEntries({
+    // Through the same derivation and the same probe the gates use, so this
+    // case also proves those resolve correctly from wherever tests run.
+    const required = deriveRequiredPatternKeys(
+      [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE],
+    );
+    expect("error" in required).toBe(false);
+    expect(guardBreakRegistryEntries({
       entries: collectBreakRegistryEntries(),
-      requiredPatternKeys: new Set(
-        requiredPatternKeys([HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE]),
-      ),
-      recordExists: (path) => {
-        try {
-          return Deno.statSync(`${REPO_ROOT}/${path}`).isFile;
-        } catch {
-          return false;
-        }
-      },
-    });
-    expect(findings).toEqual([]);
+      requiredPatternKeys: (required as { keys: ReadonlySet<string> }).keys,
+      recordExists: recordExistsUnder(),
+    })).toEqual([]);
   });
 });
