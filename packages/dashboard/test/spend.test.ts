@@ -75,8 +75,8 @@ describe("spend", () => {
 
   it("ends a lagging source at its own known day instead of padding it with zeros", () => {
     const github = source(run("2026-01-01", 20, 1), 2, "#58a6ff");
-    const blacksmith = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
-    const { chart, duration } = spendChart([github, blacksmith], NOW, "good");
+    const secondary = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
+    const { chart, duration } = spendChart([github, secondary], NOW, "good");
     expect(duration).toBe(20 * DAY);
     const lines = polylines(chart);
     expect(lines.length).toBe(2);
@@ -117,8 +117,8 @@ describe("spend", () => {
 
   it("aligns each line's highlight to the shared trailing window", () => {
     const github = source(run("2026-01-01", 20, 1), 2, "#58a6ff");
-    const blacksmith = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
-    const { chart } = spendChart([github, blacksmith], NOW, "good", 5);
+    const secondary = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
+    const { chart } = spendChart([github, secondary], NOW, "good", 5);
     const lines = polylines(chart);
     // Two bases, then the two bright trailing slices.
     expect(lines.length).toBe(4);
@@ -185,20 +185,20 @@ describe("spend", () => {
       "#58a6ff",
       ["2025-11", "2026-01"],
     );
-    const blacksmith = source(run("2025-11-20", 45, 2), 2, "#f59e0b");
-    const { chart } = spendChart([github, blacksmith], GAP_NOW, "good", 20);
+    const continuous = source(run("2025-11-20", 45, 2), 2, "#f59e0b");
+    const { chart } = spendChart([github, continuous], GAP_NOW, "good", 20);
     const lines = polylines(chart);
     // Two pieces of the holed base line, one whole base line, then a slice of
     // each.
     expect(lines.length).toBe(5);
-    const [, , , githubTint, blacksmithTint] = lines;
+    const [, , , githubTint, continuousTint] = lines;
     // The window opens at column 25, inside the hole. The unbroken line's
     // slice starts there; the holed one picks up at its first reported day.
-    expect(blacksmithTint.length).toBe(20);
-    expect(blacksmithTint[0][0]).toBe(125);
+    expect(continuousTint.length).toBe(20);
+    expect(continuousTint[0][0]).toBe(125);
     expect(githubTint.length).toBe(3);
     expect(githubTint[0][0]).toBe(210);
-    expect(githubTint[2][0]).toBe(blacksmithTint[19][0]);
+    expect(githubTint[2][0]).toBe(continuousTint[19][0]);
   });
 
   it("stops at the last day it reports on rather than at the settled horizon", () => {
