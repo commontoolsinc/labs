@@ -114,10 +114,10 @@ export class ExecutorHost {
       // Fan-out stage B: a watch-set change on an ACTIVE space wakes its
       // demand pass (the arrival re-arm's trigger); an inactive space
       // waits for the session-open / admission activation triggers.
-      demandChanged: (space) => {
+      demandChanged: (space, reason) => {
         if (this.#closed) return;
         const existing = this.#spaces.get(space);
-        if (existing?.active) existing.noteDemandChanged();
+        if (existing?.active) existing.noteDemandChanged(reason);
       },
     });
     registerServingLoopStatsProvider(() => this.stats());
@@ -136,6 +136,18 @@ export class ExecutorHost {
     return {
       ...this.#stats,
       events: { ...this.#stats.events },
+      demand: {
+        ...this.#stats.demand,
+        sizes: {
+          perSession: [...this.#stats.demand.sizes.perSession],
+          unionKeys: this.#stats.demand.sizes.unionKeys,
+        },
+        sizeSeries: [...this.#stats.demand.sizeSeries],
+      },
+      settle: {
+        series: [...this.#stats.settle.series],
+        dropped: this.#stats.settle.dropped,
+      },
       memo: { ...this.#stats.memo },
       outbox: { ...this.#stats.outbox },
       lease: { ...this.#stats.lease },

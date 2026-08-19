@@ -66,6 +66,22 @@ export class NodeRegistry {
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
+  /** W0 (d′) SCRATCH — the STANDING, refcounted `demandedWriters` root
+   * kind (design §2.4; serving-loop.md §1's "a demanded instance's
+   * writers hold demand … while any session tracks the instance"): the
+   * writers of instances a client session TRACKS. A third `isDemandRoot`
+   * disjunct beside effects and materializers — NOT `provisionalDemand`
+   * (pass-scoped, one-shot). Held here so every liveness state bundle
+   * (`nodes` is on all of them) sees it with no plumbing. Only the
+   * serving loop's demand pass ever adds to it (through the facade's
+   * enter/leave, bracketed with the liveness notifications); EMPTY off
+   * the serving posture and on every client. Refcounts (per demanded
+   * entity) live in the facade. */
+  readonly demandedWriters = new Set<Action>();
+
+  isDemandedWriter(action: Action): boolean {
+    return this.demandedWriters.has(action);
+  }
 
   register(
     action: Action,

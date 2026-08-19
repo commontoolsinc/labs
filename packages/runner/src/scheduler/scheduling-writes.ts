@@ -121,8 +121,26 @@ export class SchedulerWriteIndex
     }
 
     this.actionWriteEntities.set(action, nextEntities);
+    if (addedEntities.size > 0 || removedEntities.size > 0) {
+      this.onWriterEntitiesChanged?.(action, addedEntities, removedEntities);
+    }
     return { nextEntities, addedEntities, removedEntities };
   }
+
+  /** W0 (d′) SCRATCH — the REGISTRATION hook for the standing
+   * `demandedWriters` root kind (design §2.4: "a writer that registers
+   * AFTER its output is demanded must consult the demanded set on
+   * registration … unregistration releases"). Fired with the entities a
+   * writer's surface gained and lost; the facade consults its demanded
+   * entity set and brackets the root transition. Undefined off the
+   * serving posture (never installed). */
+  onWriterEntitiesChanged:
+    | ((
+      action: Action,
+      added: ReadonlySet<SpaceScopeAndURI>,
+      removed: ReadonlySet<SpaceScopeAndURI>,
+    ) => void)
+    | undefined;
 
   clearAction(action: Action): void {
     const writeEntities = this.actionWriteEntities.get(action);
@@ -137,6 +155,7 @@ export class SchedulerWriteIndex
     }
     // Clear actionWriteEntities so resubscribe will re-register the action.
     this.actionWriteEntities.delete(action);
+    this.onWriterEntitiesChanged?.(action, new Set(), writeEntities);
   }
 }
 
