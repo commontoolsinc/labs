@@ -31,7 +31,7 @@ deno task cf test packages/patterns/<pattern>/<name>.test.tsx --verbose --stats-
 ```
 
 No browser, no shell, no rendering — the cheapest rung that can see a read count
-explode. Each row carries `count`, `average`, `p95`, `max` and `total`.
+explode.
 
 Each row prints `n`, `total`, `avg` and `p95`. Read the count against the
 average before forming any theory: a row whose `total` grew because it ran more
@@ -64,17 +64,19 @@ matches the capture:
 
 - **Profiling the `cf test` process.** Wrap the phase the way
   [`packages/cli/lib/test-runner.ts`](../../../packages/cli/lib/test-runner.ts)
-  does in its `withPhase` helper: hierarchical keys so subphases nest,
-  `logger.timeStart()` / `logger.timeEnd()` around the body, `performance.mark()`
-  at both boundaries with a `performance.measure()` across the pair, and a
-  `console.timeStamp()` at each. Run the process under `--inspect` and the marks
-  and timestamps land on the DevTools timeline beside the samples, so zooming to
-  the phase is a drag rather than arithmetic.
-- **Profiling the browser worker.** The interval has to come from the capture
-  itself: start the profiler when the phase starts and stop it when the phase
-  ends, so the profile *is* the phase. That is what the phase-scoped capture in
-  step 3 is for. Marks emitted inside the worker also work; marks emitted by the
-  test driving it do not.
+  does in its `withPhase` helper: multi-segment keys, `logger.timeStart()` /
+  `logger.timeEnd()` around the body, `performance.mark()` at both boundaries
+  with a `performance.measure()` across the pair, and a `console.timeStamp()` at
+  each. The key segments are joined into one path and recorded against that path
+  alone — they read as a hierarchy and sort together, but nothing rolls up, so a
+  parent's total is its own span rather than the sum of its children's. Run the
+  process under `--inspect` and the marks and timestamps land on the DevTools
+  timeline beside the samples, so zooming to the phase is a drag rather than
+  arithmetic. - **Profiling the browser worker.** The interval has to come from
+  the capture itself: start the profiler when the phase starts and stop it when
+  the phase ends, so the profile *is* the phase. That is what the phase-scoped
+  capture in step 3 is for. Marks emitted inside the worker also work; marks
+  emitted by the test driving it do not.
 
 Either way, add the bracket to the phase you are narrowing rather than to
 everything.
@@ -107,8 +109,8 @@ ranking is not enough.
 For the logger's own view of the same run, `collectBrowserLoadSummary` in
 [`packages/patterns/integration/cfc-browser-helpers.ts`](../../../packages/patterns/integration/cfc-browser-helpers.ts)
 reads the worker's scheduler, runner and storage rows plus main-thread IPC, with
-`count`, `p50`, `p95` and `max` per row. It keeps the top rows by total, so a row
-recording set sizes rather than milliseconds will evict real timings — read
+`count`, `p50`, `p95` and `max` per row. It keeps the top rows by total, so a
+row recording set sizes rather than milliseconds will evict real timings — read
 those by name instead of widening the summary.
 
 ## 4. Split until an explosion has an origin
@@ -117,9 +119,12 @@ A count that is too high is visible at the top level. The caller that multiplies
 it is not.
 
 Keep splitting the phase into subphases and comparing counts between adjacent
-levels. The level where a count stops being proportional to the work and starts
-being proportional to the work squared is the level that introduced the
-multiplication — that is the caller to fix, and it is frequently not the
+levels. Compare the counts, not shares of a total: each key is timed
+independently and nothing aggregates, so a child's contribution cannot be
+inferred by subtracting it from its parent. The level where a count stops being
+proportional to the work and starts being proportional to the work squared is
+the level that introduced the multiplication — that is the caller to fix, and it
+is frequently not the
 function the profile ranked first.
 
 ## 5. Isolate, then pin it with a benchmark
