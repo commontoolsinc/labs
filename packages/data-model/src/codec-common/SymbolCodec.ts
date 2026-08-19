@@ -23,6 +23,11 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
  * it is checked where it is provable, and a format with no `string` arm cannot
  * supply it.
  *
+ * That same fact is why this codec's state type is `Encoded & string` rather
+ * than plain `string`. The state type is bounded by `Encoded`, which a bare
+ * `string` cannot be shown to satisfy; the intersection is the only spelling
+ * that is both a string and provably in the format's domain.
+ *
  * **What crosses is internedness**, and that is the whole of the promise: a
  * decoded symbol is interned under the key the encoded one was interned under,
  * which is as interned as a symbol on the far side can be. Whether it is the
