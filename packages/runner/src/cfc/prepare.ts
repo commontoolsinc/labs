@@ -4286,19 +4286,22 @@ const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
   source: LinkWritePolicyInput["source"],
 ): JSONSchema | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["schema"], never the whole document: the same commit-time
+  // concurrency scoping `storedMetadataFor` above applies here. A path-[]
+  // recursive read makes the whole source document a value dependency, so
+  // a concurrent write to the source's value — an append to a collection
+  // this link points into among them — conflicts the commit. The
+  // ["schema"] read depends on that member alone, which such a write
+  // leaves undisturbed.
+  const schema = tx.readOrThrow({
     space: source.space,
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: [],
+    path: ["schema"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(document)) {
-    return undefined;
-  }
-  const schema = (document as Record<string, unknown>).schema;
   return schema === undefined || schema === null
     ? undefined
     : schema as JSONSchema;

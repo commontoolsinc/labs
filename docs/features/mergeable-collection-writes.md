@@ -448,6 +448,16 @@ lunch poll's `addUser`
 ([participant-identity-card.tsx](../../packages/patterns/lunch-poll/participant-identity-card.tsx))
 is a deliberate read-then-push that relies on it.
 
+The narrowing keys on the read's path, and does not care which layer issued the
+read. Runtime machinery that runs during a commit is bound by the same rule as
+handler code. A recursive read at a document's root depends on every path in
+that document, so a concurrent write anywhere in it — including the mergeable
+append the commit is carrying — invalidates that read and conflicts the commit.
+A runtime pass that needs one member of a document reads that member's own path
+instead. The CFC label envelope at `["cfc"]` and the schema meta at
+`["schema"]` are each read at their own path, so each depends on that member
+alone and a concurrent append to the document's value leaves it undisturbed.
+
 Two further responses make the keyed case cheaper and catch misuse (see
 `keyed-collection-writes.md`):
 
