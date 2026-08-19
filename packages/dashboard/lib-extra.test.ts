@@ -140,6 +140,30 @@ Deno.test("github: an HTTP failure logs the endpoint and GitHub response context
   });
 });
 
+Deno.test("github: response header details are bounded and single-line", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      const unsafe = `request-\x1b[31m${"x".repeat(500)}`;
+      await withFetch(
+        () =>
+          new Response("unavailable", {
+            status: 503,
+            headers: { "x-github-request-id": unsafe },
+          }),
+        async () => {
+          await assertRejects(() => github("repos/o/runs"), Error);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert([...messages[0]].every((character) => {
+        const code = character.charCodeAt(0);
+        return code > 31 && (code < 127 || code > 159);
+      }));
+      assert(messages[0].length < 500);
+    });
+  });
+});
+
 Deno.test("github: a request failure logs its endpoint, stage, and elapsed time", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
@@ -227,6 +251,40 @@ Deno.test("github: a failed error body preserves the known HTTP failure", async 
       assert(messages[0].includes("could not read the error response"));
       assert(messages[0].includes("body connection closed"));
       assert(messages[1].includes("returned HTTP 403"));
+    });
+  });
+});
+
+Deno.test("github: a large error keeps a bounded prefix and cancels the body", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      let sent = false;
+      let cancelled = false;
+      const response = new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (sent) return;
+            sent = true;
+            controller.enqueue(
+              new TextEncoder().encode(`useful detail ${"x".repeat(10_000)}`),
+            );
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 500 },
+      );
+      await withFetch(
+        () => response,
+        async () => {
+          await assertRejects(() => github("repos/o/error"), Error);
+        },
+      );
+      assert(cancelled);
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("useful detail"));
+      assert(messages[0].length < 500);
     });
   });
 });
@@ -396,7 +454,7 @@ Deno.test("github: an abandoned download has already completed its body", async 
   });
 });
 
-Deno.test("github: a failed download consumes and logs its error body", async () => {
+Deno.test("github: a failed download cancels its body and logs response context", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
       const response = Response.json(
@@ -425,27 +483,25 @@ Deno.test("github: a failed download consumes and logs its error body", async ()
         messages[0].includes("for download repos/o/actions/artifacts/1/zip"),
       );
       assert(messages[0].includes("HTTP 410, request download-123"));
-      assert(messages[0].includes("artifact expired"));
+      assert(!messages[0].includes("artifact expired"));
     });
   });
 });
 
-Deno.test("github: a large download error keeps a bounded prefix and cancels the body", async () => {
+Deno.test("github: a failed download does not wait for body cleanup", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
-      let sent = false;
       let cancelled = false;
       const response = new Response(
         new ReadableStream({
-          pull(controller) {
-            if (sent) return;
-            sent = true;
+          start(controller) {
             controller.enqueue(
-              new TextEncoder().encode(`useful detail ${"x".repeat(10_000)}`),
+              new TextEncoder().encode("short detail"),
             );
           },
           cancel() {
             cancelled = true;
+            return new Promise<void>(() => {});
           },
         }),
         { status: 500 },
@@ -459,13 +515,12 @@ Deno.test("github: a large download error keeps a bounded prefix and cancels the
       );
       assert(cancelled);
       assertEquals(messages.length, 1);
-      assert(messages[0].includes("useful detail"));
-      assert(messages[0].length < 500);
+      assert(!messages[0].includes("short detail"));
     });
   });
 });
 
-Deno.test("github: an ignored download status does not hide transport failures", async () => {
+Deno.test("github: an ignored download status does not hide cleanup or transport failures", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
       const response = new Response("missing", { status: 404 });
@@ -487,8 +542,8 @@ Deno.test("github: an ignored download status does not hide transport failures",
         () =>
           new Response(
             new ReadableStream({
-              pull(controller) {
-                controller.error(new Error("body connection closed"));
+              cancel() {
+                return Promise.reject(new Error("body cancellation failed"));
               },
             }),
             { status: 404 },
@@ -502,8 +557,9 @@ Deno.test("github: an ignored download status does not hide transport failures",
           assertEquals(download.status, 404);
         },
       );
+      await Promise.resolve();
       assertEquals(messages.length, 1);
-      assert(messages[0].includes("body connection closed"));
+      assert(messages[0].includes("body cancellation failed"));
       await withFetch(
         () => Promise.reject(new TypeError("connection closed")),
         async () => {

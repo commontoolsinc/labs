@@ -1,4 +1,5 @@
 import {
+  assert,
   assertEquals,
   assertRejects,
   assertStringIncludes,
@@ -1199,9 +1200,37 @@ Deno.test("performance GitHub requests report unusable rate-limit responses", as
         assertStringIncludes(error.message, "request rate-probe-request");
         assertStringIncludes(error.message, "rate limit 0 remaining");
         assertStringIncludes(error.message, "retry after 60");
-        assertStringIncludes(error.message, "unavailable");
       }
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("an unusable rate-limit response does not wait for body cleanup", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  const response = new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("short detail"));
+      },
+      cancel() {
+        cancelled = true;
+        return new Promise<void>(() => {});
+      },
+    }),
+    { status: 503 },
+  );
+  try {
+    globalThis.fetch = (() => Promise.resolve(response)) as typeof fetch;
+    const token = `rate-probe-cleanup-${crypto.randomUUID()}`;
+    await assertRejects(
+      () => performanceGithub("repos/o/r", token),
+      GitHubRateLimitBudgetError,
+      "rate limit status could not be read",
+    );
+    assert(cancelled);
   } finally {
     globalThis.fetch = originalFetch;
   }

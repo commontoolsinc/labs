@@ -98,16 +98,20 @@ function errorMessage(error: unknown): string {
 
 function githubResponseContext(response: Response): string {
   const parts = [`HTTP ${response.status}`];
-  const requestId = response.headers.get("x-github-request-id");
+  const header = (name: string): string | undefined => {
+    const value = response.headers.get(name);
+    return value === null ? undefined : boundedLogDetail(value);
+  };
+  const requestId = header("x-github-request-id");
   if (requestId) parts.push(`request ${requestId}`);
-  const remaining = response.headers.get("x-ratelimit-remaining");
-  const limit = response.headers.get("x-ratelimit-limit");
+  const remaining = header("x-ratelimit-remaining");
+  const limit = header("x-ratelimit-limit");
   if (remaining || limit) {
     parts.push(`rate limit ${remaining ?? "?"} remaining of ${limit ?? "?"}`);
   }
-  const reset = response.headers.get("x-ratelimit-reset");
+  const reset = header("x-ratelimit-reset");
   if (reset) parts.push(`rate limit resets at ${reset}`);
-  const retryAfter = response.headers.get("retry-after");
+  const retryAfter = header("retry-after");
   if (retryAfter) parts.push(`retry after ${retryAfter}`);
   return parts.join(", ");
 }
@@ -154,6 +158,33 @@ function logGitHubOperationFailure(
   );
 }
 
+function logGitHubErrorResponseFailure(
+  response: Response,
+  operation: ActiveGitHubOperation,
+  action: string,
+  error: unknown,
+): void {
+  console.error(
+    "GitHub API operation " + operation.id + " for " + operation.path +
+      " could not " + action + " the error response from " +
+      githubResponseContext(response) + ": " + errorMessage(error),
+  );
+}
+
+function discardGitHubErrorResponseBody(
+  response: Response,
+  operation: ActiveGitHubOperation,
+): void {
+  if (!response.body) return;
+  try {
+    void response.body.cancel().catch((error) => {
+      logGitHubErrorResponseFailure(response, operation, "discard", error);
+    });
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "discard", error);
+  }
+}
+
 async function githubErrorResponseBody(
   response: Response,
   operation: ActiveGitHubOperation,
@@ -169,26 +200,19 @@ async function githubErrorResponseBody(
     }
     return new TextDecoder().decode(bytes);
   };
-  const logReadFailure = (action: string, error: unknown): void => {
-    console.error(
-      "GitHub API operation " + operation.id + " for " + operation.path +
-        " could not " + action + " the error response from " +
-        githubResponseContext(response) + ": " + errorMessage(error),
-    );
-  };
   if (!response.body) return "";
   let reader: ReadableStreamDefaultReader<Uint8Array>;
   try {
     reader = response.body.getReader();
   } catch (error) {
-    logReadFailure("read", error);
+    logGitHubErrorResponseFailure(response, operation, "read", error);
     return "";
   }
   const cancel = async (): Promise<void> => {
     try {
       await reader.cancel();
     } catch (error) {
-      logReadFailure("stop reading", error);
+      logGitHubErrorResponseFailure(response, operation, "stop reading", error);
     }
   };
   try {
@@ -203,7 +227,7 @@ async function githubErrorResponseBody(
     await cancel();
     return detail();
   } catch (error) {
-    logReadFailure("read", error);
+    logGitHubErrorResponseFailure(response, operation, "read", error);
     return detail();
   } finally {
     reader.releaseLock();
@@ -232,19 +256,13 @@ function githubRequest(path: string, token: string, withTimeout: boolean): Promi
 
 async function githubPrimaryRateLimit(
   token: string,
+  operation: ActiveGitHubOperation,
 ): Promise<GitHubPrimaryRateLimit> {
   const response = await githubRequest("rate_limit", token, false);
   if (!response.ok) {
-    let body = "";
-    try {
-      body = await response.text();
-    } catch (error) {
-      body = `could not read error response: ${errorMessage(error)}`;
-    }
-    const detail = githubErrorBody(body);
+    discardGitHubErrorResponseBody(response, operation);
     throw new Error(
-      `GitHub API rate_limit failed: ${githubResponseContext(response)}` +
-        `${detail ? `: ${detail}` : ""}`,
+      `GitHub API rate_limit failed: ${githubResponseContext(response)}`,
     );
   }
   const value = await response.json() as {
@@ -280,7 +298,7 @@ async function githubResponse(
     if (performance) {
       reservation = await performanceGitHubRateLimit.reserve(
         token,
-        () => githubPrimaryRateLimit(token),
+        () => githubPrimaryRateLimit(token, operation),
       );
       operation.stage = "requesting GitHub";
     }
@@ -421,17 +439,12 @@ async function githubDownloadResponse(
   );
   if (!response.ok) {
     const reportHttpError = !options.ignoreStatuses?.includes(response.status);
-    const responseBody = await githubErrorResponseBody(
-      response,
-      operation,
-    );
+    discardGitHubErrorResponseBody(response, operation);
     if (reportHttpError) {
-      const responseDetail = githubErrorBody(responseBody);
       console.error(
         `GitHub API operation ${operation.id} for download ${operation.path} returned ` +
           `${githubResponseContext(response)} after ` +
-          `${Math.max(0, Date.now() - operation.startedAt)} ms` +
-          `${responseDetail ? `: ${responseDetail}` : ""}`,
+          `${Math.max(0, Date.now() - operation.startedAt)} ms`,
       );
     }
     finishGitHubOperation(operation, response, true);
