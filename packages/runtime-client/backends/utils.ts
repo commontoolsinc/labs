@@ -1,4 +1,7 @@
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   Cell,
   JSONSchema,
@@ -18,7 +21,18 @@ import { isSigilLink, linkRefFrom } from "@commonfabric/runner/shared";
 import { isCellRef } from "../protocol/mod.ts";
 import { CellRef, PageRef } from "../protocol/types.ts";
 
-export function mapCellRefsToSigilLinks(value: unknown): any {
+/**
+ * Converts a value arriving over the connection into the form the worker
+ * writes: every `CellRef` in it becomes a `SigilLink`, and every raw
+ * `SigilLink` loses its label view.
+ *
+ * A cell's value is a `FabricValue`, so that is the domain both ways, and a
+ * `CellRef` is one too -- the conversion moves within the type rather than
+ * across it. That the result holds no `CellRef` is therefore a fact about this
+ * function and not something its return type states; a narrower name for the
+ * result would only seem to exclude them.
+ */
+export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
   if (
     typeof value === "string" || typeof value === "number" ||
     typeof value === "boolean"
@@ -35,7 +49,11 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     // via toJSON). Its label view is a main-thread display artifact like a
     // ref's (inv-12 Stage 0) — drop it so it never becomes a link-write
     // policy input.
-    return stripSigilCfcLabelViews(value);
+    //
+    // `stripSigilCfcLabelViews()` reports `unknown`, being general over what it
+    // walks. Narrowed here by what it does: it removes a property from each
+    // link payload it finds, so given a link it returns one.
+    return stripSigilCfcLabelViews(value) as SigilLink;
   } else if (value instanceof FabricPrimitive) {
     // Atomic, so there is nothing under it to map and handing it back whole is
     // the complete answer rather than a deferral. It goes _before_ the record
@@ -45,19 +63,24 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     return value;
   } else if (typeof value === "object" && value) {
     // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-    // which point this becomes a walk rather than a silent flattening. Unlike
-    // the primitive above, an instance can hold a link in its contents, so
-    // handing one back whole would leave that link unmapped -- and the rebuild
-    // below reads enumerable own properties it does not have, so it leaves as
-    // `{}` instead. Neither disposition is right, and which to take meanwhile
-    // is open. What keeps it from arising today is `CellHandle.serialize()` in
-    // `../cell-handle.ts`, which refuses a `FabricSpecialObject` before it can
-    // reach this walk; the marker on `WireCellValue` in `../protocol/types.ts`
-    // states the same gap at the type.
-    return Object.entries(value).reduce((acc: Record<string, any>, [k, v]) => {
-      acc[k] = mapCellRefsToSigilLinks(v);
-      return acc;
-    }, {});
+    // which point this becomes a walk rather than a silent flattening. This is
+    // the one arm of the declared domain that is not yet served: an instance
+    // reaches here and the rebuild below reads enumerable own properties it
+    // does not have, so it leaves as `{}`. Handing one back whole instead is
+    // no better, unlike the primitive above -- an instance can hold a link in
+    // its contents, which would then go unmapped -- so which disposition to
+    // take meanwhile is open. What keeps it from arising today is
+    // `CellHandle.serialize()` in `../cell-handle.ts`, which refuses a
+    // `FabricSpecialObject` before it can reach this walk; the marker on
+    // `WireCellValue` in `../protocol/types.ts` states the same gap at the
+    // type.
+    return Object.entries(value).reduce(
+      (acc: Record<string, FabricValue>, [k, v]) => {
+        acc[k] = mapCellRefsToSigilLinks(v);
+        return acc;
+      },
+      {},
+    );
   }
   return value;
 }
