@@ -238,6 +238,16 @@ describe("authored source annotation", () => {
       expect(viaReference.name).toBe("referenced");
     });
 
+    // ANCHOR-LESS artifacts have no case here. The transformer annotates a
+    // builder whose callback arrives through property access or an import at
+    // the builder call's own site, but the SES compiled-bundle verifier refuses
+    // to load a module containing one — `resolveTrustedBuilderCallback` admits
+    // a direct function or a same-file identifier bound to one, and nothing
+    // else ("must receive a direct callback, not an indirect reference",
+    // pinned by esm-verifier-parity.test.ts). Such an artifact therefore never
+    // reaches the provenance walk, so it has no `fn.src` to assert. Add a case
+    // here if that rule is ever relaxed.
+
     it("reports a declaration-form callback at its declaration", async () => {
       const engine = makeRuntime();
       const { main } = await engine.compileAndEvaluateModules(
