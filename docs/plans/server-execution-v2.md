@@ -272,6 +272,25 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   the train tip (recorded at the end of this bullet as they land) are
   the first evidence on the TRUE combined configuration
   (W2.1 + α + F1) — reds there are DATA for the investigation.
+  **Recorded (2026-08-19, tip `b2ecd93b0` = code `42674af15`; ON binary
+  sha256 `66182d7638de4ea4…`, gitSha read back per run, `No default
+  model available` per run, fresh store per run, ports 8975/8976/8977,
+  `gtimeout --kill-after=30 520`; the box carried the investigation's
+  own workloads — loads recorded, not excused): 3/3 GREEN, and the
+  stall SHAPE appeared once WITHOUT reaching the timeout** — r1 total
+  5.65 s (join 254 ms, merge 493 ms, swatches 1 ms; load 271→148); r2
+  total 3.96 s (join 254, merge 394, swatches 1 ms; load 67→54); r3
+  total 46.3 s — the swatch step took **28,266 ms** (join 253, merge
+  429; the only run with commit conflicts/reverts — host 1/17, guest
+  1/2; server settle structural-growth max 11.3 s vs r1's 2.6 s; load
+  45–94). Every run: events appended 11 / processed 12 (1 purged LT1
+  leftover), consequence multiplicity {1: 16} — the (α) exactly-once
+  invariant HELD; `users` spliced exactly twice; votes 3 adds / 0
+  removes — NO toggle; flicker counters host 2/1, guest 2–3/0; the
+  join step honest (confirmed roster) in all three. r3 is the stall
+  mechanism RECOVERING inside the 60-s timeout — evidence for the
+  investigation (F1 and/or load may be moving the rate/shape), not a
+  lift basis.
 
 **Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
 (posted; the second review round's report recovered on-branch); (2) the
