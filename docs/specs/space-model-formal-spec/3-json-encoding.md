@@ -69,9 +69,10 @@ padded with whitespace or a newline.
 A string outside that syntax is not an unrecognized tag; it is not a tag at
 all. A key naming one is a structural violation under Section 9 rather than an
 `UnknownValue` under Section 8, and that is what lets an `UnknownValue` always
-hold a real tag. The escapes `/quote`, `/hole` and `/object` (Section 6) fall
-outside the syntax deliberately, each being a structural marker the format
-handles itself rather than a type anything encodes.
+hold a real tag. The escapes `/quote` and `/object` (Section 6), and the
+sparse-array marker `/hole` (Section 3), fall outside the syntax deliberately,
+each being a structural marker the format handles itself rather than a type
+anything encodes.
 
 The syntax is not particular to JSON. It is the type-tag syntax the whole codec
 system shares: a registry refuses a codec that declares a fixed tag outside it,
