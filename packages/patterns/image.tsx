@@ -5,6 +5,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
 } from "commonfabric";
 
 type ImageInput = {
@@ -13,8 +14,8 @@ type ImageInput = {
 };
 
 export type ImageOutput = {
-  [NAME]: unknown;
-  [UI]: unknown;
+  [NAME]: string;
+  [UI]: VNode;
   url: string;
   caption: string;
 };

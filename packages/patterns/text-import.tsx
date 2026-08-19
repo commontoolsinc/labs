@@ -14,6 +14,7 @@ import {
   pattern,
   str,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -40,10 +41,9 @@ export interface TextImportModuleInput {
   filename: string | Default<"">;
 }
 
-// Output interface with unknown for UI properties to prevent OOM (CT-1148)
 export interface TextImportModuleOutput {
-  [NAME]: unknown;
-  [UI]: unknown;
+  [NAME]: string;
+  [UI]: VNode;
   content: string;
   filename: string;
 }

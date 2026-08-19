@@ -9,6 +9,7 @@ import {
   Stream,
   type TrustedActionWrite,
   UI,
+  type VNode,
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
@@ -140,7 +141,7 @@ const makeFactCheckDisclosure = lift<
 
 export interface GalleryOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   totalExamples: number;
   completedCount: number;
   lastCompleted: string;
