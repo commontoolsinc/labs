@@ -314,11 +314,9 @@ built-in escape, or an encoding error.
 > `constructor`. `then` is about what the host does with a record afterward —
 > JavaScript takes its presence as the mark of a thenable, its own runtime
 > internals included, so a record carrying one is consumed by promise
-> resolution that nothing asked for and no boundary reports.
-> `unsafeObjectKeyIn()` in `@commonfabric/utils/types` carries what makes each
-> name awkward and what carrying it would take. An implementation on a host
-> that neither routes property assignment through a prototype chain nor
-> duck-types promises reserves no names at all, which is the behavior the
+> resolution that nothing asked for and no boundary reports. An implementation
+> on a host that neither routes property assignment through a prototype chain
+> nor duck-types promises reserves no names at all, which is the behavior the
 > format describes.
 
 The common case — a **tagged value** — is a single-key object whose sole key

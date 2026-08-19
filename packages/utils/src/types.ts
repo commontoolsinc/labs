@@ -284,12 +284,10 @@ export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
 // TODO(danfuzz): The wire formats accept a plain object with any keys, that
 // being the rule a cross-language format has to hold to. This implementation
-// refuses these names instead, and closing that gap means learning to carry
-// them: reconstructing records through mechanisms that preserve the name, and
-// keeping a record that carries `then` clear of promise resolution. That code
-// reads this same list -- as the names needing care rather than the names
-// refused -- so the list stays and what reading it means is what changes.
-// `unsafeObjectKeyIn()` below states what makes each name awkward.
+// refuses these names instead. Closing that gap means carrying such records
+// rather than refusing them, and code that does will read this list too, to
+// know which names need the care. `unsafeObjectKeyIn()` below states what
+// makes each name awkward.
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "then"]);
 
 /**
@@ -335,18 +333,11 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   rather than the record, or nothing at all, and no boundary reports a fault
  *   because none occurred.
  *
- * Refusing them is what this implementation does today, and it is not the end
- * state: the format asks that these records be carried, and carrying them is
- * work this implementation has to grow. `__proto__` needs records rebuilt
- * through a mechanism that preserves the name. `constructor` needs the later
- * boundaries that drop it to keep it instead. `then` needs a record carrying
- * it kept clear of promise resolution, the host being what makes that name
- * awkward and the host not being ours to change.
- *
- * None of that empties this list. Handling a name with care needs the same
- * knowledge of which names need it, so what such work changes is what reading
- * this list means, not whether it is read. Until then, refusal is what keeps a
- * record from being corrupted in transit or quietly consumed after it.
+ * Refusing them is what this implementation does today. The format asks that
+ * such records be carried instead, which is work this implementation has to
+ * grow, and which will read this list too, to know which names need the care.
+ * Until then, refusal is what keeps a record from being corrupted in transit
+ * or quietly consumed after it.
  *
  * The check is one `Object.hasOwn()` call per reserved name rather than a walk
  * over the object's own keys, so it costs nothing per property and can sit on
