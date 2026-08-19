@@ -296,8 +296,9 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   const engine = runtime.harness;
 
   // 2. Compile and run the test pattern
-  const program = await engine.resolve(
-    new FileSystemProgramResolver(testPath)
+  const program = await resolveLocalProgram(
+    (resolver) => engine.resolve(resolver),
+    { main: testPath, dataFilePaths: options.dataFilePaths },
   );
   const { main } = await engine.process(program, { noCheck: false, noRun: false });
   const testPatternFactory = main.default as Pattern;

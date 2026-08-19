@@ -35,9 +35,7 @@ import { basename } from "@std/path";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { dirname } from "@std/path";
-import { attachDataFiles } from "./data-files.ts";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -1093,14 +1091,14 @@ export async function runTestPattern(
     // 2. Compile the test pattern
     const program = await withPhase(
       ["runTestPattern", "resolve"],
-      async () =>
-        attachDataFiles(
-          await engine.resolve(
-            new FileSystemProgramResolver(testPath, root),
-          ),
-          options.dataFilePaths,
-          root ?? dirname(testPath),
-        ),
+      () =>
+        resolveLocalProgram((r) => engine.resolve(r), {
+          main: testPath,
+          ...(root === undefined ? {} : { root }),
+          ...(options.dataFilePaths === undefined
+            ? {}
+            : { dataFilePaths: options.dataFilePaths }),
+        }),
     );
     const evalResult = await withPhase(
       ["runTestPattern", "compile"],

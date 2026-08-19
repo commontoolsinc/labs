@@ -47,6 +47,7 @@
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
     "check-conflict-markers": "deno run --allow-read --allow-run=git ./tasks/check-conflict-markers.ts",
+    "check-local-program": "deno run --allow-read --allow-env --allow-run=git ./tasks/check-local-program.ts",
     "check-docs-history-index": "deno run --allow-read ./tasks/check-docs-history-index.ts",
     "check-unused-deps": "deno run --allow-read --allow-run=git ./tasks/check-unused-deps.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",

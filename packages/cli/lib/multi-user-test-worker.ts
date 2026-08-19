@@ -32,9 +32,7 @@ import {
   Identity,
   type KeyPairRaw,
 } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { dirname } from "@std/path";
-import { attachDataFiles } from "./data-files.ts";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   type Cell,
   type ConsoleHandler,
@@ -337,18 +335,13 @@ const handlers: Record<
       : undefined;
     patternCoverageRoot = typeof args.root === "string" ? args.root : undefined;
 
-    const program = attachDataFiles(
-      await engine.resolve(
-        new FileSystemProgramResolver(
-          args.testPath as string,
-          args.root as string | undefined,
-        ),
-      ),
-      Array.isArray(args.dataFilePaths)
-        ? args.dataFilePaths as string[]
-        : undefined,
-      (args.root as string | undefined) ?? dirname(args.testPath as string),
-    );
+    const program = await resolveLocalProgram((r) => engine!.resolve(r), {
+      main: args.testPath as string,
+      ...(typeof args.root === "string" ? { root: args.root } : {}),
+      ...(Array.isArray(args.dataFilePaths)
+        ? { dataFilePaths: args.dataFilePaths as string[] }
+        : {}),
+    });
     // `compileAndRegisterModules` seals compile + evaluate + register (see
     // test-runner.ts): map/filter/flatMap ops resolve via their content-addressed
     // canonical artifact instead of the defer-corrupted embedded graph (CT-1811).

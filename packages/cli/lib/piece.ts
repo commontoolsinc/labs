@@ -1,5 +1,5 @@
 import { ensureDir } from "@std/fs";
-import { common, dirname, join } from "@std/path";
+import { dirname, join } from "@std/path";
 
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { codecOf } from "@commonfabric/data-model/codec-common";
@@ -9,8 +9,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { attachDataFiles } from "./data-files.ts";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
@@ -601,52 +600,24 @@ export async function loadPieces(
   });
 }
 
-export async function getProgramFromFile(
+export function getProgramFromFile(
   pieces: PiecesController,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  const entryPaths = [entry.mainPath, ...(entry.testPaths ?? [])];
-  const dataPaths = entry.dataFilePaths ?? [];
-  const rootPath = entry.rootPath ??
-    join(
-      common([...entryPaths, ...dataPaths].map((path) => dirname(path))),
-      ".",
-    );
-  const programs: RuntimeProgram[] = await Promise.all(
-    entryPaths.map((path) =>
-      pieces.runtime.harness.resolve(
-        new FileSystemProgramResolver(path, rootPath),
-      )
-    ),
-  );
-  const [mainProgram, ...testPrograms] = programs;
-  const files = new Map<string, RuntimeProgram["files"][number]>();
-  for (const program of [mainProgram, ...testPrograms]) {
-    for (const file of program.files) {
-      const existing = files.get(file.name);
-      if (existing !== undefined && existing.contents !== file.contents) {
-        throw new Error(
-          `Source package contains conflicting files named "${file.name}".`,
-        );
-      }
-      files.set(file.name, file);
-    }
-  }
-  const program = attachDataFiles(
+  return resolveLocalProgram(
+    (resolver) => pieces.runtime.harness.resolve(resolver),
     {
-      main: mainProgram.main,
-      files: [...files.values()],
-      ...(testPrograms.length === 0
+      main: entry.mainPath,
+      ...(entry.rootPath === undefined ? {} : { root: entry.rootPath }),
+      ...(entry.testPaths === undefined ? {} : { testPaths: entry.testPaths }),
+      ...(entry.dataFilePaths === undefined
         ? {}
-        : { sourceRoots: testPrograms.map((test) => test.main) }),
+        : { dataFilePaths: entry.dataFilePaths }),
+      ...(entry.mainExport === undefined
+        ? {}
+        : { mainExport: entry.mainExport }),
     },
-    dataPaths,
-    rootPath,
   );
-  if (entry.mainExport) {
-    program.mainExport = entry.mainExport;
-  }
-  return program;
 }
 
 async function getPinnedProgramFromFile(

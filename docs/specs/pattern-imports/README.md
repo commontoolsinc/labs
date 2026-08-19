@@ -263,6 +263,8 @@ checkout.
 
 `cf check` and `cf test` take the same repeatable `--datafile` flag, so a
 pattern that reads a data file can be checked and tested before it is deployed.
+An integration test names its data files on the scenario or fixture it runs —
+`dataFiles`, grounded by `dataRoot` — rather than on a command line.
 Without it such a pattern still compiles and type-checks, because `dataFile` is
 declared whether or not a file is attached; the absence surfaces when the
 pattern runs.
@@ -1102,3 +1104,26 @@ unchanged.
    are authenticated, how stale site-table entries are replaced, whether
    failover is allowed, and how an open session closes and reconnects without
    losing or duplicating work after a seed or hint has made the route explicit.
+
+### One way to build a local program
+
+Everything that compiles source from disk — the deployment commands, `cf check`,
+`cf test` and its multi-user workers, and every pattern integration harness —
+goes through `resolveLocalProgram`. It resolves the entry, merges the closures
+of any attached test entries, and attaches any data files, as one operation.
+
+That is a deliberate constraint rather than a convenience. A program assembled
+by hand from a `FileSystemProgramResolver` is complete in every way a compiler
+or type checker can see; what it silently lacks is any data file the caller
+meant to attach, and nothing reports that until a pattern reads one. Composing
+the whole operation in one place removes the opportunity to omit the step, and
+`deno task check-local-program` keeps that the only route by failing on any
+file that names the resolver in code, which catches an alias or a namespace
+import as readily as a direct construction. The check parses each file and
+looks for an identifier, so a document, a doc comment, or a diagnostic message
+may name the resolver while explaining why not to reach for it. Its allowlist
+holds only sites that never build a program to compile: the operation itself,
+the package that declares and re-exports the resolver, the tests of the
+resolver's containment rules, and the import walk behind `cf deps`.
+Extending it means the same claim — a site that compiles what it builds belongs
+on the route, not beside it.

@@ -248,6 +248,9 @@ Each of these gates fails CI on its own, and none of them run as part of
   dependency declarations across the workspace
 - `deno task check-package-cycles` — two packages that import each other, the
   part of "Dependencies run downward" above that a machine can settle
+- `deno task check-local-program` — a program built from local files by hand
+  rather than through `resolveLocalProgram`, which silently drops any data files
+  the caller attached
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
 

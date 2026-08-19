@@ -20,7 +20,7 @@ import {
   type PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
@@ -231,12 +231,19 @@ const handlers: Record<
     return { did: identity.did() };
   },
 
-  async createPiece({ programPath, rootPath, input }) {
-    const program = await controller().runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        programPath as string,
-        rootPath as string,
-      ),
+  async createPiece({ programPath, rootPath, dataFilePaths, input }) {
+    // Each runtime compiles the pattern in its own worker, so data files have
+    // to cross this boundary with the paths rather than be attached where the
+    // worker was spawned.
+    const program = await resolveLocalProgram(
+      (resolver) => controller().runtime.harness.resolve(resolver),
+      {
+        main: programPath as string,
+        root: rootPath as string,
+        ...(Array.isArray(dataFilePaths)
+          ? { dataFilePaths: dataFilePaths as string[] }
+          : {}),
+      },
     );
     const created = await controller().create(program, {
       input: isObjectNotArray(input) ? input : undefined,

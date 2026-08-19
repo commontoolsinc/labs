@@ -117,12 +117,15 @@ const Top = pattern(({ n }: any) => ({
 // A synthetic fixture cannot exhibit what it has no shape for; every claim
 // below is made against this one.
 const { Engine } = await import(`${R}/harness/engine.ts`);
-const { FileSystemProgramResolver } = await import("@commonfabric/js-compiler");
+const { resolveLocalProgram } = await import(
+  "@commonfabric/runner/local-program.deno"
+);
 const FIXTURE = Deno.env.get("CF_FIXTURE") ??
   `${ROOT}/packages/patterns/factory-outputs/parking-coordinator/main.test.tsx`;
 const engine = new Engine(runtime);
-const realProgram = await engine.resolve(
-  new FileSystemProgramResolver(FIXTURE, ROOT),
+const realProgram = await resolveLocalProgram(
+  (resolver) => engine.resolve(resolver),
+  { main: FIXTURE, root: ROOT },
 );
 const Real: any = (await engine.compileAndEvaluateModules(realProgram)).main
   ?.default;

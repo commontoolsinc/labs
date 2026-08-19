@@ -1,4 +1,4 @@
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import { collectPatternFiles, PATTERNS_DIR } from "./pattern-files.ts";
 
@@ -52,8 +52,9 @@ const programs = [];
 for (const file of filesToCheck) {
   try {
     programs.push(
-      await runtime.harness.resolve(
-        new FileSystemProgramResolver(`${cwd}/${file}`, cwd),
+      await resolveLocalProgram(
+        (resolver) => runtime.harness.resolve(resolver),
+        { main: `${cwd}/${file}`, root: cwd },
       ),
     );
   } catch (error) {

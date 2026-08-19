@@ -97,6 +97,24 @@ the document is an exemption nobody can review.
 The repository-wide ban on timeouts, retry loops, and sleeps applies here with
 no exceptions, including in setup and teardown.
 
+## A pattern that reads a data file
+
+A pattern calling `dataFile()` needs its data files attached to the program the
+test compiles, or it fails at the read. It compiles and type-checks either way,
+so nothing earlier reports the omission.
+
+Attach them where the test builds its program: `--datafile` on `cf test`, the
+`dataFiles` field of a `generated-patterns` scenario, or `dataFilePaths` on the
+`resolveLocalProgram` call a browser integration test makes. A browser test
+needs nothing beyond that — the data reaches the browser through the space,
+inside the compiled pattern, not from the filesystem. Forgetting shows up as
+`No attached data file "<path>"` when the pattern runs, and the message lists
+what is attached. That one function is the only sanctioned way to build a
+program from local files, and
+`deno task check-local-program` fails a `FileSystemProgramResolver` constructed
+anywhere else — a program assembled by hand carries no data files and says
+nothing about it.
+
 ## Reaching into shadow DOM
 
 Integration tests address components through accessibility locators rather than

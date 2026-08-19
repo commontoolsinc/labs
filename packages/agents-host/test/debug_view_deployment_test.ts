@@ -6,11 +6,11 @@ import type {
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createSession, Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { pieceId } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   EmulatedStorageManager,
   type Options,
@@ -399,8 +399,9 @@ async function deployDebugPiece(
   cause?: string,
 ) {
   const location = defaultDebugPatternLocation();
-  const program = await manager.runtime.harness.resolve(
-    new FileSystemProgramResolver(location.mainPath, location.rootPath),
+  const program = await resolveLocalProgram(
+    (resolver) => manager.runtime.harness.resolve(resolver),
+    { main: location.mainPath, root: location.rootPath },
   );
   return await manager.create(
     program,
@@ -427,13 +428,14 @@ async function deployRawDataPiece(
   manifest: AgentFabricTarget["cells"]["index"],
 ) {
   const location = defaultDebugPatternLocation();
-  const program = await manager.runtime.harness.resolve(
-    new FileSystemProgramResolver(
-      fromFileUrl(
+  const program = await resolveLocalProgram(
+    (resolver) => manager.runtime.harness.resolve(resolver),
+    {
+      main: fromFileUrl(
         new URL("./fixtures/raw-session-view.tsx", import.meta.url),
       ),
-      location.rootPath,
-    ),
+      root: location.rootPath,
+    },
   );
   return await manager.create(program, {
     input: {
