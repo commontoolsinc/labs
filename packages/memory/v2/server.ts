@@ -2354,8 +2354,14 @@ export class Server {
           // op produced the head this commit leaves behind, so it alone
           // decides the flush-time echo shape.
           const dirtyOps = new Map<string, DirtyOp>();
-          for (const operation of message.commit.operations) {
+          const elided = new Set(commit.elidedOpIndexes ?? []);
+          for (
+            const [opIndex, operation] of message.commit.operations.entries()
+          ) {
             if (operation.op === "sqlite") continue;
+            // An elided content-addressed re-set changed nothing — no head
+            // moved, so there is no novelty to fan out or classify.
+            if (elided.has(opIndex)) continue;
             dirtyOps.set(
               toDirtyKey(operation.id, declaredScope(operation.scope)),
               operation.op,

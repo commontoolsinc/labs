@@ -969,6 +969,12 @@ export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  /**
+   * Operation indexes whose `cid:` set matched the stored content exactly
+   * and applied as a no-op: no revision, no head advance, no dirty mark.
+   * The commit itself still records and advances the space log.
+   */
+  elidedOpIndexes?: number[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
@@ -5194,6 +5200,14 @@ const applyCommitTransaction = (
   // survive to the final document (a remove-by-value operand, an
   // add-then-remove within one commit) is still validated.
   let cidSetsInCommit: Map<string, unknown> | null = null;
+  // Content-identical re-sets apply as no-ops: the comparison below already
+  // proves nothing changes, and writing a fresh revision anyway would
+  // advance the head and fan the unchanged document out to every watcher —
+  // the cost that makes blind closure re-installs expensive. The commit
+  // still records (the space log advances; a client basis at its seq is
+  // legal and truthful), only the per-document machinery goes quiet.
+  const elidedCidSetOpIndexes = new Set<number>();
+  const elidableCidIds = new Set<string>();
   const requiredSchemaRefs = new Set<string>();
   const collectLinkSchemaRefs = (content: unknown): void => {
     if (content === null || typeof content !== "object") return;
@@ -5206,7 +5220,7 @@ const applyCommitTransaction = (
       return schema;
     });
   };
-  for (const operation of commit.operations) {
+  for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (operation.op === "patch") {
       for (const patch of operation.patches ?? []) {
@@ -5266,6 +5280,11 @@ const applyCommitTransaction = (
           `memory v2 commit carries conflicting sets of content-addressed document ${operation.id}`,
         );
       }
+      // A duplicate of a stored-identical set elides with it; a duplicate
+      // within a first install keeps today's write-both behavior.
+      if (elidableCidIds.has(operation.id)) {
+        elidedCidSetOpIndexes.add(opIndex);
+      }
       continue;
     }
     const stored = read(engine, {
@@ -5275,13 +5294,14 @@ const applyCommitTransaction = (
       principal,
       sessionId,
     });
-    if (
-      stored !== null &&
-      !valueEqual(stored as FabricValue, operation.value as FabricValue)
-    ) {
-      throw new ProtocolError(
-        `memory v2 commit cannot change content-addressed document ${operation.id}`,
-      );
+    if (stored !== null) {
+      if (!valueEqual(stored as FabricValue, operation.value as FabricValue)) {
+        throw new ProtocolError(
+          `memory v2 commit cannot change content-addressed document ${operation.id}`,
+        );
+      }
+      elidedCidSetOpIndexes.add(opIndex);
+      elidableCidIds.add(operation.id);
     }
     (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
   }
@@ -5435,6 +5455,7 @@ const applyCommitTransaction = (
       });
       continue;
     }
+    if (elidedCidSetOpIndexes.has(opIndex)) continue;
     const revision = writeOperation(engine, {
       branch,
       seq,
@@ -5481,6 +5502,11 @@ const applyCommitTransaction = (
     seq,
     branch,
     revisions,
+    ...(elidedCidSetOpIndexes.size > 0
+      ? {
+        elidedOpIndexes: [...elidedCidSetOpIndexes].toSorted((a, b) => a - b),
+      }
+      : {}),
     ...(schedulerObservationResult
       ? {
         schedulerObservationId: schedulerObservationResult.observationId,

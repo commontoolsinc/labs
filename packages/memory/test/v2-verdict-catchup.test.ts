@@ -913,3 +913,112 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     ["of:doc:b"],
   );
 });
+
+Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watchers", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-cid-elide",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // A second session observes the schema document and a control doc.
+  const observerMessages: ServerMessage[] = [];
+  const observer = server.connect((message) => observerMessages.push(message));
+  await observer.receive(encodeMemoryBoundary(HELLO));
+  const observerSessionOpen = expectHelloOk(observerMessages);
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "observer-open",
+    space,
+    session: {},
+    invocation: authInvocation(observerSessionOpen),
+  }));
+  const observerSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(observerMessages))
+      .ok!.sessionId;
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.watch.set",
+    requestId: "observer-watch",
+    space,
+    sessionId: observerSessionId,
+    watches: [{
+      id: "elide-watch",
+      kind: "graph",
+      query: {
+        roots: [
+          {
+            id: "cid:fid1:elide-fanout",
+            selector: { path: [], schema: false },
+          },
+          { id: "of:elide-control", selector: { path: [], schema: false } },
+        ],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(observerMessages));
+
+  // Install both; the observer's frame carries both.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-install",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "cid:fid1:elide-fanout",
+          value: { value: { type: "string", title: "fanout" } },
+        },
+        { op: "set", id: "of:elide-control", value: { value: { round: 1 } } },
+      ],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  // The committer's own accept rides home as an (echo-suppressed) marker
+  // frame; drain it so the next shift sees the second verdict.
+  assertEffect(shiftMessage(committerMessages));
+  const first = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    first.upserts.map((upsert) => upsert.id).toSorted(),
+    ["cid:fid1:elide-fanout", "of:elide-control"],
+  );
+
+  // The identical re-set applies as a no-op, so the observer's next frame
+  // carries ONLY the control change — before elision, the re-set advanced
+  // the schema document's head and re-delivered the unchanged content here.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-reset",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "cid:fid1:elide-fanout",
+          value: { value: { type: "string", title: "fanout" } },
+        },
+        { op: "set", id: "of:elide-control", value: { value: { round: 2 } } },
+      ],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  const second = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    second.upserts.map((upsert) => ({ id: upsert.id, doc: upsert.doc })),
+    [{ id: "of:elide-control", doc: { value: { round: 2 } } }],
+  );
+  observer.close();
+});
