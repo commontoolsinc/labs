@@ -2909,7 +2909,23 @@ describe("assertFabricLoggerFlags", () => {
     // "some metadata somewhere" would not tell them.
     expect(() => assertFabricLoggerFlags(flags)).toThrow(
       "Cannot send logger flag metadata on this connection: `runner` " +
-        "`action invalid input` `action:bad` is not a fabric record.",
+        "`action invalid input` `action:bad` is not a `FabricValue`.",
+    );
+  });
+
+  it("throws naming `FabricPlainObject` for metadata of the wrong shape", () => {
+    // A `FabricValue` that is not a record. The deep walk accepts it and the
+    // shape check is what refuses, which is why the two are separate calls and
+    // report separately.
+    const flags = { runner: { sample: { "id:1": ["not", "a", "record"] } } };
+
+    expect(() =>
+      assertFabricLoggerFlags(
+        flags as unknown as Parameters<typeof assertFabricLoggerFlags>[0],
+      )
+    ).toThrow(
+      "Cannot send logger flag metadata on this connection: `runner` " +
+        "`sample` `id:1` is not a `FabricPlainObject`.",
     );
   });
 

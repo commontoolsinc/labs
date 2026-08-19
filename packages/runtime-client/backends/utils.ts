@@ -105,6 +105,10 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
  * the flag whose metadata cannot travel, which is what a reader needs in order
  * to fix it.
  *
+ * `isFabricValue()` walks the whole breakdown once and so validates every
+ * metadata value in it, leaving each leaf to be checked only for its shape.
+ * The per-leaf walk that names a culprit runs only on the way to throwing.
+ *
  * Nothing reaches the throw today, de facto rather than by construction: no
  * flag gates it, and every producer that raises a flag with metadata passes
  * fabric data -- one of them a cell's own raw value.
@@ -115,25 +119,41 @@ export function assertFabricLoggerFlags(
     Record<string, Record<string, Record<string, unknown> | null>>
   >,
 ): asserts breakdown is LoggerFlagsData {
+  const deepOk = isFabricValue(breakdown);
+
   for (const [logger, flags] of Object.entries(breakdown)) {
     for (const [flag, byId] of Object.entries(flags)) {
       for (const [id, metadata] of Object.entries(byId)) {
-        // `isFabricValue()` is the validating half and runs first;
-        // `isFabricPlainObject()` takes a value it has already accepted, which
-        // is why the two are spelled together rather than either alone.
-        if (
-          (metadata === null) ||
-          (isFabricValue(metadata) && isFabricPlainObject(metadata))
-        ) {
-          continue;
+        // A flag raised without metadata, which is what `null` means here.
+        if (metadata === null) continue;
+
+        if (!deepOk && !isFabricValue(metadata)) {
+          throw new Error(unsendableFlag(logger, flag, id, "FabricValue"));
         }
-        throw new Error(
-          "Cannot send logger flag metadata on this connection: " +
-            `\`${logger}\` \`${flag}\` \`${id}\` is not a fabric record.`,
-        );
+
+        // A `FabricValue` by here, whether the one walk established it or the
+        // per-leaf call above did, which is what `isFabricPlainObject()` asks
+        // of its argument. What it adds is the shape: a `FabricValue` that is
+        // a string or an array is not what this payload carries.
+        if (!isFabricPlainObject(metadata as FabricValue)) {
+          throw new Error(
+            unsendableFlag(logger, flag, id, "FabricPlainObject"),
+          );
+        }
       }
     }
   }
+}
+
+/** The refusal a flag gets when its metadata cannot cross. */
+function unsendableFlag(
+  logger: string,
+  flag: string,
+  id: string,
+  wanted: string,
+): string {
+  return "Cannot send logger flag metadata on this connection: " +
+    `\`${logger}\` \`${flag}\` \`${id}\` is not a \`${wanted}\`.`;
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
