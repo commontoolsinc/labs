@@ -17,7 +17,7 @@ import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@commonfabric/api";
-import { isUnsafeObjectKey } from "@commonfabric/utils/types";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import {
@@ -458,6 +458,10 @@ export class FabricError extends FabricNativeWrapper<Error>
         state: FabricValue,
         env: LiveEnvironment,
       ): FabricValue {
+        if (!isPlainObject(state)) {
+          throw new Error("`Error@1` state is not an object.");
+        }
+
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? "Error";
         // `null` `name` means "same as `type`" (the wire-level optimization).

@@ -62,12 +62,22 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
     if (decoded !== null) {
       const { tag, state: rawState } = decoded;
 
-      // `CODEC_META_TAGS.quote` literal handling (Section 5.6).
+      // `CODEC_META_TAGS.quote` literal handling (`3-json-encoding.md` Section 6).
       if (tag === CODEC_META_TAGS.quote) {
+        // TODO(danfuzz): Quote content is returned whole, so a key this
+        // runtime reserves is admitted here where the `/object` and
+        // plain-object arms below refuse one. `JSON.parse` makes such a key an
+        // own property, so it does arrive. The result cannot be re-encoded --
+        // `BaseEncodeAct.assertEncodableKey()` refuses it -- so a decode
+        // through this arm can produce a value that does not round-trip.
+        // Settling it means deciding whether the reservation covers every arm
+        // or only the arms that rebuild an object by assignment, and writing
+        // that answer into Section 9, which does not currently mention these
+        // keys at all.
         return rawState;
       }
 
-      // `CODEC_META_TAGS.object` unwrapping (Section 5.6).
+      // `CODEC_META_TAGS.object` unwrapping (`3-json-encoding.md` Section 6).
       if (tag === CODEC_META_TAGS.object) {
         if (!isPlainObject(rawState)) {
           return this.reportMalformed(
@@ -216,7 +226,7 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
    * returned `state` is extracted directly from `data`, so if `data` is
    * deep-frozen (as it should be) then `state` will be too.
    *
-   * See Section 5.4 of the formal spec.
+   * See `3-json-encoding.md` Section 4.
    */
   static #unwrapTag(
     data: JsonCodecValue,

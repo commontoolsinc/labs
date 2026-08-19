@@ -11,8 +11,8 @@ import type { LiveEnvironment } from "./interface.ts";
 import { BaseLiveEnvironment } from "./BaseLiveEnvironment.ts";
 
 /**
- * `LiveEnvironment` whose `getCell()` always throws. `shouldDeepFreeze`
- * is inherited from `BaseLiveEnvironment` (defaults to `true`).
+ * `LiveEnvironment` whose `getCell()` always throws. `shouldDeepFreeze` is
+ * inherited from `BaseLiveEnvironment`, and is required at construction.
  */
 export class NullLiveEnvironment extends BaseLiveEnvironment {
   readonly #getCellMessage: string;

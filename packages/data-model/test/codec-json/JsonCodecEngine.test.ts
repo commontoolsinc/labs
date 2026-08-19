@@ -1834,7 +1834,7 @@ describe("JsonCodecEngine", () => {
     });
   });
 
-  describe("JsonCodecEngine", () => {
+  describe("entry points", () => {
     it("`encode()` returns a prefixed JSON string", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine();
       const result = jsonCodecEngine.encode(42);

@@ -64,7 +64,7 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
     return this.#recognizedTypeTag;
   }
 
-  /** @innheritDoc */
+  /** @inheritDoc */
   canEncode(value: FabricValue): boolean {
     const cls = this.#uniqueHandledClass;
 

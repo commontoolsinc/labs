@@ -30,8 +30,8 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
-   * Prepends `/` to the tag to produce the JSON key. See Section 5.2 of the
-   * formal spec.
+   * Prepends `/` to the tag to produce the JSON key. See `3-json-encoding.md`
+   * Section 2.
    *
    * The result is not frozen. An encode-side tree is stringified and
    * discarded without ever reaching a caller, so the deep-frozen invariant
@@ -92,7 +92,7 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
    * order. See `3-json-encoding.md` Section 10.
    *
    * A `/`-prefixed key collides with the tag form, so an object bearing one is
-   * escaped per Section 5.6: all values are encoded first, and if every one is
+   * escaped per `3-json-encoding.md` Section 6: all values are encoded first, and if every one is
    * quote-safe the whole object is wrapped in `/quote` with any `/quote`
    * children collapsed into it, and otherwise in `/object` so that the decoder
    * walks the entries.
