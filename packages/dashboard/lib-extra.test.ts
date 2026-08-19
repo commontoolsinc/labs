@@ -50,14 +50,10 @@ async function captureConsole(
 
 // Run `fn` with the token vars set as given; a key left out is unset for the
 // duration. Whatever the process had is put back.
-async function withTokens(
-  env: Record<string, string>,
-  fn: () => Promise<void>,
-) {
+async function withTokens(env: Record<string, string>, fn: () => Promise<void>) {
   const keys = ["GH_TOKEN", "GITHUB_TOKEN"];
   const saved = keys.map((k) => [k, Deno.env.get(k)] as const);
-  const apply = (k: string, v: string | undefined) =>
-    v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
+  const apply = (k: string, v: string | undefined) => v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
   try {
     for (const k of keys) apply(k, env[k]);
     await fn();
@@ -66,17 +62,13 @@ async function withTokens(
   }
 }
 
-const auth = (c: { init: RequestInit }) =>
-  (c.init.headers as Record<string, string>).authorization;
+const auth = (c: { init: RequestInit }) => (c.init.headers as Record<string, string>).authorization;
 
 Deno.test("github: no token -> a 'set GH_TOKEN' error, and no request is attempted", async () => {
   await withTokens({}, async () => {
     await withFetch(() => Response.json({}), async (calls) => {
       const e = await assertRejects(() => github("repos/o/r"), Error);
-      assertEquals(
-        e.message,
-        "GitHub API repos/o/r: set GH_TOKEN or GITHUB_TOKEN",
-      );
+      assertEquals(e.message, "GitHub API repos/o/r: set GH_TOKEN or GITHUB_TOKEN");
       assertEquals(calls.length, 0);
       // The message is one friendlyError recognizes, so a token-gated tile grays
       // out with "set GH_TOKEN" rather than "temporarily unavailable".
@@ -87,14 +79,11 @@ Deno.test("github: no token -> a 'set GH_TOKEN' error, and no request is attempt
 
 Deno.test("github: non-OK -> throws with the status; the error body is not returned as data", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
-    await withFetch(
-      () => Response.json({ message: "Not Found" }, { status: 404 }),
-      async () => {
-        const e = await assertRejects(() => github("repos/o/missing"), Error);
-        assertEquals(e.message, "GitHub API repos/o/missing failed: HTTP 404");
-        assertEquals(friendlyError(e.message), "not found");
-      },
-    );
+    await withFetch(() => Response.json({ message: "Not Found" }, { status: 404 }), async () => {
+      const e = await assertRejects(() => github("repos/o/missing"), Error);
+      assertEquals(e.message, "GitHub API repos/o/missing failed: HTTP 404");
+      assertEquals(friendlyError(e.message), "not found");
+    });
     await withFetch(() => Response.json({}, { status: 429 }), async () => {
       const e = await assertRejects(() => github("rate/limited"), Error);
       assertEquals(e.message, "GitHub API rate/limited failed: HTTP 429");
@@ -228,9 +217,7 @@ Deno.test("github: unreadable JSON logs the endpoint and response context", asyn
         },
       );
       assertEquals(messages.length, 1);
-      assert(
-        messages[0].includes("for repos/o/invalid could not read valid JSON"),
-      );
+      assert(messages[0].includes("for repos/o/invalid could not read valid JSON"));
       assert(messages[0].includes("HTTP 200, request invalid-123"));
       assert(messages[0].includes("SyntaxError"));
     });
@@ -415,9 +402,7 @@ Deno.test("github: an in-progress request reports what it is waiting on", async 
     let requestStarted = () => {};
     const started = new Promise<void>((resolve) => requestStarted = resolve);
     let finishRequest = (_response: Response) => {};
-    const response = new Promise<Response>((resolve) =>
-      finishRequest = resolve
-    );
+    const response = new Promise<Response>((resolve) => finishRequest = resolve);
     await withFetch(
       () => {
         requestStarted();
@@ -445,17 +430,15 @@ Deno.test("github: JSON stays active while its response body is read", async () 
     let bodyRead = () => {};
     const reading = new Promise<void>((resolve) => bodyRead = resolve);
     let finishPull = () => {};
-    const response = new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          bodyController = controller;
-        },
-        pull() {
-          bodyRead();
-          return new Promise<void>((resolve) => finishPull = resolve);
-        },
-      }),
-    );
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+      pull() {
+        bodyRead();
+        return new Promise<void>((resolve) => finishPull = resolve);
+      },
+    }));
     await withFetch(
       () => response,
       async () => {
@@ -464,9 +447,7 @@ Deno.test("github: JSON stays active while its response body is read", async () 
         const operations = githubOperationsInProgress();
         assertEquals(operations.length, 1);
         assertEquals(operations[0].stage, "reading GitHub response");
-        bodyController!.enqueue(
-          new TextEncoder().encode('{"workflow_runs":[]}'),
-        );
+        bodyController!.enqueue(new TextEncoder().encode('{"workflow_runs":[]}'));
         bodyController!.close();
         finishPull();
         assertEquals(await pending, { workflow_runs: [] });
@@ -482,17 +463,15 @@ Deno.test("github: a download stays active while its response body is read", asy
     let bodyRead = () => {};
     const reading = new Promise<void>((resolve) => bodyRead = resolve);
     let finishPull = () => {};
-    const response = new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          bodyController = controller;
-        },
-        pull() {
-          bodyRead();
-          return new Promise<void>((resolve) => finishPull = resolve);
-        },
-      }),
-    );
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+      pull() {
+        bodyRead();
+        return new Promise<void>((resolve) => finishPull = resolve);
+      },
+    }));
     await withFetch(
       () => response,
       async () => {
@@ -582,9 +561,7 @@ Deno.test("github: a failed download does not wait for body cleanup", async () =
       await withFetch(
         () => response,
         async () => {
-          const download = await githubDownload(
-            "repos/o/actions/artifacts/1/zip",
-          );
+          const download = await githubDownload("repos/o/actions/artifacts/1/zip");
           assertEquals(download.status, 500);
         },
       );
@@ -778,11 +755,7 @@ Deno.test("github: a slow successful operation logs response context", async () 
           },
         );
         assertEquals(messages.length, 1);
-        assert(
-          messages[0].includes(
-            "for repos/o/slow completed slowly after 10000 ms",
-          ),
-        );
+        assert(messages[0].includes("for repos/o/slow completed slowly after 10000 ms"));
         assert(messages[0].includes("HTTP 200, request slow-123"));
       });
     });
@@ -793,24 +766,18 @@ Deno.test("github: a slow successful operation logs response context", async () 
 
 Deno.test("github: parsed JSON from api.github.com, with the auth and version headers", async () => {
   await withTokens({ GH_TOKEN: "env-token" }, async () => {
-    await withFetch(
-      () => Response.json({ login: "octocat", id: 1 }),
-      async (calls) => {
-        const body = await github<{ login: string; id: number }>("/user");
-        assertEquals(body, { login: "octocat", id: 1 });
-        assertEquals(calls.length, 1);
-        // A leading slash on the path does not double up against the base url.
-        assertEquals(calls[0].url, "https://api.github.com/user");
-        const h = calls[0].init.headers as Record<string, string>;
-        assertEquals(h.authorization, "Bearer env-token");
-        assertEquals(h.accept, "application/vnd.github+json");
-        assertEquals(h["x-github-api-version"], "2022-11-28");
-        assert(
-          calls[0].init.signal,
-          "the request is bounded by a timeout signal",
-        );
-      },
-    );
+    await withFetch(() => Response.json({ login: "octocat", id: 1 }), async (calls) => {
+      const body = await github<{ login: string; id: number }>("/user");
+      assertEquals(body, { login: "octocat", id: 1 });
+      assertEquals(calls.length, 1);
+      // A leading slash on the path does not double up against the base url.
+      assertEquals(calls[0].url, "https://api.github.com/user");
+      const h = calls[0].init.headers as Record<string, string>;
+      assertEquals(h.authorization, "Bearer env-token");
+      assertEquals(h.accept, "application/vnd.github+json");
+      assertEquals(h["x-github-api-version"], "2022-11-28");
+      assert(calls[0].init.signal, "the request is bounded by a timeout signal");
+    });
   });
 });
 
@@ -823,11 +790,7 @@ Deno.test("github: an explicit token wins over the env; GITHUB_TOKEN backs up GH
     await withTokens({ GITHUB_TOKEN: "github" }, async () => {
       await github("x");
     });
-    assertEquals(calls.map(auth), [
-      "Bearer explicit",
-      "Bearer gh",
-      "Bearer github",
-    ]);
+    assertEquals(calls.map(auth), ["Bearer explicit", "Bearer gh", "Bearer github"]);
   });
 });
 
@@ -848,9 +811,7 @@ Deno.test("memo: a rejection is not cached -> the next call retries", async () =
   let n = 0;
   const get = memo(60_000, () => {
     n++;
-    return n === 1
-      ? Promise.reject(new Error("error sending request"))
-      : Promise.resolve("ok");
+    return n === 1 ? Promise.reject(new Error("error sending request")) : Promise.resolve("ok");
   });
   const e = await assertRejects(() => get(), Error);
   assertEquals(e.message, "error sending request");
