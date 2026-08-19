@@ -2158,12 +2158,14 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
           {
             pieces: {
               getSpace: () => registrySpace,
-              getPieceRegistry: () =>
+              getDefaultPattern: (_runIt: boolean) =>
                 Promise.resolve({
-                  getAsNormalizedFullLink: () => ({
-                    space: registrySpace,
-                    id: registryId,
-                    path: ["pieceRegistry"],
+                  key: (segment: string) => ({
+                    getAsNormalizedFullLink: () => ({
+                      space: registrySpace,
+                      id: registryId,
+                      path: [segment],
+                    }),
                   }),
                 }),
             },
@@ -3809,6 +3811,10 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
     {
       io,
       env: { CF_HARNESS_API_KEY: "test-key" },
+      // The resume path must forward the same session override a fresh run
+      // honors; the assertion below reads it back off the resumed engine.
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
       readRunArtifacts: (path) => {
         assertEquals(
           path,
@@ -3881,6 +3887,10 @@ Deno.test("runCfHarnessCli can resume from persisted run artifacts", async () =>
   assertEquals(exitCode, 0);
   assertEquals(createdOptions?.allowedToolIds, ["delegate_task"]);
   assertEquals(createdOptions?.allowedSubagentProfiles, ["default"]);
+  assertEquals(
+    (createdOptions?.engine as CfHarnessEngine).fabricSessionAvailable,
+    true,
+  );
   assertEquals(runTranscriptOptions?.promptSlotBinding, promptSlotBinding);
   assertEquals(stdout, [
     formatCfHarnessCliResult({

@@ -216,13 +216,15 @@ Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the r
         {
           pieces: {
             getSpace: () => registrySpace,
-            getPieceRegistry: () => {
+            getDefaultPattern: (_runIt: boolean) => {
               registryReads += 1;
               return Promise.resolve({
-                getAsNormalizedFullLink: () => ({
-                  space: registrySpace,
-                  id: registryId,
-                  path: ["pieceRegistry"],
+                key: (segment: string) => ({
+                  getAsNormalizedFullLink: () => ({
+                    space: registrySpace,
+                    id: registryId,
+                    path: [segment],
+                  }),
                 }),
               });
             },

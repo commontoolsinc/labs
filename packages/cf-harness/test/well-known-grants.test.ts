@@ -26,19 +26,33 @@ const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const REGISTRY_ID = `of:fid1:${"A".repeat(43)}`;
 const REGISTRY_REF = `/${REGISTRY_ID}/pieceRegistry`;
 
-// A stand-in carrying exactly the two members grant resolution touches.
-const stubSession = (): HarnessFabricSession =>
+// A stand-in carrying exactly the members grant resolution touches: the
+// default-pattern root pointer and the address walk off it. No registry
+// listing exists on the stub at all, which is itself the assertion that
+// resolution never pulls one.
+const stubSession = (
+  options: { defaultPattern?: boolean } = {},
+): HarnessFabricSession =>
   ({
     pieces: {
       getSpace: () => SPACE_DID,
-      getPieceRegistry: () =>
-        Promise.resolve({
-          getAsNormalizedFullLink: () => ({
-            space: SPACE_DID,
-            id: REGISTRY_ID,
-            path: ["pieceRegistry"],
+      getDefaultPattern: (runIt: boolean) => {
+        if (runIt !== false) {
+          throw new Error("address resolution must not run the pattern");
+        }
+        if (options.defaultPattern === false) {
+          return Promise.resolve(undefined);
+        }
+        return Promise.resolve({
+          key: (segment: string) => ({
+            getAsNormalizedFullLink: () => ({
+              space: SPACE_DID,
+              id: REGISTRY_ID,
+              path: [segment],
+            }),
           }),
-        }),
+        });
+      },
     },
   }) as unknown as HarnessFabricSession;
 
@@ -47,6 +61,12 @@ describe("well-known-grants", () => {
     it("resolves the piece registry to its canonical in-space reference", async () => {
       const refs = await resolveWellKnownGrantRefs(stubSession());
       expect(refs).toEqual([{ name: "piece-registry", ref: REGISTRY_REF }]);
+    });
+
+    it("refuses to grant when the space has no default pattern", async () => {
+      await expect(resolveWellKnownGrantRefs(stubSession({
+        defaultPattern: false,
+      }))).rejects.toThrow("no default pattern");
     });
   });
 

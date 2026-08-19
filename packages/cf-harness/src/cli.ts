@@ -3113,6 +3113,9 @@ export const runCfHarnessCli = async (
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
           : {}),
+        ...(deps.fabricSessionFactory !== undefined
+          ? { fabricSessionFactory: deps.fabricSessionFactory }
+          : {}),
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),

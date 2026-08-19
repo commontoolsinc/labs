@@ -39,19 +39,32 @@ const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
 
 /**
  * Resolves the canonical references behind every well-known grant through
- * `session`. Each resolution is a metadata read — the registry cell's own
- * address — not a read of what the registry lists.
+ * `session`. Each resolution is address-only: the registry's address is the
+ * default pattern's cell plus the `pieceRegistry` path, so resolving the
+ * root pointer is the whole read — nothing the registry lists is pulled.
+ * (`getPieceRegistry()` is deliberately not used here: it syncs every
+ * listed piece, a privileged data pull an address does not need, and in a
+ * space with no default pattern it answers a detached placeholder that
+ * would persist as a permanently dead grant.)
+ *
+ * @throws Error when the space has no default pattern to anchor the
+ * registry; a grant that cannot name a live address is refused rather than
+ * recorded.
  */
 export const resolveWellKnownGrantRefs = async (
   session: HarnessFabricSession,
 ): Promise<{ name: HarnessWellKnownGrantName; ref: string }[]> => {
-  const registry = await session.pieces.getPieceRegistry();
+  const defaultPattern = await session.pieces.getDefaultPattern(false);
+  if (defaultPattern === undefined) {
+    throw new Error(
+      "space has no default pattern to anchor the piece registry",
+    );
+  }
+  const registryLink = defaultPattern.key("pieceRegistry")
+    .getAsNormalizedFullLink();
   return [{
     name: "piece-registry",
-    ref: createLLMFriendlyLink(
-      registry.getAsNormalizedFullLink(),
-      session.pieces.getSpace(),
-    ),
+    ref: createLLMFriendlyLink(registryLink, session.pieces.getSpace()),
   }];
 };
 
