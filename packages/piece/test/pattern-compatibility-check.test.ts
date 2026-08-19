@@ -12,7 +12,10 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
+import {
+  loadStoredCfcEnvelope,
+  readStoredCfcMetadata,
+} from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 // `cf piece setsrc <main>` replaces the source of a LIVE piece. Until now the
@@ -223,6 +226,58 @@ function strengthenedProgram(): RuntimeProgram {
     }],
   };
 }
+
+/**
+ * A source piece publishing a writable another piece can link to. Its own
+ * document carries the space's creation label, which is what makes a link into
+ * it a labeled write.
+ */
+function writableSourceProgram(): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { NAME, pattern, Writable } from 'commonfabric';",
+        "export default pattern<Record<string, never>, {",
+        "  value: Writable<string>;",
+        "}>(() => ({",
+        "  [NAME]: 'Link source',",
+        "  value: new Writable('shared').for('value'),",
+        "}));",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
+/**
+ * A piece taking one linked input alongside a REQUIRED plain field that
+ * declares no default — the shape the additive-required merge rule rejects —
+ * and no `ifc` claims anywhere.
+ */
+function linkedProgram(label: string): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { NAME, pattern, Writable } from 'commonfabric';",
+        "interface Args { seed: string; linked: Writable<string>; }",
+        "export default pattern<Args, { label: string }>(",
+        "  ({ seed, linked }) => ({",
+        "    [NAME]: 'Compatibility check',",
+        `    label: ${label},`,
+        "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
+const linkedBase = () => linkedProgram("seed");
+const linkedNext = () => linkedProgram("`seen:${seed}`");
 
 describe("setsrc compatibility preflight", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -532,6 +587,64 @@ describe("setsrc compatibility preflight", () => {
       await freshRuntime.dispose();
       await freshStorage.close();
     }
+  });
+
+  /**
+   * A piece whose argument document carries an envelope no pattern declared.
+   * Writing a link into the argument makes the write CFC-relevant — the linked
+   * piece carries its space's creation label — and a link write supplies no
+   * schema candidate, so what lands is an envelope whose schema claims
+   * nothing. This is the ordinary shape for a piece reading another piece's
+   * data.
+   */
+  const pieceLinkingLabeledData = async () => {
+    const source = await pieces.create(writableSourceProgram());
+    await runtime.idle();
+    const piece = await pieces.create(linkedBase(), {
+      input: { seed: "hello", linked: source.getCell().key("value") },
+    });
+    await runtime.idle();
+
+    const link = pieces.getArgument(piece.getCell()).getAsNormalizedFullLink();
+    const stored = loadStoredCfcEnvelope(runtime.readTx(), {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+    });
+    expect(
+      stored.status,
+      "the linked fixture stored no CFC envelope, so the cases below would " +
+        "pass for want of one rather than because the check works",
+    ).toBe("loaded");
+    expect(
+      JSON.stringify(stored.status === "loaded" ? stored.schema : undefined),
+      "the fixture's envelope carries ifc claims, so it is the labeled case " +
+        "above rather than the claim-less one these cases are about",
+    ).not.toContain("ifc");
+    return piece;
+  };
+
+  it("clears a candidate whose argument schema claims nothing", async () => {
+    // The candidate declares no `ifc`, so the commit records no schema
+    // candidate for the argument document and keeps the stored envelope as it
+    // is — there is no merge for the preflight to disagree with. Running the
+    // merge anyway rejects every candidate carrying a required field, because
+    // an envelope that claims nothing declares no default to migrate from.
+    const piece = await pieceLinkingLabeledData();
+    const report = await piece.checkPattern(linkedNext());
+
+    expect(report.issues.cfc).toBe(undefined);
+    expect(report.compatible).toBe(true);
+  });
+
+  it("agrees with the apply path on a candidate that claims nothing", async () => {
+    // The verdict above is worth acting on only if the deploy really lands.
+    const piece = await pieceLinkingLabeledData();
+    await piece.setPattern(linkedNext());
+    await runtime.idle();
+
+    expect((piece.getCell().getAsQueryResult() as { label?: string }).label)
+      .toBe("seen:hello");
   });
 
   it("still lets the dangerous override through", async () => {

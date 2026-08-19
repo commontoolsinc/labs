@@ -37,6 +37,7 @@ import {
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  schemaHasIfc,
 } from "@commonfabric/runner";
 import {
   cfcSchemaChildRoot,
@@ -88,8 +89,19 @@ async function snapshotCloneData(
   inputCell: Cell<unknown>,
   expectedSource: PieceSourceSnapshot,
 ): Promise<{ input: unknown; internals: CloneInternalSnapshot[] }> {
+  // The space the copy is taken FROM, so the clone guards can tell this
+  // space's own residency scoping — which the destination re-declares — from
+  // every other label, wherever in the walk they appear.
+  const sourceSpace = piece.getAsNormalizedFullLink().space;
   const preloadedCells = new Map<string, Cell<unknown>>();
-  await preloadCloneValue(inputCell, undefined, preloadedCells);
+  await preloadCloneValue(
+    inputCell,
+    undefined,
+    preloadedCells,
+    undefined,
+    undefined,
+    sourceSpace,
+  );
   const initialManifest = cloneInternalManifest(piece);
   for (const entry of initialManifest) {
     if (entry.kind === "computed") continue;
@@ -97,7 +109,14 @@ async function snapshotCloneData(
       parseLinkOrThrow(entry.link, piece),
     );
     if (!isStream(internal)) {
-      await preloadCloneValue(internal, undefined, preloadedCells);
+      await preloadCloneValue(
+        internal,
+        undefined,
+        preloadedCells,
+        undefined,
+        undefined,
+        sourceSpace,
+      );
     }
   }
 
@@ -121,6 +140,7 @@ async function snapshotCloneData(
       new WeakMap(),
       snapshotCells,
       preloadedCells,
+      sourceSpace,
     );
     const internals: CloneInternalSnapshot[] = [];
     const manifest = cloneInternalManifest(txPiece);
@@ -141,6 +161,7 @@ async function snapshotCloneData(
           new WeakMap(),
           snapshotCells,
           preloadedCells,
+          sourceSpace,
         ),
       });
     }
@@ -4272,6 +4293,17 @@ function pieceSourceCfcEnvelopeIssue(
     return `the CFC schema envelope stored for this piece's argument ` +
       `document could not be read (${stored.reason}); applying a source ` +
       `would be rejected over the same failure`;
+  }
+  // The commit never merges a schema the pattern declared unless that schema
+  // carries `ifc` claims. For an ifc-less write on a document that already
+  // stores metadata, `recordRelevantSchemaWritePolicyInput` records the
+  // document's OWN stored schema as the candidate, so the persist pass merges
+  // the stored envelope with itself and leaves it as it was. Either way the
+  // candidate's argument schema never meets the stored envelope — an envelope
+  // minted by a link write, claiming nothing, is the common carrier — so
+  // there is nothing here to reject.
+  if (!schemaHasIfc(candidate.argumentSchema)) {
+    return undefined;
   }
   // The commit takes the stored envelope unchanged when it already covers the
   // candidate's, so a preflight that skipped this fast path would manufacture

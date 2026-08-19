@@ -4,16 +4,21 @@
  * remains the piece controller's responsibility.
  */
 
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   type Cell,
   type IExtendedStorageTransaction,
 } from "@commonfabric/runner";
-import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewForCellFailClosed,
+  clauseAlternatives,
+} from "@commonfabric/runner/cfc";
 import {
   FabricInstance,
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export function cloneCellKey(cell: Cell<unknown>): string {
   const link = cell.getAsNormalizedFullLink();
@@ -49,11 +54,51 @@ export function assertNoCloneFabricInstance(
   }
 }
 
-/** Reject a value copy that would discard Common Fabric Control labels. */
-export function assertCloneDataUnlabeled(carrier: unknown): void {
+/**
+ * Whether a confidentiality clause is exactly `space`'s own principal —
+ * `Space(<space>)`, `PersonalSpace(<space>)`, or the legacy DID-string form,
+ * and nothing else. Such a clause is the source space's residency scoping,
+ * which a clone drops by design: the destination copy is re-declared under
+ * the destination space's own principal at creation.
+ *
+ * A clause offering that principal alongside other alternatives says more
+ * than where the data lives, so it is not residency scoping and still
+ * refuses the copy.
+ */
+const sameSpacePrincipalClause = (
+  space: string,
+  clause: unknown,
+): boolean => {
+  const alternatives = clauseAlternatives(
+    clause as Parameters<typeof clauseAlternatives>[0],
+  );
+  if (alternatives.length !== 1) return false;
+  const [alternative] = alternatives;
+  return alternative === space ||
+    (isObjectOrArray(alternative) &&
+      (((alternative as { type?: unknown }).type === CFC_ATOM_TYPE.Space &&
+        (alternative as { id?: unknown }).id === space) ||
+        ((alternative as { type?: unknown }).type ===
+            CFC_ATOM_TYPE.PersonalSpace &&
+          (alternative as { owner?: unknown }).owner === space)));
+};
+
+/**
+ * Reject a value copy that would discard Common Fabric Control labels.
+ * Confidentiality clauses naming `sourceSpace`'s own principal are not
+ * labels a copy discards — see {@link sameSpacePrincipalClause} — so they
+ * do not refuse the clone; every other clause and any integrity entry does.
+ */
+export function assertCloneDataUnlabeled(
+  carrier: unknown,
+  sourceSpace?: string,
+): void {
   const view = cfcLabelViewForCellFailClosed(carrier);
   const labeled = view?.entries.some((entry) =>
-    (entry.label.confidentiality?.length ?? 0) > 0 ||
+    (entry.label.confidentiality ?? []).some((clause) =>
+      sourceSpace === undefined ||
+      !sameSpacePrincipalClause(sourceSpace, clause)
+    ) ||
     (entry.label.integrity?.length ?? 0) > 0
   );
   if (labeled) {

@@ -23,6 +23,7 @@ import {
   getMetaLink,
   getPatternIdentityRef,
   getPieceSourceSnapshot,
+  type IExtendedStorageTransaction,
   isCell,
   isLink,
   isStoredArgumentSchemaRefusal,
@@ -47,9 +48,10 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
-import type {
-  CfcEnforcementMode,
-  CfcFlowLabelsMode,
+import {
+  type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
+  cfcLabelViewForCellFailClosed,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
@@ -354,10 +356,16 @@ export class PiecesController<T = unknown> {
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
   ): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -366,10 +374,16 @@ export class PiecesController<T = unknown> {
    * Used when the default pattern is being deleted.
    */
   async unlinkDefaultPattern(): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
     });
+    if (error) {
+      throw new Error(
+        `Clearing the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -1240,7 +1254,70 @@ export class PiecesController<T = unknown> {
           : this.syncPattern(piece),
     );
 
+    await timePiecePhase(
+      "setupPersistent.declareSpaceScopedLabel",
+      async () => {
+        const { error } = await this.runtime.editWithRetry((tx) => {
+          this.declareSpaceScopedPieceLabel(piece, tx);
+        });
+        if (error) {
+          throw new Error(
+            `Declaring the new piece's space-scoped CFC label failed: ${error.message}`,
+            { cause: error },
+          );
+        }
+      },
+    );
+
     return piece;
+  }
+
+  /**
+   * Declare the space-scoped confidentiality on a piece root within `tx`:
+   * `PersonalSpace(<space>)` when this space is its owner's identity space,
+   * `Space(<space did>)` otherwise. Recorded as the piece doc's declared
+   * store-policy component (§8.12.4), so labeled space-internal flows fit
+   * the doc's write ceiling and the display boundary resolves the label
+   * through the acting user's space membership. The piece's value must
+   * already be written when this runs — creation paths call it after the
+   * pattern setup write, inside the same transaction or a follow-up one.
+   *
+   * A piece that already carries confidentiality at any path — a pattern
+   * declaring it on one of its own fields, a restored or copied source
+   * snapshot bringing its own labels — keeps that labeling: declared
+   * confidentiality evolves monotonically (§8.12.1), so the space-scoped
+   * declaration only ever seeds a piece born without one. The skip reaches
+   * every path rather than the root alone because the declaration re-mints
+   * the document's store policy from the root down, which over a document
+   * declaring a clause deeper is the weakening §8.12.1 refuses. A label read
+   * that errors reads as labeled, since a document whose labels cannot be
+   * read must not have a policy stamped over them.
+   */
+  private declareSpaceScopedPieceLabel(
+    piece: Cell<unknown>,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const withTx = piece.withTx(tx);
+    if (withTx.getRaw() === undefined) {
+      // A piece whose value is not written yet (a snapshot restore still
+      // materializing, a refused setup) has nothing to label; the declared
+      // component applies to a stored value.
+      return;
+    }
+    const view = cfcLabelViewForCellFailClosed(withTx);
+    if (
+      view?.entries.some((entry) =>
+        (entry.label.confidentiality?.length ?? 0) > 0
+      )
+    ) {
+      return;
+    }
+    const space = this.getSpace();
+    const atom = space === this.runtime.userIdentityDID
+      ? cfcAtom.personalSpace(space)
+      : cfcAtom.space(space);
+    withTx.asSchema({ ifc: { confidentiality: [atom] } })
+      .applyCfcSchemaToExistingValue();
   }
 
   /** Start scheduling and running a prepared piece. */
@@ -1562,6 +1639,8 @@ export class PiecesController<T = unknown> {
         setPatternRepository(pieceCell, tx, options.repository);
       }
 
+      this.declareSpaceScopedPieceLabel(pieceCell, tx);
+
       // Link as default pattern within same transaction
       const spaceCellWithTx = spaceCellContents.withTx(tx);
       const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
@@ -1701,6 +1780,8 @@ export class PiecesController<T = unknown> {
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
           setPatternSource(pieceCell, tx, patternConfig.source);
+
+          this.declareSpaceScopedPieceLabel(pieceCell, tx);
 
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));

@@ -1548,9 +1548,13 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
 
+    // The linked piece carries its own space's creation label, so the label
+    // guard refuses the cross-space copy before the snapshot-consistency
+    // check sees the second space.
     await expect(source.cloneTo(destination, { copyData: true })).rejects
       .toThrow(
-        "piece data linked from another space cannot be copied consistently",
+        "piece data with confidentiality or integrity labels cannot be " +
+          "copied into another space",
       );
   });
 

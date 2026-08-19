@@ -14,6 +14,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import {
+  createDefaultPatternPiece,
   identity,
   installDefaultPattern,
   newSharedServer,
@@ -632,14 +633,12 @@ Deno.test("debug deployment rejects a replaced default pattern", async () => {
       runtime,
       spaceDid: session.space,
     });
-    const replacementRoot = runtime.getCell(
-      session.space,
+    // A second root piece, created the way every root is and left unlinked
+    // until the deployment is under way.
+    const replacementRoot = await createDefaultPatternPiece(
+      manager,
       `replacement-default-pattern-${crypto.randomUUID()}`,
     );
-    const replacementResult = await runtime.editWithRetry((tx) => {
-      replacementRoot.withTx(tx).setRawUntyped({ replacement: true });
-    });
-    if (replacementResult.error) throw replacementResult.error;
 
     const originalGetDefaultPattern = manager.getDefaultPattern;
     let replaced = false;

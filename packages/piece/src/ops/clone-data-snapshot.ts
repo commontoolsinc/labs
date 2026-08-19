@@ -21,13 +21,19 @@ import {
   cloneEntityKey,
 } from "./clone-data-guards.ts";
 
-/** Copy materialized piece data into detached arrays and plain objects. */
+/**
+ * Copy materialized piece data into detached arrays and plain objects.
+ * `sourceSpace` is the space the piece is being copied FROM, threaded through
+ * the whole walk: it names the one principal whose residency scoping a copy
+ * drops. Omitting it refuses every labeled value.
+ */
 export function snapshotCloneValue(
   value: unknown,
   sourceCell?: Cell<unknown>,
   seen = new WeakMap<object, unknown>(),
   cells = new Map<string, Cell<unknown>>(),
   preloadedCells?: { has(key: string): boolean },
+  sourceSpace?: string,
 ): unknown {
   let cell = sourceCell;
   if (isCell(value)) {
@@ -49,8 +55,8 @@ export function snapshotCloneValue(
     }
     cells.set(key, cell);
   }
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
+  assertCloneDataUnlabeled(cell, sourceSpace);
+  assertCloneDataUnlabeled(value, sourceSpace);
   const raw = cell?.getRawUntyped();
   if (value instanceof FabricInstance || raw instanceof FabricInstance) {
     throw new Error(
@@ -76,6 +82,7 @@ export function snapshotCloneValue(
         seen,
         cells,
         preloadedCells,
+        sourceSpace,
       );
     }
     return snapshot;
@@ -100,19 +107,24 @@ export function snapshotCloneValue(
         seen,
         cells,
         preloadedCells,
+        sourceSpace,
       ),
     });
   }
   return snapshot;
 }
 
-/** Load every linked cell that a later synchronous transaction read can reach. */
+/**
+ * Load every linked cell that a later synchronous transaction read can reach.
+ * `sourceSpace` carries the same meaning as in {@link snapshotCloneValue}.
+ */
 export async function preloadCloneValue(
   value: unknown,
   sourceCell: Cell<unknown> | undefined,
   cells: Map<string, Cell<unknown>>,
   loadedEntities = new Set<string>(),
   seen = new WeakSet<object>(),
+  sourceSpace?: string,
 ): Promise<void> {
   let cell = sourceCell;
   if (isCell(value)) {
@@ -141,8 +153,8 @@ export async function preloadCloneValue(
   }
 
   assertNoCloneFabricInstance(value);
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
+  assertCloneDataUnlabeled(cell, sourceSpace);
+  assertCloneDataUnlabeled(value, sourceSpace);
   if (
     value === null || typeof value !== "object" ||
     value instanceof FabricPrimitive || value instanceof FabricInstance ||
@@ -159,6 +171,7 @@ export async function preloadCloneValue(
         cells,
         loadedEntities,
         seen,
+        sourceSpace,
       );
     }
     return;
@@ -170,6 +183,7 @@ export async function preloadCloneValue(
       cells,
       loadedEntities,
       seen,
+      sourceSpace,
     );
   }
 }

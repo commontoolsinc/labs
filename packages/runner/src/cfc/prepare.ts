@@ -1,5 +1,5 @@
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, MetaField } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
@@ -1323,6 +1323,29 @@ const schemaEnvelopeForTargetPath = (
   return envelope;
 };
 
+// Document-root storage paths the raw meta seam writes (`setMetaRaw`). Typed
+// as a total map over `MetaField`, so adding a meta field without deciding its
+// treatment here is a compile error.
+const RAW_META_WRITE_PATH_ROOTS: Readonly<Record<MetaField, true>> = {
+  pattern: true,
+  argument: true,
+  result: true,
+  patternIdentity: true,
+  patternSetupIdentity: true,
+  patternSource: true,
+  pieceSourceHistory: true,
+  patternRepository: true,
+  displacedPattern: true,
+  internal: true,
+  schema: true,
+  slug: true,
+};
+
+/** Whether a raw storage path addresses the meta seam rather than a value. */
+const isRawMetaWritePath = (rawPath: readonly string[]): boolean =>
+  rawPath.length > 0 &&
+  Object.hasOwn(RAW_META_WRITE_PATH_ROOTS, rawPath[0]);
+
 const valueWriteTargets = (
   tx: IExtendedStorageTransaction,
 ): Map<
@@ -1333,6 +1356,9 @@ const valueWriteTargets = (
     id: URI;
     type: MediaType;
     paths: (readonly string[])[];
+    // The subset of `paths` a schema write-policy input can describe: every
+    // written path except the raw meta seam, which no schema covers.
+    schemaPolicyPaths: (readonly string[])[];
     // Last written value per path (pathKey), for flow-label value-shape
     // classification (pure link structure is not stamped).
     valuesByPath: Map<string, unknown>;
@@ -1362,6 +1388,7 @@ const valueWriteTargets = (
       id: URI;
       type: MediaType;
       paths: (readonly string[])[];
+      schemaPolicyPaths: (readonly string[])[];
       valuesByPath: Map<string, unknown>;
       previousValuesByPath: Map<string, unknown>;
       previousPresentByPath: Map<string, boolean>;
@@ -1377,16 +1404,17 @@ const valueWriteTargets = (
     for (const write of tx.getWriteDetails?.(space) ?? []) {
       const rawPath = write.address.path;
       const writePath = canonicalizeLogicalPath(rawPath);
-      // The `cfc`/`source` surface exclusions key on the RAW storage path:
-      // the runtime-internal surfaces are document-root siblings of `value`
-      // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
-      // same names live under `["value", ...]` and canonicalize to identical
-      // logical paths. Keying on the canonical path would let a user write
-      // to `value.source` dodge schema write policy and flow-label
-      // attachment (#4011 review). The link-valued `internal` exclusion
-      // stays canonical on purpose: it covers the runtime's link plumbing
-      // both at the root surface and inside process-doc values; link writes
-      // carry their labels via the link-write machinery, not here.
+      // The runtime-surface exclusions key on the RAW storage path: the
+      // runtime-internal surfaces are document-root siblings of `value`
+      // (raw `["cfc", ...]`/`["source", ...]` and the `MetaField` roots the
+      // raw meta seam writes), while user fields of the same names live
+      // under `["value", ...]` and canonicalize to identical logical paths.
+      // Keying on the canonical path would let a user write to
+      // `value.source` dodge schema write policy and flow-label attachment
+      // (#4011 review). The link-valued `internal` exclusion stays canonical
+      // on purpose: it covers the runtime's link plumbing both at the root
+      // surface and inside process-doc values; link writes carry their labels
+      // via the link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
         rawPath[0] === "cfc" ||
@@ -1398,6 +1426,14 @@ const valueWriteTargets = (
       ) {
         continue;
       }
+      // A raw meta write (`setMetaRaw`) lands on a document-root sibling of
+      // `value`, and no schema describes that seam, so it can carry no schema
+      // write-policy input. It stays a flow-label target — reads of the seam
+      // still feed the taint join, so its writes must still be stamped — and
+      // is recorded here only to be left out of the schema-policy
+      // requirement. Keyed on the RAW path, so a user field of the same name
+      // under `value` keeps its policy requirement.
+      const metaWrite = isRawMetaWritePath(rawPath);
       // A document-root write carries the RAW envelope ({value, source, …}):
       // writeOrThrow's missing-doc retry materializes the whole document in
       // one write at storage path []. `writePath` is already logical, so the
@@ -1429,6 +1465,7 @@ const valueWriteTargets = (
       const existing = result.get(key);
       if (existing !== undefined) {
         existing.paths.push(writePath);
+        if (!metaWrite) existing.schemaPolicyPaths.push(writePath);
         existing.valuesByPath.set(pathKey(writePath), writtenValue);
         if (!existing.previousValuesByPath.has(pathKey(writePath))) {
           existing.previousValuesByPath.set(
@@ -1447,6 +1484,7 @@ const valueWriteTargets = (
           id: write.address.id as URI,
           type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
+          schemaPolicyPaths: metaWrite ? [] : [writePath],
           valuesByPath: new Map([[pathKey(writePath), writtenValue]]),
           previousValuesByPath: new Map([[
             pathKey(writePath),
@@ -5241,7 +5279,7 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
-    if (!metadataAppliesToAnyPath(existing, target.paths)) {
+    if (!metadataAppliesToAnyPath(existing, target.schemaPolicyPaths)) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];

@@ -330,8 +330,14 @@ export async function readRawDataProvenance(
   };
 }
 
-export async function installDefaultPattern(
+/**
+ * A root piece shaped like the space's default pattern, created but not yet
+ * linked. Created through the controller, as every root in production is, so
+ * it carries the creation label a root document is expected to have.
+ */
+export async function createDefaultPatternPiece(
   manager: PiecesController,
+  cause = "agents-host-debug-test-default-pattern",
 ): Promise<Cell<unknown>> {
   const { handler, pattern } = createBuilder().commonfabric;
   const addPiece = handler<
@@ -369,11 +375,18 @@ export async function installDefaultPattern(
       addPiece: addPiece({ allPieces }),
     }),
   );
-  const piece = await manager.runPersistent(
+  return await manager.runPersistent(
     defaultPattern,
     { allPieces: [], recentPieces: [] },
-    "agents-host-debug-test-default-pattern",
+    cause,
   );
+}
+
+/** {@link createDefaultPatternPiece}, linked as the space's default pattern. */
+export async function installDefaultPattern(
+  manager: PiecesController,
+): Promise<Cell<unknown>> {
+  const piece = await createDefaultPatternPiece(manager);
   await manager.linkDefaultPattern(piece);
   await manager.runtime.idle();
   await manager.synced();
