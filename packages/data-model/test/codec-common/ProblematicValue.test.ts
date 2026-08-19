@@ -21,7 +21,7 @@ import {
 import { CODEC } from "@/codec-interface/interface.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
@@ -66,8 +66,8 @@ describe("ProblematicValue", () => {
     });
 
     it("survives a state whose own membership check throws", () => {
-      // Prophylaxis rather than a proxy guard: this path must not fail even
-      // if `isFabricValue()` itself has a defect, since throwing here would
+      // Prophylaxis rather than a proxy guard: this path must not fail even if
+      // `isValidFabricValue()` itself has a defect, since throwing here would
       // replace the failure being reported rather than add to it. A hostile
       // proxy is the only way to provoke that from outside.
       const hostile = new Proxy({}, {
@@ -109,7 +109,7 @@ describe("ProblematicValue", () => {
         expect(result).toBe(pv);
         expect(Object.isFrozen(pv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(isDeepFrozenFabricValue(pv)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(pv)).toBe(true);
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {

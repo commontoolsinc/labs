@@ -35,7 +35,7 @@ import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
   deepFreeze,
   isDeepFrozen,
-  isDeepFrozenFabricValue,
+  isValidDeepFrozenFabricValue,
 } from "@/deep-freeze.ts";
 import { dummyEnv, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
@@ -443,12 +443,12 @@ describe("FabricError", () => {
 
       it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + cause are frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
-        expect(isDeepFrozenFabricValue(fe)).toBe(false);
+        expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
         Object.freeze(fe); // wrapper only; some descendants still mutable
         // (May be true since this particular FabricError has no nested
         // FabricValue descendants beyond primitive strings.)
         deepFreeze(fe);
-        expect(isDeepFrozenFabricValue(fe)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(fe)).toBe(true);
       });
 
       it("via direct member invocation: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {

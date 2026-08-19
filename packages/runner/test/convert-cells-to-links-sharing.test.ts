@@ -9,7 +9,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
-import { type FabricOrConvertibleNativeValue } from "@commonfabric/data-model/fabric-value";
+import { type FabricConvertibleValue } from "@commonfabric/data-model/fabric-value";
 
 import { convertCellsToLinks } from "../src/cell.ts";
 
@@ -62,7 +62,7 @@ describe("convert-cells-to-links-sharing", () => {
   });
 
   it("returns a back-link for an ancestor, so a cycle stays representable", () => {
-    const cyclic: Record<string, FabricOrConvertibleNativeValue> = { n: 1 };
+    const cyclic: Record<string, FabricConvertibleValue> = { n: 1 };
     cyclic.self = cyclic;
     const result = convertCellsToLinks(cyclic) as Record<string, unknown>;
 

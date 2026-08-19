@@ -19,7 +19,7 @@ import {
 import { CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("UnknownValue", () => {
@@ -85,7 +85,7 @@ describe("UnknownValue", () => {
         expect(result).toBe(uv);
         expect(Object.isFrozen(uv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(isDeepFrozenFabricValue(uv)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(uv)).toBe(true);
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {

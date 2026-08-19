@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { isFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/type-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /** How much of a rendered state to keep. */
@@ -26,7 +26,7 @@ const MAX_RENDERED_LENGTH = 200;
  *
  * The membership check runs guarded, so that a defect in it cannot take this
  * function down with it. That is prophylaxis against an unanticipated bug in
- * `isFabricValue()` rather than a guard against any particular input: this
+ * `isValidFabricValue()` rather than a guard against any particular input: this
  * runs on the failure path, where throwing does not surface a second problem
  * so much as replace the first one, the original error being lost in favor of
  * whatever the predicate did. `toCompactDebugString()` needs no such wrapping,
@@ -38,7 +38,7 @@ const MAX_RENDERED_LENGTH = 200;
  */
 export function toReportableState(state: any): FabricValue {
   try {
-    if (isFabricValue(state)) {
+    if (isValidFabricValue(state)) {
       return state;
     }
   } catch {

@@ -133,9 +133,9 @@ export function withAliasBindings(
   // for the same reason a non-inert plain object is refused there: `.map()`
   // rebuilds by index, so it drops a named or symbol-keyed property and
   // EVALUATES an accessor-backed index into a data property, and -- since
-  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass
-  // instance still carrying its live prototype. The first two produce an array
-  // that satisfies `isFabricValue()` while meaning something else; the last
+  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass instance
+  // still carrying its live prototype. The first two produce an array that
+  // satisfies `isValidFabricValue()` while meaning something else; the last
   // produces one that does not satisfy it at all.
   if (isInertArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
@@ -176,7 +176,7 @@ export function withAliasBindings(
   // `for...in` rebuild silently drops a symbol key and a non-enumerable
   // property, EVALUATES an accessor into a data property, and reparents a
   // null-prototype object -- each producing a plain object that satisfies
-  // `isFabricValue()` while meaning something else. Nothing downstream can
+  // `isValidFabricValue()` while meaning something else. Nothing downstream can
   // catch it, because what it produces is genuinely valid.
   if (
     isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
