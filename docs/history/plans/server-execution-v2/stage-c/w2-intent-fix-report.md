@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-19
 archived: 2026-08-19
-reason: "Stage-C evidence: the fix pass for W2 (e), PR #6039 — every finding of the independent review (LANDABLE-WITH-FIXES, 0/1/7/6) dispositioned with red/green evidence; the branch rebased onto its stated base; OW41 minted; the suites re-run; one provisional note n=20 series for the one client-side cost change."
+reason: "Stage-C evidence: the fix pass for W2 (e), PR #6039 — every finding of the independent review (LANDABLE-WITH-FIXES, 0/1/7/6) dispositioned with red/green evidence; the branch rebased onto its stated base; OW42 minted (as OW41; renumbered at the re-stack onto W1); the suites re-run; one provisional note n=20 series for the one client-side cost change."
 ---
 
 # Stage C — W2 (e) fix report: the intent listener after its independent review
@@ -24,7 +24,8 @@ speculation.md §4, the register §3.
 
 **All 14 findings addressed — 10 FIXED (MAJ-1, MIN-1, MIN-4, MIN-5,
 MIN-6 in code/tests; MIN-7 the rebase; MIN-2, N-1, N-4, N-5 as text), 1
-OWED as a numbered row (MIN-3 → OW41), 1 HARDENED (N-2), 2 NOT CHANGED
+OWED as a numbered row (MIN-3 → OW42, minted as OW41), 1 HARDENED
+(N-2), 2 NOT CHANGED
 with the reason stated (N-3, N-6); the MIN-2 code alternative is
 flagged, not built. No finding disputed. The MAJOR was real: reproduced RED on the build
 tip exactly as the reviewer's scratch probe said
@@ -75,7 +76,7 @@ assertion; "GREEN" means it passes on the fix tip.
 | MAJ-1 | re-entrant `trackIntent` inside an outcome callback applies an already-retired id twice (MAJOR) | **FIXED** — `#checkIntents`'s `consider` now gates each located entry on the LIVE tracked set re-fetched from the map (`this.#trackedIntents.get(space)?.get(sidecarId)`), not only on the check's pre-loop `pending` snapshot; the old sink's scan gated on the live `ids.has(...)` per entry AND its `trackIntent` returned early while a sink existed, so it could not double-apply — this was a regression vs the old guard, LATENT today (no production `subscribeIntentOutcomes` caller; the hook is the ruled UI hook), now restored explicitly. The PR body's self-review claim "re-entrancy … is safe — `pending` is a copy" was wrong precisely because it is a copy; corrected in the PR body and the build report with a dated note | `9c7ecf80f` | pin "review MAJ-1" (the reviewer's scenario: seed [X, Z], track both, a subscriber that consumes the memo and re-fires ONCE on the first outcome, one notification marks both dropped with hints Z then X): RED on the build tip's code — `Actual ["dropped:Z","dropped:X","dropped:X"] / Expected ["dropped:Z","dropped:X"]`; GREEN after the fix; the pin also asserts `pendingIntentCount` 1 (the retry), each consequence settled once, and NO orphaned memo (a fresh waiter for X hangs). The pre-fix code IS the pin's named mutation |
 | MIN-1 | pin-vacuity gap: one notification spanning two tracked sidecars uncovered (the MX1 `break` mutation survived every pin) (MINOR) | **FIXED** — pin "review MIN-1" added: `deliverMany` dispatches ONE notification with changes on two tracked sidecars; asserts one coalesced check per sidecar (`intentCheckCount` +2), both intents retired, the listener released, zero `runtime.edit`. The harness gained `deliverMany` (`deliver` delegates to it) | `9c7ecf80f` | GREEN on the tip code (behavior was correct, coverage was not); RED under MX1 (`break` after the first wanted change in `CoalescedDocListener#next`): the second sidecar's intent stays outstanding — `1 passed (10 steps) / 1 failed (1 step)`; mutation reverted, tree clean |
 | MIN-2 | `speculation.md` §4 overclaims "O(outstanding), never O(history)" (MINOR) | **FIXED (text)** — the RULED content (carrier, guards, never a dependency on history) stands; the COST clause now says what the code does: a notified check is O(outstanding + hinted indices); a change with no usable index (an append, a moved hint) degrades to a backward tail scan over the entries appended after the tracked one — O(k) per notification on a busy shared stream; the immediate check at `trackIntent` walks the raw array once, O(E). Mirrored in the register block's "Not rows" (i) and the build report §3 (dated). The code alternative (memoize each located index into the hint set → O(1) thereafter) is NAMED as the fix shape and flagged, NOT built — describe, don't re-rule | `546ef4cb3` (spec), `793a10aab` (register/report) | n/a (text); pin 5 still pins the hinted arm's O(1) and the immediate walk's 1 000 visits |
-| MIN-3 | the tracked-set drain gap deserves a NUMBERED row (MINOR) | **OWED — OW41 minted** (the next free number: the register's last was OW40; W1's branch at `19c6448ab` and the design base had minted none). Row text: an outstanding intent whose sidecar entry is GONE before this client saw its mark never resolves — `waitForIntentConsequence` hangs, and with it the caller's durable-ack `onCommit` (`cell.ts` routes the flag-ON send path's ack through it — the CLI verb dispatch / webhook forwarder would wait forever); the ECHO still retires by W. Verified UNREACHABLE today (`maintainStreamEventWatermarks` recomputes `eventWatermark` from the contiguous consequenced frontier, so `eventWatermark ≥ seq(e)` implies the mark is present; nothing but compaction removes an entry). Fix shape (~10 lines in `#checkIntents`: record the entry's `seq` at first sight; treat `eventWatermark ≥ seq` with the entry gone as consequenced) with its pin. Trigger: OW24 — the compaction PR cannot land without it | `793a10aab` | register §3, the W2 block; the build report's flag 1 annotated |
+| MIN-3 | the tracked-set drain gap deserves a NUMBERED row (MINOR) | **OWED — OW42 minted** (minted as OW41, the next free number at mint time: the register's last was OW40; W1's branch at `19c6448ab` and the design base had minted none. Renumbered OW42 at the 2026-08-19 re-stack onto W1: W1's fix pass had concurrently minted its own OW41 — the O(closure) demand-pass row — which keeps the number). Row text: an outstanding intent whose sidecar entry is GONE before this client saw its mark never resolves — `waitForIntentConsequence` hangs, and with it the caller's durable-ack `onCommit` (`cell.ts` routes the flag-ON send path's ack through it — the CLI verb dispatch / webhook forwarder would wait forever); the ECHO still retires by W. Verified UNREACHABLE today (`maintainStreamEventWatermarks` recomputes `eventWatermark` from the contiguous consequenced frontier, so `eventWatermark ≥ seq(e)` implies the mark is present; nothing but compaction removes an entry). Fix shape (~10 lines in `#checkIntents`: record the entry's `seq` at first sight; treat `eventWatermark ≥ seq` with the entry gone as consequenced) with its pin. Trigger: OW24 — the compaction PR cannot land without it | `793a10aab` | register §3, the W2 block; the build report's flag 1 annotated |
 | MIN-4 | the one best-effort `sync` kick is load-bearing; a transient first failure leaves the stream unwatched (MINOR) | **FIXED** — `#watchIntentSidecar` now runs on EVERY `trackIntent`, not only when the sidecar state is created. Cost shown, not assumed: a covered re-kick takes the selector tracker's exact-match fast path and `pull`'s `#syncTasks`/`newEntries.length === 0` early return (no wire; `normalizeSyncSelector` returns the `REJECTING_SELECTOR` singleton for `schema: false`, so `Provider#syncRequests` does not grow); micro-measured on the real replica (EmulatedStorageManager over an in-process server, real clock): first sync 7.9 ms (the watch), covered re-kick **1.7–2.4 µs each** (×1 000 / ×10 000). Pin 1's "sync exactly once" assertion became "once per fire, same selector" | `546ef4cb3` | pin "review MIN-4" (`failNextSync` makes the first `sync` resolve `{error}` — loud `intent-watch-failed` asserted via `getLoggerCountsBreakdown`; the second `trackIntent` on the same sidecar must re-issue the sync): RED on the build tip at `expect(scripted.syncs.length).toBe(2)` (received 1); GREEN after. The provisional note series (§4 below) shows no per-note growth from the re-kick |
 | MIN-5 | pin 10 weaker than the design's "by `synced()`/`idle()`" (MINOR) | **FIXED** — pin 10 now states the design's guarantee: a probe subscriber registered AFTER the listener (the relay runs subscribers in insertion order) arms `manager.synced()` and `runtime.idle()` AT the frame that carries the mark; both continuations must read `pendingIntentCount` 0 (and the probe reads 1 inside the dispatch — contract point 3). The macrotask-poll assertion is kept beside it | `546ef4cb3` | GREEN on the tip; RED under the mutation "defer the check to a macrotask" (`queueMicrotask` → `setTimeout(0)` in the listener): `synced` reads 1 (line 795) — a deferral the old macrotask-poll form could NOT see (the deferred check ran before the poll's next 20-ms tick; that assertion stayed green under the same mutation). Mutation reverted, tree clean |
 | MIN-6 | the scripted harness's change addresses lack production's `scope: "space"` (MINOR) | **FIXED** — every harness change address now carries `scope: "space"` (as `differential.ts`'s `toAddress` sets via `normalizeCellScope`) | `9c7ecf80f` | the reviewer's MX4 mutation (`wants` accepts only `scope === undefined`) now reddens the SCRIPTED describe (0 passed / 1 failed, the first pin), not only e2e pins 6/10; reverted, tree clean |
@@ -89,7 +90,8 @@ assertion; "GREEN" means it passes on the fix tip.
 
 Dispositions: 10 FIXED (5 in code/tests — MAJ-1, MIN-1, MIN-4, MIN-5,
 MIN-6; 1 the rebase — MIN-7; 4 text — MIN-2, N-1, N-4, N-5), 1 OWED
-(MIN-3 → OW41), 1 HARDENED (N-2), 2 NOT CHANGED (N-3, N-6). Nothing
+(MIN-3 → OW42, minted as OW41), 1 HARDENED (N-2), 2 NOT CHANGED
+(N-3, N-6). Nothing
 upgraded; nothing disputed.
 
 Files touched by the fix pass (vs the rebased tip `20c442213`, +/−
@@ -98,7 +100,8 @@ kick, the apply guard), `speculation-intent-listener.test.ts` 211/9 (+3
 pins, pin 10 strengthened, header), `speculation-intent-test-utils.ts`
 60/17 (`deliverMany`, `failNextSync`, production scope),
 `speculation.md` 12/3 (§4's cost clause), `verification-coverage.md`
-143/62 (the W2 block re-tensed, OW41), the build report 93/6 (dated
+143/62 (the W2 block re-tensed, OW42 — minted as OW41), the build
+report 93/6 (dated
 notes), the review report 146/0 (new), `INDEX.md` 1/1.
 
 ## 3. Suites (FOREGROUND, every `deno test` with `--no-lock`; the runner through its package task's exact flags + preload)
@@ -193,4 +196,7 @@ PROVISIONAL — W4 is the quiet acceptance run. Artifacts:
 - The register's OW41 number was minted against W1's tip `19c6448ab`
   and the design base; if W1's fix pass mints OW41 concurrently the
   re-stack renumbers one of them (stated here so the collision is
-  visible).
+  visible). **Resolved at the 2026-08-19 re-stack onto W1:** W1's fix
+  pass HAD minted its own OW41 (the O(closure) demand-pass row); W1
+  keeps OW41 and this report's row is **OW42** — every reference here,
+  in the build report, and in the register renumbered.

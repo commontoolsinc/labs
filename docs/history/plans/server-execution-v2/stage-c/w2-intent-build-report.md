@@ -453,7 +453,10 @@ exist in the harness; W4 should add it (recorded in the register block).
    ≥ seq` with the entry gone as consequenced (item 9's fact applied to
    the tracked SET) — ~10 lines. Recommend: number it in the sweep, land
    with OW24. *Fix-pass (review MIN-3): NUMBERED — register row
-   **OW41**, trigger OW24 (the compaction PR cannot land without it);
+   **OW42** (minted as OW41; renumbered at the 2026-08-19 re-stack onto
+   W1, whose fix pass concurrently minted OW41, the O(closure)
+   demand-pass row), trigger OW24 (the compaction PR cannot land
+   without it);
    the hang also reaches the caller's durable-ack `onCommit` (`cell.ts`
    routes the flag-ON send path's ack through `waitForIntentConsequence`
    — the CLI verb dispatch / webhook forwarder would wait forever);

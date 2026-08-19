@@ -4065,8 +4065,11 @@ supply; OW29/OW32/OW34 closed):
   [`stage-c/w2-intent-build-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-build-report.md),
   [`stage-c/w2-intent-review-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-review-report.md),
   [`stage-c/w2-intent-fix-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-fix-report.md).
-  Rows minted here: OW41 (the fix pass; W1's branch had minted none at
-  the time of minting — OW40 was the last).
+  Rows minted here: OW42 (the fix pass; minted as OW41 — W1's branch
+  had minted none at the time of minting, OW40 was the last — and
+  RENUMBERED OW42 at the 2026-08-19 re-stack onto W1, whose own fix
+  pass had concurrently minted OW41, the O(closure) demand-pass row;
+  W1 keeps the number).
   W0's (e) gate (the design §6 refutation experiment, run FIRST on this
   branch): the interim (b) schema-narrowed sink on the note n=20 series
   collapsed the per-note client `scheduler/run` from 0.84 → 14–20 s
@@ -4230,14 +4233,17 @@ supply; OW29/OW32/OW34 closed):
     RETIRES and never rebases; an outstanding echo stands until its
     mark or the backstop, as the sentence says; nothing learned moves
     the row.
-  - **OW41 — the tracked-set DRAIN when a mark never arrives: an
+  - **OW42 — the tracked-set DRAIN when a mark never arrives: an
     outstanding intent whose sidecar entry is GONE before this client
     saw its mark never resolves — `waitForIntentConsequence` hangs,
     and with it the caller's durable-ack `onCommit` (`cell.ts`'s
     flag-ON send path routes the ack through it: the CLI verb dispatch
     / the webhook forwarder would wait forever) — the ECHO still
     retires by W.** Numbered in the W2 fix pass (independent review
-    MIN-3; the build had it "recorded, not a row"). Verified
+    MIN-3; the build had it "recorded, not a row"; minted as OW41 and
+    renumbered OW42 at the 2026-08-19 re-stack onto W1 — W1's fix pass
+    had concurrently minted OW41, the O(closure) demand-pass row, and
+    keeps the number). Verified
     UNREACHABLE today: the watermark is recomputed from the contiguous
     consequenced frontier, so `eventWatermark ≥ seq(e)` implies the
     mark is present, and nothing else removes an entry — only
