@@ -325,13 +325,16 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   in this implementation already refuse it: the projection to native values
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
- * * `then` copies faithfully and survives every boundary here. It is reserved
- *   because its mere presence is what JavaScript takes for a `Thenable`, the
- *   runtime's own internals included, so a record carrying one is adopted by
- *   promise machinery it never asked to meet. Nothing awaits it deliberately;
- *   resolution finds it. What comes out the far side is then the key's value
- *   rather than the record, or nothing at all, and no boundary reports a fault
- *   because none occurred.
+ * * `then` copies faithfully, and the name alone is not the hazard: promise
+ *   adoption probes for `then` and takes over only when what it finds is
+ *   callable, so a record holding a string under that name resolves intact.
+ *   What makes the name unsafe is that a record's properties are not always
+ *   answered by the record. A layer surfacing a value through a proxy decides
+ *   what a property read returns, and one that can answer with a function
+ *   turns the data key into a thenable, which promise resolution then adopts
+ *   -- taking the record out of the caller's hands with no fault reported,
+ *   because none occurred. The value proxies here already guard the name for
+ *   that reason.
  *
  * Refusing them is what this implementation does today. The format asks that
  * such records be carried instead, which is work this implementation has to

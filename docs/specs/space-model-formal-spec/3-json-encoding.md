@@ -266,10 +266,11 @@ built-in escape, or an encoding error.
 > `__proto__` and `constructor` are about copying: this implementation rebuilds
 > a record by assignment, which for `__proto__` reaches a prototype accessor
 > instead of creating a property, and other boundaries here already drop
-> `constructor`. `then` is about what the host does with a record afterward —
-> JavaScript takes its presence as the mark of a thenable, its own runtime
-> internals included, so a record carrying one is consumed by promise
-> resolution that nothing asked for and no boundary reports. An implementation
+> `constructor`. `then` is about what the host does with a record afterward:
+> JavaScript's promise resolution probes for that name and adopts whatever
+> answers it, if what answers is callable. A record read through a layer that
+> can answer a property with a function is therefore consumed by resolution
+> nothing asked for, with no fault reported. An implementation
 > on a host that neither routes property assignment through a prototype chain
 > nor duck-types promises reserves no names at all, which is the behavior the
 > format describes.

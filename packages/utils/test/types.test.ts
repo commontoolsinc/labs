@@ -394,9 +394,9 @@ describe("types", () => {
 
     it("returns `true` for `then`", () => {
       // Reserved for a different reason than the two above, which is why it
-      // gets its own case: `then` copies faithfully and passes every boundary
-      // here. What it does not survive is promise resolution, which duck-types
-      // any object carrying the name.
+      // gets its own case. `then` copies faithfully; what it does not survive
+      // is a layer that answers the property with a function, which promise
+      // resolution then adopts.
       expect(isUnsafeObjectKey("then")).toBe(true);
     });
 
