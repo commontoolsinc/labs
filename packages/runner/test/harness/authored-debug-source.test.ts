@@ -161,7 +161,24 @@ describe("authored debug source", () => {
       expect((fn as { src?: string }).src).toBeUndefined();
     });
 
-    it("keeps the accessor off enumeration", () => {
+    it("reports the authored binding name in place of the hoisted one", () => {
+      const fn = function __cfLift_1() {
+        return 0;
+      };
+      defineAuthoredDebugAccessors(fn);
+      recordAuthoredDebugSource(fn, { bindingName: "doubled" });
+      expect(fn.name).toBe("doubled");
+    });
+
+    it("falls back to the function's own name without an entry", () => {
+      const fn = function computeTotal() {
+        return 0;
+      };
+      defineAuthoredDebugAccessors(fn);
+      expect(fn.name).toBe("computeTotal");
+    });
+
+    it("keeps both accessors off enumeration", () => {
       const fn = () => 0;
       defineAuthoredDebugAccessors(fn);
       recordAuthoredDebugSource(fn, { src: "cf:module/HASH/main.tsx:1:0" });

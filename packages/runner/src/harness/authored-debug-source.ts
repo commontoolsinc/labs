@@ -109,23 +109,36 @@ function readPosition(
 }
 
 /**
- * Install the lazy `src` debug accessor on a builder artifact's function.
+ * Install the lazy `src` and `name` debug accessors on a builder artifact's
+ * function.
  *
- * The value is served from the map rather than written onto the function
+ * The values are served from the map rather than written onto the function
  * because the provenance walk that fills the map runs long after the builder
  * call, by which time `hardenVerifiedFunction` has frozen the implementation.
- * The accessor is non-enumerable so it stays out of serialization and
+ * The accessors are non-enumerable so they stay out of serialization and
  * `Object.entries` walks, and configurable so a re-registered function can be
  * re-annotated.
  *
- * A miss returns undefined and never throws: `Runner` reads `.src` on the
- * invoke path, where a body compiled before the annotation existed is normal.
+ * A miss returns the function's own name for `name` and undefined for `src`,
+ * and neither ever throws: `Runner` reads `.src` on the invoke path, where a
+ * body compiled before the annotation existed is normal.
+ *
+ * `name` reports the AUTHORED declaration name. The pipeline hoists a builder
+ * callback to a generated `__cfLift_N` const, so the function's own name is
+ * that generated one and the name the author would recognize survives only in
+ * the annotation.
  */
 export function defineAuthoredDebugAccessors(
   fn: (...args: any[]) => unknown,
 ): void {
+  const originalName = fn.name;
   Object.defineProperty(fn, "src", {
     get: () => getAuthoredDebugSource(fn)?.src,
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(fn, "name", {
+    get: () => getAuthoredDebugSource(fn)?.bindingName ?? originalName,
     enumerable: false,
     configurable: true,
   });

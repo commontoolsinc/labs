@@ -71,7 +71,7 @@ const HANDLER_PROGRAM: RuntimeProgram = {
   ],
 };
 
-type DebugAnnotated = { src?: string };
+type DebugAnnotated = { src?: string; name?: string };
 
 /**
  * The authored coordinate of `anchor` on `line` of `source`, spelled the way
@@ -143,7 +143,7 @@ describe("authored source annotation", () => {
   });
 
   describe("fn.src by artifact class", () => {
-    it("reports the authored position of an exported builder const", async () => {
+    it("reports the authored position and name of an exported builder const", async () => {
       const engine = makeRuntime();
       const { main } = await engine.compileAndEvaluateModules(
         ARTIFACT_PROGRAM,
@@ -156,6 +156,7 @@ describe("authored source annotation", () => {
           authoredAt(ARTIFACT_SOURCE, 3, "(n: number) => n + 1"),
         ),
       ).toBe(true);
+      expect(exported.name).toBe("exported");
     });
 
     it("reports the authored position of an in-place non-exported builder const", async () => {
@@ -175,6 +176,7 @@ describe("authored source annotation", () => {
           authoredAt(ARTIFACT_SOURCE, 2, "(n: number) => n * 2"),
         ),
       ).toBe(true);
+      expect(inline.name).toBe("inline");
     });
 
     it("reports the authored position of a lift hoisted out of a pattern body", async () => {
@@ -192,9 +194,12 @@ describe("authored source annotation", () => {
           authoredAt(ARTIFACT_SOURCE, 9, "() => (value as number) + 100"),
         ),
       ).toBe(true);
+      // The hoisted const is `__cfLift_N`; the name the author would recognize
+      // survives only in the annotation.
+      expect(hoisted.name).toBe("hoisted");
     });
 
-    it("reports the authored position of an export-default pattern", async () => {
+    it("reports the authored position of an export-default pattern, unnamed", async () => {
       const engine = makeRuntime();
       const { main } = await engine.compileAndEvaluateModules(
         ARTIFACT_PROGRAM,
@@ -208,9 +213,12 @@ describe("authored source annotation", () => {
           authoredAt(ARTIFACT_SOURCE, 8, "({ value }) => {"),
         ),
       ).toBe(true);
+      // `export default` binds no name, and the declaration a pattern is
+      // assigned to would not name what is written inside its callback.
+      expect(patternFactory.name).toBe("");
     });
 
-    it("reports where a referenced callback was written", async () => {
+    it("reports where a referenced callback was written, under its own name", async () => {
       const engine = makeRuntime();
       const { main } = await engine.compileAndEvaluateModules(
         ARTIFACT_PROGRAM,
@@ -220,13 +228,14 @@ describe("authored source annotation", () => {
         "n - 1",
       );
 
-      // The position names where the callback was written, not the builder
+      // The position names the callback's own declaration, not the builder
       // binding that consumed it.
       expect(
         viaReference.src?.endsWith(
           authoredAt(ARTIFACT_SOURCE, 4, "(n: number) => n - 1"),
         ),
       ).toBe(true);
+      expect(viaReference.name).toBe("referenced");
     });
 
     it("reports a declaration-form callback at its declaration", async () => {
@@ -244,6 +253,7 @@ describe("authored source annotation", () => {
           authoredAt(ARTIFACT_SOURCE, 6, "function declared"),
         ),
       ).toBe(true);
+      expect(viaDeclaration.name).toBe("declared");
     });
 
     it("resolves a handler's src to its authored source, not a bundle coordinate", async () => {
@@ -351,10 +361,11 @@ describe("authored source annotation", () => {
       ).toBe(true);
     });
 
-    it("omits src on a source-free load", async () => {
+    it("omits src on a source-free load, keeping the authored name", async () => {
       // A by-identity warm load carries no source, so the injection offset for
       // the module is unknown. A position that might be off by one is worse
-      // than none, so `src` is absent.
+      // than none, so `src` is absent — the name still comes from the
+      // annotation the cached body carries.
       const engine = makeRuntime();
       const { modules, entryIdentity } = await engine.compileToRecordGraph(
         ARTIFACT_PROGRAM,
@@ -368,6 +379,7 @@ describe("authored source annotation", () => {
       const exported = exportedImplementation(main, "exported");
 
       expect(exported.src).toBeUndefined();
+      expect(exported.name).toBe("exported");
     });
   });
 
