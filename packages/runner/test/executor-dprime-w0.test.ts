@@ -764,6 +764,174 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     setup.cancel();
   });
 
+  it("P-release (root leave / 1→0): a writer demanded ONLY through a departing session releases its root status when that session leaves (a 1→0 transition — demandedWriters drops, demandRootLeaves increments) and goes DORMANT (a later write to its input does not re-derive server-side), while a writer a REMAINING session still demands stays a root and keeps re-deriving", async () => {
+    // MAJOR-2 of the W1 review: P-coarse never exercised a root release
+    // (its departing keys named WRITERLESS entities — a per-user instance
+    // row of a space-declared doc maps to a `user/…` entity while the
+    // writer is indexed under `space/…`), so `demandRootLeaves` stayed 0
+    // and a no-op `leaveDemandedEntity` (M-B) was green. This pin drives a
+    // genuine 1→0: two SEPARATE pieces, each with its OWN space-scoped
+    // `label` writer, one demanded only through Bob's session.
+    //
+    // The releasing writer must be demanded by NO other session — and a
+    // creator's session tracks every doc its local run pulled, so the
+    // SOLO piece is created BY BOB (not Alice): only Bob's session ever
+    // names its `label` doc. When Bob leaves, that space key departs (no
+    // remaining pair) → `leaveDemandedEntity` 1→0 → the writer releases.
+    // Killing mutation (review M-B): `leaveDemandedEntity` a no-op → the
+    // solo writer never releases (`demandRootLeaves` 0; a later write
+    // re-derives — dormancy fails).
+    host = newHost();
+    const aliceClient = openClient(aliceSigner);
+    const alice = aliceClient.runtime;
+    const bobClient = openClient(bobSigner);
+    const bob = bobClient.runtime;
+    const engine = await server.engineForSpace(space);
+    const make = async (rt: Runtime, argName: string, resultName: string) => {
+      const compiled = await rt.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: FAN_OUT_PATTERN }],
+      }, { space });
+      const arg = rt.getCell<Record<string, unknown>>(
+        space,
+        argName,
+        undefined,
+      );
+      const result = rt.getCell<Record<string, unknown>>(
+        space,
+        resultName,
+        compiled.resultSchema,
+      );
+      await arg.sync();
+      await result.sync();
+      {
+        const seed = rt.edit();
+        arg.withTx(seed).set({ n: 1 });
+        expect((await seed.commit()).error).toBeUndefined();
+      }
+      {
+        const tx = rt.edit();
+        rt.run(tx, compiled, arg, result);
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await rt.idle();
+      await rt.storageManager.synced();
+      return { compiled, resultId: result.getAsNormalizedFullLink().id };
+    };
+    // Alice creates+watches SHARED; Bob creates SOLO. Both watch SHARED;
+    // only Bob watches SOLO. (A space `label` computed per piece — the
+    // writer that becomes a demand root; `label:1` is its landed value.)
+    const shared = await make(alice, "dp-r-sh-arg", "dp-r-sh-res");
+    const solo = await make(bob, "dp-r-so-arg", "dp-r-so-res");
+    const cancels: Array<() => void> = [];
+    const watch = async (
+      rt: Runtime,
+      resultName: string,
+      compiled: { resultSchema: unknown },
+    ) => {
+      const cell = rt.getCell<Record<string, unknown>>(
+        space,
+        resultName,
+        compiled.resultSchema as never,
+      );
+      await cell.sync();
+      cancels.push(cell.sink(() => {}));
+    };
+    await watch(alice, "dp-r-sh-res", shared.compiled);
+    await watch(bob, "dp-r-sh-res", shared.compiled);
+    await watch(bob, "dp-r-so-res", solo.compiled);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation",
+    );
+    await waitUntil(
+      () =>
+        instanceHolds(engine, "space", '"label:1"') &&
+        (host!.spaceServer(space)?.demandedIdentitiesOf(solo.resultId) ?? [])
+          .some((i) => i.principal === bobSigner.did()),
+      "both pieces' labels to land and bob's solo demand to register",
+    );
+    await servingRuntime!.idle();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const writersBefore = servingRuntime!.scheduler.demandedWriterCount;
+    const leavesBefore = host!.stats().demand.demandRootLeaves;
+    expect(writersBefore).toBeGreaterThanOrEqual(4);
+    // Bob departs (his runtime + connection close; the session prunes
+    // after the TTL). His solo piece's `label` doc then has no remaining
+    // demander; the shared piece's `label` doc still has Alice's.
+    await bob.dispose();
+    await bobClient.manager.close();
+    runtimes.splice(runtimes.indexOf(bob), 1);
+    managers.splice(managers.indexOf(bobClient.manager), 1);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await waitUntil(
+      () => {
+        host!.spaceServer(space)!.noteDemandChanged();
+        return demandRows().filter((r) =>
+          r.identity?.principal === bobSigner.did()
+        ).length === 0;
+      },
+      "bob's rows to leave the demand set",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const writersAfter = servingRuntime!.scheduler.demandedWriterCount;
+    const leavesAfter = host!.stats().demand.demandRootLeaves;
+    console.log(
+      `[P-release] demandedWriters ${writersBefore} → ${writersAfter}; ` +
+        `demandRootLeaves ${leavesBefore} → ${leavesAfter}`,
+    );
+    // A genuine 1→0: the solo piece's writers left the root set, and the
+    // leave was COUNTED (M-B — a no-op leave — leaves this flat, RED).
+    expect(writersAfter).toBeLessThan(writersBefore);
+    expect(leavesAfter).toBeGreaterThan(leavesBefore);
+    // DORMANCY: a write to the SOLO piece's input (its space `n`) does
+    // NOT re-derive server-side — its `label` writer is no longer a
+    // demand root, so the dirtied node stays unmaterialized. (M-B keeps
+    // the writer a root → `label:2` lands → this assertion RED.)
+    const soloArg = alice.getCell<{ n: number }>(
+      space,
+      "dp-r-so-arg",
+      { type: "object", properties: { n: { type: "number" } } } as never,
+    );
+    await soloArg.sync();
+    {
+      const tx = alice.edit();
+      soloArg.key("n").withTx(tx).set(2);
+      expect((await tx.commit()).error).toBeUndefined();
+      await alice.idle();
+      await alice.storageManager.synced();
+    }
+    // SHARED still serves: Alice writes its `n`, its `label` re-derives
+    // (the remaining-demander writer stays a root — the "release only
+    // when the LAST demander leaves" half).
+    const sharedArg = alice.getCell<{ n: number }>(
+      space,
+      "dp-r-sh-arg",
+      { type: "object", properties: { n: { type: "number" } } } as never,
+    );
+    await sharedArg.sync();
+    {
+      const tx = alice.edit();
+      sharedArg.key("n").withTx(tx).set(2);
+      expect((await tx.commit()).error).toBeUndefined();
+      await alice.idle();
+      await alice.storageManager.synced();
+    }
+    await waitUntil(
+      () => instanceHolds(engine, "space", '"label:2"'),
+      "the SHARED piece's label to re-derive (its writer stays a root)",
+    );
+    // The dormant solo piece did NOT re-derive: exactly ONE `label:2`
+    // landed (the shared piece's), never the solo piece's.
+    const labelTwos = [...rowsUnder(engine, "space").values()].filter((v) =>
+      JSON.stringify(v ?? null).includes('"label:2"')
+    );
+    console.log(`[P-release] label:2 instances=${labelTwos.length}`);
+    expect(labelTwos.length).toBe(1);
+    expect(walkRuns()).toBe(0);
+    cancels.forEach((cancel) => cancel());
+  });
+
   it("P-arrival: a second principal arriving after the node narrowed gets her instance on demand (per-key not-current re-arm / root arrival re-arm), the first principal's instance untouched", async () => {
     const setup = await standUp({
       names: { arg: "dp-d-arg", result: "dp-d-result" },
