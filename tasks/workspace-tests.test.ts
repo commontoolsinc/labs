@@ -412,20 +412,8 @@ Deno.test("initializeDb runs the initialize-db task in the given directory", asy
     await makeWorkspace(dir, [], {
       "initialize-db": "echo ok > initialized.txt",
     });
-    assertEquals(await initializeDb(dir), true);
+    await initializeDb(dir);
     await Deno.stat(`${dir}/initialized.txt`);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("initializeDb returns false when the task fails", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "ws-initdb-fail-" });
-  try {
-    await makeWorkspace(dir, [], {
-      "initialize-db": "exit 3",
-    });
-    assertEquals(await initializeDb(dir), false);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

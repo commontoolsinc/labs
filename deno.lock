@@ -60,9 +60,7 @@
     "jsr:@std/testing@1": "1.0.19",
     "jsr:@std/testing@^1.0.19": "1.0.19",
     "jsr:@std/text@~1.0.7": "1.0.19",
-    "jsr:@std/ulid@1": "1.0.0",
     "jsr:@std/yaml@*": "1.0.12",
-    "jsr:@std/yaml@1": "1.0.12",
     "jsr:@zip-js/zip-js@^2.7.52": "2.8.33",
     "npm:@agentclientprotocol/sdk@1.2.1": "1.2.1_zod@4.4.3",
     "npm:@ai-sdk/anthropic@^4.0.16": "4.0.16_zod@4.4.3",
@@ -353,9 +351,6 @@
     },
     "@std/text@1.0.19": {
       "integrity": "003a0e032d360e8c3a4e0410fb792c77a66bd6553fee9d60c6ec1bce30d29223"
-    },
-    "@std/ulid@1.0.0": {
-      "integrity": "d41c3d27a907714413649fee864b7cde8d42ee68437d22b79d5de4f81d808780"
     },
     "@std/yaml@1.0.12": {
       "integrity": "7deabca4545bcedd07c5f69ea53acea71b8b4c67562f224e17b90d75944cb20c"
@@ -2489,7 +2484,6 @@
       "jsr:@std/jsonc@^1.0.2",
       "jsr:@std/path@^1.1.6",
       "jsr:@std/testing@^1.0.19",
-      "jsr:@std/ulid@1",
       "npm:@noble/hashes@^2.2.0",
       "npm:dagre@~0.8.5",
       "npm:hash-wasm@^4.12.0",

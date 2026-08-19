@@ -12,7 +12,6 @@
 
 import { exists } from "@std/fs";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
-import { FragmentWriter } from "@commonfabric/test-support/records";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
@@ -932,25 +931,8 @@ export async function replayAll(
     unmappable = 0,
     stranded = 0;
   const failures: ReplayFailure[] = [];
-  // One gate-kind record per fixture, the replay's natural unit: a fixture
-  // covers several patterns, and anything finer would be a redesign. The
-  // stamp is part of the name because each captured generation is its own
-  // test; a new capture is a new test, not a rename.
-  const recordsFragment = FragmentWriter.openForRun();
   for (const vintage of vintages) {
-    const replayStarted = performance.now();
     const report = await replayVintage(roots, vintage);
-    recordsFragment?.append({
-      line: "record",
-      test: {
-        k: "gate",
-        s: "repo",
-        n: `pattern-vintage ${vintage.testKey} ${vintage.tier} ` +
-          vintage.stamp,
-      },
-      outcome: report.failures.length > 0 ? "fail" : "pass",
-      durationMs: Math.round(performance.now() - replayStarted),
-    });
     perVintage.push({
       ref: vintage,
       targets: report.targets,
@@ -985,7 +967,6 @@ export async function replayAll(
     }
     failures.push(...report.failures);
   }
-  recordsFragment?.close();
   return {
     vintages,
     replayed: vintages.length,

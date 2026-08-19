@@ -70,12 +70,6 @@ mapped in [`../README.md`](../README.md).
   rebalancing jobs
 - [`COVERAGE.md`](COVERAGE.md) — the two coverage mechanisms, which job
   collects which, and how to read the resulting numbers
-- [`test-records.md`](test-records.md) — the record of every test execution:
-  what gets recorded, the environment surface, opting a workstation in with
-  a personal key, and reading the public store
-- [`test-records-adoption.md`](test-records-adoption.md) — implementing the
-  test-run record system in another repository of the organization: what is
-  shared, what the repository adds, and the rules that are not optional
 - [`deno-coverage-guard-line-artifact.md`](deno-coverage-guard-line-artifact.md)
   — why `deno coverage` reports a one-line guard as uncovered whenever its
   branch is not taken

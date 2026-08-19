@@ -27,8 +27,6 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       # A manual run can name any ref. Publishing moves the `latest` tag that
       # the deployment follows, so a run on another ref stops here, before
@@ -52,16 +50,7 @@ jobs:
 
       - name: 🧪 Test dashboard
         working-directory: packages/dashboard
-        run: deno task run-recorded unit dashboard test -- deno task test
-
-      # The test-records relay follows this workflow's completion and ships
-      # the artifact; this job stays free of cloud credentials.
-      - name: 📤 Ship test records
-        if: always()
-        uses: ./.github/actions/test-records-ship
-        with:
-          artifact: dashboard-tests
-          job: Tests
+        run: deno task test
 
   publish:
     name: Publish image

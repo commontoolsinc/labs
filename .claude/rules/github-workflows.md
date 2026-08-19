@@ -47,19 +47,6 @@ other job to the shape: it fails the `Check` job when a bound is missing, when
 it is written as a number rather than an alias, or when a step's anchor is
 fewer than ten minutes below its job's.
 
-## A test job ships test records
-
-Every job that runs tests sets `CF_TEST_RECORDS_DIR` to a workspace spool
-and ends with a `📤 Ship test records` step using the
-`./.github/actions/test-records-ship` composite action, `if: always()`,
-with the job's display name, its matrix leg in `artifact:`, and a
-`--junit` specification when the job produces JUnit XML. Command-level
-steps wrap their command in `deno task run-recorded <kind> <scope> <name>
---`. The contract is `docs/specs/test-records.md`; the wiring recipe is
-"Covering a new test surface" in `docs/development/test-records.md`. A job
-without the ship step runs fine and records nothing — which is how a new
-job silently falls out of the flake and duration history.
-
 ## Before splitting or rebalancing jobs
 
 `docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,

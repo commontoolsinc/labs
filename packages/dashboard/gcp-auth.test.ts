@@ -161,7 +161,7 @@ Deno.test("token exchange 200 with no access_token is an error, not an empty bea
       ),
     Error,
   );
-  assertEquals(err.message, "token exchange returned no access_token string");
+  assertEquals(err.message, "token exchange returned no access_token");
 });
 
 Deno.test("metadata server rejects: the status is reported (a 404 here means the wrong path)", async () => {

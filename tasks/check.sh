@@ -85,8 +85,124 @@ if [[ "${DENO_VERSION}" != "${DENO_VERSION_PINNED}" ]]; then
   trap version_mismatch_reminder EXIT
 fi
 
-# The checked path list and the per-package invocations live in
-# tasks/typecheck.ts; this script owns only the version gate above. Each
-# package group is its own timed, recorded typecheck-kind test.
-deno run --allow-read --allow-write --allow-env --allow-run \
-  tasks/typecheck.ts "$@"
+# Collect all paths to check. Glob patterns will be expanded by bash.
+#
+# This list is the single type-checking point for the paths it names: the CI
+# test jobs and the package test tasks that cover these paths run
+# `deno test --no-check` and rely on this script (via the Check job's
+# "Type check codebase" step) for type safety. Before adding --no-check to a
+# test invocation, make sure every file it loads is under a path listed here.
+# Removing a path from this list removes its type checking entirely.
+FILES_TO_CHECK=()
+
+# Directory paths (no glob expansion needed)
+DIRS=(
+  "packages/agents-host"
+  "packages/api"
+  "packages/background-piece-service"
+  "packages/cf-harness"
+  "packages/cli/commands"
+  "packages/cli/lib"
+  "packages/cli/support"
+  "packages/cli/test"
+  "packages/connectors/agents"
+  "packages/content-hash"
+  "packages/dashboard"
+  "packages/data-model"
+  "packages/deno-web-test"
+  "packages/felt"
+  "packages/fuse"
+  "packages/generated-patterns"
+  "packages/home-schemas"
+  "packages/html"
+  "packages/identity"
+  "packages/iframe-sandbox"
+  "packages/integration"
+  "packages/js-compiler"
+  "packages/leb128"
+  "packages/lib-shell"
+  "packages/llm"
+  "packages/memory"
+  "packages/patterns/auth"
+  "packages/patterns/battleship"
+  "packages/patterns/budget-tracker"
+  "packages/patterns/contacts"
+  "packages/patterns/examples"
+  "packages/patterns/gideon-tests"
+  "packages/patterns/google/core/integration"
+  "packages/patterns/google/core/util"
+  "packages/patterns/integration"
+  "packages/patterns/notes"
+  "packages/patterns/record"
+  "packages/patterns/scrabble"
+  "packages/patterns/system"
+  "packages/patterns/test"
+  "packages/patterns/tools"
+  "packages/patterns/weekly-calendar"
+  "packages/piece"
+  "packages/pure-json"
+  "packages/runner"
+  "packages/runtime-client"
+  "packages/schema-generator/src"
+  "packages/shell"
+  "packages/spec-model"
+  "packages/state-inspector"
+  "packages/static/scripts"
+  "packages/static/test"
+  "packages/test-support"
+  "packages/toolshed"
+  "packages/ts-transformers/src"
+  "packages/utils"
+)
+
+FILES_TO_CHECK+=("${DIRS[@]}")
+
+# Glob patterns - bash expands these with nullglob set
+FILES_TO_CHECK+=(tasks/*.ts)
+FILES_TO_CHECK+=(scripts/*.ts)
+FILES_TO_CHECK+=(packages/ui/src/v2/components/*[!outliner]/*.ts*)
+FILES_TO_CHECK+=(packages/cli/*.ts)
+FILES_TO_CHECK+=(packages/static/*.ts)
+FILES_TO_CHECK+=(packages/patterns/*.ts)
+FILES_TO_CHECK+=(packages/patterns/*.tsx)
+
+while IFS= read -r testFile; do
+  FILES_TO_CHECK+=("${testFile}")
+done < <(find packages/ts-transformers/test -type f -name '*.test.ts' -print)
+
+# schema-generator tests, excluding test/fixtures: the `*.input.ts` fixtures
+# name ambient wrappers (Cell, Stream, Writable) without importing them, since
+# the transformer supplies those, so they do not type-check on their own.
+while IFS= read -r testFile; do
+  FILES_TO_CHECK+=("${testFile}")
+done < <(find packages/schema-generator/test -type f -name '*.test.ts' -print)
+
+# Google patterns (previously checked individually to avoid OOM, now included
+# with increased heap limit)
+FILES_TO_CHECK+=(packages/patterns/google/core/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/core/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/extractors/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/extractors/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/WIP/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/WIP/*.tsx)
+
+if (( ${#FILES_TO_CHECK[@]} == 0 )); then
+    # This can happen if the repo ends up in a very weird state, but it _can_
+    # happen!
+    echo 1>&2 "${cmdName}:" 'No files to check?! (Project is in an odd state.)'
+    exit 1
+fi
+
+echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
+
+reloadArg=()
+if [[ "${DENO_CHECK_RELOAD:-}" != '' ]]; then
+    echo 'Reloading Deno dependencies before checking...'
+    reloadArg=(--reload)
+fi
+
+DENO_V8_FLAGS="--max-old-space-size=8192" deno check "${reloadArg[@]}" "${FILES_TO_CHECK[@]}"
+
+echo "Type check complete."

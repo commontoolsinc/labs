@@ -1,5 +1,4 @@
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
-import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import { collectPatternFiles, PATTERNS_DIR } from "./pattern-files.ts";
 
@@ -74,25 +73,6 @@ for (const diagnostic of result.diagnostics) {
     .replace(/^\/fid1:[^/]+\//, "")
     .replace(`${cwd}/`, "") || "(batch)";
   failures.push({ file, error: diagnostic.message });
-}
-
-// One typecheck-kind record per file in this shard, named "cfcheck <file>".
-// The shard stays one batched TypeScript program because the per-program
-// bind dominates its cost, so per-file durations do not exist: every record
-// carries a zero duration and only the outcome is meaningful. A diagnostic
-// attributed to "(batch)" fails the run without belonging to a file record.
-const recordsFragment = FragmentWriter.openForRun();
-if (recordsFragment !== undefined) {
-  const failedFiles = new Set(failures.map((failure) => failure.file));
-  for (const file of filesToCheck) {
-    recordsFragment.append({
-      line: "record",
-      test: { k: "typecheck", s: "repo", n: `cfcheck ${file}` },
-      outcome: failedFiles.has(file) ? "fail" : "pass",
-      durationMs: 0,
-    });
-  }
-  recordsFragment.close();
 }
 
 if (failures.length > 0) {

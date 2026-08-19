@@ -8,17 +8,6 @@ export CF_FUSE_DEBUG=1
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
-# This sectionless script is one recorded test. The record is written from
-# the existing cleanup trap, which owns EXIT; registering a second trap
-# would replace it. With recording off this initializes nothing, so the
-# suite carries no dependency on the timing helper.
-source "$SCRIPT_DIR/test-records.sh"
-CF_TEST_RECORD_NAME="fuse-exec.sh"
-CF_TEST_RECORD_START_MS=0
-if [ -n "${CF_TEST_RECORDS_DIR:-}" ]; then
-  CF_TEST_RECORD_START_MS=$(cf_test_now_ms)
-fi
-
 error() {
   # Drop errexit for the diagnostics: this path is about to exit non-zero anyway,
   # and one failing probe must not cut the dump short. Dump the daemon's own state
@@ -633,12 +622,6 @@ cleanup() {
   fi
   if [ -n "${INCOMPATIBLE_PATTERN_SRC:-}" ]; then
     rm -f "$INCOMPATIBLE_PATTERN_SRC"
-  fi
-  # The record carries the run's final verdict, wedged teardown included.
-  if [ "$wedge_confirmed" = true ]; then
-    cf_test_record_with_status 1
-  else
-    cf_test_record_with_status "$exit_code"
   fi
   # If the graceful unmount could not complete before the deadline, the teardown
   # wedged after the test otherwise passed. Fail the run so that hang is reported

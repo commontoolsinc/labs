@@ -25,7 +25,6 @@
  */
 
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
-import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import {
   collectPatternFiles,
@@ -100,12 +99,6 @@ async function main() {
   // than by pattern count, so a cost regression is not visible from the total.
   const timingEnabled = Deno.env.get("PATTERN_COMPAT_TIMING") !== undefined;
   const timings: { key: string; ms: number }[] = [];
-  // One gate-kind record per pattern file in this shard, named
-  // "pattern-compat <key>", with the compile and check time and whether
-  // that file produced findings. Inert without CF_TEST_RECORDS_DIR.
-  const recordsFragment = FragmentWriter.openForRun();
-  const checkMsByKey = new Map<string, number>();
-  const failedKeys = new Set<string>();
   for (const file of files) {
     const key = patternKey(file);
     const started = performance.now();
@@ -144,11 +137,8 @@ async function main() {
       const reason = formatError(error);
       unavailable.set(key, reason);
       evaluationErrors.push({ pattern: key, error: reason });
-    } finally {
-      // In a finally so a file without a pattern export is timed too; its
-      // record below still carries the compile it cost.
-      timings.push({ key, ms: performance.now() - started });
     }
+    timings.push({ key, ms: performance.now() - started });
   }
   if (timingEnabled) {
     console.log("\nSlowest compiles:");
@@ -187,36 +177,13 @@ async function main() {
   // caught: it has baselines but no contract, which `checkPattern` reports.
   const keys = [...new Set([...contracts.keys(), ...unavailable.keys()])]
     .sort();
-  const compileMsByKey = new Map(
-    timings.map((timing) => [timing.key, timing.ms]),
-  );
-  const unexpectedKeys = new Set(
-    evaluationErrors
-      .filter((failure) => !UNEVALUABLE_PATTERNS.has(failure.pattern))
-      .map((failure) => failure.pattern),
-  );
-  // One gate-kind record per file, appended the moment its verdict is
-  // known so a killed run keeps every finished file's record. The
-  // retirement findings of an unfiltered shard 1 concern patterns outside
-  // this shard's file set; they fail the run-level record the CI step's
-  // run-recorded wrapper emits, not a per-file one.
-  const appendRecord = (key: string) =>
-    recordsFragment?.append({
-      line: "record",
-      test: { k: "gate", s: "repo", n: `pattern-compat ${key}` },
-      outcome: failedKeys.has(key) || unexpectedKeys.has(key) ? "fail" : "pass",
-      durationMs: Math.round(
-        (compileMsByKey.get(key) ?? 0) + (checkMsByKey.get(key) ?? 0),
-      ),
-    });
   for (const key of keys) {
     const current = contracts.get(key);
     const baselines = await readBaselines(BASELINES_DIR, key);
     const checkStarted = performance.now();
     const allFindings = checkPattern(key, current, baselines);
-    checkMsByKey.set(key, performance.now() - checkStarted);
     if (timingEnabled) {
-      const ms = Math.round(checkMsByKey.get(key)!);
+      const ms = Math.round(performance.now() - checkStarted);
       // A slow check means a contract CHANGED and its proof is expensive — the
       // schema machinery blows up combinatorially on some shapes.
       if (ms > 200) console.log(`  check ${ms}ms  ${key}`);
@@ -248,20 +215,16 @@ async function main() {
       }
       // A recorded contract still has to survive the incompatibility check
       // below — `--update` adds evidence, it never clears a finding.
-      const kept = patternFindings.filter((f) => f.kind !== "missing-baseline");
-      if (kept.length > 0) failedKeys.add(key);
-      findings.push(...kept);
-      appendRecord(key);
+      findings.push(
+        ...patternFindings.filter((f) => f.kind !== "missing-baseline"),
+      );
       continue;
     }
 
-    if (patternFindings.length > 0) failedKeys.add(key);
     findings.push(...patternFindings);
-    appendRecord(key);
   }
 
   await runtime.dispose();
-  recordsFragment?.close();
 
   if (recorded.length > 0) {
     console.log(`\nRecorded ${recorded.length} contract(s):`);
