@@ -2310,25 +2310,31 @@ describe("Phase 3 events-down (serving side)", () => {
       };
       const seenView = () =>
         (w.servingC.get() as { seen?: string[] } | undefined)?.seen ?? [];
+      const sideView = () =>
+        (sideServing.get() as { n?: number } | undefined)?.n ?? 0;
       expect(seenView()).toEqual([]);
+      expect(sideView()).toBe(0);
 
+      // Hold the wave open once EITHER of the copy's two seals is visible
+      // through the sealed overlay. The seal chain runs emitter → sibling
+      // (committed inline by the handler) → the handler's own tx, so the
+      // sibling's write is the earliest event-handler seal the settle's
+      // barrier can observe — the same chain position the (α3) pin's
+      // handler seal holds; the handler's seal then joins the held wave.
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () => seenView().includes("ping");
+      servingManager!.settleGateWhen = () =>
+        sideView() === 1 || seenView().includes("ping");
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);
         await waitUntil(
-          () => seenView().includes("ping"),
-          "the derivation's cascade copy to SEAL into the open wave",
+          () => seenView().includes("ping") && sideView() === 1,
+          "the derivation's cascade copy AND its sibling to SEAL into the open wave",
           20_000,
         );
-        // The sibling sealed into the same open wave (visible through the
-        // sealed overlay).
-        await waitUntil(
-          () => (sideServing.get() as { n?: number } | undefined)?.n === 1,
-          "the sibling tx to SEAL into the open wave",
-          20_000,
-        );
+        // The wave is HELD: nothing of it has reached the store yet (the
+        // sidecar holds no "ping" entry) — the rival below races it.
+        expect(w.entriesOf(w.sidecarOf(w.s2))).toEqual([]);
         w.s2.send({ tag: "rival" } as never);
         await clientRuntime.idle();
         await clientRuntime.storageManager.synced();
