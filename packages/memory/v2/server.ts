@@ -2367,11 +2367,19 @@ export class Server {
               operation.op,
             );
           }
-          this.markSpaceDirty(message.space, dirtyOps.keys(), {
-            sessionId: message.sessionId,
-            seq: commit.seq,
-            ops: dirtyOps,
-          });
+          if (dirtyOps.size > 0) {
+            this.markSpaceDirty(message.space, dirtyOps.keys(), {
+              sessionId: message.sessionId,
+              seq: commit.seq,
+              ops: dirtyOps,
+            });
+          } else {
+            // Every operation elided: nothing was written, so no document
+            // turns dirty — but the accept still owes this session its
+            // catch-up marker, and the marker rides the batched flush.
+            // Schedule the pass without dirtying anything.
+            this.markSpaceDirty(message.space);
+          }
           // Stage the accept's catch-up obligation with the dirty mark. The
           // verdict response leaves this request before the independently
           // scheduled batch can send its covering frame. The batched fan-out

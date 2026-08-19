@@ -1022,3 +1022,61 @@ Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watc
   );
   observer.close();
 });
+
+Deno.test("memory v2 server: an all-elided accept still delivers its marker on an empty frame", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-all-elided",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-install",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "cid:fid1:all-elided",
+        value: { value: { type: "string", title: "all-elided" } },
+      }],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // The whole commit elides: nothing is written and no document turns
+  // dirty, yet the writer parks its promotion on the catch-up marker — the
+  // flush must still run and carry it on an otherwise-empty frame.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-elided",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "cid:fid1:all-elided",
+        value: { value: { type: "string", title: "all-elided" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ elidedOpIndexes?: number[] }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.elidedOpIndexes, [0]);
+  await server.flushSessions([space]);
+  const frame = assertEffect(shiftMessage(committerMessages))
+    .effect as SessionSync;
+  assertEquals(frame.upserts, []);
+  assertEquals(frame.caughtUpLocalSeq, 2);
+});
