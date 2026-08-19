@@ -260,6 +260,27 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
     let decoded: FabricValue;
 
     try {
+      // Every state is offered to the codec before it is decoded, which is
+      // what lets a `decode()` be written for the states its codec accepts
+      // rather than for everything its format can carry. Inside the `try`
+      // because a codec's own code runs here, and a predicate that throws is
+      // a fault of the same kind as one thrown from the decoding.
+      const accepted = terminal
+        ? (matched as TerminalCodec<Encoded>).canDecode(rawState)
+        : (matched as NonterminalCodec).canDecode(state as FabricValue);
+
+      if (!accepted) {
+        // Reported rather than raised, like every other malformation off a
+        // channel: `reportMalformed()` is what settles it against leniency,
+        // and strictly what it raises passes back out through the `catch`
+        // below untouched.
+        return this.reportMalformed(
+          tag,
+          state,
+          "state is not one this codec decodes",
+        );
+      }
+
       decoded = terminal
         ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, this.env)
         : (matched as NonterminalCodec).decode(
@@ -290,11 +311,12 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
       !this.config.lenient && (decoded instanceof ProblematicValue) &&
       (matched.uniqueHandledClass !== ProblematicValue)
     ) {
-      // The two ways a codec reports a state it will not accept -- throwing,
-      // and returning one of these -- are the codec author's choice and say
-      // nothing about what a caller wants. `lenient` is what says that, so
-      // this instance settles both into the same answer: a strict decode
-      // fails, whichever way the codec reported it.
+      // Of the ways a codec reports a state it will not accept, two are
+      // settled this late: throwing, caught above, and returning one of
+      // these. Which it picks is the codec author's choice and says nothing
+      // about what a caller wants. `lenient` is what says that, so this
+      // instance settles both into the same answer: a strict decode fails,
+      // whichever way the codec reported it.
       //
       // `ProblematicValue`'s own codec is exempt, because for that one a
       // `ProblematicValue` is the successful product rather than a refusal.

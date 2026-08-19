@@ -88,6 +88,16 @@ describe("FabricEpochDays", () => {
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for string state", () => {
+          expect(codec.canDecode("AA")).toBe(true);
+        });
+
+        it("returns `false` for state that is not a string", () => {
+          expect(codec.canDecode(42)).toBe(false);
+        });
+      });
+
       describe("decode()", () => {
         it("decodes a flat base64 string (epoch zero)", () => {
           const decoded = codec.decode(
@@ -97,11 +107,6 @@ describe("FabricEpochDays", () => {
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(0n);
-        });
-
-        it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, env);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
         it("decodes malformed base64 to a `ProblematicValue`", () => {

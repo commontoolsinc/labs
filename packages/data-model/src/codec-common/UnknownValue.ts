@@ -121,6 +121,13 @@ export class UnknownValue extends BaseFabricInstance {
       }
 
       /** @inheritDoc */
+      canDecode(_state: FabricValue): _state is FabricValue {
+        // What arrives under a tag no registry claims is preserved rather than
+        // interpreted, so there is no shape it could fail to have.
+        return true;
+      }
+
+      /** @inheritDoc */
       decode(
         typeTag: string,
         state: FabricValue,

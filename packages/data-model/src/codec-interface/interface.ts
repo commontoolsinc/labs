@@ -111,6 +111,29 @@ export interface FabricCodec<Encoded> {
   canEncode(value: FabricValue): boolean;
 
   /**
+   * Returns `true` if the given state is one this codec knows how to decode:
+   * the decode side's counterpart to {@link #canEncode}, answering the same
+   * kind of question about whether a value is in the domain this codec works
+   * over.
+   *
+   * What belongs here is what is cheap to ask and not already asked by the
+   * decoding: the state's type, the presence and types of the parts a decode
+   * reads, membership in a fixed set of literals. What does not belong is a
+   * check whose only implementation is the decode itself. Whether a string is
+   * valid base64 is answered by decoding it, so asking here costs that work
+   * twice; {@link #decode} keeps such a question and is where a state failing
+   * it is refused.
+   *
+   * An implementation states this as a type predicate over its own state type,
+   * which is what lets its {@link #decode} declare that same type and read the
+   * state's parts without re-checking them. See {@link BaseFabricCodec}.
+   *
+   * Called on every state before {@link #decode} sees it, so an implementation
+   * of the latter may take the check as done.
+   */
+  canDecode(state: Encoded): boolean;
+
+  /**
    * Returns the wire type tag to use when encoding the given value. Only ever
    * called on a value for which {@link #canEncode} has returned `true`. Unlike
    * {@link #recognizedTypeTag} -- the codec's single recognized tag, if it has
@@ -130,10 +153,13 @@ export interface FabricCodec<Encoded> {
    * not necessarily correspond to {@link #recognizedTypeTag} (depending on how
    * an instance of this class got hooked up).
    *
-   * `state` is the whole of `Encoded` rather than the narrower thing
-   * {@link #encode} emits, because decoding is dispatched on a tag read from
-   * untrusted input: a payload can carry any state at all under this codec's
-   * tag. Rejecting what does not fit is part of the job.
+   * Only ever called on a state for which {@link #canDecode} has returned
+   * `true`, which is the decode side's counterpart to the way
+   * {@link #canEncode} precedes {@link #encode}. That is what lets an
+   * implementation declare the narrower state type it actually decodes and
+   * read its parts as such. `state` is the whole of `Encoded` here because
+   * this interface is what a registry holds, and the codecs in one agree on
+   * nothing narrower.
    */
   decode(
     typeTag: string,

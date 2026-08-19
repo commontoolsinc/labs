@@ -43,16 +43,20 @@ describe("UndefinedCodec", () => {
       });
     });
 
+    describe("canDecode()", () => {
+      it("returns `true` for `null` state", () => {
+        expect(codec.canDecode(null)).toBe(true);
+      });
+
+      it("returns `false` for state that is not `null`", () => {
+        expect(codec.canDecode(42)).toBe(false);
+      });
+    });
+
     describe("decode()", () => {
       it("decodes `null` state back to `undefined`", () => {
         const decoded = codec.decode(expectedTag, null, env);
         expect(decoded).toBe(undefined);
-      });
-
-      it("throws when decoding non-`null` state", () => {
-        expect(() => codec.decode(expectedTag, 42, env)).toThrow(
-          "expected `null` state",
-        );
       });
     });
 

@@ -23,6 +23,7 @@ import {
   KeepAsCell,
   mergeSchemaDefaults,
   NAME,
+  type NormalizedLink,
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
@@ -1626,6 +1627,16 @@ function suppliedLinks(
   return links;
 }
 
+/**
+ * Prove that every value the source contracts admit is accepted by every
+ * target contract.
+ *
+ * The source and target contract lists are conjunctions. Proving any source
+ * conjunct implies each target conjunct is a conservative proof that the
+ * complete source intersection is accepted by the target intersection.
+ * Possible absence of a source value rides the contracts' `mayBeMissing`
+ * flags and is resolved per source/target pair inside the proof.
+ */
 function assertContractSubset(
   sources: readonly PathSchemaContract[],
   targets: readonly PathSchemaContract[],
@@ -1713,7 +1724,480 @@ function linkMatchesCommittedState(
   return deepEqual(committed, suppliedLink.value);
 }
 
-/** @internal Exported for focused durable-link contract tests. */
+/** Wrap a per-concern failure in the uniform supplied-link rejection. */
+function incompatibleLinkError(displayPath: string, cause: unknown): Error {
+  return new Error(
+    `input link at ${displayPath} schema is not compatible: ${
+      cause instanceof Error ? cause.message : String(cause)
+    }`,
+  );
+}
+
+/**
+ * Localize each contract's outer Cell wrapper and require every wrapped
+ * contract to agree on one outer shape. A failed localization or a
+ * disagreement is reported as `issue` — `disagreement` names the latter —
+ * so each caller can raise it in its own error form.
+ */
+function localizeUniformOuter(
+  contracts: readonly PathSchemaContract[],
+  disagreement: string,
+): {
+  localized: OuterCellLocalization[];
+  outer?: OuterCellShape;
+  issue?: string;
+} {
+  const localized = contracts.map((contract) =>
+    localizeOuterCellContract(contract)
+  );
+  const invalid = localized.find((entry) => entry.issue !== undefined);
+  if (invalid?.issue !== undefined) {
+    return { localized, issue: invalid.issue };
+  }
+  const outers = localized.flatMap((entry) =>
+    entry.outer === undefined ? [] : [entry.outer]
+  );
+  const outer = outers[0];
+  for (const candidate of outers.slice(1)) {
+    if (!outerCellShapesMatch(outer!, candidate)) {
+      return { localized, outer, issue: disagreement };
+    }
+  }
+  return { localized, outer };
+}
+
+/** Resolve a link envelope's carried schema through refs, when it has one. */
+function carriedEnvelopeSchema(
+  link: NormalizedLink,
+): JSONSchema | undefined {
+  return link.schema === undefined ? undefined : linkPathContracts(
+    [{ schema: link.schema, root: link.schema }],
+    [],
+  )[0]?.schema;
+}
+
+/** Derive the destination contracts a supplied link's path must satisfy. */
+function deriveTargetContracts(
+  destinationSchema: JSONSchema,
+  destinationRoot: JSONSchema,
+  destinationIsStream: boolean,
+  basePath: readonly (string | number)[],
+  linkPath: readonly (string | number)[],
+  displayPath: string,
+): PathSchemaContract[] {
+  try {
+    if (destinationIsStream) {
+      const streamContracts = linkPathContracts(
+        [{ schema: destinationSchema, root: destinationRoot }],
+        basePath,
+      ).map((contract) => consumeStreamEventContract(contract));
+      return linkPathContracts(streamContracts, linkPath);
+    }
+    // Track destination presence so an optional destination slot records
+    // `mayBeMissing`, mirroring the source-side tracking in
+    // `buildSourceContracts`: a source that may hold no value must only be
+    // provable against a destination that also tolerates absence.
+    return linkPathContracts(
+      [{ schema: destinationSchema, root: destinationRoot }],
+      [...basePath, ...linkPath],
+      { trackSourcePresence: true, preserveMissingFlag: true },
+    );
+  } catch (error) {
+    throw incompatibleLinkError(displayPath, error);
+  }
+}
+
+/**
+ * Parse a supplied link and recover its producer's durable schema contract.
+ * A metadata-less linked document is held to the prior argument contract on
+ * a pattern update (see the `priorArgumentSchema` option's doc on
+ * `assertSuppliedLinkSchemasCompatible`); otherwise it is refused outright.
+ */
+function resolveDurableSource(
+  suppliedLink: SuppliedLink,
+  linkBase: Cell<unknown>,
+  baseCell: Cell<unknown>,
+  fullPath: readonly (string | number)[],
+  pieces: PiecesController,
+  priorArgumentSchema: JSONSchema | undefined,
+  displayPath: string,
+): {
+  link: NormalizedLink;
+  linkedCell: Cell<unknown>;
+  durableSource: DurableSourceContract;
+} {
+  const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+  const linkedCell = pieces.runtime.getCellFromLink(
+    { ...link, schema: undefined },
+    undefined,
+    linkBase.tx,
+  );
+  // A direct Cell view can be narrowed with asSchema() just as easily as a
+  // serialized alias can carry a narrowed schema. Neither is a future-value
+  // invariant, so every durable link needs producer-owned Piece metadata.
+  let durableSource = durableSourceContract(linkedCell, pieces);
+  if (durableSource === undefined && priorArgumentSchema !== undefined) {
+    // Pattern update over existing state: hold a metadata-less linked doc to
+    // the prior argument contract at this path (see the option's doc).
+    durableSource = {
+      schemas: [{
+        root: priorArgumentSchema,
+        path: [...fullPath],
+        rawBasePath: [],
+        schemaBaseDepth: 0,
+        validationCell: baseCell,
+        validationPath: [...fullPath],
+      }],
+    };
+  }
+  if (durableSource === undefined) {
+    throw incompatibleLinkError(
+      displayPath,
+      "source has no durable schema contract",
+    );
+  }
+  return { link, linkedCell, durableSource };
+}
+
+/** Localize the destination contracts and derive their agreed outer shape. */
+function localizeTargetOuter(
+  targetContracts: readonly PathSchemaContract[],
+  displayPath: string,
+): {
+  localizedTargets: OuterCellLocalization[];
+  targetOuter: OuterCellShape | undefined;
+} {
+  const targets = localizeUniformOuter(
+    targetContracts,
+    "destination Cell constraints disagree",
+  );
+  if (targets.issue !== undefined) {
+    throw incompatibleLinkError(displayPath, targets.issue);
+  }
+  return { localizedTargets: targets.localized, targetOuter: targets.outer };
+}
+
+/**
+ * Decide whether a supplied link's original envelope survives the caller's
+ * write, returning the destination's outer Cell shape when it does and
+ * `undefined` when the envelope is rebuilt. Only a destination with an outer
+ * Cell wrapper can accept a direct handle at all, so absent `targetOuter`
+ * the decision is always a rebuild.
+ *
+ * Two independent ways to know the envelope survives: the value is a live
+ * Cell the caller demonstrably holds, or the caller declared a preserving
+ * write plan AND the link is identical to what is already committed at its
+ * path.
+ *
+ * These answer different questions and must not be conflated. `isCell` is
+ * PROVENANCE — a live Cell is a capability the caller possesses, whereas a
+ * serialized sigil link is just bytes it wrote. The rebuild rules
+ * (`policeRebuiltAlias`) are about the WRITE PLAN: every one of them polices
+ * a rebuild that is about to happen. Inferring the plan from the provenance
+ * is sound wherever the caller actually rebuilds, and false at `setPattern`,
+ * which rebuilds nothing — it discards
+ * `assertSuppliedLinkSchemasCompatible`'s return value and lets
+ * `applySetupState` carry the argument over from `getRaw()`. Conflating them
+ * would judge an injected capability input (Loom's `db: SqliteDb`, `asCell:
+ * ["sqlite"]`) restored from raw storage as exposing the capability as an
+ * ordinary alias — raw storage holds serialized links, which are never
+ * `isCell()` — a laundering the caller is not performing, and the capability
+ * could then never be carried across a source update.
+ *
+ * The declared plan is verified per link, not trusted: only bytes already
+ * durably committed at this path count as "preserved" (see
+ * `linkMatchesCommittedState`). In the one flow that sets the flag, the
+ * staged argument is the previous argument merged with the INCOMING
+ * pattern's schema defaults — a link-shaped default would be brand-new,
+ * pattern-authored bytes riding the same restore, and it falls through to
+ * the rebuild rules.
+ */
+function derivePreserveDecision(
+  suppliedLink: SuppliedLink,
+  targetOuter: OuterCellShape | undefined,
+  baseCell: Cell<unknown>,
+  basePath: readonly (string | number)[],
+  linksPreservedVerbatim: boolean | undefined,
+): OuterCellShape | undefined {
+  if (targetOuter === undefined) return undefined;
+  const preserves = isCell(suppliedLink.value) ||
+    (linksPreservedVerbatim === true &&
+      linkMatchesCommittedState(suppliedLink, baseCell, basePath));
+  return preserves ? targetOuter : undefined;
+}
+
+/**
+ * Build the producer-side contracts for the subset proofs, in two lenses:
+ * `rawSourceContracts` keeps every Cell wrapper for the capability policing
+ * in `policeRebuiltAlias`, while `sourceContracts` carries the sanitize-vs-
+ * keep choice — a rebuilt link materializes through the destination's
+ * schema, so its nested (non-stream) Cell wrappers are stripped from the
+ * payload proof; a preserved envelope keeps them.
+ */
+function buildSourceContracts(
+  durableSource: DurableSourceContract,
+  preservesDirectHandle: boolean,
+  displayPath: string,
+): {
+  rawSourceContracts: PathSchemaContract[];
+  sourceContracts: PathSchemaContract[];
+} {
+  try {
+    const rawSourceContracts = durableSource.schemas.flatMap((source) =>
+      linkPathContracts(
+        [{ schema: source.root, root: source.root }],
+        source.path,
+        { trackSourcePresence: true, preserveMissingFlag: true },
+      )
+    );
+    const sourceContracts = durableSource.schemas.flatMap((source) => {
+      const root = preservesDirectHandle
+        ? source.root
+        : sanitizeSchemaForLinks(source.root, KeepAsCell.OnlyStream);
+      return linkPathContracts(
+        [{ schema: root, root }],
+        source.path,
+        { trackSourcePresence: true, preserveMissingFlag: true },
+      );
+    });
+    return { rawSourceContracts, sourceContracts };
+  } catch (error) {
+    throw incompatibleLinkError(displayPath, error);
+  }
+}
+
+/**
+ * Police a link whose envelope is about to be rebuilt from a materialized
+ * read: the raw producer contract must not expose a connector capability as
+ * an ordinary alias, a durable stream wrapper must survive on the rebuilt
+ * link, and the link must not carry a Cell wrapper its producer never
+ * declared.
+ */
+function policeRebuiltAlias(
+  rawSourceContracts: readonly PathSchemaContract[],
+  sourceContracts: readonly PathSchemaContract[],
+  link: NormalizedLink,
+  displayPath: string,
+): void {
+  try {
+    const rawSources = localizeUniformOuter(
+      rawSourceContracts,
+      "source Cell constraints disagree",
+    );
+    if (rawSources.issue !== undefined) {
+      throw new Error(rawSources.issue);
+    }
+    const rawSourceOuter = rawSources.outer;
+    if (
+      rawSourceOuter !== undefined && rawSourceOuter.kind !== "cell" &&
+      rawSourceOuter.kind !== "stream"
+    ) {
+      throw new Error(
+        `${rawSourceOuter.kind} capability cannot be exposed as an ordinary alias`,
+      );
+    }
+    const durableEntries = sourceContracts.map((contract) =>
+      ContextualFlowControl.getAsCellValues(contract.schema)
+    );
+    const preservesStream = durableEntries.some((entries) =>
+      ContextualFlowControl.getAsCellKind(entries[0]) === "stream"
+    );
+    if (preservesStream) {
+      const streamContract = sourceContracts.find((contract) =>
+        ContextualFlowControl.getAsCellKind(
+          ContextualFlowControl.getAsCellValues(contract.schema)[0],
+        ) === "stream"
+      )!;
+      if (
+        !asCellShapesMatch(carriedEnvelopeSchema(link), streamContract.schema)
+      ) {
+        throw new Error(
+          "link does not preserve its durable stream wrapper",
+        );
+      }
+    } else if (
+      ContextualFlowControl.getAsCellValues(link.schema).length > 0
+    ) {
+      throw new Error("link carries a non-durable Cell wrapper");
+    }
+  } catch (error) {
+    throw incompatibleLinkError(displayPath, error);
+  }
+}
+
+/** A source Cell's scope must fit every destination contract's scope cap. */
+function assertSourceScopeFits(
+  targetContracts: readonly PathSchemaContract[],
+  linkedCell: Cell<unknown>,
+  displayPath: string,
+): void {
+  const sourceScope = linkedCell.getAsNormalizedFullLink().scope;
+  for (const targetContract of targetContracts) {
+    if (!canFollowSourceScope(targetContract.schema, sourceScope)) {
+      throw incompatibleLinkError(
+        displayPath,
+        `source Cell scope ${sourceScope} exceeds the destination scope`,
+      );
+    }
+  }
+}
+
+/**
+ * Police a link whose original envelope survives to the durable write, and
+ * return the localized payload contracts the subset proofs consume in its
+ * place: a serialized envelope must re-assert its carried Cell wrapper
+ * against the durable contracts, the source's outer capability must narrow
+ * to the destination's, and both sides' outer wrappers are consumed so the
+ * proofs compare payloads.
+ */
+function policePreservedEnvelope(
+  suppliedLink: SuppliedLink,
+  link: NormalizedLink,
+  sourceContracts: readonly PathSchemaContract[],
+  localizedTargets: readonly OuterCellLocalization[],
+  targetOuter: OuterCellShape,
+  displayPath: string,
+): {
+  sourceContracts: PathSchemaContract[];
+  targetContracts: PathSchemaContract[];
+} {
+  // A SERIALIZED link carries its own `schema` envelope, and that envelope
+  // is caller-written bytes; a live Cell has no separate envelope to forge,
+  // so only the serialized case needs this check (`policeRebuiltAlias`
+  // polices the same forgery for rebuilt links). A serialized link only
+  // reaches here when it is identical to already-committed state, but
+  // committed does not mean vetted — raw write paths
+  // (`PiecesController.link`) commit links without ever running this
+  // validator — so re-assert it: a carried wrapper's `asCell` STACK (kind
+  // and scope, per `asCellShapesMatch`; payload schemas are proved
+  // separately against the durable contracts) has to match every durable
+  // contract of the source. (Loom's injected links carry no envelope —
+  // `PiecesController.link` serializes with `KeepAsCell.OnlyStream` — so the
+  // real restore case is unaffected.)
+  if (!isCell(suppliedLink.value)) {
+    const carried = ContextualFlowControl.getAsCellValues(link.schema);
+    if (carried.length > 0) {
+      const carriedSchema = carriedEnvelopeSchema(link);
+      // `.every`, not `.some`: the durable contracts are a conjunction,
+      // so a wrapper the source did not declare in ALL of them was never
+      // uniformly granted. Contracts that disagree about the wrapper
+      // stack reject every carried envelope — that state is already
+      // refused at the outer level below.
+      const matchesDurableContract = sourceContracts.length > 0 &&
+        sourceContracts.every((contract) =>
+          asCellShapesMatch(carriedSchema, contract.schema)
+        );
+      if (!matchesDurableContract) {
+        throw incompatibleLinkError(
+          displayPath,
+          "link carries a non-durable Cell wrapper",
+        );
+      }
+    }
+  }
+  const sources = localizeUniformOuter(
+    sourceContracts,
+    "source Cell constraints disagree",
+  );
+  if (sources.issue !== undefined) {
+    throw incompatibleLinkError(displayPath, sources.issue);
+  }
+  const sourceOuter = sources.outer ?? {
+    kind: isStream(suppliedLink.value) ? "stream" : "cell",
+    scope: undefined,
+  };
+  if (!cellCapabilityCanNarrow(sourceOuter.kind, targetOuter.kind)) {
+    if (
+      sourceOuter.kind === "stream" || targetOuter.kind === "stream"
+    ) {
+      throw incompatibleLinkError(
+        displayPath,
+        `${
+          sourceOuter.kind === "stream" ? "Stream" : "Cell"
+        } handle is not accepted as ${targetOuter.kind}`,
+      );
+    }
+    throw incompatibleLinkError(
+      displayPath,
+      `${sourceOuter.kind} capability cannot be exposed as ${targetOuter.kind}`,
+    );
+  }
+  return {
+    sourceContracts: sources.localized.map((entry) => entry.contract),
+    targetContracts: localizedTargets.map((entry) => entry.contract),
+  };
+}
+
+/** Prove a rebuilt link's payload flow from source to destination. */
+function proveRebuiltContracts(
+  sourceContracts: readonly PathSchemaContract[],
+  targetContracts: readonly PathSchemaContract[],
+  displayPath: string,
+): void {
+  // Nested (non-stream) Cell wrappers are read-side projections, not part
+  // of the payload contract: a wrapper-declaring source may serve a plain
+  // slot, and a plain source may serve a wrapper-declaring slot (the
+  // destination materializes the handle through its own schema either
+  // way). `buildSourceContracts` already sanitizes the source contracts on
+  // this path; the proof must see the destination through the same lens, or
+  // a destination's nested `asCell` fails the exact-match comparison
+  // against the sanitized source — refusing, among others, every
+  // same-schema source update of a piece whose roster array stores elements
+  // with a Cell-typed `profile` field. Capability kinds such as `sqlite`
+  // strip here too: the payload proof deliberately ignores them at nested
+  // positions. Capability policing is `policeRebuiltAlias`'s job (a
+  // capability source refuses exposure as an ordinary alias there), and no
+  // supported flow places a connector wrapper below a link payload.
+  const proofTargets = targetContracts.map((contract) => ({
+    ...contract,
+    schema: sanitizeSchemaForLinks(
+      contract.schema,
+      KeepAsCell.OnlyStream,
+    ),
+    root: sanitizeSchemaForLinks(contract.root, KeepAsCell.OnlyStream),
+  }));
+  assertContractSubset(
+    sourceContracts,
+    proofTargets,
+    `input link at ${displayPath}`,
+  );
+}
+
+/** Prove a preserved handle's payload flow, in both directions it can move. */
+function provePreservedContracts(
+  sourceContracts: readonly PathSchemaContract[],
+  targetContracts: readonly PathSchemaContract[],
+  targetOuter: OuterCellShape,
+  displayPath: string,
+): void {
+  const label = `input link at ${displayPath}`;
+  if (
+    targetOuter.kind !== "writeonly" && targetOuter.kind !== "stream"
+  ) {
+    assertContractSubset(sourceContracts, targetContracts, label);
+  }
+  if (cellKindCanWrite(targetOuter.kind)) {
+    // A writable handle can send values back to the producer, so the
+    // destination payload contract must also fit the source payload.
+    // Absence never flows through a write-back — the handle writes concrete
+    // values — so slot optionality on either side is irrelevant here and
+    // the `mayBeMissing` flags are dropped from both.
+    assertContractSubset(
+      targetContracts.map(withoutMissingFlag),
+      sourceContracts.map(withoutMissingFlag),
+      label,
+    );
+  }
+}
+
+/**
+ * Validate every supplied link against the destination schema's contract,
+ * one helper per concern, and return the links that preserve a direct handle
+ * to their source (see `derivePreserveDecision`) — the subset a restoring
+ * caller writes back verbatim rather than rebuilding.
+ *
+ * @internal Exported for focused durable-link contract tests.
+ */
 export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
   destinationSchema: JSONSchema,
@@ -1740,21 +2224,22 @@ export function assertSuppliedLinkSchemasCompatible(
      * than rebuilding it from a materialized read.
      *
      * This is a statement about the caller's WRITE PLAN, not about its
-     * authority — authority is `isCell` below, which is real evidence that the
-     * caller held a live handle. Only the caller knows its own plan, so it has
-     * to say. `setPattern` is the case that has one: `applySetupState` carries
-     * the argument over from `previousArgumentCell.getRaw()`, so every
-     * retained link survives byte for byte by construction and there is no
-     * rebuild for the ordinary-alias rules below to police.
+     * authority — authority is the `isCell` evidence in
+     * `derivePreserveDecision`, which proves the caller held a live handle.
+     * Only the caller knows its own plan, so it has to say. `setPattern` is
+     * the case that has one: `applySetupState` carries the argument over from
+     * `previousArgumentCell.getRaw()`, so every retained link survives byte
+     * for byte by construction and there is no rebuild for
+     * `policeRebuiltAlias` to police.
      *
      * The declaration is scoped, not trusted: a serialized link only counts
      * as preserved when it is identical to the value already durably
      * committed at its path ({@link linkMatchesCommittedState}) — restoring
      * committed bytes grants nothing new. Any link that fails that comparison
      * (one minted from the incoming pattern's schema `default`s, a mutated
-     * envelope, a lying caller) is validated by the rebuild rules below
-     * exactly as if this option were unset. Left unset (every other flow),
-     * those rules apply to every serialized link, as before.
+     * envelope, a lying caller) is validated by the rebuild rules exactly as
+     * if this option were unset. Left unset (every other flow), those rules
+     * apply to every serialized link.
      */
     linksPreservedVerbatim?: boolean;
   } = {},
@@ -1768,344 +2253,67 @@ export function assertSuppliedLinkSchemasCompatible(
     for (const segment of fullPath) {
       linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
     }
-    let targetContracts: PathSchemaContract[];
-    try {
-      const destinationRoot = options.destinationRoot ?? destinationSchema;
-      if (options.destinationIsStream) {
-        const streamContracts = linkPathContracts(
-          [{ schema: destinationSchema, root: destinationRoot }],
-          basePath,
-        ).map((contract) => consumeStreamEventContract(contract));
-        targetContracts = linkPathContracts(
-          streamContracts,
-          suppliedLink.path,
-        );
-      } else {
-        // Track destination presence so an optional destination slot records
-        // `mayBeMissing`, mirroring the source-side tracking below: a source
-        // that may hold no value must only be provable against a destination
-        // that also tolerates absence.
-        targetContracts = linkPathContracts(
-          [{ schema: destinationSchema, root: destinationRoot }],
-          fullPath,
-          { trackSourcePresence: true, preserveMissingFlag: true },
-        );
-      }
-    } catch (error) {
-      throw new Error(
-        `input link at ${displayPath} schema is not compatible: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-    const linkedCell = pieces.runtime.getCellFromLink(
-      { ...link, schema: undefined },
-      undefined,
-      linkBase.tx,
+    const targetContracts = deriveTargetContracts(
+      destinationSchema,
+      options.destinationRoot ?? destinationSchema,
+      options.destinationIsStream === true,
+      basePath,
+      suppliedLink.path,
+      displayPath,
     );
-    // A direct Cell view can be narrowed with asSchema() just as easily as a
-    // serialized alias can carry a narrowed schema. Neither is a future-value
-    // invariant, so every durable link needs producer-owned Piece metadata.
-    let durableSource = durableSourceContract(linkedCell, pieces);
-    if (
-      durableSource === undefined && options.priorArgumentSchema !== undefined
-    ) {
-      // Pattern update over existing state: hold a metadata-less linked doc to
-      // the prior argument contract at this path (see the option's doc).
-      durableSource = {
-        schemas: [{
-          root: options.priorArgumentSchema,
-          path: [...fullPath],
-          rawBasePath: [],
-          schemaBaseDepth: 0,
-          validationCell: baseCell,
-          validationPath: [...fullPath],
-        }],
-      };
-    }
-    if (durableSource === undefined) {
-      throw new Error(
-        `input link at ${displayPath} schema is not compatible: source has no durable schema contract`,
-      );
-    }
-
-    const localizedTargets = targetContracts.map((contract) =>
-      localizeOuterCellContract(contract)
+    const { link, linkedCell, durableSource } = resolveDurableSource(
+      suppliedLink,
+      linkBase,
+      baseCell,
+      fullPath,
+      pieces,
+      options.priorArgumentSchema,
+      displayPath,
     );
-    const invalidTarget = localizedTargets.find((entry) =>
-      entry.issue !== undefined
+    const { localizedTargets, targetOuter } = localizeTargetOuter(
+      targetContracts,
+      displayPath,
     );
-    if (invalidTarget?.issue !== undefined) {
-      throw new Error(
-        `input link at ${displayPath} schema is not compatible: ${invalidTarget.issue}`,
-      );
-    }
-    const targetOuters = localizedTargets.flatMap((entry) =>
-      entry.outer === undefined ? [] : [entry.outer]
+    const preservedOuter = derivePreserveDecision(
+      suppliedLink,
+      targetOuter,
+      baseCell,
+      basePath,
+      options.linksPreservedVerbatim,
     );
-    const targetOuter = targetOuters[0];
-    for (const outer of targetOuters.slice(1)) {
-      if (!outerCellShapesMatch(targetOuter!, outer)) {
-        throw new Error(
-          `input link at ${displayPath} schema is not compatible: destination Cell constraints disagree`,
-        );
-      }
-    }
-    // Does the original envelope survive? Two independent ways to know it
-    // does: this value is a live Cell the caller demonstrably holds, or the
-    // caller declared a preserving write plan AND this link is identical to
-    // what is already committed at its path.
-    //
-    // These answer different questions and must not be conflated. `isCell` is
-    // PROVENANCE — a live Cell is a capability the caller possesses, whereas a
-    // serialized sigil link is just bytes it wrote. The rules below are about
-    // the WRITE PLAN: every one of them polices a rebuild that is about to
-    // happen. Inferring the plan from the provenance is sound wherever the
-    // caller actually rebuilds, and false at `setPattern`, which rebuilds
-    // nothing — it discards this function's return value and lets
-    // `applySetupState` carry the argument over from `getRaw()`. That is why
-    // an injected capability input (Loom's `db: SqliteDb`, `asCell:
-    // ["sqlite"]`) could never be carried across a source update: raw storage
-    // holds serialized links, which are never `isCell()`, so the restore was
-    // always judged to be exposing the capability as an ordinary alias — a
-    // laundering that the caller was not in fact performing.
-    //
-    // The declared plan is verified per link, not trusted: only bytes already
-    // durably committed at this path count as "preserved" (see
-    // `linkMatchesCommittedState`). In the one flow that sets the flag, the
-    // staged argument is the previous argument merged with the INCOMING
-    // pattern's schema defaults — a link-shaped default would be brand-new,
-    // pattern-authored bytes riding the same restore, and it falls through to
-    // the rebuild rules here.
-    const preservesDirectHandle = targetOuter !== undefined &&
-      (isCell(suppliedLink.value) ||
-        (options.linksPreservedVerbatim === true &&
-          linkMatchesCommittedState(suppliedLink, baseCell, basePath)));
-    if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
+    if (preservedOuter !== undefined) preservedDirectHandles.add(suppliedLink);
 
-    let sourceContracts: PathSchemaContract[];
-    let rawSourceContracts: PathSchemaContract[];
-    try {
-      rawSourceContracts = durableSource.schemas.flatMap((source) =>
-        linkPathContracts(
-          [{ schema: source.root, root: source.root }],
-          source.path,
-          { trackSourcePresence: true, preserveMissingFlag: true },
-        )
-      );
-      sourceContracts = durableSource.schemas.flatMap((source) => {
-        const root = preservesDirectHandle
-          ? source.root
-          : sanitizeSchemaForLinks(source.root, KeepAsCell.OnlyStream);
-        return linkPathContracts(
-          [{ schema: root, root }],
-          source.path,
-          { trackSourcePresence: true, preserveMissingFlag: true },
-        );
-      });
-      if (!preservesDirectHandle) {
-        const rawLocalizedSources = rawSourceContracts.map((contract) =>
-          localizeOuterCellContract(contract)
-        );
-        const invalidRawSource = rawLocalizedSources.find((entry) =>
-          entry.issue !== undefined
-        );
-        if (invalidRawSource?.issue !== undefined) {
-          throw new Error(invalidRawSource.issue);
-        }
-        const rawSourceOuters = rawLocalizedSources.flatMap((entry) =>
-          entry.outer === undefined ? [] : [entry.outer]
-        );
-        const rawSourceOuter = rawSourceOuters[0];
-        for (const outer of rawSourceOuters.slice(1)) {
-          if (!outerCellShapesMatch(rawSourceOuter!, outer)) {
-            throw new Error("source Cell constraints disagree");
-          }
-        }
-        if (
-          rawSourceOuter !== undefined && rawSourceOuter.kind !== "cell" &&
-          rawSourceOuter.kind !== "stream"
-        ) {
-          throw new Error(
-            `${rawSourceOuter.kind} capability cannot be exposed as an ordinary alias`,
-          );
-        }
-        const durableEntries = sourceContracts.map((contract) =>
-          ContextualFlowControl.getAsCellValues(contract.schema)
-        );
-        const preservesStream = durableEntries.some((entries) =>
-          ContextualFlowControl.getAsCellKind(entries[0]) === "stream"
-        );
-        if (preservesStream) {
-          const streamContract = sourceContracts.find((contract) =>
-            ContextualFlowControl.getAsCellKind(
-              ContextualFlowControl.getAsCellValues(contract.schema)[0],
-            ) === "stream"
-          )!;
-          const carriedSchema = link.schema === undefined
-            ? undefined
-            : linkPathContracts(
-              [{ schema: link.schema, root: link.schema }],
-              [],
-            )[0]?.schema;
-          if (!asCellShapesMatch(carriedSchema, streamContract.schema)) {
-            throw new Error(
-              "link does not preserve its durable stream wrapper",
-            );
-          }
-        } else if (
-          ContextualFlowControl.getAsCellValues(link.schema).length > 0
-        ) {
-          throw new Error("link carries a non-durable Cell wrapper");
-        }
-      }
-    } catch (error) {
-      throw new Error(
-        `input link at ${displayPath} schema is not compatible: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+    const { rawSourceContracts, sourceContracts } = buildSourceContracts(
+      durableSource,
+      preservedOuter !== undefined,
+      displayPath,
+    );
+    if (preservedOuter === undefined) {
+      policeRebuiltAlias(
+        rawSourceContracts,
+        sourceContracts,
+        link,
+        displayPath,
       );
     }
+    assertSourceScopeFits(targetContracts, linkedCell, displayPath);
 
-    const sourceScope = linkedCell.getAsNormalizedFullLink().scope;
-    for (const targetContract of targetContracts) {
-      if (!canFollowSourceScope(targetContract.schema, sourceScope)) {
-        throw new Error(
-          `input link at ${displayPath} schema is not compatible: source Cell scope ${sourceScope} exceeds the destination scope`,
-        );
-      }
-    }
-
-    if (preservesDirectHandle) {
-      // A SERIALIZED link carries its own `schema` envelope, and that envelope
-      // is caller-written bytes. The rebuild branch checks it below ("link
-      // carries a non-durable Cell wrapper"); this branch could previously
-      // skip it because `isCell` was the only way in, and a live Cell has no
-      // separate envelope to forge. A serialized link only reaches here when
-      // it is identical to already-committed state, but committed does not
-      // mean vetted — raw write paths (`PiecesController.link`) commit links
-      // without ever running this validator — so re-assert it: a carried
-      // wrapper's `asCell` STACK (kind and scope, per `asCellShapesMatch`;
-      // payload schemas are proved separately against the durable contracts)
-      // has to match every durable contract of the source. (Loom's injected
-      // links carry no envelope — `PiecesController.link` serializes with
-      // `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
-      if (!isCell(suppliedLink.value)) {
-        const carried = ContextualFlowControl.getAsCellValues(link.schema);
-        if (carried.length > 0) {
-          const carriedSchema = link.schema === undefined
-            ? undefined
-            : linkPathContracts(
-              [{ schema: link.schema, root: link.schema }],
-              [],
-            )[0]?.schema;
-          // `.every`, not `.some`: the durable contracts are a conjunction,
-          // so a wrapper the source did not declare in ALL of them was never
-          // uniformly granted. Contracts that disagree about the wrapper
-          // stack reject every carried envelope — that state is already
-          // refused at the outer level below.
-          const matchesDurableContract = sourceContracts.length > 0 &&
-            sourceContracts.every((contract) =>
-              asCellShapesMatch(carriedSchema, contract.schema)
-            );
-          if (!matchesDurableContract) {
-            throw new Error(
-              `input link at ${displayPath} schema is not compatible: link carries a non-durable Cell wrapper`,
-            );
-          }
-        }
-      }
-      const localizedSources = sourceContracts.map((contract) =>
-        localizeOuterCellContract(contract)
+    if (preservedOuter === undefined) {
+      proveRebuiltContracts(sourceContracts, targetContracts, displayPath);
+    } else {
+      const localized = policePreservedEnvelope(
+        suppliedLink,
+        link,
+        sourceContracts,
+        localizedTargets,
+        preservedOuter,
+        displayPath,
       );
-      const invalidSource = localizedSources.find((entry) =>
-        entry.issue !== undefined
-      );
-      if (invalidSource?.issue !== undefined) {
-        throw new Error(
-          `input link at ${displayPath} schema is not compatible: ${invalidSource.issue}`,
-        );
-      }
-      const sourceOuters = localizedSources.flatMap((entry) =>
-        entry.outer === undefined ? [] : [entry.outer]
-      );
-      const sourceOuter = sourceOuters[0] ?? {
-        kind: isStream(suppliedLink.value) ? "stream" : "cell",
-        scope: undefined,
-      };
-      for (const outer of sourceOuters.slice(1)) {
-        if (!outerCellShapesMatch(sourceOuter, outer)) {
-          throw new Error(
-            `input link at ${displayPath} schema is not compatible: source Cell constraints disagree`,
-          );
-        }
-      }
-      if (!cellCapabilityCanNarrow(sourceOuter.kind, targetOuter.kind)) {
-        if (
-          sourceOuter.kind === "stream" || targetOuter.kind === "stream"
-        ) {
-          throw new Error(
-            `input link at ${displayPath} schema is not compatible: ${
-              sourceOuter.kind === "stream" ? "Stream" : "Cell"
-            } handle is not accepted as ${targetOuter.kind}`,
-          );
-        }
-        throw new Error(
-          `input link at ${displayPath} schema is not compatible: ${sourceOuter.kind} capability cannot be exposed as ${targetOuter.kind}`,
-        );
-      }
-      sourceContracts = localizedSources.map((entry) => entry.contract);
-      targetContracts = localizedTargets.map((entry) => entry.contract);
-    }
-
-    // The source and target contracts are conjunctions. Proving any source
-    // conjunct implies each target conjunct is a conservative proof that the
-    // complete source intersection is accepted by the target intersection.
-    // Possible absence of a source value rides the contracts' `mayBeMissing`
-    // flags and is resolved per source/target pair inside the proof.
-    const label = `input link at ${displayPath}`;
-    if (
-      !preservesDirectHandle || targetOuter.kind !== "writeonly" &&
-        targetOuter.kind !== "stream"
-    ) {
-      // Nested (non-stream) Cell wrappers are read-side projections, not part
-      // of the payload contract: a wrapper-declaring source may serve a plain
-      // slot, and a plain source may serve a wrapper-declaring slot (the
-      // destination materializes the handle through its own schema either
-      // way). The source contracts above are already sanitized on the
-      // non-preserving path; the proof must see the destination through the
-      // same lens, or a destination's nested `asCell` fails the exact-match
-      // comparison against the sanitized source — refusing, among others,
-      // every same-schema source update of a piece whose roster array stores
-      // elements with a Cell-typed `profile` field. Capability kinds such as
-      // `sqlite` strip here too: the payload proof deliberately ignores them
-      // at nested positions. Capability policing is the OUTER-level rules'
-      // job (a capability source refuses exposure as an ordinary alias
-      // above), and no supported flow places a connector wrapper below a
-      // link payload.
-      const proofTargets = preservesDirectHandle
-        ? targetContracts
-        : targetContracts.map((contract) => ({
-          ...contract,
-          schema: sanitizeSchemaForLinks(
-            contract.schema,
-            KeepAsCell.OnlyStream,
-          ),
-          root: sanitizeSchemaForLinks(contract.root, KeepAsCell.OnlyStream),
-        }));
-      assertContractSubset(sourceContracts, proofTargets, label);
-    }
-    if (preservesDirectHandle && cellKindCanWrite(targetOuter.kind)) {
-      // A writable handle can send values back to the producer, so the
-      // destination payload contract must also fit the source payload.
-      // Absence never flows through a write-back — the handle writes concrete
-      // values — so slot optionality on either side is irrelevant here and
-      // the `mayBeMissing` flags are dropped from both.
-      assertContractSubset(
-        targetContracts.map(withoutMissingFlag),
-        sourceContracts.map(withoutMissingFlag),
-        label,
+      provePreservedContracts(
+        localized.sourceContracts,
+        localized.targetContracts,
+        preservedOuter,
+        displayPath,
       );
     }
   }

@@ -456,8 +456,9 @@ describe("native-conversion", () => {
     });
 
     it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      // Tag travels separately; the bare inner state is the codec payload.
-      const state = { x: 1 };
+      // Tag travels separately; the bare inner state is the codec payload,
+      // which for this class is a record of the three facts it preserves.
+      const state = { tag: "Bad@1", state: { x: 1 }, error: "oops" };
       const frozen = ProblematicValue[CODEC].decode("Bad@1", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = ProblematicValue[CODEC].decode(

@@ -197,6 +197,43 @@ describe("ProblematicValue", () => {
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for a record of the three fields", () => {
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: { x: 1 }, error: "oops" },
+          )).toBe(true);
+        });
+
+        it("returns `true` for a `state` present and `undefined`", () => {
+          // Every `FabricValue` is a valid state, `undefined` among them.
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: undefined, error: "oops" },
+          )).toBe(true);
+        });
+
+        it("returns `false` for a record with no `state` property at all", () => {
+          // An absent property is the only thing that marks a record this
+          // codec did not write. Filling it in would put a reshaped record
+          // back on the wire rather than reporting the one that arrived.
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", error: "oops" },
+          )).toBe(false);
+        });
+
+        it("returns `false` for a non-string `tag` or `error`", () => {
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: 7, state: 1, error: "oops" },
+          )).toBe(false);
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: 1, error: 7 },
+          )).toBe(false);
+        });
+
+        it("returns `false` for state that is not an object", () => {
+          expect(ProblematicValue[CODEC].canDecode("nope")).toBe(false);
+        });
+      });
+
       describe("decode()", () => {
         const ENV = NULL_LIVE_ENVIRONMENT;
 
@@ -221,32 +258,6 @@ describe("ProblematicValue", () => {
 
           expect(result.wireTypeTag).toBe("Weird@7");
           expect(result.state).toBe(undefined);
-        });
-
-        it("reports a record with no `state` property at all", () => {
-          // Every `FabricValue` is a valid state, `undefined` among them, so
-          // an absent property is the only thing that marks a record this
-          // codec did not write. Filling it in would put a reshaped record
-          // back on the wire rather than reporting the one that arrived.
-          const result = ProblematicValue[CODEC].decode(
-            "Problematic@1",
-            { tag: "Weird@7", error: "oops" },
-            ENV,
-          ) as ProblematicValue;
-
-          expect(result.wireTypeTag).toBe("Problematic@1");
-          expect(result.error).toMatch(/`state` property/);
-        });
-
-        it("reports a state that is not an object", () => {
-          const result = ProblematicValue[CODEC].decode(
-            "Problematic@1",
-            "nope",
-            ENV,
-          ) as ProblematicValue;
-
-          expect(result.wireTypeTag).toBe("Problematic@1");
-          expect(result.error).toMatch(/expected object state/);
         });
       });
     });

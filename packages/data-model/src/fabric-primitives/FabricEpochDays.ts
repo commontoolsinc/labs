@@ -48,30 +48,29 @@ export class FabricEpochDays extends BaseFabricPrimitive
   //
 
   static #jsonCodec = Object.freeze(
-    new (class EpochDaysCodec extends BaseTerminalCodec<JsonCodecValue> {
+    new (class EpochDaysCodec
+      extends BaseTerminalCodec<JsonCodecValue, string> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochDays): JsonCodecValue {
+      encode(value: FabricEpochDays): string {
         return bigintToUnpaddedBase64url(value.#value);
+      }
+
+      /** @inheritDoc */
+      canDecode(state: JsonCodecValue): state is string {
+        return typeof state === "string";
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: JsonCodecValue,
+        state: string,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (typeof state !== "string") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `EpochDays: expected string state, got ${typeof state}`,
-          );
-        }
         try {
           return new FabricEpochDays(bigintFromUnpaddedBase64url(state));
         } catch {

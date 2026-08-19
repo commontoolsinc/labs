@@ -82,6 +82,10 @@ export class XCodec extends BaseTerminalCodec<ProbeValue> {
     return "encoded-X";
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     _state: ProbeValue,
@@ -137,6 +141,10 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
     return { inner: NESTED };
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     state: ProbeValue,
@@ -173,6 +181,10 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
     return { inner: NESTED };
   }
 
+  canDecode(_state: FabricValue): _state is FabricValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     state: FabricValue,
@@ -198,6 +210,10 @@ export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
 
   encode(_value: FabricValue): ProbeValue {
     throw new Error("Shouldn't happen: this codec never encodes.");
+  }
+
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
   }
 
   decode(
@@ -227,6 +243,10 @@ export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
     throw new Error("Shouldn't happen: this codec never encodes.");
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     typeTag: string,
     state: ProbeValue,
@@ -237,6 +257,37 @@ export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
       state as FabricValue,
       "rejected by returning",
     );
+  }
+}
+
+/**
+ * Codec that rejects a state by REFUSING it in `canDecode()`, which is the
+ * third way. Reachable by tag only: nothing encodes to it, since what it
+ * exists to exercise is the decode side.
+ */
+export class RefusingCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("Refuses@1", undefined);
+  }
+
+  override canEncode(_value: FabricValue): boolean {
+    return false;
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    throw new Error("Shouldn't happen: this codec never encodes.");
+  }
+
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return false;
+  }
+
+  decode(
+    _typeTag: string,
+    _state: ProbeValue,
+    _env: LiveEnvironment,
+  ): FabricValue {
+    throw new Error("Shouldn't happen: nothing gets past `canDecode()`.");
   }
 }
 
@@ -272,6 +323,10 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
 
   encode(_value: FabricValue): ProbeValue {
     return "m";
+  }
+
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
   }
 
   decode(
@@ -437,6 +492,7 @@ export function newProbeEngine(
   registry.register(new MarkerCodec());
   registry.register(new ThrowingCodec());
   registry.register(new RejectingCodec());
+  registry.register(new RefusingCodec());
   for (const t of ["null", "boolean", "number", "string", "bigint"] as const) {
     registry.registerSelfRep(t);
   }

@@ -20,7 +20,6 @@ import { expect } from "@std/expect";
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 
 // An `Encoded` that cannot hold a registry key cannot be constructed at, since
@@ -69,17 +68,13 @@ describe("SymbolCodec", () => {
       });
     });
 
-    describe("decode()", () => {
-      it("decodes non-string state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          42,
-          env,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "Symbol@1",
-        );
+    describe("canDecode()", () => {
+      it("returns `true` for string state", () => {
+        expect(codec.canDecode("some-key")).toBe(true);
+      });
+
+      it("returns `false` for state that is not a string", () => {
+        expect(codec.canDecode(42)).toBe(false);
       });
     });
 

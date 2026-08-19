@@ -111,29 +111,34 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseNonterminalCodec {
+    new (class LinkCodec extends BaseNonterminalCodec<FabricPlainObject> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);
       }
 
       /** @inheritDoc */
-      encode(value: FabricLink): FabricValue {
+      encode(value: FabricLink): FabricPlainObject {
         // The payload IS the encoded state; its nested values are recursively
         // encoded by the engine.
         return value.#payload;
       }
 
       /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricPlainObject {
+        return isPlainObject(state);
+      }
+
+      /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
+        state: FabricPlainObject,
         env: LiveEnvironment,
       ): FabricValue {
-        // The constructor validates the shape and throws on any violation, so
-        // bad state falls into the `catch`.
+        // The constructor validates the payload and throws on any violation,
+        // so bad state falls into the `catch`.
         try {
-          const result = new FabricLink(state as FabricPlainObject);
+          const result = new FabricLink(state);
           return env.shouldDeepFreeze ? deepFreeze(result) : result;
         } catch (e) {
           return new ProblematicValue(

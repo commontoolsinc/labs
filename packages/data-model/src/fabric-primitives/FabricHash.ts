@@ -26,6 +26,15 @@ import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
 
 /**
+ * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest
+ * as base64url.
+ */
+type FabricHashState = {
+  tag: string;
+  hash: string;
+};
+
+/**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
  *
  * Stringification produces `<tag>:<base64urlHash>` where
@@ -124,38 +133,31 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   //
 
   static #jsonCodec = Object.freeze(
-    new (class HashCodec extends BaseNonterminalCodec {
+    new (class HashCodec extends BaseNonterminalCodec<FabricHashState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);
       }
 
       /** @inheritDoc */
-      encode(value: FabricHash): FabricValue {
+      encode(value: FabricHash): FabricHashState {
         return { tag: value.tag, hash: value.hashString };
+      }
+
+      /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricHashState {
+        return isPlainObject(state) && (typeof state.tag === "string") &&
+          (typeof state.hash === "string");
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
+        state: FabricHashState,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (!isPlainObject(state)) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `Hash: expected object state, got ${typeof state}`,
-          );
-        }
         const { tag, hash } = state;
-        if (typeof tag !== "string" || typeof hash !== "string") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            "Hash: expected string `tag` and `hash`",
-          );
-        }
+
         try {
           return new FabricHash(fromBase64url(hash), tag, true);
         } catch (e) {

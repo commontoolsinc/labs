@@ -36,7 +36,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import type { FabricValue } from "@/interface.ts";
+import type { FabricPlainObject, FabricValue } from "@/interface.ts";
 import { errorClassFromType } from "@/native-conversion.ts";
 
 /**
@@ -427,14 +427,15 @@ export class FabricError extends FabricNativeWrapper<Error>
   //
 
   static #codec = Object.freeze(
-    new (class FabricErrorCodec extends BaseNonterminalCodec {
+    new (class FabricErrorCodec
+      extends BaseNonterminalCodec<FabricPlainObject> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);
       }
 
       /** @inheritDoc */
-      encode(value: FabricError): FabricValue {
+      encode(value: FabricError): FabricPlainObject {
         const state: Record<string, FabricValue> = {
           type: value.type,
           name: value.name === value.type ? null : value.name,
@@ -453,29 +454,30 @@ export class FabricError extends FabricNativeWrapper<Error>
       }
 
       /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricPlainObject {
+        return isPlainObject(state);
+      }
+
+      /** @inheritDoc */
       decode(
         _typeTag: string,
-        state: FabricValue,
+        state: FabricPlainObject,
         env: LiveEnvironment,
       ): FabricValue {
-        if (!isPlainObject(state)) {
-          throw new Error("`Error@1` state is not an object.");
-        }
-
-        const s = state as Record<string, FabricValue>;
-        const type = (s.type as string) ?? (s.name as string) ?? "Error";
+        const type = (state.type as string) ?? (state.name as string) ??
+          "Error";
         // `null` `name` means "same as `type`" (the wire-level optimization).
-        const name = (s.name as string | null | undefined) ?? type;
-        const message = (s.message as string) ?? "";
-        const stack = s.stack as string | undefined;
-        const cause = s.cause;
+        const name = (state.name as string | null | undefined) ?? type;
+        const message = (state.message as string) ?? "";
+        const stack = state.stack as string | undefined;
+        const cause = state.cause;
 
         const extras: Array<[string, FabricValue]> = [];
-        for (const key of Object.keys(s)) {
+        for (const key of Object.keys(state)) {
           if (FABRIC_ERROR_RESERVED_KEYS.has(key) || isUnsafeObjectKey(key)) {
             continue;
           }
-          extras.push([key, s[key]]);
+          extras.push([key, state[key]]);
         }
 
         const result = new FabricError({
