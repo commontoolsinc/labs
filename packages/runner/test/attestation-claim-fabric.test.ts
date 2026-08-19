@@ -26,9 +26,7 @@ const replicaHolding = (storedValue: FabricValue): ISpaceReplica => {
     the: "application/json",
     of: "of:attest-claim-fabric",
     is: storedValue,
-    // A real cause hash is irrelevant to the value comparison under test.
-    cause: undefined,
-  } as State;
+  };
   return {
     did: () => "did:test:attest" as ReturnType<ISpaceReplica["did"]>,
     get: () => state,

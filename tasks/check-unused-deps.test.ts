@@ -155,7 +155,7 @@ Deno.test("importsAlias counts a commented-out import as used", () => {
 Deno.test("owningMember attributes a file to its member", () => {
   const members = ["packages/memory", "packages/runner"];
   assertEquals(
-    owningMember("packages/memory/lib.ts", members),
+    owningMember("packages/memory/interface.ts", members),
     "packages/memory",
   );
 });
@@ -179,7 +179,7 @@ Deno.test("owningMember returns undefined for a file under no member", () => {
 Deno.test("owningMember does not match a member that is only a path-segment prefix", () => {
   // "packages/mem" must not own a file under "packages/memory".
   assertEquals(
-    owningMember("packages/memory/lib.ts", ["packages/mem"]),
+    owningMember("packages/memory/interface.ts", ["packages/mem"]),
     undefined,
   );
 });

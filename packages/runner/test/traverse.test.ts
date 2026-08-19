@@ -7,7 +7,6 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -75,7 +74,6 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
       the: type,
       of: doc1Entity,
       is: { value: doc1Value },
-      cause: hashOf({ the: type, of: doc1Entity }),
       since: 1,
     };
     store.set(
@@ -118,7 +116,6 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
       the: type,
       of: doc2Entity,
       is: { value: doc2Value },
-      cause: hashOf({ the: type, of: doc2Entity }),
       since: 2,
     };
     store.set(
@@ -187,7 +184,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -230,7 +226,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -277,7 +272,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -328,7 +322,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -377,7 +370,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -421,7 +413,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -466,7 +457,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -513,7 +503,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -558,7 +547,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -595,7 +583,6 @@ describe("SchemaObjectTraverser array traversal", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -639,7 +626,6 @@ describe("SchemaObjectTraverser array traversal", () => {
         the: "application/json",
         of: id,
         is: { value: value },
-        cause: hashOf({ the: "application/json", of: id }),
         since: 1,
       };
     }
@@ -667,7 +653,6 @@ describe("SchemaObjectTraverser array traversal", () => {
           the: "application/json",
           of: id,
           is: { value: value },
-          cause: hashOf({ the: "application/json", of: id }),
           since: 1,
         };
       }
@@ -883,7 +868,6 @@ describe("getAtPath array index validation", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -946,7 +930,6 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -984,7 +967,6 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1023,7 +1005,6 @@ describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1066,7 +1047,6 @@ describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1104,7 +1084,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1145,7 +1124,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1200,7 +1178,6 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1263,7 +1240,6 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     return { store, docUri, type };
@@ -1415,7 +1391,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1460,7 +1435,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1505,14 +1479,12 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     store.set(`${linkedUri}/${type}`, {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 2,
     });
 
@@ -1548,7 +1520,6 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -1588,7 +1559,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1634,7 +1604,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { city: "Paris" } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
 
@@ -1646,7 +1615,6 @@ describe("SchemaObjectTraverser allOf correctness", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 1,
     });
 
@@ -2091,7 +2059,6 @@ describe("SchemaObjectTraverser number/integer type pruning", () => {
         the: type,
         of: docEntity,
         is: { value },
-        cause: hashOf({ the: type, of: docEntity }),
         since: 1,
       });
 
@@ -2309,7 +2276,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -2349,7 +2315,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2412,7 +2377,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2458,7 +2422,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: linkedEntity,
       is: { value: "linked-value" },
-      cause: hashOf({ the: type, of: linkedEntity }),
       since: 1,
     };
     store.set(`${linkedRevision.of}/${linkedRevision.the}`, linkedRevision);
@@ -2479,7 +2442,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2533,7 +2495,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2575,7 +2536,6 @@ describe("anyOf optimization integration", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2620,7 +2580,6 @@ describe("link schema path narrowing", () => {
       the: TYPE,
       of: entity,
       is: { value },
-      cause: hashOf({ the: TYPE, of: entity }),
       since: 1,
     } as Revision<State>);
   }
@@ -3091,7 +3050,6 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
       the: TYPE,
       of: entity,
       is: { value },
-      cause: hashOf({ the: TYPE, of: entity }),
       since: 1,
     } as Revision<State>);
   }
@@ -3469,7 +3427,6 @@ describe("sparse array preservation in traverseDAG", () => {
       the: type,
       of: docEntity,
       is: { value: sparseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3508,7 +3465,6 @@ describe("sparse array preservation in traverseDAG", () => {
       the: type,
       of: docEntity,
       is: { value: denseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3552,7 +3508,6 @@ describe("sparse array preservation in traverseArrayWithSchema", () => {
       the: type,
       of: docEntity,
       is: { value: sparseArray },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3688,7 +3643,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -3724,14 +3678,12 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     store.set(`${linkedUri}/${type}`, {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -3760,7 +3712,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc1Uri as Entity,
       is: { value: { name: "Alice", secret: "hidden" } },
-      cause: hashOf({ the: type, of: doc1Uri as Entity }),
       since: 1,
     });
 
@@ -3772,7 +3723,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc2Uri as Entity,
       is: { value: doc2Value },
-      cause: hashOf({ the: type, of: doc2Uri as Entity }),
       since: 2,
     });
 
@@ -3817,7 +3767,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -3829,7 +3778,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -3841,7 +3789,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -3856,7 +3803,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -3870,7 +3816,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -3886,7 +3831,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -3954,7 +3898,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -3966,7 +3909,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -3978,7 +3920,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -3993,7 +3934,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -4007,7 +3947,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -4023,7 +3962,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -4077,7 +4015,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { shouldNotLoad: true } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
 
@@ -4091,7 +4028,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: outerUri as Entity,
       is: { value: outerValue },
-      cause: hashOf({ the: type, of: outerUri as Entity }),
       since: 2,
     });
 
@@ -4136,7 +4072,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -4147,7 +4082,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 
@@ -4176,7 +4110,6 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 
@@ -4328,14 +4261,12 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { employees: [{ name: "Bob" }] } },
-      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
     store.set(`${docUri}/${type}`, {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 
@@ -4424,7 +4355,6 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
         the: type,
         of,
         is: { value: { name: `name-${i}` } },
-        cause: hashOf({ the: type, of }),
         since: 1,
       });
     }
@@ -4432,7 +4362,6 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 

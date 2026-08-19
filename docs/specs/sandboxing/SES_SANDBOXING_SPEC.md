@@ -364,7 +364,7 @@ inside a handler, and it forbids any ambient clock/entropy read in a
 lift/computed or at pattern body.
 
 Version 1 of the allowed domain is a deliberate subset of
-`@commonfabric/memory`'s `FabricValue`:
+`@commonfabric/api`'s `FabricValue`:
 
 - `null`
 - `undefined`

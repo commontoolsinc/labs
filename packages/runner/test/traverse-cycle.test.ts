@@ -3,7 +3,6 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -49,12 +48,10 @@ function storeWith(
 ): Map<string, Revision<State>> {
   const store = new Map<string, Revision<State>>();
   const entity = docUri as Entity;
-  // hashOf only hashes { the, of }, so a cyclic value here is fine.
   store.set(`${entity}/${TYPE}`, {
     the: TYPE,
     of: entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: entity }),
     since: 1,
   });
   return store;
