@@ -63,7 +63,9 @@ function recordPathProblem(record: string): string | undefined {
     return `is not under ${RECORD_PREFIX} — the decision record lives in ` +
       `the history tree`;
   }
-  const segments = record.slice(RECORD_PREFIX.length).split("/");
+  // Both separators: on Windows the probe's stat resolves a backslash as a
+  // path separator, so a slash-only split would let `..\` step out.
+  const segments = record.slice(RECORD_PREFIX.length).split(/[/\\]/);
   if (segments.some((s) => s === ".." || s === "." || s === "")) {
     return `steps back out of ${RECORD_PREFIX} — a dot or empty segment ` +
       `defeats the prefix`;
@@ -71,7 +73,9 @@ function recordPathProblem(record: string): string | undefined {
   if (!record.endsWith(".md")) {
     return `is not a Markdown document — a decision record is one`;
   }
-  if (RECORD_SCAFFOLDING.has(segments[segments.length - 1])) {
+  // The tree root's own two files; a NESTED file by either name is an
+  // ordinary indexed document.
+  if (segments.length === 1 && RECORD_SCAFFOLDING.has(segments[0])) {
     return `is the history tree's own scaffolding, not a decision record`;
   }
   return undefined;

@@ -61,16 +61,24 @@ describe("pattern-break-registry-guards", () => {
   });
 
   it("returns a finding for a record that steps back out of the tree", () => {
-    // The prefix alone would accept this, and the probe would then stat a
-    // file OUTSIDE the history tree — so the shape check refuses it before
-    // the probe ever sees it.
-    const findings = guardBreakRegistryEntries({
-      entries: [entry({ record: "docs/history/../../README.md" })],
-      requiredPatternKeys: new Set(),
-      recordExists: () => true,
-    });
-    expect(findings.length).toBe(1);
-    expect(findings[0].detail).toContain("steps back out");
+    // The prefix alone would accept these, and the probe would then stat a
+    // file OUTSIDE the history tree — so the shape check refuses them before
+    // the probe ever sees them. The second spelling is the Windows face:
+    // stat resolves a backslash as a separator there.
+    for (
+      const record of [
+        "docs/history/../../README.md",
+        "docs/history/..\\..\\README.md",
+      ]
+    ) {
+      const findings = guardBreakRegistryEntries({
+        entries: [entry({ record })],
+        requiredPatternKeys: new Set(),
+        recordExists: () => true,
+      });
+      expect(findings.length).toBe(1);
+      expect(findings[0].detail).toContain("steps back out");
+    }
   });
 
   it("returns a finding for a record that is not a Markdown document", () => {
@@ -95,6 +103,16 @@ describe("pattern-break-registry-guards", () => {
       expect(findings.length).toBe(1);
       expect(findings[0].detail).toContain("scaffolding");
     }
+  });
+
+  it("accepts a nested record named like the scaffolding", () => {
+    // Only the tree root's own two files are scaffolding. A nested README.md
+    // is an ordinary document the index covers.
+    expect(guardBreakRegistryEntries({
+      entries: [entry({ record: "docs/history/some-break/README.md" })],
+      requiredPatternKeys: new Set(),
+      recordExists: () => true,
+    })).toEqual([]);
   });
 
   it("reports every offending entry rather than the first", () => {
