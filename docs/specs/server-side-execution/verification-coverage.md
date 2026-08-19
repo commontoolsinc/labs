@@ -3568,7 +3568,8 @@ supply; OW29/OW32/OW34 closed):
     i.e. before the confidence verdict is stated as "no fundamental
     issue" without this qualification.
     **CLOSED 2026-08-19 by the design build's W3 (α)** (stacked PR
-    `claude/server-exec-v2-w3-alpha` off W1; no CI — every green a local
+    `claude/server-exec-v2-w3-alpha`, built off W1 and re-stacked onto
+    W2's tip at the 2026-08-19 re-stack; no CI — every green a local
     run). LANDED: (α1) the deadline-time purge of QUEUED LT1 leftovers
     (`Scheduler.purgeQueuedEvents`, the ruled discriminator, synchronous
     at both `exhausted` arms of `#waveCycle`; `events.lt1LeftoversPurged`);
@@ -4143,8 +4144,8 @@ supply; OW29/OW32/OW34 closed):
   the outstanding intent set; the schema-less whole-sidecar `cell.sink`
   is GONE; the effects channel follows (item 13); THREE RULED sentences
   LANDED (items 5/6, 8, 7). LANDED on
-  `claude/server-exec-v2-w2-intent-listener` (PR #6039, stacked on the
-  design branch; to be re-stacked onto W1's tip, PR #6029).
+  `claude/server-exec-v2-w2-intent-listener` (PR #6039, built on the
+  design branch; RE-STACKED onto W1's tip — PR #6029 — 2026-08-19).
   Independent adversarial review 2026-08-19: LANDABLE-WITH-FIXES (0
   BLOCKER / 1 MAJOR / 7 MINOR / 6 NIT), every finding addressed in the
   fix pass — MAJ-1 (the check applied a retired id TWICE when an
@@ -4497,8 +4498,9 @@ supply; OW29/OW32/OW34 closed):
 - **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
   durable stream entry is delivered to its handler exactly once as a
   COMPLETED run (events.md §4, RULED 2026-08-18); the build is the
-  stacked PR `claude/server-exec-v2-w3-alpha` off W1 (no CI — every
-  green a local run; report
+  stacked PR `claude/server-exec-v2-w3-alpha`, built off W1 and
+  re-stacked onto W2's tip 2026-08-19 (no CI — every green a local
+  run; report
   [`stage-c/w3-alpha-build-report.md`](../../history/plans/server-execution-v2/stage-c/w3-alpha-build-report.md)).
   It closes OW35 (above) and lands events.md §4's LANDED note naming the
   three seats. Coverage row per sentence of the RULED paragraph:

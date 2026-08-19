@@ -27,7 +27,8 @@ AND the W3 build report (`6d302f8d5`). Code hunks applied clean —
 byte-identical across the rebase (the W1 fixer's `space-server.ts`
 changes and W3's touch disjoint regions). W3 minted no OW row, so no
 collision with W1's OW41 (W2's separately-minted OW41 is the
-re-stacker's to renumber — untouched here). ONE
+re-stacker's to renumber — untouched here; done at the 2026-08-19
+re-stack: W2's row is now OW42, W1 keeps OW41). ONE
 `--force-with-lease` push for the rebase; every later push fast-forward.
 
 ## 1. Findings → dispositions (severities exactly as the report)
