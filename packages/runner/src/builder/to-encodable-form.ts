@@ -45,12 +45,10 @@ export type CellAliasResolver = (
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
 
-// Ledger-visible counter for the body-only module write (see
-// `moduleToEncodableForm`): counts increment even while the logger is
-// disabled, so the volume of function implementations serialized with neither
-// provenance nor an entry ref is always observable from the logger ledger.
+// Surfaces the body-only module write (see `moduleToEncodableForm`). It has
+// its own name so write-time diagnostics can be silenced or raised without
+// touching everything the `runner` logger carries.
 const serializeShapeLogger = getLogger("builder.serialize-shape", {
-  enabled: false,
   logCountEvery: 0,
 });
 
@@ -339,11 +337,10 @@ export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
     if (module.type === "javascript" && implRefValue === undefined) {
       // This module serializes body-only with no `$implRef` — a shape a
       // reader can resolve only through the bare-SES stringified-source
-      // fallback, where module-scope references do not exist. Test-built and
-      // never-verified modules produce it legitimately, so this stays at
-      // debug; the ledger count still fires while the logger is disabled, so
-      // the write volume is always observable.
-      serializeShapeLogger.debug("noref-body-write", () => [
+      // fallback, where module-scope references do not exist. Surfacing it
+      // here catches the shape as it is written, which is the only signal for
+      // graphs serialized inline rather than persisted by pattern reference.
+      serializeShapeLogger.warn("noref-body-write", () => [
         "Serializing a function implementation with neither provenance nor a" +
         " verified entry ref (body-only, no $implRef)",
         {
