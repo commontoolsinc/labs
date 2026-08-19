@@ -7,6 +7,7 @@ import {
   getResultCellWithSourceSchema,
   isLegacyPieceRegistryRoot,
   parseCellPath,
+  pieceRegistryKeyForRoot,
   resolveCellPath,
 } from "../src/piece-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -402,5 +403,21 @@ describe("isLegacyPieceRegistryRoot", () => {
         `expected ${String(source)} to be refused`,
       );
     }
+  });
+
+  it("selects allPieces for a legacy root and pieceRegistry otherwise", async () => {
+    assertEquals(
+      pieceRegistryKeyForRoot(await legacyShapedRoot(undefined)),
+      "allPieces",
+    );
+    const modern = runtime.getCell<Record<string, unknown>>(
+      space,
+      `modern-registry-root-${crypto.randomUUID()}`,
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      modern.withTx(tx).set({ pieceRegistry: [] });
+    });
+    assertEquals(error, undefined);
+    assertEquals(pieceRegistryKeyForRoot(modern), "pieceRegistry");
   });
 });

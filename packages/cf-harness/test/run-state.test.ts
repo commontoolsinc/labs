@@ -25,5 +25,24 @@ describe("run-state", () => {
       table.entries.pop();
       expect(state.handleTable?.entries.length).toBe(1);
     });
+
+    it("carries a defensive copy of given well-known grants", () => {
+      const grants = [{
+        name: "piece-registry" as const,
+        token: "cfh:a:abcdefgh",
+        ref: `/of:fid1:${"A".repeat(43)}/pieceRegistry`,
+      }];
+
+      const state = createHarnessRunState({
+        cfcEnforcementMode: "disabled",
+        currentDir: "/workspace",
+        wellKnownGrants: grants,
+      });
+
+      expect(state.wellKnownGrants).toEqual(grants);
+      expect(state.wellKnownGrants).not.toBe(grants);
+      grants.pop();
+      expect(state.wellKnownGrants?.length).toBe(1);
+    });
   });
 });

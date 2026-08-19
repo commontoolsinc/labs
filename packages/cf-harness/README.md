@@ -615,6 +615,33 @@ only the positions still sealed. Denial-path tool messages are not swapped; that
 coverage, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+#### Well-known grants
+
+A run configured with a Fabric session starts with a seeded handle: before the
+first model turn, the CLI establishes the session, mints a token for the space's
+piece registry — the same discovery root behind `cf piece ls` — and announces it
+in a context message pairing the token with a fixed, harness-authored
+description. The address stays trusted-side in the handle table like any other
+entry. This is what lets an agent find pieces to compute over without an
+operator handing it references one by one: discovery is `run_pattern` over the
+granted token, not a tool of its own, and `describe_handle` answers the
+registry's shape like any other reference.
+
+What the model receives is a token and fixed prose, never data. Reading anything
+behind the token means running a pattern over it, where the CFC boundary rules
+as it does for every other flow — in particular, a piece's `$NAME` is a value,
+and a name computed from labelled data taints a name-listing pattern's result,
+which strict enforcement refuses whole. The announcement says so and names the
+fallback: a pattern that returns the entry references without reading any
+values, which cannot taint and whose addresses come back as tokens through the
+ordinary outbound swap.
+
+The grants are recorded in run state (`wellKnownGrants`), replayed rather than
+re-minted on resume, and reported in the operator summary as `fabricGrants:`. A
+session that cannot be established leaves the run to proceed without its grants,
+and the CLI says so on stderr rather than staying silent. The grant list is
+designed to grow; the identity's profile is the expected next entry.
+
 #### Inspecting a handle's shape
 
 A token says nothing about what it refers to, and an agent handed one cannot

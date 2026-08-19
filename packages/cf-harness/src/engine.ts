@@ -77,6 +77,11 @@ import {
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
+import {
+  mintWellKnownGrants,
+  resolveWellKnownGrantRefs,
+} from "./well-known-grants.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -744,6 +749,43 @@ export class CfHarnessEngine {
 
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
+  }
+
+  /**
+   * Establishes the run's well-known grants: seeds the handle table with a
+   * token for each reference every Fabric-configured run is entitled to
+   * hold, records the grants in run state, and returns them. Establishing
+   * the Fabric session is the cost of resolving the references, so this
+   * connects eagerly — callers invoke it only on runs configured for a
+   * session. Idempotent across resume: grants already recorded are returned
+   * as they stand, without connecting again.
+   *
+   * A run without a session factory has nothing to grant and answers `[]`.
+   * A session that cannot be established propagates its failure — the caller
+   * decides whether a run proceeds without its grants, and says so.
+   */
+  async establishWellKnownGrants(): Promise<HarnessWellKnownGrant[]> {
+    if (this.#runState.wellKnownGrants !== undefined) {
+      return structuredClone(this.#runState.wellKnownGrants);
+    }
+    if (this.#fabricSessionFactory === undefined) {
+      return [];
+    }
+    const session = await this.#fabricSessionFactory();
+    const refs = await resolveWellKnownGrantRefs(session);
+    const minted = await mintWellKnownGrants(
+      this.handleTable,
+      this.#runState.runId,
+      refs,
+    );
+    await this.recordHandleTable(minted.table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { wellKnownGrants: structuredClone(minted.grants) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return minted.grants;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

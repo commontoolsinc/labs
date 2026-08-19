@@ -64,6 +64,8 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
+import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
+import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
@@ -380,6 +382,11 @@ export interface RunCfHarnessCliDependencies {
     handler: CfHarnessCliSignalHandler,
   ) => () => void;
   exit?: (code: number) => never | void;
+  /**
+   * Replaces the Fabric session the engine would build from `--fabric-*`
+   * configuration. Tests grant well-known handles without a deployed API.
+   */
+  fabricSessionFactory?: HarnessFabricSessionFactory;
 }
 
 const defaultCliIo = (): CfHarnessCliIO => ({
@@ -2401,6 +2408,18 @@ export const formatCfHarnessCliResult = (
       `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
     );
   }
+  if (
+    result.runState.wellKnownGrants !== undefined &&
+    result.runState.wellKnownGrants.length > 0
+  ) {
+    lines.push(
+      `fabricGrants: ${
+        result.runState.wellKnownGrants.map((grant) =>
+          `${grant.name} ${grant.token}`
+        ).join(", ")
+      }`,
+    );
+  }
   const reportedUsage = result.totalUsage ?? result.usage;
   if (reportedUsage !== undefined) {
     const usage = reportedUsage;
@@ -3094,6 +3113,9 @@ export const runCfHarnessCli = async (
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
           : {}),
+        ...(deps.fabricSessionFactory !== undefined
+          ? { fabricSessionFactory: deps.fabricSessionFactory }
+          : {}),
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
@@ -3258,6 +3280,9 @@ export const runCfHarnessCli = async (
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
           : {}),
+        ...(deps.fabricSessionFactory !== undefined
+          ? { fabricSessionFactory: deps.fabricSessionFactory }
+          : {}),
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
@@ -3315,6 +3340,26 @@ export const runCfHarnessCli = async (
           : {}),
       });
       const contextMessages = await prepareSkillContextMessages(engine);
+      // The well-known grants connect the Fabric session up front; a run
+      // configured for one is assumed to use it. A run whose session cannot
+      // be established still runs — its tools will surface the same failure
+      // when called — but the missing grants are said out loud rather than
+      // silently absent.
+      if (engine.fabricSessionAvailable) {
+        try {
+          const grants = await engine.establishWellKnownGrants();
+          const grantMessage = wellKnownGrantsContextMessage(grants);
+          if (grantMessage !== undefined) {
+            contextMessages.push(grantMessage);
+          }
+        } catch (error) {
+          io.stderr(
+            `fabric grants: unavailable (${
+              error instanceof Error ? error.message : String(error)
+            })\n`,
+          );
+        }
+      }
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,

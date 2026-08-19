@@ -7,6 +7,7 @@ import {
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -108,6 +109,7 @@ export interface HarnessRunState {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   handleTable?: HarnessHandleTable;
+  wellKnownGrants?: HarnessWellKnownGrant[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -154,6 +156,7 @@ export interface CreateHarnessRunStateOptions {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   handleTable?: HarnessHandleTable;
+  wellKnownGrants?: HarnessWellKnownGrant[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -262,6 +265,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
+      : {}),
+    ...(options.wellKnownGrants !== undefined
+      ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }
