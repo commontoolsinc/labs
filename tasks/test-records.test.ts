@@ -81,6 +81,35 @@ describe("test-records", () => {
       expect(context.agent).toBe("probe-agent");
     });
 
+    it("carries the branch when the checkout is on one", async () => {
+      // The ambient checkout cannot drive this either way: continuous
+      // integration builds a pull request from a detached merge commit, where
+      // `git branch --show-current` is empty and the branch is left off. A
+      // scratch repository on a named branch reaches it on every run.
+      const repo = await Deno.makeTempDir({ prefix: "test-records-branch-" });
+      try {
+        const git = async (...args: string[]) => {
+          const result = await new Deno.Command("git", {
+            args: ["-C", repo, ...args],
+            stdout: "null",
+            stderr: "null",
+          }).output();
+          expect(result.success).toBe(true);
+        };
+        await git("init", "-b", "probe-branch");
+        await git("config", "user.name", "Probe");
+        await git("config", "user.email", "probe@example.invalid");
+        await Deno.writeTextFile(`${repo}/probe.txt`, "probe\n");
+        await git("add", "probe.txt");
+        await git("commit", "-m", "probe");
+
+        const context = await buildLocalContext(repo, () => undefined);
+        expect(context.branch).toBe("probe-branch");
+      } finally {
+        await Deno.remove(repo, { recursive: true });
+      }
+    });
+
     it("falls back to unknown facts outside a repository", async () => {
       const context = await buildLocalContext(root, () => undefined);
       expect(context.commit).toBe("unknown");

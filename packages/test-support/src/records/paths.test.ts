@@ -25,7 +25,15 @@ describe("paths", () => {
     it("returns the directory holding .git when run inside a repository", () => {
       const root = repositoryRoot();
       expect(root).toBeDefined();
-      expect(Deno.statSync(join(root!, ".git")).isDirectory).toBe(true);
+      expect(Deno.cwd().startsWith(root!)).toBe(true);
+
+      // `.git` is a directory in an ordinary clone and a file holding a
+      // `gitdir:` pointer in a worktree. The climb keys on the entry
+      // existing, which `statSync()` answers for either shape, so asserting
+      // which shape it is would fail wherever the checkout is a worktree --
+      // and continuous integration, which uses a clone, would never see that.
+      const stat = Deno.statSync(join(root!, ".git"));
+      expect(stat.isDirectory || stat.isFile).toBe(true);
     });
 
     it("returns undefined outside any repository", () => {

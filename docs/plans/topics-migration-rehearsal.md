@@ -278,6 +278,11 @@ API_URL=http://localhost:8010 CF_DRILL_STORE_DIR=<the server's MEMORY_DIR> \
   packages/cli/integration/topics-restore-drill.sh
 ```
 
+CI runs that same loop in the `piece-call` CLI-integration shard, so the
+restore path is exercised on every pull request rather than only when someone
+rehearses. What CI cannot do is rehearse against real data, which is what the
+clone pass above is for.
+
 ```bash
 # Damage one topic the worst way a bad migration would.
 echo '{"title":"CLOBBERED","body":"","comments":[]}' | \

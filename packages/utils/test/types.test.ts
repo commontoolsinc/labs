@@ -400,12 +400,14 @@ describe("types", () => {
     });
 
     it("returns `false` for near-miss keys that are not in the set", () => {
-      // Only `__proto__` and `constructor` are unsafe — not every
-      // prototype-adjacent name.
+      // Only `__proto__` and `constructor` are unsafe -- not every
+      // prototype-adjacent name, and not `then`, which a schema may carry as
+      // a JSON Schema keyword.
       expect(isUnsafeObjectKey("prototype")).toBe(false);
       expect(isUnsafeObjectKey("proto")).toBe(false);
       expect(isUnsafeObjectKey("toString")).toBe(false);
       expect(isUnsafeObjectKey("hasOwnProperty")).toBe(false);
+      expect(isUnsafeObjectKey("then")).toBe(false);
     });
 
     it("is backstopped by the runtime keeping `__proto__` inert", () => {
