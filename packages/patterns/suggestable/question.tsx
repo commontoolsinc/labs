@@ -46,9 +46,13 @@ const onAnswer = handler<
  */
 const Question = pattern<QuestionInput, QuestionOutput>(
   ({ topic, context }) => {
+    // An empty prompt holds the request back: `generateObject` clears its
+    // state and makes no call until one arrives. A question with no topic has
+    // nothing to ask about, so the model is asked only once a caller names the
+    // subject.
     const prompt = computed(() => {
-      const t = topic || "the current situation";
-      return `Generate a single, thoughtful clarifying question about: ${t}. Include 2-4 multiple choice options if appropriate, or leave options empty for a free-text answer.`;
+      if (!topic) return "";
+      return `Generate a single, thoughtful clarifying question about: ${topic}. Include 2-4 multiple choice options if appropriate, or leave options empty for a free-text answer.`;
     });
 
     const response = generateObject<{
