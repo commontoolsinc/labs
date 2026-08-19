@@ -13,7 +13,16 @@ said with counts). Worktree `/Users/berni/labs-worktrees/w3-alpha`; durable copy
 this report `/Users/berni/labs-worktrees/w3-alpha-build-report.md`. Every
 deno invocation `--no-lock`. Commits: `a8f9ff61a` (the mechanisms),
 `c3732e50b` (the pins), `9b843b4e3` (spec + register + skip list), plus
-this report's docs commit. Design references: `stage-c-design.md` §4 (the
+this report's docs commit.
+*Fix-pass note (2026-08-19): the branch was REBASED onto W1's final tip
+`963ff600e` (W1's own review fixes) by the review fix pass — the build
+commits above now read `d0f382ef0` / `c5c3e1919` / `2385192e1` /
+`fcdfc2653` / `6ba2cc812`; the code is byte-identical across the rebase
+(one register conflict, both sides kept; the history INDEX's directory
+line folded into one). The independent review (`w3-alpha-review-report.md`
+beside this file) and the fix pass (`w3-alpha-fix-report.md`) are the
+record of what changed after this report was written; corrections below
+are marked "Fix-pass note".* Design references: `stage-c-design.md` §4 (the
 work item), §6 W3, §7; events.md §4 (the RULED sentence; its LANDED note
 is this build's); verification-coverage.md OW35 (CLOSED here) and the
 "Stage C design build delta — W3 (α)" block.
@@ -32,6 +41,20 @@ derived commit, and 3 vote adds / 0 toggles in the store — where W0's l1
 showed the toggle. The ON skip for the lunch gate STAYS (a DECISION, §4):
 its remaining bimodality is a CLIENT cascade-echo stranding on the join
 step — W2's, root-caused in §1 and handed off with the evidence.
+
+*Fix-pass note (2026-08-19): the independent review (LANDABLE-WITH-FIXES;
+1 BLOCKER / 2 MAJOR / 3 MINOR / 4 NIT) found the verdict's "enforced at
+three seats" WEAKER than the sentence in one corner the pins did not
+construct — an event contributing a same-eventId SIBLING tx (the served
+navigateTo's intent, committed inline mid-run) beside its LT1 handler
+run: with the sibling surviving the appending wave and the handler's tx
+refused at its late seal, the batch marked the entry on the sibling's
+survival and the drain never re-delivered — a LOST delivery (B1; a
+regression against the W1 base); the orphan arm had the mirror gap (M1:
+the intent half of an orphan landed). Both fixed and pinned in the fix
+pass (`499c9dd7b`): only the LT1 copy's OWN run marks its seq-less
+entry; the orphan refusal folds siblings, counted per event. OW35
+CLOSED stands for the pinned shapes, the sibling shape now among them.*
 
 ## 1. The l3 root cause (W0's "duplicate join") — CLIENT cascade-echo stranding, NOT a server double run
 
@@ -169,6 +192,16 @@ From `…/runs/l1-lunch-on/` (store `did:key:z6Mkipzr….sqlite`):
   resolved, the W3 LANDED block with a coverage row per ruled sentence,
   the skip DECISION, the l3 hand-off, OW37 re-read, the chat smoke);
   stage-c-design.md §6 W3 / §7 (α) risk — LANDED notes.
+- *Fix-pass additions (2026-08-19):* `wave.ts` — the seq-less-entry
+  marking requires `context.lt1 === true` (F1) and the requeue closure's
+  `eventOrphaned` sibling fold with per-EVENT `orphanDeliveriesRefused`
+  (F2); `executor-events-down.test.ts` — two sibling pins, pin 1's
+  held-gate extension (the purge's discriminator), pin 1's title
+  corrected; `stats.ts` / `events.ts` / `space-server.ts` comment
+  honesty (the shaper-held LT1 class, the skipped telemetry submit, the
+  non-waking refusal); events.md §4 AMENDED note; serving-loop.md §7;
+  verification-coverage.md (OW35 re-read, the W3 rows, OW37 direction);
+  stage-c-design.md §6 W3 note; this report's notes.
 
 ## 4. Decisions (flag-don't-fill)
 
@@ -185,7 +218,11 @@ From `…/runs/l1-lunch-on/` (store `did:key:z6Mkipzr….sqlite`):
    (it works — see the defense-in-depth row in §5 — at the cost of the
    refused copy's writes reaching the serving overlay, where the drain's
    copy reads them and then REQUEUES once when the late copy withdraws).
-   Owner-visible.
+   Owner-visible. *Fix-pass note: the review judged the DATED note a
+   clarification within the ruled sentence's letter — and found the
+   CODE weaker than that letter in the sibling corner (B1) until the
+   fix; events.md §4 now carries the AMENDED note stating the sibling
+   shape, the fix, and the late-seal split residual.*
 2. **(α2) not rebuilt — verified by reading, pinned by the trio's guard
    pin.** The guard entry is set before `queueEvent`, which holds shaped
    events synchronously (so a shaper-held drain copy is `queued` to the
@@ -226,6 +263,9 @@ From `…/runs/l1-lunch-on/` (store `did:key:z6Mkipzr….sqlite`):
 | **"(α1)+(α1b)+(α4) the QUEUED leftover and the in-flight one, side by side"** (flushDeadlineMs 100) | a served parent handler emits TWO LT1 children; the child handler is ASYNC — `c1` parks on a test gate (in flight across the deadline), `c2` sits QUEUED behind it (one event per pass) | `lt1LeftoversPurged 1` (c2), `lt1LateSealsRefused 1` (c1), `childRuns == [c1, c1, c2]` (the refused copy + the drain's two), the child's non-idempotent effect applied exactly TWICE for two entries, one consequence commit per entry, no notice on either entry, `appended 1 / processed 3` | purge skipped → `lt1LeftoversPurged` 0 (and c2 refused at the seal instead: refusals 2); seal refusal + the orphan arm's absent-emitter clause skipped → effect applied THREE times (3 ≠ 2) — the lunch double |
 | **"(α1b)+(α4) the IN-FLIGHT residue"** (flushDeadlineMs 150) | one async child parked across the deadline; the drain queues its `streamEntry` copy behind it; the gate opens | `lt1LateSealsRefused 1`, `lt1LeftoversPurged 0`, handler body ran twice, effect applied ONCE, one consequence commit | seal refusal skipped ALONE → refusals 0 but the effect still once (the orphan arm's absent-emitter clause withdraws the late copy in the next wave; the drain's copy requeues once — defense in depth, recorded); seal refusal + absent-emitter clause skipped → effect TWICE (2 ≠ 1) |
 | **"(α3) the ORPHAN refusal"** (flushDeadlineMs 30 000; the settle gate) | a DERIVATION emitter (`scheduler.run` of a registered action that sends on a bare stream) + its LT1 child handler recording payload tags; the gate holds the wave once the child sealed; a CLIENT fires a rival on the same stream; release | the witness doc saw only `["rival"]`, `orphanDeliveriesRefused 1`, the sidecar holds only the rival's entry (consequenced), every consequenced id has a durable entry | the orphan arm removed → `["ping", "rival"]` — "ping" delivered with no entry behind it |
+| *Fix-pass (2026-08-19)* **"(α1b)+(α4) + a same-eventId SIBLING tx"** (flushDeadlineMs 150) | the in-flight pin's child commits a separate event-handler-stamped tx carrying `tx.dispatchedEventId` (the served navigateTo intent shape) BEFORE the await that spans the deadline | the entry UNMARKED several deadlines later (the sibling's survival is not the handler's completion), the drain re-queues it (`processed` 2), after the gate: effect once, the sibling's write once, `childRuns` 2, refusal 1, purge 0, orphan 0, one consequence commit for the drain's run + one for the sibling (the SPLIT, recorded), no notice | the `lt1 === true` gate on the marking removed (the build tip's code) → RED at the marking (the entry consequenced before the gate); the reviewer's probe past that point: `processed` 1, `counterC` 0 — a LOST delivery |
+| *Fix-pass (2026-08-19)* **"(α3) + a same-eventId SIBLING tx"** (flushDeadlineMs 30 000; the settle gate on the earliest visible seal) | the orphan pin's "ping" run also commits the sibling tx inline | `seen ["rival"]`, the sibling's doc still 0, `orphanDeliveriesRefused 1` (two contributions folded, one event), every consequenced id durable | the sibling fold (`eventOrphaned`) off → `side` 1 — the intent half landed (2/2 runs) |
+| *Fix-pass (2026-08-19)* pin 1's held-gate extension | after the drain queued `c1'`/`c2'` behind the parked `c1`, the gate is held ≥ 450 ms (≥ 2 more 100-ms deadlines) | `wavesBudgetExhausted` > 1, `lt1LeftoversPurged` still 1, `processed` still 3, no `status` on either entry | the purge predicate widened to `served !== undefined` (the drain copies purged too) → `lt1LeftoversPurged` 3 ≠ 1, RED (the build tip's α pins were GREEN under this mutation — review m1) |
 
 Why the pins use RAW handlers on the serving runtime: the production
 chain from the emitting run's `send` (cell.ts's serving arm) through the
@@ -310,3 +350,12 @@ a comparator. A quiet re-run is the W4 acceptance's job.
 - **The lunch ON skip lift** — decision 4.
 - **The `require-await` lint finding in `wave.ts`'s `#foreignGrantFor`**
   — pre-existing (fan-out F1), untouched.
+- *Fix-pass (2026-08-19) additions:* the shaper-HELD-copy follow-on
+  should cover the HELD LT1 copy too (review m3: held by the wake shaper,
+  out of the purge's reach, caught by (α1b) one wave later — exactly-once
+  holds, `lt1LateSealsRefused` grows routinely; the counter doc says so);
+  the late-seal SPLIT tightening (withdraw a seq-less entry's sibling
+  from the appending wave when the copy's own run did not survive it, so
+  intent and consequences re-land together) — named in events.md §4's
+  AMENDED note, NOT built, owner-visible; the lunch ON skip lift — still
+  W2.1's + (α) → 3/3 (the coordinator's call, not the fix pass's).

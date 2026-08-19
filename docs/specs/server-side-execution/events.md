@@ -353,13 +353,50 @@ ambient-state one.
   (`events.orphanDeliveriesRefused`) — when NO surviving contribution of
   that wave appends its entry: the emitter's sidecar write was superseded
   (a derivation's per-doc drop), the emitter dropped whole or requeued, or
-  the emitter's seal never entered the wave; readers of the refused run
-  and its own cascade grandchildren fold through the same closure. The
-  run-count pins (`executor-events-down.test.ts`, "(α1)+(α1b)+(α4)",
-  "(α1b)+(α4)", "(α3)") count completed runs from the store — the
-  handler's non-idempotent effect applied exactly once per durable entry
+  the emitter's seal never entered the wave; readers of the refused run,
+  its own cascade grandchildren, and its same-eventId siblings fold
+  through the same closure. The run-count pins
+  (`executor-events-down.test.ts`, "(α1)+(α1b)+(α4)", "(α1b)+(α4)",
+  "(α3)") count completed runs from the store — the handler's
+  non-idempotent effect applied exactly once per durable entry
   and exactly one derived commit naming each event — with the killing
   mutations recorded in the W3 build report.
+- **AMENDED by W3's independent review (2026-08-19; B1 / M1 — the
+  same-eventId SIBLING shape):** an event can contribute SEVERAL
+  transactions to one wave — the handler run plus a separate
+  event-handler-stamped tx carrying the same `eventId`, in production
+  the served `navigateTo`'s intent tx (builtins.md §4), committed inline
+  mid-run. As built, (α1b) and (α3) assumed the LT1 copy's handler tx
+  was the event's ONLY same-eventId contribution, and in that corner the
+  code was WEAKER than the ruled sentence's letter: when the sibling
+  sealed into the appending wave and the handler's own tx did not (an
+  async handler still running at the deadline, refused at its late
+  seal), the batch marked the entry `consequenced` on the SIBLING's
+  survival, so the drain never re-delivered it — zero completed runs, a
+  lost delivery (a regression against the W1 base, where the late copy
+  committed unmarked one wave later and delivered). FIXED and pinned:
+  (i) a seq-less entry is marked consequenced ONLY by the LT1 copy's
+  OWN surviving run (`WaveRunContext.lt1 === true`) — a sibling-only
+  survival leaves the entry unmarked and the drain delivers it once,
+  with a `streamEntry` (the re-run's re-issued intent dedupes on its
+  deterministic nonce at apply); (ii) the (α3) orphan refusal folds the
+  copy's same-eventId siblings — neither half of an orphan lands, and
+  `events.orphanDeliveriesRefused` counts once per EVENT. Pins:
+  `executor-events-down.test.ts` "(α1b)+(α4) + a same-eventId SIBLING
+  tx" (red on the build tip: the entry marked, `processed` 1, the
+  effect 0×) and "(α3) + a same-eventId SIBLING tx" (red on the build
+  tip: the intent half landed). RESIDUAL, recorded and not ruled: in
+  the late-seal shape the sibling's write lands in the appending wave
+  while the handler's consequences land with the drain's run one wave
+  later — the event's contributions SPLIT across two commits (the
+  appending wave "could not process" the entry, §2 — it commits as
+  durable input and reprocesses); the split is idempotent by the
+  intent's nonce dedupe, and a store-side per-event commit count reads
+  2 for it exactly as it reads 1 for a same-wave double (W0's l1) —
+  the handler's effect is the run-count witness, never that count. A
+  tightening that also withdraws the timing-orphaned sibling from the
+  appending wave (so intent and consequences re-land together) is
+  named, not built — owner-visible.
 
 FORBIDDEN: a processed-events table; per-event acks from clients;
 handler-run provenance records; a handler delivery with no durable

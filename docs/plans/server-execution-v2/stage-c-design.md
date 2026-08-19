@@ -2132,7 +2132,19 @@ still RUNNING at the deadline (it seals after its appending wave closed;
 W0's l1 store is that shape: commit 64 = the unmarked in-process add +
 the drain copy's marked toggle-off) — the purge reaches only QUEUED
 copies. Lunch gate 3/3 green at the tip; the ON skip STAYS for the
-client cascade-echo stranding (l3's "3 joined"), which is W2's.*
+client cascade-echo stranding (l3's "3 joined"), which is W2's.
+Independent review (2026-08-19; LANDABLE-WITH-FIXES, 1 BLOCKER / 2
+MAJOR / 3 MINOR / 4 NIT, report on-branch) found the build WEAKER than
+the sentence in the same-eventId SIBLING corner — an LT1 copy whose run
+commits a separate event-handler-stamped tx (the served navigateTo
+intent) that survives the appending wave while the handler's own tx is
+refused late: the entry was marked on the sibling's survival and never
+re-delivered (a LOST delivery; a regression against W1's base). Fixed in
+the review batch and pinned: only the copy's OWN run marks its seq-less
+entry; the orphan arm folds siblings, counted per event. OW35 CLOSED
+stands for the pinned shapes, the sibling shape now among them; the
+late-seal SPLIT (intent in the appending wave, consequences one wave
+later) is a recorded residual, not a hole.*
 
 **W4 — measurement and acceptance** (the design pass's re-benchmark;
 register OW38 (i)):

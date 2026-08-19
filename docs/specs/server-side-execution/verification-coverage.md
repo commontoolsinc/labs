@@ -3628,6 +3628,29 @@ supply; OW29/OW32/OW34 closed):
     11 / processed 12`, no toggle. The lunch ON skip STAYS (decision
     below, W3 block): the gate's remaining bimodality is NOT (α)'s —
     see the l3 row.
+    **RE-READ by W3's independent review (2026-08-19) — CLOSED stands
+    for the PINNED shapes, and the sibling shape is now one of them.**
+    The closing build's code was WEAKER than the ruled sentence's
+    letter in one corner the (α4) pins did not construct: an event
+    contributing a same-eventId SIBLING tx (the served navigateTo's
+    intent, committed inline mid-run) beside its LT1 handler run. With
+    the sibling surviving the appending wave and the handler's tx
+    refused at its late seal (α1b), the batch marked the entry on the
+    sibling's survival and the drain never re-delivered — zero
+    completed runs (review B1, a BLOCKER: a lost delivery and a
+    regression against the W1 base, where the late copy committed
+    unmarked one wave later); the (α3) arm had the mirror gap — the
+    intent half of an orphan landed (review M1). Both FIXED in the
+    review batch and pinned red-first ("(α1b)+(α4) + a same-eventId
+    SIBLING tx"; "(α3) + a same-eventId SIBLING tx"): only the LT1
+    copy's OWN surviving run marks its seq-less entry; an
+    orphan-refused copy folds its siblings, counted once per event.
+    Residual recorded (events.md §4's AMENDED note): the late-seal
+    split — the intent lands in the appending wave, the consequences
+    with the drain's run one wave later, idempotent by the nonce
+    dedupe; a tightening that withdraws the timing-orphaned sibling is
+    named, not built. Not a hole in the sentence; a shape the register
+    now names.
   - **OW36 — the late-echo arrival-gate rule — RULED 2026-08-18
     (ratified as written); CLOSED.**
     Implemented in #5991 (T2 (b)) as speculation.md §4 step 2 read as a
@@ -4488,7 +4511,21 @@ supply; OW29/OW32/OW34 closed):
     the appending wave with one LT1 copy running and one queued. Killing
     mutations recorded in the report (the true double needs BOTH the
     seal refusal and the orphan arm's absent-emitter clause off: the
-    effect applied three times / twice).
+    effect applied three times / twice). **Review fix (2026-08-19):**
+    the same-eventId SIBLING shape — an LT1 copy whose run commits a
+    separate event-handler-stamped tx (the served navigateTo intent)
+    before an await spanning the deadline — is pinned by "(α1b)+(α4) +
+    a same-eventId SIBLING tx": RED on the build tip (the sibling's
+    survival marked the entry; the refused handler copy was never
+    re-delivered — `processed` 1, the effect 0×, a LOST delivery),
+    green with the marking keyed on the copy's OWN run (`lt1 === true`);
+    the effect once, the sibling's write once, `processed` 2; the
+    store-side per-event commit count reads 2 for this split and is
+    recorded as not the witness. Pin 1 additionally holds its gate
+    across ≥2 further deadlines with the drain's `streamEntry` copies
+    queued (review m1): an over-reaching purge predicate (`served !==
+    undefined` alone) is RED there (`lt1LeftoversPurged` 3 ≠ 1) — the
+    discriminator is now guarded by the α pins, not only by the trio's.
   - "An entry whose in-process (LT1 same-wave) run does not complete
     within its appending wave is dispatched by the drain alone; the
     serving loop purges unrun in-process leftovers at the flush deadline
@@ -4502,7 +4539,13 @@ supply; OW29/OW32/OW34 closed):
     by reading (held copies are `queued` to the guard; one producer of
     `streamEntry`-bearing copies) — its pin is the trio's
     ("exactly-once under an HONEST flush deadline"); a shaper-HELD-copy
-    pin is NOT added (FOLLOW-ON, see the report's not-done list).
+    pin is NOT added (FOLLOW-ON, see the report's not-done list) — and
+    the follow-on should cover the shaper-held LT1 copy too, not only
+    the drain-held one (review m3): an LT1 copy forwarding a
+    renderer-trusted event is HELD by the wake shaper, out of the
+    purge's `eventQueue` reach, released into a later wave and caught by
+    (α1b) there — exactly-once holds, `lt1LateSealsRefused` grows
+    routinely for it (the counter doc says so now).
   - "A derivation-kind emitter's superseded LT1 leftover re-arms nothing
     and its orphan delivery is REFUSED (never delivered without a durable
     entry)" — COVERED by (α3): the orphan arm in the wave's requeue
@@ -4510,7 +4553,13 @@ supply; OW29/OW32/OW34 closed):
     saw only the rival's tag, every consequenced id has an entry;
     mutation: the arm removed → "ping" delivered with no entry) and by
     (α1)'s purge for a not-yet-run copy (no notice, no re-arm: the copy
-    carries no failure hook and no commit callback).
+    carries no failure hook and no commit callback). **Review fix
+    (2026-08-19, M1):** the arm folds the copy's same-eventId SIBLINGS
+    (the inline intent tx) into the refusal and counts once per EVENT —
+    pin "(α3) + a same-eventId SIBLING tx": RED on the build tip (the
+    handler half refused, the intent half LANDED — `side` 1), green with
+    the fold (`side` 0, `orphanDeliveriesRefused` 1 for two folded
+    contributions).
   - Counters (serving-loop.md §7 `events`): `lt1LeftoversPurged`,
     `lt1LateSealsRefused`, `orphanDeliveriesRefused` — asserted in the
     pins; read on the live runs (lunch 1/0/0 per run; chat 0/0/0).
@@ -4560,9 +4609,14 @@ supply; OW29/OW32/OW34 closed):
     the refusal run inside existing cut cycles; the lunch runs show
     `derivedCommits == waves` (61/61, 52/52, 52/52) with
     `wavesBudgetExhausted` 38 / 26 / 25 — the deadline-honesty shape the
-    trio named, fewer than the W0 tip's 21 on a 46-wave run in ratio
-    terms only by noise; the ratio metric stays owed to W4's quiet run,
-    never silenced.
+    trio named. CORRECTED (review m2, 2026-08-19; the first wording said
+    "fewer … by noise", the wrong direction): W3's exhausted ratios are
+    0.62 / 0.50 / 0.48 (38/61, 26/52, 25/52) against W0's l1–l3 0.46 /
+    0.39 / 0.26 (21/46, 17/44, 10/38) — HIGHER, and confounded by load
+    (W3's 1-min load 4.5 / 6.9 / 5.5 before each run → 8.8 / 8.3 / 5.7
+    after; W0's l1–l3 5.0 / 2.9 / 3.6 before, from the driver logs); not
+    a comparison, not silence. The ratio metric stays owed to W4's
+    quiet run.
   - Chat n=20 smoke (PROVISIONAL, one run, load 9.4–9.6 — a concurrent
     benchmark on the box; NOT comparable to W1's 1 239 ms): series
     complete, median 1 541 ms (q1 1 408 / q3 1 818 / max 3 208);

@@ -1299,13 +1299,22 @@ decision (their durable entry stays pending; the next drain delivers it
 with a `streamEntry`); `lt1LateSealsRefused` — LT1 copies that were
 RUNNING at the deadline and sealed after their appending wave closed,
 refused at the seal destination before entering any wave (the drain's
-copy is the one completed run); `orphanDeliveriesRefused` — LT1 copy
-contributions the wave withdrew because no surviving contribution of
-that wave appended their entry (a derivation emitter's superseded
-sidecar write, a withdrawn or never-sealed emitter). All four are the
-invariant WORKING, routine under short waves; `events.processed >
-events.appended` is the drain delivering server-emitted entries, never
-the double's signature — per-event run counts are.
+copy is the one completed run) — it also grows for the shaper-HELD LT1
+class (a copy forwarding a renderer-trusted event object is held by the
+scheduler's wake shaper, out of the purge's `eventQueue` reach, and
+released into a later wave where the refusal catches it; exactly-once
+holds, at one refused run + one extra cycle per such cascade — W3
+review m3, recorded, the shaper-held pin still a follow-on);
+`orphanDeliveriesRefused` — LT1 copies the wave withdrew because no
+surviving contribution of that wave appended their entry (a derivation
+emitter's superseded sidecar write, a withdrawn or never-sealed
+emitter), their same-eventId siblings folded with them — counted once
+per EVENT (W3 review M1). All four are the invariant WORKING, routine
+under short waves; `events.processed > events.appended` is the drain
+delivering server-emitted entries, never the double's signature —
+per-event run counts are (and a store-side per-event consequence-commit
+count is not one either: it reads 1 for a same-wave double and 2 for a
+late-seal split with a surviving intent sibling — W3 review B1).
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 
