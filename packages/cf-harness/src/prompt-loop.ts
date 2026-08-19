@@ -3234,6 +3234,7 @@ export class CfHarnessPromptLoop {
       // are scrubbed here; the artifact keeps the raw text.
       const {
         rawValue: _rawValue,
+        rawCauseMessage: _rawCauseMessage,
         pieceId: _pieceId,
         resultRefSchema: _resultRefSchema,
         ...publicOutput
