@@ -1255,10 +1255,16 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   sidecar was minted for (a sibling's runs of a per-user sidecar's
   narrowed nodes are inert but not free) — a per-demander pin
   (`demandedBy` on the run options → a resolver filter) is the
-  refinement, an unstated semantic left for the owner; (ix) the walk
+  refinement, an unstated semantic left for the owner; (ix) ~~the walk
   re-fires per changed doc it read (an effect; N × walk per changed
   root — the design's stated cost), not covered by B7's derivation
-  claim; (x) the demand wake's 300 ms grace is a coalescing choice,
+  claim~~ **RESTATED 2026-08-19 (stage-C build W1): there is no walk.**
+  The demand walk is deleted; the demand pass reconciles the tracked-ids
+  closure in O(rows) on registry deltas (no per-row engine read), and the
+  structural-growth path lands one derived commit later than the link that
+  reaches it (W0's measured cost: chat 220–253 ms p50 to the landing,
+  ≤ 1.24 s p95, mostly the 300 ms demand-wake grace of (x)). B7's
+  per-instance clean bit is now the currency check's substrate; (x) the demand wake's 300 ms grace is a coalescing choice,
   not a ruling — without it the lunch gate's browsers hung at login
   (the loop's eager first structure load + derivations of a piece its
   creator was still setting up made the creator's deferred-start
@@ -3775,33 +3781,33 @@ supply; OW29/OW32/OW34 closed):
     "any per-user subtree the demand walk does not reach" likewise
     describes the stage-B mechanism and is swept by the build's
     speculation.md edits (W2), not by the acceptance.
-  - **OW39 — the (d′) §1 sentence's IMPLEMENTATION (W1); the spec is
-    ahead of the code until it lands.** Binding since 2026-08-18
-    (serving-loop.md §1:57–89 on this branch): demand is the union of
-    the demanding sessions' tracked instances (memory v2's
-    schema-narrowed closure); the serving loop runs the stale writers
-    of demanded instances; there is no demand walk; a demanded
-    instance's writers hold demand while any session tracks it and
-    release when none does (coarse — R-D; fine-grained is the future
-    row the build mints). The code at this tip: the per-demander walk
-    (`#installDemandWalk`, `#demandSinks`, the `demand-walk:*` effects
-    and traces, `watchedRootsForSpace`, the walk's union logs and
-    resubscribes — design Appendix A's (d′) anchors). Owed: W1 per
-    design §6 — the memory-server exposure (`demandedInstancesForSpace`
-    + the push-growth `demandChanged` notify); the SpaceServer's
-    registry over the closure + the currency check on registry deltas
-    (writers of an entered key → demand roots; not-current-for-pair
-    re-arm; releases on leave); the scheduler's `demandedWriters` root
-    kind with its §8 bracket on every transition; the walk DELETED;
-    the (d′) `demand` counter block; the pins above red-first;
-    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green; the OFF suite
-    byte-identical — gated by W0's (d′) refutation result. If W0
-    refutes (d′) and the fallback (design §2F) is taken, the §2F.4
-    "structural subscription" text REPLACES this ruled sentence — a
-    RE-RULING of the owner, not a quiet swap. Trigger: W1's landing PR
-    closes the row (and removes §1's spec-ahead-of-code marker); before
-    the design build stage's confidence verdict names the demand model
-    as built.
+  - **OW39 — the (d′) §1 sentence's IMPLEMENTATION (W1). CLOSED
+    2026-08-19 by the design build's W1.** Binding since 2026-08-18
+    (serving-loop.md §1): demand is the union of the demanding sessions'
+    tracked instances (memory v2's schema-narrowed closure); the serving
+    loop runs the stale writers of demanded instances; there is no demand
+    walk; a demanded instance's writers hold demand while any session
+    tracks it and release when none does (coarse — R-D; fine-grained is
+    the future row below). W1 LANDED it: the memory-server exposure
+    (`demandedInstancesForSpace` + the push-growth `demandChanged`
+    notify), the SpaceServer's registry over the closure + the currency
+    check on registry deltas (writers of an entered key → demand roots;
+    not-current-for-pair re-arm; releases on leave), the scheduler's
+    standing `demandedWriters` root kind with its §8 bracket on every
+    enter/leave/registration/unregistration transition, and the walk
+    DELETED (`#installDemandWalk`, `#demandSinks`, the `demand-walk:*`
+    effects/traces, the walk's union logs and resubscribes — gone; `grep
+    -r demand-walk packages/src` finds no code). Instruments: the (d′)
+    `demand` counter block (no `walkRuns`); the W1 pins T1′/T2′(probe +
+    cross-piece)/T3′/T4′/T5′/T7′/T9′/T10′/P-demand-set/P-coarse/P-arrival
+    (`executor-dprime-w0.test.ts`), red-first with recorded killing
+    mutations; the fan-out (f) walk half retired into T9′;
+    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green across the executor suites
+    and the pins; the OFF scheduler suites' pass/fail set identical to
+    the base tree (T9′). §1's spec-ahead-of-code marker is REMOVED. See
+    the "Stage C design build delta — W1 (d′)" LANDED block below for the
+    per-sentence coverage rows. (W0 returned PROCEED (d′): no dark value;
+    the fallback §2F was not taken.)
   - **OW40 — speculation.md §4 step 4's re-run of un-consequenced
     intents against fresh state — RULED "owed" 2026-08-18 (design §5
     item 4's sub-question, as recommended; §4 NOT amended).** Step 4
@@ -3853,6 +3859,101 @@ supply; OW29/OW32/OW34 closed):
     ACCEPTED 2026-08-18; W0 is next" (plan); W0 is (d′)'s refutation
     experiment (and (e)'s) on a scratch branch, nothing pushed (design
     §6); the design document itself stays LIVE until the build lands.
+- **Stage C design build delta — W1 (d′) LANDED (2026-08-19).** The
+  serving loop's demand model is now the tracked-ids closure and the
+  demand walk is deleted; the build is the stacked PR
+  `claude/server-exec-v2-w1-dprime` off the design branch (no CI — every
+  green a local run). It closes OW39 (above) and lands serving-loop.md
+  §1's (d′) text as CODE. Coverage row per (d′) §1 sentence:
+  - "demand … is memory v2's schema-narrowed closure … instance-keyed,
+    accumulated across its overlapping watches" — COVERED by
+    `demandedInstancesForSpace` (⋃ `session.trackedIds` over the space's
+    client sessions, service excluded, one row per (instance key,
+    session)); pins P-demand-set / T5′ (`server.demandSetSizesForSpace`
+    unionKeys = the registry keys). Killing mutation: return only watch
+    roots → the closure's non-root docs vanish from the registry and
+    P-demand-set's union-equality fails.
+  - "there is no demand walk … the serving loop runs the STALE writers
+    of demanded instances … those runs' own logged reads make their
+    inputs live and current in turn" — COVERED by the standing
+    `demandedWriters` root kind (the `isDemandRoot` disjunct) + the
+    currency check on registry deltas; pins T1′/T4′/T7′. Killing
+    mutation M1 (recorded in the build report): drop the `demandedWriters`
+    disjunct in `isDemandRoot`/`recomputeLiveRefs` → 5/6 pin steps time
+    out (no demanded value lands). T9′: no `demand-walk:*` action in the
+    graph or trace; the OFF scheduler suites byte-identical.
+  - "a demanded instance's writers hold demand … while any session
+    tracks the instance and release it when none does — a session's
+    tracked set shrinks only on a full re-evaluation or close (coarse)"
+    — COVERED by the §8 liveness bracket on enter/leave/registration and
+    the coarse leave (release only when no registry key names the writer);
+    pin P-coarse; `SCHEDULER_LIVENESS_EQUIVALENCE=1` green (T10′).
+  - "a derivation that becomes reachable through a wave's own write
+    becomes demand when the tracker's push-time re-traversal reaches it
+    and lands in a later derived commit" — COVERED by the push-growth
+    `demandChanged` notify (a push pass that GREW a session's tracked set)
+    → `pushGrowthWakes`; pins T2′-cross / T3′ (a cross-piece / array-element
+    link enters a narrowly-watching demander's closure, pre-empted=false,
+    `pushGrowthWakes` +1). Killing mutation M2 (recorded): remove the two
+    push-growth notify sites → T2′-cross/T3′ fail on `pushGrowthWakes`.
+    The cycle count is the `settle` series' structural-growth waves
+    (W0 workload numbers: chat landing 3.3–3.4 waves, 220–253 ms p50).
+  - The `demand` counter block (serving-loop.md §7, no `walkRuns`) and
+    the `settle` series are asserted present in the pins; `demandRootEnters`/
+    `Leaves` accumulate across park (obligation (iii)).
+  - **R-D — the coarse unsubscribe — RULED 2026-08-18, recorded here.**
+    A doc leaves demand only when NO live session tracks it; the
+    incremental push path only grows a session's set, so demand roots
+    release LATE, never early (bounded work no client reads, never a
+    starved value). FUTURE row **"fine-grained demand release"**: the
+    seat is the memory server's tracker (per-doc refcounts across a
+    session's selectors), not the loop; trigger — a workload where the
+    coarse over-demand's compute cost is shown to matter (W0's drift was
+    not tens of thousands: note union 0 → 1 721 over 20 notes, one
+    session, dropping to 3 when the sessions leave).
+  - **FUTURE / owed rows the build surfaced (none binding):**
+    - **flag 4 — the structure load for demanded NON-root docs with
+      pattern meta.** The closure surfaces a piece reachable only through
+      a DATA link whose writer is not registered on the server (parity
+      with the walk, which never started pieces either); W0 counted the
+      rows: chat 2 / note 19 / lunch 0. The id-class-filtered
+      `#attemptStructureLoad` per such row is the OPTION; not built (the
+      count is small and the pattern-meta test needs a per-row engine read
+      the pass must not do). Trigger: a workload where a data-linked
+      piece's value must land server-side.
+    - **flag 5 — the output-doc-demanders union.** `#demandersFor`
+      matches keys by ROOT id; a session whose closure reaches piece P2's
+      computed doc but not P2's root supplies no demander to P2's writer →
+      the wave-level `undemandedNarrowingRuns` fallback (pre-existing;
+      W0: chat 0, lunch 0, note 47–55, the trio tip 47–48). Unioning the
+      pairs demanding a writer's OUTPUT docs into its demanders is an
+      option within the ruled semantics; not built. Trigger: the note
+      journey's `undemandedNarrowingRuns` shown on the critical path.
+    - **flag 9 — id-class filtering of the `source`-wired closure.** The
+      tracker follows a piece root's `source`/process wiring regardless of
+      schema, so a schema-narrowed root watch demands the piece's whole
+      internal graph (over-approximation, never under — W0 §2(b)).
+      RECOMMENDATION ON FILE: accept the tracker's set as the demand set
+      (it is what the client is delivered anyway); do NOT filter the demand
+      pass by id class / value reach. Owner-visible; not a binding change.
+    - **the no-grace push-growth wake / pre-seal closure refresh** — the
+      two named fix shapes for the one-push-late structural-growth cycle;
+      NOT built (W0's numbers did not force it: sub-second at p50 on every
+      workload, mostly the 300 ms grace, and the `source` pre-emption
+      makes most structure demanded before it exists). Trigger: a real
+      journey that puts the growth path on its critical path.
+    - **the l3 duplicate-join / vote-toggle family → W3.** The lunch gate
+      was bimodal on the W0 tip (1/3 green) for a DUPLICATE-CONSEQUENCE
+      family — (α)'s double dispatch toggling a vote off; a duplicate join
+      rendered — made more visible by faster waves, NOT a (d′) demand hole
+      (the votes were demanded and derived, twice). The root cause is
+      (α)/(e) territory (W3/W2); l3's duplicate not root-caused (client
+      speculative echo vs a same-drain LT1 copy). Trigger: W3 (α).
+    - **OW37 re-read on W1's numbers** — with the walk gone, the wave
+      count per authored input falls (fewer exhausted waves; W0: chat
+      wavesBudgetExhausted 30–35 vs the trio tip's 739–777), and the
+      structural-growth path adds one cycle; re-read the §4 amplification
+      ratio on W4's quiet run, never silence the assertion.
 
 ## 4. Standing rule
 

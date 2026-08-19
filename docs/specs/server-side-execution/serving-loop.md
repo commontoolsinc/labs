@@ -57,10 +57,22 @@ for that principal's instance of every node that narrows beneath it
 (scopes.md §2, RULED 2026-08-16; fan-out stage B), so the demand
 registry keeps the demanding (user, session) pair on every INSTANCE a
 client session TRACKS — memory v2's schema-narrowed closure of that
-session's watches (the roots and every doc the selectors' schemas
-reach, absent targets included), instance-keyed, accumulated across
-its overlapping watches, space-scoped instances included. Demand is
-that union over the space's client sessions; there is no demand walk.
+session's watches (the roots, every doc the selectors' schemas reach,
+AND the piece `source`/process wiring the tracker follows regardless of
+schema — a watched piece root pulls its whole internal graph, handler
+bindings and `ifElse` inputs included; absent targets included),
+instance-keyed, accumulated across its overlapping watches, space-scoped
+instances included. Demand is that union over the space's client
+sessions; there is no demand walk.
+*(AMENDED 2026-08-19 (descriptive; the RULED semantics — the tracked
+set — unchanged): W1's build measured what the tracker's closure
+actually is (stage-C W0 §2(b)) — it follows a piece root's
+`source`/process wiring, so a schema-narrowed root watch still demands
+the piece's whole internal graph, and the one-push-late structural-growth
+path is therefore pre-empted for a piece's own computeds and fires only
+for links OUT of a piece's wiring (a cross-piece link, an array element).
+Over-approximation, never under: the client renders nothing it is not
+delivered.)*
 The serving loop runs the STALE writers of demanded instances — a
 writer whose instance for a demanding pair never ran at its ratchet,
 or was dirtied since (§3b's per-instance clean bit; the basis index is
@@ -83,9 +95,11 @@ runs once per demanding pair, each run following THAT demander's
 redirects" — described the fan-out stage-B mechanism and was amendable,
 not a rule. The text is the design's §2.10, verbatim
 ([`stage-c-design.md`](../../plans/server-execution-v2/stage-c-design.md)).
-IMPLEMENTATION is the design build's W1: at this branch's tip the code
-still runs the per-demander walk, so this paragraph is the spec ahead
-of the code — verification-coverage.md OW39 is the row W1 closes.)*
+IMPLEMENTED by the design build's W1 (2026-08-19): the per-demander
+demand walk is deleted; the serving loop marks the writers of demanded
+instances as standing demand roots (§8's liveness bracket) and runs the
+stale ones. verification-coverage.md OW39 — the row that tracked "spec
+ahead of code" — is CLOSED by W1's landing.)*
 Events run
 their handlers eagerly — after preflight makes any dirty state
 inputs current (D-v2-2). Undemanded derivations stay
@@ -1179,7 +1193,11 @@ supersededWrites, authoredSeen, effectAcks, derivedCommits,
 structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
-watermarkLag, events:
+watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
+demand: {demandedRows, demandedInstances, demandedInstancesMax,
+demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
+demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
+pushGrowthWakes, watchWakes}, settle: {series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed,
 budgetDeferrals}, lease:
@@ -1223,6 +1241,36 @@ EVALUATED per group in mixed batches, frame or no frame: an ordering
 witness, not a delivered-frame metric). Every
 Phase gate in the plan reads these counters; tests MUST assert on
 counters, not logs.
+
+The (d′) `demand` block (stage-C design build W1, 2026-08-19) is the
+demand-model accounting after the demand walk was deleted — so there is
+NO `walkRuns` counter, and its absence is the structural witness (a
+`demand-walk:*` action anywhere in the graph fails the T9′ pin).
+`demandedRows` is the closure the last pass saw (rows =
+⋃ `session.trackedIds` over the space's client sessions, service
+excluded); `demandedInstances`/`Max` the distinct registry keys and
+their peak; `demandedPairs` the total (instance key, demanding pair)
+entries; `demandedWriters`/`Max` the standing demand-root set (the
+`isDemandRoot` disjunct, §8's bracket) and its peak; `demandRootEnters`/
+`demandRootLeaves` the ACCUMULATED root transitions across the space's
+whole life (they are held on the space's stats, not read from the
+current runtime's counters, which zero on a reactivation);
+`notCurrentRearms` the per-key not-current-for-pair re-arms (B7's clean
+bit); `demandPasses`/`demandPassMs` the pass's O(rows) reconcile cost
+(the pass does NO per-row engine read and runs on registry deltas — a
+per-row read here lands on the wave-latency critical path);
+`pushGrowthWakes` the NEW push-time `demandChanged` notify (a push pass
+that grew a session's tracked set — the structural-growth trigger) and
+`watchWakes` the pre-existing `session.watch.set`/`.add` notifies;
+`demandArrivals` (top-level) the root-level arrival re-arm's count. The
+`settle` block is SERVER SETTLE per authored input — admission (the
+feed's admitted-commit notice, the append's seq) to W COVERING it (the
+wave whose `derivedThrough` ≥ seq); each series entry carries `ms`,
+`waves`/`cycles` (the T2′/T3′ cycle count), and `class` (`value-only`
+vs `structural-growth` — a push-growth wake fired between admission and
+coverage), so W4's acceptance run reads p50/p95 straight off it.
+`undemandedNarrowingRuns` and `earlyEmitRefusals` are pre-existing
+top-level counters the earlier §7 list omitted (folded in here).
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 

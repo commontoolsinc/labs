@@ -81,26 +81,6 @@ const FAN_OUT_PATTERN = [
   "});",
 ].join("\n");
 
-/** T2′: `view` links to `guarded` ONLY when the flag is on; ifElse writes
- * a LINK and never reads the branch value (if-else.ts), so `guarded` is
- * reachable only through the link the wave writes. */
-const GUARDED_PATTERN = [
-  "import { computed, Default, ifElse, pattern, PerUser, Writable } from 'commonfabric';",
-  "type Draft = Writable<string | Default<''>>;",
-  "type Flag = Writable<boolean | Default<false>>;",
-  "const text = (cell: Draft): string => (cell.get() as string | undefined) ?? '';",
-  "export default pattern<",
-  "  { draft?: PerUser<Draft>; flag?: PerUser<Flag>; n?: number },",
-  "  { view: unknown }",
-  ">(({ draft, flag }) => {",
-  "  const draftCell: Draft = draft!;",
-  "  const flagCell: Flag = flag!;",
-  "  const guarded = computed(() => 'guarded:' + text(draftCell));",
-  "  const on = computed(() => flagCell.get() === true);",
-  "  return { view: ifElse(on, guarded, 'off') };",
-  "});",
-].join("\n");
-
 /** T2′ (isolated): a HANDLER writes a LINK to a computed it never reads
  * (`slot.set(hiddenCell)` — the link-tool shape); `hidden` is exposed
  * nowhere else, so it is reachable only through the link the wave writes. */
