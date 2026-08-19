@@ -674,7 +674,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     setup.cancel();
   });
 
-  it("(f-walk) the per-demander demand WALK reaches a per-user subtree: a computed guarded by Alice's per-user flag — reachable only through HER value — materializes server-side under her instance (design §B4; residual 2's coverage)", async () => {
+  it("(f) [d′] a per-user subtree reachable only through HER value: a computed guarded by Alice's per-user flag materializes server-side under her instance WITH NO WALK — the branch's own run reaches it (§2.3 (ii); §2.8 (b)'s known non-hole)", async () => {
     const setup = await standUp({
       names: { arg: "fo-f-arg", result: "fo-f-result" },
       pattern: GUARDED_PATTERN,
@@ -688,8 +688,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // Both type a draft; only ALICE sets her flag.
     await setup.writeDraft(alice, "A");
     await setup.writeDraft(bob, "B");
-    const traceBeforeFlag = servingRuntime!.scheduler.getActionRunTrace()
-      .length;
     {
       const arg = alice.getCell<{ flag: boolean }>(
         space,
@@ -737,49 +735,23 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       () => instanceHolds(engine, aliceKey, '"guarded:A2"'),
       "alice's second draft under her instance",
     );
-    const resultWalk = `demand-walk:${space}/${setup.resultId}`;
-    const resultWalkKeys = () =>
-      new Set(
-        servingRuntime!.scheduler.getActionRunTrace()
-          .filter((entry) => entry.actionId === resultWalk)
-          .map((entry) => entry.instanceKey),
-      );
-    const short = (key: string | undefined) =>
-      key === aliceKey ? "alice" : key === bobKey ? "bob" : key ?? "∅";
-    await waitUntil(
-      () => resultWalkKeys().has(aliceKey) && resultWalkKeys().has(bobKey),
-      () => {
-        // On failure: the walk node's fan-out record and every run since
-        // the flag write (which instance ran, what it wrote).
-        const state = servingRuntime!.scheduler.fanOutStateOf(resultWalk);
-        const since = servingRuntime!.scheduler.getActionRunTrace()
-          .slice(traceBeforeFlag).map((entry) => [
-            entry.actionId.startsWith("demand-walk:")
-              ? "walk:" + entry.actionId.slice(-8)
-              : entry.actionId.slice(0, 40),
-            short(entry.instanceKey),
-            entry.actualWrites.map((w) =>
-              w.entityId.slice(-8) + "/" + w.path.join(".")
-            ).join(","),
-          ]);
-        return "the result root's walk to have run as BOTH demanders (keys " +
-          `so far: ${JSON.stringify([...resultWalkKeys()].map(short))}; ` +
-          `node: ${
-            state === undefined ? "no fan-out record" : JSON.stringify({
-              narrowed: state.narrowed,
-              instances: state.instanceKeys.map(short),
-              clean: state.cleanKeys.map(short),
-            })
-          }; runs since the flag write: ${JSON.stringify(since)})`;
-      },
-    );
-    const walkKeys = resultWalkKeys();
+    // W0 (d′) SCRATCH — the second half is RETIRED with the walk: there
+    // is no `demand-walk:*` node under (d′) (design §2.7; T9′'s
+    // structural witness). Alice's guarded value materialized under her
+    // instance ABOVE with no walk at all — the per-user branch is reached
+    // by the branch's OWN run (the `ifElse` running as Alice reads the
+    // guarded computed; §2.3's mechanism (ii)) — which is what §2.8 (b)
+    // names as a known non-hole. The witness: no run of any
+    // `demand-walk:*` action exists in the trace.
+    const walkRuns = servingRuntime!.scheduler.getActionRunTrace()
+      .filter((entry) => entry.actionId.startsWith("demand-walk:"));
+    expect(walkRuns.length).toBe(0);
     console.log(
-      `[walk coverage] result-walk instance keys: ${
-        JSON.stringify([...walkKeys].map(short))
-      }`,
+      `[d′ (f)] guarded value reached with ZERO walk runs; demanded ` +
+        `writers=${servingRuntime!.scheduler.demandedWriterCount} ` +
+        `notCurrentRearms=${host!.stats().demand.notCurrentRearms} ` +
+        `pushGrowthWakes=${host!.stats().demand.pushGrowthWakes}`,
     );
-    expect(walkKeys.has(undefined)).toBe(false);
     // Never Bob's value in Alice's instance.
     expect(instanceHolds(engine, aliceKey, '"guarded:B"')).toBe(false);
     // Bob's `view` is 'off'; his instance of the guarded node — if it

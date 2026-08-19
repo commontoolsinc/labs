@@ -747,6 +747,61 @@ describe("stage G SpaceServer recovery seams", () => {
   /** A facade whose watch registry names exactly the given demanded
    * roots — the unit-level stand-in for client sessions' watches (the
    * production feed is pinned in the serving-loop E2E). */
+  // W0 (d′) SCRATCH: these seams hand-feed DEMAND with no client session.
+  // Under (d′) demand is the tracked-ids CLOSURE (`demandedInstancesForSpace`
+  // rows: instance-keyed, `root` marked) — a client watching a piece's
+  // result with its schema tracks the result doc AND the `computed:` docs
+  // it links to (the writers of those are the demand roots; the root doc
+  // itself has no scheduler writer). A seam that feeds ROOT rows only
+  // would demand nothing runnable, so this shim adds a SUPERSET closure:
+  // every `computed:` doc in the space (space instance, `root: false`,
+  // no identity — the demanders still come from the identity-bearing root
+  // rows through `#pieceRootByDemandKey`, as before). The mechanism these
+  // pins bind (terminal state, re-arm, argument-doc supply, LT6) is
+  // unchanged by the demand source.
+  const demandRowsFor = (
+    roots: Array<{
+      id: string;
+      scope?: string;
+      identity?: { principal?: string; sessionId?: string };
+    }>,
+  ) => {
+    const rows: Array<{
+      id: string;
+      scope: "space" | "user" | "session";
+      scopeKey: string;
+      identity?: { principal?: string; sessionId?: string };
+      root: boolean;
+    }> = [];
+    for (const root of roots) {
+      const scope = (root.scope ?? "space") as "space" | "user" | "session";
+      let scopeKey = "space";
+      if (scope !== "space") {
+        try {
+          scopeKey = resolveScopeKey(scope, {
+            principal: root.identity?.principal,
+            sessionId: root.identity?.sessionId as never,
+          });
+        } catch {
+          continue;
+        }
+      }
+      rows.push({
+        id: root.id,
+        scope,
+        scopeKey,
+        ...(root.identity === undefined ? {} : { identity: root.identity }),
+        root: true,
+      });
+    }
+    const computedIds = engine.database.prepare(
+      `SELECT DISTINCT id FROM head WHERE id LIKE 'computed:%' AND op != 'delete'`,
+    ).all() as Array<{ id: string }>;
+    for (const { id } of computedIds) {
+      rows.push({ id, scope: "space", scopeKey: "space", root: false });
+    }
+    return rows;
+  };
   const demandFacade = (
     roots: Array<{
       id: string;
@@ -756,8 +811,8 @@ describe("stage G SpaceServer recovery seams", () => {
   ): typeof server =>
     new Proxy(server, {
       get(target, prop, receiver) {
-        if (prop === "watchedRootsForSpace") {
-          return () => roots;
+        if (prop === "demandedInstancesForSpace") {
+          return () => demandRowsFor(roots);
         }
         const value = Reflect.get(target, prop, receiver);
         return typeof value === "function" ? value.bind(target) : value;
@@ -834,9 +889,9 @@ describe("stage G SpaceServer recovery seams", () => {
     // observer seam: the SpaceServer reads watchedRootsForSpace on
     // every demand pass, so overriding the method on the shared server
     // object works mid-flight).
-    const originalWatched = server.watchedRootsForSpace.bind(server);
-    (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
-      () => [{ id: rootId }];
+    const originalWatched = server.demandedInstancesForSpace.bind(server);
+    (server as { demandedInstancesForSpace: unknown })
+      .demandedInstancesForSpace = () => demandRowsFor([{ id: rootId }]);
     try {
       // Fire a demand pass; the absent root confirms no-meta and
       // terminalizes (not-yet and never are indistinguishable HERE —
@@ -930,8 +985,8 @@ describe("stage G SpaceServer recovery seams", () => {
       expect(stats.structureLoadTerminal).toBe(1);
       expect(stats.structureLoadFailures).toBe(0);
     } finally {
-      (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
-        originalWatched;
+      (server as { demandedInstancesForSpace: unknown })
+        .demandedInstancesForSpace = originalWatched;
     }
   });
 

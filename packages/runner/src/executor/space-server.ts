@@ -2552,28 +2552,7 @@ export class SpaceServer implements TransactionSealDestination {
         known = new Map();
         this.#demandersByKey.set(key, known);
         this.#indexDemandKey(key, row.id);
-        const writers = runtime.scheduler.enterDemandedEntity(address);
-        if (writers.length === 0) {
-          stats.demand.noWriterRows += 1;
-          // Flag 4 (design §2.8): a demanded NON-ROOT row whose doc
-          // carries pattern meta and has NO registered writer — a piece
-          // reachable only through a data link, not running here
-          // (parity with today; the walk never started pieces either).
-          // Counted, never acted on. Never-a-piece id classes excluded.
-          if (!row.root && !neverAPieceRootId(row.id)) {
-            try {
-              const doc = Engine.read(this.#options.engine, {
-                id: row.id as never,
-                scopeKey: row.scopeKey as never,
-              });
-              if (doc !== null && doc.patternIdentity !== undefined) {
-                stats.demand.noWriterRowsWithPatternMeta += 1;
-              }
-            } catch {
-              // best-effort diagnostic
-            }
-          }
-        }
+        runtime.scheduler.enterDemandedEntity(address);
       }
       for (const pairKey of [...known.keys()]) {
         if (!pairs.has(pairKey)) known.delete(pairKey);
@@ -2722,6 +2701,37 @@ export class SpaceServer implements TransactionSealDestination {
     let pairCount = 0;
     for (const pairs of this.#demandersByKey.values()) pairCount += pairs.size;
     const d = stats.demand;
+    // Flag 4 (design §2.8), recomputed at PASS END over the current
+    // registry (writers register after the structure load, so an
+    // at-entry count would over-report): demanded rows whose entity has
+    // NO registered writer — every class (`noWriterRows`), and among the
+    // NON-ROOT ones with a never-a-piece id excluded, those whose doc
+    // carries `patternIdentity` meta (a piece reachable only through a
+    // data link, not running here — parity with today; the walk never
+    // started pieces either). Counted, never acted on.
+    {
+      let noWriter = 0;
+      let noWriterMeta = 0;
+      for (const [key, row] of rowByKey) {
+        const address = addressOf(key, row);
+        if (runtime.scheduler.writersOfEntity(address).length > 0) continue;
+        noWriter += 1;
+        if (row.root || neverAPieceRootId(row.id)) continue;
+        try {
+          const doc = Engine.read(this.#options.engine, {
+            id: row.id as never,
+            scopeKey: row.scopeKey as never,
+          });
+          if (doc !== null && doc.patternIdentity !== undefined) {
+            noWriterMeta += 1;
+          }
+        } catch {
+          // best-effort diagnostic
+        }
+      }
+      d.noWriterRows = noWriter;
+      d.noWriterRowsWithPatternMeta = noWriterMeta;
+    }
     d.demandedRows = rows.length;
     d.demandedInstances = this.#demandersByKey.size;
     d.demandedInstancesMax = Math.max(
