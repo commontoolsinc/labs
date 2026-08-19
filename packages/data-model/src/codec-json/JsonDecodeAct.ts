@@ -64,6 +64,16 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
 
       // `CODEC_META_TAGS.quote` literal handling (`3-json-encoding.md` Section 6).
       if (tag === CODEC_META_TAGS.quote) {
+        // TODO(danfuzz): Quote content is returned whole, so a key this
+        // runtime reserves is admitted here where the `/object` and
+        // plain-object arms below refuse one. `JSON.parse` makes such a key an
+        // own property, so it does arrive. The result cannot be re-encoded --
+        // `BaseEncodeAct.assertEncodableKey()` refuses it -- so a decode
+        // through this arm can produce a value that does not round-trip.
+        // Settling it means deciding whether the reservation covers every arm
+        // or only the arms that rebuild an object by assignment, and writing
+        // that answer into Section 9, which does not currently mention these
+        // keys at all.
         return rawState;
       }
 
