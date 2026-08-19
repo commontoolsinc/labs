@@ -1003,7 +1003,20 @@ export class SpeculationOverlayDestination
       pending.delete(entry.eventId);
       const live = this.#trackedIntents.get(space)?.get(sidecarId);
       if (live === undefined || !live.has(entry.eventId)) return;
-      this.#applyIntentEntry(space, sidecarId, entry);
+      try {
+        this.#applyIntentEntry(space, sidecarId, entry);
+      } catch (error) {
+        // Nothing in the arms throws today (subscribers are caught in
+        // `#notifyIntentOutcome`; the waiters are promise resolvers),
+        // and the old sink ran inside a scheduler effect whose catch
+        // logged `schedule-error`. Kept so a future regression in one
+        // entry's arm cannot strand the OTHER ids of this check in a
+        // microtask's uncaught throw (independent review of W2, N-2).
+        logger.warn("intent-apply-failed", () => [
+          `intent ${entry.eventId} on ${sidecarId}: applying its entry threw`,
+          error,
+        ]);
+      }
     };
     if (state !== undefined && state.hints.size > 0) {
       const hinted = [...state.hints];

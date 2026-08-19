@@ -9,7 +9,10 @@
 // payload links, and paid the CFC probe on every sidecar change:
 // O(entries²) per change, the attribution's dominant client term).
 //
-// Pins 1–11 (design §3.4), each with its killing mutation:
+// Pins 1–11 (design §3.4), each with its killing mutation (3 and 4 are
+// folded into pin 1's step; 11 is the OFF witness), plus the pins the
+// independent review of W2 added (MAJ-1, MIN-1, MIN-4 — named by
+// finding):
 //  1. a consequenced / dropped / errored mark on a TRACKED id retires the
 //     intent (mutation: listener never installed → the intent stays
 //     outstanding; the echo would linger until the watermark backstop);
@@ -31,9 +34,18 @@
 //     forget the release);
 //  9. the check runs in a MICROTASK, never inside notification dispatch
 //     (mutation: act inline);
-// 10. the intent is resolved by the time the mark is VISIBLE in the
-//     client replica — no extra turn (timing guard, e2e);
-// 11. OFF byte-identity: no overlay, no listener OFF (e2e).
+// 10. the check has run by the time `storageManager.synced()` /
+//     `runtime.idle()` armed at the mark's frame resolve, and by the
+//     time the mark is VISIBLE on a macrotask poll — no extra turn (the
+//     timing guard, e2e; mutation: defer the check to a macrotask);
+// 11. OFF byte-identity: no overlay, no listener OFF (e2e);
+// MAJ-1. a re-entrant trackIntent inside an outcome callback applies
+//     each retired id exactly once (mutation: gate the check on its
+//     pre-loop snapshot instead of the LIVE tracked set);
+// MIN-1. one notification spanning two tracked sidecars checks both
+//     (mutation: record only the first wanted change per notification);
+// MIN-4. the sidecar watch is re-kicked on every fire, so a transient
+//     first-sync failure heals (mutation: kick once per sidecar state).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -81,7 +93,7 @@ const scriptedDestination = () => {
   return { scripted, destination, edits: () => edits };
 };
 
-describe("intent listener — scripted notification seam (design (e) pins 1–5, 7–9)", () => {
+describe("intent listener — scripted notification seam (design (e) pins 1–5, 7–9; review pins MAJ-1, MIN-1, MIN-4)", () => {
   it("pin 1 + 3 + 4: a consequenced mark retires SILENTLY; errored and dropped marks retire AND signal; waitForIntentConsequence resolves per terminal kind (memo consumed); the listener releases with the last tracked id", async () => {
     const { scripted, destination, edits } = scriptedDestination();
     const outcomes: string[] = [];

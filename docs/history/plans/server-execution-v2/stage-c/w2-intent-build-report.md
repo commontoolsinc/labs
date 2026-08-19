@@ -7,9 +7,19 @@ reason: "Stage-C evidence: W2 — the (e) build (design §6): the client's whole
 
 # Stage C — W2: (e) the intent listener (server-execution v2)
 
+*Fix-pass note (2026-08-19): this report is the BUILD report, written
+at the build tip `2ce7cb8c7` (pre-rebase). The independent adversarial
+review (`w2-intent-review-report.md`, LANDABLE-WITH-FIXES — 0 BLOCKER /
+1 MAJOR / 7 MINOR / 6 NIT) and the fix pass (`w2-intent-fix-report.md`)
+sit beside it; claims the review refuted or sharpened are corrected IN
+PLACE below with a dated "Fix-pass" note, the original wording kept.
+The branch was rebased onto the design branch's tip `461b01822` (review
+MIN-7) — the code is byte-identical across the rebase.*
+
 Date: 2026-08-19 (runs 07:02–07:53 UTC). Base: the stage-C design
 branch tip `c3ec7fc7b` (`claude/server-exec-v2-stage-c-design`, PR
-#6017's line, off `bebf8e1ff` → the tuning trio's `b54bf5215`). Branch
+#6017's line, off `bebf8e1ff` → the tuning trio's `b54bf5215`) —
+*fix-pass: rebased onto `461b01822`, the branch's stated base*. Branch
 `claude/server-exec-v2-w2-intent-listener` (worktree
 `/Users/berni/labs-worktrees/w2-intent`), stacked PR **#6039** onto the
 design branch, to be RE-STACKED onto W1's tip (`claude/server-exec-v2-w1-dprime`)
@@ -63,6 +73,13 @@ the re-benchmark's n2); the n=20 series completed in both.
 |---|---|---|---|---|---|
 | b1 (baseline: the schema-less sink) | design tip `c3ec7fc7b` | `7a9157db3ec36ef0` | 07:03:52 | 1.96/2.64/2.95 → 5.51/4.59/3.77 | 286 s |
 | e1 (interim (b): the schema-narrowed sink, scratch `e91194469`) | +1 scratch commit | `c262190bda9fed13` | 07:12:20 | 3.51/4.29/3.82 → 4.29/4.38/3.92 | 121 s |
+
+*Fix-pass note (review N-4): the table's loads are the 1/5/15-min
+triples at start and end; the IN-RUN 1-min peaks (from
+`load-samples.txt`, 10-s cadence) were b1 **6.29** (07:08:30Z,
+mid-series) and e1 5.01 — the baseline arm ran under the highest load
+of the arms, which inflates the b1/e1 ratio a little; the monotone-vs-
+flat SLOPE is the robust signal and is unaffected.*
 
 Per-note CLIENT counters (the profile's cumulative logger totals,
 differenced per note; the action-run trace per note):
@@ -123,7 +140,12 @@ churn counters), tests (below), specs + register + plan + design notes.
    `storageManager.open(space).sync(sidecarId, { path: [], schema: false
    }, "space")` — the schema-less selector `syncCell` uses (a covered
    watch is a replica no-op), best-effort with the loud
-   `intent-watch-failed` arm; (iii) an IMMEDIATE raw check runs at
+   `intent-watch-failed` arm — *fix-pass (review MIN-4): the kick now
+   runs on EVERY `trackIntent`, not only the first on a sidecar, so a
+   transient first-pull failure (which drops the replica's tracker
+   entry and leaves the stream unwatched — NO frame arrives) heals on
+   the next fire; a covered watch is an O(1) tracker lookup, no wire;
+   pinned*; (iii) an IMMEDIATE raw check runs at
    `trackIntent` (T25: a re-fired caller-supplied id whose consequence
    already landed resolves here) and the listener is installed only if
    ids remain tracked (no leak). Install failure is fail-soft and loud
@@ -145,7 +167,19 @@ churn counters), tests (below), specs + register + plan + design notes.
    else `consequenced === true` → untrack, retire, settle `errored` (if
    `error`) or `consequenced`, notify `errored` if `error`.
    `resolveIntent`, `waitForIntentConsequence`, `subscribeIntentOutcomes`
-   untouched.
+   untouched. *Fix-pass (review MAJ-1): the check's per-entry gate is
+   the LIVE tracked set re-fetched from the map, not only the check's
+   pre-loop snapshot — as built here, an outcome subscriber that
+   re-fired on the same sidecar (a retry-on-drop UI, the events.md §5
+   hook) ran a nested `trackIntent` → an INNER check that retired an
+   id the outer check's snapshot still held, and the outer check then
+   applied it AGAIN (`dropped:X` delivered twice; a stale memo). The
+   old sink's scan gated on the live `ids.has(...)` per entry and its
+   `trackIntent` returned early while a sink existed, so it could not
+   double-apply: a regression vs the old guard, latent (no production
+   subscriber yet), fixed with its pin. Review N-2: the apply is
+   wrapped in a per-entry try/catch (`intent-apply-failed`) so a future
+   throw in one entry's arm cannot strand the check's other ids.*
 5. **Release.** `#untrackIntent` drops the sidecar's state when its set
    empties and releases the listener when NOTHING is outstanding;
    `close()` releases it (and a delivery already dispatched before close
@@ -213,7 +247,21 @@ coordination block + design §3.3/§6: landing notes.
   reports it; every NOTIFIED check is O(outstanding + hints) (pin 5).
   Alternative not taken: a per-sidecar "scanned length" memo (would
   break under compaction's index shift; the mark's own hint rescues it,
-  but the reasoning is subtler than the µs it saves).
+  but the reasoning is subtler than the µs it saves). *Fix-pass
+  (review MIN-2): "O(outstanding + hints)" is the HINTED arm; a change
+  with no usable index (an append's `["value","entries"]`, a moved
+  hint) degrades to the backward tail scan over the entries appended
+  AFTER the tracked one — O(k) per notification while an intent stays
+  outstanding on a busy shared stream (µs at k ≈ 100). The spec
+  sentence in speculation.md §4 said "O(outstanding), never O(history)"
+  and now says what the code does; memoizing each located index into
+  the hint set (O(1) thereafter) is the fix shape if it ever matters —
+  flagged, not built. Review N-3: the tail-first scan reads the
+  TAIL-MOST entry for a tracked id, so a T25 duplicate that coexists
+  with its consequenced original waits for the duplicate's OWN mark
+  (the skip path seals it consequenced without error → `consequenced`),
+  where the old forward scan read the original's (and its `error`) —
+  this fire's own consequence; a behavior delta in that corner, stated.*
 - **Item 8's spec home = speculation.md §4 beside step 2** (the
   client-side reconciliation rule sits with the retirement it serves;
   events.md §5 is the server's failure semantics) — the design left the
@@ -230,6 +278,29 @@ coordination block + design §3.3/§6: landing notes.
   (sidecars are space docs; hygiene, not a semantic).
 
 ## 4. Pins 1–11 and the mutation that kills each (all run; RED under the mutation, GREEN restored)
+
+*Fix-pass note (review N-1): "each with its mutation" — pins 3 and 4
+are folded into pin 1's step, and pin 11 (the OFF witness) has no
+mutation. Review MIN-5: pin 10's landed form asserted "resolved by the
+time the mark is visible on a MACROTASK poll", weaker than the design's
+"by the time `synced()` / `idle()` resolve after a frame"; it now states
+the design's guarantee (observed from a subscriber registered after the
+listener, arming both barriers AT the mark's frame) and is killed by a
+macrotask deferral of the check (`queueMicrotask` → `setTimeout(0)`),
+which the macrotask-poll form could NOT see (the deferred check ran
+before the next 20-ms poll). The reviewer's own probes (MX1 "record only
+the first wanted change per notification" survived every shipped pin;
+MX4 "`wants` accepts only `scope === undefined`" survived the scripted
+pins because the harness sent no scope) are now killed: the MIN-1 pin
+(one notification spanning two tracked sidecars) and the harness's
+production `scope: "space"` on every change address (MIN-6). Three
+review pins were added to `speculation-intent-listener.test.ts`: MAJ-1
+(re-entrant `trackIntent` in an outcome callback — exactly one outcome
+per retired id; RED on the build tip: `["dropped:Z","dropped:X",
+"dropped:X"]`), MIN-1 (two tracked sidecars in one notification; RED
+under MX1), MIN-4 (a transiently failed first `sync` is re-issued by the
+next fire on the stream; RED on the build tip). Suite now 2 tests / 12
+steps.*
 
 `packages/runner/test/speculation-intent-listener.test.ts` (scripted
 seam: `speculation-intent-test-utils.ts` — a stub manager implementing
@@ -317,6 +388,11 @@ Same recipe as §1; ON binary from `7a5481d14` (sha `7964711e835ea16f`),
 | a1 | note n=20 (+ the client captures) | 07:44:02 | 3.06/3.90/3.71 → **5.99**/4.68/4.04 | 125 s | series ✓ (step 1 red on the pre-existing console gate) |
 | ca1 | chat n=20 @2 s | 07:47:40 | 4.27/4.51/4.04 → 3.80/4.76/4.35 | 326 s | ✓ green, series COMPLETE |
 
+*Fix-pass note (review N-4): in-run 1-min peaks from `load-samples.txt`
+— a1 6.07, ca1 **7.61** (07:51:04Z); the three note arms' loads were
+NOT equal (b1 6.29 / e1 5.01 / a1 6.07), so the cross-arm RATIOS are
+indicative and the per-arm SLOPE is the signal.*
+
 **Note (the (e) witness):** per-note client `scheduler/run` `101 91 82
 80 77 71 78 91 89 103 87 88 135 170 129 123 149 109 109 80` ms — FLAT
 (first-10 / last-10 medians 88 / 122; the design tip: 0.84 → 14–20 s);
@@ -340,7 +416,11 @@ per-post climb is the server's walk term, W1's; not (e)'s). Client
 witnesses (the churn line): Alice `overlayIntentChecks=75` for 25 fires
 (3 per intent — fire, append landing, mark), `overlayIntentsBy
 ConsequenceOf=25` (every fire resolved by its mark), `overlayIntentEcho
-Backstops=2`, `overlayArrivalSweeps=106`, `actionRuns=2540` (trio
+Backstops=2` — *fix-pass (review N-5): this counter counts ECHO entries
+the W sweep retired, not missed marks: the arrival sweep runs
+synchronously inside `applySessionSync` and can retire the echo before
+the mark's microtask check runs, so 2 backstops coexist with 25/25
+resolved by mark* — `overlayArrivalSweeps=106`, `actionRuns=2540` (trio
 2 722–2 753; OFF 975–1 006 — the remaining ON excess is NOT the intent
 watch: 75 checks are not scheduler runs; it is the speculation
 echo/arrival re-derivation class, W1/W4 territory); Bob
@@ -368,7 +448,14 @@ exist in the harness; W4 should add it (recorded in the register block).
    lands: record the entry's `seq` at first sight, treat `eventWatermark
    ≥ seq` with the entry gone as consequenced (item 9's fact applied to
    the tracked SET) — ~10 lines. Recommend: number it in the sweep, land
-   with OW24.
+   with OW24. *Fix-pass (review MIN-3): NUMBERED — register row
+   **OW41**, trigger OW24 (the compaction PR cannot land without it);
+   the hang also reaches the caller's durable-ack `onCommit` (`cell.ts`
+   routes the flag-ON send path's ack through `waitForIntentConsequence`
+   — the CLI verb dispatch / webhook forwarder would wait forever);
+   verified unreachable today (the watermark is recomputed from the
+   contiguous consequenced frontier, so `eventWatermark ≥ seq(e)`
+   implies the mark is present; nothing else removes an entry).*
 2. **The remaining ON client action-run excess on chat** (Alice 2 540 vs
    OFF ~1 000) is NOT the intent watch — the listener runs no scheduler
    action (75 checks) — it is the arrival/echo re-derivation class
