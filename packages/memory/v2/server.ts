@@ -1513,7 +1513,11 @@ export class Server {
           }],
         },
       });
-      this.markSpaceDirty(space, [toDirtyKey(id)]);
+      // An elided direct write changed nothing, and unlike a session
+      // transact it owes no catch-up marker — skip the flush entirely.
+      if (commit.revisions.length > 0) {
+        this.markSpaceDirty(space, [toDirtyKey(id)]);
+      }
       await this.runPostCommitSchedulerSideEffects(
         space,
         commit,

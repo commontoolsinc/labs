@@ -309,9 +309,18 @@ contended writes land).
 
 ### INV-8 — Transaction atomicity
 
-> All operations of an accepted transaction produce revision rows and head
-> updates at one seq, or none do. No partial visibility, on the server or in
-> any client's integrated view.
+> All material state changes of an accepted transaction land at one seq, or
+> none do. No partial visibility, on the server or in any client's
+> integrated view.
+
+An operation the engine PROVES changes nothing — a `set` of a
+content-addressed (`cid:`) document whose stored content is value-equal to
+the operation's — applies as a no-op: no revision row, no head update, no
+dirty mark. The commit row and the space sequence still advance, and the
+verdict reports the elided operation indexes. Atomicity is therefore
+phrased over material changes, not over one revision per submitted
+operation: every operation that changes state lands at the commit's seq,
+and a no-op operation is exact by proof, not a torn apply.
 
 Layer: engine (`applyCommitTransaction` runs in one database transaction);
 client integrate path.

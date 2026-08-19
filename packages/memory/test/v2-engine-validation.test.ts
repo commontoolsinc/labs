@@ -607,3 +607,33 @@ Deno.test("applies an identical content-addressed re-set as a no-op", async () =
     );
   });
 });
+
+Deno.test("a replayed eliding commit reports its elision again", async () => {
+  await withEngine((engine) => {
+    const schema = { type: "string", title: "replayed-elision" } as const;
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:replayed", schema)],
+      }),
+    });
+    const elidingCommit = commit(2, {
+      operations: [setOp("cid:fid1:replayed", schema)],
+    });
+    const first = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: elidingCommit,
+    });
+    assertEquals(first.elidedOpIndexes, [0]);
+    // The replay returns the stored result — including the elision report,
+    // which persisted no revision and must be re-derived, or the accept
+    // path would classify the unchanged document as dirty.
+    const replayed = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: elidingCommit,
+    });
+    assertEquals(replayed.seq, first.seq);
+    assertEquals(replayed.elidedOpIndexes, [0]);
+    assertEquals(replayed.revisions, []);
+  });
+});

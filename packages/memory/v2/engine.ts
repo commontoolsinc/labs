@@ -5152,10 +5152,23 @@ const applyCommitTransaction = (
         observationReplay,
       )
       : undefined;
+    const replayedRevisions = selectCommitRevisions(engine, existing.seq);
+    // Re-derive the elision report: an elided operation persisted no
+    // revision, so a replayed verdict must name it again or the accept
+    // path would classify the unchanged document as dirty.
+    const revisionOpIndexes = new Set(
+      replayedRevisions.map((revision) => revision.opIndex),
+    );
+    const replayedElided = commit.operations.flatMap((operation, opIndex) =>
+      operation.op !== "sqlite" && !revisionOpIndexes.has(opIndex)
+        ? [opIndex]
+        : []
+    );
     return {
       seq: existing.seq,
       branch: existing.branch,
-      revisions: selectCommitRevisions(engine, existing.seq),
+      revisions: replayedRevisions,
+      ...(replayedElided.length > 0 ? { elidedOpIndexes: replayedElided } : {}),
       ...(observationResult?.schedulerObservationId !== undefined
         ? { schedulerObservationId: observationResult.schedulerObservationId }
         : {}),

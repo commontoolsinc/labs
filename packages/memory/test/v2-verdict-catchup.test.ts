@@ -1080,3 +1080,56 @@ Deno.test("memory v2 server: an all-elided accept still delivers its marker on a
   assertEquals(frame.upserts, []);
   assertEquals(frame.caughtUpLocalSeq, 2);
 });
+
+Deno.test("memory v2 server: an identical direct re-write fans out nothing", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-direct-elide",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // Watch the content-addressed document itself, so a spurious dirty mark
+  // from the direct-write path would be OBSERVED as a re-delivery.
+  await committer.receive(encodeMemoryBoundary({
+    type: "session.watch.add",
+    requestId: "watch-direct-cid",
+    space,
+    sessionId: committerSessionId,
+    watches: [{
+      id: "direct-cid",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "cid:fid1:direct",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(committerMessages));
+
+  // The install — the blob-upload path — delivers its novelty...
+  const installed = await server.writeDocument(space, "cid:fid1:direct", {
+    type: "string",
+    title: "direct-elide",
+  });
+  assertEquals(installed.revisions.length, 1);
+  await server.flushSessions([space]);
+  const first = assertEffect(shiftMessage(committerMessages))
+    .effect as SessionSync;
+  assertEquals(first.upserts.map((upsert) => upsert.id), ["cid:fid1:direct"]);
+
+  // ...and the identical re-write is a proven no-op: it marks nothing
+  // dirty and schedules nothing, so the watcher hears nothing.
+  const reWritten = await server.writeDocument(space, "cid:fid1:direct", {
+    type: "string",
+    title: "direct-elide",
+  });
+  assertEquals(reWritten.elidedOpIndexes, [0]);
+  assertEquals(reWritten.revisions, []);
+  await server.flushSessions([space]);
+  assertEquals(committerMessages.length, 0);
+});
