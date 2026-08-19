@@ -237,6 +237,7 @@ async function githubDollarSpend(
     const response = await github<{ budgets?: Budget[] }>(
       `organizations/${org}/settings/billing/budgets`,
       token,
+      { ignoreStatuses: [404] },
     );
     budgets = readBudgets(response.budgets ?? []);
   } catch {
@@ -305,7 +306,7 @@ async function githubDollarSpend(
       const previous = await github<{ usageItems?: UsageItem[] }>(
         usagePath(org, previousYear, previousMonth + 1),
         token,
-        { reportErrors: false },
+        { ignoreStatuses: [404] },
       );
       if (Array.isArray(previous.usageItems)) {
         noteReport(previous.usageItems);

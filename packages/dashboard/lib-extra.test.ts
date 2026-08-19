@@ -211,26 +211,6 @@ Deno.test("github: a failed error body preserves the known HTTP failure", async 
   });
 });
 
-Deno.test("github: an expected HTTP failure can omit its request log", async () => {
-  await withTokens({ GH_TOKEN: "t" }, async () => {
-    await captureConsole("error", async (messages) => {
-      await withFetch(
-        () => new Response("missing", { status: 404 }),
-        async () => {
-          await assertRejects(
-            () =>
-              github("repos/o/optional", undefined, {
-                reportErrors: false,
-              }),
-            Error,
-          );
-        },
-      );
-      assertEquals(messages, []);
-    });
-  });
-});
-
 Deno.test("github: an ignored status does not hide transport failures", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
@@ -371,6 +351,78 @@ Deno.test("github: an abandoned download has already completed its body", async 
         assertEquals(new TextDecoder().decode(download.body), "archive");
       },
     );
+  });
+});
+
+Deno.test("github: a failed download consumes and logs its error body", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      const response = Response.json(
+        { message: "artifact expired" },
+        {
+          status: 410,
+          headers: { "x-github-request-id": "download-123" },
+        },
+      );
+      await withFetch(
+        () => response,
+        async () => {
+          const download = await githubDownload(
+            "repos/o/actions/artifacts/1/zip",
+          );
+          assertEquals(download, {
+            ok: false,
+            status: 410,
+            body: new Uint8Array(),
+          });
+        },
+      );
+      assert(response.bodyUsed);
+      assertEquals(messages.length, 1);
+      assert(
+        messages[0].includes("for download repos/o/actions/artifacts/1/zip"),
+      );
+      assert(messages[0].includes("HTTP 410, request download-123"));
+      assert(messages[0].includes("artifact expired"));
+    });
+  });
+});
+
+Deno.test("github: an ignored download status does not hide transport failures", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      const response = new Response("missing", { status: 404 });
+      await withFetch(
+        () => response,
+        async () => {
+          const download = await githubDownload(
+            "repos/o/actions/artifacts/1/zip",
+            undefined,
+            { ignoreStatuses: [404] },
+          );
+          assertEquals(download.status, 404);
+          assertEquals(download.ok, false);
+        },
+      );
+      assert(response.bodyUsed);
+      assertEquals(messages, []);
+      await withFetch(
+        () => Promise.reject(new TypeError("connection closed")),
+        async () => {
+          await assertRejects(
+            () =>
+              githubDownload(
+                "repos/o/actions/artifacts/1/zip",
+                undefined,
+                { ignoreStatuses: [404] },
+              ),
+            TypeError,
+          );
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("TypeError: connection closed"));
+    });
   });
 });
 

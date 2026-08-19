@@ -507,6 +507,34 @@ Deno.test("github spend: a prior month we can't read shortens the chart, it does
   assertEquals(v.duration, 18 * D); // January 1st to the settled 18th only
 });
 
+Deno.test("github spend: optional billing failures log while current data remains usable", async () => {
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) =>
+    errors.push(parts.map(String).join(" "));
+  try {
+    const result = await view("2026-01-20T09:00:00Z", {
+      [usagePath(2026, 1)]: {
+        usageItems: [
+          ...days(2026, 1, 1, 10, 18),
+          stillReporting("2026-01-18"),
+        ],
+      },
+      [usagePath(2025, 12)]: new TypeError("prior billing disconnected"),
+      [budgetsPath()]: new TypeError("budget disconnected"),
+    });
+    assertEquals(result.status, "good");
+    assertEquals(result.value, "~$310/mo");
+    assertEquals(errors.length, 2);
+    assertStringIncludes(errors[0], budgetsPath());
+    assertStringIncludes(errors[0], "budget disconnected");
+    assertStringIncludes(errors[1], usagePath(2025, 12));
+    assertStringIncludes(errors[1], "prior billing disconnected");
+  } finally {
+    console.error = realError;
+  }
+});
+
 Deno.test("github spend: an unavailable prior month is not zero-spend history", async () => {
   const v = await view("2026-01-03T09:00:00Z", {
     [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 2, 20) },
