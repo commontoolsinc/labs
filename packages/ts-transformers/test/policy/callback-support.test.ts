@@ -8,13 +8,26 @@ import {
   getCallbackBoundarySemantics,
 } from "../../src/policy/callback-boundary.ts";
 
+const virtualLibraryFileName = "/virtual/es2023.d.ts";
+const virtualLibrarySource = `
+  interface ReadonlyArray<T> {
+    map<U>(callback: (value: T) => U): U[];
+  }
+
+  interface Array<T> extends ReadonlyArray<T> {}
+`;
+
 function createProgramAndContext(
   source: string,
-  options: { withDefaultLibrary?: boolean } = {},
+  options: {
+    withDefaultLibrary?: boolean;
+    withVirtualLibrary?: boolean;
+  } = {},
 ): {
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
   context: TransformationContext;
+  program: ts.Program;
 } {
   const fileName = "/test.tsx";
   const compilerOptions: ts.CompilerOptions = {
@@ -33,6 +46,15 @@ function createProgramAndContext(
     true,
     ts.ScriptKind.TSX,
   );
+  const virtualLibraryFile = options.withVirtualLibrary
+    ? ts.createSourceFile(
+      virtualLibraryFileName,
+      virtualLibrarySource,
+      compilerOptions.target!,
+      true,
+      ts.ScriptKind.TS,
+    )
+    : undefined;
 
   const host = ts.createCompilerHost(compilerOptions, true);
   const getSourceFile = host.getSourceFile.bind(host);
@@ -41,17 +63,30 @@ function createProgramAndContext(
   host.getSourceFile = (name, languageVersion, onError, shouldCreateNew) =>
     name === fileName
       ? sourceFile
+      : name === virtualLibraryFileName
+      ? virtualLibraryFile
       : getSourceFile(name, languageVersion, onError, shouldCreateNew);
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
-  host.fileExists = (name) => name === fileName || fileExists(name);
-  host.readFile = (name) => name === fileName ? source : readFile(name);
+  host.fileExists = (name) =>
+    name === fileName ||
+    (name === virtualLibraryFileName && !!virtualLibraryFile) ||
+    fileExists(name);
+  host.readFile = (name) =>
+    name === fileName
+      ? source
+      : name === virtualLibraryFileName
+      ? virtualLibrarySource
+      : readFile(name);
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
   host.getNewLine = () => "\n";
 
-  const program = ts.createProgram([fileName], compilerOptions, host);
+  const rootNames = virtualLibraryFile
+    ? [virtualLibraryFileName, fileName]
+    : [fileName];
+  const program = ts.createProgram(rootNames, compilerOptions, host);
   const context = new TransformationContext({
     program,
     sourceFile,
@@ -61,7 +96,7 @@ function createProgramAndContext(
     },
   });
 
-  return { sourceFile, checker: program.getTypeChecker(), context };
+  return { sourceFile, checker: program.getTypeChecker(), context, program };
 }
 
 function findFirstNode<T extends ts.Node>(
@@ -116,16 +151,58 @@ Deno.test(
 );
 
 Deno.test(
+  "Callback support policy: readonly array map callbacks carry a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items: readonly number[] = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: virtual library array map callbacks carry a wrapper site",
+  () => {
+    const { sourceFile, checker, context, program } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withVirtualLibrary: true },
+    );
+    const virtualLibraryFile = program.getSourceFile(virtualLibraryFileName);
+    if (!virtualLibraryFile) {
+      throw new Error("Expected virtual library source file");
+    }
+    assertEquals(program.isSourceFileDefaultLibrary(virtualLibraryFile), false);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
   "Callback support policy: plain array find callbacks stay plain-array value callbacks",
   () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      interface Array<T> {
-        find(callback: (value: T) => boolean): T | undefined;
-      }
-
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
       const result = items.find((item) => item > 1);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
@@ -148,14 +225,13 @@ Deno.test(
 Deno.test(
   "Callback support policy: a plain filter callback carries no wrapper site",
   () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      interface Array<T> {
-        filter(callback: (value: T) => boolean): T[];
-      }
-
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
       const result = items.filter((item) => item > 1);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
@@ -168,14 +244,13 @@ Deno.test(
 Deno.test(
   "Callback support policy: a sort comparator carries no wrapper site",
   () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      interface Array<T> {
-        toSorted(compare: (a: T, b: T) => number): T[];
-      }
-
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
-      const result = items.toSorted((a, b) => a - b);
-    `);
+      const result = items.sort((a, b) => a - b);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);

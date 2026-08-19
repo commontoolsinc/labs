@@ -106,8 +106,8 @@ the callback returns while it runs — as a boolean, a number, an array test, or
 the next accumulator. `map` is the one that merely collects. A lift returned to
 a predicate is an object, so `filter` keeps every element and `find` matches
 the first; those callbacks therefore keep the diagnostic. The test that admits
-a callback also requires it to be argument zero of a method whose owner symbol
-includes the standard-library `Array`/`ReadonlyArray` declaration, so a
+a callback also requires it to be argument zero of a method whose owner is
+TypeScript's declaration-file-backed global `Array`/`ReadonlyArray` type, so a
 comparator in a later argument position, a same-named source type, and a `map`
 belonging to some other type are all excluded.
 

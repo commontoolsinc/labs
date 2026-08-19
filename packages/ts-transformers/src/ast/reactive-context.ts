@@ -25,7 +25,6 @@ export interface ReactiveContextInfo {
 
 export interface ReactiveContextLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
-  isSourceFileDefaultLibrary?(sourceFile: ts.SourceFile): boolean;
   isSyntheticComputeCallback?(node: ts.Node): boolean;
   isSyntheticComputeOwnedNode?(node: ts.Node): boolean;
 }
@@ -217,8 +216,6 @@ export function classifyReactiveContext(
           {
             isArrayMethodCallback: (node) =>
               lookup?.isArrayMethodCallback(node) ?? false,
-            isSourceFileDefaultLibrary: (sourceFile) =>
-              lookup?.isSourceFileDefaultLibrary?.(sourceFile) ?? false,
           },
         );
         const bodyContext = boundarySemantics.bodyContext;
