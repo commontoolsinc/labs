@@ -12,6 +12,7 @@ export type BuiltinToolId =
   | "write_file"
   | "delegate_task"
   | "run_pattern"
+  | "assign_slug"
   | "describe_handle";
 
 export const DEFAULT_PARENT_TOOL_IDS = [

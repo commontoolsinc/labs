@@ -774,17 +774,27 @@ const subagentProfileConfigForRun = (
 ): HarnessSubagentProfileConfig => {
   const config = getHarnessSubagentProfileConfig(profile);
   if (
-    fabricSessionAvailable || !config.allowedToolIds.includes("run_pattern")
+    fabricSessionAvailable ||
+    !config.allowedToolIds.some((toolId) => FABRIC_SESSION_TOOL_IDS.has(toolId))
   ) {
     return config;
   }
   return {
     ...config,
     allowedToolIds: config.allowedToolIds.filter((toolId) =>
-      toolId !== "run_pattern"
+      !FABRIC_SESSION_TOOL_IDS.has(toolId)
     ),
   };
 };
+
+/**
+ * The tools that exist only over a fabric session. They join the tool
+ * surface exactly when the run can build one; without it each is absent
+ * rather than present-but-failing, even when an explicit allowlist names it.
+ */
+const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["run_pattern", "assign_slug"] as const,
+);
 
 /**
  * The child's initial handle table for a delegation: an empty table salted
@@ -2138,17 +2148,21 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
-    // `run_pattern` joins the tool surface exactly when the run can build a
-    // fabric session; without one the tool is absent rather than
-    // present-but-failing, even when an explicit allowlist names it.
+    // The fabric-session tools join the tool surface exactly when the run
+    // can build a session; see FABRIC_SESSION_TOOL_IDS.
     const requestedToolIds = options.allowedToolIds ??
       (this.engine.fabricSessionAvailable
-        ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+        ? [
+          ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
+          ...FABRIC_SESSION_TOOL_IDS,
+        ]
         : DEFAULT_PROMPT_LOOP_TOOL_IDS);
     this.#allowedToolIds = new Set(
       this.engine.fabricSessionAvailable
         ? requestedToolIds
-        : requestedToolIds.filter((toolId) => toolId !== "run_pattern"),
+        : requestedToolIds.filter((toolId) =>
+          !FABRIC_SESSION_TOOL_IDS.has(toolId)
+        ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -3225,10 +3239,7 @@ export class CfHarnessPromptLoop {
       // redundant with `resultRef` since the piece cell is the result cell.
       // It also keeps the pattern's result schema, which reaches the model
       // through `describe_handle` on the minted token rather than inline.
-      // The model sees `resultRef`, the schema-sanitized `value`, and — when
-      // registration was asked for — the `registration` block, whose slug is
-      // the model's own word and whose URL is composed from the session's API
-      // URL and space name, so neither is a fabric identifier.
+      // The model sees `resultRef` and the schema-sanitized `value`.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
@@ -3240,11 +3251,21 @@ export class CfHarnessPromptLoop {
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
-      for (const field of ["message", "valueError", "registrationError"]) {
+      for (const field of ["message", "valueError"]) {
         const text = scrubbed[field];
         if (typeof text === "string") {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
         }
+      }
+      return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "assign_slug" && isObjectNotArray(output)) {
+      // The slug is the model's own word and the URL is composed from the
+      // session's API URL and space name, so neither is a fabric identifier;
+      // only the free-text error message could carry one.
+      const scrubbed: Record<string, unknown> = { ...output };
+      if (typeof scrubbed.message === "string") {
+        scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
       }
       return { output: stripInternalCfcFields(scrubbed) };
     }
