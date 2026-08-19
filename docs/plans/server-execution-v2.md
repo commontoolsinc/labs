@@ -102,30 +102,56 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   clearly far too high regardless. The next benchmark measures server
   settle time EXPLICITLY (register OW38); the flip's performance BAR is
   an owner ruling.
-- **The design pass — NEXT.** Two design-class terms named: (d) the
-  demand walk → redesign as a STRUCTURAL WALK (one shallow read per
-  container, one probe per leaf, whole reads at links; value-only
-  changes do not fire it; one walk node per (scope-name, root id)); (e)
-  the intent watch → a non-reactive storage-notification listener keyed
-  on the outstanding intent set (interim: a schema-narrowed sink). Three
-  lens reports are in; the convener's reconciled `stage-c-design.md` was
-  PENDING at the handoff. Its owner rulings (all pre-recommended as
-  stated): no lazy demand; the walk as a "structural subscription"
-  (amend serving-loop.md §1's per-pair wording); walk re-runs on
-  structural change only; the intent watch need not be a scheduler
-  effect; tracked-entry-only sidecar read; no idle-demander tier;
-  per-entry `consequenced` mark not a client dependency; pin
-  drops/errors ride `consequenceOf`; amend scopes.md §9's ragged
-  tripwire against §2; the flip's performance BAR.
+- **The design pass — report LANDED; ruling set presented; the build
+  stage is NEXT.** The reconciled design is
+  [`server-execution-v2/stage-c-design.md`](server-execution-v2/stage-c-design.md)
+  (LIVE — a design + build work order for unexecuted work; it archives
+  beside the closeout when the build lands); the three lens reports it
+  reconciles sit beside the closeout
+  (`stage-c/stage-c-lens-{spec-blind,d-server-walk,e-client-intent}.md`).
+  Two design-class terms: (d) the demand walk → a STRUCTURAL WALK (one
+  walk node per (scope-name, root id); a purpose-built traversal whose
+  read CLASS makes value-only changes not fire it — one shallow read
+  per container, one recursive probe per leaf, whole reads only at
+  links, a visited-set cycle guard; per-instance logs compacted once;
+  resubscribe only on a run or a prune); (e) the intent watch → a
+  NON-REACTIVE storage-notification listener keyed on the outstanding
+  intent set (O(outstanding); zero txs, zero CFC probes, no scheduler
+  node; interim: a schema-narrowed sink). Plus (α) the RULED
+  double-dispatch implementation as a work item (deadline-time purge of
+  unrun LT1 leftovers; drain skip against a `streamEntry`-bearing copy;
+  derivation-emitter orphan REFUSAL; a per-event run-count pin). Build
+  acceptance = SERVER SETTLE TIME on the cross-user chat/lunch journeys
+  sub-second at p50, measured explicitly (`waitForSettled`), plus
+  client-local speculation latency preserved, note createToView flat in
+  history, the §7 `demand` counter block, the OFF byte-identity witness;
+  the refutation experiments run FIRST; recommended shape: a train of
+  three stacked PRs ((d) → (e) → (α)). The design's ruling set is its
+  §5: three items already RULED and folded in (no lazy demand — RULED
+  in substance; the double-dispatch invariant; the measurement caveat);
+  the front-loaded open one is the walk's spec sentence
+  (serving-loop.md §1:57–62 "runs once per demanding pair" → the
+  "structural subscription" text — recommend adopt); the rest are
+  one-liners (reach gap accepted; Q3.3 walk-only; no scheduler effect
+  for the intent watch; tracked-entry-only read; sanction the tracked
+  entry's mark as the value-plane carrier of `consequenceOf`;
+  drops/errors ride `consequenceOf`; keep the stream subscribed while
+  intents are outstanding; the W/eventWatermark backstop; amend
+  scopes.md §9's ragged tripwire; no basis rows for the walk; the
+  node key; the effects channel follows; the CFC zero-write probe
+  skip is a CFC-owner rider; `subscribe` vs `sinkDocument?` is the
+  storage owner's; interim (b) only if two steps).
 
 **Ordered next actions:** (1) #5991's ledger comment; (2) the design
-pass — reconciled report → owner rulings → the two redesigns, re-
-benchmarked measuring server settle time; (3) the CONFIDENCE VERDICT to
-the owner; (4) on "no fundamental issue", land the train on main with
-the flag OFF (siblings stacked; default lanes OFF) and continue on
-main; (5) the flip's ordered gates as listed under Phase 7 (skip list
-EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
-benchmark against the ruled bar), then the flip PR and the soak.
+BUILD stage per the design's §6 work order — the owner's rulings on its
+§5 (the walk sentence first) → W0 refutation experiments → (d), (e), (α)
+as a train → re-benchmarked measuring server settle time; (3) the
+CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
+the train on main with the flag OFF (siblings stacked; default lanes
+OFF) and continue on main; (5) the flip's ordered gates as listed under
+Phase 7 (skip list EMPTY, deployed binaries exercised ON, OW31's ruled
+posture BUILT, the benchmark against the ruled bar), then the flip PR
+and the soak.
 
 **Owner rulings (state at 2026-08-18; recommendations on file for the
 open ones):** (1) served-handler DOUBLE-DISPATCH parity gap — **RULED
@@ -147,9 +173,13 @@ already delegated, the one defect is the served genesis ACL's content
 (service-owned), the READ side needs a read-only service class
 (recommended, not yet ruled) — work order recorded (register OW31; the
 scoping report beside the closeout), implementation OWED POST-MERGE,
-BEFORE the flip PR, OFF-invisible; (4) the design-pass set above,
-UNRULED; (5) #5968's Flags (instantiation seat, `resolvedHash`,
-fetch-parity on live completion failure, `plainProgramOf`), UNRULED.
+BEFORE the flip PR, OFF-invisible; (4) the design-pass set —
+PRESENTED as the design's §5 (`server-execution-v2/stage-c-design.md`):
+three already ruled and folded in (no lazy demand, the double-dispatch
+invariant, the measurement caveat), the walk's spec sentence
+front-loaded, the one-liners listed — UNRULED beyond those three;
+(5) #5968's Flags (instantiation seat, `resolvedHash`, fetch-parity on
+live completion failure, `plainProgramOf`), UNRULED.
 
 ## Phase 0 — Rulings and guardrails
 

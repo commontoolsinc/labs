@@ -3628,11 +3628,49 @@ supply; OW29/OW32/OW34 closed):
     READ-side replacement (a read-only service class) is the
     recommendation on file, not yet ruled.
   - Not rows, recorded: #5991's ledger comment is pending; the design
-    pass's reconciled report (`stage-c-design.md`) was pending at the
-    handoff and, when written, belongs beside the closeout with the
-    history header; #5968's Flags 1–4 (instantiation seat,
+    pass's reconciled report (`stage-c-design.md`) LANDED 2026-08-18 as
+    a LIVE design + build work order at
+    `docs/plans/server-execution-v2/stage-c-design.md` (the design-pass
+    delta below; it archives beside the closeout with the history
+    header when the build stage lands — the closeout's stated
+    destination); #5968's Flags 1–4 (instantiation seat,
     `resolvedHash`, fetch-parity on live completion failure,
     `plainProgramOf`) await the owner's ratify-or-direct.
+- **Stage C design-pass delta (2026-08-18) — the reconciled design
+  LANDED; NOTHING BINDING LANDED.** The three design lenses (spec-only;
+  server demand walk; client intent watch) are reconciled in
+  [`docs/plans/server-execution-v2/stage-c-design.md`](../../plans/server-execution-v2/stage-c-design.md)
+  (live; the lens reports verbatim beside the closeout as
+  `stage-c/stage-c-lens-*.md`). It is a DESIGN: this PR changes no
+  binding sentence — serving-loop.md §1:57–62 still reads "runs once
+  per demanding pair"; the amended "structural subscription" text is
+  the design's §2.4 and the front-loaded item of its ruling set (§5);
+  the residual (ix) item above ("N × walk per changed root — the
+  design's stated cost") still stands as accepted cost and is
+  restated only when (d) lands. The three rulings the owner made on
+  2026-08-18 are folded in as RULED (no lazy demand — RULED in
+  substance; the double-dispatch invariant, OW35, whose (α) build the
+  design carries as a work item; the measurement caveat, OW38 — the
+  build's acceptance is server settle time sub-second on the
+  cross-user journeys plus client-local speculation latency preserved).
+  Rows the BUILD will mint or move when it lands (none minted here):
+  a "Stage C design build delta" LANDED block with the counters
+  (`servingLoop.demand.*`, the client `commonfabric.*` surface); the
+  restated residual (ix); (b′) the incremental structural walk if the
+  settle floor needs it; the effects-channel listener if not in scope;
+  Q3.3 (skip resubscribe on identical logs) for fanned-out computeds;
+  the CFC zero-write probe rider (CFC owner; OFF-visible); speculation
+  §4 step 4's rebase if ruled owed; OW24 compaction re-pointed as the
+  bound on the ON-only linear residuals (whole-doc frames, the
+  differential, patch apply); the (a) upgrade if the interim
+  schema-narrowed sink lands first; OW37 re-read on the new numbers;
+  OW38 (i) the settle-time series lands with the build's benchmark and
+  (ii) the flip's numeric bar stays the owner's. Spec drift the design
+  records for the build to fix: serving-loop.md §7's counter list omits
+  `undemandedNarrowingRuns` (scopes.md §2) and `earlyEmitRefusals`
+  (protocol.md §2) though the code emits both; scopes.md §9's "ragged
+  instance sets" tripwire is inconsistent with §2's amended ragged
+  ruling (design §5 item 10).
 
 ## 4. Standing rule
 
