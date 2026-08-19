@@ -204,7 +204,7 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   gets it.
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
-- Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDays"`,
+- Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDay"`,
   `"FabricEpochNsec"`, `"FabricHash"`, `"FabricRegExp"` — each naming a
   concrete `FabricPrimitive` class from the data-model. A value matches by
   prototype (`instanceof`), not by structure: these values are opaque leaves

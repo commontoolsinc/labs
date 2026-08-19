@@ -2242,7 +2242,7 @@ describe("piece schema compatibility", () => {
         properties: { value: { type: "integer" } },
         required: ["value", brand],
       };
-      for (const epochType of ["FabricEpochNsec", "FabricEpochDays"]) {
+      for (const epochType of ["FabricEpochNsec", "FabricEpochDay"]) {
         expect(() =>
           assertPatternSchemasBackwardCompatible(
             pattern(withField(oldEpoch), true),

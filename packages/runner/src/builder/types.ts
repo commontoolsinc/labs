@@ -71,7 +71,7 @@ import type {
 } from "@commonfabric/data-model/fabric-instances";
 import type {
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -497,7 +497,7 @@ export interface BuilderFunctionsAndConstants {
   FabricInstance: typeof FabricInstance;
   FabricPrimitive: typeof FabricPrimitive;
   FabricEpochNsec: typeof FabricEpochNsec;
-  FabricEpochDays: typeof FabricEpochDays;
+  FabricEpochDay: typeof FabricEpochDay;
   FabricHash: typeof FabricHash;
   FabricLink: typeof FabricLink;
   FabricBytes: typeof FabricBytes;

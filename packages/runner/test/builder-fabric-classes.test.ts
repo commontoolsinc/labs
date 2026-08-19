@@ -26,7 +26,7 @@ import {
 } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -49,7 +49,7 @@ const expectedBindings: Record<string, unknown> = {
   FabricInstance,
   FabricPrimitive,
   FabricEpochNsec,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricHash,
   FabricLink,
   FabricBytes,

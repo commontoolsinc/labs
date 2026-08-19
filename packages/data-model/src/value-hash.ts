@@ -49,7 +49,7 @@ const TAG_STRING = 0x24;
 const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
-const TAG_EPOCH_DAYS = 0x28;
+const TAG_EPOCH_DAY = 0x28;
 const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
@@ -74,7 +74,7 @@ const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
-const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
+const TAG_EPOCH_DAY_BYTES = new Uint8Array([TAG_EPOCH_DAY]);
 const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
@@ -270,8 +270,8 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.EpochDays: {
-      hasher.update(TAG_EPOCH_DAYS_BYTES);
+    case NATIVE_TAGS.EpochDay: {
+      hasher.update(TAG_EPOCH_DAY_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
       );

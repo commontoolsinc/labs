@@ -227,7 +227,7 @@ export function shallowFabricFromNativeValue(
     // Special primitives are direct `FabricValue` members -- always frozen,
     // pass through as-is regardless of the `freeze` argument.
     case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.EpochDay:
     case NATIVE_TAGS.FabricBytes:
     case NATIVE_TAGS.FabricRegExp:
     case NATIVE_TAGS.Hash:

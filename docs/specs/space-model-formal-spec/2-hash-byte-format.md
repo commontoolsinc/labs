@@ -292,16 +292,16 @@ The encoding is structurally identical to `TAG_BIGINT` but uses a different type
 tag (`0x27` instead of `0x26`), ensuring that `FabricEpochNsec(42n)` and
 `42n` produce distinct hashes.
 
-### 4.10 `FabricEpochDays`
+### 4.10 `FabricEpochDay`
 
 ```
-Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
+Bytes: TAG_EPOCH_DAY  LENGTH_LEB128  TWO_COMP_BYTES
        0x28            <1+ bytes>     <length bytes>
 ```
 
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
-`FabricEpochDays` represents a day-precision Unix epoch timestamp. It is a
+`FabricEpochDay` represents a day-precision Unix epoch timestamp. It is a
 `FabricPrimitive` subclass and has a dedicated type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -310,7 +310,7 @@ Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
   two's-complement, big-endian, minimal bytes.
 
 The encoding is structurally identical to `TAG_BIGINT` but uses a different type
-tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDays(42n)` and
+tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDay(42n)` and
 `42n` produce distinct hashes. It also differs from `FabricEpochNsec` (`0x27`)
 so the two temporal types are always distinguishable.
 
@@ -397,7 +397,7 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `FabricBytes`,
-> `FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, and `FabricRegExp` are
+> `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, and `FabricRegExp` are
 > **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
 > encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, and 4.16
 > respectively). These are all `FabricPrimitive` subclasses — at this
@@ -500,7 +500,7 @@ The overall traversal is depth-first, left-to-right:
 
 1. Feed the type tag byte.
 2. For primitive types with variable-length payloads (string, bigint, bytes,
-   epoch-nsec, epoch-days, content-id), feed the LEB128 byte-length prefix(es),
+   epoch-nsec, epoch-day, content-id), feed the LEB128 byte-length prefix(es),
    then the payload.
 3. For compound types (array, object), recursively hash each child, then feed
    `TAG_END`. Each child's bytes (starting with its own type tag) are fed to
@@ -583,7 +583,7 @@ Length 5 in LEB128 is `0x05`.
 `TAG_EPOCH_NSEC` (`0x27`), followed by the bigint `0n` encoded as minimal
 two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
-### 7.10 `FabricEpochDays(42n)`
+### 7.10 `FabricEpochDay(42n)`
 
 `42n` in minimal two's-complement is `0x2A` (1 byte).
 
@@ -591,7 +591,7 @@ two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 28  01  2A
 ```
 
-`TAG_EPOCH_DAYS` (`0x28`), length 1 (`0x01`), payload `0x2A`.
+`TAG_EPOCH_DAY` (`0x28`), length 1 (`0x01`), payload `0x2A`.
 
 ### 7.11 `FabricHash("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
 
@@ -751,7 +751,7 @@ of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
 | Byte sequence (`FabricBytes`)     | unsigned LEB128 | Byte count of raw payload        |
 | `FabricEpochNsec` payload         | unsigned LEB128 | Byte count of two's complement   |
-| `FabricEpochDays` payload         | unsigned LEB128 | Byte count of two's complement   |
+| `FabricEpochDay` payload         | unsigned LEB128 | Byte count of two's complement   |
 | `FabricHash` algorithm tag        | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
 | `FabricHash` hash bytes           | unsigned LEB128 | Byte count of raw hash payload   |
 | `FabricInstance` type tag         | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |

@@ -35,7 +35,7 @@ import {
   realmFromFabricValue,
 } from "@/codecs.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -464,14 +464,14 @@ describe("RealmCodecEngine", () => {
       // refused on its own account once the array is walked as data.
       const decoded = engine.decodeWithoutMarker([
         undefined,
-        "EpochDays@1",
+        "EpochDay@1",
         7n,
       ]);
 
-      // Data, not a `FabricEpochDays` built from a forged tagged form.
+      // Data, not a `FabricEpochDay` built from a forged tagged form.
       expect(Array.isArray(decoded)).toBe(true);
-      expect((decoded as FabricValue[])[1]).toBe("EpochDays@1");
-      expect(decoded).not.toBeInstanceOf(FabricEpochDays);
+      expect((decoded as FabricValue[])[1]).toBe("EpochDay@1");
+      expect(decoded).not.toBeInstanceOf(FabricEpochDay);
     });
 
     it("returns a `ProblematicValue` for a bad state, for every codec that validates one", () => {
@@ -500,7 +500,7 @@ describe("RealmCodecEngine", () => {
       const refused = /state is not one this codec decodes/;
 
       // Wrong primitive type where a `bigint` is required.
-      expect(bad("EpochDays@1", "7").error).toMatch(refused);
+      expect(bad("EpochDay@1", "7").error).toMatch(refused);
       expect(bad("EpochNsec@1", 7).error).toMatch(refused);
 
       // Not a record at all, then a record with the wrong field types.
@@ -602,11 +602,11 @@ describe("RealmCodecEngine", () => {
       // an array and not a tagged form missing its state.
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
-        [marker, { a: [marker, "EpochDays@1"] }] as never,
+        [marker, { a: [marker, "EpochDay@1"] }] as never,
       ) as Record<string, FabricValue>;
 
       expect(Array.isArray(decoded.a)).toBe(true);
-      expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
+      expect((decoded.a as FabricValue[])[1]).toBe("EpochDay@1");
     });
 
     it("throws when given an outer envelope nested as its own payload", () => {
@@ -625,11 +625,11 @@ describe("RealmCodecEngine", () => {
       // object however equal it looks.
       const lookalike = ["fvr1"];
       const decoded = fabricFromRealmValue(
-        wire({ a: [lookalike, "EpochDays@1", 7n] }),
+        wire({ a: [lookalike, "EpochDay@1", 7n] }),
       ) as Record<string, FabricValue>;
 
       expect(Array.isArray(decoded.a)).toBe(true);
-      expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
+      expect((decoded.a as FabricValue[])[1]).toBe("EpochDay@1");
       // And slot zero is still the array the payload built, not swapped for
       // anything: an unrecognized head is data like the rest of it.
       expect((decoded.a as FabricValue[])[0]).toBe(lookalike);
@@ -778,13 +778,13 @@ describe("RealmCodecEngine", () => {
       // value that holds one instance twice yields two nodes and revisits
       // nothing. A hand-built node is reused directly to get the sharing this
       // needs.
-      const shared = tagged("EpochDays@1", 7n);
+      const shared = tagged("EpochDay@1", 7n);
       const decoded = fabricFromRealmValue(
         wire({ x: shared, y: shared }),
       ) as Record<string, FabricValue>;
 
-      expect(decoded.x).toBeInstanceOf(FabricEpochDays);
-      expect(decoded.y).toBeInstanceOf(FabricEpochDays);
+      expect(decoded.x).toBeInstanceOf(FabricEpochDay);
+      expect(decoded.y).toBeInstanceOf(FabricEpochDay);
     });
 
     it("returns a reserved-key `ProblematicValue`, not a circular one, for a repeated object", () => {
@@ -953,7 +953,7 @@ describe("RealmCodecEngine", () => {
 
       const encoded = engine.encode({
         first: new Reentrant() as unknown as FabricValue,
-        second: new FabricEpochDays(2n),
+        second: new FabricEpochDay(2n),
       }) as unknown as [
         unknown,
         Record<string, unknown[]>,
@@ -974,7 +974,7 @@ describe("RealmCodecEngine", () => {
       // asserted is only that: whether the walk passed the subtree through or
       // rebuilt it, the same older marker object lands in slot zero either
       // way, and the point is that it is not this call's.
-      const earlier = realmFromFabricValue(new FabricEpochDays(7n));
+      const earlier = realmFromFabricValue(new FabricEpochDay(7n));
       const value = Object.freeze({
         smuggled: payloadOf(earlier) as FabricValue,
       });
@@ -985,8 +985,8 @@ describe("RealmCodecEngine", () => {
 
       // Data, three slots and all, rather than a decoded value.
       expect(Array.isArray(decoded.smuggled)).toBe(true);
-      expect((decoded.smuggled as FabricValue[])[1]).toBe("EpochDays@1");
-      expect(decoded.smuggled).not.toBeInstanceOf(FabricEpochDays);
+      expect((decoded.smuggled as FabricValue[])[1]).toBe("EpochDay@1");
+      expect(decoded.smuggled).not.toBeInstanceOf(FabricEpochDay);
     });
 
     it("reads those same three slots as tagged under a matching marker", () => {
@@ -995,10 +995,10 @@ describe("RealmCodecEngine", () => {
       // marker the outer envelope carries, do decode as the value they name.
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
-        [marker, [marker, "EpochDays@1", 7n]] as never,
+        [marker, [marker, "EpochDay@1", 7n]] as never,
       );
 
-      expect(decoded).toBeInstanceOf(FabricEpochDays);
+      expect(decoded).toBeInstanceOf(FabricEpochDay);
     });
 
     it("decodes a tree carrying bytes exactly once", () => {
@@ -1067,7 +1067,7 @@ describe("RealmCodecEngine", () => {
       const report = await crossRealm({
         bytes: new FabricBytes(new Uint8Array([1, 2, 250])),
         nsec: new FabricEpochNsec(1234567890123456789n),
-        days: new FabricEpochDays(20_000n),
+        days: new FabricEpochDay(20_000n),
         hash: new FabricHash(new Uint8Array([9, 8, 7]), "fid1"),
         regexp: new FabricRegExp(/ab+c/gi),
       });
@@ -1078,7 +1078,7 @@ describe("RealmCodecEngine", () => {
       expect(report.classes).toEqual({
         bytes: "FabricBytes",
         nsec: "FabricEpochNsec",
-        days: "FabricEpochDays",
+        days: "FabricEpochDay",
         hash: "FabricHash",
         regexp: "FabricRegExp",
       });
@@ -1124,7 +1124,7 @@ describe("RealmCodecEngine", () => {
         // check the transport: same-realm this is a fact about `===`, but a
         // transport that interned equal subtrees would merge this with the
         // real marker and the far side would decode ordinary data as a value.
-        lookalike: [["fvr1"], "EpochDays@1", 7n],
+        lookalike: [["fvr1"], "EpochDay@1", 7n],
       });
 
       expect(report.ok).toBe(true);
@@ -1146,9 +1146,9 @@ describe("RealmCodecEngine", () => {
       // Still an array on the far side, and still carrying its own contents:
       // the transport kept it distinct from the marker it resembles. The
       // classes check above says the same thing from the other direction --
-      // a merged marker would have made this a `FabricEpochDays`.
+      // a merged marker would have made this a `FabricEpochDay`.
       expect(report.facts?.lookalikeIsArray).toBe(true);
-      expect(report.facts?.lookalikeTag).toBe("EpochDays@1");
+      expect(report.facts?.lookalikeTag).toBe("EpochDay@1");
       expect(report.classes?.lookalike).toBe("Array");
     });
 
@@ -1180,7 +1180,7 @@ describe("RealmCodecEngine", () => {
       const [name, cls] of [
         ["FabricBytes", FabricBytes],
         ["FabricEpochNsec", FabricEpochNsec],
-        ["FabricEpochDays", FabricEpochDays],
+        ["FabricEpochDay", FabricEpochDay],
         ["FabricHash", FabricHash],
         ["FabricRegExp", FabricRegExp],
       ] as const

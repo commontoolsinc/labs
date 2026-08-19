@@ -114,19 +114,19 @@ export interface FabricEpochNsecConstructor {
 export declare const FabricEpochNsec: FabricEpochNsecConstructor;
 
 /**
- * Temporal type representing days from the POSIX Epoch.
- * Wraps a `bigint` value.
+ * Temporal type representing a particular day, as a count of days from the
+ * POSIX Epoch. Wraps a `bigint` value.
  */
-export interface FabricEpochDays extends FabricPrimitive {
+export interface FabricEpochDay extends FabricPrimitive {
   readonly value: bigint;
 }
 
-export interface FabricEpochDaysConstructor {
-  new (value: bigint): FabricEpochDays;
-  prototype: FabricEpochDays;
+export interface FabricEpochDayConstructor {
+  new (value: bigint): FabricEpochDay;
+  prototype: FabricEpochDay;
 }
 
-export declare const FabricEpochDays: FabricEpochDaysConstructor;
+export declare const FabricEpochDay: FabricEpochDayConstructor;
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -1825,7 +1825,7 @@ export type MutableJSONValue = Mutable<JSONValue>;
 export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
   [
     "FabricBytes",
-    "FabricEpochDays",
+    "FabricEpochDay",
     "FabricEpochNsec",
     "FabricHash",
     "FabricRegExp",
