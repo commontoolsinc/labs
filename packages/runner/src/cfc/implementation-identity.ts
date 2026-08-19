@@ -60,18 +60,17 @@ const resolveProvenanceImplementationIdentity = (
   const provenance = getVerifiedProvenance(implementation);
   if (!provenance) return undefined;
 
-  // `.src` (the debug source location) is NO LONGER consulted for identity: the
+  // `.src` (the debug source location) is not consulted for identity: the
   // WeakMap provenance lookup above IS the anti-spoof proof (an attacker-supplied
   // function has no entry), and the policy-facing identity fields are provenance-
   // derived, never `.src`-derived. `writeAuthorizedBy` verifies the direct or
   // delegated `moduleIdentity` plus the exact `bindingPath`; `sourceFile` remains
   // diagnostic at verification time and participates only when claims are minted
-  // or reconciled. The former `identityFromCanonicalSource(.src)
-  // === provenance.identity` consistency check was defense-in-depth, not the
-  // security boundary; it is dropped so that making `.src` lazy/debug-only
-  // (skipped at boot) cannot flip a genuinely-verified implementation to
-  // `unsupported` and deny its authorized writes. `.src` garble/absence is now
-  // identity-inert (the `src-garble-identity-invariant` harness asserts this).
+  // or reconciled. That independence is what lets `.src` be debug-only and
+  // absent — a source-free warm load records no position — without flipping a
+  // genuinely-verified implementation to `unsupported` and denying its
+  // authorized writes. A garbled or absent `.src` is identity-inert (the
+  // `src-independent-identity` harness asserts this).
   return {
     kind: "verified",
     moduleIdentity: provenance.identity,

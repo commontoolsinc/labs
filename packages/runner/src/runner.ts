@@ -167,12 +167,6 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
   level: "warn",
   logCountEvery: 0,
 });
-const sourceLocationLogger = getLogger("runner.source-location", {
-  enabled: false,
-  level: "warn",
-  logCountEvery: 0,
-});
-
 /**
  * How many prepared/stopped result shortcuts one runner keeps. Sized well
  * above any plausible number of simultaneously live pieces, so the bound is
@@ -5110,18 +5104,8 @@ export class Runner {
       liveTrusted ??
       this.getFallbackJavaScriptImplementation(module);
 
-    const namedFn = fn as {
-      src?: string;
-      name?: string;
-      sourceLocationSample?: Record<string, unknown>;
-    };
+    const namedFn = fn as { src?: string; name?: string };
     const name = namedFn.src || fn.name;
-    if (name && namedFn.sourceLocationSample) {
-      sourceLocationLogger.flag("sample", name, true, {
-        name,
-        ...namedFn.sourceLocationSample,
-      });
-    }
 
     return { fn, name };
   }
@@ -6360,12 +6344,11 @@ export class Runner {
 
     // Identity stamping is UNCONDITIONAL — the single identity channel (the
     // scheduler reads only these stamps; there is no fallback derivation).
-    // The debug NAME below depends on `name` (fn.src / fn.name — absent for
-    // anonymous arrows when the eager source annotation is off), but identity
-    // must not: gating the stamps on `name` silently re-opened the per-symbol
+    // The debug NAME below depends on `name` (fn.src / fn.name), which is
+    // absent whenever a load carries no authored position, but identity must
+    // not: gating the stamps on `name` silently re-opened the per-symbol
     // multi-instance collision (N instances of one lift sharing one id, so one
-    // actionStats entry and one durable observation) whenever annotation was
-    // off — the production default.
+    // actionStats entry and one durable observation).
     //
     // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
     // not `module.implementation`: an `$implRef`-resolved module (reloaded from

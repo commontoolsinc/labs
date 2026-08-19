@@ -10,9 +10,11 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // SCOPE (CT-1754): this guards the verified-binding regression only — an
 // inSpace child's owner-protected list, written by a NON-exported mode-bound
-// handler from a fresh session, was rejected because the warm/cached re-load
-// left `fn.src` non-canonical so the writer identity downgraded to
-// `unsupported`. Both sessions here share ONE compiled PROGRAM, so they share
+// handler from a fresh session, was rejected because the writer identity
+// downgraded to `unsupported` across the warm/cached re-load. Writer identity
+// is now rooted in the content-addressed provenance record, which that re-load
+// carries; this test holds it there. Both sessions here share ONE compiled
+// PROGRAM, so they share
 // one `moduleIdentity` and this does NOT reproduce the separate two-compile-
 // context moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain
 // stable") that still blocks card-add in the real profile-create → piece-view
@@ -36,14 +38,10 @@ const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
 //
 // Standalone (single-context) the write commits fine. The real flow creates
 // the child via `child.inSpace(spaceB)(...)` from the parent, and a FRESH
-// session loads the child from its own space via the warm/cached module path —
-// where `graph.moduleSourceMaps` is empty, so the per-module `//# sourceURL`
-// source frame never registered and `fn.src` resolved to the raw
-// `${evalId}.js:line:col` bundle coordinate instead of the canonical
-// `cf:module/<id>/main.tsx:..` form. That made the function's canonical-source
-// check disagree with its recorded provenance identity, downgrading the writer
-// identity to `unsupported`, and CFC rejected the commit with
-// "writeAuthorizedBy requires a trusted verified binding identity at /".
+// session loads the child from its own space via the warm/cached module path,
+// which carries no authored source. The writer identity has to survive that
+// load on the provenance record alone; when it does not, CFC rejects the commit
+// with "writeAuthorizedBy requires a trusted verified binding identity at /".
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [

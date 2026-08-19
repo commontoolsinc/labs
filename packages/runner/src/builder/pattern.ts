@@ -7,6 +7,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { isCell, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
+import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
 import {
   externalizeSchema,
   getStableInternalPathSegment,
@@ -644,6 +645,13 @@ function factoryFromPattern<T, R>(
         toJSON: () => patternToEncodableForm(factory),
       } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
+
+    // A pattern's provenance is keyed by the factory itself — it carries no
+    // `.implementation`, so it IS what `Engine.recordModuleProvenance` records
+    // against — and the factory is also what the transformer annotates. Install
+    // the accessor here so a pattern artifact resolves its authored position
+    // through the same map lift and handler implementations use.
+    defineAuthoredDebugAccessors(factory);
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as
     // derivation copies so identity facts resolve through to the root factory

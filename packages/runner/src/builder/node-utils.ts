@@ -9,8 +9,8 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { resolveLocationFromFunctionSource } from "./module.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
@@ -23,12 +23,11 @@ export function connectInputAndOutputs(node: NodeRef) {
         const implementation = isObjectOrArray(node.module)
           ? node.module.implementation
           : undefined;
-        const sourceLocation = typeof implementation === "function"
-          ? resolveLocationFromFunctionSource(
-            implementation as (...args: any[]) => unknown,
-            node.frame,
-          )
-          : null;
+        // A factory applied during module evaluation predates the provenance
+        // walk that records authored positions, so the location is routinely
+        // absent here and the message reads without one.
+        const sourceLocation = getAuthoredDebugSource(implementation)?.src ??
+          null;
         throw new Error(
           closureCaptureErrorMessage({
             capturedCell: {
