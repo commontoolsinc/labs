@@ -2845,6 +2845,38 @@ describe("runtime-client CellRef conversion", () => {
     expect(payload.id).toBe("of:cfc-raw-link");
     expect("cfcLabelView" in payload).toBe(false);
   });
+
+  it("hands back a `FabricPrimitive` whole, nested or not", () => {
+    // A fabric class keeps its state in private fields and has no enumerable
+    // own properties, so the record branch would rebuild one as `{}`. A
+    // primitive is atomic and holds no link, so passing it through is the
+    // whole answer.
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+    expect(mapCellRefsToSigilLinks(bytes)).toBe(bytes);
+    expect(mapCellRefsToSigilLinks({ b: bytes })).toEqual({ b: bytes });
+    expect(mapCellRefsToSigilLinks([bytes])).toEqual([bytes]);
+    // Identity through a container too: the walk rebuilds the container, and
+    // what it puts back has to be the value rather than a copy of it.
+    expect(
+      (mapCellRefsToSigilLinks({ b: bytes }) as { b: unknown }).b,
+    ).toBe(bytes);
+  });
+
+  it("refuses a `FabricInstance`, naming the class and the situation", () => {
+    // A tripwire, not a limitation to route around: an instance's codec
+    // contents can hold a link that this walk cannot reach, so refusing beats
+    // the `{}` the record branch would otherwise produce.
+    const error = FabricError.fromNativeError(new Error("boom"));
+    const message =
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when mapping " +
+      "cell refs to sigil links.";
+
+    expect(() => mapCellRefsToSigilLinks(error)).toThrow(message);
+    // Nested too, the walk reaching it through the container rebuild.
+    expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
+    expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
 });
 
 describe("RuntimeProcessor VDom event label-view ingress", () => {

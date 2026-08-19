@@ -11,7 +11,7 @@ import type {
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 
-export interface TelemetryAnnotations {
+export type TelemetryAnnotations = {
   pattern: Pattern;
   module: Module;
   reads: NormalizedFullLink[];
@@ -32,14 +32,14 @@ export interface TelemetryAnnotations {
     directOutputs: NormalizedFullLink[];
   };
   schedulerObservationIdentity?: SchedulerObservationIdentity;
-}
+};
 
-export interface SchedulerObservationIdentity {
+export type SchedulerObservationIdentity = {
   ownerSpace?: MemorySpace;
   branch?: string;
   pieceId: string;
   processGeneration?: number;
-}
+};
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
 export type AnnotatedAction = Action & TelemetryAnnotations;
@@ -92,30 +92,30 @@ export type SpaceScopeURIAndType =
   `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
 
 /** Per-iteration stats captured during the settle loop. */
-export interface SettleIterationStats {
+export type SettleIterationStats = {
   workSetSize: number;
   orderSize: number;
   actionsRun: number;
   /** Action IDs in the work set (truncated to top entries) */
   actions: { id: string; type: "effect" | "computation" }[];
   durationMs: number;
-}
+};
 
 /** Stats for the entire settle loop of one execute() call. */
-export interface SettleStats {
+export type SettleStats = {
   iterations: SettleIterationStats[];
   totalDurationMs: number;
   settledEarly: boolean;
   initialSeedCount: number;
-}
+};
 
 /** One recorded settle stats entry from execute() history. */
-export interface SettleStatsHistoryEntry {
+export type SettleStatsHistoryEntry = {
   recordedAt: number;
   stats: SettleStats;
-}
+};
 
-export interface ActionRunTraceEntry {
+export type ActionRunTraceEntry = {
   recordedAt: number;
   actionId: string;
   actionType: "effect" | "computation";
@@ -123,13 +123,13 @@ export interface ActionRunTraceEntry {
   durationMs: number;
   declaredWrites: ActionRunTraceAddress[];
   actualWrites: ActionRunTraceAddress[];
-}
+};
 
-export interface ActionRunTraceAddress {
+export type ActionRunTraceAddress = {
   space: MemorySpace;
   entityId: URI;
   path: string[];
-}
+};
 
 export type TriggerTraceValueKind =
   | "undefined"
@@ -141,13 +141,13 @@ export type TriggerTraceValueKind =
   | "object"
   | "other";
 
-export interface TriggerTraceValueSummary {
+export type TriggerTraceValueSummary = {
   kind: TriggerTraceValueKind;
   size?: number;
   preview?: string | number | boolean | null;
-}
+};
 
-export interface TriggerTraceActionRecord {
+export type TriggerTraceActionRecord = {
   actionId: string;
   actionType: "effect" | "computation";
   mode: "pull";
@@ -160,9 +160,9 @@ export interface TriggerTraceActionRecord {
   pendingAfter: boolean;
   dirtyBefore: boolean;
   dirtyAfter: boolean;
-}
+};
 
-export interface TriggerTraceEntry {
+export type TriggerTraceEntry = {
   recordedAt: number;
   notificationType: string;
   changeIndex: number;
@@ -175,7 +175,7 @@ export interface TriggerTraceEntry {
   before: TriggerTraceValueSummary;
   after: TriggerTraceValueSummary;
   triggered: TriggerTraceActionRecord[];
-}
+};
 
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
