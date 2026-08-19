@@ -90,6 +90,9 @@ async function main() {
   const registryReport = reportBreakRegistryFindings({
     requiredPatternKeys: required.keys,
     recordExists: recordExistsUnder(),
+    // Tier 1 owns the unevaluable list, so Tier 1 is where it is judged: a
+    // required pattern listed there escapes this gate altogether.
+    unevaluable: UNEVALUABLE_PATTERNS,
   });
   if (registryReport !== undefined) {
     console.error(registryReport);

@@ -97,6 +97,34 @@ function recordPathProblem(record: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether a key written in an exemption list addresses a required pattern.
+ *
+ * Membership is judged the way the lists' own consumers resolve a key, not by
+ * string equality. `acceptedDropsFor` claims an entry whose key is a path
+ * SUFFIX of the manifest's pattern path, so an entry written `home.tsx`
+ * exempts `system/home.tsx` — and an exact `has()` would let the shorter
+ * spelling walk straight around every floor here.
+ *
+ * The other two lists match exactly, so this refuses a suffix-written entry
+ * that exempts nothing today. That asymmetry is deliberate and cheap: a
+ * prohibition may exceed the convention it protects, and the spelling nobody
+ * needs is the one a reader cannot tell from the spelling that bites.
+ *
+ * The `/` is part of the test rather than a bare `endsWith`: without it
+ * `whome.tsx` would answer for `system/home.tsx`, which is a different
+ * pattern that no required key addresses.
+ */
+function namesRequiredPattern(
+  requiredPatternKeys: ReadonlySet<string>,
+  pattern: string,
+): boolean {
+  for (const key of requiredPatternKeys) {
+    if (key === pattern || key.endsWith(`/${pattern}`)) return true;
+  }
+  return false;
+}
+
 /** Both shipped registries, flattened to the shape the guards judge. */
 export function collectBreakRegistryEntries(): BreakRegistryEntry[] {
   return [
@@ -120,18 +148,7 @@ export function guardBreakRegistryEntries(options: {
 }): BreakRegistryFinding[] {
   const findings: BreakRegistryFinding[] = [];
   for (const entry of options.entries) {
-    // Membership is judged the way the REGISTRIES' own consumers resolve a
-    // key, not by string equality. `acceptedDropsFor` claims an entry whose
-    // key is a path SUFFIX of the manifest's pattern path, so a Tier 2 entry
-    // written `home.tsx` forgives drops on `system/home.tsx` — and an exact
-    // `has()` would let the shorter spelling walk around this floor. Tier 1
-    // keys exactly, so a suffix-written entry there forgives nothing today
-    // and refusing it costs nothing; judging both registries by the looser
-    // rule keeps the floor ahead of either consumer.
-    const namesRequired = [...options.requiredPatternKeys].some((key) =>
-      key === entry.pattern || key.endsWith(`/${entry.pattern}`)
-    );
-    if (namesRequired) {
+    if (namesRequiredPattern(options.requiredPatternKeys, entry.pattern)) {
       findings.push({
         registry: entry.registry,
         pattern: entry.pattern,
@@ -159,23 +176,66 @@ export function guardBreakRegistryEntries(options: {
 }
 
 /**
+ * Findings for patterns exempted from Tier 1 by being unevaluable.
+ *
+ * `UNEVALUABLE_PATTERNS` is debt made visible: a file that throws while being
+ * evaluated yields no contract, so it can never be recorded and never
+ * checked. That is a WIDER exemption than any accepted break — not "this
+ * finding is forgiven" but "this pattern is not gated at all" — so the floor
+ * that keeps the auto-updating roots out of the break registries has to reach
+ * it too, or the strictest rule is the one with the easiest way around it.
+ *
+ * Tier 1 only, because Tier 1 is the gate this list exempts anything from.
+ * The list is empty of required patterns today, so this costs nothing now and
+ * refuses the one addition that would matter.
+ */
+export function guardUnevaluableExemptions(options: {
+  unevaluable: ReadonlySet<string>;
+  requiredPatternKeys: ReadonlySet<string>;
+}): BreakRegistryFinding[] {
+  const findings: BreakRegistryFinding[] = [];
+  for (const pattern of options.unevaluable) {
+    if (!namesRequiredPattern(options.requiredPatternKeys, pattern)) continue;
+    findings.push({
+      registry: "pattern-compat-unevaluable",
+      pattern,
+      detail: `names a required pattern — an unevaluable pattern is exempt ` +
+        `from the update gate entirely, which an auto-updating root may ` +
+        `never be. Fix the pattern rather than listing it.`,
+    });
+  }
+  return findings;
+}
+
+/**
  * Guard the shipped registries against the real tree, formatted for a task's
  * failure output. Returns `undefined` when every entry is permitted.
  */
 export function reportBreakRegistryFindings(options: {
   requiredPatternKeys: ReadonlySet<string>;
   recordExists: (repoRelativePath: string) => boolean;
+  /**
+   * Tier 1's unevaluable list, when the caller is the gate it exempts from.
+   * Omitted by Tier 2, which does not consult it.
+   */
+  unevaluable?: ReadonlySet<string>;
 }): string | undefined {
-  const findings = guardBreakRegistryEntries({
-    entries: collectBreakRegistryEntries(),
-    requiredPatternKeys: options.requiredPatternKeys,
-    recordExists: options.recordExists,
-  });
+  const findings = [
+    ...guardBreakRegistryEntries({
+      entries: collectBreakRegistryEntries(),
+      requiredPatternKeys: options.requiredPatternKeys,
+      recordExists: options.recordExists,
+    }),
+    ...(options.unevaluable === undefined ? [] : guardUnevaluableExemptions({
+      unevaluable: options.unevaluable,
+      requiredPatternKeys: options.requiredPatternKeys,
+    })),
+  ];
   if (findings.length === 0) return undefined;
   const lines = findings.map((finding) =>
     `  ${finding.registry}: ${finding.pattern}\n    ${finding.detail}`
   );
-  return `${findings.length} accepted-break registry entr` +
+  return `${findings.length} pattern-exemption entr` +
     `${findings.length === 1 ? "y is" : "ies are"} not permitted:\n\n` +
     lines.join("\n");
 }

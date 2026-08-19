@@ -5,8 +5,10 @@ import {
   collectBreakRegistryEntries,
   deriveRequiredPatternKeys,
   guardBreakRegistryEntries,
+  guardUnevaluableExemptions,
   recordExistsUnder,
 } from "./pattern-break-registry-guards.ts";
+import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
@@ -158,6 +160,44 @@ describe("pattern-break-registry-guards", () => {
       entries: [entry({ pattern: "whome.tsx" })],
       requiredPatternKeys: new Set(["system/home.tsx"]),
       recordExists: () => true,
+    })).toEqual([]);
+  });
+
+  it("refuses an unevaluable pattern that is a required root", () => {
+    // A wider exemption than any accepted break: not "this finding is
+    // forgiven" but "this pattern is not gated at all".
+    const findings = guardUnevaluableExemptions({
+      unevaluable: new Set(["system/home.tsx", "examples/cf-picker.tsx"]),
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].pattern).toBe("system/home.tsx");
+    expect(findings[0].registry).toBe("pattern-compat-unevaluable");
+  });
+
+  it("allows unevaluable patterns that no required key addresses", () => {
+    expect(guardUnevaluableExemptions({
+      unevaluable: new Set(["examples/cf-picker.tsx", "whome.tsx"]),
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+    })).toEqual([]);
+  });
+
+  it("refuses a required root written as a bare suffix key there too", () => {
+    expect(
+      guardUnevaluableExemptions({
+        unevaluable: new Set(["home.tsx"]),
+        requiredPatternKeys: new Set(["system/home.tsx"]),
+      }).length,
+    ).toBe(1);
+  });
+
+  it("accepts the shipped unevaluable list against the real required set", () => {
+    const required = deriveRequiredPatternKeys(
+      [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE],
+    ) as { keys: ReadonlySet<string> };
+    expect(guardUnevaluableExemptions({
+      unevaluable: UNEVALUABLE_PATTERNS,
+      requiredPatternKeys: required.keys,
     })).toEqual([]);
   });
 
