@@ -3,6 +3,10 @@ import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
@@ -1600,9 +1604,11 @@ describe("RuntimeProcessor blob upload IPC", () => {
       },
     } as unknown as RuntimeProcessor;
 
-    // Freshly allocated, as the transport's clone delivers it: the handler owns
+    // Freshly encoded, as the transport's clone delivers it: the handler owns
     // its request's payload. Kept here so the test can check what became of it.
-    const payload = new Uint8Array([1, 2, 3]);
+    const payload = realmFromFabricValue(
+      new FabricBytes(new Uint8Array([1, 2, 3])),
+    );
 
     try {
       await expect(
@@ -1623,8 +1629,9 @@ describe("RuntimeProcessor blob upload IPC", () => {
 
     // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
     // does, which is what makes the transport's ownership guarantee load-
-    // bearing rather than decorative. A detached array reports zero length.
-    expect(payload.length).toBe(0);
+    // bearing rather than decorative. A spent tree is what a second decode
+    // reports.
+    expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
 
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",

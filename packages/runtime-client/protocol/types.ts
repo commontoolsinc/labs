@@ -1,4 +1,5 @@
 import type { MetaField } from "@commonfabric/api";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
@@ -556,16 +557,13 @@ export interface UploadBlobRequest extends BaseRequest {
   space: DID;
   contentType: string;
   /**
-   * The blob's bytes. The type has to stay structured-clone-able, this being an
-   * IPC payload: a class does not survive the crossing, where a typed array
-   * does and carries whole rather than element by element.
-   *
-   * TODO(danfuzz): this wants to be a `FabricBytes`, which `codec-realm`
-   * carries across as a bare `ArrayBuffer` the send can transfer. The bytes
-   * would then be immutable end to end rather than a view a sender still
-   * holds.
+   * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
+   * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
+   * and a send can transfer. It decodes back into a `FabricBytes`, so the
+   * bytes are an immutable value at both ends rather than a view a sender
+   * still holds.
    */
-  body: Uint8Array;
+  body: RealmEncodedValue;
   suffix?: string;
 }
 
@@ -961,6 +959,19 @@ export interface VDomMountResponse {
   rootId: number;
 }
 
+/**
+ * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
+ * transport implemented using `codec-realm`. As of this writing, secure crypto
+ * keypairs cannot be properly represented: `InitializeRequest`'s `identity` is
+ * a `KeyPairRaw`, whose `CryptoKeyPair` arm is a pair of opaque host objects
+ * that no fabric class covers. Note also that an `interface` never satisfies
+ * `FabricPlainObject` -- TypeScript grants an implicit index signature to an
+ * anonymous object type and not to an interface -- so every arm here has to
+ * become a type alias. The two ends of the crossing carry the matching
+ * markers: `WebWorkerRuntimeTransport.send()` in
+ * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
+ * listener in `../backends/web-worker/index.ts`.
+ */
 export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
