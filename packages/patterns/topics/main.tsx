@@ -39,6 +39,8 @@ export type {
   AgentAuthoredEvent,
   SetBodyEvent,
   SetBodyResult,
+  SetTitleEvent,
+  SetTitleResult,
   TopicAuthor,
   TopicComment,
   TopicCrossrefRow,
@@ -52,6 +54,9 @@ export type {
 } from "./topic.tsx";
 
 export interface TopicsInput {
+  /** The board's durable topic list. `addTopic` appends here; direct writes
+   * are legitimate but unattributed, and a whole-array write forfeits the
+   * mergeability the verb's append keeps. */
   topics?: Writable<TopicPiece[] | Default<[]>>;
   /** @deprecated Retained while pre-Profile callers still use the old
    * `setMyName` + unsigned-event contract. New callers use `agentName`. */
@@ -59,6 +64,7 @@ export interface TopicsInput {
 }
 
 export interface AddTopicEvent {
+  /** The topic's title, trimmed before it is stored. Must be non-empty. */
   title: string;
   /** The topic's initial living-document body. A topic born with a body
    * appears with it atomically — no reader observes the title-only halfway
@@ -78,8 +84,16 @@ export interface AddTopicResult {
    * identifier. It reaches the caller as a link to the child, which the CLI
    * renders as an address (`cf piece call --show-links`). A caller therefore
    * addresses the new topic straight from the create, instead of filing it and
-   * then searching the board's index for the topic it just made. */
-  topic: TopicPiece;
+   * then searching the board's index for the topic it just made.
+   *
+   * Declared through the index's row schema rather than the full `TopicPiece`,
+   * and the narrowness is the contract: the declared schema bounds the default
+   * readback — a full piece would expand the body, thread, and every
+   * referenced sibling — and every name a verb's result publishes is permanent
+   * with no gate checking it, so the result publishes the survey row the
+   * caller already knows plus the write-time facts only the pattern could
+   * resolve (`createdAt`, `createdBy`). */
+  topic: TopicIndexRow;
 }
 
 /** One row of the board's compact discovery index: the topic itself, declared
@@ -91,8 +105,10 @@ export interface AddTopicResult {
 export interface TopicIndexRow {
   title: string;
   createdAt: number;
-  /** Authorship has no honest zero, so absence stays declared rather than
-   * being coalesced to an empty author. */
+  /** Who filed the topic. A topic written without structured authorship
+   * materializes the declared default — the inert legacy sentinel
+   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned";
+   * the display string then comes from the topic's own `createdByName`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
    * so the row itself never carries the mixed-version undefined. */
@@ -214,12 +230,26 @@ const cardsByActivity = lift(
  * (CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics
  * sort by last activity. Replaces Linear / GitHub issues / loose process docs
  * for the team; PR workflows stay in GitHub and arrive here as links.
+ *
+ * Headless use: survey the whole board with one bounded read of `index` — a
+ * row IS its topic, so a row's own address (`--select index[].@`) is what
+ * that topic's reads and verbs take as the piece. File with `addTopic`,
+ * title and optional initial body in one call, then work on the topic
+ * directly: the body is its living document, the thread its append-only
+ * deliberation. Sign every mutation with `agentName` — Fabric records the
+ * human principal behind the key; the name says which agent acted under it.
  */
 export interface TopicsOutput {
   [NAME]: string;
   [UI]: VNode;
+  /** The board's topics, in filing order, as complete pieces — bodies,
+   * threads, and verbs included. Survey through `index` instead; read this
+   * when you already know which topic you are expanding. */
   topics: TopicPiece[];
+  /** The same list, under the name the topic pattern's editor autocompletes
+   * over — what `addTopic` wires into each child as its mention universe. */
   mentionable: TopicPiece[] | Default<[]>;
+  /** How many topics the board holds, nulls included. */
   topicCount: number;
   /** The board's mention pivot, one row per topic: the topic, and the topics
    * that mention it. Published so a topic composed outside `addTopic` can be
@@ -234,6 +264,10 @@ export interface TopicsOutput {
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
+  /** File a topic. The atomic unit takes the initial body with the title, so
+   * no reader observes a title-only halfway state and no follow-up `setBody`
+   * finishes a create. Returns the created topic as its survey row — the
+   * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
   /** @deprecated Compatibility view for callers of the previous board. */
   myName: string;
@@ -349,8 +383,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       boardCrossrefs: crossrefs,
     });
     // Mergeable append: concurrent creates from different users all land.
+    // The session composer draft is `submitTopic`'s to clear; a headless
+    // create has no draft.
     topics.push(piece);
-    newTitle.set("");
     return { topic: piece };
   });
 
