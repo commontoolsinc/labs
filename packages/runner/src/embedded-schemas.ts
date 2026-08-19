@@ -12,7 +12,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
+import { rendererVDOMSchema, vnodeSchema } from "./schemas.ts";
 
 export const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,

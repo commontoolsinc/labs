@@ -26,6 +26,7 @@ import type {
   JSONValue,
   NormalizedFullLink,
   PatternCoverageData,
+  RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -34,7 +35,6 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONObject, JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };

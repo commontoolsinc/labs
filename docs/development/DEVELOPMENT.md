@@ -29,7 +29,19 @@ about one aspect of the runtime, are indexed in
 - Group imports by source: standard library, external, then internal, with a
   blank line between the groups.
 - Prefer named exports over default exports.
-- Use package names for internal imports.
+- Use package names to import from another package.
+- Use relative paths to import from within your own package. A file that names
+  the package it belongs to reaches a file of that same package the long way
+  round, through the `exports` map and back, so one module ends up with two
+  spellings. Naming the bare package name is worse than that. The entry point
+  reaches every module the package exports, so naming it from inside completes
+  a cycle, and the order in which the package's modules initialize starts to
+  depend on the order the entry point lists its exports. The
+  `cf-package/no-self-import` lint rule (`tasks/lint-self-import.ts`,
+  registered in the root `deno.jsonc`) reports both forms, so a plain
+  `deno lint` catches them. It exempts a package's own tests, which name their
+  package on purpose: the surface a consumer sees is the thing they are there
+  to check.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
