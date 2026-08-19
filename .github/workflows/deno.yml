@@ -152,7 +152,9 @@ jobs:
 
       - name: 🚧 Guard against programs built from local files by hand
         timeout-minutes: *work-timeout
-        run: deno task check-local-program
+        run: >-
+          deno task run-recorded gate repo check-local-program --
+          deno task check-local-program
 
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
