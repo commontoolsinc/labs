@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -39,11 +21,6 @@ const __cfLift_1 = __cfHelpers.lift((): Question | null => {
     // In real code this would filter and return first match, or null
     return null;
 }, false, undefined, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 31 },
-    bindingName: "topQuestion"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     topQuestion: {
         question: string;
@@ -69,10 +46,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 32, col: 40 }
-});
 const __cfLift_3 = __cfHelpers.lift<{
     topQuestion: Question | null;
 }, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.question, {
@@ -107,10 +80,6 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 36, col: 37 }
-});
 const __cfLift_4 = __cfHelpers.lift<{
     topQuestion: {
         category: string;
@@ -136,10 +105,6 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 39, col: 42 }
-});
 const __cfLift_5 = __cfHelpers.lift<{
     topQuestion: Question | null;
 }, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.category, {
@@ -174,10 +139,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_5, {
-    sourceFile: "/test.tsx",
-    position: { line: 40, col: 42 }
-});
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
 //   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })
@@ -185,7 +146,7 @@ __cfBindVerifiedBinding(__cfLift_5, {
 // Context: Tests both optional chaining (?.) and explicit null-check patterns on
 //   a nullable Reactive. The capture schema correctly uses anyOf [Question, null]
 //   with asOpaque: true for the topQuestion capture.
-export default __cfBindVerifiedBinding(pattern((_) => {
+export default pattern((_) => {
     // This computed can return null - simulates finding a question from a list
     const topQuestion = __cfLift_1().for("topQuestion", true);
     return {
@@ -237,10 +198,7 @@ export default __cfBindVerifiedBinding(pattern((_) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

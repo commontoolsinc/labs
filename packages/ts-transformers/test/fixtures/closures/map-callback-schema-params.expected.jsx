@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -83,10 +65,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 27 }
-});
 const __cfLift_1 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -120,10 +98,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 30, col: 19 }
-});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -193,10 +167,6 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 29, col: 27 }
-});
 // FIXTURE: map-callback-schema-params
 // Verifies: mapWithPattern callback schemas omit params when captures are unused
 // and include params when captures are used
@@ -204,7 +174,7 @@ __cfBindVerifiedBinding(__cfPattern_2, {
 //   state.items.map((item) => <span>{item.price * state.discount}</span>)
 //     -> required: ["element", "params"]
 // Context: Both callbacks are pattern-owned JSX maps over the same receiver; only the second closes over outer state
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <section data-kind="unused">
@@ -276,10 +246,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

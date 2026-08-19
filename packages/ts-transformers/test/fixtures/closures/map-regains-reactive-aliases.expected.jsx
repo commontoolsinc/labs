@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -40,11 +22,6 @@ const passthrough = lift((items: string[]) => items, {
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(passthrough, {
-    sourceFile: "/test.tsx",
-    position: { line: 4, col: 25 },
-    bindingName: "passthrough"
-});
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: string[];
@@ -72,11 +49,6 @@ const __cfLift_1 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 19, col: 25 },
-    bindingName: "inner"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -96,11 +68,6 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 22, col: 25 },
-    bindingName: "foo"
-});
 const __cfLift_3 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -114,10 +81,6 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 23, col: 29 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_3({ item: item }).for("__patternResult", true);
@@ -132,10 +95,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 23, col: 19 }
-});
 const __cfLift_4 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => {
@@ -158,11 +117,6 @@ const __cfLift_4 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 32 },
-    bindingName: "fromComputed"
-});
 const __cfLift_5 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -176,10 +130,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_5, {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 29 }
-});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_5({ item: item }).for("__patternResult", true);
@@ -194,10 +144,6 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 19 }
-});
 const __cfLift_6 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => {
@@ -220,11 +166,6 @@ const __cfLift_6 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_6, {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 28 },
-    bindingName: "fromLift"
-});
 const __cfLift_7 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -238,10 +179,6 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_7, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 29 }
-});
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_7({ item: item }).for("__patternResult", true);
@@ -256,10 +193,6 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 19 }
-});
 const __cfLift_8 = __cfHelpers.lift(() => {
     const foo = wish<Default<string[], [
     ]>>({ query: "#items" }, {
@@ -271,11 +204,6 @@ const __cfLift_8 = __cfHelpers.lift(() => {
     } as const satisfies __cfHelpers.JSONSchema).result!;
     return foo.mapWithPattern(__cfPattern_3, {});
 }, false, undefined, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_8, {
-    sourceFile: "/test.tsx",
-    position: { line: 31, col: 28 },
-    bindingName: "fromWish"
-});
 const __cfLift_9 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -295,11 +223,6 @@ const __cfLift_9 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_9, {
-    sourceFile: "/test.tsx",
-    position: { line: 37, col: 25 },
-    bindingName: "foo"
-});
 const __cfLift_10 = __cfHelpers.lift<{
     item: {
         length: number;
@@ -321,10 +244,6 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_10, {
-    sourceFile: "/test.tsx",
-    position: { line: 38, col: 42 }
-});
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_10({ item: {
@@ -341,11 +260,6 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 38, col: 32 },
-    bindingName: "filtered"
-});
 const __cfLift_11 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -359,10 +273,6 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_11, {
-    sourceFile: "/test.tsx",
-    position: { line: 39, col: 34 }
-});
 const __cfPattern_5 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_11({ item: item }).for("__patternResult", true);
@@ -377,10 +287,6 @@ const __cfPattern_5 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_5, {
-    sourceFile: "/test.tsx",
-    position: { line: 39, col: 24 }
-});
 const __cfLift_12 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => {
@@ -404,11 +310,6 @@ const __cfLift_12 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_12, {
-    sourceFile: "/test.tsx",
-    position: { line: 36, col: 32 },
-    bindingName: "fromFiltered"
-});
 const __cfLift_13 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -428,11 +329,6 @@ const __cfLift_13 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_13, {
-    sourceFile: "/test.tsx",
-    position: { line: 43, col: 25 },
-    bindingName: "foo"
-});
 const __cfLift_14 = __cfHelpers.lift<{
     item: {
         length: number;
@@ -454,10 +350,6 @@ const __cfLift_14 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_14, {
-    sourceFile: "/test.tsx",
-    position: { line: 44, col: 42 }
-});
 const __cfPattern_6 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_14({ item: {
@@ -474,11 +366,6 @@ const __cfPattern_6 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_6, {
-    sourceFile: "/test.tsx",
-    position: { line: 44, col: 32 },
-    bindingName: "filtered"
-});
 const __cfLift_15 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item.toUpperCase(), {
@@ -492,10 +379,6 @@ const __cfLift_15 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_15, {
-    sourceFile: "/test.tsx",
-    position: { line: 45, col: 34 }
-});
 const __cfPattern_7 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return __cfLift_15({ item: item }).for("__patternResult", true);
@@ -510,10 +393,6 @@ const __cfPattern_7 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_7, {
-    sourceFile: "/test.tsx",
-    position: { line: 45, col: 24 }
-});
 const __cfLift_16 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => {
@@ -537,11 +416,6 @@ const __cfLift_16 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_16, {
-    sourceFile: "/test.tsx",
-    position: { line: 42, col: 46 },
-    bindingName: "fromFilteredReceiverMethod"
-});
 // FIXTURE: map-regains-reactive-aliases
 // Verifies: compute-owned aliases that still resolve to reactive array roots
 // are rewritten back to mapWithPattern/filterWithPattern when used in pattern
@@ -554,7 +428,7 @@ __cfBindVerifiedBinding(__cfLift_16, {
 //                                                   -> receiver-method body still lowers to a lift-applied computation
 // Context: contrasts with the existing plain-array compute fixtures where the
 // callback receiver really is compute-owned plain JS data.
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     const inner = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("inner", true);
@@ -616,10 +490,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
         }
     },
     required: ["fromComputed", "fromLift", "fromWish", "fromFiltered", "fromFilteredReceiverMethod"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 44 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

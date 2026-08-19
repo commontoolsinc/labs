@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -91,11 +73,6 @@ const addPiece = handler({
         pieceRegistry.push(piece);
     }
 });
-__cfBindVerifiedBinding(addPiece, {
-    sourceFile: "/test.tsx",
-    position: { line: 14, col: 2 },
-    bindingName: "addPiece"
-});
 const trackRecent = handler({
     type: "object",
     properties: {
@@ -148,11 +125,6 @@ const trackRecent = handler({
     const filtered = current.filter((c) => !equals(c, piece));
     const updated = [piece, ...filtered].slice(0, 10);
     recentPieces.set(updated);
-});
-__cfBindVerifiedBinding(trackRecent, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 2 },
-    bindingName: "trackRecent"
 });
 // FIXTURE: identity-only-handler-payload
 // Verifies: handler payloads and array items used only for identity/passthrough

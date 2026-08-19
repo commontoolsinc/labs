@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -50,10 +32,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 14, col: 24 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     cell: {
         value: number;
@@ -75,16 +53,12 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 20 }
-});
 // FIXTURE: pattern-with-cells
 // Verifies: pattern input property access is transformed to .key() and arithmetic to a lift-applied computation
 //   cell.value       → cell.key("value")
 //   cell.value + 1   → lift(({cell}) => cell.value + 1)({ value: asOpaque })
 //   cell.value * 2   → lift(({cell}) => cell.value * 2)({ value: asOpaque })
-export default __cfBindVerifiedBinding(pattern((cell) => {
+export default pattern((cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.key("value")}</p>
@@ -137,10 +111,7 @@ export default __cfBindVerifiedBinding(pattern((cell) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 9, col: 42 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

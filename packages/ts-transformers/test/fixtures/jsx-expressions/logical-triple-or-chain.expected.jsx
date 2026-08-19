@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -48,10 +30,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 15 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
 }, number | undefined>(({ items }) => items.get()[0]?.length || items.get()[1]?.length, {
@@ -69,16 +47,12 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 15 }
-});
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
 // FIXTURE: logical-triple-or-chain
 // Verifies: triple || chain (a || b || c) is transformed to nested unless() calls
 //   primary.get().length || secondary.get().length || "no content" → unless(unless(...), "no content")
-export default __cfBindVerifiedBinding(pattern((_state) => {
+export default pattern((_state) => {
     const primary = cell("", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("primary", true);
@@ -144,10 +118,7 @@ export default __cfBindVerifiedBinding(pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 9, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

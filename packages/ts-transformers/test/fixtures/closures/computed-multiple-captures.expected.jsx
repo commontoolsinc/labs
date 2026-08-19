@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -56,16 +38,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 26 },
-    bindingName: "result"
-});
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → lift(({ a, b, c }) => { ... })({ a, b, c })
 //   All three cells (a, b, c) are captured with asCell: true in the schema.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const a = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
@@ -83,10 +60,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 8, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

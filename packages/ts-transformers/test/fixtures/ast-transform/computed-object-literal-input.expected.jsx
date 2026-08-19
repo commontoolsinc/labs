@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -46,11 +28,6 @@ const __cfLift_1 = lift((value: string) => value, {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 29 },
-    bindingName: "normalizedStage"
-});
 // FIXTURE: computed-object-literal-input
 // Verifies: cell(), lift(), and computed() all get schemas injected from type annotations
 //   cell<string>("initial")             → cell<string>("initial", { type: "string" })
@@ -63,41 +40,21 @@ const __cfLift_2 = lift((count: number) => count, {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 16, col: 22 },
-    bindingName: "attempts"
-});
 const attempts = __cfHelpers.__cf_data(__cfLift_2(attemptCount).for("attempts", true));
 const __cfLift_3 = lift((count: number) => count, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 22 },
-    bindingName: "accepted"
-});
 const accepted = __cfHelpers.__cf_data(__cfLift_3(acceptedCount).for("accepted", true));
 const __cfLift_4 = lift((count: number) => count, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 22 },
-    bindingName: "rejected"
-});
 const rejected = __cfHelpers.__cf_data(__cfLift_4(rejectedCount).for("rejected", true));
 const __cfLift_5 = __cfHelpers.lift(() => `stage:${normalizedStage} attempts:${attempts}` +
     ` accepted:${accepted} rejected:${rejected}`, false, undefined, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_5, {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 26 },
-    bindingName: "_summary"
-});
 const _summary = __cfHelpers.__cf_data(__cfLift_5().for("_summary", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

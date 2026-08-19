@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -47,11 +29,6 @@ const liftWrapped = lift((input: Writable<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(liftWrapped, {
-    sourceFile: "/test.tsx",
-    position: { line: 8, col: 25 },
-    bindingName: "liftWrapped"
-});
 const patternFullShape = pattern((input: Writable<{
     foo: string;
     bar: string;
@@ -71,11 +48,6 @@ const patternFullShape = pattern((input: Writable<{
     type: "string",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(patternFullShape, {
-    sourceFile: "/test.tsx",
-    position: { line: 12, col: 33 },
-    bindingName: "patternFullShape"
-});
 const patternExplicit = pattern((input) => input.key("foo"), {
     type: "object",
     properties: {
@@ -92,11 +64,6 @@ const patternExplicit = pattern((input) => input.key("foo"), {
     type: "string",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(patternExplicit, {
-    sourceFile: "/test.tsx",
-    position: { line: 19, col: 2 },
-    bindingName: "patternExplicit"
-});
 const liftPassthrough = lift((input: Writable<{
     foo: string;
     bar: string;
@@ -125,11 +92,6 @@ const liftPassthrough = lift((input: Writable<{
     required: ["foo", "bar"],
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(liftPassthrough, {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 29 },
-    bindingName: "liftPassthrough"
-});
 const helper = __cfHardenFn((value: Writable<{
     foo: string;
     bar: string;
@@ -153,11 +115,6 @@ const patternHelper = pattern((input: Writable<{
     type: "string",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(patternHelper, {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 30 },
-    bindingName: "patternHelper"
-});
 const wildcardLift = lift((input: Writable<{
     foo: string;
     bar: string;
@@ -180,11 +137,6 @@ const wildcardLift = lift((input: Writable<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(wildcardLift, {
-    sourceFile: "/test.tsx",
-    position: { line: 32, col: 26 },
-    bindingName: "wildcardLift"
-});
 export default __cfHelpers.__cf_data({
     liftWrapped,
     patternFullShape,

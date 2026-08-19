@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -70,10 +52,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     asCell: ["opaque"]
 } as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["processed"]], completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 11 }
-});
 // FIXTURE: computed-write-capability-materializer
 // Verifies: a computed() that WRITES to a captured cell (`.set(...)`) produces a
 //   write-capability capture, which the lift-applied strategy emits with a
@@ -83,7 +61,7 @@ __cfBindVerifiedBinding(__cfLift_1, {
 //   i.e. the options object stays LAST, after both schemas — NOT scrambled into
 //   the argumentSchema slot. (CT-1625 regression: the function-first reorder
 //   originally appended schemas after the options, corrupting the call.)
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const items = new Writable<Item[]>([{ title: "a" }], {
         type: "array",
         items: {
@@ -142,10 +120,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             required: ["title"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

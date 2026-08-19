@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -55,11 +37,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
 } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
     isEditing.set(true);
 });
-__cfBindVerifiedBinding(__cfHandler_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 30, col: 30 },
-    bindingName: "startEditing"
-});
 const __cfLift_1 = __cfHelpers.lift<{
     card: {
         description: string;
@@ -84,18 +61,13 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": [false, true, ""]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 34, col: 34 },
-    bindingName: "hasDescription"
-});
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
 //   local JSX rewrites instead of forcing a whole-branch lift-applied computation
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const card = __cf_pattern_input.key("card");
     const isEditing = new Cell(false, {
         type: "boolean"
@@ -218,10 +190,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

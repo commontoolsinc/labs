@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -69,11 +51,6 @@ const removeItem = handler({
     }
 } as const satisfies __cfHelpers.JSONSchema, (_, { items, item }) => {
     items.remove(item);
-});
-__cfBindVerifiedBinding(removeItem, {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 2 },
-    bindingName: "removeItem"
 });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
@@ -140,16 +117,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 19 }
-});
 // FIXTURE: map-wish-default-handler-capture
 // Verifies: wish<Default<Array<T>, []>>().result maps still lower to mapWithPattern with handler captures
 //   wish<Default<Item[], []>>(...).result!.map(fn) -> mapWithPattern(pattern(...), { items: items })
 //   removeItem({ items, item })                    -> captures both the reactive array and the current element
 // Context: The array comes from wish().result rather than a pattern param or a local cell
-export default __cfBindVerifiedBinding(pattern((_) => {
+export default pattern((_) => {
     const __cf_destructure_1 = wish<Default<Item[], [
     ]>>({ query: "#items" }, {
         type: "array",
@@ -216,10 +189,7 @@ export default __cfBindVerifiedBinding(pattern((_) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 46 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -53,10 +35,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 22, col: 20 }
-});
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     value: number;
 }) => {
@@ -73,11 +51,6 @@ const __cfPattern_1 = pattern((__cf_pattern_input: {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 21, col: 35 },
-    bindingName: "tool"
-});
 // FIXTURE: patternTool-multiple-captures
 // Verifies: patternTool's first arg is an explicit pattern() (CT-1655) with no
 //   explicit extraParams. The free module-scoped reactive captures `prefix` and
@@ -87,7 +60,7 @@ __cfBindVerifiedBinding(__cfPattern_1, {
 //   patternTool(pattern(({ value }) => …prefix.get()…multiplier.get()…))
 // Context: Both `prefix` and `multiplier` are module-scoped new Writable() values;
 //   `value` is the pattern's only per-call input.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const tool = patternTool(__cfPattern_1);
     return { tool };
 }, {
@@ -132,10 +105,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             "enum": ["space", "user", "session"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 54 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

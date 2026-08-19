@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -48,11 +30,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 14, col: 23 },
-    bindingName: "sum"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     sum: number;
 }, number>(({ sum }) => sum * 2, {
@@ -66,18 +43,13 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 27 },
-    bindingName: "doubled"
-});
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first
 //   computed(() => a.get() + b.get()) → lift(({ a, b }) => a.get() + b.get())({ a, b })
 //   computed(() => sum * 2) → lift(({ sum }) => sum * 2)({ sum })
 // Context: The first lift-applied computation captures cells (asCell: true), the second captures
 //   the computed result (asOpaque: true) since it is a Reactive.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const a = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
@@ -92,10 +64,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 10, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

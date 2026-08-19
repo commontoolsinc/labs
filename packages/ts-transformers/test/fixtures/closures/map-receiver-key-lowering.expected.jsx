@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -57,10 +39,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 40 }
-});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item.key("subItems").mapWithPattern(__cfPattern_1, {}).for("__patternResult", true);
@@ -98,10 +76,6 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 12 }
-});
 // FIXTURE: map-receiver-key-lowering
 // Verifies: nested .map() calls are both transformed, with receiver lowered to .key()
 //   items.map(fn) → items.mapWithPattern(pattern(...), {})
@@ -150,11 +124,6 @@ const _p = pattern((__cf_pattern_input) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(_p, {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 26 },
-    bindingName: "_p"
-});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

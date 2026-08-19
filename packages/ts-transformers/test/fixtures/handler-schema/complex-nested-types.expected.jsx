@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -114,11 +96,6 @@ const userHandler = handler({
     }
     state.lastAction.set(event.action);
 });
-__cfBindVerifiedBinding(userHandler, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 50 },
-    bindingName: "userHandler"
-});
 const _updateTags = handler({
     type: "object",
     properties: {
@@ -151,11 +128,6 @@ const _updateTags = handler({
 } as const satisfies __cfHelpers.JSONSchema, ({ detail }, state) => {
     state.tags.set(detail?.tags ?? []);
 });
-__cfBindVerifiedBinding(_updateTags, {
-    sourceFile: "/test.tsx",
-    position: { line: 43, col: 2 },
-    bindingName: "_updateTags"
-});
 export { userHandler };
 // FIXTURE: complex-nested-types
 // Verifies: handler with nested object types, string literal unions, and Cell-wrapped arrays generate correct schemas
@@ -163,7 +135,7 @@ export { userHandler };
 //   "create" | "update" | "delete" → { enum: ["create", "update", "delete"] }
 //   Cell<Array<{...}>> → { type: "array", items: { type: "object", ... }, asCell: true }
 // Context: also tests a second handler (_updateTags) with Cell<string[]>; pattern wraps handler as asStream output
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     return { userHandler };
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
@@ -173,10 +145,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
         }
     },
     required: ["userHandler"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 56, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

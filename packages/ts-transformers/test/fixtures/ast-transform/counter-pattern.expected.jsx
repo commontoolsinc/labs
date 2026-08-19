@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -49,11 +31,6 @@ const increment = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_e, state) => {
     state.value.set(state.value.get() + 1);
 });
-__cfBindVerifiedBinding(increment, {
-    sourceFile: "/test.tsx",
-    position: { line: 12, col: 49 },
-    bindingName: "increment"
-});
 const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -67,11 +44,6 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
-});
-__cfBindVerifiedBinding(decrement, {
-    sourceFile: "/test.tsx",
-    position: { line: 16, col: 26 },
-    bindingName: "decrement"
 });
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
@@ -94,10 +66,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 35, col: 42 }
-});
 // FIXTURE: counter-pattern
 // Verifies: full pattern with handlers, ternary, str template, and schema generation
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
@@ -106,7 +74,7 @@ __cfBindVerifiedBinding(__cfLift_1, {
 //   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), lift(...)({...}), "unknown")
 //   state.value                        → state.key("value")
 // Context: Combines handler schema injection, pattern schema generation, ternary-to-ifElse, and str template transforms
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     return {
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
@@ -172,10 +140,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 37 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -61,17 +43,13 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 16 }
-});
 // FIXTURE: pattern-preserve-opaque-input
 // Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in a lift-applied computation
 //   input.key("foo").get() in JSX → lift(({ input }) => input.key("foo").get())({ input })
 // Context: When the pattern parameter is typed as Writable<State>, the input
 //   schema uses asOpaque: true. The .get() call inside JSX is not in a safe
 //   reactive context, so it gets wrapped in a lift-applied computation.
-export default __cfBindVerifiedBinding(pattern((input: Writable<State>) => {
+export default pattern((input: Writable<State>) => {
     return {
         [UI]: <div>{__cfLift_1({ input: input })}</div>,
     };
@@ -121,10 +99,7 @@ export default __cfBindVerifiedBinding(pattern((input: Writable<State>) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

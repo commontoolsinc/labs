@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -92,10 +74,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 24, col: 25 }
-});
 // FIXTURE: map-capture-mixed-reactivity
 // Verifies: captures of different reactivity kinds are annotated distinctly in the schema
 //   label (plain string) → params.label (type: "string", accessed via .params)
@@ -104,7 +82,7 @@ __cfBindVerifiedBinding(__cfPattern_1, {
 //       `cell`. (The capture is created with cell(100) but never written here.)
 //   derived (state.threshold) → params.derived (asOpaque: true)
 // Context: Three capture kinds — plain value, cell, and state-derived — in one map callback
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     const label = "Result";
     const limit = cell(100, {
         type: "number"
@@ -168,10 +146,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

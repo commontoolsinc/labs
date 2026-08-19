@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -65,11 +47,6 @@ const logPiecesList = lift(({ piecesList }) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(logPiecesList, {
-    sourceFile: "/test.tsx",
-    position: { line: 12, col: 2 },
-    bindingName: "logPiecesList"
-});
 const getStatus = lift(({ status }) => status, {
     type: "object",
     properties: {
@@ -86,11 +63,6 @@ const getStatus = lift(({ status }) => status, {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(getStatus, {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 2 },
-    bindingName: "getStatus"
-});
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
 //   lift(fn, toSchema<{ piecesList: Cell<PieceEntry[]> }>()) → lift(fn, generatedSchema)
