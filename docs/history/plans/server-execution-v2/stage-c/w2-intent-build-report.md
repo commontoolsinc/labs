@@ -11,8 +11,8 @@ Date: 2026-08-19 (runs 07:02–07:53 UTC). Base: the stage-C design
 branch tip `c3ec7fc7b` (`claude/server-exec-v2-stage-c-design`, PR
 #6017's line, off `bebf8e1ff` → the tuning trio's `b54bf5215`). Branch
 `claude/server-exec-v2-w2-intent-listener` (worktree
-`/Users/berni/labs-worktrees/w2-intent`), stacked PR onto the design
-branch, to be RE-STACKED onto W1's tip (`claude/server-exec-v2-w1-dprime`)
+`/Users/berni/labs-worktrees/w2-intent`), stacked PR **#6039** onto the
+design branch, to be RE-STACKED onto W1's tip (`claude/server-exec-v2-w1-dprime`)
 when W1 lands. Durable copy of this report:
 `/Users/berni/labs-worktrees/w2-intent-build-report.md`. Raw run
 artifacts (driver logs, test logs, toolshed logs, `/api/health/stats`

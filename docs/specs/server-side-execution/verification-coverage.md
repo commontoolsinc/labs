@@ -4055,8 +4055,8 @@ supply; OW29/OW32/OW34 closed):
   the outstanding intent set; the schema-less whole-sidecar `cell.sink`
   is GONE; the effects channel follows (item 13); THREE RULED sentences
   LANDED (items 5/6, 8, 7). LANDED on
-  `claude/server-exec-v2-w2-intent-listener` (stacked on the design
-  branch; to be re-stacked onto W1's tip).** Report:
+  `claude/server-exec-v2-w2-intent-listener` (PR #6039, stacked on the
+  design branch; to be re-stacked onto W1's tip, PR #6029).** Report:
   [`stage-c/w2-intent-build-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-build-report.md).
   W0's (e) gate (the design §6 refutation experiment, run FIRST on this
   branch): the interim (b) schema-narrowed sink on the note n=20 series
