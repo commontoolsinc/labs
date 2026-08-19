@@ -1207,7 +1207,11 @@ export class PatternManager {
       return live;
     }
     // Check before single-flight: follower retries re-enter from the top and
-    // should observe a deterministic failure recorded by the leader.
+    // should observe a deterministic failure recorded by the leader. Sitting
+    // ahead of the compiled-closure read is sound because the runtime version
+    // fingerprints all compile-shaping code (`compiler-fingerprint.deno.ts`),
+    // so no same-version peer can publish a compiled closure for bytes this
+    // session cannot compile itself.
     const key = `${space}\0${entryIdentity}`;
     const runtimeVersion = moduleByteCacheRuntimeVersion(
       await getCompileCacheRuntimeVersion(),

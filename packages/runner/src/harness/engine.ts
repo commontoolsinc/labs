@@ -101,7 +101,14 @@ import {
 
 const logger = getLogger("engine");
 
-/** Run one pure compile step, classifying only its synchronous failures. */
+/**
+ * Run one pure compile step, classifying only its synchronous failures.
+ *
+ * Every call site sits after an `await`, so the step runs on an
+ * event-loop-drained stack: a stack overflow inside it is a property of the
+ * compiled source, not of the caller, and is safe to classify as
+ * deterministic. Keep new call sites behind an `await`.
+ */
 function deterministicCompileStep<T>(step: () => T): T {
   try {
     return step();

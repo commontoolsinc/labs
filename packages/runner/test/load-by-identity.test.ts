@@ -1082,7 +1082,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     });
   });
 
-  it("T8e: a runtimeVersion change reopens a memoized identity", async () => {
+  it("T8d: a runtimeVersion change reopens a memoized identity", async () => {
     const rt = newRuntime();
     const nonEnvelope = "// bad versioned\n" + injectCfHelpers(
       "import { pattern } from 'commonfabric';\n" +
@@ -1127,7 +1127,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     }
   });
 
-  it("T8f: a transient fabric-resolution miss is never memoized", async () => {
+  it("T8e: a transient fabric-resolution miss is never memoized", async () => {
     const rt = newRuntime();
     const rt2 = newRuntime();
     const dependency = await storedModules("/dep.tsx", [{
@@ -1160,7 +1160,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
       space,
     );
     expect(typeof loaded).toBe("function");
-    expect(await runPattern(rt2, loaded, 6, "T8f resolver retry")).toEqual({
+    expect(await runPattern(rt2, loaded, 6, "T8e resolver retry")).toEqual({
       child: { doubled: 12 },
     });
   });
