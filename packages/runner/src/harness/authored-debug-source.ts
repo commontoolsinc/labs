@@ -132,13 +132,28 @@ export function defineAuthoredDebugAccessors(
   fn: (...args: any[]) => unknown,
 ): void {
   const originalName = fn.name;
-  Object.defineProperty(fn, "src", {
-    get: () => getAuthoredDebugSource(fn)?.src,
-    enumerable: false,
-    configurable: true,
-  });
-  Object.defineProperty(fn, "name", {
-    get: () => getAuthoredDebugSource(fn)?.bindingName ?? originalName,
+  defineDebugAccessor(fn, "src", () => getAuthoredDebugSource(fn)?.src);
+  defineDebugAccessor(
+    fn,
+    "name",
+    () => getAuthoredDebugSource(fn)?.bindingName ?? originalName,
+  );
+}
+
+/**
+ * A debug accessor must never make a builder mint fail: a function arriving
+ * with its own non-configurable `name` or `src` keeps that property, and only
+ * loses the authored-name nicety.
+ */
+function defineDebugAccessor(
+  fn: (...args: any[]) => unknown,
+  property: "src" | "name",
+  get: () => string | undefined,
+): void {
+  const existing = Object.getOwnPropertyDescriptor(fn, property);
+  if (existing !== undefined && existing.configurable !== true) return;
+  Object.defineProperty(fn, property, {
+    get,
     enumerable: false,
     configurable: true,
   });

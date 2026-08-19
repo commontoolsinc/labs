@@ -582,6 +582,22 @@ describe("module", () => {
       expect((frozen as { src?: string }).src).toBeUndefined();
     });
 
+    it("keeps a caller's non-configurable name and still constructs", () => {
+      // A property that cannot be redefined is kept as-is rather than making
+      // the mint throw; only the authored-name nicety is lost. The two
+      // properties guard independently, so `src` still installs.
+      const fn = (n: number) => n - 3;
+      Object.defineProperty(fn, "name", {
+        value: "sealedName",
+        writable: false,
+        configurable: false,
+      });
+      const fact = lift(fn);
+      expect(isModule(fact)).toBe(true);
+      expect(fn.name).toBe("sealedName");
+      expect((fn as { src?: string }).src).toBeUndefined();
+    });
+
     it("serves src from the map for an implementation recorded after freezing", () => {
       // The real sequence: the accessor is installed while the function is
       // extensible, the builder hardens it, and only then does the provenance
