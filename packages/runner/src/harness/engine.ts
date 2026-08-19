@@ -64,6 +64,10 @@ import {
 } from "../sandbox/module-record-verifier.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
+  deterministicCompileError,
+  markDeterministicCompileFailure,
+} from "./compile-failure.ts";
+import {
   COMPILE_INTERLEAVES_EVENT_LOOP,
   interleaveCompileYield,
 } from "./compile-interleave.ts";
@@ -99,6 +103,22 @@ import {
 } from "./verified-provenance.ts";
 
 const logger = getLogger("engine");
+
+/**
+ * Run one pure compile step, classifying only its synchronous failures.
+ *
+ * Every call site sits after an `await`, so caller stack depth is drained.
+ * Within a runtime session the engine stack limit is fixed, so an overflow
+ * will recur for the same compile inputs and is safe to classify as
+ * deterministic. Keep new call sites behind an `await`.
+ */
+function deterministicCompileStep<T>(step: () => T): T {
+  try {
+    return step();
+  } catch (error) {
+    throw markDeterministicCompileFailure(error);
+  }
+}
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -990,13 +1010,16 @@ export class Engine extends EventTarget {
     // stored bytes are exactly what their identities were computed over, so
     // the identity check below still holds, and the successful compile
     // writes back under the current runtimeVersion (self-heal on load).
-    const injectedInput = transformInjectHelperModule({
-      main: entryFilename,
-      files: codeFiles,
-      ...(options.sourceRoots === undefined
-        ? {}
-        : { sourceRoots: [...options.sourceRoots] }),
-    }, { tolerateStoredLegacyEnvelope: true });
+    // This pretransform is pure compute over the verified stored bytes.
+    const injectedInput = deterministicCompileStep(() =>
+      transformInjectHelperModule({
+        main: entryFilename,
+        files: codeFiles,
+        ...(options.sourceRoots === undefined
+          ? {}
+          : { sourceRoots: [...options.sourceRoots] }),
+      }, { tolerateStoredLegacyEnvelope: true })
+    );
     const sourceRoots = canonicalSourceRoots(
       entryFilename,
       injectedInput.sourceRoots,
@@ -1013,6 +1036,8 @@ export class Engine extends EventTarget {
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
+    // Resolution may perform storage/network I/O for fabric mounts. Its
+    // failures are intentionally left unmarked and therefore retryable.
     const resolvedProgram = await this.resolveWithSourceRoots(
       resolver,
       sourceRoots,
@@ -1024,7 +1049,9 @@ export class Engine extends EventTarget {
     // compilation (authored entry modules were injected before resolve above).
     const resolvedForCompile = {
       ...resolvedProgram,
-      files: injectMountSources(resolvedProgramFiles),
+      files: deterministicCompileStep(() =>
+        injectMountSources(resolvedProgramFiles)
+      ),
     };
     const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
@@ -1071,33 +1098,35 @@ export class Engine extends EventTarget {
       },
     );
 
-    const emitted = compiler.compileToModules(resolvedForCompile, {
-      runtimeModules: Engine.runtimeModuleNames(),
-      specifierAliases,
-      // These bytes are durable stored source nobody can re-author;
-      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
-      // not brick the reload (CT-1916).
-      storedSource: true,
-      beforeTransformers: (program) => {
-        const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)({
-          patternCoverage,
-          moduleIdentities: identityByPath,
-          // Names on this path are already stored-shaped (no `/<id>` prefix);
-          // only mount paths need unmapping to authored spellings.
-          canonicalWriterIdentityFile: (name) =>
-            storedFilenameFor(name, undefined, mounts),
-        });
-        return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-          getPolicyManifests: () => pipeline.getPolicyManifests(),
-        };
-      },
-    });
+    const emitted = deterministicCompileStep(() =>
+      compiler.compileToModules(resolvedForCompile, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        specifierAliases,
+        // These bytes are durable stored source nobody can re-author;
+        // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+        // not brick the reload (CT-1916).
+        storedSource: true,
+        beforeTransformers: (program) => {
+          const pipeline = new (compilerStack()
+            .CommonFabricTransformerPipeline)({
+            patternCoverage,
+            moduleIdentities: identityByPath,
+            // Names on this path are already stored-shaped (no `/<id>`
+            // prefix); only mount paths need unmapping to authored spellings.
+            canonicalWriterIdentityFile: (name) =>
+              storedFilenameFor(name, undefined, mounts),
+          });
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+            getPolicyManifests: () => pipeline.getPolicyManifests(),
+          };
+        },
+      })
+    );
     for (const file of moduleFiles) {
       if (!emitted.has(file.name)) {
-        throw new Error(
+        throw deterministicCompileError(
           `Recompile from source produced no body for '${file.name}'`,
         );
       }

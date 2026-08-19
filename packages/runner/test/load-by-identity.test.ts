@@ -20,6 +20,10 @@ import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { Engine } from "../src/harness/engine.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import {
+  PatternCoverageCollector,
+  type PatternCoverageSpan,
+} from "../src/pattern-coverage.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   buildRecordsFromCompiled,
@@ -500,10 +504,11 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const runtimes: Runtime[] = [];
 
-  const newRuntime = () => {
+  const newRuntime = (patternCoverage?: PatternCoverageCollector) => {
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      ...(patternCoverage === undefined ? {} : { patternCoverage }),
     });
     runtimes.push(rt);
     return rt;
@@ -956,6 +961,280 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     } finally {
       restore();
     }
+  });
+
+  // Companion negative-memo coverage: only failures explicitly classified
+  // after source verification may suppress later attempts. Every transient
+  // boundary is exercised by making the missing state arrive in-session.
+  it("T8a: a deterministic compile failure is memoized", async () => {
+    const rt = newRuntime();
+    const nonEnvelope = "// leading comment\n" + injectCfHelpers(
+      "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+      "/main.tsx",
+    );
+    const bad = await storedModules("/main.tsx", [
+      { name: "/main.tsx", contents: nonEnvelope },
+    ]);
+    await persist(rt, bad);
+
+    const rt2 = newRuntime();
+    const engine2 = rt2.harness as Engine;
+    let coldCompiles = 0;
+    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+    engine2.compileResolvedToRecordGraph =
+      ((...args: Parameters<typeof original>) => {
+        coldCompiles++;
+        return original(...args);
+      }) as typeof engine2.compileResolvedToRecordGraph;
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        bad.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        bad.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+  });
+
+  it("T8b: an absent closure is never memoized", async () => {
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const late = await storedModules("/late.tsx", [{
+      name: "/late.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        late.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    await persist(rt, late);
+    expect(
+      typeof await rt2.patternManager.loadPatternByIdentity(
+        late.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBe("function");
+  });
+
+  it("T8c: a partial closure verify failure is never memoized", async () => {
+    // This is the regression that invalidated the original memo design. When
+    // a linked child has not arrived yet, loadSourceClosure omits that edge;
+    // verification reports a root hash mismatch rather than `missing`. The
+    // classification must therefore stay retryable regardless of the exact
+    // verification detail.
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const fixture = await storedModules("/main.tsx", [
+      {
+        name: "/dep.ts",
+        contents: "export const add = (value: number) => value + 2;",
+      },
+      {
+        name: "/main.tsx",
+        contents: "import { pattern } from 'commonfabric';\n" +
+          "import { add } from './dep.ts';\n" +
+          "export default pattern<{ value: number }>(({ value }) => ({ result: add(value) }));\n",
+      },
+    ], {
+      "/main.tsx": [{ specifier: "./dep.ts", target: "/dep.ts" }],
+    });
+    const entry = fixture.modules.find((module) =>
+      module.identity === fixture.entryIdentity
+    )!;
+    // Publish only the root; its stored link points to the not-yet-present dep.
+    await persist(rt, {
+      modules: [entry],
+      entryIdentity: fixture.entryIdentity,
+    });
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+
+    // Once the dependency arrives, the same PatternManager session retries
+    // verification/compile and succeeds.
+    await persist(rt, fixture);
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      fixture.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
+    expect(await runPattern(rt2, loaded, 5, "T8c partial retry")).toEqual({
+      result: 7,
+    });
+  });
+
+  it("T8d: a runtimeVersion change reopens a memoized identity", async () => {
+    const rt = newRuntime();
+    const nonEnvelope = "// bad versioned\n" + injectCfHelpers(
+      "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+      "/main.tsx",
+    );
+    const bad = await storedModules("/main.tsx", [
+      { name: "/main.tsx", contents: nonEnvelope },
+    ]);
+    await persist(rt, bad);
+
+    const restoreV1 = setCompileCacheRuntimeVersionForTesting("memo-v1");
+    try {
+      const rt2 = newRuntime();
+      const engine2 = rt2.harness as Engine;
+      let coldCompiles = 0;
+      const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+      engine2.compileResolvedToRecordGraph =
+        ((...args: Parameters<typeof original>) => {
+          coldCompiles++;
+          return original(...args);
+        }) as typeof engine2.compileResolvedToRecordGraph;
+      const load = () =>
+        rt2.patternManager.loadPatternByIdentity(
+          bad.entryIdentity,
+          "default",
+          space,
+        );
+      expect(await load()).toBeUndefined();
+      expect(await load()).toBeUndefined();
+      expect(coldCompiles).toBe(1);
+
+      const restoreV2 = setCompileCacheRuntimeVersionForTesting("memo-v2");
+      try {
+        expect(await load()).toBeUndefined();
+        expect(coldCompiles).toBe(2);
+      } finally {
+        restoreV2();
+      }
+    } finally {
+      restoreV1();
+    }
+  });
+
+  it("T8e: a transient fabric-resolution miss is never memoized", async () => {
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const dependency = await storedModules("/dep.tsx", [{
+      name: "/dep.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ doubled: value * 2 }));\n",
+    }]);
+    const importer = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        `import dep from "cf:pattern:${dependency.entryIdentity}";\n` +
+        "export default pattern<{ value: number }>(({ value }) => ({ child: dep({ value }) }));\n",
+    }]);
+    await persist(rt, importer);
+
+    // The verified importer exists, but resolving its fabric mount cannot yet
+    // find the dependency. Resolution sits outside the deterministic marker.
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        importer.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    await persist(rt, dependency);
+
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      importer.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
+    expect(await runPattern(rt2, loaded, 6, "T8e resolver retry")).toEqual({
+      child: { doubled: 12 },
+    });
+  });
+
+  it("T8f: a recompiled-identity mismatch is memoized", async () => {
+    const rt = newRuntime();
+    const fixture = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    await persist(rt, fixture);
+
+    // Compiler drift: the recompile succeeds but emits a different entry
+    // identity than the stored reference. That mismatch is deterministic for
+    // this runtime version, so the memo suppresses the second attempt.
+    const rt2 = newRuntime();
+    const engine2 = rt2.harness as Engine;
+    let coldCompiles = 0;
+    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+    engine2.compileResolvedToRecordGraph = (async (
+      ...args: Parameters<typeof original>
+    ) => {
+      coldCompiles++;
+      const compiled = await original(...args);
+      return { ...compiled, entryIdentity: `${compiled.entryIdentity}-drift` };
+    }) as typeof engine2.compileResolvedToRecordGraph;
+    const load = () =>
+      rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      );
+    expect(await load()).toBeUndefined();
+    expect(await load()).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+  });
+
+  it("retries a coverage-collector failure", async () => {
+    class FailOnceCoverage extends PatternCoverageCollector {
+      #failed = false;
+
+      override registerSpan(span: PatternCoverageSpan): void {
+        if (!this.#failed) {
+          this.#failed = true;
+          throw new Error("transient coverage sink failure");
+        }
+        super.registerSpan(span);
+      }
+    }
+
+    const rt = newRuntime();
+    const fixture = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    await persist(rt, fixture);
+
+    const rt2 = newRuntime(new FailOnceCoverage());
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      fixture.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
   });
 
   it("T9: JS-trailer variant (.jsx module) heals through the cold path", async () => {
