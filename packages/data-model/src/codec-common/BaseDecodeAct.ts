@@ -311,11 +311,12 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
       !this.config.lenient && (decoded instanceof ProblematicValue) &&
       (matched.uniqueHandledClass !== ProblematicValue)
     ) {
-      // The two ways a codec reports a state it will not accept -- throwing,
-      // and returning one of these -- are the codec author's choice and say
-      // nothing about what a caller wants. `lenient` is what says that, so
-      // this instance settles both into the same answer: a strict decode
-      // fails, whichever way the codec reported it.
+      // Of the ways a codec reports a state it will not accept, two reach
+      // here: throwing, caught above, and returning one of these. Which it
+      // picks is the codec author's choice and says nothing about what a
+      // caller wants. `lenient` is what says that, so this instance settles
+      // both into the same answer: a strict decode fails, whichever way the
+      // codec reported it.
       //
       // `ProblematicValue`'s own codec is exempt, because for that one a
       // `ProblematicValue` is the successful product rather than a refusal.

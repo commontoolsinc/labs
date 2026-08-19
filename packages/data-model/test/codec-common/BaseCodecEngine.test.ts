@@ -556,8 +556,9 @@ describe("BaseCodecEngine", () => {
       it("raises a refusal from `canDecode()`", () => {
         // The refusal is reported rather than raised, so strictly it is
         // `reportMalformed()` that raises and the throw then passes back out
-        // through the codec-facing `catch`. Asserting the type and both facts
-        // is what says it arrives unaltered rather than rebuilt.
+        // through the codec-facing `catch`. `cause` is what says it arrives
+        // unaltered: a rebuilt error carries the original there, and this one
+        // carries nothing, the facts alone being no proof either way.
         const { engine } = newProbeEngine();
 
         try {
@@ -569,6 +570,7 @@ describe("BaseCodecEngine", () => {
             .toMatch(/state is not one this codec decodes/);
           expect((e as ProblematicStateError).wireTypeTag).toBe("Refuses@1");
           expect((e as ProblematicStateError).state).toBe("x");
+          expect((e as ProblematicStateError).cause).toBeUndefined();
         }
       });
 

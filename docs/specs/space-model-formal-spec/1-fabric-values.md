@@ -1109,7 +1109,8 @@ Like every fabric primitive, `FabricHash` hosts a `[JSON_CODEC]` (tag
 Its encoded state is `{ tag, hash }` — the algorithm tag plus the hash as
 an unpadded base64url string (i.e., `.hashString`); `canDecode()` refuses a
 state that is not a record of two strings, and `decode()` produces a
-`ProblematicValue` for a `hash` that is not valid base64url. See Section 5 of `3-json-encoding.md` for the wire format.
+`ProblematicValue` for a `hash` that is not valid base64url. See Section 5 of
+`3-json-encoding.md` for the wire format.
 
 #### 1.4.10 `FabricBytes`
 
@@ -1781,6 +1782,10 @@ export interface FabricCodec<Encoded> {
    * here costs that work twice; `decode()` keeps such a question and is
    * where a state failing it is refused.
    *
+   * An implementation states this as a type predicate over its own state
+   * type, which is what lets its `decode()` declare that same type and read
+   * the state's parts without re-checking them.
+   *
    * Called on every state before `decode()` sees it, so an implementation of
    * the latter may take the check as done.
    */
@@ -2158,9 +2163,10 @@ codec system:
    `codec.encode(value)` to extract the essential state.
 2. Encodes that state (recursively handling any nested `FabricValue`s)
    and wraps it with the tag from `codec.tagForValue(value)`.
-3. On decoding, routes the tag back to the codec and calls
-   `codec.decode(tag, state, env)`, which checks `canDecode()` and then
-   produces a real `Temperature` instance with its methods intact.
+3. On decoding, routes the tag back to the codec, asks
+   `codec.canDecode(state)`, and calls `codec.decode(tag, state, env)` for a
+   state it accepts, producing a real `Temperature` instance with its methods
+   intact.
 
 **Reference types and `LiveEnvironment`.** The `Temperature` example
 above is a simple value type -- its codec's `decode()` creates a fresh
