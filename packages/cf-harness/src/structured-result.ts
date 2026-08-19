@@ -66,6 +66,105 @@ export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
     target.startsWith("opaque:");
 };
 
+/**
+ * Replaces each position a sanitization reports having sealed with whatever
+ * `buildRef` answers for that path — an addressed form of the position — or
+ * keeps the seal where it answers `undefined`. Provenance comes from the
+ * sanitizer's own `sealedPaths`, never from inspecting the value: a sealed
+ * link an author declared in the schema — even one spelled with the same
+ * handle id — is preserved by the sanitizer, absent from `sealedPaths`, and
+ * passes through here untouched.
+ *
+ * The paths drive ONE traversal: they are gathered into a trie and the value
+ * is rebuilt along the touched spines in a single pass, so a result whose
+ * positions are mostly sealed — a discovery listing, say — costs linear
+ * work rather than one spine clone per sealed sibling. A path the value does
+ * not hold — which a correct `sealedPaths` never names — is simply never
+ * reached, leaving the value unchanged rather than inventing structure.
+ *
+ * This is what makes a sealed position composable instead of terminal: a
+ * run_pattern result is fabric-backed by construction, so a position the
+ * schema could not release as text still has an address, and an address can
+ * be described and wired onward where an `opaque:` output link cannot.
+ */
+export const addressSealedPositions = (
+  value: unknown,
+  sealedPaths: readonly (readonly (string | number)[])[],
+  buildRef: (path: readonly (string | number)[]) => unknown | undefined,
+): unknown => {
+  if (sealedPaths.length === 0) {
+    return value;
+  }
+  const root: ReplaceNode = { children: new Map() };
+  for (const path of sealedPaths) {
+    let at = root;
+    for (const segment of path) {
+      const key = String(segment);
+      let child = at.children.get(key);
+      if (child === undefined) {
+        child = { children: new Map() };
+        at.children.set(key, child);
+      }
+      at = child;
+    }
+    at.replaceWith = [...path];
+  }
+  return applyReplacements(value, root, buildRef);
+};
+
+/**
+ * One position of the replacement trie: the child spines to rebuild below
+ * it, and — on a terminal — the sealed path to hand `buildRef`. A terminal
+ * never carries children, because the sanitizer never seals inside a
+ * subtree it already sealed whole.
+ */
+interface ReplaceNode {
+  replaceWith?: readonly (string | number)[];
+  children: Map<string, ReplaceNode>;
+}
+
+const applyReplacements = (
+  value: unknown,
+  at: ReplaceNode,
+  buildRef: (path: readonly (string | number)[]) => unknown | undefined,
+): unknown => {
+  if (at.replaceWith !== undefined) {
+    // A path `buildRef` answers nothing for keeps its seal: no address is
+    // better than an address naming the wrong cell.
+    return buildRef(at.replaceWith) ?? value;
+  }
+  if (Array.isArray(value)) {
+    let items: unknown[] | undefined;
+    for (const [key, child] of at.children) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= value.length) {
+        continue;
+      }
+      const replaced = applyReplacements(value[index], child, buildRef);
+      if (replaced !== value[index]) {
+        items ??= [...value];
+        items[index] = replaced;
+      }
+    }
+    return items ?? value;
+  }
+  if (isObjectNotArray(value)) {
+    let result: Record<string, unknown> | undefined;
+    for (const [key, child] of at.children) {
+      if (!Object.hasOwn(value, key)) {
+        continue;
+      }
+      const replaced = applyReplacements(value[key], child, buildRef);
+      if (replaced !== value[key]) {
+        result ??= { ...value };
+        result[key] = replaced;
+      }
+    }
+    return result ?? value;
+  }
+  return value;
+};
+
 export const parseStructuredResultSchema = (
   input: unknown,
   options: ParseStructuredResultSchemaOptions = {},

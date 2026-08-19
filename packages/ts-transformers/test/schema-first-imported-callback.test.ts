@@ -22,6 +22,11 @@ export const echoAny: any = ((event: Ping) => ({
   echoed: event.word,
   // deno-lint-ignore no-explicit-any
 })) as any;
+export type EchoHandler = (event: Ping) => PingResult;
+// deno-lint-ignore no-explicit-any
+export const echoSatisfies: any = ((event: Ping) => ({
+  echoed: event.word,
+})) satisfies EchoHandler;
 `;
 
 const MAIN = `import { cell, handler, pattern, Stream } from "commonfabric";
@@ -94,6 +99,30 @@ describe("schema-first-imported-callback", () => {
     expect(call).toBeDefined();
     expect(call.arguments.length).toBe(4);
     expect(call.arguments[2].getText(module)).toBe("echoAny");
+    expect(call.arguments[3].getText(module)).toContain("resultSchema");
+  });
+
+  it("recognizes an imported `any` callback behind a `satisfies` constraint", async () => {
+    // `satisfies T` checks the value against T and leaves it exactly as
+    // written, so it is transparent for the same reason parentheses and `as`
+    // are. With the alias annotated `any` the wrapper is the only thing
+    // between the declaration fallback and the function it needs to see.
+    const main = MAIN.replace(
+      "import { echoImported, type Ping, type PingResult }",
+      "import { echoSatisfies, echoImported, type Ping, type PingResult }",
+    ).replace(
+      "  echoImported,\n);",
+      "  echoSatisfies,\n);",
+    );
+    const output = await transformFiles({
+      "/main.tsx": main,
+      "/helpers.ts": HELPERS,
+    }, { types: COMMONFABRIC_TYPES });
+    const module = parseModule(output["/main.tsx"]);
+    const [call] = callsNamed(module, "handler");
+    expect(call).toBeDefined();
+    expect(call.arguments.length).toBe(4);
+    expect(call.arguments[2].getText(module)).toBe("echoSatisfies");
     expect(call.arguments[3].getText(module)).toContain("resultSchema");
   });
 });
