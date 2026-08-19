@@ -954,6 +954,10 @@ export function generateText(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1015,9 +1019,9 @@ export function generateText(
       // the same prompt go out again rather than match the in-flight check and
       // never be sent. A queued request is neither of those: the queue owns its
       // lifecycle and runs it to completion, so forgetting its hash would
-      // enqueue a second copy of a call that is still going to arrive.
-      const queued = inputs.key("queue").withTx(tx).get() !== undefined;
-      if (!queued) {
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
         currentRun++;
         previousCallHash = undefined;
       }
@@ -1098,6 +1102,7 @@ export function generateText(
       currentRun++;
     }
     const thisRun = currentRun;
+    lastRequestQueued = !!queueName;
 
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
@@ -1253,6 +1258,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1328,9 +1337,9 @@ export function generateObject<T extends Record<string, unknown>>(
       // the same prompt go out again rather than match the in-flight check and
       // never be sent. A queued request is neither of those: the queue owns its
       // lifecycle and runs it to completion, so forgetting its hash would
-      // enqueue a second copy of a call that is still going to arrive.
-      const queued = inputs.key("queue").withTx(tx).get() !== undefined;
-      if (!queued) {
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
         currentRun++;
         previousCallHash = undefined;
       }
@@ -1509,6 +1518,7 @@ export function generateObject<T extends Record<string, unknown>>(
         currentRun++;
       }
       const thisRun = currentRun;
+      lastRequestQueued = !!queueName;
 
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
@@ -1870,6 +1880,7 @@ export function generateObject<T extends Record<string, unknown>>(
         currentRun++;
       }
       const thisRun = currentRun;
+      lastRequestQueued = !!queueName;
 
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);

@@ -396,4 +396,70 @@ describe("LLM builtin no-request paths", () => {
       LLMClient.prototype.sendRequest = original;
     }
   });
+  it("`generateText` abandons an unqueued request even if `queue` is set later", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    let release: (() => void) | undefined;
+    const arrived = Promise.withResolvers<void>();
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    LLMClient.prototype.sendRequest = async () => {
+      arrived.resolve();
+      await held;
+      return { content: "a summary of cats" } as never;
+    };
+    try {
+      const testPattern = builder.pattern<{ prompt: string; queue: string }>((
+        { prompt, queue },
+      ) => builder.generateText({ prompt, queue }));
+      const promptCell = runtime.getCell<string>(
+        space,
+        "late-queue-prompt-input",
+        undefined,
+        tx,
+      );
+      promptCell.set("summarize cats");
+      const queueCell = runtime.getCell<string>(
+        space,
+        "late-queue-name-input",
+        undefined,
+        tx,
+      );
+      queueCell.set("");
+      const resultCell = runtime.getCell(
+        space,
+        "late-queue-prompt",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { prompt: promptCell, queue: queueCell },
+        resultCell,
+      );
+      tx.commit();
+      tx = runtime.edit();
+
+      // The request went out unqueued, and is parked inside the client.
+      await arrived.promise;
+
+      // `queue` gains a name only now. The request already in flight is still
+      // the unqueued one, and clearing the prompt has to abandon it.
+      const change = runtime.edit();
+      queueCell.withTx(change).set("late-queue");
+      promptCell.withTx(change).set("");
+      change.commit();
+      await runtime.idle();
+
+      release!();
+      await runtime.settled();
+
+      expect(result.key("requestHash").get()).toBeUndefined();
+      expect(result.key("result").get()).toBeUndefined();
+      expect(result.key("pending").get()).toBe(false);
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
+  });
 });
