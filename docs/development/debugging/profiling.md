@@ -27,10 +27,16 @@ counts for anything already wrapped exist before you touch the code.
 What is *not* on by default is emission. `CF_TIMING_MEASURES=1` makes every
 recorded span also emit a `performance.measure`, which is what puts it on the
 timeline of the process that ran it and what step 4 aggregates. It is off
-because a measure costs several times what recording the span does, and the
-spans a logger wraps are the hot paths a profile is trying to describe — paying
-that always would distort the thing being measured. Turn it on for an
-investigation, not for a run you intend to trust the absolute numbers of.
+because the volume is meant for a tool rather than for a person: a topics
+pattern test emits more than 800,000 spans, and a human opening a timeline wants
+the phases someone deliberately named, not every span the runtime recorded. Turn
+it on for the length of an investigation and read it with something that
+aggregates.
+
+`CF_TIMING_MEASURES_CAP` raises the ceiling. It matters more than it looks:
+emission stops at the cap rather than sampling, so a run that hits it leaves an
+early-run prefix, and attributing a whole run from its setup is the mistake that
+invites.
 
 ## 1. Find the phase
 

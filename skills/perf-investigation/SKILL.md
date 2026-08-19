@@ -134,8 +134,9 @@ you begin and what you can trust:
   — or `cf test --timing-measures-out <file>` — makes each logger time span emit
   a `performance.measure` as well as recording into the statistics, across the
   whole stack rather than only what someone wrapped by hand. It is off by
-  default because a measure costs several times what recording the span does,
-  and these are the hot paths a profile is trying to describe.
+  default because the volume is for a tool, not a person: a topics pattern test
+  emits over 800,000 spans, and a human opening a timeline wants the phases
+  someone named rather than every span the runtime recorded.
   `skills/perf-investigation/scripts/aggregate-measures.ts` rolls the result up
   by key prefix, which is what the statistics cannot do: a logger records
   against its full joined path and nothing shorter, so the count at the level

@@ -471,10 +471,15 @@ _globalLevelFloor = getEnvFloor();
 /**
  * Whether every recorded time span also emits a `performance.measure`.
  *
- * Off unless asked for, and the reason is cost rather than caution: a measure
- * costs roughly three times what recording the span into the statistics does,
- * and the spans this instruments are the hot paths a profile is trying to
- * describe. Paying that always would distort what it measures.
+ * Off unless asked for, because these are for a tool rather than for a person.
+ * A run emits hundreds of thousands of them — a topics pattern test produces
+ * over 800,000 — and a human opening the timeline wants to see the handful of
+ * phases someone named, not every span the runtime recorded. Emission is turned
+ * on for the length of an investigation and read by something that aggregates.
+ *
+ * The cost is real but secondary: a measure runs about three and a half times
+ * what recording the span into the statistics does, which is worth knowing for
+ * a hot path and is not what decides the default.
  *
  * Turned on, every span already carried by a logger becomes an entry on the
  * timeline of the process that ran it — which is the whole point, because a
@@ -508,7 +513,29 @@ function getEnvMeasuresEnabled(): boolean {
   return false;
 }
 
+/**
+ * The cap named by `CF_TIMING_MEASURES_CAP`, when it names a positive integer.
+ *
+ * Separate from the on/off variable because a run that hits the cap stops
+ * emitting partway through, which leaves an early-run prefix rather than a
+ * sample — and a reader who does not know that will attribute a whole run from
+ * its setup. Raising it has to be reachable from wherever emission is.
+ */
+function getEnvMeasureCap(): number | undefined {
+  if (isDeno()) {
+    try {
+      const raw = Deno.env.get("CF_TIMING_MEASURES_CAP");
+      if (raw) {
+        const parsed = Number(raw);
+        if (Number.isInteger(parsed) && parsed > 0) return parsed;
+      }
+    } catch { /* ignore permission errors */ }
+  }
+  return undefined;
+}
+
 _emitTimingMeasures = getEnvMeasuresEnabled();
+_timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
 
 /**
  * Turn `performance.measure` emission on or off for every logger.
@@ -522,7 +549,9 @@ export function setTimingMeasuresEnabled(
   options?: { cap?: number },
 ): void {
   _emitTimingMeasures = enabled;
+  const envCap = getEnvMeasureCap();
   if (options?.cap !== undefined) _timingMeasureCap = options.cap;
+  else if (envCap !== undefined) _timingMeasureCap = envCap;
   _timingMeasuresEmitted = 0;
   _timingMeasureCapReported = false;
 }
