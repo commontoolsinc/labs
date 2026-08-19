@@ -20,8 +20,7 @@ import {
   autoGenerationsToPrune,
   collectVintages,
   describeError,
-  isDerivedHoistSymbol,
-  isStoredArgumentRefusal,
+  hoistSupersessionReason,
   newestAutoGeneration,
   patternKeyFromMain,
   PINNED,
@@ -726,13 +725,11 @@ export async function replayVintage(
         // report. Held back and reported WITH the rule that fired, never
         // silently dropped. Any other refusal of a hoist — compile, commit,
         // storage — still fails.
-        const supersession = !isDerivedHoistSymbol(entry.symbol)
-          ? undefined
-          : isStoredArgumentRefusal(outcome.error)
-          ? "stored arguments superseded"
-          : outcome.missingArtifact === true
-          ? "hoist no longer emitted"
-          : undefined;
+        const supersession = hoistSupersessionReason(
+          entry.symbol,
+          outcome.error,
+          outcome.missingArtifact === true,
+        );
         if (supersession !== undefined) {
           report.capturesSuperseded.push(
             `${entry.main} ${entry.symbol} (${supersession})`,

@@ -22,6 +22,7 @@ import {
   describeCaptureOutcome,
   describeError,
   describePinOutcome,
+  hoistSupersessionReason,
   isClean,
   isDerivedHoistSymbol,
   isStoredArgumentRefusal,
@@ -1785,5 +1786,44 @@ describe("derived-hoist classification", () => {
     expect(isStoredArgumentRefusal(new Error("commit failed"))).toBe(false);
     expect(isStoredArgumentRefusal("compile error")).toBe(false);
     expect(isStoredArgumentRefusal(undefined)).toBe(false);
+  });
+});
+
+describe("hoist supersession rule", () => {
+  const REFUSED = `${STORED_ARGUMENT_SCHEMA_REFUSAL}: params: missing ` +
+    `required property boundRemoveHistoryEntry`;
+
+  it("names the stored-argument rule for a refused hoist", () => {
+    expect(hoistSupersessionReason("__cfPattern_4", REFUSED, false))
+      .toBe("stored arguments superseded");
+  });
+
+  it("names the no-longer-emitted rule for a missing hoist", () => {
+    expect(hoistSupersessionReason("__cfPattern_6", "gone", true))
+      .toBe("hoist no longer emitted");
+  });
+
+  it("prefers the stored-argument rule when both could apply", () => {
+    // The refusal the candidate actually made is the more specific account
+    // of what happened, and the one whose remedy the reader needs.
+    expect(hoistSupersessionReason("__cfPattern_4", REFUSED, true))
+      .toBe("stored arguments superseded");
+  });
+
+  it("returns undefined for an authored artifact under either shape", () => {
+    // The partition: the same two refusals that supersede a hoist are loss
+    // when they land on something an author wrote, and must fail the run.
+    expect(hoistSupersessionReason("Row", REFUSED, false)).toBeUndefined();
+    expect(hoistSupersessionReason("Row", "gone", true)).toBeUndefined();
+    expect(hoistSupersessionReason("default", REFUSED, true)).toBeUndefined();
+    expect(hoistSupersessionReason("__cfPattern_0", REFUSED, true))
+      .toBeUndefined();
+  });
+
+  it("returns undefined for any other refusal of a hoist", () => {
+    expect(hoistSupersessionReason("__cfPattern_4", "commit failed", false))
+      .toBeUndefined();
+    expect(hoistSupersessionReason("__cfPattern_4", undefined, false))
+      .toBeUndefined();
   });
 });

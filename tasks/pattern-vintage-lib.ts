@@ -1224,3 +1224,29 @@ export function isStoredArgumentRefusal(error: unknown): boolean {
   return typeof error === "string" &&
     error.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
 }
+
+/**
+ * Which hold-back rule covers a refused update, or `undefined` when none
+ * does and the refusal must fail the run.
+ *
+ * The whole partition in one place, and the returned string is the reason
+ * the report prints beside the target: a refusal is held back only for a
+ * DERIVED hoist, and only in the two shapes that are supersession rather
+ * than loss — captures the re-run derivation re-supplies, and a hoist
+ * today's source no longer emits under the recorded (renumbered) id.
+ * Anything else about a hoist, and everything about an authored artifact,
+ * is the caller's failure to report.
+ *
+ * `missingArtifact` is passed as the materializer's own verdict rather than
+ * read out of `error`, whose text is arbitrary propagated prose.
+ */
+export function hoistSupersessionReason(
+  symbol: string,
+  error: unknown,
+  missingArtifact: boolean,
+): string | undefined {
+  if (!isDerivedHoistSymbol(symbol)) return undefined;
+  if (isStoredArgumentRefusal(error)) return "stored arguments superseded";
+  if (missingArtifact) return "hoist no longer emitted";
+  return undefined;
+}
