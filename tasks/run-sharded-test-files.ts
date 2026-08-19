@@ -3,12 +3,14 @@
 import * as path from "@std/path";
 import { parseShard, type Shard } from "./shard-utils.ts";
 import {
+  AGENTS_HOST_TEST_WEIGHTS,
   PIECE_TEST_WEIGHTS,
   TASK_TEST_WEIGHTS,
 } from "./test-timing-weights.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
 
 const PROFILES = {
+  "agents-host": { weights: AGENTS_HOST_TEST_WEIGHTS, defaultWeight: 0.4 },
   piece: { weights: PIECE_TEST_WEIGHTS, defaultWeight: 0.2 },
   tasks: { weights: TASK_TEST_WEIGHTS, defaultWeight: 0.2 },
 } as const;
