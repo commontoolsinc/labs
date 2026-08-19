@@ -4,6 +4,7 @@ import {
   type FabricValue,
   isFabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   Cell,
   JSONSchema,
@@ -23,6 +24,7 @@ import {
   linkRefFrom,
   refuseFabricInstance,
 } from "@commonfabric/runner/shared";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "../protocol/mod.ts";
 import { CellRef, type LoggerFlagsData, PageRef } from "../protocol/types.ts";
@@ -97,8 +99,7 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
  * shape is the declaration's -- `getLoggerFlagsBreakdown()` reports records to
  * the leaf -- and what the declaration leaves open is the leaves themselves,
  * `Logger` taking a `Record<string, unknown>` and constraining it no further.
- * So the whole question is whether the breakdown is a `FabricValue`, and one
- * walk answers it.
+ * So the whole question is whether the breakdown is a `FabricValue`.
  *
  * A breakdown that is not one throws rather than travelling with the offending
  * metadata dropped. Dropping it would leave the payload reporting a flag whose
@@ -117,27 +118,9 @@ export function assertFabricLoggerFlags(
 ): asserts breakdown is LoggerFlagsData {
   if (isFabricValue(breakdown)) return;
 
-  // Failed, so walk it again to say which flag is responsible -- a reader has
-  // to know which one to go fix, and the walk above reports only a verdict.
-  // This runs on the way to throwing and never on the way to returning.
-  for (const [logger, flags] of Object.entries(breakdown)) {
-    for (const [flag, byId] of Object.entries(flags)) {
-      for (const [id, metadata] of Object.entries(byId)) {
-        if ((metadata === null) || isFabricValue(metadata)) continue;
-        throw new Error(
-          "Cannot send logger flag metadata on this connection: " +
-            `\`${logger}\` \`${flag}\` \`${id}\` is not a \`FabricValue\`.`,
-        );
-      }
-    }
-  }
-
-  // Every metadata value vets on its own, so what does not vet is the
-  // breakdown around them -- a symbol-keyed or non-enumerable property on one
-  // of the records the walk descends through.
   throw new Error(
-    "Cannot send logger flags on this connection: the breakdown is not a " +
-      "`FabricValue`.",
+    "Cannot send logger flags on this connection, not being a " +
+      `\`FabricValue\`: ${backtickQuote(toCompactDebugString(breakdown))}`,
   );
 }
 

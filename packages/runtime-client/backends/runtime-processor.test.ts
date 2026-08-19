@@ -2896,7 +2896,7 @@ describe("assertFabricLoggerFlags", () => {
     expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
   });
 
-  it("throws naming the flag whose metadata cannot travel", () => {
+  it("throws, rendering what it refused", () => {
     // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
     // shape that would otherwise cross as something the far side cannot read.
     const flags = {
@@ -2905,36 +2905,17 @@ describe("assertFabricLoggerFlags", () => {
       },
     };
 
-    // Named down to the id: a reader has to know which flag to go fix, and
-    // "some metadata somewhere" would not tell them.
+    // The rendering is what says which flag is at fault. Asserted through the
+    // flag's own id rather than the whole string, so a change to how a `Date`
+    // renders does not read as this breaking.
     expect(() => assertFabricLoggerFlags(flags)).toThrow(
-      "Cannot send logger flag metadata on this connection: `runner` " +
-        "`action invalid input` `action:bad` is not a `FabricValue`.",
+      /Cannot send logger flags on this connection, not being a `FabricValue`/,
     );
-  });
-
-  it("throws about the breakdown when no single flag accounts for it", () => {
-    // Every metadata value vets on its own; what fails is a record the walk
-    // descends through, so there is no flag to name and the message says so
-    // rather than picking one arbitrarily.
-    const flags: Record<string, unknown> = {
-      runner: { sample: { "id:1": { a: 1 } } },
-    };
-    flags[Symbol("nope") as unknown as string] = 1;
-    Object.defineProperty(flags, "hidden", { value: 1, enumerable: false });
-
-    expect(() =>
-      assertFabricLoggerFlags(
-        flags as unknown as Parameters<typeof assertFabricLoggerFlags>[0],
-      )
-    ).toThrow(
-      "Cannot send logger flags on this connection: the breakdown is not a " +
-        "`FabricValue`.",
-    );
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(/action:bad/);
   });
 
   it("throws rather than dropping the metadata and reporting the flag", () => {
-    // The disposition itself, asserted: nulling the metadata would leave the
+    // The disposition itself, asserted: dropping the metadata would leave the
     // payload reporting a flag whose contents had silently gone, which is the
     // loss "Death before confusion!" rules out.
     const flags = {
