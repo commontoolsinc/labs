@@ -72,6 +72,12 @@ installFakeClock({
     // same live ExecutorHost + N flag-ON clients under the same
     // wall-clock policies, waiting on store/replica edges.
     "executor-fan-out",
+    // The (d′) demand-model suite (stage-C build W1) drives the same live
+    // ExecutorHost + N flag-ON clients under the same wall-clock policies
+    // — the demand-wake grace, the flush deadline, and the session TTL —
+    // waiting on store/replica/demand edges; auto-advance turns those
+    // real-time policies into a runaway.
+    "executor-dprime-w0",
     // The speculation arrival-gate suite drives a live memory server and
     // waits on push/watermark edges with bounded timeouts, and its
     // "would-be loop" window is a real-time observation.
