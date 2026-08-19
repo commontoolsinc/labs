@@ -202,10 +202,15 @@ fixed recipe. The recurring debugging questions and where they resolve:
 - **Scheduler tables are usually absent** on disk (only present when
   `persistentSchedulerState` was on). The entity-history surface always works;
   the reactive dependency graph is opt-in — absence is normal, not a broken DB.
-- **Lists and the bundle are capped** (e.g. history/hot/graph/contention have
-  limits; the HTML stale-read pass caps per bundle and _marks_ un-analyzed cells
-  rather than showing them clean). When a count equals a round cap, suspect
-  truncation and narrow with flags or a per-entity command.
+- **A capped result announces itself — and the caps that don't are the ones to
+  watch.** The space-wide scans (`entities`, `graph`, `html`) print a cap notice
+  on stderr in _both_ modes, so silence there means you hold the whole set; a
+  `--json` consumer that discards stderr discards the only warning it gets.
+  `entities --kind` selects _during_ the scan, so `--limit` counts entities of
+  that kind, not entities walked to find them. The other caps stay silent —
+  history/hot/contention row limits, and the HTML stale-read pass, which caps
+  per bundle and _marks_ un-analyzed cells rather than showing them clean. There
+  a count equal to a round cap is still the tell.
 - **`--json` is the agent path.** Human output elides; for anything you parse or
   chain, pass `--json`.
 - **It reads DBs it didn't write.** A corrupt/partial row degrades that one

@@ -29,9 +29,12 @@ import { reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
+  countEntities,
+  DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   type ModuleEntry,
+  type ScanExtent,
 } from "./model.ts";
 
 /** A resolved reference to another entity (or a cross-space target). */
@@ -448,6 +451,13 @@ function roleFor(kind: EntityKind, owned: boolean): string {
   }
 }
 
+/** A capped detail pass over a space, with how far its scan reached. */
+export interface DetailListing {
+  /** The entities detailed, at most `extent.limit` of them. */
+  details: EntityDetail[];
+  extent: ScanExtent;
+}
+
 /**
  * Build rich details for every entity in a space — one reconstruction pass,
  * resolving link-target labels and owner→child context names space-wide.
@@ -455,19 +465,23 @@ function roleFor(kind: EntityKind, owned: boolean): string {
 export function buildAllDetails(
   space: SpaceDb,
   opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityDetail[] {
+): DetailListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
+  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
   const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
+  // One row past the limit is asked for and dropped: getting it is what proves
+  // the space holds entities this pass does not describe.
   const rows = space.db
     .prepare(
       `SELECT id, count(*) revisions FROM revision
        WHERE branch = ? AND scope_key = ?
        GROUP BY id ORDER BY revisions DESC LIMIT ?`,
     )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+    .all<{ id: string; revisions: number }>(branch, scope, limit + 1);
+  const truncated = rows.length > limit;
+  if (truncated) rows.pop();
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
@@ -560,7 +574,14 @@ export function buildAllDetails(
     "free-cell": 5,
     unknown: 6,
   };
-  return out.sort(
-    (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
-  );
+  return {
+    details: out.sort(
+      (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),
+    ),
+    extent: {
+      limit,
+      total: countEntities(space, { branch, scope }),
+      truncated,
+    },
+  };
 }

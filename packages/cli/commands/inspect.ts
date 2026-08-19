@@ -21,6 +21,7 @@ import {
   contendedEntities,
   convergenceExact,
   convergenceScanExact,
+  DEFAULT_SCAN_LIMIT,
   // Remote acquisition (`cf inspect --remote` / `pull`).
   defaultCacheDir,
   describeIdentity,
@@ -29,6 +30,7 @@ import {
   discoverSpaceDbs,
   entityConflicts,
   entityHistory,
+  entityKinds,
   entityTimeline,
   escapeTerminalText,
   type ExactConvergenceResult,
@@ -38,6 +40,7 @@ import {
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  isEntityKind,
   listCommits,
   listEntityModels,
   listRemoteSpaces,
@@ -50,6 +53,7 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  type ScanExtent,
   type Scope,
   scopeOverlay,
   type SpaceGraph,
@@ -85,6 +89,24 @@ function out(
 ): void {
   if (json) console.log(stringify(data));
   else render();
+}
+
+/**
+ * Report a capped result on stderr.
+ *
+ * A capped listing is a SUBSET that looks exactly like a complete one, so it
+ * has to announce itself — and stderr is the one channel that reaches both
+ * readers. A human sees it beside the table; a `--json` consumer sees it
+ * without the parsed bytes on stdout changing shape, which is what an envelope
+ * around the array would have cost every caller for a condition most runs
+ * never hit. Silence on stderr means the result IS the whole set.
+ */
+function noteTruncation(extent: ScanExtent, what: string): void {
+  if (!extent.truncated) return;
+  console.error(
+    `NOTE: capped at --limit ${extent.limit} ${what}; the space holds ` +
+      `${extent.total} entities. Raise --limit for the rest.`,
+  );
 }
 
 function splitPath(p?: string): string[] {
@@ -964,20 +986,30 @@ export const inspect = new Command()
   )
   .option(
     "--kind <kind:string>",
-    "Filter: piece | module | stream | schema | owned-cell | free-cell | unknown.",
+    `Filter: ${entityKinds.join(" | ")}. --limit then counts entities of ` +
+      `this kind, not entities scanned to find them.`,
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to return; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
   .action(async (options, space) => {
+    const kind = options.kind;
+    if (kind !== undefined && !isEntityKind(kind)) {
+      throw new ValidationError(
+        `Unknown --kind "${kind}". Expected one of: ${entityKinds.join(", ")}.`,
+      );
+    }
     const s = await openByToken(space, options);
     try {
-      let rows = listEntityModels(s, {
+      const listing = listEntityModels(s, {
         limit: options.limit,
         branch: options.branch,
+        kind,
       });
-      if (options.kind) rows = rows.filter((r) => r.kind === options.kind);
+      const rows = listing.entities;
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
           console.log("(no entities)");
@@ -1003,6 +1035,7 @@ export const inspect = new Command()
           ]).toString(),
         );
       });
+      noteTruncation(listing.extent, kind ? `${kind} entities` : "entities");
     } finally {
       s.close();
     }
@@ -1079,9 +1112,11 @@ export const inspect = new Command()
   .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).", {
     conflicts: ["json"],
   })
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
   .action(async (options, space) => {
     const s = await openByToken(space, options);
     try {
@@ -1094,6 +1129,7 @@ export const inspect = new Command()
       if (options.root) g = subgraphAround(g, options.root, options.depth);
       if (options.dot) {
         console.log(graphToDot(g));
+        noteTruncation(g.extent, "entities");
         return;
       }
       out(!!options.json, g, () => {
@@ -1158,6 +1194,7 @@ export const inspect = new Command()
           );
         }
       });
+      noteTruncation(g.extent, "entities");
     } finally {
       s.close();
     }
@@ -1174,6 +1211,11 @@ export const inspect = new Command()
     "--app-url <url:string>",
     "Live shell base origin for deep links (e.g. https://host).",
   )
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
   .action(async (options, space) => {
     if (options.json) {
       throw new ValidationError(
@@ -1187,6 +1229,7 @@ export const inspect = new Command()
         scope: options.scope,
         generatedAt: new Date().toISOString(),
         liveBase: options.appUrl,
+        limit: options.limit,
       });
       const html = renderInspectorHtml(bundle);
       if (options.out) {
@@ -1198,6 +1241,7 @@ export const inspect = new Command()
       } else {
         console.log(html);
       }
+      noteTruncation(bundle.extent, "entities");
     } finally {
       s.close();
     }

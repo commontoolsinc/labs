@@ -445,30 +445,110 @@ const KIND_ORDER: Record<EntityKind, number> = {
   unknown: 6,
 };
 
+/** Every kind an entity classifies as, in the order a listing presents them. */
+export const entityKinds: readonly EntityKind[] = Object.keys(
+  KIND_ORDER,
+) as EntityKind[];
+
+/** Whether a string names one of the kinds an entity classifies as. */
+export function isEntityKind(value: string): value is EntityKind {
+  return (entityKinds as readonly string[]).includes(value);
+}
+
 /**
- * Model every entity in a space — the fluent "what is in here?" view. One
+ * How many entities a space-wide scan reconstructs before it stops. Every scan
+ * is capped, because reconstruction is per-entity work and a space can hold
+ * more entities than anyone wants to wait for.
+ */
+export const DEFAULT_SCAN_LIMIT = 5000;
+
+/**
+ * How far a capped space-wide scan reached. A scan that stops at its cap
+ * returns a SUBSET, and a caller that cannot tell a capped result from a
+ * complete one will read the subset as the whole space — so every capped scan
+ * reports this alongside its result.
+ */
+export interface ScanExtent {
+  /** The cap the scan applied. */
+  limit: number;
+  /** Entities the space holds on this branch and scope, before any filter. */
+  total: number;
+  /** True when the space holds more of what was asked for than `limit`. */
+  truncated: boolean;
+}
+
+/** Entities present on one branch and scope — the set a capped scan walks. */
+export function countEntities(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string } = {},
+): number {
+  const row = space.db
+    .prepare(
+      `SELECT count(DISTINCT id) n FROM revision
+       WHERE branch = ? AND scope_key = ?`,
+    )
+    .get<{ n: number }>(opts.branch ?? "", opts.scope ?? "space");
+  return row?.n ?? 0;
+}
+
+/** An entity's kind without modeling it; `unknown` when it cannot be read. */
+function kindOf(doc: EntityDocument | undefined): EntityKind {
+  return doc === undefined ? "unknown" : classifyDocument(doc).kind;
+}
+
+/** A capped listing of a space's entities, with how far its scan reached. */
+export interface EntityListing {
+  /** The entities modeled, at most `extent.limit` of them. */
+  entities: EntityModel[];
+  extent: ScanExtent;
+}
+
+/**
+ * Model the entities in a space — the fluent "what is in here?" view. One
  * reconstruction pass: collect documents, build the module index from them,
  * then classify each. Sorted pieces → modules → streams → schemas → cells.
- * Replaces the old value-shape-only `listEntities` (which undercounted pieces).
+ *
+ * `limit` bounds what the caller asked for, so `kind` selects DURING the scan
+ * rather than over its result: filtering afterwards would yield "the pieces
+ * among the first `limit` entities" rather than "up to `limit` pieces", which
+ * reads the same and is a different set. A `kind` scan therefore walks the
+ * space until it has enough matches, and costs more than an unfiltered one.
  */
 export function listEntityModels(
   space: SpaceDb,
-  opts: { branch?: string; scope?: string; limit?: number } = {},
-): EntityModel[] {
+  opts: {
+    branch?: string;
+    scope?: string;
+    limit?: number;
+    kind?: EntityKind;
+  } = {},
+): EntityListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
+  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
+  const kind = opts.kind;
+
+  // Unfiltered, SQL bounds the scan; filtered, only reconstruction can tell a
+  // match from a miss, so the whole space is walked and the loop below stops
+  // itself. Either way the scan reaches for one row past `limit` — finding it
+  // is what proves more remain.
+  const ordered = `SELECT id, count(*) revisions FROM revision
        WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+       GROUP BY id ORDER BY revisions DESC`;
+  const rows = kind === undefined
+    ? space.db
+      .prepare(`${ordered} LIMIT ?`)
+      .all<{ id: string; revisions: number }>(branch, scope, limit + 1)
+    : space.db
+      .prepare(ordered)
+      .all<{ id: string; revisions: number }>(branch, scope);
 
   // Single reconstruction pass: cache docs + build the module index inline.
+  // Only matching documents are cached; a `kind` scan may pass over far more
+  // entities than it keeps, and holding every value would cost the space.
   const docs = new Map<string, EntityDocument | undefined>();
   const moduleIndex = new Map<string, ModuleEntry>();
+  const kept: { id: string; revisions: number }[] = [];
   for (const r of rows) {
     let doc: EntityDocument | undefined;
     try {
@@ -476,7 +556,6 @@ export function listEntityModels(
     } catch {
       doc = undefined;
     }
-    docs.set(r.id, doc);
     const v = doc?.value;
     if (isModuleValue(v)) {
       const existing = moduleIndex.get(v.identity);
@@ -488,9 +567,15 @@ export function listEntityModels(
         });
       }
     }
+    if (kind !== undefined && kindOf(doc) !== kind) continue;
+    docs.set(r.id, doc);
+    kept.push(r);
+    if (kept.length > limit) break;
   }
+  const truncated = kept.length > limit;
+  if (truncated) kept.pop();
 
-  const out: EntityModel[] = rows.map((r): EntityModel => {
+  const out: EntityModel[] = kept.map((r): EntityModel => {
     const doc = docs.get(r.id);
     if (doc === undefined) {
       return {
@@ -513,11 +598,18 @@ export function listEntityModels(
     return m;
   });
 
-  return out.sort(
-    (a, b) =>
-      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      (b.revisions ?? 0) - (a.revisions ?? 0),
-  );
+  return {
+    entities: out.sort(
+      (a, b) =>
+        KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+        (b.revisions ?? 0) - (a.revisions ?? 0),
+    ),
+    extent: {
+      limit,
+      total: countEntities(space, { branch, scope }),
+      truncated,
+    },
+  };
 }
 
 export interface PieceCellRef {

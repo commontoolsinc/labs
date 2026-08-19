@@ -16,6 +16,7 @@ import { type SpaceSummary, summarizeSpace } from "./queries.ts";
 import { buildSpaceGraph, type SpaceGraph } from "./graph.ts";
 import { spaceTimeline, type SpaceTimelineEntry } from "./timetravel.ts";
 import { buildAllDetails, type EntityDetail } from "./detail.ts";
+import type { ScanExtent } from "./model.ts";
 import {
   listScopes,
   type Participant,
@@ -37,6 +38,8 @@ export interface InspectorBundle {
   liveBase: string;
   summary: SpaceSummary;
   details: EntityDetail[];
+  /** How far the entity scan behind `details` and `graph` reached. */
+  extent: ScanExtent;
   graph: SpaceGraph;
   timeline: SpaceTimelineEntry[];
   /** Per-identity scopes present (space / user:<DID> / session:<DID>:*). */
@@ -57,10 +60,12 @@ export function buildInspectorBundle(
     scope?: string;
     generatedAt?: string;
     liveBase?: string;
+    limit?: number;
   } = {},
 ): InspectorBundle {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
+  const limit = opts.limit;
   const did = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
   // Entities that carry per-user/session state (in a non-space scope, or in
@@ -77,13 +82,15 @@ export function buildInspectorBundle(
     .map((r) => r.id);
   const overlays = overlayIds.map((id) => scopeOverlay(space, id, { branch }));
 
+  const listing = buildAllDetails(space, { branch, scope, limit });
   return {
     space: did,
     generatedAt: opts.generatedAt ?? "",
     liveBase: opts.liveBase ?? "",
     summary: summarizeSpace(space),
-    details: buildAllDetails(space, { branch, scope }),
-    graph: buildSpaceGraph(space, { branch, scope }),
+    details: listing.details,
+    extent: listing.extent,
+    graph: buildSpaceGraph(space, { branch, scope, limit }),
     timeline: spaceTimeline(space, { branch, scope }),
     scopes: listScopes(space, { branch }),
     overlays,
@@ -679,6 +686,11 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
       multiUser ? `, ${multiUser} multi-user ⚔` : ""
     }`
     : "";
+  // The header's entity count is the whole space, while the tree and graph hold
+  // only what the scan reached. Say so, or the two read as one number.
+  const capLine = bundle.extent.truncated
+    ? `<span class="stats" style="color:var(--piece)">⚠ capped at ${bundle.extent.limit} of ${bundle.extent.total} entities · rebuild with a higher --limit for the rest</span>`
+    : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -694,6 +706,7 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
     escapeHtml(opsLine)
   }${bundle.generatedAt ? ` · ${bundle.generatedAt.slice(0, 10)}` : ""}</span>
   <span class="stats" style="color:var(--stream)">${idLine}${xLine}${cfLine}</span>
+  ${capLine}
   <span class="live">app URL <input id="live-input" placeholder="https://host (for live links)" size="22"></span>
 </header>
 <nav>
