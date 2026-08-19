@@ -3644,10 +3644,12 @@ supply; OW29/OW32/OW34 closed):
   `stage-c/stage-c-lens-*.md`). It is a DESIGN: this PR changes no
   binding sentence — serving-loop.md §1:57–62 still reads "runs once
   per demanding pair"; the amended "structural subscription" text is
-  the design's §2.4 and the front-loaded item of its ruling set (§5);
-  the residual (ix) item above ("N × walk per changed root — the
-  design's stated cost") still stands as accepted cost and is
-  restated only when (d) lands. The three rulings the owner made on
+  the design's §2F.4 (the FALLBACK's wording since the same-day (d′)
+  amendment below; the (d′) text is §2.10) and the front-loaded item of
+  its ruling set (§5); the residual (ix) item above ("N × walk per
+  changed root — the design's stated cost") still stands as accepted
+  cost and is restated only when (d′) — or its fallback — lands. The
+  three rulings the owner made on
   2026-08-18 are folded in as RULED (no lazy demand — RULED in
   substance; the double-dispatch invariant, OW35, whose (α) build the
   design carries as a work item; the measurement caveat, OW38 — the
@@ -3671,6 +3673,54 @@ supply; OW29/OW32/OW34 closed):
   (protocol.md §2) though the code emits both; scopes.md §9's "ragged
   instance sets" tripwire is inconsistent with §2's amended ragged
   ruling (design §5 item 10).
+  - **Amendment (2026-08-18, same day) — design (d) SUPERSEDED by (d′)
+    per owner direction; still NOTHING BINDING LANDED.** The owner
+    directed that demand be "the set of documents the client cares
+    about … accumulated across all (highly overlapping) demands …
+    [with] the schema" — which memory v2 already tracks per session
+    (`session.trackedIds`, coarse on unsubscribe) — and that the loop
+    "keep that list, for each document there see whether it is current
+    via scheduler metadata and if not update it. that then creates new
+    reads that trigger later updating." The design's §2 is now (d′):
+    the demand WALK is DELETED; demand = the union over a space's
+    client sessions of their tracked-ids closures with each row's
+    demanding pair (`demandedInstancesForSpace`, the successor of
+    `watchedRootsForSpace`); the writers of demanded instances are
+    demand roots (a new `isDemandRoot` disjunct, §8-bracketed) and the
+    loop runs the ones not current for a demanding pair (B7's clean
+    bit; the basis index at activation); no structural-versus-value
+    distinction; the structural walk is the FALLBACK (design §2F). What
+    this changes in the ruling set: item 1 is RESTATED — the sentence
+    to adopt for serving-loop.md §1:57–62 is the (d′) text ("demand is
+    the union of the demanding sessions' tracked instances (memory v2's
+    schema-narrowed closure); the serving loop runs the stale writers
+    of demanded instances; there is no demand walk"; design §2.10 —
+    still a PROPOSAL, not landed here); items 2 (reach gap), 3 (Q3.3),
+    11 (no basis rows for the walk), 12 (walk-node key) are MOOT under
+    (d′); ONE new item is RULED — **R-D, the coarse unsubscribe** ("it
+    doesn't unsubscribe in a fine-grained way … i think this remains
+    acceptable (and we can make it fine-grained in the future)") —
+    recorded in the design's §5, no binding sentence yet (its sentence
+    is part of the (d′) §1 text the build lands; the build mints the
+    "fine-grained demand release" future row then). W0 becomes (d′)'s
+    refutation experiment (does anything the walk kept live go dark;
+    the settle including the one-push-late structural-growth cycle and
+    the 300 ms demand-wake grace); W1 becomes (d′) proper with the
+    structural walk as the fallback branch. Rows the build will now
+    mint or move (superseding the list above where they conflict): the
+    (d′) `demand` counter block (`demandedInstances`, `demandedWriters`,
+    `demandRootEnters/Leaves`, `notCurrentRearms`, `pushGrowthWakes`, …
+    — no `walkRuns`); residual (ix) restated as "there is no walk; the
+    demand pass reconciles the tracked-ids closure in O(rows) on
+    deltas; the structural-growth path lands one derived commit later
+    than the link that reaches it"; the fine-grained-release future
+    row (R-D); the no-grace push-growth wake / pre-seal closure refresh
+    if W0 needs them; the structure load for demanded non-root docs
+    with pattern meta if W0's count says so; the output-doc demanders
+    union if `undemandedNarrowingRuns` shows the linked-piece shape;
+    (b′) and Q3.3-for-computeds ONLY on the fallback branch. The
+    design's §2.8 lists what in the code makes (d′) harder than the
+    naive statement — flagged, not filled.
 
 ## 4. Standing rule
 

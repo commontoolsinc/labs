@@ -103,49 +103,85 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   settle time EXPLICITLY (register OW38); the flip's performance BAR is
   an owner ruling.
 - **The design pass — report LANDED; ruling set presented; the build
-  stage is NEXT.** The reconciled design is
+  stage is NEXT. Design (d) SUPERSEDED by (d′) per owner direction
+  2026-08-18 (same day).** The reconciled design is
   [`server-execution-v2/stage-c-design.md`](server-execution-v2/stage-c-design.md)
   (LIVE — a design + build work order for unexecuted work; it archives
   beside the closeout when the build lands); the three lens reports it
   reconciles sit beside the closeout
   (`stage-c/stage-c-lens-{spec-blind,d-server-walk,e-client-intent}.md`).
-  Two design-class terms: (d) the demand walk → a STRUCTURAL WALK (one
-  walk node per (scope-name, root id); a purpose-built traversal whose
-  read CLASS makes value-only changes not fire it — one shallow read
-  per container, one recursive probe per leaf, whole reads only at
-  links, a visited-set cycle guard; per-instance logs compacted once;
-  resubscribe only on a run or a prune); (e) the intent watch → a
-  NON-REACTIVE storage-notification listener keyed on the outstanding
-  intent set (O(outstanding); zero txs, zero CFC probes, no scheduler
-  node; interim: a schema-narrowed sink). Plus (α) the RULED
-  double-dispatch implementation as a work item (deadline-time purge of
-  unrun LT1 leftovers; drain skip against a `streamEntry`-bearing copy;
+  Two design-class terms: **(d′) — the demand WALK is DELETED**: demand
+  is the memory server's per-session TRACKED-IDS closure
+  (`session.trackedIds` — the instance-keyed set of every doc a
+  session's watches reach, narrowed by the selectors' schemas,
+  maintained on every push, accumulated across overlapping watches,
+  coarse on unsubscribe — RULED acceptable), exposed as the union over a
+  space's client sessions with each row's demanding pair
+  (`demandedInstancesForSpace`, the successor of `watchedRootsForSpace`);
+  the serving loop marks the WRITERS of demanded instances as demand
+  roots (a new `isDemandRoot` disjunct, bracketed per serving-loop.md
+  §8) and runs the ones NOT CURRENT for a demanding pair (B7's
+  per-instance clean bit; the basis index is the same predicate at
+  activation); those runs' own reads pull upstream and dirty downstream
+  — the client-side scheduler's model; structure changes ride the
+  tracker's push-time re-traversal and a run's own read of a newly
+  linked doc; NO structural-versus-value distinction anywhere. The
+  former (d) — the STRUCTURAL WALK (one walk node per (scope-name, root
+  id); a read-class traversal value-only changes do not fire) — is the
+  FALLBACK (design §2F), reached only if (d′)'s refutation experiment
+  finds a real hole (a value the client renders that goes dark with the
+  walk gone and the schema right) or its one-push-late structural-growth
+  cycle breaks the settle bar. (e) the intent watch → a NON-REACTIVE
+  storage-notification listener keyed on the outstanding intent set
+  (O(outstanding); zero txs, zero CFC probes, no scheduler node;
+  interim: a schema-narrowed sink). Plus (α) the RULED double-dispatch
+  implementation as a work item (deadline-time purge of unrun LT1
+  leftovers; drain skip against a `streamEntry`-bearing copy;
   derivation-emitter orphan REFUSAL; a per-event run-count pin). Build
   acceptance = SERVER SETTLE TIME on the cross-user chat/lunch journeys
   sub-second at p50, measured explicitly (`waitForSettled`), plus
   client-local speculation latency preserved, note createToView flat in
-  history, the §7 `demand` counter block, the OFF byte-identity witness;
-  the refutation experiments run FIRST; recommended shape: a train of
-  three stacked PRs ((d) → (e) → (α)). The design's ruling set is its
-  §5: three items already RULED and folded in (no lazy demand — RULED
-  in substance; the double-dispatch invariant; the measurement caveat);
-  the front-loaded open one is the walk's spec sentence
-  (serving-loop.md §1:57–62 "runs once per demanding pair" → the
-  "structural subscription" text — recommend adopt); the rest are
-  one-liners (reach gap accepted; Q3.3 walk-only; no scheduler effect
-  for the intent watch; tracked-entry-only read; sanction the tracked
-  entry's mark as the value-plane carrier of `consequenceOf`;
-  drops/errors ride `consequenceOf`; keep the stream subscribed while
-  intents are outstanding; the W/eventWatermark backstop; amend
-  scopes.md §9's ragged tripwire; no basis rows for the walk; the
-  node key; the effects channel follows; the CFC zero-write probe
-  skip is a CFC-owner rider; `subscribe` vs `sinkDocument?` is the
-  storage owner's; interim (b) only if two steps).
+  history, the §7 `demand` counter block ((d′) version), the OFF
+  byte-identity witness; the refutation experiments run FIRST — W0 is
+  (d′)'s cheap experiment (expose the closure, delete the walk on a
+  scratch branch, run chat/lunch/note: do the demanded derivations
+  still land, does anything go dark, what is the settle — including
+  the one-push-late cycle and the 300 ms demand-wake grace); W1 is (d′)
+  proper (memory-server exposure + push-growth `demandChanged`, the
+  registry over the closure + the currency check, the demand-root
+  bracket, deleting the walk, the pins) with the structural walk as the
+  fallback branch W1-F; recommended shape: a train of three stacked PRs
+  ((d′) → (e) → (α)). The design's ruling set is its §5: FOUR items
+  RULED and folded in (no lazy demand — RULED in substance; the
+  double-dispatch invariant; the measurement caveat; NEW R-D — the
+  coarse unsubscribe accepted for now, fine-grained future — RULED
+  2026-08-18 by the same direction); the front-loaded open one is the
+  demand sentence (serving-loop.md §1:57–62 "runs once per demanding
+  pair" → the (d′) text: "demand is the union of the demanding sessions'
+  tracked instances (memory v2's schema-narrowed closure); the serving
+  loop runs the stale writers of demanded instances; there is no demand
+  walk" — recommend adopt; the SB/W "structural subscription" text is
+  the fallback's wording); MOOT under (d′): the reach gap, Q3.3, no
+  basis rows for the walk, the walk-node key; the rest are one-liners
+  (no scheduler effect for the intent watch; tracked-entry-only read;
+  sanction the tracked entry's mark as the value-plane carrier of
+  `consequenceOf`; drops/errors ride `consequenceOf`; keep the stream
+  subscribed while intents are outstanding; the W/eventWatermark
+  backstop; amend scopes.md §9's ragged tripwire; the effects channel
+  follows; the CFC zero-write probe skip is a CFC-owner rider;
+  `subscribe` vs `sinkDocument?` is the storage owner's; interim (b)
+  only if two steps). Flagged, not filled (design §2.8): the
+  one-push-late structural growth (+ grace); the push-growth notify is
+  a new site; the standing root kind is a new disjunct; the structure
+  load stays root-scoped (linked pieces visible now); demander
+  resolution for linked pieces' writers; `#demandersFor`'s key scan;
+  the monotone growth of `trackedIds`.
 
 **Ordered next actions:** (1) #5991's ledger comment; (2) the design
 BUILD stage per the design's §6 work order — the owner's rulings on its
-§5 (the walk sentence first) → W0 refutation experiments → (d), (e), (α)
-as a train → re-benchmarked measuring server settle time; (3) the
+§5 (the (d′) demand sentence first) → W0: (d′)'s refutation experiment
+(and (e)'s) → (d′) (or its fallback), (e), (α) as a train →
+re-benchmarked measuring server settle time; (3) the
 CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
 the train on main with the flag OFF (siblings stacked; default lanes
 OFF) and continue on main; (5) the flip's ordered gates as listed under
@@ -175,9 +211,21 @@ already delegated, the one defect is the served genesis ACL's content
 scoping report beside the closeout), implementation OWED POST-MERGE,
 BEFORE the flip PR, OFF-invisible; (4) the design-pass set —
 PRESENTED as the design's §5 (`server-execution-v2/stage-c-design.md`):
-three already ruled and folded in (no lazy demand, the double-dispatch
-invariant, the measurement caveat), the walk's spec sentence
-front-loaded, the one-liners listed — UNRULED beyond those three;
+FOUR already ruled and folded in (no lazy demand, the double-dispatch
+invariant, the measurement caveat, and — by the 2026-08-18 direction
+that superseded (d) with (d′) — R-D, the coarse unsubscribe accepted for
+now with fine-grained future), the (d′) demand sentence front-loaded,
+four items MOOT under (d′) (reach gap, Q3.3, no basis rows for the walk,
+the walk-node key), the one-liners listed — UNRULED beyond those four;
+(4′) the **(d′) direction itself — 2026-08-18** — "the client-side
+scheduler seems to work well without differentiating structural changes
+from just value changes … the set of documents the client cares about
+… memory v2 has all that implemented … it doesn't unsubscribe in a
+fine-grained way … acceptable … we keep that list, for each document
+there see whether it is current via scheduler metadata and if not
+update it. that then creates new reads that trigger later updating" —
+adopted as the design premise (design §2.0), the structural walk
+demoted to fallback (§2F);
 (5) #5968's Flags (instantiation seat, `resolvedHash`, fetch-parity on
 live completion failure, `plainProgramOf`), UNRULED.
 
