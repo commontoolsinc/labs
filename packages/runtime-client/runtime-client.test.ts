@@ -477,6 +477,14 @@ describe("RuntimeClient.uploadBlob", () => {
     // connection double holds what it was handed without copying, so a request
     // that carried the caller's array would show this write.
     body[0] = 0xff;
+    // The write has to have LANDED for the decode below to mean anything. Had
+    // the method ceded the array rather than copied it, this view would be
+    // detached, where a write is a silent no-op rather than an error and the
+    // request would still decode to the original bytes -- so every assertion
+    // about the decode would hold while the array the caller was promised had
+    // been taken from it.
+    expect(body.length).toBe(3);
+    expect(body[0]).toBe(0xff);
 
     expect(await upload).toEqual({ id: "fid1:blob", url: "blobs/blob.png" });
     expect(requests.length).toBe(1);

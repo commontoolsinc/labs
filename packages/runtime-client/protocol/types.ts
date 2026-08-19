@@ -959,6 +959,19 @@ export interface VDomMountResponse {
   rootId: number;
 }
 
+/**
+ * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
+ * transport implemented using `codec-realm`. As of this writing, secure crypto
+ * keypairs cannot be properly represented: `InitializeRequest`'s `identity` is
+ * a `KeyPairRaw`, whose `CryptoKeyPair` arm is a pair of opaque host objects
+ * that no fabric class covers. Note also that an `interface` never satisfies
+ * `FabricPlainObject` -- TypeScript grants an implicit index signature to an
+ * anonymous object type and not to an interface -- so every arm here has to
+ * become a type alias. The two ends of the crossing carry the matching
+ * markers: `WebWorkerRuntimeTransport.send()` in
+ * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
+ * listener in `../backends/web-worker/index.ts`.
+ */
 export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
