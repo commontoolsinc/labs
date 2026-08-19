@@ -8,7 +8,10 @@ import {
   getCallbackBoundarySemantics,
 } from "../../src/policy/callback-boundary.ts";
 
-function createProgramAndContext(source: string): {
+function createProgramAndContext(
+  source: string,
+  options: { withDefaultLibrary?: boolean } = {},
+): {
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
   context: TransformationContext;
@@ -19,7 +22,7 @@ function createProgramAndContext(source: string): {
     module: ts.ModuleKind.ESNext,
     jsx: ts.JsxEmit.Preserve,
     strict: true,
-    noLib: true,
+    noLib: !options.withDefaultLibrary,
     skipLibCheck: true,
   };
 
@@ -32,11 +35,17 @@ function createProgramAndContext(source: string): {
   );
 
   const host = ts.createCompilerHost(compilerOptions, true);
-  host.getSourceFile = (name) => name === fileName ? sourceFile : undefined;
+  const getSourceFile = host.getSourceFile.bind(host);
+  const fileExists = host.fileExists.bind(host);
+  const readFile = host.readFile.bind(host);
+  host.getSourceFile = (name, languageVersion, onError, shouldCreateNew) =>
+    name === fileName
+      ? sourceFile
+      : getSourceFile(name, languageVersion, onError, shouldCreateNew);
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
-  host.fileExists = (name) => name === fileName;
-  host.readFile = (name) => name === fileName ? source : undefined;
+  host.fileExists = (name) => name === fileName || fileExists(name);
+  host.readFile = (name) => name === fileName ? source : readFile(name);
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
@@ -82,16 +91,13 @@ function findFirstNode<T extends ts.Node>(
 Deno.test(
   "Callback support policy: plain array map callbacks stay plain-array value callbacks",
   () => {
-    // The harness compiles with `noLib`, so the Array members a test relies on
-    // are declared by the test itself.
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      interface Array<T> {
-        map<U>(callback: (value: T) => U): U[];
-      }
-
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
       const result = items.map((item) => item + 1);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
@@ -198,16 +204,38 @@ Deno.test(
 );
 
 Deno.test(
-  "Callback support policy: a callback past argument zero carries no wrapper site",
+  "Callback support policy: a source-defined `Array.map()` carries no wrapper site",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
+      class Array<T> {
+        map<U>(callback: (value: T) => U): U[] { return []; }
+      }
+
+      const items = new Array<number>();
+      const result = items.map((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a callback past argument zero carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       interface Array<T> {
         map<U>(callback: (value: T) => U, andThen: (value: U) => U): U[];
       }
 
       const items = [1, 2, 3];
       const result = items.map((item) => item + 1, (item) => item * 2);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callbacks: ts.ArrowFunction[] = [];
     const visit = (node: ts.Node): void => {

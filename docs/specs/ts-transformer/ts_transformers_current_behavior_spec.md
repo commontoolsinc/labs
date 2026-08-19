@@ -707,11 +707,12 @@ pattern-owned sites outright; the compute-owned boundaries (`computed`,
 
 `plain-array-value` carries them only for the callback role that can hold
 them, which `isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`)
-decides. It admits a callback that is argument zero of an
-`Array`/`ReadonlyArray` method named in `COLLECTING_ARRAY_METHOD_NAMES` —
-today `map` alone — over a plain receiver no reactive lowering owns. `map`
-stores each result without reading it, so a result that is a cell stays a
-cell. Every other callback-taking array method reads the result as it runs:
+decides. It admits a callback that is argument zero of a standard-library
+`Array`/`ReadonlyArray` method named in `COLLECTING_ARRAY_METHOD_NAMES` — today
+`map` alone — over a plain receiver no reactive lowering owns. A source-defined
+type merely named `Array` or `ReadonlyArray` is not a standard array. `map`
+stores each result without reading it, so a result that is a cell stays a cell.
+Every other callback-taking array method reads the result as it runs:
 `filter`, `find`, `some`, and `every` as a boolean, `sort` as a number,
 `flatMap` as an array test, `reduce` as the next accumulator. A cell reaching
 any of those is an object, which is truthy, not a number, and not an array, so

@@ -12,6 +12,7 @@ import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 
 export interface CallbackBoundaryLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
+  isSourceFileDefaultLibrary(sourceFile: ts.SourceFile): boolean;
 }
 
 export type SupportedCallbackBoundaryKind =
@@ -406,7 +407,12 @@ export function getCallbackBoundarySemantics(
     supportsPatternOwnedWrapperCallbackSite: supportedKind ===
         "reactive-array-method" ||
       (supportedKind === "plain-array-value" &&
-        isCollectingPlainArrayMethodCallback(callback, checker)) ||
+        !!lookup &&
+        isCollectingPlainArrayMethodCallback(
+          callback,
+          checker,
+          (sourceFile) => lookup.isSourceFileDefaultLibrary(sourceFile),
+        )) ||
       supportedKind === "pattern-builder" ||
       supportedKind === "render-builder",
     supportsPatternOwnedStatements: supportedKind === "reactive-array-method" ||

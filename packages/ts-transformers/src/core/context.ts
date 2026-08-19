@@ -167,6 +167,11 @@ export class TransformationContext {
     return this.state.isArrayMethodCallback(node);
   }
 
+  /** Whether `sourceFile` belongs to TypeScript's loaded default library. */
+  isSourceFileDefaultLibrary(sourceFile: ts.SourceFile): boolean {
+    return this.program.isSourceFileDefaultLibrary(sourceFile);
+  }
+
   /**
    * Mark a synthetic callback introduced by a compute wrapper so later phases
    * can classify its contents as compute-owned even when they originate from
