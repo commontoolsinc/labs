@@ -5,9 +5,12 @@ description: Investigate Common Fabric slowness end to end — measure it, attri
 
 # Performance Investigation
 
-For why we spend this time at all, and what we consider worth speeding up, read
-`docs/development/PERFORMANCE_PROGRAM.md`. This skill is the other half: how the
-investigation is actually run here, and what the answers have historically been.
+Two neighbours carry the halves this does not.
+`docs/development/PERFORMANCE_PROGRAM.md` is why we spend this time at all and
+what we consider worth speeding up. `docs/development/debugging/profiling.md` is
+the walkthrough — the steps in order, with the commands. This skill is the map
+they are read against: what each instrument reaches, what it is blind to, and
+what the answers here have historically turned out to be.
 
 ## A slow pattern is an instrument, not the defect
 
@@ -106,14 +109,64 @@ reading. A perf harness is otherwise throwaway — built for one investigation,
 driven by knobs nobody else needs, and not committed — so duplicating the parts
 that differ costs less than a seam every future scenario has to be bent through.
 
+## Narrowing, until a phase becomes a source
+
+A phase is a place to look, never an answer. "The seed phase costs four minutes"
+is where an investigation starts being useful, and stopping there produces a fix
+aimed at a symptom. Keep going until you can name the thing doing the work — a
+function, a read, a derivation that re-runs — and say whether it is expensive or
+merely frequent.
+
+`docs/development/debugging/profiling.md` has the steps and the commands. Two
+things about them are worth knowing before you start, because they decide where
+you begin and what you can trust:
+
+- **The timings already exist.** A logger constructed with `enabled: false` is
+  quiet, not inert: `timeStart`, `timeEnd` and `time` record into per-key
+  statistics without consulting that flag, and the counts behind the logging
+  methods increment before it is checked. Read what is accumulating before
+  instrumenting anything.
+- **Marks only help in the process that emits them.** `cf test` runs in a Deno
+  process with no browser; a worker CPU profile comes from a different process
+  over CDP. Bracketing a phase is what gives a profile its interval, but the
+  bracket has to be on the same side of that boundary as the samples.
+
+**You are done narrowing when you can write a benchmark.** A source you
+understand can be provoked directly; one you cannot provoke is still a
+hypothesis. Confirm it correlates — that it moves with the real measurement
+rather than merely being fast — and keep it, because that is what defends the
+fix afterwards.
+
 ## Count against average
 
-Every logger row carries `count`, `average`, `p95`, `max`, and `total`, and the
-first two are the whole diagnosis: a row whose `total` grew because `count` grew
-is a different bug from one whose `average` grew, and they have disjoint fixes.
-Read them before forming a theory. Rows are ranked by `total` and truncated, so
-a row that measures set sizes rather than milliseconds will sort above real
-timings and evict them — read those by name instead of widening the summary.
+Every logger row carries a count and a set of durations — the `cf test` stats
+print `n`, `total`, `avg` and `p95`, and the browser summary adds `p50` and
+`max` — and the count against the average is the whole diagnosis: a row whose
+`total` grew because `count` grew is a different bug from one whose `average`
+grew, and they have disjoint fixes. Read them before forming a theory. Rows are
+ranked by `total` and truncated, so a row that measures set sizes rather than
+milliseconds will sort above real timings and evict them — read those by name
+instead of widening the summary.
+
+## Two ways to be slow, at every level
+
+A call costs what it costs and happens as often as it happens, so every finding
+has two fixes available: make the work cheaper, or ask for it less. They are not
+alternatives to choose between up front — which one is available is a fact about
+the code you have not read yet, and investigations that assume one skip the
+larger win about half the time.
+
+Both live at every level of the stack, and neither level is the natural home of
+this work. A leaf at the edge — resolving a link, walking a schema, hashing a
+value — can often be made cheaper for every caller at once, which is the widest
+possible fix and the one that closes a footgun rather than an instance. The
+caller can often stop asking: hoist the read, declare a narrower one, split a
+derivation so the half that cannot have changed does not re-run. A pattern
+usually surfaces the second; the first is usually a runtime change, and is the
+reason this work does not end at the pattern.
+
+Look for both before choosing. The cheapest real fix is frequently the one at
+the other end of the stack from where the symptom appeared.
 
 ## Where cost comes from in this runtime
 
