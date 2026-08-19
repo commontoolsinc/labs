@@ -4,11 +4,17 @@
  */
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { friendlyError, github, memo } from "./lib.ts";
+import {
+  friendlyError,
+  github,
+  githubDownload,
+  githubOperationsInProgress,
+  memo,
+} from "./lib.ts";
 
 // Run `fn` with fetch replaced by `stub`, handing `fn` the calls made so far.
 async function withFetch(
-  stub: (url: string) => Response,
+  stub: (url: string) => Response | Promise<Response>,
   fn: (calls: { url: string; init: RequestInit }[]) => Promise<void>,
 ) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -22,6 +28,21 @@ async function withFetch(
     await fn(calls);
   } finally {
     globalThis.fetch = original;
+  }
+}
+
+async function captureConsole(
+  level: "error" | "warn",
+  fn: (messages: string[]) => Promise<void>,
+) {
+  const original = console[level];
+  const messages: string[] = [];
+  console[level] = (...parts: unknown[]) =>
+    messages.push(parts.map(String).join(" "));
+  try {
+    await fn(messages);
+  } finally {
+    console[level] = original;
   }
 }
 
@@ -82,6 +103,304 @@ Deno.test("github: non-OK -> throws with the status; the error body is not retur
       },
     );
   });
+});
+
+Deno.test("github: an HTTP failure logs the endpoint and GitHub response context", async () => {
+  await withTokens({ GH_TOKEN: "secret-token" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () =>
+          Response.json(
+            { message: "API rate limit exceeded" },
+            {
+              status: 403,
+              headers: {
+                "x-github-request-id": "request-123",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "1787100000",
+                "retry-after": "60",
+              },
+            },
+          ),
+        async () => {
+          await assertRejects(() => github("repos/o/runs?per_page=100"), Error);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("GitHub API operation"));
+      assert(messages[0].includes("repos/o/runs?per_page=100"));
+      assert(messages[0].includes("HTTP 403"));
+      assert(messages[0].includes("request request-123"));
+      assert(messages[0].includes("rate limit 0 remaining of 5000"));
+      assert(messages[0].includes("retry after 60"));
+      assert(messages[0].includes("API rate limit exceeded"));
+      assert(!messages[0].includes("secret-token"));
+    });
+  });
+});
+
+Deno.test("github: a request failure logs its endpoint, stage, and elapsed time", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () => Promise.reject(new TypeError("connection closed")),
+        async () => {
+          await assertRejects(() => github("repos/o/runs"), TypeError);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("for repos/o/runs failed after"));
+      assert(messages[0].includes("while requesting GitHub"));
+      assert(messages[0].includes("TypeError: connection closed"));
+      assertEquals(githubOperationsInProgress(), []);
+    });
+  });
+});
+
+Deno.test("github: unreadable JSON logs the endpoint and response context", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () =>
+          new Response("not json", {
+            headers: { "x-github-request-id": "invalid-123" },
+          }),
+        async () => {
+          await assertRejects(() => github("repos/o/invalid"), SyntaxError);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("for repos/o/invalid could not read valid JSON"));
+      assert(messages[0].includes("HTTP 200, request invalid-123"));
+      assert(messages[0].includes("SyntaxError"));
+    });
+  });
+});
+
+Deno.test("github: a failed error body preserves the known HTTP failure", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new Error("body connection closed"));
+              },
+            }),
+            { status: 403 },
+          ),
+        async () => {
+          const error = await assertRejects(
+            () => github("repos/o/broken-error"),
+            Error,
+          );
+          assertEquals(
+            error.message,
+            "GitHub API repos/o/broken-error failed: HTTP 403",
+          );
+          assertEquals(friendlyError(error.message), "auth failed");
+        },
+      );
+      assertEquals(messages.length, 2);
+      assert(messages[0].includes("could not read the error response"));
+      assert(messages[0].includes("body connection closed"));
+      assert(messages[1].includes("returned HTTP 403"));
+    });
+  });
+});
+
+Deno.test("github: an expected HTTP failure can omit its request log", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () => new Response("missing", { status: 404 }),
+        async () => {
+          await assertRejects(
+            () =>
+              github("repos/o/optional", undefined, {
+                reportErrors: false,
+              }),
+            Error,
+          );
+        },
+      );
+      assertEquals(messages, []);
+    });
+  });
+});
+
+Deno.test("github: an ignored status does not hide transport failures", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      await withFetch(
+        () => new Response("missing", { status: 404 }),
+        async () => {
+          await assertRejects(
+            () =>
+              github("repos/o/optional", undefined, {
+                ignoreStatuses: [404],
+              }),
+            Error,
+          );
+        },
+      );
+      assertEquals(messages, []);
+      await withFetch(
+        () => Promise.reject(new TypeError("connection closed")),
+        async () => {
+          await assertRejects(
+            () =>
+              github("repos/o/optional", undefined, {
+                ignoreStatuses: [404],
+              }),
+            TypeError,
+          );
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("TypeError: connection closed"));
+    });
+  });
+});
+
+Deno.test("github: an in-progress request reports what it is waiting on", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    let requestStarted = () => {};
+    const started = new Promise<void>((resolve) => requestStarted = resolve);
+    let finishRequest = (_response: Response) => {};
+    const response = new Promise<Response>((resolve) => finishRequest = resolve);
+    await withFetch(
+      () => {
+        requestStarted();
+        return response;
+      },
+      async () => {
+        const pending = github("repos/o/actions/runs?branch=main");
+        await started;
+        const operations = githubOperationsInProgress();
+        assertEquals(operations.length, 1);
+        assertEquals(operations[0].path, "repos/o/actions/runs?branch=main");
+        assertEquals(operations[0].stage, "requesting GitHub");
+        assert(operations[0].elapsedMs >= 0);
+        finishRequest(Response.json({ workflow_runs: [] }));
+        await pending;
+        assertEquals(githubOperationsInProgress(), []);
+      },
+    );
+  });
+});
+
+Deno.test("github: JSON stays active while its response body is read", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let bodyRead = () => {};
+    const reading = new Promise<void>((resolve) => bodyRead = resolve);
+    let finishPull = () => {};
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+      pull() {
+        bodyRead();
+        return new Promise<void>((resolve) => finishPull = resolve);
+      },
+    }));
+    await withFetch(
+      () => response,
+      async () => {
+        const pending = github("repos/o/actions/runs?branch=main");
+        await reading;
+        const operations = githubOperationsInProgress();
+        assertEquals(operations.length, 1);
+        assertEquals(operations[0].stage, "reading GitHub response");
+        bodyController!.enqueue(new TextEncoder().encode('{"workflow_runs":[]}'));
+        bodyController!.close();
+        finishPull();
+        assertEquals(await pending, { workflow_runs: [] });
+        assertEquals(githubOperationsInProgress(), []);
+      },
+    );
+  });
+});
+
+Deno.test("github: a download stays active while its response body is read", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let bodyRead = () => {};
+    const reading = new Promise<void>((resolve) => bodyRead = resolve);
+    let finishPull = () => {};
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+      pull() {
+        bodyRead();
+        return new Promise<void>((resolve) => finishPull = resolve);
+      },
+    }));
+    await withFetch(
+      () => response,
+      async () => {
+        const pending = githubDownload("repos/o/archive");
+        await reading;
+        const operations = githubOperationsInProgress();
+        assertEquals(operations.length, 1);
+        assertEquals(operations[0].path, "repos/o/archive");
+        assertEquals(operations[0].stage, "reading GitHub response");
+        bodyController!.enqueue(new TextEncoder().encode("archive"));
+        bodyController!.close();
+        finishPull();
+        const download = await pending;
+        assertEquals(new TextDecoder().decode(download.body), "archive");
+        assertEquals(githubOperationsInProgress(), []);
+      },
+    );
+  });
+});
+
+Deno.test("github: an abandoned download has already completed its body", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    const response = new Response("archive");
+    await withFetch(
+      () => response,
+      async () => {
+        const download = await githubDownload("repos/o/archive");
+        assertEquals(githubOperationsInProgress(), []);
+        assertEquals(new TextDecoder().decode(download.body), "archive");
+      },
+    );
+  });
+});
+
+Deno.test("github: a slow successful operation logs response context", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  try {
+    await withTokens({ GH_TOKEN: "t" }, async () => {
+      await captureConsole("warn", async (messages) => {
+        await withFetch(
+          () => {
+            now += 10_000;
+            return Response.json(
+              { ok: true },
+              { headers: { "x-github-request-id": "slow-123" } },
+            );
+          },
+          async () => {
+            await github("repos/o/slow");
+          },
+        );
+        assertEquals(messages.length, 1);
+        assert(messages[0].includes("for repos/o/slow completed slowly after 10000 ms"));
+        assert(messages[0].includes("HTTP 200, request slow-123"));
+      });
+    });
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 Deno.test("github: parsed JSON from api.github.com, with the auth and version headers", async () => {

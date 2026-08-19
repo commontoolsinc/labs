@@ -31,6 +31,128 @@ function githubToken(path: string, token?: string): string {
   return t;
 }
 
+type GitHubOperationStage =
+  | "waiting for performance-request capacity"
+  | "requesting GitHub"
+  | "recording performance-request use"
+  | "reading GitHub response";
+
+interface ActiveGitHubOperation {
+  id: number;
+  path: string;
+  startedAt: number;
+  stage: GitHubOperationStage;
+}
+
+export interface GitHubOperationInProgress {
+  id: number;
+  path: string;
+  elapsedMs: number;
+  stage: GitHubOperationStage;
+}
+
+const activeGitHubOperations = new Map<number, ActiveGitHubOperation>();
+let nextGitHubOperationId = 1;
+const SLOW_GITHUB_OPERATION_MS = 10_000;
+
+export interface GitHubRequestOptions {
+  // False keeps an expected failure from an optional probe out of the logs.
+  reportErrors?: boolean;
+  // These expected HTTP responses stay quiet while transport failures still log.
+  ignoreStatuses?: readonly number[];
+}
+
+export interface GitHubDownload {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly body: Uint8Array<ArrayBuffer>;
+}
+
+export function githubOperationsInProgress(
+  now = Date.now(),
+): GitHubOperationInProgress[] {
+  return [...activeGitHubOperations.values()].map((operation) => ({
+    id: operation.id,
+    path: operation.path,
+    elapsedMs: Math.max(0, now - operation.startedAt),
+    stage: operation.stage,
+  }));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
+}
+
+function githubResponseContext(response: Response): string {
+  const parts = [`HTTP ${response.status}`];
+  const requestId = response.headers.get("x-github-request-id");
+  if (requestId) parts.push(`request ${requestId}`);
+  const remaining = response.headers.get("x-ratelimit-remaining");
+  const limit = response.headers.get("x-ratelimit-limit");
+  if (remaining || limit) {
+    parts.push(`rate limit ${remaining ?? "?"} remaining of ${limit ?? "?"}`);
+  }
+  const reset = response.headers.get("x-ratelimit-reset");
+  if (reset) parts.push(`rate limit resets at ${reset}`);
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) parts.push(`retry after ${retryAfter}`);
+  return parts.join(", ");
+}
+
+function githubErrorBody(body: string): string | undefined {
+  let detail = body;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (
+      value !== null && typeof value === "object" && "message" in value &&
+      typeof value.message === "string"
+    ) {
+      detail = value.message;
+    }
+  } catch {
+    // A plain-text GitHub error body is already the useful detail.
+  }
+  const withoutControls = [...detail].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
+  }).join("");
+  const compact = withoutControls.replace(/\s+/g, " ").trim();
+  return compact ? compact.slice(0, 300) : undefined;
+}
+
+function finishGitHubOperation(
+  operation: ActiveGitHubOperation,
+  response: Response | undefined,
+  failed: boolean,
+): void {
+  const elapsedMs = Math.max(0, Date.now() - operation.startedAt);
+  activeGitHubOperations.delete(operation.id);
+  if (!failed && response?.ok && elapsedMs >= SLOW_GITHUB_OPERATION_MS) {
+    console.warn(
+      `GitHub API operation ${operation.id} for ${operation.path} completed slowly after ` +
+        `${elapsedMs} ms: ${githubResponseContext(response)}`,
+    );
+  }
+}
+
+function logGitHubOperationFailure(
+  operation: ActiveGitHubOperation,
+  error: unknown,
+): void {
+  console.error(
+    `GitHub API operation ${operation.id} for ${operation.path} failed after ` +
+      `${Math.max(0, Date.now() - operation.startedAt)} ms ` +
+      `while ${operation.stage}: ${errorMessage(error)}`,
+  );
+}
+
+interface GitHubResponseResult {
+  response: Response;
+  operation: ActiveGitHubOperation;
+}
+
 function githubRequest(path: string, token: string, withTimeout: boolean): Promise<Response> {
   const init: RequestInit = {
     headers: {
@@ -51,7 +173,17 @@ async function githubPrimaryRateLimit(
 ): Promise<GitHubPrimaryRateLimit> {
   const response = await githubRequest("rate_limit", token, false);
   if (!response.ok) {
-    throw new Error(`GitHub API rate_limit failed: HTTP ${response.status}`);
+    let body = "";
+    try {
+      body = await response.text();
+    } catch (error) {
+      body = `could not read error response: ${errorMessage(error)}`;
+    }
+    const detail = githubErrorBody(body);
+    throw new Error(
+      `GitHub API rate_limit failed: ${githubResponseContext(response)}` +
+        `${detail ? `: ${detail}` : ""}`,
+    );
   }
   const value = await response.json() as {
     resources?: { core?: GitHubPrimaryRateLimit };
@@ -67,73 +199,202 @@ async function githubResponse(
   token: string,
   performance: boolean,
   withTimeout: boolean,
-): Promise<Response> {
-  const reservation = performance
-    ? await performanceGitHubRateLimit.reserve(
-      token,
-      () => githubPrimaryRateLimit(token),
-    )
-    : null;
+  reportErrors: boolean,
+): Promise<GitHubResponseResult> {
+  const normalizedPath = path.replace(/^\//, "");
+  const operation: ActiveGitHubOperation = {
+    id: nextGitHubOperationId++,
+    path: normalizedPath,
+    startedAt: Date.now(),
+    stage: performance
+      ? "waiting for performance-request capacity"
+      : "requesting GitHub",
+  };
+  activeGitHubOperations.set(operation.id, operation);
+  let reservation: Awaited<ReturnType<typeof performanceGitHubRateLimit.reserve>> | null = null;
   let response: Response | undefined;
+  let failed = false;
+  let operationError: unknown;
   try {
+    if (performance) {
+      reservation = await performanceGitHubRateLimit.reserve(
+        token,
+        () => githubPrimaryRateLimit(token),
+      );
+      operation.stage = "requesting GitHub";
+    }
     response = await githubRequest(path, token, withTimeout);
-    return response;
-  } finally {
-    if (reservation) await reservation.complete(response);
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    if (reportErrors) logGitHubOperationFailure(operation, error);
   }
+  try {
+    if (reservation) {
+      operation.stage = "recording performance-request use";
+      await reservation.complete(response);
+    }
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    if (reportErrors) logGitHubOperationFailure(operation, error);
+  }
+  if (failed) {
+    finishGitHubOperation(operation, response, true);
+    throw operationError;
+  }
+  operation.stage = "reading GitHub response";
+  return { response: response!, operation };
 }
 
 async function githubJson<T>(
   path: string,
   token: string,
   performance: boolean,
+  options: GitHubRequestOptions,
 ): Promise<T> {
-  const res = await githubResponse(path, token, performance, true);
+  const reportErrors = options.reportErrors !== false;
+  const { response: res, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    true,
+    reportErrors,
+  );
   if (!res.ok) {
+    const reportHttpError = reportErrors &&
+      !options.ignoreStatuses?.includes(res.status);
+    let body = "";
+    try {
+      body = await res.text();
+    } catch (error) {
+      if (reportHttpError) {
+        console.error(
+          `GitHub API operation ${operation.id} for ${operation.path} could not read ` +
+            `the error response from ${githubResponseContext(res)}: ${errorMessage(error)}`,
+        );
+      }
+    }
     let rateLimited = false;
     if (res.status === 403) {
-      const message = await res.text();
       rateLimited = res.headers.get("x-ratelimit-remaining") === "0" ||
-        res.headers.has("retry-after") || /rate.?limit/i.test(message);
+        res.headers.has("retry-after") || /rate.?limit/i.test(body);
     }
     const detail = rateLimited ? " (rate-limited)" : "";
+    const responseDetail = githubErrorBody(body);
+    if (reportHttpError) {
+      console.error(
+        `GitHub API operation ${operation.id} for ${operation.path} returned ` +
+          `${githubResponseContext(res)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms` +
+          `${responseDetail ? `: ${responseDetail}` : ""}`,
+      );
+    }
+    finishGitHubOperation(operation, res, true);
     throw new Error(
       `GitHub API ${path} failed: HTTP ${res.status}${detail}`,
     );
   }
-  return await res.json() as T;
+  try {
+    const value = await res.json() as T;
+    finishGitHubOperation(operation, res, false);
+    return value;
+  } catch (error) {
+    if (reportErrors) {
+      console.error(
+        `GitHub API operation ${operation.id} for ${operation.path} could not read valid JSON ` +
+          `from ${githubResponseContext(res)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms: ${errorMessage(error)}`,
+      );
+    }
+    finishGitHubOperation(operation, res, true);
+    throw error;
+  }
 }
 
 export async function github<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, false);
+  return await githubJson<T>(path, t, false, options);
 }
 
 export async function githubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, false, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    false,
+    options.reportErrors !== false,
+  );
 }
 
 export async function performanceGithub<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, true);
+  return await githubJson<T>(path, t, true, options);
 }
 
 export async function performanceGithubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, true, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    true,
+    options.reportErrors !== false,
+  );
+}
+
+async function githubDownloadResponse(
+  path: string,
+  token: string,
+  performance: boolean,
+  reportErrors: boolean,
+): Promise<GitHubDownload> {
+  const { response, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    false,
+    reportErrors,
+  );
+  if (!response.ok) {
+    if (reportErrors) {
+      console.error(
+        `GitHub API operation ${operation.id} for download ${operation.path} returned ` +
+          `${githubResponseContext(response)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms`,
+      );
+    }
+    finishGitHubOperation(operation, response, true);
+    return { ok: false, status: response.status, body: new Uint8Array() };
+  }
+  if (!response.body) {
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body: new Uint8Array() };
+  }
+  try {
+    const body = new Uint8Array(await response.arrayBuffer());
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body };
+  } catch (error) {
+    if (reportErrors) logGitHubOperationFailure(operation, error);
+    finishGitHubOperation(operation, response, true);
+    throw error;
+  }
 }
 
 // Cache an async result for ttlMs; a rejection is not cached (so it retries).

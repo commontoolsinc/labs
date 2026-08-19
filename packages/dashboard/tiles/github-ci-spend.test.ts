@@ -585,6 +585,29 @@ Deno.test("github spend: the classic plan falls back to minutes against the incl
   assertEquals((await classic(0, 0, 0)).status, "good");
 });
 
+Deno.test("github spend: enhanced billing outages log before classic fallback", async () => {
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) =>
+    errors.push(parts.map(String).join(" "));
+  try {
+    const result = await view("2026-01-20T09:00:00Z", {
+      [usagePath(2026, 1)]: new TypeError("enhanced billing disconnected"),
+      [classicPath()]: {
+        total_minutes_used: 1000,
+        included_minutes: 3000,
+        total_paid_minutes_used: 0,
+      },
+    });
+    assertEquals(result.status, "good");
+    assertEquals(errors.length, 1);
+    assertStringIncludes(errors[0], usagePath(2026, 1));
+    assertStringIncludes(errors[0], "enhanced billing disconnected");
+  } finally {
+    console.error = realError;
+  }
+});
+
 Deno.test("github spend: both billing endpoints unreachable -> gray with a calm reason", async () => {
   const v = await view("2026-01-20T09:00:00Z", {
     [classicPath()]: new TypeError(

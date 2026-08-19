@@ -245,6 +245,7 @@ async function githubDollarSpend(
   const report = await github<{ usageItems?: UsageItem[] }>(
     usagePath(org, year, month0 + 1),
     token,
+    { ignoreStatuses: [404] },
   );
   if (!Array.isArray(report.usageItems)) {
     throw new GitHubUsageShapeError("billing usage unavailable");
@@ -304,6 +305,7 @@ async function githubDollarSpend(
       const previous = await github<{ usageItems?: UsageItem[] }>(
         usagePath(org, previousYear, previousMonth + 1),
         token,
+        { reportErrors: false },
       );
       if (Array.isArray(previous.usageItems)) {
         noteReport(previous.usageItems);

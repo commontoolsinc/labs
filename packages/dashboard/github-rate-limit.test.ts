@@ -1176,18 +1176,31 @@ Deno.test("performance GitHub requests report unusable rate-limit responses", as
   try {
     for (
       const response of [
-        new Response("unavailable", { status: 503 }),
+        new Response("unavailable", {
+          status: 503,
+          headers: {
+            "x-github-request-id": "rate-probe-request",
+            "x-ratelimit-remaining": "0",
+            "retry-after": "60",
+          },
+        }),
         Response.json({ resources: {} }),
       ]
     ) {
       const token = `rate-probe-${crypto.randomUUID()}`;
       globalThis.fetch = (() =>
         Promise.resolve(response.clone())) as typeof fetch;
-      await assertRejects(
+      const error = await assertRejects(
         () => performanceGithub("repos/o/r", token),
         GitHubRateLimitBudgetError,
         "rate limit status could not be read",
       );
+      if (response.status === 503) {
+        assertStringIncludes(error.message, "request rate-probe-request");
+        assertStringIncludes(error.message, "rate limit 0 remaining");
+        assertStringIncludes(error.message, "retry after 60");
+        assertStringIncludes(error.message, "unavailable");
+      }
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -1215,11 +1228,15 @@ Deno.test("GitHub download helpers return response bodies without JSON decoding"
 
   try {
     assertEquals(
-      await (await githubDownload("repos/o/archive", token)).text(),
+      new TextDecoder().decode(
+        (await githubDownload("repos/o/archive", token)).body,
+      ),
       "archive",
     );
     assertEquals(
-      await (await performanceGithubDownload("repos/o/archive", token)).text(),
+      new TextDecoder().decode(
+        (await performanceGithubDownload("repos/o/archive", token)).body,
+      ),
       "archive",
     );
     assertEquals(calls.map((call) => call.path), [

@@ -34,6 +34,7 @@ import {
 } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
+import { github } from "./lib.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
 import { dashboardCacheFile } from "./history-files.ts";
@@ -358,6 +359,9 @@ Deno.test("the ticker leaves a tile alone until its interval has elapsed", async
 
 Deno.test("an update still running after one minute stays gray until it completes", async () => {
   const realNow = Date.now;
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
   const startedAt = realNow() + 10_000;
   let now = startedAt;
   Date.now = () => now;
@@ -411,6 +415,10 @@ Deno.test("an update still running after one minute stays gray until it complete
     assertStringIncludes(stale, "refresh still pending");
     assertStringIncludes(stale, "last chart");
     assertEquals(messages.length, 1, "the stale transition is published");
+    assertEquals(errors, [
+      "dashboard refresh still pending: tiles model-spend (60000 ms); " +
+      "active run sources none; active GitHub operations none",
+    ]);
 
     now += 15_000;
     await tick([tile]);
@@ -442,6 +450,71 @@ Deno.test("an update still running after one minute stays gray until it complete
       await collection;
     } finally {
       Date.now = realNow;
+      console.error = realError;
+    }
+  }
+});
+
+Deno.test("a stale source log names its active GitHub operation", async () => {
+  const realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  const realWarn = console.warn;
+  const realToken = Deno.env.get("GH_TOKEN");
+  let now = realNow();
+  Date.now = () => now;
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
+  console.warn = (...parts: unknown[]) => warnings.push(parts.map(String).join(" "));
+  const response = deferred<Response>();
+  const requested = deferred<void>();
+  globalThis.fetch = () => {
+    requested.resolve();
+    return response.promise;
+  };
+  Deno.env.set("GH_TOKEN", "test-token");
+  const source = { repo: "test/github-diagnostic", workflow: "ci.yml" };
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    async runsFor() {
+      const body = await github<{ workflow_runs: Run[] }>(
+        "repos/test/github-diagnostic/actions/runs?branch=main",
+      );
+      return body.workflow_runs;
+    },
+    env: () => undefined,
+  };
+  const tile = sourceTile("github-diagnostic", "GitHub diagnostic", [source]);
+  let refresh: Promise<void> | undefined;
+  try {
+    refresh = tick([tile], sourceCtx);
+    await requested.promise;
+    now += 60_000;
+    await tick([tile], sourceCtx);
+    assertEquals(errors.length, 1);
+    assertStringIncludes(errors[0], "tiles github-diagnostic (60000 ms)");
+    assertStringIncludes(errors[0], "active run sources test/github-diagnostic ci.yml");
+    assertStringIncludes(
+      errors[0],
+      "repos/test/github-diagnostic/actions/runs?branch=main (requesting GitHub, 60000 ms)",
+    );
+  } finally {
+    response.resolve(Response.json({ workflow_runs: [] }));
+    try {
+      await refresh;
+      assertEquals(warnings.length, 1);
+      assertStringIncludes(
+        warnings[0],
+        "for repos/test/github-diagnostic/actions/runs?branch=main completed slowly after 60000 ms",
+      );
+    } finally {
+      Date.now = realNow;
+      globalThis.fetch = realFetch;
+      console.error = realError;
+      console.warn = realWarn;
+      if (realToken === undefined) Deno.env.delete("GH_TOKEN");
+      else Deno.env.set("GH_TOKEN", realToken);
     }
   }
 });
