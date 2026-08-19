@@ -175,6 +175,24 @@ export const namedPieceUrl = (
   }
 };
 
+/**
+ * Puts `cell` in the space's piece list unless the list already holds it.
+ * The registry's addPiece handler appends unconditionally, so membership is
+ * asked first — by piece id over the registered list — rather than by
+ * re-adding and hoping.
+ */
+const ensureRegistered = async (
+  pieces: PiecesController,
+  cell: Parameters<PiecesController["add"]>[0][number],
+  targetId: string,
+): Promise<void> => {
+  const registered = await pieces.getRegisteredPieces();
+  if (registered.some((piece) => piece.id === targetId)) {
+    return;
+  }
+  await pieces.add([cell]);
+};
+
 export const assignSlugTool: HarnessToolDefinition<
   AssignSlugToolInput,
   AssignSlugToolOutput
@@ -257,7 +275,20 @@ export const assignSlugTool: HarnessToolDefinition<
     if (availability.state === "taken") {
       if (targetId !== undefined && availability.pieceId === targetId) {
         // The name already points where the caller is pointing it, so the
-        // request is already true, and saying so beats refusing it.
+        // request is already true, and saying so beats refusing it. The
+        // contract's other half still has to hold: a slug can point at a
+        // piece the registry does not list — a pre-existing name, a naming
+        // interrupted between its two steps — so membership is ensured
+        // before answering, without duplicating an entry that is there.
+        try {
+          await ensureRegistered(pieces, cell, targetId);
+        } catch (error) {
+          return errorOutput(
+            `assign_slug failed while listing the piece: ${
+              errorMessage(error)
+            }`,
+          );
+        }
         const url = namedPieceUrl(pieces, slug);
         return {
           outputId,

@@ -112,36 +112,37 @@ The current package provides:
   identifiers;
 - content-addressed snapshots for in-run `view_image` observations, while
   run-start images remain source-integrity-locked;
-- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
-  `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
-  environment fallbacks): compiles and runs an inline `sourceText` pattern
-  (capped at 256 KiB) against a deployed Fabric space from the trusted host side
-  over a lazy per-run session that caches only a healthy, authorized
-  construction; passes whole-string LLM-friendly link inputs as live cells,
-  refusing links into another space, inputs the compiled pattern declares no
-  argument for, input values that carry a sealed opaque link anywhere within
-  them, values that mismatch the compiled argument schema whether a live cell or
-  plain JSON supplies them, and a `register` slug that is unusable, that already
-  names a piece in the space, or whose availability the space could not
-  establish, all before any piece exists; honors the run's abort signal by
-  stopping the created piece, removing it from the space's piece list if it had
-  joined, and returning a structured `cancelled` error that names a slug the
-  assignment had already begun taking — that assignment is not withdrawn,
-  because its redirect carries no per-assignment identity a withdrawal could
-  match, so the message says the name may still resolve to the created piece and
-  reports the piece list as that path left it; scrubs bare fabric identifiers
-  from model-facing diagnostics; reports a result that settles to empty or
-  schema-failing as an error when the invocation's settle window observed a
-  cause — an action error attributed to the piece, or a convergence-budget
-  episode whose deferred actions name this pattern — and otherwise still reports
-  ok, since an empty result with no observed cause is not evidence of failure;
-  returns the result cell's canonical reference plus an optionally
-  schema-sanitized value, and leaves the piece detached (no recorded origin)
-  and, unless `register` asked for a named address, out of the space's
-  registered piece list, with run→piece provenance carried by the run's
-  persisted artifacts; without the session configuration the tool is absent from
-  the tool surface, for a `default`- or `pattern-author`-profile subagent as
-  much as for the parent — a child shares the one session the parent built;
+- opt-in fabric-session tools — `run_pattern` and `assign_slug`
+  (`--fabric-api-url`, `--fabric-identity`, and `--fabric-space` configured
+  together, or their `CF_HARNESS_FABRIC_*` environment fallbacks).
+  `run_pattern`: compiles and runs an inline `sourceText` pattern (capped at 256
+  KiB) against a deployed Fabric space from the trusted host side over a lazy
+  per-run session that caches only a healthy, authorized construction; passes
+  whole-string LLM-friendly link inputs as live cells, refusing links into
+  another space, inputs the compiled pattern declares no argument for, input
+  values that carry a sealed opaque link anywhere within them, and values that
+  mismatch the compiled argument schema whether a live cell or plain JSON
+  supplies them, all before any piece exists; honors the run's abort signal by
+  stopping the created piece and returning a structured `cancelled` error;
+  scrubs bare fabric identifiers from model-facing diagnostics; reports a result
+  that settles to empty or schema-failing as an error when the invocation's
+  settle window observed a cause — an action error attributed to the piece, or a
+  convergence-budget episode whose deferred actions name this pattern — and
+  otherwise still reports ok, since an empty result with no observed cause is
+  not evidence of failure; returns the result cell's canonical reference plus an
+  optionally schema-sanitized value, and leaves the piece detached (no recorded
+  origin) and out of the space's registered piece list, with run→piece
+  provenance carried by the run's persisted artifacts. `assign_slug` names a
+  piece afterwards, from any handle token referring to one: it validates the
+  slug, fails closed on an availability question the space cannot answer,
+  refuses a slug already naming another piece (one already naming the same piece
+  answers ok), refuses a token that names a position inside a piece, another
+  space, or a document with no pattern identity, and otherwise registers the
+  piece in the space's piece list and points the slug at it, returning the slug
+  and, when composable without a bare fabric identifier, an openable URL.
+  Without the session configuration both tools are absent from the tool surface,
+  for a `default`- or `pattern-author`-profile subagent as much as for the
+  parent — a child shares the one session the parent built;
   `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a

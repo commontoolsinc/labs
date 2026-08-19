@@ -12,10 +12,7 @@ import {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import {
-  PieceController,
-  type PiecesController,
-} from "@commonfabric/piece/ops";
+import { PieceController } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { fabricRuntimeObservations } from "../fabric-observations.ts";

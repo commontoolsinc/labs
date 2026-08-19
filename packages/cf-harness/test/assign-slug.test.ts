@@ -9,9 +9,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
-import { resolvePieceAddress } from "@commonfabric/piece";
+import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
+import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import {
@@ -213,6 +214,52 @@ describe("assign-slug", () => {
       const output = again.output as AssignSlugToolSuccessOutput;
       expect(output.status).toBe("ok");
       expect(output.slug).toBe("doubling-report");
+    });
+
+    it("registers an unlisted piece whose slug already points at it", async () => {
+      // A slug can point at a piece the registry does not list — a
+      // pre-existing name, or a naming interrupted between its two steps.
+      // The idempotent answer still delivers the contract's other half.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = pieces.runtime.getCellFromLink(
+        // The resultRef names the piece cell itself.
+        parseLLMFriendlyLink(created.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await assignSlug(pieces, cell, "doubling-report");
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+    });
+
+    it("reports the listing failure when an already-named piece cannot join a missing registry", async () => {
+      // Same pre-state as above, but the space has no default pattern, so
+      // ensuring membership has no registry to join. Both halves of the
+      // contract cannot hold, and the answer says which one failed.
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(created.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await assignSlug(pieces, cell, "doubling-report");
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("failed while listing");
     });
 
     it("refuses when the slug's availability could not be established, assigning nothing", async () => {

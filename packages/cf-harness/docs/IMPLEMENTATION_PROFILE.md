@@ -97,11 +97,11 @@ tool result rather than a dereference path.
 LLM-friendly link inputs to live cells only within the configured space and
 checks declared inputs, opaque-link containment, and argument schemas before
 piece creation. Success returns the result reference and an optional
-schema-sanitized value while raw evidence stays in artifacts. A valid optional
-`register` slug adds the created piece to the space's piece list and returns the
-slug and, when possible, an openable URL. Calls without it remain unlisted.
-Cancellation stops the piece and best-effort removes a registered piece from the
-list, but a slug assignment already in flight cannot be withdrawn. The session
+schema-sanitized value while raw evidence stays in artifacts; the created piece
+stays out of the space's piece list. Naming is the separate `assign_slug` tool:
+it takes a handle token referring to a piece plus a slug, registers the piece in
+the list, points the slug at it, and returns the slug and, when possible, an
+openable URL. Cancellation of `run_pattern` stops the created piece. The session
 separately records its Fabric CFC enforcement and flow-label posture.
 
 Current child profiles are `default`, `browser`, `web_fetch`, `web_search`, and

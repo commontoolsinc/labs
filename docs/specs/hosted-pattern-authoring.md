@@ -410,15 +410,15 @@ the retention and identifier obligations above.
 
 - **`run_pattern` is not this specification's verification gate.** The harness
   `run_pattern` tool is an exploration and smoke capability. It takes
-  single-string, test-less pattern source, and on request joins the piece it
-  creates to the space's piece list under a caller-chosen slug. Publication
-  here requires `cf check`, retained test files in the authored-program
-  manifest, and trusted publication. A pattern that ran under `run_pattern` has
-  passed none of those gates, and a piece it registered is a named address
-  rather than a verified one.
+  single-string, test-less pattern source, and its companion `assign_slug`
+  joins a piece to the space's piece list under a caller-chosen slug.
+  Publication here requires `cf check`, retained test files in the
+  authored-program manifest, and trusted publication. A pattern that ran under
+  `run_pattern` has passed none of those gates, and a piece `assign_slug`
+  registered is a named address rather than a verified one.
 
 - **Spaces may contain pieces the piece list does not name.** Harness-created
-  pieces are durable whether or not `run_pattern` registered them, an
+  pieces are durable whether or not `assign_slug` registered them, an
   unregistered one never joins the piece list, and every one of their
   source-history revisions is a storage-retention root. Root validation,
   retention, and space-clone reasoning over "the pieces in a space" must not

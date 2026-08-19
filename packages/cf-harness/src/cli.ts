@@ -475,7 +475,7 @@ Options:
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
   --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug);
-                                run_pattern additionally requires the three --fabric-* session flags
+                                run_pattern and assign_slug additionally require the three --fabric-* session flags
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -517,9 +517,9 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
-  --fabric-api-url <url>        Deployed Fabric API URL for the run_pattern tool
-  --fabric-identity <path>      PKCS#8 identity keyfile for the run_pattern fabric session
-  --fabric-space <space>        Target space (name or did:key) for the run_pattern tool;
+  --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
+  --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
+  --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
                                 all three --fabric-* session flags go together
   --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
                                 session's runtime (raise-only; distinct from
