@@ -33,15 +33,21 @@ const SIZES = [100, 1000, 10000];
 /**
  * The largest board that can be built today.
  *
- * Seeding cost grows as roughly the square of the topic count, because the
- * board recomputes its whole crossref join and index on every write and each
- * topic holds the board's own list: a hundred topics take about seven and a
- * half minutes and six and a half gigabytes, where thirty take half a minute.
- * A thousand extrapolates to the better part of a day and more memory than a
- * runner has, and ten thousand is out of reach entirely. Neither is a limit of
- * this benchmark, and neither is caused by crossrefs — creating the same topic
- * pieces without a board is linear and flat in memory, and attaching them to
- * one in a single write is refused by the board's element schema.
+ * Seeding cost grows faster than the topic count, because the board recomputes
+ * its whole crossref join and index on every write and each topic holds the
+ * board's own list: on an Apple M3 Max, thirty topics take 33 seconds and
+ * 0.95GB of peak resident memory, sixty take 143 seconds and 1.6GB, and a
+ * hundred take 274 seconds and 2.6GB.
+ *
+ * Memory is what binds rather than time. It is close to linear at roughly 26MB
+ * per topic, so a thousand needs on the order of 26GB — more than a runner has
+ * — while time extrapolates to several hours. Ten thousand is out of reach on
+ * both counts. Neither limit belongs to this benchmark, and neither is caused
+ * by crossrefs: these boards carry none, creating the same topic pieces without
+ * a board is linear and flat in memory, and attaching them to one in a single
+ * write is refused by the board's element schema.
+ *
+ * `docs/development/BENCHMARKS.md` carries the same figures; move both together.
  *
  * The larger sizes are declared and skipped rather than left out, so the curve
  * they belong to is written down and turning them on is one edit. Raise this
