@@ -3531,9 +3531,10 @@ This applies at every point where decoded data is consumed:
   existence, types, constraints — is the codec's obligation, and a type cast
   (`state as { value: number }`) discharges none of it. What a codec is spared
   is checking twice: `canDecode()` holds the cheap part, stated as a type
-  predicate over the codec's own state type, and that predicate is what makes
-  the narrower `state` parameter `decode()` declares true rather than asserted.
-  `decode()` keeps the checks whose only implementation is the decoding itself.
+  predicate over the codec's own state type, and the engine asking it of every
+  state before dispatch is what makes the narrower `state` parameter `decode()`
+  declares true rather than asserted. `decode()` keeps the checks whose only
+  implementation is the decoding itself.
   See the note in Section 2.7 for a concrete example.
 
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
