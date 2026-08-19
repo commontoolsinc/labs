@@ -1446,8 +1446,11 @@ export class WaveAccumulator
     const droppedWhole = new Set<number>();
     /** Event-handler contributions refused as ORPHANS (stage C build W3,
      * (α3)) — a subset of `droppedWhole`, kept apart for the
-     * disposition message and the outcome count. */
+     * disposition message; the outcome COUNT is per EVENT
+     * (`orphanRefusedEvents`), since an orphan-refused copy takes its
+     * same-eventId siblings down with it (the sibling fold below). */
     const orphanRefused = new Set<number>();
+    const orphanRefusedEvents = new Set<string>();
     /** eventId → the contribution (and its home sidecar doc-instance
      * key) whose sealed ops APPEND that event's durable entry in THIS
      * wave — the LT1 same-wave emitters (cell.ts's serving-arm send
@@ -1662,20 +1665,40 @@ export class WaveAccumulator
                 (requeued.has(emitter.index) ||
                   droppedWhole.has(emitter.index) ||
                   droppedDocs[emitter.index].has(emitter.docKey))));
+          // The orphan fold is atomic PER EVENT too (stage C build W3
+          // independent review M1, 2026-08-19): a same-eventId SIBLING
+          // of an orphan-refused copy — the served navigateTo's intent
+          // tx, committed inline by the refused run — is dropped whole
+          // with it. Without the fold the handler half was refused while
+          // the intent half LANDED: a navigation enacted for an event
+          // with zero durable entries, events.md §4's FORBIDDEN
+          // "handler delivery with no durable stream entry behind it",
+          // half of it. `eventRequeued` above keys on `requeued` only and
+          // cannot see a droppedWhole orphan, hence the separate fold.
+          const eventOrphaned = sameEvent !== undefined &&
+            orphanRefusedEvents.has(sameEvent);
           if (
             !parentRequeued && !eventRequeued && !readWithdrawn &&
-            !emitterWithdrawn
+            !emitterWithdrawn && !eventOrphaned
           ) {
             continue;
           }
           if (contribution.context.kind === "event-handler") {
             if (
-              emitterWithdrawn && !parentRequeued && !eventRequeued &&
-              !readWithdrawn
+              (emitterWithdrawn || eventOrphaned) && !parentRequeued &&
+              !eventRequeued && !readWithdrawn
             ) {
               droppedWhole.add(idx);
               orphanRefused.add(idx);
-              outcome.orphanDeliveriesRefused += 1;
+              // Counted once per EVENT: the copy and its folded siblings
+              // are one refused delivery. (`sameEvent` is defined here —
+              // both arms that reach this branch require an eventId.)
+              if (
+                sameEvent !== undefined && !orphanRefusedEvents.has(sameEvent)
+              ) {
+                orphanRefusedEvents.add(sameEvent);
+                outcome.orphanDeliveriesRefused += 1;
+              }
             } else {
               requeued.add(idx);
             }
@@ -2275,21 +2298,40 @@ export class WaveAccumulator
     // a seq-LESS entry into a stream sidecar carries a NEW event — the
     // engine's admission requires its declaration to stamp the stream
     // seq (a rewrite — an already-stamped entry — needs none). An
-    // entry whose event was PROCESSED IN THIS WAVE — a surviving
-    // event-handler contribution carries its eventId — is marked
-    // `consequenced` in the batch op (a CLONE; the sealed arrays are
-    // caller-shared), so the entry and its consequences commit
+    // entry whose event was PROCESSED IN THIS WAVE — the surviving
+    // contribution of the LT1 in-process copy's OWN handler run
+    // (`context.lt1 === true`; stamped by the SpaceServer from
+    // `served.lt1`, cell.ts's serving arm) carries its eventId — is
+    // marked `consequenced` in the batch op (a CLONE; the sealed arrays
+    // are caller-shared), so the entry and its consequences commit
     // together (events.md §2's "an entry processed in its own wave
     // commits together with its consequences"; the engine admits
     // derived new appends already consequenced). A run that REQUEUED
     // is not a survivor: its entry lands unmarked and the next wave's
     // drain re-runs it (C8b); an emitter that requeued withdrew the
     // entry with its contribution (C8d).
+    //
+    // ONLY the copy's own run marks (stage C build W3 independent review
+    // B1, 2026-08-19): an event can contribute SEVERAL transactions to
+    // one wave — the handler run plus a separate event-handler-stamped
+    // sibling carrying the same eventId (the served navigateTo's intent
+    // tx, committed inline mid-run). When the sibling seals into the
+    // appending wave and the handler's own tx does not (an async handler
+    // still running when the flush deadline closed the wave — the copy is
+    // then refused at its late seal, α1b), marking the entry on the
+    // sibling's survival alone declared the event processed while its
+    // consequences never landed: the drain saw a consequenced entry and
+    // never re-delivered — a LOST delivery (zero completed runs), the
+    // RULED sentence broken from the other side. A sibling-only survival
+    // now leaves the entry UNMARKED; the drain re-runs the handler with a
+    // streamEntry (its re-issued intent dedupes on navigateTo's
+    // deterministic nonce at apply), and the effect lands exactly once.
     const survivedEventIds = new Set<string>();
     for (const contribution of this.#survivors(requeued, droppedWhole)) {
       if (
         contribution.context.kind === "event-handler" &&
-        contribution.context.eventId !== undefined
+        contribution.context.eventId !== undefined &&
+        contribution.context.lt1 === true
       ) {
         survivedEventIds.add(contribution.context.eventId);
       }

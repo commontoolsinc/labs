@@ -1773,7 +1773,7 @@ describe("Phase 3 events-down (serving side)", () => {
     };
   };
 
-  it("(α1)+(α1b)+(α4) the QUEUED leftover and the in-flight one, side by side: a served parent emits TWO LT1 cascade children; the first is still RUNNING when the flush deadline fires (an async handler parked on a test gate), the second sits QUEUED behind it — the deadline decision PURGES the queued copy (no notice on its entry) and the running copy, completing after its wave closed, is REFUSED at the seal; the next drain delivers both entries ONCE each with a streamEntry; per-event: one consequence commit each, the child effect applied exactly twice in total (mutations: purge skipped → the queued copy runs after the close and is refused at the seal instead, `lt1LeftoversPurged` 0 / `lt1LateSealsRefused` 2; purge AND refusal skipped → the effect applied four times)", async () => {
+  it("(α1)+(α1b)+(α4) the QUEUED leftover and the in-flight one, side by side: a served parent emits TWO LT1 cascade children; the first is still RUNNING when the flush deadline fires (an async handler parked on a test gate), the second sits QUEUED behind it — the deadline decision PURGES the queued copy (no notice on its entry) and the running copy, completing after its wave closed, is REFUSED at the seal; the next drain delivers both entries ONCE each with a streamEntry; per-event: one consequence commit each, the child effect applied exactly twice in total (mutations: purge skipped → the queued copy runs after the close and is refused at the seal instead, `lt1LeftoversPurged` 0 / `lt1LateSealsRefused` 2; purge AND refusal AND the orphan arm's absent-emitter clause skipped → the effect applied four times; purge AND refusal skipped with the orphan arm intact → the late copies are orphan-dropped in the next wave and the pin fails earlier, on the counters)", async () => {
     const w = await w3Setup("w3-purge", { flushDeadlineMs: 100 });
     const cancels: Array<() => void> = [];
     const gate = Promise.withResolvers<void>();
@@ -1829,6 +1829,24 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(childRuns).toEqual(["c1"]);
       expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
       expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
+
+      // The purge's DISCRIMINATOR (independent review m1): keep the gate
+      // held across several more flush deadlines with the drain's
+      // `streamEntry`-bearing copies c1'/c2' sitting QUEUED behind the
+      // parked c1 — every cut cycle runs the purge over that queue, and
+      // the purge must never reach a drain copy (`served.streamEntry !==
+      // undefined`). An over-reaching predicate (`served !== undefined`
+      // alone) purges them here: the count climbs past 1 and the drop
+      // chokepoint writes a `dropped` notice onto the durable entries —
+      // a LOST delivery the α pins' original timing could not see.
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(host!.stats().wavesBudgetExhausted).toBeGreaterThan(1);
+      expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
+      expect(host!.stats().events.processed).toBe(3);
+      for (const entry of w.entriesOf(s2Sidecar)) {
+        expect(entry.status).toBeUndefined();
+        expect(entry.consequenced).not.toBe(true);
+      }
 
       // Open the gate: c1's in-flight copy completes OUTSIDE its appending
       // wave → refused at the seal; the drain's c1' and c2' then run (the
@@ -2053,6 +2071,304 @@ describe("Phase 3 events-down (serving side)", () => {
       // rival's consequence landed once. Every consequenced eventId in
       // the store has a durable entry behind it.
       expect(seen).toEqual(["rival"]);
+      expect(stats.events.orphanDeliveriesRefused).toBe(1);
+      const consequenced = (w.engine.database.prepare(
+        `SELECT consequence_of FROM "commit"
+         WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+      ).all() as Array<{ consequence_of: string }>).flatMap((row) =>
+        decodeMemoryBoundary(row.consequence_of) as unknown as string[]
+      );
+      const durableIds = new Set(
+        sidecarIdsIn(w.engine).flatMap((id) =>
+          w.entriesOf(id).map((entry) => entry.eventId)
+        ),
+      );
+      expect(consequenced.length).toBeGreaterThanOrEqual(1);
+      for (const id of consequenced) expect(durableIds.has(id)).toBe(true);
+    } finally {
+      gate.resolve();
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // The same-eventId SIBLING shape (independent review of W3, B1 / M1):
+  // an event can contribute SEVERAL transactions to one wave — the
+  // handler run plus a separate event-handler-stamped tx carrying the
+  // same eventId, in production the served navigateTo's intent tx
+  // (navigate-to.ts: `stampServerRun(intentTx, {kind: "event-handler",
+  // eventId: context.eventId, …}); intentTx.commit()`, committed inline
+  // mid-run). The two pins below stamp such a sibling directly from the
+  // LT1 child's handler body and pin that neither (α1b) nor (α3) treats
+  // the sibling's survival as the handler's: a seq-less entry is marked
+  // consequenced only by the LT1 copy's OWN run (`lt1 === true`), and an
+  // orphan-refused copy takes its siblings down with it.
+  // ---------------------------------------------------------------------
+
+  /** A sibling contribution of the running handler's event: a separate
+   * event-handler-stamped tx carrying `tx.dispatchedEventId`, committed
+   * inline (the served navigateTo intent shape), writing `n + 1` into
+   * `sideCell` — a NON-idempotent witness so a doubled or a lost sibling
+   * is visible. */
+  const stampSibling = (
+    serving: Runtime,
+    tx: IExtendedStorageTransaction,
+    sideCell: Cell<{ n?: number }>,
+  ): void => {
+    const side = serving.edit();
+    serving.stampServerRun(side, {
+      actionId: `pin/sibling-intent:${tx.dispatchedEventId}`,
+      kind: "event-handler",
+      eventId: tx.dispatchedEventId!,
+    });
+    sideCell.withTx(side).set({
+      n: (sideCell.withTx(side).get()?.n ?? 0) + 1,
+    });
+    side.commit();
+  };
+
+  it("(α1b)+(α4) + a same-eventId SIBLING tx (independent review B1 — a LOST delivery on the build tip, a regression vs the W1 base): an ASYNC LT1 cascade child commits a separate event-handler-stamped tx carrying its own eventId (the served navigateTo intent shape) BEFORE an await that spans the flush deadline; the sibling seals into the appending wave and survives, the handler's own tx seals late and is REFUSED — the entry must land UNMARKED (only the LT1 copy's OWN run may mark its seq-less entry, never a sibling) so the drain re-delivers it: the child's effect lands exactly once, one consequence commit names the event, the sibling's write stands (mutation: the `lt1 === true` gate on the seq-less marking removed → the sibling's survival marks the entry consequenced, the refused copy is never re-delivered, the effect lands ZERO times — `processed` 1, `counterC` 0)", async () => {
+    const w = await w3Setup("w3-sibling-late", { flushDeadlineMs: 150 });
+    const cancels: Array<() => void> = [];
+    const childGate = Promise.withResolvers<void>();
+    let childRuns = 0;
+    // The sibling's target doc, created by the client (native commit).
+    const sideClient = clientRuntime.getCell<{ n?: number }>(
+      space,
+      "w3-sibling-late-side",
+      undefined,
+    );
+    await sideClient.sync();
+    {
+      const tx = clientRuntime.edit();
+      sideClient.withTx(tx).set({ n: 0 });
+      expect((await tx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+    const sideServing = w.serving.getCell<{ n?: number }>(
+      space,
+      "w3-sibling-late-side",
+      undefined,
+    );
+    await sideServing.sync();
+    try {
+      cancels.push(w.serving.scheduler.addEventHandler(
+        (tx: IExtendedStorageTransaction, _event: unknown) => {
+          w.servingP.withTx(tx).set({
+            n: (w.servingP.withTx(tx).get()?.n ?? 0) + 1,
+          });
+          w.servingS2.withTx(tx).send({ tag: "child" } as never);
+        },
+        w.servingS1.getAsNormalizedFullLink(),
+      ));
+      // The CHILD (async): on its FIRST dispatch — the LT1 in-process
+      // copy — it commits the sibling tx inline and THEN parks on the
+      // gate across the deadline; its consequence (the counter bump) is
+      // written after the gate. The drain's re-run (the second dispatch)
+      // does not re-issue the sibling: in production the re-run's
+      // re-issue is navigateTo's deterministic-nonce append, which the
+      // engine dedupes at apply — the sibling's effect is one-shot either
+      // way, and this pin's witness is the non-idempotent bump.
+      cancels.push(w.serving.scheduler.addEventHandler(
+        async (tx: IExtendedStorageTransaction, _event: unknown) => {
+          childRuns += 1;
+          if (childRuns === 1) stampSibling(w.serving, tx, sideServing);
+          await childGate.promise;
+          w.servingC.withTx(tx).set({
+            n: (w.servingC.withTx(tx).get()?.n ?? 0) + 1,
+          });
+        },
+        w.servingS2.getAsNormalizedFullLink(),
+      ));
+
+      w.s1.send({ tag: "root" } as never);
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      const s2Sidecar = w.sidecarOf(w.s2);
+      await waitUntil(
+        () => w.entriesOf(s2Sidecar).length === 1,
+        "the child's entry to land",
+        20_000,
+      );
+      // Several deadlines later (the gate still held): the sibling is
+      // durable, and the entry it rode beside is UNMARKED — the sibling's
+      // survival is not the handler's completion. (On the build tip the
+      // entry was marked here: `survivedEventIds` admitted any surviving
+      // event-handler contribution with the eventId.)
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      expect(w.engineN(sideServing)).toBe(1);
+      expect(w.entriesOf(s2Sidecar)[0].consequenced).not.toBe(true);
+      // … so the next drain re-queued the entry's `streamEntry` copy
+      // behind the parked in-process one (processed: root + the drain's
+      // copy = 2).
+      await waitUntil(
+        () => host!.stats().events.processed === 2,
+        "the drain to queue the entry's copy behind the parked one",
+        20_000,
+      );
+      expect(childRuns).toBe(1);
+      expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
+
+      // Open the gate: the in-flight copy seals outside its appending
+      // wave → refused; the drain's copy runs next and completes WITH
+      // the mark.
+      childGate.resolve();
+      await waitUntil(
+        () => w.entriesOf(s2Sidecar)[0]?.consequenced === true,
+        "the drain's copy to consequence the entry",
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await w.serving.idle();
+
+      const childEntry = w.entriesOf(s2Sidecar)[0];
+      const stats = host!.stats();
+      // THE PIN: the handler's non-idempotent effect landed exactly ONCE
+      // (the drain's completed run — never zero: the RULED sentence is
+      // one durable entry, one COMPLETED run), the sibling's write stands
+      // once (it survived the appending wave; nothing withdrew it), the
+      // handler body ran twice (the refused copy + the drain's), one
+      // refusal, no purge, no orphan, no notice on the entry.
+      expect(w.engineN(w.counterC)).toBe(1);
+      expect(w.engineN(sideServing)).toBe(1);
+      expect(w.engineN(w.counterP)).toBe(1);
+      expect(childRuns).toBe(2);
+      expect(stats.events.lt1LateSealsRefused).toBe(1);
+      expect(stats.events.lt1LeftoversPurged).toBe(0);
+      expect(stats.events.orphanDeliveriesRefused).toBe(0);
+      expect(stats.events.processed).toBe(2);
+      expect(stats.events.appended).toBe(1);
+      // The store-side per-event commit count reads TWO here — the
+      // sibling's contribution named the event in the appending wave's
+      // commit, the drain's completed run names it one wave later: the
+      // event's contributions SPLIT across two waves (the appending wave
+      // "could not process" the entry, events.md §2 — it commits as
+      // durable input and reprocesses; the sibling's early landing is
+      // idempotent on the re-run by navigateTo's nonce dedupe). Recorded
+      // as what it is: this count over-counts a split delivery exactly as
+      // it under-counts a same-wave double (W0's l1) — the handler's
+      // effect is the run-count witness, never this number.
+      expect(w.consequenceCommitsOf(childEntry.eventId)).toBe(2);
+      expect(childEntry.consequenced).toBe(true);
+      expect(childEntry.status).toBeUndefined();
+      expect(childEntry.error).toBeUndefined();
+    } finally {
+      childGate.resolve();
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1)", async () => {
+    const w = await w3Setup("w3-sibling-orphan", { flushDeadlineMs: 30_000 });
+    const cancels: Array<() => void> = [];
+    const gate = Promise.withResolvers<void>();
+    const sideClient = clientRuntime.getCell<{ n?: number }>(
+      space,
+      "w3-sibling-orphan-side",
+      undefined,
+    );
+    await sideClient.sync();
+    {
+      const tx = clientRuntime.edit();
+      sideClient.withTx(tx).set({ n: 0 });
+      expect((await tx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+    const sideServing = w.serving.getCell<{ n?: number }>(
+      space,
+      "w3-sibling-orphan-side",
+      undefined,
+    );
+    await sideServing.sync();
+    try {
+      const servingSeen = w.servingC;
+      // The s2 handler records every tag; for the derivation's "ping" it
+      // ALSO commits the sibling tx inline (the intent half).
+      cancels.push(w.serving.scheduler.addEventHandler(
+        (tx: IExtendedStorageTransaction, event: unknown) => {
+          const tag = (event as { tag?: string })?.tag ?? "?";
+          if (tag === "ping") stampSibling(w.serving, tx, sideServing);
+          const current = servingSeen.withTx(tx).get() as
+            | { seen?: string[] }
+            | undefined;
+          servingSeen.withTx(tx).set({
+            seen: [...(current?.seen ?? []), tag],
+          } as never);
+        },
+        w.servingS2.getAsNormalizedFullLink(),
+      ));
+      const trigger = w.serving.getCell<{ v?: number }>(
+        space,
+        "w3-sibling-orphan-trigger",
+        undefined,
+      );
+      await trigger.sync();
+      const emitter = (tx: IExtendedStorageTransaction): void => {
+        trigger.withTx(tx).get();
+        w.servingS2.withTx(tx).send({ tag: "ping" } as never);
+      };
+      const seenView = () =>
+        (w.servingC.get() as { seen?: string[] } | undefined)?.seen ?? [];
+      expect(seenView()).toEqual([]);
+
+      servingManager!.settleGate = gate.promise;
+      servingManager!.settleGateWhen = () => seenView().includes("ping");
+      let released = false;
+      try {
+        await w.serving.scheduler.run(emitter as never);
+        await waitUntil(
+          () => seenView().includes("ping"),
+          "the derivation's cascade copy to SEAL into the open wave",
+          20_000,
+        );
+        // The sibling sealed into the same open wave (visible through the
+        // sealed overlay).
+        await waitUntil(
+          () => (sideServing.get() as { n?: number } | undefined)?.n === 1,
+          "the sibling tx to SEAL into the open wave",
+          20_000,
+        );
+        w.s2.send({ tag: "rival" } as never);
+        await clientRuntime.idle();
+        await clientRuntime.storageManager.synced();
+        const s2Sidecar = w.sidecarOf(w.s2);
+        await waitUntil(
+          () =>
+            w.entriesOf(s2Sidecar).some((entry) =>
+              (entry.payload as { tag?: string } | undefined)?.tag === "rival"
+            ),
+          "the rival append to land",
+        );
+        gate.resolve();
+        released = true;
+      } finally {
+        if (!released) gate.resolve();
+        servingManager!.settleGate = undefined;
+        servingManager!.settleGateWhen = undefined;
+      }
+
+      const s2Sidecar = w.sidecarOf(w.s2);
+      await waitUntil(
+        () =>
+          w.entriesOf(s2Sidecar).length === 1 &&
+          w.entriesOf(s2Sidecar)[0].consequenced === true,
+        "the rival's entry to be the sidecar's only entry, consequenced",
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await w.serving.idle();
+
+      const stats = host!.stats();
+      const seen =
+        (Engine.read(w.engine, { id: w.counterC.getAsNormalizedFullLink().id })
+          ?.value as { seen?: string[] } | undefined)?.seen ?? [];
+      // THE PIN: the handler half never landed ("ping" unseen), the
+      // SIBLING half never landed either (the intent doc still reads 0),
+      // the refusal counted ONCE for the event (two contributions
+      // folded), and every consequenced id has a durable entry.
+      expect(seen).toEqual(["rival"]);
+      expect(w.engineN(sideServing)).toBe(0);
       expect(stats.events.orphanDeliveriesRefused).toBe(1);
       const consequenced = (w.engine.database.prepare(
         `SELECT consequence_of FROM "commit"
