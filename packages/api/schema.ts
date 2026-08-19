@@ -452,7 +452,7 @@ declare module "commonfabric" {
     <S extends JSONSchema = JSONSchema>(
       target: FactoryInput<WishParams>,
       schema: S,
-    ): Reactive<WishState<Schema<S>> & UIRenderable>;
+    ): Reactive<WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload

@@ -75,12 +75,21 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
+  // The object literal is the one annotated with the builder surface type.
+  // `factory.ts` annotates it rather than casting, so the compiler checks it
+  // against what `@commonfabric/api` declares; that annotation is the durable
+  // marker for it, where the name of the local holding it is not.
+  const isBuilderSurfaceAnnotation = (node: ts.VariableDeclaration) =>
+    node.type !== undefined &&
+    sourceText.slice(node.type.pos, node.type.end).includes(
+      "BuilderFunctionsAndConstants",
+    );
+
   let commonfabricObject: ts.ObjectLiteralExpression | undefined;
   ts.forEachChild(sourceFile, function visit(node) {
     if (
       ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === "commonfabric" &&
+      isBuilderSurfaceAnnotation(node) &&
       node.initializer
     ) {
       const initializer = unwrapExpression(node.initializer);

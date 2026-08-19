@@ -7,21 +7,21 @@
 // These helpers compile to plain data; the transformer/runtime do not special-
 // case them.
 
-import type { FabricValue } from "@commonfabric/api";
+import type {
+  FabricValue,
+  JSONSchemaTypes,
+  SqliteColumnSchema,
+  SqliteColumnSpec,
+} from "@commonfabric/api";
 import { CF_LINK_SUFFIX, isCfLinkColumn } from "./columns.ts";
 import { buildRowLabelSpec, type RowLabelRule } from "./row-label.ts";
 
-export type ColumnSchema = {
-  type: string;
-
-  /** Verbatim SQLite column type/constraints for DDL, e.g. "integer primary key". */
-  sqlType: string;
-
-  /** Marks a `_cf_link` column (stored TEXT, surfaced as a Cell). */
-  cfLink?: true;
-
-  [key: string]: FabricValue;
-};
+/**
+ * One column of a table as this module stores it: what
+ * `@commonfabric/api` declares to a pattern author, with the `sqlType` that
+ * `normalizeColumn` supplies for a column declared without one.
+ */
+export type ColumnSchema = SqliteColumnSchema & { sqlType: string };
 
 export type TableSchema = {
   type: "object";
@@ -31,7 +31,7 @@ export type TableSchema = {
 };
 
 /** Column spec: a shorthand SQL type string, or an explicit column schema. */
-export type ColumnSpec = string | ColumnSchema;
+export type ColumnSpec = SqliteColumnSpec;
 
 /** A `_cf_link` column: TEXT in SQLite, a Cell<T> in TypeScript. */
 export function cfLink<_T = unknown>(): ColumnSchema {
@@ -64,7 +64,7 @@ export function assertSafeColumn(name: string, sqlType: string): void {
 }
 
 // Map the leading SQL type word to a JSON Schema `type`.
-function jsonTypeForSql(sqlType: string): string {
+function jsonTypeForSql(sqlType: string): JSONSchemaTypes {
   const head = sqlType.trim().toLowerCase().split(/\s+/)[0] ?? "";
   switch (head) {
     case "integer":

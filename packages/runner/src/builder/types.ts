@@ -1,90 +1,21 @@
 import type {
-  ActionFunction,
-  AsCell,
-  AsComparableCell,
-  AsOpaqueCell,
-  AsReadonlyCell,
   AssertCaptureFunction,
-  AssertFunction,
   AssertRenderPartsFunction,
-  AsStream,
-  AsWriteonlyCell,
-  ByRefFunction,
   Cell,
-  CellFromUrlFunction,
   CellScope,
-  CellTypeConstructor,
-  CfDataFunction,
-  CfSqliteHelpers,
-  CompileAndRunFunction,
-  ComputedFunction,
-  DataFileFunction,
-  EntityRefToStringFunction,
-  EqualsFunction,
   FabricExecValue,
   FactoryInput,
-  FetchBinaryFunction,
-  FetchJsonFunction,
-  FetchJsonUncheckedFunction,
-  FetchProgramFunction,
-  FetchTextFunction,
-  GenerateObjectFunction,
-  GenerateTextFunction,
-  GetEntityIdFunction,
-  GetPatternEnvironmentFunction,
-  HandlerFunction,
   HFunction,
-  IfElseFunction,
-  InspectConfLabelFunction,
   JSONSchema,
   JSONValue,
-  JSXElement,
-  LiftFunction,
-  LLMDialogFunction,
-  LLMFunction,
   Module,
-  NavigateToFunction,
   Pattern,
-  PatternToolFunction,
   Reactive,
   schema as schemaFunction,
   SELF as SELFSymbol,
-  SqliteCfLinkFunction,
-  SqliteDatabaseFunction,
-  SqliteQueryFunction,
-  SqliteTableFunction,
-  StreamDataFunction,
-  StrFunction,
-  UiActionProps,
-  UiDisclosureProps,
-  UiPromptSlotProps,
-  UIVariantFunction,
-  UnlessFunction,
-  WhenFunction,
-  WishFunction,
 } from "@commonfabric/api";
-import { toSchema } from "@commonfabric/api";
+import type * as DeclaredApi from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import {
-  type FabricInstance,
-  type FabricPrimitive,
-  type FabricSpecialObject,
-  type toCompactDebugString,
-  type toIndentedDebugString,
-  type valueEqual,
-} from "@commonfabric/data-model";
-import type {
-  FabricError,
-  FabricLink,
-} from "@commonfabric/data-model/fabric-instances";
-import type {
-  FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-} from "@commonfabric/data-model/fabric-primitives";
 import {
   CHIP_UI,
   FRAMEWORK_RESULT_KEYS,
@@ -95,6 +26,11 @@ import {
   TYPE,
   UI,
 } from "@commonfabric/utils/framework-result-keys";
+import type { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import type { valueEqual } from "@commonfabric/data-model";
+import type * as RowLabelHelpers from "@commonfabric/memory/sqlite/row-label";
+import type { cfLink, table } from "@commonfabric/memory/sqlite/schema";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { ImplementationIdentity } from "../cfc/types.ts";
@@ -397,120 +333,177 @@ export type Frame = {
   inSpaceCounter?: number;
 };
 
-// Builder functions interface
-export interface BuilderFunctionsAndConstants {
-  // Pattern creation
+/**
+ * The type of the `commonfabric` module as pattern code sees it. A pattern
+ * compiles against `types/commonfabric.d.ts`, which is `packages/api/index.ts`,
+ * and the sandbox binds that same module name to the object `createBuilder()`
+ * returns. So these declarations describe that object, and every value they
+ * declare has to be there.
+ *
+ * `@commonfabric/api/schema` adds schema-carrying overloads to several of these
+ * declarations by module augmentation, and this file imports it above, so those
+ * overloads are part of what is required here.
+ */
+type DeclaredSurface = typeof DeclaredApi;
+
+/**
+ * The bindings whose implementation type does not satisfy the type
+ * `@commonfabric/api` declares for them, each mapped to the type the binding
+ * actually has. Every other name on the pattern surface is required to match
+ * its declaration exactly, so this is the whole of what the compiler is not
+ * checking.
+ *
+ * - `table` takes a column map, and a parameter is checked the other way round
+ *   from a result: the declared `Record<string, SqliteColumnSpec>` has to be
+ *   assignable to the implementation's own generic column map, which it is not.
+ * - `cfSqlite` gathers `table` with the row-label helpers, whose declarations
+ *   say `unknown` where the implementation says which label shape it takes. So
+ *   the whole namespace is taken from the implementation, which is also what
+ *   keeps its members agreeing with each other: a rule built from the helpers
+ *   has to be one `table` accepts.
+ * - `entityRefToString` and `valueEqual` come from `@commonfabric/data-model`
+ *   and take fabric values as parameters, so the same reversal applies. The
+ *   pattern-visible `FabricHash` and `FabricValue` are structural views of
+ *   classes whose private fields no interface can carry, which is why no
+ *   declaration can be assignable to them.
+ * - `FabricKeyPair` is the one fabric class in the same position: its second
+ *   constructor takes the key bytes, so the declared `FabricBytes` would have
+ *   to be assignable to the class. Its instance side is compared, both here and
+ *   by the `satisfies` beside the class.
+ *
+ * {@link StaleDriftingBinding} keeps this set from outliving its reasons.
+ */
+interface DriftingBindings {
+  table: typeof table;
+  cfSqlite:
+    & Pick<
+      typeof RowLabelHelpers,
+      Exclude<keyof DeclaredSurface["cfSqlite"], "table" | "cfLink">
+    >
+    & { table: typeof table; cfLink: typeof cfLink };
+  entityRefToString: typeof entityRefToString;
+  valueEqual: typeof valueEqual;
+  FabricKeyPair: typeof FabricKeyPair;
+}
+
+/**
+ * A member of {@link DriftingBindings} whose implementation has come back into
+ * line with its declaration. Such a member no longer needs an entry, and the
+ * assertion below stops compiling until the entry is removed -- so the set can
+ * only shrink.
+ */
+type StaleDriftingBinding = {
+  [K in keyof DriftingBindings]: DriftingBindings[K] extends DeclaredSurface[K]
+    ? K
+    : never;
+}[keyof DriftingBindings];
+
+/** Fails to compile when `T` is anything but `never`. */
+type AssertNever<T extends never> = T;
+
+/** Fails to compile unless `Bound` satisfies `Declared`. */
+type AssertSatisfies<Bound extends Declared, Declared> = Bound;
+
+export type NoStaleDriftingBindings = AssertNever<StaleDriftingBinding>;
+
+/**
+ * `pattern` is the one name below written out because its binding is a
+ * different type rather than a richer one, so it is the one name the interface
+ * cannot check for itself. This says what the two still have in common:
+ * whatever else `PatternBuilder` carries, a pattern author's call has to be one
+ * `PatternFunction` describes.
+ */
+export type PatternBuilderSatisfiesDeclaration = AssertSatisfies<
+  PatternBuilder,
+  DeclaredSurface["pattern"]
+>;
+
+/**
+ * Every declared name the interface below does not require, written out.
+ *
+ * This was once two rules -- drop a `unique symbol`, drop anything the CFC
+ * authoring vocabulary also exports -- which read well and were the wrong
+ * shape. A rule reaches as far as it reaches, so a declaration that fell
+ * through one would not fail; it would quietly stop being required, which is
+ * the one outcome all of this exists to prevent. `SELF` was the standing proof:
+ * a `unique symbol` and so a brand by that rule, yet a real value a pattern
+ * reads, required only because someone noticed and wrote it back in.
+ *
+ * Written out instead, the default is the safe one. A declaration is required
+ * unless it appears here, so a new one is checked without anyone deciding
+ * anything, and exempting one is a visible edit to this list with its reason
+ * beside it.
+ */
+type IntentionallyUnrequired =
+  // Brands. Each keys a branded type and has no runtime existence.
+  | "CELL_BRAND"
+  | "CELL_INNER_TYPE"
+  | "CELL_LIKE"
+  | "CELL_RESULT_TYPE"
+  | "DEFAULT_MARKER"
+  | "FRAMEWORK_PROVIDED_MARKER"
+  | "SCOPE_BRAND"
+  // The CFC authoring vocabulary. `packages/api/index.ts` re-exports the types
+  // out of `cfc.ts` with `export type *`, and TypeScript carries the value
+  // meaning of those names into the module's type even though nothing is
+  // re-exported at runtime. Their runtime home is `commonfabric/cfc`, bound
+  // alongside this module in `sandbox/runtime-modules.ts`. Not
+  // `CFC_CANONICAL_ALIAS_NAMES`, which `index.ts` re-exports as a value, so a
+  // pattern reaches that one through `commonfabric` and it is required.
+  | "CFC_ATOM_TYPE"
+  | "CFC_COMPILED_BY_ATOM"
+  | "CFC_COMPILED_BY_ATOM_PREFIX"
+  | "CFC_CONCEPT_KIND"
+  | "CFC_FUSE_ATOM_CLASS"
+  | "CFC_RUNTIME_SUBJECT"
+  | "THIS_POLICY"
+  | "cfcAtom"
+  | "cfcPattern"
+  | "exchangeRule"
+  | "exchangeRules"
+  | "v";
+
+/**
+ * A name exempted above that `@commonfabric/api` no longer declares. Its entry
+ * exempts nothing, and is either a typo or what a removed declaration left
+ * behind, so this stops compiling until the entry goes.
+ */
+export type NoStaleIntentionallyUnrequired = AssertNever<
+  Exclude<IntentionallyUnrequired, keyof DeclaredSurface>
+>;
+
+/**
+ * The `commonfabric` module the sandbox hands a pattern.
+ *
+ * Every value `@commonfabric/api` declares is required here, with the declared
+ * type, because that is what a pattern was type-checked against: a declaration
+ * with no binding behind it compiles and then reads as `undefined` when the
+ * pattern runs. What the members below add to that is a binding whose type says
+ * more than the declaration does, and the bindings a pattern cannot name at
+ * all.
+ */
+export interface BuilderFunctionsAndConstants extends
+  Omit<
+    DeclaredSurface,
+    IntentionallyUnrequired | keyof DriftingBindings | "pattern"
+  >,
+  DriftingBindings {
+  /**
+   * Carries the pattern-building methods (`inSpace`, and the rest) alongside
+   * the call signature `PatternFunction` declares.
+   */
   pattern: PatternBuilder;
-  patternTool: PatternToolFunction;
 
-  // Module creation
-  lift: LiftFunction;
-  handler: HandlerFunction;
-  action: ActionFunction;
-  computed: ComputedFunction;
-  assert: AssertFunction;
-
-  // Operand recording for `assert` bodies. The assert-diagnostics transformer
-  // emits calls to these against the injected `__cfHelpers` object; they are
-  // not meant to be called from authored code. `assertCapture` stashes each
-  // operand's resolved value; `assertRenderParts` renders them into the
-  // record's `parts`, but only when the assertion failed.
+  // The rest of this interface is what the sandbox binds beyond what
+  // `@commonfabric/api` declares. Pattern source cannot name any of it: the
+  // assert-diagnostics transformer reaches the two operand recorders through
+  // the injected `__cfHelpers` object, JSX lowering emits calls to `h`, and the
+  // two schemas are read by the runner rather than by pattern code.
   assertCapture: AssertCaptureFunction;
   assertRenderParts: AssertRenderPartsFunction;
-
-  // Built-in modules
-  str: StrFunction;
-  ifElse: IfElseFunction;
-  when: WhenFunction;
-  unless: UnlessFunction;
-  uiVariant: UIVariantFunction;
-  llm: LLMFunction;
-  llmDialog: LLMDialogFunction;
-  generateObject: GenerateObjectFunction;
-  generateText: GenerateTextFunction;
-  fetchBinary: FetchBinaryFunction;
-  cellFromUrl: CellFromUrlFunction;
-  fetchText: FetchTextFunction;
-  fetchJson: FetchJsonFunction;
-  fetchJsonUnchecked: FetchJsonUncheckedFunction;
-  fetchProgram: FetchProgramFunction;
-  streamData: StreamDataFunction;
-  compileAndRun: CompileAndRunFunction;
-  dataFile: DataFileFunction;
-  sqliteDatabase: SqliteDatabaseFunction;
-  sqliteQuery: SqliteQueryFunction;
-  table: SqliteTableFunction;
-  cfLink: SqliteCfLinkFunction;
-  cfSqlite: CfSqliteHelpers;
-  navigateTo: NavigateToFunction;
-  inspectConfLabel: InspectConfLabelFunction;
-  wish: WishFunction;
-
-  // Cell creation
-  cell: CellTypeConstructor<AsCell>["of"];
-  equals: EqualsFunction;
-
-  // Cell constructors with static methods
-  Cell: CellTypeConstructor<AsCell>;
-  Writable: CellTypeConstructor<AsCell>; // Alias for Cell with clearer write-access semantics
-  OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
-  Stream: CellTypeConstructor<AsStream>;
-  ComparableCell: CellTypeConstructor<AsComparableCell>;
-  ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
-  WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
-
-  // Utility
-  byRef: ByRefFunction;
-
-  // Environment
-  getPatternEnvironment: GetPatternEnvironmentFunction;
-
-  // Entity utilities
-  getEntityId: GetEntityIdFunction;
-  entityRefToString: EntityRefToStringFunction;
-
-  // Constants
-  SELF: typeof SELF;
-  TYPE: typeof TYPE;
-  NAME: typeof NAME;
-  UI: typeof UI;
-  TILE_UI: typeof TILE_UI;
-  CHIP_UI: typeof CHIP_UI;
-  FS: typeof FS;
-
-  // Schema utilities
-  schema: typeof schema;
-  toSchema: typeof toSchema;
-  __cf_data: CfDataFunction;
+  h: HFunction;
   AuthSchema: typeof AuthSchema;
   WebhookConfigSchema: typeof WebhookConfigSchema;
-
-  // Render utils
-  h: HFunction;
-  UiAction: (props: UiActionProps) => JSXElement;
-  UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
-  UiDisclosure: (props: UiDisclosureProps) => JSXElement;
-
-  // `FabricSpecialObject` classes, in the order they are declared in
-  // api/index.ts.
-  FabricSpecialObject: typeof FabricSpecialObject;
-  FabricInstance: typeof FabricInstance;
-  FabricPrimitive: typeof FabricPrimitive;
-  FabricEpochNsec: typeof FabricEpochNsec;
-  FabricEpochDay: typeof FabricEpochDay;
-  FabricHash: typeof FabricHash;
-  FabricLink: typeof FabricLink;
-  FabricBytes: typeof FabricBytes;
-  FabricRegExp: typeof FabricRegExp;
-  FabricKeyPair: typeof FabricKeyPair;
-  FabricError: typeof FabricError;
-
-  // Debug stringifiers
-  toCompactDebugString: typeof toCompactDebugString;
-  toIndentedDebugString: typeof toIndentedDebugString;
-
-  // Value comparison
-  valueEqual: typeof valueEqual;
 }
 
 // Runtime interface needed by createCell
