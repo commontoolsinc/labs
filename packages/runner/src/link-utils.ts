@@ -1,5 +1,6 @@
 import { MetaLinkField } from "@commonfabric/api";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -239,17 +240,20 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
  * with the flag off. A reference whose closure the registry cannot supply
  * stays a reference; the traversal's loader gates that read either way.
  */
-export function inlineExternalSchemaRefsInValue<T>(value: T): T {
-  return mapLinkSchemas(value as never, (schema) => {
+export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
     if (!isObjectNotArray(schema)) return schema;
     const ref = (schema as JSONSchemaObj).$ref;
     if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
     try {
       // Recomposition never mints an empty `$defs` (a closure of one
-      // document returns the body alone), so the result rides as it is.
+      // document returns the body alone), so the result rides as it is. A
+      // schema document is plain JSON, hence a FabricValue.
       return internSchema(
         recomposeSchema(ref, lookupSchemaDocument),
-      ) as never;
+      ) as FabricValue;
     } catch {
       return schema;
     }
