@@ -2,6 +2,7 @@
 // `debug_view_support.ts`; see there for why the suite spans several files.
 
 import type { RawDataProvenance } from "../../patterns/agent-sessions-debug/main.tsx";
+import { resolvedSchema } from "../../runner/test/schema-ref-helpers.ts";
 import { SESSION_PAGE_SIZE } from "../../patterns/agent-sessions-debug/presentation.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { AgentFabricTarget } from "@commonfabric/agents-connector/fabric";
@@ -61,11 +62,22 @@ Deno.test("debug pattern accepts empty target cells before collection", async ()
       ),
       false,
     );
-    const argumentSchema = manager.getArgument(piece.getCell())
-      .getAsNormalizedFullLink().schema as DebugArgumentSchema;
+    // The stored link schema rides as a content-addressed reference;
+    // recompose it and locate the definitions by shape — recomposition
+    // derives `$defs` names from content hashes, not the authored ones.
+    const argumentSchema = resolvedSchema(
+      manager.getArgument(piece.getCell()).getAsNormalizedFullLink().schema,
+    ) as DebugArgumentSchema;
+    const definitions = Object.values(
+      argumentSchema.$defs ?? {},
+      // deno-lint-ignore no-explicit-any
+    ) as any[];
+    const sessionIndexInput = definitions.find((definition) =>
+      definition?.properties?.sources && definition?.properties?.sessions
+    );
+    assertEquals(sessionIndexInput !== undefined, true);
     for (const field of ["sources", "sessions"] as const) {
-      const item = argumentSchema.$defs?.SessionIndexInput?.properties?.[field]
-        ?.items;
+      const item = sessionIndexInput?.properties?.[field]?.items;
       assertEquals(
         item?.asCell?.includes("opaque"),
         true,
@@ -75,11 +87,16 @@ Deno.test("debug pattern accepts empty target cells before collection", async ()
         undefined,
       );
     }
+    const publishedSessionInput = definitions.find((definition) =>
+      definition?.properties?.active && definition?.properties?.archived
+    );
+    assertEquals(publishedSessionInput !== undefined, true);
     for (const field of ["active", "archived"] as const) {
-      const alternatives = argumentSchema.$defs?.PublishedSessionInput
-        ?.properties?.[field]?.anyOf ?? [];
+      const alternatives = publishedSessionInput?.properties?.[field]?.anyOf ??
+        [];
+      // deno-lint-ignore no-explicit-any
       assertEquals(
-        alternatives.some((schema) =>
+        alternatives.some((schema: any) =>
           schema.type === "null" ||
           (Array.isArray(schema.type) && schema.type.includes("null"))
         ),
@@ -87,9 +104,7 @@ Deno.test("debug pattern accepts empty target cells before collection", async ()
       );
     }
     assertEquals(
-      argumentSchema.$defs?.PublishedSessionInput?.required?.includes(
-        "driver",
-      ) ?? false,
+      publishedSessionInput?.required?.includes("driver") ?? false,
       false,
     );
     assertEquals(piece.name(), "Agent sessions");
