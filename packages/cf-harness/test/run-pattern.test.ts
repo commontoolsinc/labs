@@ -3,14 +3,14 @@ import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
-import { pieceId, resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
+  asSerializableValue,
   RUN_PATTERN_MAX_SOURCE_TEXT_BYTES,
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
@@ -995,6 +995,32 @@ describe("run-pattern", () => {
       expect(output.value).toEqual({ titleLength: 6 });
     });
 
+    it("returns a `cancelled` output when the signal aborts while the settle race is underway", async () => {
+      // The abort lands after the race over the settle barrier has been
+      // entered — a microtask later, not before — so the live race path
+      // itself answers, rather than the pre-aborted short-circuit.
+      const controller = new AbortController();
+      const runtimeWithSettled = runtime as unknown as {
+        settled: () => Promise<void>;
+      };
+      runtimeWithSettled.settled = () => {
+        queueMicrotask(() => controller.abort());
+        return new Promise<void>(() => {});
+      };
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+      }, { signal: controller.signal });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+    });
+
+    it("serializes a plain value and answers undefined for one JSON cannot carry", () => {
+      expect(asSerializableValue({ n: 1 })).toEqual({ n: 1 });
+      expect(asSerializableValue(7n)).toBeUndefined();
+    });
+
     it("returns a `cancelled` output and stops the piece when the signal aborts during the settle barrier", async () => {
       const controller = new AbortController();
       // Abort exactly when the tool reaches its post-create barrier, and
@@ -1027,405 +1053,6 @@ describe("run-pattern", () => {
       expect(result.runState.status).toBe("completed");
     });
 
-    it("returns a `cancelled` output and stops the piece when the signal aborts during registration", async () => {
-      // Registration runs after the settle barrier, so it is its own window in
-      // which the caller can ask to stop. An abort there is the caller's
-      // instruction, not a failed publish: reporting `ok` with a
-      // `registrationError` would leave the piece running.
-      const controller = new AbortController();
-      // Abort exactly when the tool reaches the registry join, and hold the
-      // join open so only the signal can win the race.
-      const piecesWithAdd = pieces as unknown as {
-        add: (cells: unknown[]) => Promise<void>;
-      };
-      piecesWithAdd.add = () => {
-        controller.abort();
-        return new Promise<void>(() => {});
-      };
-      const stopped: unknown[] = [];
-      const runner = runtime.runner as unknown as {
-        stop: (cell: unknown) => unknown;
-      };
-      const originalStop = runner.stop.bind(runtime.runner);
-      runner.stop = (cell) => {
-        stopped.push(cell);
-        return originalStop(cell);
-      };
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("cancelled");
-      expect(output.message).toContain("cancelled");
-      expect(stopped.length).toBe(1);
-      expect(
-        (result.output as RunPatternToolSuccessOutput).registration,
-      ).toBeUndefined();
-      expect(
-        (result.output as RunPatternToolSuccessOutput).registrationError,
-      ).toBeUndefined();
-    });
-
-    it("removes the piece from the space's piece list when the signal aborts after the registry join and before the slug", async () => {
-      // The window the two publishing steps open: the piece has joined the
-      // list and has no slug yet. Stopping it does not remove it, so without
-      // the cancellation path removing it the space keeps a listed, slugless
-      // piece the caller was handed no reference to.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      // Let the join land for real, record that it landed, then abort and
-      // make the slug assignment fail at its first use of the controller — a
-      // call the removal path does not make — so the run is cancelled with
-      // the piece listed and unslugged, deterministically.
-      let listedAfterJoin = -1;
-      const originalGetSpace = pieces.getSpace.bind(pieces);
-      const originalAdd = pieces.add.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        listedAfterJoin = (await pieces.getRegisteredPieces()).length;
-        pieces.getSpace = () => {
-          pieces.getSpace = originalGetSpace;
-          throw new Error("slug assignment refused");
-        };
-        controller.abort();
-      };
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-      pieces.getSpace = originalGetSpace;
-      pieces.add = originalAdd;
-
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("cancelled");
-      // The join really happened, so the empty list below is a removal rather
-      // than a join that never landed.
-      expect(listedAfterJoin).toBe(1);
-      expect(await pieces.getRegisteredPieces()).toEqual([]);
-      // And no slug points at it either, so nothing addresses the piece the
-      // cancelled run left behind.
-      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
-        .toThrow();
-    });
-
-    it("leaves nothing registered when the signal aborts while the registry join is still in flight", async () => {
-      // Losing the race does not stop the publishing work: the cancelled
-      // output is handed back while the join is still running, and the join
-      // goes on to land afterwards. Without a mark the continuation reads, a
-      // cancelled run would list the piece and take the slug after saying it
-      // stopped.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      const originalAdd = pieces.add.bind(pieces);
-      const originalRemove = pieces.remove.bind(pieces);
-      // Held open until the tool has returned, so the abort provably wins
-      // the race with a join that then lands for real.
-      let releaseJoin!: () => void;
-      const joinReleased = new Promise<void>((resolve) => {
-        releaseJoin = resolve;
-      });
-      let listedAfterJoin = -1;
-      pieces.add = async (cells) => {
-        controller.abort();
-        await joinReleased;
-        await originalAdd(cells);
-        listedAfterJoin = (await pieces.getRegisteredPieces()).length;
-      };
-      // Resolves when the continuation has cleaned up after itself, so the
-      // assertions below read the state it left rather than a state it has
-      // not reached.
-      let removalLanded!: () => void;
-      const removed = new Promise<void>((resolve) => {
-        removalLanded = resolve;
-      });
-      pieces.remove = async (cell) => {
-        const removedPiece = await originalRemove(cell);
-        removalLanded();
-        return removedPiece;
-      };
-      // The other end the continuation can reach: the slug assignment, whose
-      // first act is to fetch the slug document. Waiting on whichever comes
-      // means the assertions run once the continuation has committed to a
-      // course, rather than waiting forever on a removal it never performs.
-      // Armed only once the join is released, so the availability check's own
-      // read of the same document earlier in the run is not mistaken for it.
-      let slugAssignmentReached!: () => void;
-      const slugAssignment = new Promise<void>((resolve) => {
-        slugAssignmentReached = resolve;
-      });
-      let watchingForSlugAssignment = false;
-      const slugEntity = JSON.stringify(
-        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
-      );
-      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
-      runtime.getCellFromEntityId = ((
-        ...args: Parameters<Runtime["getCellFromEntityId"]>
-      ) => {
-        if (
-          watchingForSlugAssignment && JSON.stringify(args[1]) === slugEntity
-        ) {
-          slugAssignmentReached();
-        }
-        return originalGetCell(...args);
-      }) as Runtime["getCellFromEntityId"];
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-
-      expect((result.output as RunPatternToolErrorOutput).status).toBe(
-        "cancelled",
-      );
-      watchingForSlugAssignment = true;
-      releaseJoin();
-      await Promise.race([removed, slugAssignment]);
-      runtime.getCellFromEntityId = originalGetCell;
-      pieces.add = originalAdd;
-      pieces.remove = originalRemove;
-
-      // The join really landed after the cancelled output, so the empty list
-      // below is the continuation undoing itself rather than a join that
-      // never happened.
-      expect(listedAfterJoin).toBe(1);
-      expect(await pieces.getRegisteredPieces()).toEqual([]);
-      // And the slug the cancelled run asked for names nothing, so the
-      // continuation stopped before rebinding an address.
-      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
-        .toThrow();
-    });
-
-    it("names the slug it kept in the cancelled output when the abort lands inside the assignment", async () => {
-      // The one durable effect a cancelled run does not undo. The redirect an
-      // assignment writes is a pure function of the target and the slug
-      // document, so nothing in it says which caller wrote it, and a
-      // withdrawal could not tell this run's assignment from an identical one
-      // a later writer made. The name goes on resolving to the created piece,
-      // and the output says so rather than leaving a person to find out by
-      // opening it.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      // Held until the tool has returned, so the slug write provably commits
-      // after the cancelled output rather than before it.
-      let releaseAssignment!: () => void;
-      const toolReturned = new Promise<void>((resolve) => {
-        releaseAssignment = resolve;
-      });
-      // Resolves once the held write has committed, so the assertions read
-      // the state the assignment left rather than one it has not reached.
-      let assignmentLanded!: () => void;
-      const assignmentCommitted = new Promise<void>((resolve) => {
-        assignmentLanded = resolve;
-      });
-
-      const slugEntity = JSON.stringify(
-        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
-      );
-      // Armed only once the registry join has landed, so the availability
-      // check's own read of the slug document earlier in the run is not
-      // mistaken for the assignment's.
-      let armed = false;
-      let createdPieceId: string | undefined;
-      let holdAssignmentEdit = false;
-
-      const originalAdd = pieces.add.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        createdPieceId = pieceId(cells[0]);
-        armed = true;
-      };
-      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
-      runtime.getCellFromEntityId = ((
-        ...args: Parameters<Runtime["getCellFromEntityId"]>
-      ) => {
-        const cell = originalGetCell(...args);
-        if (armed && JSON.stringify(args[1]) === slugEntity) {
-          // `setSlugLink` fetches the slug document and then, with no await in
-          // between, opens the transaction that writes it — so the abort here
-          // lands inside the assignment, ahead of its write, every run.
-          armed = false;
-          holdAssignmentEdit = true;
-          controller.abort();
-        }
-        return cell;
-      }) as Runtime["getCellFromEntityId"];
-      const originalEdit = runtime.editWithRetry.bind(runtime);
-      runtime.editWithRetry = ((
-        ...args: Parameters<Runtime["editWithRetry"]>
-      ) => {
-        if (!holdAssignmentEdit) {
-          return originalEdit(...args);
-        }
-        holdAssignmentEdit = false;
-        return toolReturned
-          .then(() => originalEdit(...args))
-          .then((committed) => {
-            assignmentLanded();
-            return committed;
-          });
-      }) as Runtime["editWithRetry"];
-
-      let result;
-      try {
-        const engine = createEngine();
-        result = await engine.invokeBuiltinTool("run_pattern", {
-          sourceText: DOUBLING_PATTERN_SOURCE,
-          inputs: { n: 21 },
-          register: { slug: "doubling-report" },
-        }, { signal: controller.signal });
-
-        releaseAssignment();
-        await assignmentCommitted;
-      } finally {
-        runtime.getCellFromEntityId = originalGetCell;
-        runtime.editWithRetry = originalEdit;
-        pieces.add = originalAdd;
-      }
-      await runtime.idle();
-      await pieces.synced();
-
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("cancelled");
-      expect(output.message).toBe(
-        'run_pattern was cancelled; the name "doubling-report" was being assigned when the run was cancelled and is not withdrawn, so it may still resolve to the created piece, which is stopped and no longer listed',
-      );
-      // The assignment really committed after the cancelled output, so the
-      // name resolves below because the run kept it rather than because the
-      // write beat the abort.
-      expect(createdPieceId).toEqual(expect.any(String));
-      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
-        createdPieceId,
-      );
-      // And the piece the name reaches really is delisted, which is the state
-      // the message describes.
-      expect(await pieces.getRegisteredPieces()).toEqual([]);
-    });
-
-    it("still returns `cancelled` when removing the piece from the space's piece list fails", async () => {
-      // The removal is best effort: the caller asked to stop, and a run that
-      // reported the removal's failure instead of the cancellation would be
-      // answering a question nobody asked.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      const originalGetSpace = pieces.getSpace.bind(pieces);
-      const originalAdd = pieces.add.bind(pieces);
-      const originalRemove = pieces.remove.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        pieces.getSpace = () => {
-          pieces.getSpace = originalGetSpace;
-          throw new Error("slug assignment refused");
-        };
-        controller.abort();
-      };
-      let removeCalls = 0;
-      pieces.remove = () => {
-        removeCalls += 1;
-        return Promise.reject(new Error("removal refused"));
-      };
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-      pieces.getSpace = originalGetSpace;
-      pieces.add = originalAdd;
-      pieces.remove = originalRemove;
-
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("cancelled");
-      expect(result.runState.status).toBe("completed");
-      // The detail reports the list as this path left it rather than as the
-      // path intended: the removal was attempted and refused, so the piece is
-      // still listed and the message says so.
-      expect(output.message).toContain("was left listed");
-      expect(output.message).not.toContain("no longer listed");
-      // The removal really was attempted and really did fail, so the
-      // cancellation above stands despite it rather than beside it.
-      expect(removeCalls).toBe(1);
-      expect((await pieces.getRegisteredPieces()).length).toBe(1);
-    });
-
-    it("reports the piece as still listed when the removal answers that the list did not hold it", async () => {
-      // `remove` resolving false is not the same as it throwing: the call
-      // succeeded and reported that nothing left the list. The message follows
-      // the answer rather than the absence of an exception.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      const originalGetSpace = pieces.getSpace.bind(pieces);
-      const originalAdd = pieces.add.bind(pieces);
-      const originalRemove = pieces.remove.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        pieces.getSpace = () => {
-          pieces.getSpace = originalGetSpace;
-          throw new Error("slug assignment refused");
-        };
-        controller.abort();
-      };
-      let removeCalls = 0;
-      pieces.remove = () => {
-        removeCalls += 1;
-        return Promise.resolve(false);
-      };
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-      pieces.getSpace = originalGetSpace;
-      pieces.add = originalAdd;
-      pieces.remove = originalRemove;
-
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("cancelled");
-      expect(removeCalls).toBe(1);
-      expect(output.message).toContain("was left listed");
-      expect(output.message).not.toContain("no longer listed");
-    });
-
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
       let factoryCalls = 0;
       const engine = new CfHarnessEngine({
@@ -1455,7 +1082,7 @@ describe("run-pattern", () => {
       expect(factoryCalls).toBe(2);
     });
 
-    it("leaves the created piece out of the space's real registered piece list without a `register` request", async () => {
+    it("leaves the created piece out of the space's real registered piece list", async () => {
       // A real default pattern first: without one, `getRegisteredPieces()`
       // reads a detached always-empty fallback and the assertion below
       // holds vacuously.
@@ -1481,277 +1108,6 @@ describe("run-pattern", () => {
       await pieces.add([control.getCell()]);
       const afterAdd = await pieces.getRegisteredPieces();
       expect(afterAdd.length).toBe(1);
-    });
-
-    it("registers the created piece under the requested slug when `register` asks for it", async () => {
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      const output = result.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.registrationError).toBeUndefined();
-      const registered = await pieces.getRegisteredPieces();
-      expect(registered.map((piece) => piece.id)).toEqual([output.pieceId]);
-      // The slug resolves to the same piece, so the address a person opens
-      // names the piece the run created rather than merely existing.
-      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
-        output.pieceId,
-      );
-    });
-
-    it("refuses a `register` slug that already names a piece, creating no piece and leaving the address where it pointed", async () => {
-      // Assigning a slug is a blind write, so a second run naming the same
-      // slug would repoint an address a person already opens at whatever it
-      // had just written. The refusal is a pre-flight one, so the attempt
-      // costs a message and nothing else.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-      const engine = createEngine();
-      const first = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      const held = first.output as RunPatternToolSuccessOutput;
-      expect(held.status).toBe("ok");
-
-      const spy = spyOnRunPersistent();
-      const second = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 22 },
-        register: { slug: "doubling-report" },
-      });
-
-      const output = second.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("doubling-report");
-      expect(spy.calls).toBe(0);
-      // The address still names the piece it named before, so the refusal
-      // protected the name rather than merely reporting on it.
-      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
-        held.pieceId,
-      );
-    });
-
-    it("refuses a `register` request whose slug availability could not be established, creating no piece", async () => {
-      // A resolution that fails operationally — storage error, sync that
-      // never landed — says nothing about what the slug holds. Reading it as
-      // vacancy would send the run on to the blind assignment the
-      // availability check exists to prevent, so an unanswered question is a
-      // refusal. The refusal says the availability is unknown rather than
-      // claiming the slug is taken, which nothing read supports.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      // The slug document's own cell, so only its sync fails and every other
-      // cell the run reaches behaves normally.
-      const slugEntity = JSON.stringify(
-        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
-      );
-      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
-      let syncFailures = 0;
-      runtime.getCellFromEntityId = ((
-        ...args: Parameters<Runtime["getCellFromEntityId"]>
-      ) => {
-        const cell = originalGetCell(...args);
-        if (JSON.stringify(args[1]) !== slugEntity) {
-          return cell;
-        }
-        (cell as unknown as { sync: () => Promise<unknown> }).sync = () => {
-          syncFailures += 1;
-          return Promise.reject(new Error("storage unavailable"));
-        };
-        return cell;
-      }) as Runtime["getCellFromEntityId"];
-
-      const spy = spyOnRunPersistent();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      runtime.getCellFromEntityId = originalGetCell;
-
-      // The injected failure really was the slug resolution's, so the
-      // refusal below answers it rather than something else going wrong.
-      expect(syncFailures).toBe(1);
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("could not establish");
-      expect(output.message).toContain("doubling-report");
-      expect(output.message).not.toContain("already names a piece");
-      expect(spy.calls).toBe(0);
-      expect(await pieces.getRegisteredPieces()).toEqual([]);
-    });
-
-    it("registers a second piece under a slug the space does not yet hold", async () => {
-      // The control for the refusal above: the availability check refuses a
-      // taken name, not a second registration.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-      const engine = createEngine();
-      const first = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      const second = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 22 },
-        register: { slug: "doubling-report-again" },
-      });
-
-      const held = first.output as RunPatternToolSuccessOutput;
-      const output = second.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.registration?.slug).toBe("doubling-report-again");
-      expect(output.registrationError).toBeUndefined();
-      expect(await resolvePieceAddress(pieces, "doubling-report-again")).toBe(
-        output.pieceId,
-      );
-      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
-        held.pieceId,
-      );
-    });
-
-    it("returns the registered slug and an openable URL composed from the session's API URL and space name", async () => {
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      const output = result.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.registration?.slug).toBe("doubling-report");
-      expect(output.registration?.url).toBe(
-        `http://toolshed.test/${pieces.getSpaceName()}/doubling-report`,
-      );
-      // Nothing the model receives here carries a fabric identifier: the slug
-      // is its own word and the URL is the API URL plus the space's name.
-      expect(output.registration?.url).not.toContain(output.pieceId);
-      expect(output.registration?.url).not.toContain("did:");
-    });
-
-    it("returns an error for an unusable `register` slug without creating a piece", async () => {
-      const spy = spyOnRunPersistent();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 1 },
-        register: { slug: "Doubling Report" },
-      });
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("register slug is invalid");
-      expect(spy.calls).toBe(0);
-    });
-
-    it("returns an error for a `register` request that is not an object, without creating a piece", async () => {
-      const spy = spyOnRunPersistent();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 1 },
-        // The shape a model can send: `register` is whatever arrived in the
-        // tool call, not something the type system got to check.
-        register: "doubling-report",
-      } as unknown as RunPatternToolInput);
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain(
-        "register must be an object with a slug",
-      );
-      expect(spy.calls).toBe(0);
-    });
-
-    it("returns an error for a `register` request whose slug is not a string, without creating a piece", async () => {
-      const spy = spyOnRunPersistent();
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 1 },
-        register: { slug: 7 },
-      } as unknown as RunPatternToolInput);
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("register requires a string slug");
-      expect(spy.calls).toBe(0);
-    });
-
-    it("returns the registered slug without a URL when the session's space is configured by DID", async () => {
-      // A space configured by `did:key` has no name to put in a URL, and the
-      // only address available would carry the space DID — a bare fabric
-      // identifier that does not cross the model boundary. The slug still
-      // reaches the model, because it is the caller's own word.
-      const spaceIdentity = await signer.derive(
-        `run-pattern-did-${crypto.randomUUID()}`,
-      );
-      const didPieces = new PiecesController(
-        await createSession({
-          identity: signer,
-          spaceDid: spaceIdentity.did(),
-        }),
-        runtime,
-      );
-      await didPieces.synced();
-      expect(didPieces.getSpaceName()).toBeUndefined();
-      const defaultRoot = await didPieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await didPieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await didPieces.synced();
-      const engine = new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime(),
-        runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
-        fabricSessionFactory: () => Promise.resolve({ pieces: didPieces }),
-      });
-
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      });
-      const output = result.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.registrationError).toBeUndefined();
-      expect(output.registration?.slug).toBe("doubling-report");
-      expect(output.registration?.url).toBeUndefined();
-      // The registration really happened, so the missing URL is a refusal to
-      // compose one rather than a registration that did not take place.
-      expect(await resolvePieceAddress(didPieces, "doubling-report")).toBe(
-        output.pieceId,
-      );
     });
 
     it("returns a `cancelled` output without creating a piece when the signal is already aborted", async () => {
@@ -1799,25 +1155,6 @@ describe("run-pattern", () => {
       expect(output.status).toBe("error");
       expect(output.message).toContain("requires a fabric session");
       expect(output.message).toContain("--fabric-space");
-    });
-
-    it("reports a `registrationError` alongside a usable `resultRef` when the space has no piece registry", async () => {
-      // No default pattern linked, so `pieces.add` has nothing to register
-      // through. The computation still succeeded, and the reference to it is
-      // still the run's result.
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        resultSchema: DOUBLED_RESULT_SCHEMA,
-        register: { slug: "doubling-report" },
-      });
-      const output = result.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.registration).toBeUndefined();
-      expect(output.registrationError).toContain("default pattern");
-      expect(output.resultRef).toMatch(/^\/of:/);
-      expect((output.value as { doubled: number }).doubled).toBe(42);
     });
   });
 });

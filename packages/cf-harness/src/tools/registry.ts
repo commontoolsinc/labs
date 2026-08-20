@@ -1,4 +1,5 @@
 import type { BuiltinToolId } from "../contracts/tool-descriptor.ts";
+import { assignSlugTool } from "./assign-slug.ts";
 import { bashTool } from "./bash.ts";
 import { bashNoSandboxTool } from "./bash-no-sandbox.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
@@ -25,6 +26,7 @@ export const BUILTIN_TOOLS = [
   writeFileTool,
   delegateTaskTool,
   runPatternTool,
+  assignSlugTool,
   describeHandleTool,
 ] as const;
 
