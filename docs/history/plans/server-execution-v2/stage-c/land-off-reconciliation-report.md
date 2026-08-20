@@ -25,7 +25,11 @@ Facts: merge-base `30fdbb92f` (#5786); main moved 241 commits
 `packages/runner`. Merge commit **`820da28a2`**; reconciliation
 follow-ups `9199ed344` (import dedup / identity threading / lint),
 `868ec5311` (goldens regen), `0e8064f3c` (wish failure-UI), `cc74fa37f`
-(verdict-catchup pins), `4df39643f` (the all-no-op wave pin).
+(verdict-catchup pins), `4df39643f` (the all-no-op wave pin);
+catch-up merge `a8523edbe` (`origin/main` @ `0eaf16f4c`, 5 commits
+landed post-PR — one conflict, scheduler/run.ts imports: main's
+measure-naming kept, the persistent-observation import dropped with
+the deleted subsystem; runner 1 259/7 163 + memory 552 re-run green).
 
 ## 1. The merge — conflict ledger
 
