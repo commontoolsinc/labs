@@ -1565,15 +1565,8 @@ export async function savePiecePattern(
     await Deno.mkdir(dirname(outFilePath), { recursive: true });
     await Deno.writeTextFile(outFilePath, contents);
   }
-  const undeclared = undeclaredDataFiles(program);
-  if (undeclared.length > 0) {
-    console.log(
-      `\nThis pattern carries ${undeclared.length} data file(s) its source ` +
-        `does not name.\nPass them on the next setsrc, or they are dropped ` +
-        `from that revision:\n` +
-        undeclared.map((name) => `  --datafile .${name}`).join("\n"),
-    );
-  }
+  const warning = undeclaredDataFileWarning(program);
+  if (warning !== undefined) console.log(warning);
 }
 
 /**
@@ -1591,6 +1584,23 @@ export function undeclaredDataFiles(program: RuntimeProgram): string[] {
     program.files.flatMap((file) => collectDataFileNames(file, TARGET)),
   );
   return (program.dataFiles ?? []).filter((name) => !declared.has(name));
+}
+
+/**
+ * What `getsrc` says about the data files it just wrote, or undefined when it
+ * has nothing to say. The flags are spelled out so that reproducing the
+ * revision is a matter of copying the line rather than working out which of
+ * the written files were data.
+ */
+export function undeclaredDataFileWarning(
+  program: RuntimeProgram,
+): string | undefined {
+  const undeclared = undeclaredDataFiles(program);
+  if (undeclared.length === 0) return undefined;
+  return `\nThis pattern carries ${undeclared.length} data file(s) its ` +
+    `source does not name.\nPass them on the next setsrc, or they are ` +
+    `dropped from that revision:\n` +
+    undeclared.map((name) => `  --datafile .${name}`).join("\n");
 }
 
 export async function applyPieceInput(config: PieceConfig, input: object) {

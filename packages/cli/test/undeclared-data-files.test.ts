@@ -8,7 +8,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { RuntimeProgram } from "@commonfabric/runner";
-import { undeclaredDataFiles } from "../lib/piece.ts";
+import {
+  undeclaredDataFiles,
+  undeclaredDataFileWarning,
+} from "../lib/piece.ts";
 
 const READS_CITIES = 'import { dataFile } from "commonfabric";\n' +
   'export default () => dataFile("/data/cities.json");\n';
@@ -75,5 +78,41 @@ describe("undeclaredDataFiles", () => {
         }, ["/data/cities.json"]),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("undeclaredDataFileWarning", () => {
+  it("says nothing when the source accounts for every data file", () => {
+    expect(
+      undeclaredDataFileWarning(
+        program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
+          "/data/cities.json",
+        ]),
+      ),
+    ).toBe(undefined);
+  });
+
+  it("spells out the flag that puts a file back on the next revision", () => {
+    const warning = undeclaredDataFileWarning(
+      program({ "/main.tsx": "export default 1;\n", "/extra.txt": "hi" }, [
+        "/extra.txt",
+      ]),
+    );
+    expect(warning).toContain("1 data file(s)");
+    expect(warning).toContain("--datafile ./extra.txt");
+    expect(warning).toContain("setsrc");
+  });
+
+  it("names every file it cannot account for", () => {
+    const warning = undeclaredDataFileWarning(
+      program({
+        "/main.tsx": "export default 1;\n",
+        "/a.txt": "a",
+        "/b.txt": "b",
+      }, ["/a.txt", "/b.txt"]),
+    );
+    expect(warning).toContain("2 data file(s)");
+    expect(warning).toContain("--datafile ./a.txt");
+    expect(warning).toContain("--datafile ./b.txt");
   });
 });
