@@ -62,35 +62,61 @@ async function git(
   }
 }
 
+/** What git said about the checkout a local run started in. */
+interface CheckoutFacts {
+  /** Output of `git rev-parse HEAD`; absent outside a repository. */
+  commit?: string;
+  /** Output of `git branch --show-current`; empty on a detached checkout. */
+  branch?: string;
+  /** Output of `git status --porcelain`; empty when the tree is clean. */
+  status?: string;
+}
+
 /**
- * The context of a local run, captured at start: the commit and branch the
- * run actually began against, so a branch switch mid-run cannot mis-stamp
- * it.
+ * Composes the context of a local run from what git said about the
+ * checkout. A commit git could not name is recorded as "unknown". The
+ * branch is carried only when git named one, so a detached checkout is
+ * stamped without a branch. Any status output at all marks the tree dirty.
  */
-export async function buildLocalContext(
-  cwd: string,
+export function composeLocalContext(
+  facts: CheckoutFacts,
   env: Environment = Deno.env.get,
-): Promise<RunContext> {
-  const commit = await git(cwd, "rev-parse", "HEAD") ?? "unknown";
-  const branch = await git(cwd, "branch", "--show-current");
-  const status = await git(cwd, "status", "--porcelain");
+): RunContext {
   const context: RunContext = {
     schema: RECORD_SCHEMA_VERSION,
     line: "context",
     reportId: ulid(),
     repo: REPO,
-    commit,
-    dirty: status !== undefined && status.length > 0,
+    commit: facts.commit ?? "unknown",
+    dirty: facts.status !== undefined && facts.status.length > 0,
     env: "local",
     os: Deno.build.os,
     arch: Deno.build.arch,
     denoVersion: Deno.version.deno,
     startedAt: new Date().toISOString(),
   };
-  if (branch !== undefined && branch.length > 0) context.branch = branch;
+  if (facts.branch !== undefined && facts.branch.length > 0) {
+    context.branch = facts.branch;
+  }
   const agent = agentLabel(env);
   if (agent !== undefined) context.agent = agent;
   return context;
+}
+
+/**
+ * The context of a local run, captured at start: the commit and branch the
+ * run actually began against, so a branch switch mid-run cannot mis-stamp
+ * it. Runs git in `cwd` and composes the context from its answers.
+ */
+export async function buildLocalContext(
+  cwd: string,
+  env: Environment = Deno.env.get,
+): Promise<RunContext> {
+  return composeLocalContext({
+    commit: await git(cwd, "rev-parse", "HEAD"),
+    branch: await git(cwd, "branch", "--show-current"),
+    status: await git(cwd, "status", "--porcelain"),
+  }, env);
 }
 
 /** Reads and parses the personal key file the environment names. */
