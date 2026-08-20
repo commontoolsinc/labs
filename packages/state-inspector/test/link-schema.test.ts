@@ -178,6 +178,15 @@ describe("link-schema", () => {
       expect(summary.digest).toBe(undefined);
     });
 
+    it("describes a large non-object schema without naming keys", () => {
+      // Stored data decides the shape, and a value that is not an object has
+      // no top-level keys to report.
+      const summary = annotatedLink(sigilLink("x".repeat(300)))
+        .$schemaSummary as { keys?: string[]; bytes: number };
+      expect(Object.hasOwn(summary, "keys")).toBe(false);
+      expect(summary.bytes).toBe(302);
+    });
+
     it("returns a large schema in full at infinite `maxDepth`", () => {
       const schema = largeSchema("a description long enough to matter");
       const annotated = annotate(

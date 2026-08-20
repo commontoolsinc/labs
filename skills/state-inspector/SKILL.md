@@ -127,9 +127,10 @@ Confusing an approximation for truth is the failure mode that matters here:
   means it was too large to print, and neither means the link stores no schema.
   Different digests prove two schemas differ; equal ones make agreement
   overwhelmingly likely without proving it, since the hash is truncated — reach
-  for `--full-depth` when you need certainty or the text itself. A `bytes` or
-  `digest` that is absent could not be computed, and two summaries that both
-  lack a digest say nothing about whether they agree.
+  for `--full-depth` when you need certainty or the text itself. An absent
+  `digest` could not be computed, so two summaries that both lack one say
+  nothing about whether they agree; an absent `keys` means the stored schema was
+  not an object and so had none.
 
 ## Which question → which command
 

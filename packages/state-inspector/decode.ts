@@ -260,7 +260,9 @@ function schemaDigest(schema: Json): string | undefined {
  * usually enough to settle whether one link's schema is stale against
  * another's, and `--full-depth` settles it outright.
  *
- * `digest` is absent when it could not be computed; see `schemaDigest()`.
+ * `bytes` is always present. `digest` is absent when it could not be computed,
+ * for which see `schemaDigest()`, and `keys` when the stored schema is not an
+ * object and so has none.
  */
 function schemaSummary(schema: Json, bytes: number): Json {
   const digest = schemaDigest(schema);
