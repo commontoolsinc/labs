@@ -2259,11 +2259,27 @@ export function wish(
         }
       }, runtime.servingPosture ? parentCell.space : undefined).then(
         (pattern) => {
-          if (!cancelled && pattern && slot.resultCell) {
-            runSidecarInOwnTx(
+          if (cancelled || !slot.resultCell) return;
+          if (pattern) {
+            return runSidecarInOwnTx(
               slot.resultCell,
               pattern,
               profileCreateInputForTx,
+            );
+          }
+          // Fetch/compile failed, or a later fetch for a changed apiUrl
+          // superseded this one (createSidecarPatternCache swallows the
+          // error and resolves to undefined in both cases). The create
+          // surface is the only way a user with no profile gets one, and
+          // nothing re-triggers this launch, so a silent undefined leaves
+          // that surface blank for the life of the piece. Say so in the
+          // cell the surface renders from — unless a later fetch has since
+          // landed a pattern, whose surface is in that same cell and is
+          // the better answer than this launch's failure.
+          if (!profileCreatePatternCache.cached()) {
+            return commitPatternErrorUI(
+              slot.resultCell,
+              `Can't load profile-create.tsx`,
             );
           }
         },
