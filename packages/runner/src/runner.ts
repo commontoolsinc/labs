@@ -6,7 +6,6 @@ import {
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -80,13 +79,6 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
-import {
-  type AddCancel,
-  type Cancel,
-  type DeferredCancelOwnership,
-  useCancelGroup,
-  useDeferredCancelOwnership,
-} from "./cancel.ts";
 import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
 import {
   causalFormOfBinding,

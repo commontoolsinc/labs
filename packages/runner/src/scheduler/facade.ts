@@ -85,10 +85,7 @@ import {
   WakeShaper,
 } from "./wake-shaping.ts";
 import { SchedulerWriteIndex } from "./scheduling-writes.ts";
-import {
-  NodeRegistry,
-  type SchedulerNode,
-} from "./node-record.ts";
+import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -103,8 +100,6 @@ import {
 import {
   runSchedulerAction,
   type SchedulerActionRunState,
-  schedulerImplementationFingerprint,
-  schedulerRuntimeFingerprint,
 } from "./run.ts";
 import {
   addSchedulerEventHandler,
@@ -159,10 +154,7 @@ import {
   buildSchedulerGraphSnapshot,
   type SchedulerGraphSnapshotState,
 } from "./graph-snapshot.ts";
-import {
-  entityKey,
-  entityNameKey,
-} from "./keys.ts";
+import { entityKey, entityNameKey } from "./keys.ts";
 import { SpeculationLineage } from "./lineage.ts";
 import {
   type ActionTimingState,
@@ -174,6 +166,7 @@ import type {
   EventHandler,
   EventPreflightTraceContext,
   QueuedEvent,
+  ServedEventDispatch,
   ReactivityLog,
   SchedulerObservationIdentity,
   SettleStats,
@@ -1290,7 +1283,7 @@ export class Scheduler {
        * carriage — acting identity, the durable stream entry, and the
        * failure hook (QueuedEvent.served). Passed only by the
        * SpaceServer's drain; absent everywhere client-side. */
-      served?: import("./types.ts").ServedEventDispatch;
+      served?: ServedEventDispatch;
       /** The client-echo cascade thread (QueuedEvent.parentEventId):
        * the emitting run's event id, passed by cell.ts's plain
        * queueEvent for a send from within a speculation-stamped

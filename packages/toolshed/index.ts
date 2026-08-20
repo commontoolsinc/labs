@@ -1,6 +1,5 @@
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-
 import app from "@/app.ts";
 import {
   backgroundLogFile,
@@ -13,8 +12,6 @@ import {
 import env from "@/env.ts";
 import { announceCloneIfServed } from "@/lib/clone-banner.ts";
 import { identity } from "@/lib/identity.ts";
-import type { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createToolshedRuntime } from "@/runtime-options.ts";
 import { memory, memoryServer } from "@/routes/storage/memory.ts";
 import {
@@ -22,9 +19,6 @@ import {
   stopServerExecutionHost,
 } from "@/lib/server-execution.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
-import { memory } from "@/routes/storage/memory.ts";
-import { createToolshedRuntime } from "@/runtime-options.ts";
-
 // Create a global runtime instance for the server
 let runtime: Runtime;
 

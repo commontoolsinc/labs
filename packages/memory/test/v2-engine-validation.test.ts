@@ -9,7 +9,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
-import { encodeMemoryBoundary } from "../v2.ts";
+import { encodeMemoryBoundary, ProtocolError } from "../v2.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 

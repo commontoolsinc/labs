@@ -5,7 +5,6 @@ import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   canResolveScopeKey,
   type CommitPrecondition,

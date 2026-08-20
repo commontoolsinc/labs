@@ -95,7 +95,6 @@ import {
   executionLeaseHolder,
   liveExecutionLeaseHolder,
 } from "./execution-lease.ts";
-import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
@@ -129,7 +128,6 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
-import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -226,9 +224,6 @@ let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
 
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
   pushPriorityStatsProvider?.();
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));

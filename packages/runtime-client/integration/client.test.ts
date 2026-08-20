@@ -2,7 +2,6 @@
 
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-
 import { render } from "@commonfabric/html/client";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
@@ -24,13 +23,7 @@ import {
   type VNode,
 } from "@commonfabric/runtime-client";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { Program } from "@commonfabric/js-compiler";
-import { render } from "@commonfabric/html/client";
-import { MockDoc } from "@commonfabric/html/mock-doc";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { defer } from "@commonfabric/utils/defer";
 

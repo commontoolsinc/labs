@@ -33,7 +33,6 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 type FetchRequestOptions = {

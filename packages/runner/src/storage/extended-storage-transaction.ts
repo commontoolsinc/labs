@@ -12,35 +12,35 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { aclDocId } from "@commonfabric/memory/acl";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type {
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  INotFoundError,
-  IReadActivity,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  IWriteAttempt,
-  IWriteOptions,
-  MemorySpace,
-  Metadata,
-  ReadError,
-  Result,
-  StorageTransactionFailed,
-  StorageTransactionStatus,
-  TransactionCommitOptions,
-  TransactionReactivityLog,
-  TransactionSealDestination,
-  TransactionWriteDetail,
-  Unit,
-  WriteError,
-  WriterError,
+import {
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type INotFoundError,
+  type IReadActivity,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type IWriteAttempt,
+  type IWriteOptions,
+  type MemorySpace,
+  type Metadata,
+  type ReadError,
+  type Result,
+  type StorageTransactionFailed,
+  type StorageTransactionStatus,
+  toThrowable,
+  type TransactionCommitOptions,
+  type TransactionReactivityLog,
+  type TransactionSealDestination,
+  type TransactionWriteDetail,
+  type Unit,
+  type WriteError,
+  type WriterError,
 } from "./interface.ts";
-import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type {
   CommitPrecondition,
   SqliteOperation,
@@ -105,33 +105,6 @@ import {
 } from "../link-types.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
-import type {
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  INotFoundError,
-  IReadActivity,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  IWriteAttempt,
-  IWriteOptions,
-  MemorySpace,
-  Metadata,
-  ReadError,
-  Result,
-  StorageTransactionFailed,
-  StorageTransactionStatus,
-  TransactionCommitOptions,
-  TransactionReactivityLog,
-  TransactionWriteDetail,
-  Unit,
-  WriteError,
-  WriterError,
-} from "./interface.ts";
-import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   clearSchemaRefusalTx,
@@ -1044,10 +1017,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return isLazyMaterializationTx(this);
   }
 
-  hasWrites(): boolean {
-    return this.tx.hasWrites?.() ?? false;
-  }
-
   issueReadEpoch(): number | undefined {
     return this.tx.issueReadEpoch?.();
   }
@@ -1175,7 +1144,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   hasWrites(): boolean {
-    return this.#hasWrites;
+    // Union of both accountings: this class's own write-path bit (set by
+    // noteWrite — covers mergeable ops and folded SQLite writes that never
+    // touch the inner tx's flag) and the inner storage transaction's flag
+    // (the materialized-read epoch fast path's authority). Either signal
+    // alone risks a false negative for the other consumer.
+    return this.#hasWrites || (this.tx.hasWrites?.() ?? false);
   }
 
   #hasWrites = false;

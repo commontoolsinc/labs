@@ -38,7 +38,6 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { type Cell, isCell } from "../cell.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,

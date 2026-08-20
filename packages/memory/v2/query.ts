@@ -559,7 +559,7 @@ const assembleSchemaDocClosures = (
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const id = `cid:${hash}`;
-    const key = toDocKey(space, id, DEFAULT_SCOPE);
+    const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
     manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
     const snapshot = snapshotForDocKey(space, manager, branch, key);
     const doc = snapshot?.document;
@@ -638,7 +638,7 @@ const validateSelectorSchemaRefs = (
     if (seen.has(hash)) continue;
     seen.add(hash);
     const id = `cid:${hash}`;
-    const key = toDocKey(space, id, DEFAULT_SCOPE);
+    const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
     manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
     const snapshot = snapshotForDocKey(space, manager, branch, key);
     const doc = snapshot?.document;

@@ -56,7 +56,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "serverExecution: the build define selects the OFF arm (rollback lever) or forces ON",
+  name:
+    "serverExecution: the build define selects the OFF arm (rollback lever) or forces ON",
   permissions: { read: true },
   async fn() {
     const off = await withPatchedGlobals({

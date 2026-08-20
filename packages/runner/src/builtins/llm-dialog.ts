@@ -2758,9 +2758,8 @@ async function handleUpdateArgument(
       // one action — a later contribution's basis/rebase rows replaced
       // an earlier unrelated one's as a set. The argument doc id is
       // durable and retry-stable.
-      actionId: `llm-dialog/update-argument:${
-        argumentCell.getAsNormalizedFullLink().id
-      }`,
+      actionId:
+        `llm-dialog/update-argument:${argumentCell.getAsNormalizedFullLink().id}`,
       kind: "event-handler",
     });
     if (

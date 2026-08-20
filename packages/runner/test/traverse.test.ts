@@ -9,7 +9,6 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -4619,7 +4618,7 @@ describe("SchemaObjectTraverser schema memo keys", () => {
     const traverser = getTraverser(
       new Map<string, Revision<State>>(),
       { path: ["value"], schema },
-      createDefaultTraversalContext(),
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
       memo,
     );
     traverser.traverse({

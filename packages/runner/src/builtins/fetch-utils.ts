@@ -9,8 +9,6 @@ import type {
   CommitError,
   IExtendedStorageTransaction,
 } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
 
 /**

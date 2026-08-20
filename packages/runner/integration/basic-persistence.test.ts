@@ -3,11 +3,11 @@
 import {
   deepEqual,
   experimentalOptionsFromEnv,
+  type JSONSchema,
   Runtime,
 } from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
-import { deepEqual, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const { API_URL } = env;
 

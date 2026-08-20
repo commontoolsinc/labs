@@ -1,5 +1,8 @@
-import { AnyCellWrapping } from "@commonfabric/api";
-import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
+import {
+  AnyCellWrapping,
+  type JSONSchemaObj,
+  type JSONValue,
+} from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
@@ -18,19 +21,19 @@ import {
   resolveLink,
   undefinedDataLink,
 } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type Runtime } from "./runtime.ts";
-import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
+import type { Runtime } from "./runtime.ts";
+import type {
+  IMemorySpaceValueAddress,
+  NormalizedFullLink,
 } from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { toCell } from "./back-to-cell.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { materializeSchemaView } from "./schema-view.ts";
 import {
   externalResolutionMissCount,
@@ -55,7 +58,6 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -73,27 +75,10 @@ import {
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import {
-  readMaybeLink,
-  resolveLink,
-  undefinedDataLink,
-} from "./link-resolution.ts";
-import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
-} from "./link-utils.ts";
-import {
-  createQueryResultProxy,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { type Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { materializeSchemaView } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {

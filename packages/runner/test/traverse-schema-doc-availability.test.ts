@@ -54,6 +54,11 @@ const addDoc = (
   });
 };
 
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:key:test-schema-doc-availability",
+  sessionId: "session:test-schema-doc-availability",
+} as const;
+
 const topDoc = (
   docUri: URI,
   value: FabricValue,
@@ -68,6 +73,7 @@ const contextWith = (
   createTraversalContext(
     new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
     new MapSetStringToPathSelectors(true),
+    TEST_SCOPE_IDENTITY,
     false,
     new Set(),
     onMissingLinkTarget,

@@ -22,7 +22,6 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
-  assertServerExecutionPostureAgreement,
   entityIdFrom,
   Runtime,
   type RuntimeFetch,
@@ -41,6 +40,7 @@ import {
   RequestType,
 } from "../protocol/mod.ts";
 import {
+  assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,

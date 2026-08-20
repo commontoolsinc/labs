@@ -33,7 +33,6 @@ import {
 } from "@commonfabric/utils/async-local-store";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
-
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
   isEagerSourceAnnotationEnabled,
@@ -68,7 +67,6 @@ import {
   schemaCellScope,
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
-import { createSession, Identity } from "@commonfabric/identity";
 import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
@@ -91,7 +89,6 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { addressKey } from "./link-types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -121,21 +118,9 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import { createRef, EntityId } from "./create-ref.ts";
 import type { ConsoleMethod } from "./harness/console.ts";
-import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
-import { addressKey } from "./link-types.ts";
-import {
-  CellLink,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -143,37 +128,17 @@ import { PatternUpdater } from "./pattern-updater.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
-import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
-import { isDeno } from "@commonfabric/utils/env";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import type {
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  MemorySpace,
-  URI,
-} from "./storage/interface.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import type {
-  WriteStackTraceEntry,
-  WriteStackTraceMatcher,
-} from "./storage/write-stack-trace.ts";
 import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
+  type WriteStackTraceEntry,
+  type WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import {
@@ -181,8 +146,6 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { toURI } from "./uri-utils.ts";
-
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -1844,7 +1807,6 @@ export class Runtime {
 
       // Wait for any pending operations
       await this.scheduler.idle();
-
     } finally {
       // Released whatever happened above. `storageManager.close()` can reject
       // — through a provider's `replica.close()` — and it is the one await

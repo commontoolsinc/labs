@@ -1,7 +1,9 @@
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
-
-import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import {
+  markRuntimeInjectedEventKeys,
+  sanitizeRuntimeInjectedEventKeys,
+} from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
@@ -9,32 +11,20 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   afterEach,
   beforeEach,
+  type Cell,
   createSchedulerTestRuntime,
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  type IExtendedStorageTransaction,
   it,
+  type JSONSchema,
   Runtime,
+  type RuntimeTelemetryMarker,
+  type SchedulerTestStorageManager,
   space,
 } from "./scheduler-test-utils.ts";
-import type {
-  Cell,
-  IExtendedStorageTransaction,
-  JSONSchema,
-  RuntimeTelemetryMarker,
-  SchedulerTestStorageManager,
-} from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import {
-  markRuntimeInjectedEventKeys,
-  sanitizeRuntimeInjectedEventKeys,
-} from "../src/cell.ts";
-import { resolveLink } from "../src/link-resolution.ts";
-import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
-import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-
 // The session a caller-supplied id is chosen within, for the sends whose
 // subject is something else: the pair is what a stream send accepts, and one
 // session is all a test needs whose ids never repeat across it.

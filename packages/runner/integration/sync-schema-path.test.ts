@@ -3,13 +3,14 @@
 import { assertEquals } from "@std/assert/equals";
 import {
   experimentalOptionsFromEnv,
+  type JSONSchema,
+  type MemorySpace,
   type NormalizedLink,
   Runtime,
+  type URI,
 } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
-import { type NormalizedLink, Runtime } from "@commonfabric/runner";
-import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { parseLink } from "../src/link-utils.ts";

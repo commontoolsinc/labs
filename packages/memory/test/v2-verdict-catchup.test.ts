@@ -594,7 +594,6 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   );
 });
 
-
 Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,

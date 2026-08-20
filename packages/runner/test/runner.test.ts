@@ -32,7 +32,6 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
 } from "../src/runner.ts";
-import { Runtime } from "../src/runtime.ts";
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,

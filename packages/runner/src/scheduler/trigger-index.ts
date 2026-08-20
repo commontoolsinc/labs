@@ -1,5 +1,4 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-
 import type { Cancel } from "../cancel.ts";
 import {
   addressesToPathByEntity,
@@ -8,8 +7,6 @@ import {
   nonRecursiveReadMayOverlapWrite,
   type SortedAndCompactPaths,
 } from "../reactive-dependencies.ts";
-import type { Cancel } from "../cancel.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   IMemoryChange,

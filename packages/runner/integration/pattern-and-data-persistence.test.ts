@@ -14,14 +14,15 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
+  type Cell,
   experimentalOptionsFromEnv,
+  type JSONSchema,
+  type MemorySpace,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
-import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 /** A content-addressed pattern pointer. */

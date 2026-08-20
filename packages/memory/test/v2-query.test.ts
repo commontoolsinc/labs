@@ -6,6 +6,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { encodeMemoryBoundary } from "../v2.ts";
 import {
   applyCommit,
   close,
@@ -14,6 +16,7 @@ import {
   open,
 } from "../v2/engine.ts";
 import {
+  EngineObjectManager,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
@@ -25,8 +28,6 @@ import {
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
-import { encodeMemoryBoundary } from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -1305,7 +1306,6 @@ Deno.test("loadedAddresses preserves entity ids containing '/' (the cache key is
       invocation: invocationFor(1),
       authorization,
     });
-    const { EngineObjectManager } = await import("../v2/query.ts");
     const manager = new EngineObjectManager(engine, "");
     const loaded = manager.load({ id });
     assertExists(loaded);
@@ -1321,6 +1321,13 @@ Deno.test("loadedAddresses preserves entity ids containing '/' (the cache key is
       },
       "a slash-bearing id must round-trip through loadedAddresses " +
         "unsplit (extension bookkeeping keys off these addresses)",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 schema-closure assembly fails loudly on a corrupted dependency", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-schema-corruption";

@@ -33,13 +33,6 @@ import {
   resolveScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -84,23 +77,23 @@ import {
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
-import type {
-  Activity,
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemoryAddress,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  ReadError,
-  StorageTransactionStatus,
-  WriteError,
-  WriterError,
+import {
+  type Activity,
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemoryAddress,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type ReadError,
+  type StorageTransactionStatus,
+  type WriteError,
+  type WriterError,
 } from "./storage/interface.ts";
-import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import {
   excludeReadFromConflict,
   ignoreReadForScheduling,

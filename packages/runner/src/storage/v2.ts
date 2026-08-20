@@ -7,16 +7,16 @@ import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { aclDocId } from "@commonfabric/memory/acl";
 import { assert, unclaimed } from "@commonfabric/memory/fact";
-import type { Entity } from "@commonfabric/memory/interface";
-import {
-  type AuthorizationError as IAuthorizationError,
-  type ConflictError as IConflictError,
-  type ConnectionError as IConnectionError,
-  type MemorySpace,
-  type MIME,
-  type Signer,
-  type TransactionError,
-  type URI,
+import type {
+  AuthorizationError as IAuthorizationError,
+  ConflictError as IConflictError,
+  ConnectionError as IConnectionError,
+  Entity,
+  MemorySpace,
+  MIME,
+  Signer,
+  TransactionError,
+  URI,
 } from "@commonfabric/memory/interface";
 import {
   canResolveScopeKey,
@@ -69,7 +69,6 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type { Cancel } from "../cancel.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -110,7 +109,6 @@ import {
   memoryEventAppendQueueStore,
   type QueuedEventAppend,
 } from "./event-append-queue.ts";
-import * as SubscriptionManager from "./subscription.ts";
 import {
   getDirectTransactionMergeableOpAddresses,
   getDirectTransactionReadActivities,
@@ -124,12 +122,7 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-} from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   createStorageAddressResolver,
@@ -4808,53 +4801,9 @@ class SpaceReplica implements ISpaceReplica {
       // settlement promise and commit callbacks wait out the read-repair
       // gate below, because a retry needs the repaired base.
       if (source !== undefined) {
-      notifyCommitRejected(source, rejection);
+        notifyCommitRejected(source, rejection);
       }
       const touched = this.#touchedOf(operations, identity);
-      const hasSemanticOperations = operations.length > 0;
-      const shouldNotifySubscribers = hasSemanticOperations &&
-      this.hasNotificationSubscribers();
-      const shouldNotifySinks = hasSemanticOperations &&
-      this.hasSinkSubscribers(touched);
-      const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map(({ id, scope, scopeKey }) =>
-          snapshotState(this, id, scope, scopeKey)
-        ),
-        this.#scopeKeyIdentity(),
-      )
-      : undefined;
-      await this.waitForConflictReadRepair(rejection);
-      this.dropPending(localSeq);
-      // Every drop funnels through here (server conflict, preempt, cascade,
-      // reset — this is dropPending's only call site), so scanning right after
-      // the drop catches every dependant; transitivity emerges from recursion
-      // (a victim's own finalizeRejection lands back here with its localSeq).
-      this.cascadeDroppedDependency(localSeq);
-      if (before !== undefined) {
-      const changes = before.compare(this);
-      // The revert snapshots CURRENT confirmed state (which already includes
-      // any newer seq received by subscription since this commit started) and
-      // drops only this commit's pending write — so it should not stomp newer
-      // data. Counted to verify reverts stay bounded.
-      logger.debug("commit-revert", () => [
-        `revert after ${rejection.name ?? "rejection"}`,
-      ]);
-      this.#subscription.next({
-        type: "revert",
-        space: this.#space,
-        changes,
-        reason: rejection,
-        source,
-      });
-      if (shouldNotifySinks) {
-        this.notifySinks(changes);
-      }
-      const touched = operations.map((operation) => ({
-        id: operation.id,
-        scope: operation.scope,
-      }));
       const hasSemanticOperations = operations.length > 0;
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
@@ -4863,7 +4812,10 @@ class SpaceReplica implements ISpaceReplica {
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,
-          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+          touched.map(({ id, scope, scopeKey }) =>
+            snapshotState(this, id, scope, scopeKey)
+          ),
+          this.#scopeKeyIdentity(),
         )
         : undefined;
       await this.waitForConflictReadRepair(rejection);
@@ -4876,10 +4828,10 @@ class SpaceReplica implements ISpaceReplica {
       this.cascadeDroppedDependency(localSeq);
       if (before !== undefined) {
         const changes = before.compare(this);
-        // The revert snapshots CURRENT confirmed state (which already includes
-        // any newer seq received by subscription since this commit started)
-        // and drops only this commit's pending write — so it should not stomp
-        // newer data. Counted to verify reverts stay bounded.
+        // The revert snapshots CURRENT confirmed state (which already
+        // includes any newer seq received by subscription since this commit
+        // started) and drops only this commit's pending write — so it should
+        // not stomp newer data. Counted to verify reverts stay bounded.
         logger.debug("commit-revert", () => [
           `revert after ${rejection.name ?? "rejection"}`,
         ]);
@@ -5225,7 +5177,7 @@ class SpaceReplica implements ISpaceReplica {
    * (CT-2046 tracks enforcing that broadly).
    */
   isSchemaDocPersisted(hash: string): boolean {
-    const record = this.#docs.get(docKey(`cid:${hash}` as URI, undefined));
+    const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
