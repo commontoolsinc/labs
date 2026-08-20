@@ -3,7 +3,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { Module, Pattern } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("str builtin");
@@ -22,24 +23,30 @@ export default pattern<{ who?: Writable<string | Default<"world">> }>(({ who }) 
   }],
 });
 
+const GREETING = "return { who, greeting: str`Hello, ${who}!` };";
+
 describe("str builtin", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
 
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
+  const newRuntime = () =>
+    new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
   });
 
   afterEach(async () => {
-    await runtime?.dispose();
     await storageManager?.close();
   });
 
-  const runProgram = async (body: string, label: string) => {
+  const runProgram = async (
+    runtime: Runtime,
+    body: string,
+    label: string,
+  ) => {
     const compiled = await runtime.patternManager.compilePattern(
       programFor(body),
     );
@@ -54,75 +61,150 @@ describe("str builtin", () => {
     const result = runtime.run(tx, compiled, {}, resultCell) as any;
     await tx.commit();
     await result.pull();
-    return result;
+    return { compiled, result };
   };
 
   it("interpolates a reactive substitution", async () => {
-    const result = await runProgram(
-      "return { who, greeting: str`Hello, ${who}!` };",
-      "interpolates",
-    );
-    expect(result.key("greeting").get()).toBe("Hello, world!");
+    const runtime = newRuntime();
+    try {
+      const { result } = await runProgram(runtime, GREETING, "interpolates");
+      expect(result.key("greeting").get()).toBe("Hello, world!");
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("recomputes when a substituted cell changes", async () => {
-    const result = await runProgram(
-      "return { who, greeting: str`Hello, ${who}!` };",
-      "recomputes",
-    );
-    expect(result.key("greeting").get()).toBe("Hello, world!");
+    const runtime = newRuntime();
+    try {
+      const { result } = await runProgram(runtime, GREETING, "recomputes");
+      expect(result.key("greeting").get()).toBe("Hello, world!");
 
-    const writeTx = runtime.edit();
-    result.withTx(writeTx).key("who").set("fabric");
-    await writeTx.commit();
-    await runtime.idle();
-    await result.pull();
-    expect(result.key("greeting").get()).toBe("Hello, fabric!");
+      const writeTx = runtime.edit();
+      result.withTx(writeTx).key("who").set("fabric");
+      await writeTx.commit();
+      await runtime.idle();
+      await result.pull();
+      expect(result.key("greeting").get()).toBe("Hello, fabric!");
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("interpolates several substitutions in order", async () => {
-    const result = await runProgram(
-      "return { who, greeting: str`a${who}b${who}c` };",
-      "several",
-    );
-    expect(result.key("greeting").get()).toBe("aworldbworldc");
+    const runtime = newRuntime();
+    try {
+      const { result } = await runProgram(
+        runtime,
+        "return { who, greeting: str`a${who}b${who}c` };",
+        "several",
+      );
+      expect(result.key("greeting").get()).toBe("aworldbworldc");
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("returns the template unchanged when it has no substitutions", async () => {
-    const result = await runProgram(
-      "return { who, greeting: str`no substitutions` };",
-      "no-subs",
-    );
-    expect(result.key("greeting").get()).toBe("no substitutions");
+    const runtime = newRuntime();
+    try {
+      const { result } = await runProgram(
+        runtime,
+        "return { who, greeting: str`no substitutions` };",
+        "no-subs",
+      );
+      expect(result.key("greeting").get()).toBe("no substitutions");
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("renders a substitution exactly as a native template literal does", async () => {
-    const result = await runProgram(
-      "return { who, greeting: str`v=${undefined} ${null} ${{ a: 1 }}` };",
-      "native-parity",
-    );
-    // Matches `v=${undefined} ${null} ${{ a: 1 }}` evaluated natively: authors
-    // reach for `str` in place of a template literal, so the rendering rules
-    // must not shift underneath them.
-    expect(result.key("greeting").get()).toBe(
-      `v=${undefined} ${null} ${{ a: 1 }}`,
-    );
+    const runtime = newRuntime();
+    try {
+      const { result } = await runProgram(
+        runtime,
+        "return { who, greeting: str`v=${undefined} ${null} ${{ a: 1 }}` };",
+        "native-parity",
+      );
+      // Authors reach for `str` in place of a template literal, so the
+      // rendering rules must not shift underneath them.
+      expect(result.key("greeting").get()).toBe(
+        `v=${undefined} ${null} ${{ a: 1 }}`,
+      );
+    } finally {
+      await runtime.dispose();
+    }
   });
 
-  it("resolves without falling back to unverified source", async () => {
-    const fallbackCount = () =>
-      ((getLoggerCountsBreakdown() as Record<
-        string,
-        Record<string, { total?: number }>
-      >)["runner"]?.["unverified-source-fallback"]?.total) ?? 0;
+  it("compiles to a ref node naming the builtin, leaving no unverified module", async () => {
+    const runtime = newRuntime();
+    try {
+      const { compiled } = await runProgram(runtime, GREETING, "node-shape");
+      const nodes = (compiled as Pattern).nodes;
 
-    const before = fallbackCount();
-    await runProgram(
-      "return { who, greeting: str`Hello, ${who}!` };",
-      "verified",
-    );
-    // `str` resolves through the builtin registry, so nothing in this program
-    // re-evaluates stringified source in a bare SES compartment.
-    expect(fallbackCount()).toBe(before);
+      const strNode = nodes.find((node) => {
+        const module = node.module as Module;
+        return module.type === "ref" && module.implementation === "str";
+      });
+      expect(strNode).toBeDefined();
+
+      // Every javascript module the program does carry is registered, so none
+      // of them serializes body-only for a reader to re-evaluate as source.
+      for (const node of nodes) {
+        const module = node.module as Module;
+        if (module.type !== "javascript") continue;
+        expect(getVerifiedProvenance(module.implementation)).toBeDefined();
+      }
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("interpolates after resuming the piece in a cold runtime", async () => {
+    const cause = "cold-resume";
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      const tx1 = rt1.edit();
+      const compiled = await rt1.patternManager.compilePattern(
+        programFor(GREETING),
+        { space, tx: tx1 },
+      );
+      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+        space,
+        cause,
+        undefined,
+        tx1,
+      );
+      // deno-lint-ignore no-explicit-any
+      const r1 = rt1.run(tx1, compiled, {}, resultCell1) as any;
+      await tx1.commit();
+      await r1.pull();
+      expect(r1.key("greeting").get()).toBe("Hello, world!");
+
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      // A fresh runtime resumes the piece from the PERSISTED graph, where the
+      // node carries the builtin's name rather than a live function.
+      const tx2 = rt2.edit();
+      const resultCell2 = rt2.getCell<Record<string, unknown>>(
+        space,
+        cause,
+        undefined,
+        tx2,
+      );
+      await tx2.commit();
+      await resultCell2.sync();
+      expect(await rt2.start(resultCell2)).toBe(true);
+      await resultCell2.pull();
+      expect(
+        (resultCell2.getAsQueryResult() as { greeting: string }).greeting,
+      ).toBe("Hello, world!");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
   });
 });
