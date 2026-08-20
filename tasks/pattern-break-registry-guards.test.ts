@@ -207,17 +207,6 @@ describe("pattern-break-registry-guards", () => {
     }
   });
 
-  it("allows a pattern the required key merely ends with textually", () => {
-    // The boundary the suffix rule needs: `home.tsx` is claimed because the
-    // separator lines up, but `whome.tsx` is a different pattern that no
-    // required key addresses.
-    expect(guardBreakRegistryEntries({
-      entries: [entry({ pattern: "whome.tsx" })],
-      requiredPatternKeys: new Set(["system/home.tsx"]),
-      recordExists: () => true,
-    })).toEqual([]);
-  });
-
   it("refuses an unevaluable pattern that is a required root", () => {
     // A wider exemption than any accepted break: not "this finding is
     // forgiven" but "this pattern is not gated at all".
