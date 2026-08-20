@@ -846,10 +846,15 @@ export function verbRunsWithoutPayload(
 export function requiredEventFieldsOwed(
   schema: JSONSchema | undefined,
 ): Set<string> {
+  // Asked first because it settles two things at once: `declaredEventFields`
+  // answers non-null only for an object schema, and `relaxDefaultedRequired`
+  // takes one. Asking again further down would be re-deciding a question this
+  // answer has already closed.
+  if (!isSchemaObject(schema)) return new Set();
   const declared = declaredEventFields(schema);
-  if (declared === null) return new Set();
-  if (declared.required.size === 0) return declared.required;
-  if (!isSchemaObject(schema)) return declared.required;
+  if (declared === null || declared.required.size === 0) {
+    return declared?.required ?? new Set();
+  }
   const relaxed = relaxDefaultedRequired(schema, schema, new Map());
   return declaredEventFields(relaxed)?.required ?? declared.required;
 }
