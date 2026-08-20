@@ -59,7 +59,7 @@ Deno.test("decode: a modern encoded link round-trips to a recognized link", () =
 });
 
 Deno.test("decode: summarizeLink keeps the computed: scheme visible", () => {
-  const summary = (id: string) => summarizeLink({ id, hasSchema: false });
+  const summary = (id: string) => summarizeLink({ id });
   // The hash preimage is kind-free, so of:fid1:H and computed:fid1:H can be
   // two distinct docs for one cause — the display must NOT conflate them.
   assert(

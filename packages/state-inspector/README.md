@@ -67,6 +67,20 @@ failure mode it guards against:
 - **Same id across spaces is usually independent instances**, not replica drift
   (content-addressed ids). The scan labels `cross-space-linked` (real replica →
   drift bug) vs `no-cross-space-link` (likely instance).
+- **A `schema` under `$link` is the schema the link stores**, never a stand-in
+  for one. A stored schema is a JSON Schema, so `true` (selects every value) and
+  `false` (selects none) are values a link can really hold, and they say
+  different things about what that link constrains. A schema too large to read
+  inline is described by a `$schemaSummary` **beside** `schema` rather than
+  under it — top-level keys, byte count as stored, and a truncated digest. The
+  slot is what carries the distinction: a link can store a schema of any shape,
+  so a summary placed under `schema` could be a schema some link really holds,
+  while nothing stored reaches a `$`-prefixed sibling. The two never both
+  appear, and neither appearing means the link stores no schema. Different
+  digests prove two schemas differ; equal ones make agreement overwhelmingly
+  likely without proving it. `--full-depth` writes every schema out in full —
+  annotated like any other value, so a sigil-shaped literal under `const` /
+  `default` / `enum` reads back as `$link` / `$ref`.
 
 ## Fidelity — reconstruction is the engine's, not a fork
 
@@ -119,7 +133,7 @@ deno task cf inspect hot      z6Mkqa41 --limit 10
 deno task cf inspect churn    z6Mkqa41 [--bucket 60] [--since '2026-07-22 10:00:00'] [--top 10]
 deno task cf inspect history  z6Mkqa41 of:fid1:…
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count [--seq N]
-deno task cf inspect value-at z6Mkqa41 of:fid1:… --full-depth # preserve every nested value
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --full-depth # every nested value, every link schema
 
 # the entity graph (relationships between pieces/cells/modules)
 deno task cf inspect graph    z6Mkqa41 [--root of:fid1:… --depth 2] [--dot]

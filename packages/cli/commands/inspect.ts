@@ -1257,7 +1257,7 @@ export const inspect = new Command()
   .option("--doc", "Show the whole document, not just value.")
   .option(
     "--full-depth",
-    "Do not truncate nested values while producing annotated output.",
+    "Do not truncate nested values or link schemas in annotated output.",
   )
   .action(async (options, space, entity) => {
     const path = parsePathOptions(options);
