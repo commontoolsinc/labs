@@ -46,10 +46,12 @@ async function fixtureRepo(
   await git(root, "add", name);
   if (options.autocrlf) {
     // Set AFTER staging, so the blob holds LF and only the checkout converts.
+    // Materialized straight from the index rather than through a commit: the
+    // conversion this reproduces happens on checkout either way, and a commit
+    // would need an author identity that a CI runner has no reason to carry.
     await git(root, "config", "core.autocrlf", "true");
-    await git(root, "commit", "-qm", "fixture");
     await Deno.remove(join(root, name));
-    await git(root, "checkout", "-q", "--", name);
+    await git(root, "checkout-index", "-f", "-a");
   }
   return root;
 }
