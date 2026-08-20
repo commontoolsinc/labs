@@ -2,7 +2,7 @@ import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type {
   AsCellEntry,
@@ -25,6 +25,7 @@ import {
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
+import { isExternalSchemaRef } from "./schema-decompose.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
   externalResolutionMissCount,
@@ -805,6 +806,7 @@ export class ContextualFlowControl {
     schema: JSONSchema | undefined,
   ): SchemaScope | undefined {
     if (!isObjectOrArray(schema)) return undefined;
+    schema = resolveExternalRootRefForStructure(schema);
     const entryScope = ContextualFlowControl.getAsCellScope(
       ContextualFlowControl.getAsCellValues(schema).at(0),
     );
@@ -833,6 +835,7 @@ export class ContextualFlowControl {
     schema: JSONSchema | undefined,
   ): SchemaScope | undefined {
     if (!isObjectOrArray(schema)) return undefined;
+    schema = resolveExternalRootRefForStructure(schema);
     const entryScope = ContextualFlowControl.getAsCellScope(
       ContextualFlowControl.getAsCellValues(schema).at(0),
     );
@@ -849,4 +852,36 @@ export class ContextualFlowControl {
     }
     return cap;
   }
+}
+
+/**
+ * A structural read of a schema position resolves an external reference
+ * first (`docs/specs/content-addressed-schemas.md`): the reference is the
+ * at-rest form of the schema, and declarations like the scope caps above
+ * live on the resolved document. Links are NOT rewritten — the reference
+ * stays the working representation, and each structural consumer resolves
+ * (memoized) at its point of use. A reference whose closure has not
+ * arrived reads as what it degrades to — schemaless, hence no
+ * declarations — matching the binding degradation rule; the traversal's
+ * document loader separately gates data selection on exactly that state.
+ */
+export function resolveExternalRootRefForStructure(
+  schema: JSONSchemaObj,
+): JSONSchemaObj {
+  const ref = schema.$ref;
+  if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+  const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+  if (!isObjectNotArray(resolved)) return schema;
+  // Resolution can mint a member view with the group's `$defs` attached;
+  // a view whose group contributed nothing carries an empty one. Drop it —
+  // consumers compare and combine these structurally, and the writer's
+  // sanitized input never had it.
+  if (
+    isObjectNotArray(resolved.$defs) &&
+    Object.keys(resolved.$defs).length === 0
+  ) {
+    const { $defs: _empty, ...rest } = resolved as JSONSchemaObj;
+    return internSchema(rest) as JSONSchemaObj;
+  }
+  return resolved as JSONSchemaObj;
 }

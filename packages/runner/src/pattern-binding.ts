@@ -1,4 +1,4 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   FabricInstance,
@@ -34,7 +34,11 @@ import {
   internalVerifierRead,
   machineryRead,
 } from "./storage/reactivity-log.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import type {
   Cell,
   CellScope,
@@ -130,11 +134,20 @@ const scopedLinkForPath = (
   let schema = link.schema;
   let childSchema: JSONSchema | undefined;
 
+  // The link keeps whatever schema form it carries; only the scope READS
+  // resolve a reference-form schema — a structural use, like the cap
+  // readers in cfc.ts.
+  const declaredScope = (candidate: JSONSchema | undefined) => {
+    if (!isObjectNotArray(candidate)) return undefined;
+    const structural = resolveExternalRootRefForStructure(
+      candidate as JSONSchemaObj,
+    );
+    return isCellScope(structural.scope) ? structural.scope : undefined;
+  };
+
   for (const key of path) {
     childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
-    if (isObjectOrArray(childSchema) && isCellScope(childSchema.scope)) {
-      scope = childSchema.scope;
-    }
+    scope = declaredScope(childSchema) ?? scope;
     schema = childSchema;
   }
 
@@ -142,11 +155,7 @@ const scopedLinkForPath = (
   const linkSchema = finalSchema === undefined
     ? undefined
     : sanitizeAliasSchemaForBinding(finalSchema);
-  if (isObjectOrArray(linkSchema)) {
-    if (isCellScope(linkSchema.scope)) {
-      scope = linkSchema.scope;
-    }
-  }
+  scope = declaredScope(linkSchema) ?? scope;
 
   return {
     ...link,
