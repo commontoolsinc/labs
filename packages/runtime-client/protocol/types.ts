@@ -188,7 +188,6 @@ export type InitializationData = {
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;
-    eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern (home included) forward in place
     // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;

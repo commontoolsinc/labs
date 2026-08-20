@@ -1,3 +1,5 @@
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+
 import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
 import {
   assert,
@@ -18,6 +20,7 @@ setIframeTestHandler();
 // uses them, so a body reads as the guest code it is.
 const GUEST_PROLOG = `<script type="module">
 import { connectGuestContext } from "/guest.js";
+import { realmFromFabricValue as encodeForHost } from "/codec.js";
 
 let onUpdate = (key, value) => {};
 const guest = connectGuestContext((key, value) => onUpdate(key, value));
@@ -397,6 +400,48 @@ ${GUEST_EPILOG}`;
       (value) => value === true,
     );
     assertEquals(first.callbacks.length, 0);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("carries a value structured cloning would flatten", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({
+      payload: new FabricBytes(new Uint8Array([1, 2, 3])),
+    });
+
+    // The guest reports the bytes it can read out of what arrived, and echoes
+    // the value back. Reading them takes a live `FabricBytes`, which is what
+    // separates a value that crossed whole from one structured cloning
+    // stripped to a bare object; the echo asks the same of the other
+    // direction. The report names the flattened case rather than throwing on
+    // it, so that case fails an assertion instead of going silent.
+    const body = `${GUEST_PROLOG}
+onUpdate = (key, value) => {
+  if (key !== "payload") return;
+  write("bytes-seen", typeof value?.slice === "function"
+    ? [...value.slice()]
+    : "not a FabricBytes");
+  write("echo", value);
+};
+read("payload");
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+
+    // `echo` is written last and writes arrive in order, so waiting on its
+    // arrival puts both reports in hand. Waiting on arrival rather than on the
+    // class leaves a value that crossed flattened to fail an assertion below
+    // rather than never satisfy the wait.
+    await waitForContextValue(
+      context,
+      iframe,
+      "echo",
+      (value) => value !== undefined,
+    );
+    assertDeepEquals(context.get(iframe, "bytes-seen"), [1, 2, 3]);
+    assert(context.get(iframe, "echo") instanceof FabricBytes);
   } finally {
     cleanupFixtures();
   }

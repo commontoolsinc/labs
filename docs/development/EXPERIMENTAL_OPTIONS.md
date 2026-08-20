@@ -32,7 +32,6 @@ was last checked against the code.
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`eagerSourceAnnotation`](#eagersourceannotation)                           | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental`                                                                    | off in production, on in shell dev builds                                            | gideon (#4458)                                        | permanent debug toggle, not slated for removal                                                                                                                                                                                    | implemented                                                                     |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
@@ -245,38 +244,6 @@ value is ignored with a warning rather than coerced. See
   server-side precondition check in the memory engine. The single-use grant path
   then drops its availability check (`cfcGrantReceiptsAvailable` in
   `packages/runner/src/cfc/grants.ts`), not the receipts themselves.
-
-### `eagerSourceAnnotation`
-
-- **Toggle via.** `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` environment variable,
-  or `RuntimeOptions.experimental.eagerSourceAnnotation`. The ambient control
-  point is `setEagerSourceAnnotation` in
-  [`packages/runner/src/builder/module.ts`](../../packages/runner/src/builder/module.ts).
-  Unlike the other env-backed flags, the runtime propagates this one only when
-  it is set explicitly, because the ambient flag is also a test seam.
-- **Added by.** gideon, in "make fn.src lazy/debug-only — re-root identity off
-  .src" (#4458, 2026-07-06).
-- **Purpose.** Resolves the per-primitive debug source annotation (`fn.src`)
-  eagerly at module evaluation instead of lazily. Resolving it is a stack
-  capture plus a source-map walk for every primitive, which is the single
-  largest cost in the cold boot floor (on the order of eighty milliseconds or
-  more per cold piece boot). Identity never reads `.src`, so this is purely a
-  debugging convenience.
-- **Current default and planned end state.** Off in production. Shell
-  development builds turn it on so that per-primitive source locations keep
-  working while debugging; the build define in
-  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts)
-  supplies the value, and
-  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)
-  defaults it to on when the environment is `development`. Unlike the flags
-  above, this one is not expected to graduate: it trades boot time for debug
-  fidelity and stays off in production by design.
-- **Status on 2026-07-08.** Implemented: reachable on the server through the
-  canonical environment mapping (like every env-backed flag), defaulted on in
-  shell development builds, and honored by the runtime.
-- **Path to removal.** There is no planned removal. It would only be deleted if
-  the debug source-annotation mechanism itself were removed, which is unlikely
-  because `.src` is a public debugging surface.
 
 ### `systemPatternAutoUpdate`
 
@@ -1177,7 +1144,6 @@ useful part of the remaining work for that flag.
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
-`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
 `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
 `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
@@ -1367,6 +1333,25 @@ negotiate reads as "state absent, run fresh"). The archived specs:
 [`persistent-scheduler-state.md`](../history/specs/persistent-scheduler-state.md),
 [`per-doc-rehydration-persisted-form.md`](../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
 [`incremental-observation-adoption.md`](../history/specs/scheduler-v2/incremental-observation-adoption.md).
+
+### `eagerSourceAnnotation` / `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` (removed)
+
+This flag gated the eager per-primitive stack capture and source-map walk that
+populated debug `fn.src`. It was removed when builder source positions moved to
+the compiler-generated `BuilderSourceSitesV1` sidecar: source locations are now
+recorded once at compile time, persist with compiled module bytes, and are
+served through a debug-only `WeakMap`. There is no runtime source-resolution
+work left to gate, and identity, authorization, and scheduling remain
+independent of `fn.src`.
+
+TODO(gideon): drop this entry once no shell development build still in
+circulation sets the flag. It is the one entry in this appendix that no
+reference in the tree points at, so it earns its place only for the developer
+whose local environment or deploy config still carries
+`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` — the flag was environment-settable and
+defaulted on in shell development builds, so those values outlive the code.
+Once that has aged out, this entry is pure history and belongs in neither this
+document nor any other.
 
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 

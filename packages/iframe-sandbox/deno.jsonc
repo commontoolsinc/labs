@@ -4,7 +4,7 @@
   "tasks": {
     // The first two run in Deno; the rest need a browser, so they are named
     // for `deno-web-test` rather than swept up by a glob.
-    "test": "deno test --allow-read test/guest.test.ts test/ipc.test.ts && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/iframe.test.ts test/iframe-csp.test.ts"
+    "test": "deno test --allow-read test/context.test.ts test/csp.test.ts test/guest.test.ts test/ipc.test.ts && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/iframe.test.ts test/iframe-csp.test.ts"
   },
   "exports": {
     ".": "./src/index.ts",

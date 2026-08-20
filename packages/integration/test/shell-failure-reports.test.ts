@@ -8,9 +8,10 @@ import type { Page } from "../page.ts";
 import {
   assertShellDocument,
   describeShellPage,
+  readAndDescribeShellPage,
   readShellPageProbe,
 } from "../shell-page-probe.ts";
-import { describeStateWaitFailure } from "../shell-utils.ts";
+import { describeStateWaitFailure, login } from "../shell-utils.ts";
 
 // What the toolshed answers with when its fetch to the shell dev server fails.
 const PROXY_FAILURE_TEXT =
@@ -37,6 +38,20 @@ const BOOTED_SHELL_DOCUMENT = `<!DOCTYPE html>
 </script>
 </body></html>`;
 
+// A booted shell whose `setIdentity` refuses. The login reaches the page and
+// fails there, which is the failure a report has to describe.
+const REFUSING_SHELL_DOCUMENT = `<!DOCTYPE html>
+<html><head><title>Common Fabric</title></head>
+<body><x-root-view></x-root-view>
+<script>
+  globalThis.app = {
+    state: () => ({}),
+    serialize: () => ({ view: { builtin: "home" }, identity: undefined }),
+    setIdentity: () => { throw new Error("the key store is not open"); },
+  };
+</script>
+</body></html>`;
+
 function handle(request: Request): Response {
   const { pathname } = new URL(request.url);
   switch (pathname) {
@@ -51,6 +66,10 @@ function handle(request: Request): Response {
       });
     case "/booted-shell":
       return new Response(BOOTED_SHELL_DOCUMENT, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    case "/refusing-shell":
+      return new Response(REFUSING_SHELL_DOCUMENT, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
   }
@@ -234,6 +253,40 @@ describe("shell-failure-reports", () => {
       expect(described).toContain("globalThis.app: absent");
       expect(described).toContain("response status: 502");
       expect(described).toContain("document text: Failed to proxy to ");
+    });
+  });
+
+  describe("readAndDescribeShellPage()", () => {
+    it("returns the same block describeShellPage() renders", async () => {
+      await load("/booted-shell");
+
+      expect(await readAndDescribeShellPage(page)).toBe(
+        describeShellPage(await readShellPageProbe(page)),
+      );
+    });
+
+    it("returns the reason when the page cannot be read", async () => {
+      const closed = await browser.newPage();
+      await closed.close();
+
+      const described = await readAndDescribeShellPage(closed);
+      expect(described).toContain("the page could not be probed:");
+    });
+  });
+
+  describe("login()", () => {
+    it("throws naming the identity and the page it failed against", async () => {
+      await load("/refusing-shell");
+      const identity = await Identity.generate({ implementation: "noble" });
+
+      const message = await rejectionMessage(login(page, identity));
+      expect(message).toContain(
+        `Logging in as ${identity.did()} failed: Error: the key store is not open`,
+      );
+      expect(message).toContain("x-root-view: present");
+      expect(message).toContain(
+        'globalThis.app: present, holding view {"builtin":"home"}',
+      );
     });
   });
 });

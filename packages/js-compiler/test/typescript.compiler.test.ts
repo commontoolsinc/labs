@@ -183,7 +183,7 @@ describe("TypeScriptCompiler", () => {
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
 
-  it("carries transformer policy manifests beside emitted JavaScript", async () => {
+  it("carries transformer sidecars beside emitted JavaScript", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.ts", {
       "/main.ts": "export const value = 1;",
@@ -193,23 +193,38 @@ describe("TypeScriptCompiler", () => {
       policyDigest: "sha256:policy",
       manifest: { version: 1 },
     };
+    const builderSourceSites = {
+      formatVersion: 1 as const,
+      sites: { value: { line: 1, col: 13, bindingName: "value" } },
+    };
     const modules = compiler.compileToModules(resolved, {
       beforeTransformers: () => ({
         factories: [],
+        getBuilderSourceSites: () =>
+          new Map([["/main.ts", builderSourceSites]]),
         getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
       }),
     });
 
+    expect(modules.get("/main.ts")?.builderSourceSites).toEqual(
+      builderSourceSites,
+    );
     expect(modules.get("/main.ts")?.policyManifests).toEqual([manifest]);
+    expect(modules.get("/main.ts")?.js).not.toContain("bindingName");
     expect(modules.get("/main.ts")?.js).not.toContain("sha256:policy");
 
     const collected = compiler.compileToModulesCollecting(resolved, {
       beforeTransformers: () => ({
         factories: [],
+        getBuilderSourceSites: () =>
+          new Map([["/main.ts", builderSourceSites]]),
         getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
       }),
     });
     expect(collected.diagnostics).toEqual([]);
+    expect(collected.modules.get("/main.ts")?.builderSourceSites).toEqual(
+      builderSourceSites,
+    );
     expect(collected.modules.get("/main.ts")?.policyManifests).toEqual([
       manifest,
     ]);

@@ -628,6 +628,9 @@ export class PatternManager {
         ...(compiled?.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: [...compiled.patternCoverageSpans] }
           : {}),
+        ...(compiled?.builderSourceSites !== undefined
+          ? { builderSourceSites: compiled.builderSourceSites }
+          : {}),
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
@@ -977,6 +980,9 @@ export class PatternManager {
                 ...(doc.patternCoverageSpans === undefined
                   ? {}
                   : { patternCoverageSpans: [...doc.patternCoverageSpans] }),
+                ...(doc.builderSourceSites === undefined
+                  ? {}
+                  : { builderSourceSites: doc.builderSourceSites }),
                 ...(doc.policyManifests === undefined
                   ? {}
                   : { policyManifests: doc.policyManifests }),
@@ -1167,6 +1173,9 @@ export class PatternManager {
         // The spans naming the lines this body's coverage probes stand for.
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
+          : {}),
+        ...(doc.builderSourceSites !== undefined
+          ? { builderSourceSites: doc.builderSourceSites }
           : {}),
         // Identity and cache-retention edges do not resolve module records.
         imports: doc.imports
@@ -1373,6 +1382,9 @@ export class PatternManager {
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
+        ...(doc.builderSourceSites !== undefined
+          ? { builderSourceSites: doc.builderSourceSites }
+          : {}),
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
@@ -1510,6 +1522,9 @@ export class PatternManager {
           // The spans naming the lines this body's coverage probes stand for.
           ...(module.patternCoverageSpans !== undefined
             ? { patternCoverageSpans: module.patternCoverageSpans }
+            : {}),
+          ...(module.builderSourceSites !== undefined
+            ? { builderSourceSites: module.builderSourceSites }
             : {}),
           imports: module.imports,
         }),

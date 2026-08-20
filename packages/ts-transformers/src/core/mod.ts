@@ -201,6 +201,7 @@
 export { TransformationContext } from "./context.ts";
 export { CrossStageState } from "./cross-stage-state.ts";
 export type {
+  BuilderSourceSiteOptions,
   CapabilityParamDefault,
   CapabilityParamSummary,
   DiagnosticInput,
@@ -217,6 +218,11 @@ export type {
   TypeRegistry,
   UnreadableCellArgument,
 } from "./transformers.ts";
+export type {
+  BuilderSourceSite,
+  BuilderSourceSitesV1,
+} from "./runtime-contract.ts";
+export { isBuilderSourceSitesV1 } from "./runtime-contract.ts";
 export {
   HelpersOnlyTransformer,
   PATTERN_COVERAGE_GLOBAL,

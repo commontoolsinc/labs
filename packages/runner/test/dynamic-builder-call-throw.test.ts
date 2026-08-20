@@ -74,19 +74,13 @@ describe("builder calls inside a running action throw", () => {
 
   it("module evaluation interleaving with an awaiting action is NOT blocked", async () => {
     // While an async action awaits, the scheduler may evaluate a module
-    // (sync, under an engine frame carrying sourceLocationContext) — its
+    // (sync, under an engine frame marked `moduleEvaluation`) — its
     // module-scope builder calls are the LEGAL mints the transformer
     // produces. The window must not leak into them.
     const pending = runInActionExecution(async () => {
       await clock.settle();
     });
-    const frame = pushFrame({
-      sourceLocationContext: {
-        script: "",
-        filename: "interleaved.js",
-        nextSearchOffset: 0,
-      },
-    } as never);
+    const frame = pushFrame({ moduleEvaluation: true });
     try {
       expect(() => lift((x: number) => x)).not.toThrow();
     } finally {

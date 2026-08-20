@@ -1,3 +1,8 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
@@ -140,14 +145,29 @@ export class CommonIframeSandboxElement extends LitElement {
     if (!this.isConnected) {
       return;
     }
-    if (!IPC.isGuestMessage(event.data)) {
+
+    // The guest is untrusted, so what arrives is a claim on two counts: that
+    // it is an encoding at all, and that what it encodes is a message this
+    // protocol writes. The decode settles the first -- it holds the marker
+    // this build mints -- and `isGuestMessage()` the second.
+    let decoded: FabricValue;
+    try {
+      decoded = fabricFromRealmValue(event.data);
+    } catch (error) {
       console.error(
-        "common-iframe-sandbox: Malformed message from guest.",
-        event.data,
+        `common-iframe-sandbox: Undecodable message from guest: ` +
+          String(error),
       );
       return;
     }
-    this.onGuestMessage(event.data);
+    if (!IPC.isGuestMessage(decoded)) {
+      console.error(
+        "common-iframe-sandbox: Malformed message from guest.",
+        decoded,
+      );
+      return;
+    }
+    this.onGuestMessage(decoded);
   };
 
   /** Handles a message from the outer frame. */
@@ -346,7 +366,7 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   /** Tells the guest that `key` now holds `value`. */
-  private notifySubscribers(key: string, value: unknown) {
+  private notifySubscribers(key: string, value: FabricValue) {
     this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
   }
 
@@ -360,7 +380,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * every moment outside a loaded guest's lifetime.
    */
   private toGuest(message: IPC.HostMessage) {
-    this.guestPort?.postMessage(message);
+    this.guestPort?.postMessage(realmFromFabricValue(message));
   }
 
   /** The outer frame's message listener, as `globalThis` holds it. */

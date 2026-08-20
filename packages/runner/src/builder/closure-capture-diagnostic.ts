@@ -40,24 +40,39 @@ function describeCapturedCell(info: CapturedCellInfo): string {
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
+/** One-line, length-capped rendering of a callback body preview. */
+function summarizeImplementation(preview: string): string {
+  const collapsed = preview.replace(/\s+/g, " ").trim();
+  return collapsed.length > 60 ? `${collapsed.slice(0, 60)}\u2026` : collapsed;
+}
+
 /**
  * Build the unified closure-capture diagnostic message.
  *
  * @param options.capturedCell identity of the offending cell, if available.
- * @param options.sourceLocation source-mapped `file:line:col` of the
- *   capturing callback, if it could be resolved at the call site.
+ * @param options.sourceLocation authored `file:line:col` of the capturing
+ *   callback, if it could be resolved at the call site.
+ * @param options.implementationPreview source text of the capturing callback.
+ *   Names the offending site when no location is available, which is the
+ *   common case while a module is still evaluating.
  */
 export function closureCaptureErrorMessage(
   options: {
     capturedCell?: CapturedCellInfo;
     sourceLocation?: string | null;
+    implementationPreview?: string | null;
   } = {},
 ): string {
   const cellDesc = options.capturedCell
     ? describeCapturedCell(options.capturedCell)
     : "";
+  const summary = options.implementationPreview
+    ? summarizeImplementation(options.implementationPreview)
+    : "";
   const locationLine = options.sourceLocation
     ? `\n  at ${options.sourceLocation}`
+    : summary
+    ? `\n  in ${summary}`
     : "";
 
   return (

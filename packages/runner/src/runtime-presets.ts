@@ -205,7 +205,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // Content-addressed schemas Phase 1 rollout: env-reachable so a process
   // can opt in while the flag exists.
   contentAddressedSchemas: "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
-  eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,

@@ -1,5 +1,7 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 // Diagram of the messages between the Host environment, the intermediary outer
 // frame, and the guest in the inner frame.
 //
@@ -86,13 +88,13 @@ export function isIPCGuestMessage(
   return false;
 }
 
-export interface GuestError {
+export type GuestError = {
   description: string;
   source: string;
   lineno: number;
   colno: number;
   stacktrace: string;
-}
+};
 
 export function isGuestError(e: object): e is GuestError {
   return typeof e === "object" &&
@@ -109,19 +111,30 @@ export enum HostMessageType {
 }
 
 /**
- * A message the host passes through to the guest. `data` is a key and the
- * value read for it.
+ * A message the host sends its guest over the port. `data` is a key and the
+ * value read for it; `GuestMessage`'s `Write` arm is the same value going the
+ * other way.
  *
- * TODO(danfuzz): the value is a `FabricValue` -- it comes from a cell, by way
- * of the registered `IframeContextHandler` -- and crosses to the guest by
- * `postMessage()` as itself, so structured clone strips a `FabricPrimitive`
- * to `{}` on the way. `codec-realm` encodes for exactly this crossing;
- * `GuestMessage`'s `Write` arm is the same value going the other way.
+ * This is a `FabricValue` whole, and crosses as one `codec-realm` encoding,
+ * that being the format written for a realm boundary. What travels is
+ * therefore a `RealmEncodedValue`, and this is what decoding one yields.
  */
 export type HostMessage = {
   type: HostMessageType.Update;
-  data: [string, unknown];
+  data: [string, FabricValue];
 };
+
+/**
+ * Is `message` a {@link HostMessage}? Takes what a decode produced, a guest
+ * having no reason to trust that what decoded is what this protocol writes.
+ */
+export function isHostMessage(message: unknown): message is HostMessage {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: unknown }).type === HostMessageType.Update &&
+    Array.isArray((message as { data?: unknown }).data) &&
+    (message as { data: unknown[] }).data.length === 2 &&
+    typeof (message as { data: unknown[] }).data[0] === "string";
+}
 
 export enum GuestMessageType {
   Error = "error",
@@ -136,12 +149,7 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe; data: string | string[] }
   | { type: GuestMessageType.Unsubscribe; data: string | string[] }
   | { type: GuestMessageType.Read; data: string }
-  // TODO(danfuzz): the `Write` value is the inbound half of the gap marked on
-  // `HostMessage`, and closed by the same mechanism. It is the weaker half:
-  // the guest is untrusted, so what arrives is whatever it sent, and an
-  // encoded form gives the host a decode that refuses rather than a value it
-  // has to vet by hand.
-  | { type: GuestMessageType.Write; data: [string, unknown] };
+  | { type: GuestMessageType.Write; data: [string, FabricValue] };
 
 export function isGuestMessage(message: unknown): message is GuestMessage {
   if (

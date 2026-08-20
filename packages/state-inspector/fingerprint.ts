@@ -287,7 +287,7 @@ export function diffFingerprints(
   before: FingerprintReport,
   after: FingerprintReport,
 ): FingerprintDiff {
-  const key = (e: EntityFingerprint) => `${e.id} ${e.scope}`;
+  const key = (e: EntityFingerprint) => `${e.id}\x00${e.scope}`;
   const a = new Map(before.perEntity.map((e) => [key(e), e]));
   const b = new Map(after.perEntity.map((e) => [key(e), e]));
 

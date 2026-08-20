@@ -54,9 +54,6 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: false,
         computedCellIds: false,
         lazyMaterialization: false,
-        // Read back from the ambient flag (a test seam that deliberately does
-        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
-        eagerSourceAnnotation: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -79,7 +76,6 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
-        eagerSourceAnnotation: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -100,9 +96,6 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
-        // Read back from the ambient flag (a test seam that deliberately does
-        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
-        eagerSourceAnnotation: false,
         serverExecution: false,
       });
       await runtime.dispose();

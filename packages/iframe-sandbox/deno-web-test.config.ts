@@ -3,6 +3,7 @@ export default {
   // by URL and so cannot share the test's own bundle.
   bundle: {
     "src/guest.ts": "guest.js",
+    "test/codec-entry.ts": "codec.js",
   },
   esbuildConfig: {
     supported: {

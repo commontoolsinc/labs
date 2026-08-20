@@ -11,19 +11,24 @@
  */
 
 import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
+import {
   GUEST_PORT_HANDOFF,
   type GuestError,
   type GuestMessage,
   GuestMessageType,
-  type HostMessage,
-  HostMessageType,
+  isHostMessage,
 } from "./ipc.ts";
 
 /**
  * Called with each value the host sends: the answer to a {@link
  * GuestContext.read}, and each update on a subscribed key.
  */
-export type UpdateHandler = (key: string, value: unknown) => void;
+export type UpdateHandler = (key: string, value: FabricValue) => void;
 
 /**
  * A guest's handle on the host's key/value context.
@@ -37,7 +42,7 @@ export type GuestContext = {
   read(key: string): void;
 
   /** Write `value` to `key`. */
-  write(key: string, value: unknown): void;
+  write(key: string, value: FabricValue): void;
 
   /**
    * Subscribe to each of `keys`. A change to one reaches the update handler;
@@ -65,7 +70,7 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
 
   const send = (message: GuestMessage): void => {
     if (port) {
-      port.postMessage(message);
+      port.postMessage(realmFromFabricValue(message));
     } else {
       unsent.push(message);
     }
@@ -73,18 +78,19 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
 
   // The port's far end is the host, so what arrives on it is not the open
   // question a window message is. It is still checked before being taken
-  // apart: a shape this does not recognize is one this guest has no reading
-  // of, and guessing at it would put an unnamed key in front of `onUpdate`.
+  // apart: what does not decode, and what decodes to something this protocol
+  // does not write, are both left alone rather than guessed at.
   const onPortMessage = (event: MessageEvent): void => {
-    const message = event.data as HostMessage | undefined;
-    if (
-      message?.type !== HostMessageType.Update ||
-      !Array.isArray(message.data) || message.data.length !== 2 ||
-      typeof message.data[0] !== "string"
-    ) {
+    let decoded: FabricValue;
+    try {
+      decoded = fabricFromRealmValue(event.data);
+    } catch {
       return;
     }
-    const [key, value] = message.data;
+    if (!isHostMessage(decoded)) {
+      return;
+    }
+    const [key, value] = decoded.data;
     onUpdate(key, value);
   };
 
@@ -99,7 +105,7 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
     port.onmessage = onPortMessage;
     port.start();
     for (const message of unsent) {
-      port.postMessage(message);
+      port.postMessage(realmFromFabricValue(message));
     }
     unsent.length = 0;
   };
@@ -111,7 +117,7 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
       send({ type: GuestMessageType.Read, data: key });
     },
 
-    write(key: string, value: unknown): void {
+    write(key: string, value: FabricValue): void {
       send({ type: GuestMessageType.Write, data: [key, value] });
     },
 

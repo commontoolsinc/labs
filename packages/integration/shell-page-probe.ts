@@ -1,3 +1,4 @@
+import { describeThrown } from "./describe-thrown.ts";
 import type { Page } from "./page.ts";
 
 // How much of the document's text a probe carries back. Enough to read a
@@ -139,6 +140,23 @@ export function describeShellPage(probe: ShellPageProbe): string {
     for (const entry of probe.consoleTail) lines.push(`    ${entry}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Read `page` and render it as the detail block of a failure message,
+ * reporting the reason instead when the page cannot be read at all.
+ *
+ * This is the whole of what a failure report needs from the page. A page that
+ * has closed, or a browser that has gone away, must not replace the failure
+ * being reported with a second one, so the read is guarded here rather than at
+ * each call site.
+ */
+export async function readAndDescribeShellPage(page: Page): Promise<string> {
+  try {
+    return describeShellPage(await readShellPageProbe(page));
+  } catch (error) {
+    return `  the page could not be probed: ${describeThrown(error)}`;
+  }
 }
 
 /**

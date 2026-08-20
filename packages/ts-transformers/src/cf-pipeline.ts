@@ -7,7 +7,10 @@ import {
   TransformationOptions,
   Transformer,
 } from "./core/mod.ts";
-import type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
+import type {
+  BuilderSourceSitesV1,
+  CfcPolicyCompilerManifestV1,
+} from "./core/runtime-contract.ts";
 import { LiftLoweringTransformer } from "./lift/transformer.ts";
 import {
   AssertDiagnosticsTransformer,
@@ -124,6 +127,10 @@ export class CommonFabricTransformerPipeline {
    */
   clearDiagnostics(): void {
     this.diagnosticsCollector.length = 0;
+  }
+
+  getBuilderSourceSites(): ReadonlyMap<string, BuilderSourceSitesV1> {
+    return this.state.getBuilderSourceSites();
   }
 
   getPolicyManifests(): ReadonlyMap<

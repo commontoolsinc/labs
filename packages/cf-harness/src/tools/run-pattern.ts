@@ -694,6 +694,14 @@ export const runPatternTool: HarnessToolDefinition<
       // deferred actions, so a wide episode can omit this pattern and
       // under-report, which falls back to the plain ok-with-valueError
       // rather than misattributing.
+      //
+      // The built-in list coordinators are a systematic miss with the same
+      // fallback: a pattern-body `.map()` runs as the `map` builtin, whose
+      // deferred coordinator is labelled `raw:map:<key>` with no module
+      // identity, so an episode made only of such actions is never claimed
+      // and a refused container write reads as ok over an absent value.
+      // Closing that needs the piece-scoped marker identity CT-2037 asks
+      // for, not a looser match here.
       // The scheduler composes deferred-action ids as
       // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
       // ref this meta stamp stores, so the match is on that composed prefix

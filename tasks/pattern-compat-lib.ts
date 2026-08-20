@@ -394,9 +394,16 @@ export function shouldRecord(findings: readonly Finding[]): boolean {
   return findings.length === 1 && findings[0].kind === "missing-baseline";
 }
 
-/** One `(pattern, baseline)` pair an accepted break forgives. */
+/**
+ * One `(pattern, baseline)` pair an accepted break forgives.
+ *
+ * NUL is the separator because it is the one byte neither half can contain,
+ * so no two pairs can produce the same key. It is written as an ESCAPE: the
+ * literal byte in the source would make the whole file read as binary, which
+ * `deno task check-control-characters` refuses for exactly that reason.
+ */
 export const acceptedBreakKey = (pattern: string, baseline: string): string =>
-  `${pattern} ${baseline}`;
+  `${pattern}\x00${baseline}`;
 
 /**
  * The schema paths an incompatibility finding blames.

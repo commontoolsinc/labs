@@ -394,6 +394,30 @@ export function preserveSourceMapRange<T extends ts.Node>(
   return ts.setSourceMapRange(node, ts.getSourceMapRange(origin));
 }
 
+/**
+ * Returns the best available authored text range for a node which may be
+ * synthetic. The explicit source-map range is the principal lineage channel
+ * once intermediate transformers rebuild a node.
+ */
+export function recoverAuthoredPosition(
+  node: ts.Node,
+): ts.TextRange | undefined {
+  if (node.pos >= 0) return { pos: node.pos, end: node.end };
+
+  const sourceMapRange = ts.getSourceMapRange(node);
+  if (
+    (sourceMapRange as unknown) !== (node as unknown) && sourceMapRange.pos >= 0
+  ) {
+    return { pos: sourceMapRange.pos, end: sourceMapRange.end };
+  }
+
+  const original = ts.getOriginalNode(node);
+  if (original !== node && original.pos >= 0) {
+    return { pos: original.pos, end: original.end };
+  }
+  return undefined;
+}
+
 // Import and re-export shared checks from schema-generator
 import {
   isDefaultAliasSymbol,

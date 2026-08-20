@@ -6,7 +6,6 @@ declare global {
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
-  var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
@@ -26,10 +25,6 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
 const EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE =
   typeof $EXPERIMENTAL_COMPUTED_CELL_IDS === "string"
     ? $EXPERIMENTAL_COMPUTED_CELL_IDS
-    : undefined;
-const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
-  typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
-    ? $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION
     : undefined;
 const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
@@ -66,12 +61,6 @@ function flagValue(flag: string | undefined): boolean | undefined {
 export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
-  // Debug `.src` source annotation: ON in development builds (so per-primitive
-  // source locations keep working for debugging), OFF in production (it is the
-  // boot floor's largest single cost). The define overrides either way.
-  eagerSourceAnnotation:
-    flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
-      (ENVIRONMENT === "development"),
   // Auto-update space-root system patterns (default-app AND home) in place.
   // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
   // can force it off. Home state survival across an in-place roll is pinned by

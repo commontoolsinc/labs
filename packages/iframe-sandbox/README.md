@@ -56,9 +56,14 @@ guest.write("counter", 1);
 ```
 
 The host and the guest hold the two ends of a `MessagePort`, and every message
-of this protocol crosses on it. A guest may call these operations at once: the
-port arrives once the document has loaded, and what is said before it does is
-sent when it comes, in the order it was said.
+of this protocol crosses on it as a single `codec-realm` encoding — the whole
+message, not the value inside it. That format carries the whole `FabricValue`
+domain, so a `FabricBytes` arrives as a `FabricBytes` rather than as the bare
+object structured cloning would leave. Both realms run the same
+`@commonfabric/data-model`, which is what makes an encoding written in one
+decodable in the other. A guest may call these operations at once: the port
+arrives once the document has loaded, and what is said before it does is sent
+when it comes, in the order it was said.
 
 `read()` does not return the value. The host answers a read the same way it
 announces a subscribed key's change, so both arrive at the handler.
@@ -71,7 +76,9 @@ scripts a policy blocked, or one that failed before the handoff. The host
 dispatches it as a `common-iframe-error` event on the element.
 
 That route carries nothing else. It is one-way, and a guest cannot be answered
-on it; anything a guest means to say about the context goes over the port.
+on it; anything a guest means to say about the context goes over the port. What
+crosses on it is plain rather than encoded, a guest that could not run its own
+scripts having no encoder either.
 
 ## How it works
 
