@@ -511,7 +511,7 @@ let _timingMeasureSequence = 0;
  * should stop paying at the same moment — which is precisely the longest run,
  * where it would otherwise cost the most.
  */
-function willEmitTimingMeasure(): boolean {
+export function willEmitTimingMeasure(): boolean {
   return _emitTimingMeasures && _timingMeasuresEmitted < _timingMeasureCap;
 }
 

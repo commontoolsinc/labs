@@ -28,7 +28,7 @@ import {
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
-  getSchedulerActionTelemetryInfo,
+  getSchedulerActionName,
   toActionRunTraceAddress,
 } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
@@ -63,14 +63,16 @@ const logger = getLogger("scheduler", {
  * fallback for an action that carries neither, and for one that carries an
  * empty string — which is a name a reader cannot use, not a name.
  *
- * Called only when a measure is actually being emitted. Building it walks and
- * formats every annotated read and write, which is far more than the two names
- * used here, and paying that per action on the ordinary path — emission off,
- * which is every production run — is not a trade this is worth.
+ * Two property reads, and called only when a measure is actually being
+ * emitted. Both halves of that matter and were measured: the full telemetry
+ * builder formats every annotated read and write on its way to these same two
+ * names, which costs about 675ns per action — more than twice the timing pair
+ * it would sit inside — so a label asks for a name rather than for telemetry.
+ * Deferring what remains costs about 4ns and saves about 19ns per action on the
+ * ordinary path, where emission is off.
  */
 function actionMeasureDetail(action: Action, actionId: string): string {
-  const info = getSchedulerActionTelemetryInfo(action);
-  return info?.moduleName || info?.patternName || actionId;
+  return getSchedulerActionName(action) || actionId;
 }
 
 export type ActionInvocationResult =
