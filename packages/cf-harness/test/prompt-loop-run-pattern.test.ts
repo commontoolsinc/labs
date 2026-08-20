@@ -248,7 +248,7 @@ describe("prompt-loop run_pattern model boundary", () => {
       // A real default pattern, so the space has a piece registry to join.
       const defaultRoot = await pieces.create(
         [
-          "import { handler, pattern, type Cell } from 'commonfabric';",
+          "import { handler, pattern, type Cell, type Stream } from 'commonfabric';",
           "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
           "  true,",
           "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
@@ -256,7 +256,10 @@ describe("prompt-loop run_pattern model boundary", () => {
           "    pieceRegistry.push(piece);",
           "  },",
           ");",
-          "export default pattern<{ pieceRegistry: unknown[] }>(",
+          "export default pattern<",
+          "  { pieceRegistry: unknown[] },",
+          "  { pieceRegistry: unknown[]; addPiece: Stream<{ piece: unknown }> }",
+          ">(",
           "  ({ pieceRegistry }) => ({",
           "    pieceRegistry,",
           "    addPiece: addPiece({ pieceRegistry }),",

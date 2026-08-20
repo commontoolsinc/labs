@@ -182,9 +182,8 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
   tests);
 - ambiguous `any` (or abuse of `unknown`) away from a serialization boundary;
   types that admit invalid intermediate states;
-- working around the transformer (stray `/// <cf-disable-transform />`, manual
-  graph wiring the transformers would do, imperative escapes from the target
-  language);
+- working around the transformer (manual graph wiring the transformers would do,
+  imperative escapes from the target language);
 - async escapes in patterns (`async/await` in handlers; awaiting `generateText`
   / `generateObject` instead of using `.result`; `new Stream()` /
   `.subscribe()`).

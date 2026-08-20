@@ -157,7 +157,7 @@ const DOUBLED_RESULT_SCHEMA = {
  * space has a REAL registry rather than the detached always-empty fallback.
  */
 const DEFAULT_PATTERN_SOURCE = [
-  "import { handler, pattern, type Cell } from 'commonfabric';",
+  "import { handler, pattern, type Cell, type Stream } from 'commonfabric';",
   "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
   "  true,",
   "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
@@ -165,7 +165,10 @@ const DEFAULT_PATTERN_SOURCE = [
   "    pieceRegistry.push(piece);",
   "  },",
   ");",
-  "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+  "export default pattern<",
+  "  { pieceRegistry: unknown[] },",
+  "  { pieceRegistry: unknown[]; addPiece: Stream<{ piece: unknown }> }",
+  ">(({ pieceRegistry }) => ({",
   "  pieceRegistry,",
   "  addPiece: addPiece({ pieceRegistry }),",
   "}));",

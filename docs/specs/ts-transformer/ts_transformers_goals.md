@@ -248,8 +248,8 @@ take priority over opaque micro-optimizations.
 
 ## C-001 Default-On With Explicit Opt-Out
 
-Transform-heavy behavior is enabled by default. Files can opt out explicitly via
-`/// <cf-disable-transform />`.
+Transform-heavy behavior applies to every file a program carries; there is no
+per-file opt-out.
 
 ## C-002 Ordered Multi-Stage Pipeline
 

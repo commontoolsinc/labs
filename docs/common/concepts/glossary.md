@@ -128,9 +128,8 @@ Typescript dialect that is pre-processed in patterns to preserve familiar
 Typescript patterns when using Cells and shared storage. This leverages the
 typescript compiler to parse the AST (Abstract Syntax Tree) of the code, and
 make appropriate transformations, including generating runtime schemas from
-TypeScript types (e.g. for `generateObject<T>`). Use
-`/// <cf-disable-transform />` on the first non-empty line of a file to opt
-out of CTS transforms.
+TypeScript types (e.g. for `generateObject<T>`). Every file a program carries
+is transformed.
 
 ## Safe Rendering
 
