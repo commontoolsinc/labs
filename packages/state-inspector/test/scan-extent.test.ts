@@ -27,7 +27,7 @@ import {
 } from "../model.ts";
 import { reconstructDocument } from "../reconstruct.ts";
 import { contentFingerprint } from "../fingerprint.ts";
-import { listScopes } from "../scopes.ts";
+import { listScopes, scopeOverlay } from "../scopes.ts";
 import { buildAllDetails } from "../detail.ts";
 import { buildSpaceGraph, subgraphAround } from "../graph.ts";
 import { buildInspectorBundle, renderInspectorHtml } from "../html.ts";
@@ -708,6 +708,69 @@ describe("scan-extent", () => {
         expect(shared(kid)).not.toBe(shared(root));
         expect(kid.perEntity.map((e) => e.scope)).toContain(MINE);
       });
+    });
+  });
+
+  describe("the standalone HTML explorer", () => {
+    it("marks a page missing an entity it could not reconstruct, not only a capped one", async () => {
+      await withSeeded(
+        [
+          { id: "of:good", document: { value: "readable" }, revisions: 1 },
+          { id: "of:bad", document: UNDECODABLE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          const bundle = buildInspectorBundle(space);
+          // The cap was never reached, so the cap banner stays away — and
+          // before this the page said nothing at all, while its tree omitted an
+          // entity. A generated page outlives the stderr notice: it gets opened
+          // days later and shared with someone who never ran the command.
+          expect(bundle.extent).toMatchObject({
+            truncated: false,
+            unreadable: 1,
+          });
+          const html = renderInspectorHtml(bundle);
+          expect(html).not.toContain("capped at");
+          expect(html).toContain("could not be reconstructed");
+          expect(html).toContain("a higher --limit will not recover them");
+        },
+      );
+    });
+
+    it("shows the per-user cells of an entity a child branch inherited", async () => {
+      const MINE = "user:did:key:zBob";
+      await withSeeded(
+        [
+          { id: "of:shared", document: { value: "space value" }, revisions: 1 },
+          {
+            id: "of:shared",
+            document: { value: "bob's value" },
+            revisions: 1,
+            scope: MINE,
+          },
+          {
+            id: "of:kidonly",
+            document: { value: "kid" },
+            revisions: 1,
+            branch: "kid",
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 2 }],
+        (space) => {
+          // The scope list and the overlays have to describe one domain: a page
+          // naming a per-user scope while finding no cells in it reports the
+          // divergence as absent rather than as unreached.
+          const bundle = buildInspectorBundle(space, { branch: "kid" });
+          expect(bundle.scopes.map((s) => s.raw)).toContain(MINE);
+          expect(bundle.overlays.map((o) => o.id)).toEqual(["of:shared"]);
+          const overlay = scopeOverlay(space, "of:shared", { branch: "kid" });
+          expect(overlay.variants.map((v) => v.scope)).toEqual([
+            "space",
+            MINE,
+          ]);
+          expect(overlay.divergent).toBe(true);
+        },
+      );
     });
   });
 });

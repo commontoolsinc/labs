@@ -29,10 +29,10 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { annotate, summarize } from "./decode.ts";
 import {
-  branchReadChain,
   type EntityDocument,
   reconstructDocument,
   selectAtPath,
+  visibleRevisionRows,
 } from "./reconstruct.ts";
 
 export type ScopeKind = "space" | "user" | "session" | "other";
@@ -100,30 +100,15 @@ export function listScopes(
   space: SpaceDb,
   opts: { branch?: string } = {},
 ): Scope[] {
-  const stmt = space.db.prepare(
-    `SELECT scope_key, id, count(*) revs FROM revision
-     WHERE branch = ? AND seq <= ? GROUP BY scope_key, id`,
-  );
   const totals = new Map<string, { entities: number; revisions: number }>();
-  const claimed = new Set<string>();
-  for (const link of branchReadChain(space, opts.branch ?? "")) {
-    for (
-      const r of stmt.all<{ scope_key: string; id: string; revs: number }>(
-        link.branch,
-        link.atSeq,
-      )
-    ) {
-      const key = `${r.scope_key}\u0000${r.id}`;
-      if (claimed.has(key)) continue;
-      claimed.add(key);
-      const total = totals.get(r.scope_key) ?? { entities: 0, revisions: 0 };
-      total.entities += 1;
-      total.revisions += r.revs;
-      totals.set(r.scope_key, total);
-    }
+  for (const row of visibleRevisionRows(space, { branch: opts.branch })) {
+    const total = totals.get(row.scope) ?? { entities: 0, revisions: 0 };
+    total.entities += 1;
+    total.revisions += row.revisions;
+    totals.set(row.scope, total);
   }
   return [...totals.entries()]
-    .map(([scope_key, total]) => ({ ...parseScope(scope_key), ...total }))
+    .map(([scope, total]) => ({ ...parseScope(scope), ...total }))
     .sort((a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.revisions - a.revisions
     );
@@ -373,12 +358,11 @@ export function scopeOverlay(
   opts: { branch?: string } = {},
 ): ScopeOverlay {
   const branch = opts.branch ?? "";
-  const rows = space.db
-    .prepare(
-      `SELECT scope_key, count(*) revs FROM revision
-       WHERE branch = ? AND id = ? GROUP BY scope_key`,
-    )
-    .all<{ scope_key: string; revs: number }>(branch, id);
+  // The scopes this branch can SEE for the entity, not only those written on
+  // it: an inherited entity's per-user variants live on the parent, and an
+  // overlay that missed them would report no divergence where there is some.
+  const rows = visibleRevisionRows(space, { branch, id })
+    .map((r) => ({ scope_key: r.scope, revs: r.revisions }));
   // Content-key each variant from the RAW reconstructed value (hashStringOf is
   // already fabric-aware and depth-complete). Hashing the *annotated* value
   // would falsely converge — depth-8 truncation collapses values that differ
