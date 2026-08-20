@@ -1103,12 +1103,13 @@ deno task run -- \
   --prompt "Delegate a focused inspection and summarize the result."
 ```
 
-The browser profile is the only path to the `browser` tool, the harness's one
-host escape. The tool drives the host `agent-browser` CLI one structured action
-per call, while the parent still receives only the normal sanitized subagent
-result. Browser/page output is treated as untrusted child-local data; with a
-`returnSchema`, parent-visible free-form strings are replaced by opaque links
-while raw observations stay in child artifacts. The browser child can read
+The browser profile is the only path to the `browser` tool. The tool drives the
+host `agent-browser` CLI one structured action per call, while the parent still
+receives only the normal sanitized subagent result. Together with the profile's
+allowlisted host skill scripts below, it is the whole of the harness's host
+execution surface. Browser/page output is treated as untrusted child-local data;
+with a `returnSchema`, parent-visible free-form strings are replaced by opaque
+links while raw observations stay in child artifacts. The browser child can read
 workspace files but does not receive `edit_file` or `write_file`, so it should
 return findings through the structured return channel rather than by writing
 browser observations into the workspace.

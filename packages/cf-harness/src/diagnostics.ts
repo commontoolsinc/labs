@@ -739,12 +739,11 @@ export const classifyBuiltinToolFailure = (
 
 /**
  * Which browser-tool errors count as harness failures. `invalid_input` is the
- * model asking for something outside the action vocabulary — the successor of
- * the old host-command policy denial. `lease_unavailable` and
- * `host_unavailable` are the run's environment failing the tool. A
- * `command_failed` is an ordinary page-level outcome (a ref that no longer
- * exists, a navigation that failed) the model is expected to react to, so it
- * is not recorded as a failure.
+ * model asking for something outside the action vocabulary, recorded as
+ * `tool_not_allowed`. `lease_unavailable` and `host_unavailable` are the
+ * run's environment failing the tool. A `command_failed` is an ordinary
+ * page-level outcome (a ref that no longer exists, a navigation that failed)
+ * the model is expected to react to, so it is not recorded as a failure.
  */
 const classifyBrowserToolFailure = (
   output: unknown,

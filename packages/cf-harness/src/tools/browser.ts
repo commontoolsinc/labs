@@ -1,3 +1,10 @@
+/**
+ * The `browser` tool: typed, lease-bound control of the host `agent-browser`
+ * CLI for the browser subagent profile. This module owns the action
+ * vocabulary, the per-action input validation that turns a call into one
+ * argument list, and the invocation that attaches the Browser Access lease
+ * and keeps its endpoint out of everything the model reads.
+ */
 import type { JSONSchema } from "@commonfabric/api";
 
 import {
@@ -80,9 +87,11 @@ export type BrowserToolOutput =
   | BrowserToolErrorOutput;
 
 /**
- * Structured browser control for the browser subagent profile, and the only
- * host escape that profile has. The tool builds one agent-browser invocation
- * from typed fields and attaches it to the run's Browser Access lease itself:
+ * Structured browser control for the browser subagent profile. Together with
+ * the profile's allowlisted host skill scripts, this is the whole of that
+ * profile's host execution surface, and the only free-standing part of it.
+ * The tool builds one agent-browser invocation from typed fields and attaches
+ * it to the run's Browser Access lease itself:
  * the CDP endpoint never appears in model input or output, so nothing the
  * model writes can point the browser at another endpoint, and nothing about
  * the host's topology rides in the transcript. Anything shell-shaped —

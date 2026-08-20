@@ -1,3 +1,7 @@
+/**
+ * Unit tests for the browser tool's action planning: the vocabulary, each
+ * action's argument grammar, and the refusal of fields outside their action.
+ */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

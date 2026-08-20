@@ -1,3 +1,7 @@
+/**
+ * Unit tests for the Browser Access lease contract: CDP origin normalization
+ * and lease freshness validation.
+ */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
