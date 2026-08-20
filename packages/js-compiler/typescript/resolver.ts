@@ -208,9 +208,10 @@ export function collectDataFileNames(
  */
 function isShadowed(use: ts.Identifier): boolean {
   const name = use.text;
-  for (let node = use.parent; node !== undefined; node = node.parent) {
-    if (ts.isSourceFile(node)) return false;
+  let node: ts.Node = use.parent;
+  while (!ts.isSourceFile(node)) {
     if (bindsName(node, name)) return true;
+    node = node.parent;
   }
   return false;
 }

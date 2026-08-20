@@ -218,6 +218,78 @@ describe("typescript/resolver.ts", () => {
       )).toEqual(["/data/cities.json"]);
     });
 
+    it("ignores a call under a catch binding of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  try {\n" +
+          "    return 1;\n" +
+          "  } catch (dataFile) {\n" +
+          '    return dataFile("/shadowed.json");\n' +
+          "  }\n" +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a loop variable of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  for (let dataFile = 0; dataFile < 1; dataFile++) {\n" +
+          '    console.log(dataFile("/shadowed.json"));\n' +
+          "  }\n" +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a function declared with the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  function dataFile(s: string) {\n" +
+          "    return s;\n" +
+          "  }\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a class declared with the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  class dataFile {}\n" +
+          '  return [dataFile, dataFile("/shadowed.json")];\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call inside a function expression of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default function dataFile(s: string) {\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "}\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through an array-destructured binding", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default (input: ((s: string) => string)[]) => {\n" +
+          "  const [dataFile] = input;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a default import, which does not bind the reader", () => {
+      expect(names(
+        'import cf from "commonfabric";\n' +
+          'export default () => cf.dataFile("/data/cities.json");\n',
+      )).toEqual([]);
+    });
+
     it("finds nothing in a module that never imports it", () => {
       expect(names("export const x = 1;\n")).toEqual([]);
     });
