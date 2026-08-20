@@ -777,6 +777,144 @@ describe("parseExecArgs edge cases", () => {
       .toEqual({ fooBar: 5 });
   });
 
+  it("lets a verb's single field be named by --value as well as its own name", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+
+    // The two spellings are one payload, not two shapes: --value fills the
+    // declared field rather than becoming the whole event.
+    expect(parseExecArgs(spec, ["--title", "Milk"]).input)
+      .toEqual({ title: "Milk" });
+    expect(parseExecArgs(spec, ["--value", "Milk"]).input)
+      .toEqual({ title: "Milk" });
+    expect(parseExecArgs(spec, ["--value=Milk"]).input)
+      .toEqual({ title: "Milk" });
+
+    // The value is read against the FIELD's schema, so the alias cannot
+    // deliver a string where its field is typed a number.
+    const numeric = makeSpec("handler", {
+      type: "object",
+      properties: { qty: { type: "number" } },
+      required: ["qty"],
+    });
+    expect(parseExecArgs(numeric, ["--value", "7"]).input).toEqual({ qty: 7 });
+
+    // A boolean field keeps both halves of its own vocabulary under the alias.
+    const flag = makeSpec("handler", {
+      type: "object",
+      properties: { done: { type: "boolean" } },
+      required: ["done"],
+    });
+    expect(parseExecArgs(flag, ["--value"]).input).toEqual({ done: true });
+    expect(parseExecArgs(flag, ["--no-value"]).input).toEqual({ done: false });
+
+    // Naming the field satisfies its own requirement, however it was spelled.
+    expect(() => parseExecArgs(spec, ["--value", "Milk"]))
+      .not.toThrow(/Missing required flag/);
+
+    // The alias carries a field, so it is a generated flag and shares their
+    // one rule: --json carries the whole event or nothing does.
+    expect(() => parseExecArgs(spec, ["--value", "Milk", "--json", "{}"]))
+      .toThrow(/--json cannot be combined with generated flags/);
+  });
+
+  it("refuses --value where a verb declares more than one field", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" }, qty: { type: "number" } },
+    });
+
+    // The field count is the reason, so the field count is what the refusal
+    // leads with — a near miss would offer whichever declared name happens to
+    // sit closest to "value", which explains nothing.
+    expect(() => parseExecArgs(spec, ["--value", "Milk"]))
+      .toThrow(/"--value" spells the sole field of a verb that declares one/);
+    expect(() => parseExecArgs(spec, ["--value", "Milk"]))
+      .toThrow(/this verb declares 2: "--title", "--qty"/);
+    expect(() => parseExecArgs(spec, ["--value", "Milk"]))
+      .not.toThrow(/Did you mean/);
+
+    // A verb declaring nothing has no field for the alias to spell either.
+    const empty = makeSpec("handler", { type: "object", properties: {} });
+    expect(() => parseExecArgs(empty, ["--value", "Milk"]))
+      .toThrow(/declares no fields at all/);
+  });
+
+  it("keeps one spelling for a single field already named value", () => {
+    // The alias would be the name the field already answers to, so there is
+    // none to add and nothing to collide with.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    });
+    expect(parseExecArgs(spec, ["--value", "Milk"]).input)
+      .toEqual({ value: "Milk" });
+    expect(() => parseExecArgs(spec, ["--value", "Milk"]))
+      .not.toThrow();
+
+    // And the help page names it once, as the field it is.
+    const help = renderExecHelp("/tmp/x.handler", spec);
+    expect(help).toContain("--value <string>  Required.");
+    expect(help).not.toContain("The same field as");
+  });
+
+  it("offers --value as a near miss only where the verb has a single field", () => {
+    const single = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+    });
+    // A slip toward a spelling that works is owed the same near miss a slip
+    // toward a field name is.
+    expect(() => parseExecArgs(single, ["--valu", "x"]))
+      .toThrow(/Did you mean "--value"\?/);
+    // The vocabulary sentence still answers what the verb DECLARES; the
+    // alias rides a separate clause because it is not a declaration.
+    expect(() => parseExecArgs(single, ["--valu", "x"]))
+      .toThrow(
+        /takes "--title", which this verb's sole field also spells "--value"/,
+      );
+
+    const many = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" }, qty: { type: "number" } },
+    });
+    expect(() => parseExecArgs(many, ["--valu", "x"]))
+      .not.toThrow(/--value/);
+  });
+
+  it("names both spellings on the help page of a single-field verb", () => {
+    const required = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+    const help = renderExecHelp("/tmp/x.handler", required);
+    expect(help).toContain("--value <string>  The same field as --title");
+    // The usage block names what a call must carry, so the alias appears
+    // there beneath the field's own line — never above it.
+    expect(help).toContain("[invoke] --title <string>\n");
+    expect(help).toContain("[invoke] --value <string>\n");
+    expect(help.indexOf("[invoke] --title")).toBeLessThan(
+      help.indexOf("[invoke] --value"),
+    );
+
+    // An optional field is named in neither usage line, and the alias follows
+    // it rather than standing alone in a block that never mentions --title.
+    const optional = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+    });
+    const optionalHelp = renderExecHelp("/tmp/x.handler", optional);
+    expect(optionalHelp).toContain(
+      "--value <string>  The same field as --title",
+    );
+    expect(optionalHelp).not.toContain("[invoke] --value <string>");
+  });
+
   it("handles each non-object input mode and its errors", () => {
     const booleanSpec = makeSpec("tool", { type: "boolean" });
     const stringSpec = makeSpec("tool", { type: "string" });
