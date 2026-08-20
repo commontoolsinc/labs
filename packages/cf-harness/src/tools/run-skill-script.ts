@@ -3,7 +3,10 @@ import { basename, isAbsolute, relative } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 
-import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
+import {
+  redactCdpEndpoint,
+  validateBrowserAccessLeaseFreshness,
+} from "../contracts/browser-access.ts";
 import type {
   HarnessSkillDiagnostic,
   HarnessSkillRecord,
@@ -1223,19 +1226,14 @@ export const runSkillScriptTool: HarnessToolDefinition<
       registrySizeBytes: resource.sizeBytes,
       observedSizeBytes,
       // A host agent-browser script holds the lease endpoint in its
-      // environment and may echo it; the endpoint is harness-side state, so
-      // it is scrubbed from what the model reads.
+      // environment and may echo it, so echoes are scrubbed from what the
+      // model reads. The scrub is a backstop: what keeps the endpoint out of
+      // model reach is that only the digest-pinned bundled script holds it.
       stdout: hostAgentBrowserCdpOrigin !== undefined
-        ? result.stdout.replaceAll(
-          hostAgentBrowserCdpOrigin,
-          "<lease endpoint>",
-        )
+        ? redactCdpEndpoint(result.stdout, hostAgentBrowserCdpOrigin)
         : result.stdout,
       stderr: hostAgentBrowserCdpOrigin !== undefined
-        ? result.stderr.replaceAll(
-          hostAgentBrowserCdpOrigin,
-          "<lease endpoint>",
-        )
+        ? redactCdpEndpoint(result.stderr, hostAgentBrowserCdpOrigin)
         : result.stderr,
       exitCode: result.exitCode,
       ...(cfcResult !== undefined ? { cfcResult } : {}),

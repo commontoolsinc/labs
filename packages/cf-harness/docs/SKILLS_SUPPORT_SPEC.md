@@ -301,7 +301,10 @@ uses this for the bundled `agent-browser` scripts so they can call the host
 `agent-browser` CLI attached to the Browser Access CDP endpoint leased to the
 child task. The endpoint is harness-side state: the harness injects it as
 `AGENT_BROWSER_CDP` in the script environment, rejects a `--cdp` argument, and
-scrubs the endpoint from the script output the model reads. Host-target scripts
+scrubs endpoint echoes — verbatim, URL-encoded, or bare host:port — from the
+script output the model reads. The scripts themselves are trusted with the
+endpoint the way any digest-pinned bundled code is; the scrub is a backstop
+against accidental echoes, not the confinement mechanism. Host-target scripts
 receive host paths in `SKILL_DIR` and `SKILL_SCRIPT` and
 `CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET=host`; they run with a cleared
 subprocess environment plus a controlled `PATH` and explicit `CF_HARNESS_*` /

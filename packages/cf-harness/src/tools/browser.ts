@@ -9,6 +9,7 @@ import type { JSONSchema } from "@commonfabric/api";
 
 import {
   normalizeCdpOrigin,
+  redactCdpEndpoint,
   validateBrowserAccessLeaseFreshness,
 } from "../contracts/browser-access.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -433,11 +434,12 @@ export const browserTool: HarnessToolDefinition<
       );
     }
     // Every string that came through the process — an error message that
-    // joins the argv, output that echoes the connection — gets the endpoint
-    // scrubbed before it can reach the model. The endpoint is harness-side
-    // state; no execution outcome is a channel for it.
+    // joins the argv, output that echoes the connection — gets endpoint
+    // echoes scrubbed before reaching the model. The scrub is a backstop:
+    // what keeps the endpoint out of model reach is that only the trusted
+    // agent-browser binary holds it.
     const redactEndpoint = (text: string): string =>
-      text.replaceAll(cdpOrigin, "<lease endpoint>");
+      redactCdpEndpoint(text, cdpOrigin);
     let result;
     try {
       result = await context.hostProcessRunner.run({

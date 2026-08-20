@@ -76,6 +76,25 @@ export const normalizeCdpOrigin = (
   return url.origin;
 };
 
+/**
+ * Removes echoes of a CDP endpoint from text bound for the model: the origin
+ * itself, its URL-encoded form, and the bare host:port, each of which shows
+ * up in real connection errors. This is a backstop against accidental
+ * echoes, not a flow boundary — the code that holds the endpoint (the
+ * agent-browser CLI, a digest-pinned bundled script) is trusted host
+ * software, and that trust is what actually keeps the endpoint out of model
+ * reach.
+ */
+export const redactCdpEndpoint = (text: string, cdpOrigin: string): string => {
+  const hostPort = cdpOrigin.replace(/^http:\/\//, "");
+  return [cdpOrigin, encodeURIComponent(cdpOrigin), hostPort]
+    .filter((form) => form !== "")
+    .reduce(
+      (scrubbed, form) => scrubbed.replaceAll(form, "<lease endpoint>"),
+      text,
+    );
+};
+
 export const parseBrowserAccessExpiresAt = (
   expiresAt: string,
 ): Date | undefined => {

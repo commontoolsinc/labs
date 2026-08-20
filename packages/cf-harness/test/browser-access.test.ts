@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 
 import {
   normalizeCdpOrigin,
+  redactCdpEndpoint,
   validateBrowserAccessLeaseFreshness,
 } from "../src/contracts/browser-access.ts";
 
@@ -53,6 +54,28 @@ describe("browser-access", () => {
         .toBeUndefined();
       expect(normalizeCdpOrigin("http://127.0.0.1:9222/?a=b")).toBeUndefined();
       expect(normalizeCdpOrigin("http://127.0.0.1:9222/#frag")).toBeUndefined();
+    });
+  });
+
+  describe("redactCdpEndpoint", () => {
+    it("scrubs verbatim, URL-encoded, and bare host:port echoes", () => {
+      const origin = "http://localhost:9362";
+      expect(redactCdpEndpoint("connect http://localhost:9362 now", origin))
+        .toBe("connect <lease endpoint> now");
+      expect(
+        redactCdpEndpoint("err=http%3A%2F%2Flocalhost%3A9362", origin),
+      ).toBe("err=<lease endpoint>");
+      expect(redactCdpEndpoint("dial tcp localhost:9362 refused", origin))
+        .toBe("dial tcp <lease endpoint> refused");
+    });
+
+    it("leaves text without an echo unchanged", () => {
+      expect(
+        redactCdpEndpoint(
+          "open http://localhost:8000/piece",
+          "http://localhost:9362",
+        ),
+      ).toBe("open http://localhost:8000/piece");
     });
   });
 
