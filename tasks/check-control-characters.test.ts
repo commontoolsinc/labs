@@ -103,8 +103,8 @@ describe("check-control-characters", () => {
 
   describe("isGovernedPath()", () => {
     it("governs every authored format, including ones no list named", () => {
-      // The inversion's point: an allow-list has to be complete to be true,
-      // and each of these was tracked while a list of extensions missed it.
+      // These disparate formats pin that new source types remain governed
+      // without updating a source-format registry.
       for (
         const path of [
           "tasks/a.ts",
@@ -254,11 +254,9 @@ describe("check-control-characters", () => {
     });
 
     it("catches a control byte in a blob that is not valid UTF-8", async () => {
-      // Decoding first and skipping what would not decode was fail-OPEN: this
-      // blob holds the very NUL the gate exists to catch. Raw bytes are exact
-      // here rather than a shortcut — a UTF-8 multibyte sequence is built from
-      // bytes at or above 0x80, so nothing above U+007F can contribute one
-      // below 0x20.
+      // An invalid byte elsewhere in the blob cannot hide the NUL. Raw-byte
+      // scanning is exact because UTF-8 multibyte sequences use only bytes at
+      // or above 0x80.
       const root = await fixtureRepo("subject.ts", "placeholder\n");
       await Deno.writeFile(
         join(root, "subject.ts"),

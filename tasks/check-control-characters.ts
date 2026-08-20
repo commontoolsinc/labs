@@ -31,14 +31,9 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 /**
  * Extensions whose contents are not text at all.
  *
- * The rule governs every tracked file by default, so what is written down is
- * the exemption rather than the coverage. That direction is deliberate: an
- * allow-list of authored formats has to be complete to be true, and each time
- * this one was written it missed something the repository already tracked —
- * C, TLA, JSONL, SVG, a web manifest, a Dockerfile with no extension at all.
- * A new binary format that is not listed here produces a false positive,
- * which someone fixes by adding a line; a new SOURCE format under an
- * allow-list produces silence, which nobody sees.
+ * Every tracked file is governed unless explicitly identified as binary.
+ * This keeps newly introduced authored formats covered automatically; an
+ * unlisted binary fails visibly and earns a reviewed exemption here.
  */
 const BINARY_EXTENSIONS: readonly string[] = [
   ".db",
@@ -113,15 +108,11 @@ export interface ControlViolation {
  * Every governed control byte in `contents`, one entry per byte value rather
  * than per occurrence.
  *
- * Scans RAW BYTES rather than decoded text, which is exact rather than a
- * shortcut: a UTF-8 multibyte sequence is built from bytes at or above 0x80,
- * so no character above U+007F can contribute a byte below 0x20. Every byte
- * under 0x20 in the stream is therefore that control character itself, and
- * counting LF bytes gives the same line numbers a decode would.
- *
- * It also fails CLOSED on a file that is not valid UTF-8. Decoding first and
- * skipping what would not decode meant a blob of `[0xff, 0x00, 0x0a]` — which
- * holds the very NUL this exists to catch — was reported clean.
+ * Raw-byte scanning is exact for UTF-8: a multibyte sequence uses only bytes
+ * at or above 0x80, so no character above U+007F can contribute a byte below
+ * 0x20. It also covers invalid UTF-8, where an unrelated invalid byte cannot
+ * hide a control byte. Counting LF bytes gives the same line numbers as
+ * decoding valid UTF-8.
  *
  * Reported per byte value because the finding a reader acts on is "this file
  * contains NULs"; a CRLF file would otherwise print a line per line of the
