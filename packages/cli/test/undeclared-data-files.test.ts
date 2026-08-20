@@ -10,9 +10,9 @@ import { expect } from "@std/expect";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { join } from "@std/path";
 import {
-  savePiecePattern,
   undeclaredDataFiles,
   undeclaredDataFileWarning,
+  writeSourcePackage,
 } from "../lib/piece.ts";
 
 const READS_CITIES = 'import { dataFile } from "commonfabric";\n' +
@@ -119,105 +119,71 @@ describe("undeclaredDataFileWarning", () => {
   });
 });
 
-describe("savePiecePattern", () => {
-  const CONFIG = {
-    apiUrl: "https://cf.dev",
-    space: "common-knowledge",
-    identity: "~/.my.key",
-    piece: "p",
-  };
-
-  // The command reads one thing from the piece — its source program — and
-  // writes what it finds. Everything else about a piece is beside the point.
-  const piecesOver = (program: RuntimeProgram | undefined) => () =>
-    Promise.resolve({
-      get: () =>
-        Promise.resolve({
-          getPatternSourceProgram: () => Promise.resolve(program),
-        }),
-      // deno-lint-ignore no-explicit-any
-    } as any);
-
-  // Runs `body` with console.log captured, returning what it received.
-  async function captureLog(body: () => Promise<void>): Promise<string> {
-    const lines: string[] = [];
-    const original = console.log;
-    console.log = (...args: unknown[]) =>
-      lines.push(args.map(String).join(" "));
+describe("writeSourcePackage", () => {
+  // Writes `program` into a fresh temp tree, runs `body` against that tree,
+  // and removes it.
+  async function written(
+    program: RuntimeProgram,
+    body: (out: string) => Promise<void>,
+  ): Promise<void> {
+    const out = await Deno.makeTempDir({ prefix: "source-package-" });
     try {
-      await body();
+      await writeSourcePackage(program, out);
+      await body(out);
     } finally {
-      console.log = original;
+      await Deno.remove(out, { recursive: true });
     }
-    return lines.join("\n");
   }
 
-  it("writes every file the package holds, data included", async () => {
-    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
-    try {
-      await savePiecePattern(CONFIG, out, {
-        loadPieces: piecesOver(
-          program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
-            "/data/cities.json",
-          ]),
-        ),
-        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-      });
-      expect(await Deno.readTextFile(join(out, "main.tsx"))).toBe(READS_CITIES);
-      expect(await Deno.readTextFile(join(out, "data/cities.json"))).toBe("[]");
-    } finally {
-      await Deno.remove(out, { recursive: true });
-    }
+  it("lays a file out under the name the package stores it by", async () => {
+    await written(
+      program({ "/main.tsx": READS_CITIES }),
+      async (out) => {
+        expect(await Deno.readTextFile(join(out, "main.tsx"))).toBe(
+          READS_CITIES,
+        );
+      },
+    );
   });
 
-  it("stays quiet when the source accounts for every data file", async () => {
-    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
-    try {
-      const logged = await captureLog(async () => {
-        await savePiecePattern(CONFIG, out, {
-          loadPieces: piecesOver(
-            program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
-              "/data/cities.json",
-            ]),
-          ),
-          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-        });
-      });
-      expect(logged).toBe("");
-    } finally {
-      await Deno.remove(out, { recursive: true });
-    }
+  it("writes a data file beside the code, in its own directory", async () => {
+    await written(
+      program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
+        "/data/cities.json",
+      ]),
+      async (out) => {
+        // The nested directory is what makes a `setsrc` from here resolve the
+        // same `/data/cities.json` the piece was built with.
+        expect(await Deno.readTextFile(join(out, "data/cities.json"))).toBe(
+          "[]",
+        );
+      },
+    );
   });
 
-  it("names a data file the written source cannot re-derive", async () => {
-    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
-    try {
-      const logged = await captureLog(async () => {
-        await savePiecePattern(CONFIG, out, {
-          loadPieces: piecesOver(
-            program({
-              "/main.tsx": "export default 1;\n",
-              "/extra.txt": "hi",
-            }, ["/extra.txt"]),
-          ),
-          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-        });
-      });
-      expect(logged).toContain("--datafile ./extra.txt");
-    } finally {
-      await Deno.remove(out, { recursive: true });
-    }
+  it("writes a file's bytes unchanged", async () => {
+    const authored = '{ "cities":  ["Oslo"] }\n';
+    await written(
+      program({ "/main.tsx": READS_CITIES, "/data/cities.json": authored }),
+      async (out) => {
+        // Spacing a formatter would not produce, so a re-serialization
+        // anywhere on the way out shows up here.
+        expect(await Deno.readTextFile(join(out, "data/cities.json"))).toBe(
+          authored,
+        );
+      },
+    );
   });
 
-  it("refuses a piece that holds no pattern source", async () => {
-    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
+  it("refuses a name that belongs to no layout", async () => {
+    const out = await Deno.makeTempDir({ prefix: "source-package-" });
     try {
       await expect(
-        savePiecePattern(CONFIG, out, {
-          loadPieces: piecesOver(undefined),
-          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-        }),
-      ).rejects.toThrow("does not contain a pattern source");
+        writeSourcePackage(
+          program({ "main.tsx": "export default 1;\n" }),
+          out,
+        ),
+      ).rejects.toThrow("Ungrounded file in pattern");
     } finally {
       await Deno.remove(out, { recursive: true });
     }

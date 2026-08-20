@@ -1540,15 +1540,10 @@ export async function checkPiecePattern(
 export async function savePiecePattern(
   config: PieceConfig,
   outPath: string,
-  deps: PieceOperationDependencies = {},
 ): Promise<void> {
   await ensureDir(outPath);
-  const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(
-    config,
-    pieces,
-    deps.resolvePieceAddress,
-  );
+  const pieces = await loadPieces(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1556,12 +1551,30 @@ export async function savePiecePattern(
     resolvedConfig.pieceScope,
   );
   const program = await piece.getPatternSourceProgram();
-
   if (!program) {
     throw new Error(
       `Piece "${resolvedConfig.piece}" does not contain a pattern source.`,
     );
   }
+  await writeSourcePackage(program, outPath);
+  const warning = undeclaredDataFileWarning(program);
+  if (warning !== undefined) console.log(warning);
+}
+
+/**
+ * Write a recovered source package under `outPath`, laid out by the names the
+ * package stores its files under.
+ *
+ * Those names are grounded — rooted at the program root rather than at any
+ * directory on this machine — so the layout a piece was built from is the
+ * layout it comes back to, and a `setsrc` from here resolves the same imports
+ * and the same data files. A name that is not grounded belongs to no layout
+ * and is refused rather than written somewhere arbitrary.
+ */
+export async function writeSourcePackage(
+  program: RuntimeProgram,
+  outPath: string,
+): Promise<void> {
   for (const { name, contents } of program.files) {
     if (name[0] !== "/") {
       throw new Error("Ungrounded file in pattern.");
@@ -1570,8 +1583,6 @@ export async function savePiecePattern(
     await Deno.mkdir(dirname(outFilePath), { recursive: true });
     await Deno.writeTextFile(outFilePath, contents);
   }
-  const warning = undeclaredDataFileWarning(program);
-  if (warning !== undefined) console.log(warning);
 }
 
 /**
