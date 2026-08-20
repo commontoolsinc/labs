@@ -214,8 +214,10 @@ fixed recipe. The recurring debugging questions and where they resolve:
   `entities --kind` selects _during_ the scan, so `--limit` counts entities of
   that kind, not entities walked to find them. **Scripting a backup or rollback
   payload? Pass `--require-complete`** — a capped scan then exits nonzero with
-  nothing on stdout, so an incomplete payload cannot be written by a pipeline
-  that only checks the exit code. The other caps stay silent —
+  nothing on stdout. Check that status where it is produced: a shell pipeline
+  reports its LAST command's status, so a scan piped into `jq` and a redirect
+  refuses, and the redirect still writes an empty file and reports success.
+  Capture the scan on its own, or set `pipefail`. The other caps stay silent —
   history/hot/contention row limits, and the HTML stale-read pass, which caps
   per bundle and _marks_ un-analyzed cells rather than showing them clean. There
   a count equal to a round cap is still the tell.
