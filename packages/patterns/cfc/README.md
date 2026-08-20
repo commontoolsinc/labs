@@ -105,25 +105,20 @@ below.
 ## Floor An Admin Registry
 
 A `requiredIntegrity` floor is a requirement on the value being written, and the
-runtime also screens the reads that fed that write. Five rules follow, and they
-fail in three different ways. Break one of the first three and the floor is
-unsatisfiable: the runtime refuses every write to the path the floor was meant
-to guard. Break the fourth and the writes go through, endorsed by something the
-user granted themselves — the protection is there and it admits the wrong
-writer. Break the fifth and the registry ends up holding authority that nobody
-can exercise and nobody can repair.
+runtime also screens the reads that fed that write. Five rules follow, and each
+fails in its own way. Break one of the first two and the floor is unsatisfiable:
+the runtime refuses every write to the path the floor was meant to guard. Break
+the third and a write that lands a fresh value still goes through, while one
+that moves a value already stored there is refused. Break the fourth and the
+writes go through, endorsed by something the user granted themselves — the
+protection is there and it admits the wrong writer. Break the fifth and the
+registry ends up holding authority that nobody can exercise and nobody can
+repair.
 
 **Mint on the path the floor sits on.** The floor asks what the value at that
 exact path carries. `AddIntegrity` on an array's items endorses the items; it
 says nothing about the array, so a floor on the array path still rejects. Wrap
 the list in `AddIntegrity` of the atom its floor names.
-
-**Endorse the entries too.** A value written into an endorsed location is stored
-as its own document, and moving that entry later writes a link the runtime has
-to label from the entry's own stored label. An entry with no label of its own
-cannot be re-linked, so rewriting a list around a removal fails. Endorse both:
-the entries, so each keeps a label of its own, and the list, so it satisfies its
-floor.
 
 **One atom per authority.** A floored write may only consume reads that share a
 single witness atom for the floor. Checking whether the acting person may write
@@ -132,6 +127,13 @@ paths have to name the same atom. Two atoms in one flow, such as an `admin` atom
 and a separate `admin-manager` atom, make every such write unsatisfiable: the
 registry read carries one, the floor demands the other, and nothing carries
 both.
+
+**Endorse the entries too.** A value written into an endorsed location is stored
+as its own document, and moving that entry later writes a link the runtime has
+to label from the entry's own stored label. An entry with no label of its own
+cannot be re-linked, so rewriting a list around a removal fails. Endorse both:
+the entries, so each keeps a label of its own, and the list, so it satisfies its
+floor.
 
 **A self-granted flag is not a credential.** A per-user cell any viewer can set
 for themselves must carry no integrity. Give it one and every protected write
