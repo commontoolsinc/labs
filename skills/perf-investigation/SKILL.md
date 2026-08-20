@@ -141,6 +141,11 @@ you begin and what you can trust:
   by key prefix, which is what the statistics cannot do: a logger records
   against its full joined path and nothing shorter, so the count at the level
   where it starts multiplying exists in no stored row.
+- **Some keys name the occurrence too.** A key is a place in the code, so
+  `scheduler/run/action` is the same key for every action that runs. Where the
+  emitter can say which one, it attaches that to the measure rather than the key
+  — putting it in the key would multiply the statistics by every value it takes
+  — and `attribute-measures.ts --detail` groups by it.
 - **Intervals recover the caller.** A key that runs everywhere is recorded
   against itself whoever reached it, so no aggregate can say who is responsible.
   Spans nest, so the span open when another began is the one that called it:

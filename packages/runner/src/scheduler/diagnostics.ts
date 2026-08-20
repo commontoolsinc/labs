@@ -67,6 +67,24 @@ export function getSchedulerActionId(
   return generatedId;
 }
 
+/**
+ * Just the readable name of an action, without the rest of its telemetry.
+ *
+ * `getSchedulerActionTelemetryInfo` formats every annotated read and write on
+ * the way to producing these two names, which is the bulk of its work and none
+ * of what a caller wanting a label uses. Both names are plain properties, so
+ * this is two reads and no allocation.
+ */
+export function getSchedulerActionName(
+  action: Action | EventHandler,
+): string | undefined {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  // `||`, so an empty name falls through rather than winning: a name a reader
+  // cannot use is not a name.
+  return getOptionalName(annotated.module) ||
+    getOptionalName(annotated.pattern);
+}
+
 export function getSchedulerActionTelemetryInfo(
   action: Action | EventHandler,
 ): SchedulerActionInfo | undefined {
