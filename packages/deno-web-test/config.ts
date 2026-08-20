@@ -24,6 +24,12 @@ export type Config = {
   // The keys are relative file paths and the values are the destination from
   // the server root.
   include?: Record<string, string>;
+  // A map of relative module paths to bundle onto the static server during
+  // testing. The keys are relative module paths and the values are the
+  // destination from the server root. Each is bundled the way a test module is,
+  // so it can be loaded by URL from a realm the test page creates -- an iframe
+  // or a worker -- which cannot share the test's own bundle.
+  bundle?: Record<string, string>;
   esbuildConfig?: Parameters<typeof build>[0];
 };
 
