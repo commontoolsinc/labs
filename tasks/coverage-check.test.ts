@@ -2242,6 +2242,7 @@ function unattributedFailure(): Row {
     current: 3,
     baseline: 1,
     baselineRunId: 900,
+    baselineSha: SHA_B,
   };
 }
 
@@ -2287,6 +2288,7 @@ Deno.test("buildUnattributedRegressionBody names lines the baseline run covered"
       // The PR changed a file in another group entirely.
       prFiles: [{ filename: "packages/other/src/mod.ts" }],
       lcov,
+      currentRun: makeRun(1001, SHA_C),
       readBaselineLcov: (runId) => {
         assertEquals(runId, 900);
         return Promise.resolve(baselineLcov);
@@ -2295,6 +2297,17 @@ Deno.test("buildUnattributedRegressionBody names lines the baseline run covered"
 
     assertStringIncludes(body ?? "", "`packages/example/src/racy.ts`: 2");
     assertStringIncludes(body ?? "", "not introduced by this PR");
+    // The prompt names the run that measured the lines and the run each group
+    // was held against, so a session picking it up can find both.
+    assertStringIncludes(
+      body ?? "",
+      "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/1001",
+    );
+    assertStringIncludes(body ?? "", `  Commit measured: ${SHA_C}`);
+    assertStringIncludes(
+      body ?? "",
+      `  Baseline for packages/example: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${SHA_B}`,
+    );
   });
 });
 
@@ -2352,6 +2365,7 @@ Deno.test("writeCoverageDebtSuggestion falls back to the ordinary comment when t
       failures,
       [],
       "",
+      undefined,
       () => Promise.resolve(null),
     )
   );

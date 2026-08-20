@@ -388,6 +388,17 @@ session to make the lines cover the same way every time. The author's pull
 request is not the place to fix them, and it is not held up waiting for someone
 to.
 
+The prompt says where the measurement came from, so a session picking it up can
+locate it instead of reconstructing it: the page of the workflow run that
+measured the lines, the commit that run measured, and — for each affected group
+— the baseline run its count was held against and the commit that run measured.
+It also tells the reader to read `git log` for each affected file and check
+whether the line has changed, or been given a test, since the measured commit,
+because the report describes one moment and a line may have been covered since.
+Anything the run context does not name is left out rather than guessed at: a run
+of the checker outside GitHub Actions names no run page and no commit, and its
+prompt asks the reader to check what has landed since the measurement was taken.
+
 Only files the pull request left alone are compared. A file it changed has
 different content in the two checkouts, so the same line number means a
 different line in each report and no comparison is possible. When the baseline

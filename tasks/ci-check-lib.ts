@@ -11,6 +11,9 @@
 // ---------------------------------------------------------------------------
 
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
+/** Where the repository is hosted; a workflow run names it. */
+export const SERVER_URL = Deno.env.get("GITHUB_SERVER_URL") ??
+  "https://github.com";
 export const TOKEN = Deno.env.get("GITHUB_TOKEN");
 export const WORKFLOW_FILE = "deno.yml";
 
@@ -424,9 +427,9 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
   return [...byName.values()];
 }
 
-/** The GitHub page of a workflow run, as the baseline file records it. */
-function workflowRunUrl(runId: number): string {
-  return `https://github.com/${REPO}/actions/runs/${runId}`;
+/** The GitHub page of a workflow run: the URL the baseline file records. */
+export function workflowRunUrl(runId: number): string {
+  return `${SERVER_URL}/${REPO}/actions/runs/${runId}`;
 }
 
 export function serializeCoverageBaseline(
@@ -1065,9 +1068,29 @@ export interface CoverageUnattributedFile {
   lines: number[];
 }
 
+/**
+ * Which run produced a coverage measurement, and which commit it measured.
+ * Each half is optional: a run of the checker outside GitHub Actions has no
+ * run page to point at, and a run whose context never named a commit has no
+ * commit to report.
+ */
+export interface CoverageRunIdentity {
+  /** The run's page on GitHub. */
+  runUrl?: string;
+  /** The commit that run measured. */
+  sha?: string;
+}
+
+/** A regressed group, and the baseline run its count was held against. */
+export interface CoverageUnattributedGroup extends CoverageSuggestionGroup {
+  baseline?: CoverageRunIdentity;
+}
+
 export interface CoverageDebtUnattributedInput {
-  groups: CoverageSuggestionGroup[];
+  groups: CoverageUnattributedGroup[];
   files: CoverageUnattributedFile[];
+  /** The run whose coverage report the affected lines were read from. */
+  measurement?: CoverageRunIdentity;
 }
 
 /** How many affected files the comment names before it starts counting. */
@@ -1094,12 +1117,73 @@ export function coverageOverrideLine(group: CoverageSuggestionGroup): string {
   }`;
 }
 
+/** `run <url>, commit <sha>`, dropping either half the run context lacks. */
+function formatRunIdentity(identity: CoverageRunIdentity): string | null {
+  const parts: string[] = [];
+  if (identity.runUrl) parts.push(`run ${identity.runUrl}`);
+  if (identity.sha) parts.push(`commit ${identity.sha}`);
+  return parts.length === 0 ? null : parts.join(", ");
+}
+
+/**
+ * Name the runs the affected lines were read from, and tell the reader to
+ * check that the measurement still describes the code before working on it.
+ *
+ * A run is named only as far as the run context named it, so a checker run
+ * outside GitHub Actions prints no run page and no commit, and the closing
+ * paragraph drops its reference to the measured commit.
+ */
+function buildMeasurementSection(
+  input: CoverageDebtUnattributedInput,
+): string[] {
+  const measurement = input.measurement ?? {};
+  const provenance: string[] = [];
+  if (measurement.runUrl) {
+    provenance.push(`  Measuring run: ${measurement.runUrl}`);
+  }
+  if (measurement.sha) {
+    provenance.push(`  Commit measured: ${measurement.sha}`);
+  }
+  for (const group of input.groups) {
+    const baseline = group.baseline && formatRunIdentity(group.baseline);
+    if (!baseline) continue;
+    provenance.push(`  Baseline for ${group.group}: ${baseline}`);
+  }
+
+  const lines: string[] = [];
+  if (provenance.length > 0) {
+    lines.push("", "Where this measurement came from:", "", ...provenance);
+  }
+  lines.push("");
+  lines.push(
+    ...(measurement.sha
+      ? [
+        "The lines above are one measurement of that commit, held against a",
+        "measurement each baseline run took of its own commit. Code moves and",
+        "tests land. Before working on a line, read `git log` for its file and",
+        "check whether the line has changed, or been given a test, since the",
+        "commit measured. If it has, the measurement has been overtaken: say so",
+        "rather than writing a second test for a line that already has one.",
+      ]
+      : [
+        "The lines above are one measurement, and it may no longer describe the",
+        "code. Code moves and tests land. Before working on a line, read",
+        "`git log` for its file and check whether the line has changed, or been",
+        "given a test, since the measurement was taken. If it has, the",
+        "measurement has been overtaken: say so rather than writing a second",
+        "test for a line that already has one.",
+      ]),
+  );
+  return lines;
+}
+
 /**
  * Build the prompt for an agent asked to make the affected lines cover the same
  * way on every run. The work is on the lines themselves, not on this pull
  * request, so the prompt is written to be pasted into a fresh session.
  */
 function buildUnattributedPrompt(
+  input: CoverageDebtUnattributedInput,
   files: CoverageUnattributedFile[],
   omitted: number,
 ): string[] {
@@ -1130,6 +1214,8 @@ function buildUnattributedPrompt(
     );
   }
   if (omitted > 0) lines.push(`  ...and ${omitted} more file(s).`);
+
+  lines.push(...buildMeasurementSection(input));
 
   lines.push(
     "",
@@ -1219,7 +1305,7 @@ export function buildCoverageDebtUnattributedComment(
   );
   out.push("");
   out.push("````text");
-  out.push(...buildUnattributedPrompt(files, omitted));
+  out.push(...buildUnattributedPrompt(input, files, omitted));
   out.push("````");
   out.push("");
   out.push("</details>");

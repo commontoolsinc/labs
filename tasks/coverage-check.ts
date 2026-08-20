@@ -13,6 +13,7 @@
  * Environment:
  *   GITHUB_TOKEN        - Required.
  *   GITHUB_REPOSITORY   - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_SERVER_URL   - Optional, defaults to "https://github.com".
  *   GITHUB_RUN_ID       - Required. Current workflow run ID.
  *   PR_NUMBER           - Required. Pull request number.
  *   COVERAGE_ARTIFACTS_DIR - Optional. Directory containing downloaded
@@ -41,6 +42,7 @@ import {
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
   type CoverageResolvedGroup,
+  type CoverageRunIdentity,
   type CoverageSuggestionFileLines,
   type CoverageSuggestionGroup,
   type CoverageUnattributedFile,
@@ -65,6 +67,7 @@ import {
   unknownAcceptedMetrics,
   WORKFLOW_FILE,
   type WorkflowRun,
+  workflowRunUrl,
   writeCoverageBaselineFile,
 } from "./ci-check-lib.ts";
 import {
@@ -101,7 +104,7 @@ export function currentWorkflowRunFromEvent(
 
   return {
     id: runId,
-    html_url: `https://github.com/${REPO}/actions/runs/${runId}`,
+    html_url: workflowRunUrl(runId),
     head_sha: headSha,
     created_at: new Date().toISOString(),
     conclusion: "",
@@ -1428,6 +1431,7 @@ export async function writeCoverageComment(
   coverageRows: Row[],
   prFiles: PRFile[],
   lcov: string,
+  currentRun?: WorkflowRun,
 ): Promise<void> {
   if (coverageFailures.length > 0) {
     await writeCoverageDebtSuggestion(
@@ -1435,10 +1439,19 @@ export async function writeCoverageComment(
       coverageFailures,
       prFiles,
       lcov,
+      currentRun,
     );
   } else {
     await writeCoverageResolved(prNumber, coverageRows, prFiles);
   }
+}
+
+/** A run's identity, as far as the run context names it. */
+function runIdentity(run: WorkflowRun | undefined): CoverageRunIdentity {
+  return {
+    runUrl: run?.html_url || undefined,
+    sha: run?.head_sha || undefined,
+  };
 }
 
 /**
@@ -1457,6 +1470,8 @@ export interface UnattributedRegressionOptions {
   prFiles: PRFile[];
   /** LCOV from this run. */
   lcov: string;
+  /** The run that measured that LCOV; absent outside a workflow run. */
+  currentRun?: WorkflowRun;
   readBaselineLcov: (runId: number) => Promise<string | null>;
 }
 
@@ -1468,6 +1483,7 @@ export async function buildUnattributedRegressionBody(
   // run its own baseline came from and no other: another run measured a
   // different commit, where the same line may legitimately have been covered.
   const groupsByBaselineRun = new Map<number, Set<string>>();
+  const baselineByGroup = new Map<string, CoverageRunIdentity>();
   for (const failure of options.coverageFailures) {
     const runId = failure.baselineRunId;
     if (runId === undefined) continue;
@@ -1476,6 +1492,10 @@ export async function buildUnattributedRegressionBody(
     const groups = groupsByBaselineRun.get(runId) ?? new Set<string>();
     groups.add(group);
     groupsByBaselineRun.set(runId, groups);
+    baselineByGroup.set(group, {
+      runUrl: workflowRunUrl(runId),
+      sha: failure.baselineSha,
+    });
   }
   if (groupsByBaselineRun.size === 0) return null;
 
@@ -1507,8 +1527,12 @@ export async function buildUnattributedRegressionBody(
       `across ${files.length} unchanged file(s) that the baseline run covered.`,
   );
   return buildCoverageDebtUnattributedComment({
-    groups: options.groups,
+    groups: options.groups.map((group) => ({
+      ...group,
+      baseline: baselineByGroup.get(group.group),
+    })),
     files,
+    measurement: runIdentity(options.currentRun),
   });
 }
 
@@ -1524,6 +1548,7 @@ export async function writeCoverageDebtSuggestion(
   coverageFailures: Row[],
   prFiles: PRFile[],
   lcov: string,
+  currentRun?: WorkflowRun,
   readBaselineLcov: (runId: number) => Promise<string | null> =
     baselineLcovForRun,
 ): Promise<void> {
@@ -1582,6 +1607,7 @@ export async function writeCoverageDebtSuggestion(
         coverageFailures,
         prFiles,
         lcov,
+        currentRun,
         readBaselineLcov,
       })
       : null;
@@ -2082,6 +2108,7 @@ export async function main() {
       rows,
       prFiles,
       coverageLcov,
+      currentRunInfo,
     );
   }
 
