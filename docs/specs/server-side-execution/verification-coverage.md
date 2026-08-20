@@ -3708,6 +3708,12 @@ supply; OW29/OW32/OW34 closed):
     on the cross-user step; the owner rules. Trigger: the design pass's
     re-benchmark; the flip gate (plan Phase 7 task 1 item 4) reads
     against the RULED bar, not against the client-local OFF number.
+    (W3.1, 2026-08-19: S1's quiescence advances are split OUT of the
+    per-input settle series — the `settleAdvances` block (count,
+    lastDelta, series) — so W4's settle metric reads per-input
+    timings with the designed advance-only waves excluded, and the
+    amplification arithmetic subtracts them; the sx2-serving-loop
+    budgets already do.)
   - OW31 (row above, RULED 2026-08-18): the write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
     user's identity does; a provisioned space's genesis is signed by
@@ -4447,7 +4453,17 @@ supply; OW29/OW32/OW34 closed):
     own swatch forever, so every baseline is green by masking. (b)
     would remove the exposure (the echo stands until the child's own
     landing). Owner / W3 / W2 call; the evidence, the three baseline
-    worktrees and binaries are in the report.** Counters:
+    worktrees and binaries are in the report. UPDATE 2026-08-19
+    (W3.1): the stall is root-caused (the coordination delta below;
+    OW43) and its CLASS FIX landed — S1's drain-settle quiescence
+    advance (RULED 2026-08-19) makes the diverged layer's retirement
+    reachable on a quiet space, so the blocker mechanism is closed;
+    the designed FLICKER itself (the cascade echo retiring at the
+    parent's mark, one wave before the drained child lands) remains
+    W2.1's designed cost, and shape (b) — deterministic cascade ids,
+    the FUTURE row below — stays the flagged follow-on that would
+    remove the flicker too. The lunch skip's lift rides the W3.1
+    lunch gate's evidence, not this flag.** Counters:
     `speculation-overlay/cascade-echo-retired` and
     `…/cascade-echo-retired-unarrived` (the flicker witness, armed only
     on a consequenced non-error parent: no doc the echo wrote held a
@@ -4646,14 +4662,25 @@ supply; OW29/OW32/OW34 closed):
   space-server's watermark freezes below the layer's floor on a quiet
   space until the next authored commit — probe-verified: one
   keystroke healed the stalled browser in one poll). All 5 builder
-  reds plus 7 instrumented reproductions ONE class
+  reds plus 8 instrumented reproductions ONE class (arm A
+  i6/i7/i10/i15 + arm B f1/f7/f9/f10; recorded as 7 when this block
+  was minted — corrected by W3.1 per the report's own tables)
   (delivered-but-masked); 0 never-delivered; 0 B1; F1 tested and
   orthogonal (4/10 vs 5/13). Fix seats S1–S4 are with the owner —
   the plan's coordination block carries them and the S1 ruling
   request (its item (10)).
   - **OW43 — the overlay sweep's accepted-lingering premise ("values
     converge, rendering stays correct") is FALSE under regressed-base
-    re-derivation — a diverged layer can mask a DELIVERED value.**
+    re-derivation — a diverged layer can mask a DELIVERED value —
+    CLOSED 2026-08-19 by W3.1 (S1)**, per the row's own trigger ("the
+    chosen fix seat's landing (S1 closes this row)"): the drain-settle
+    quiescence advance landed — protocol.md §4's RULED 2026-08-19
+    amendment, the space-server seat, pins
+    `executor-settle-advance.test.ts` (red-first on the pre-S1 tip:
+    the frozen-W i10 shape and the diverged-layer masking reproduced
+    RED, then healed with NO authored traffic) — so every layer's
+    floor is reachable on a quiet space, and the premise the sweep's
+    comment now states is true. The original row, for the record:
     The sweep's comment accepts entries lingering on a then-quiet
     space under the premise that lingering layers hold CONVERGED
     values; a re-derivation from a flip-regressed effective base
@@ -4675,6 +4702,66 @@ supply; OW29/OW32/OW34 closed):
     retirement hole is closed or explicitly accepted) — in any case
     before the lunch ON skip lifts and before W4's `waitForSettled`
     numbers are read at quiescence.
+
+- **Stage C W3.1 (S1) delta (2026-08-19) — the drain-settle
+  quiescence advance LANDED (the ruling at the plan's owner item
+  (10): owner, in chat, "S1 sounds good"; OW43 CLOSED above).**
+  Coverage row for the amended sentence:
+  - protocol.md §4, the quiescence-advance amendment ("at
+    drain-settle ... W additionally advances over the space's
+    committed TAIL DERIVATIONS", with the stated reading that W's
+    definition quantifies over authored commits only, the
+    once-per-transition latch, the never-chased advance commit, and
+    the fail-closed hole rule) → seat
+    `packages/runner/src/executor/space-server.ts` (the wave cycle's
+    advance computation; `#ownWaveSeqs` + `#settleAdvanceOwed`),
+    `wave.ts` `contentContributionCount`, `stats.ts`/`host.ts`
+    `settleAdvances` → pins `executor-settle-advance.test.ts`:
+    (1) the frozen-W i10 shape (RED on `e386a01be`: "W frozen at
+    input coverage; derived tail 4"; GREEN: the advance lands with NO
+    authored commit and reaches the client via the ordinary
+    watermark-doc push), (2) the diverged layer retires at quiescence
+    and the healed confirmed value renders (the report §5 probe
+    shape as a minimal seam — a stamped derivation-kind re-derivation
+    over the pushed derived value; RED masked 30 s), (3+5)
+    idempotence/no-self-chase + busy-space neutrality (the killing
+    mutation: removing the latch consume storms — one advance per
+    echo cycle — caught in 920 ms; arming the latch on
+    bookkeeping-only waves is INERT because the consume runs after
+    the arm, stated here so nobody "fixes" the ordering), (4) the
+    OFF witness (no SpaceServer, no derived commits, no watermark
+    doc). Serving-loop §3's drain-settle step and §7's counter
+    vocabulary updated in the same commit; the sweep comment's
+    accepted-lingering premise rewritten to the now-true form.
+  - FLAGGED test edits (not silent fixes): the serving-loop
+    stability pin now waits for the designed trailing advance before
+    sampling its 400-ms window (meaning unchanged — stabilize, no
+    self-chase — and it now also witnesses the advance's
+    no-successor guarantee); sx2-serving-loop's waves and
+    amplification budgets subtract `settleAdvances` and add the
+    once-per-transition bound (`advances <= authored + 1`).
+  - Residuals, stated: (i) the advance never fires past a LATE
+    authored record (a notice arriving after a later echo advanced
+    the input head — the in-order coverage math skips it, so W stays
+    below that seq until the next ordinary input; pre-S1 behavior,
+    unchanged, now the one remaining stall residue of that rare
+    interleaving); (ii) the walk's fail-closed hole rule is
+    construction-guaranteed (Set membership over dense engine seqs),
+    not pinned by a dedicated in-flight-notice interleaving test — a
+    deterministic seam would need a notice-holding server shim
+    (flagged, not filled); (iii) the one derived commit W does not
+    cover at quiescence is the final advance-carrying bookkeeping
+    commit itself, definitionally — a client derivation READING the
+    watermark doc could carry that seq in its floor and linger to
+    the next transition (no known reader does; the id class is
+    excluded from piece demand).
+  - For OW38/W4: quiescence advances are split in the stats
+    (`settleAdvances`), so the settle-time metric excludes the
+    advance-only waves; the growth-landing adjacency attribution is
+    UNCHANGED (a quiescence advance right after a growth wake can
+    still take the landing slot — the pre-existing MINOR-4
+    heuristic, now cross-referenceable against the settleAdvances
+    series timestamps).
 
 ## 4. Standing rule
 
