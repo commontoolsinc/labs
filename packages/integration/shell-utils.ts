@@ -22,6 +22,7 @@ import {
 } from "@commonfabric/navigation";
 import { AppState, deserialize } from "@commonfabric/shell/app-state";
 
+import { describeThrown } from "./describe-thrown.ts";
 import {
   collectPatternCoverage,
   enablePatternCoverage,
@@ -29,8 +30,7 @@ import {
 import { getPresentationSession } from "./presentation/session.ts";
 import {
   assertShellDocument,
-  describeShellPage,
-  readShellPageProbe,
+  readAndDescribeShellPage,
 } from "./shell-page-probe.ts";
 import { waitFor, waitForCondition } from "./utils.ts";
 
@@ -53,6 +53,31 @@ export async function login(page: Page, identity: Identity): Promise<void> {
     );
   }
 
+  // Everything from here on runs against the page, and every way it can fail
+  // says nothing about the page it failed against. The wait below is for the
+  // shell to publish itself, which a document that is not the shell never
+  // does, so it runs to the stuck-condition net reporting only that five
+  // minutes passed. The runtime handshake that follows reports which of its
+  // two stages ran out, and no more than that.
+  try {
+    await loginToPublishedApp(page, transferrableId, identity.did());
+  } catch (error) {
+    throw new Error(
+      `Logging in as ${identity.did()} failed: ${
+        describeThrown(error)
+      }\n${await readAndDescribeShellPage(page)}`,
+      { cause: error },
+    );
+  }
+}
+
+// The page half of `login`: wait for the shell to publish itself, then hand it
+// the identity and wait for the runtime to come up under it.
+async function loginToPublishedApp(
+  page: Page,
+  transferrableId: TransferrableInsecureCryptoKeyPair,
+  nextDID: string,
+): Promise<void> {
   await waitForCondition(page, () => globalThis.app !== undefined);
 
   await page!.evaluate<
@@ -105,7 +130,7 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       });
     },
     {
-      args: [transferrableId, identity.did()],
+      args: [transferrableId, nextDID],
     },
   );
 }
@@ -138,17 +163,7 @@ export async function describeStateWaitFailure(
     lines.push(`  awaited identity: ${params.identity.did()}`);
   }
   lines.push(`  last state read: ${describeAppState(lastState)}`);
-  try {
-    lines.push(describeShellPage(await readShellPageProbe(page)));
-  } catch (error) {
-    lines.push(
-      `  the page could not be probed: ${
-        error instanceof Error
-          ? error.message
-          : Deno.inspect(error, { colors: false })
-      }`,
-    );
-  }
+  lines.push(await readAndDescribeShellPage(page));
   return lines.join("\n");
 }
 
@@ -284,13 +299,7 @@ export class ShellIntegration {
         return stateMatches(lastState, params);
       });
     } catch (error) {
-      // A page exception arrives as the protocol's own detail object rather
-      // than an `Error`. Deno prints the cause below the message, so such a
-      // value is reported there rather than stringified into the summary,
-      // where it would read as "[object Object]".
-      const summary = error instanceof Error
-        ? error.message
-        : "the wait threw the value reported as the cause below.";
+      const summary = describeThrown(error);
       const detail = await describeStateWaitFailure(
         this.page(),
         params,
