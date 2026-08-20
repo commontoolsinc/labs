@@ -88,8 +88,12 @@ if (wantChains) {
   ) {
     // Truncate for the eye only, after the counting is done.
     const parts = chain.split("  <  ");
+    // Name the outermost link as well as the count, so two chains that were
+    // counted separately do not print as the same row.
     const shown = parts.length > 5
-      ? `${parts.slice(0, 5).join("  <  ")}  <  …(+${parts.length - 5})`
+      ? `${parts.slice(0, 5).join("  <  ")}  <  …(+${
+        parts.length - 5
+      }, outermost ${parts[parts.length - 1]})`
       : chain;
     console.log(`  ${String(n).padStart(8)}  ${shown}`);
   }

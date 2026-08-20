@@ -2091,5 +2091,56 @@ describe("logger", () => {
         ).length,
       ).toBe(1);
     });
+
+    it("refuses a cap that would disable the guard rather than set it", () => {
+      // NaN and Infinity both make the `emitted >= cap` test never fire, and
+      // the cap is the only thing bounding retention — so these are refused
+      // rather than quietly accepted.
+      for (const bad of [Number.NaN, Infinity, 0, -1, 1.5]) {
+        expect(() => setTimingMeasuresEnabled(true, { cap: bad })).toThrow(
+          RangeError,
+        );
+      }
+      setTimingMeasuresEnabled(true, { cap: 5 });
+      expect(getTimingMeasuresState().cap).toBe(5);
+    });
+
+    it("takes the cap from the environment when none is passed", () => {
+      Deno.env.set("CF_TIMING_MEASURES_CAP", "4242");
+      try {
+        setTimingMeasuresEnabled(true);
+        expect(getTimingMeasuresState().cap).toBe(4242);
+        // A value that names no positive integer is ignored rather than
+        // applied, which would otherwise disable the guard from the outside.
+        Deno.env.set("CF_TIMING_MEASURES_CAP", "not-a-number");
+        setTimingMeasuresEnabled(true);
+        expect(getTimingMeasuresState().cap).toBe(4242);
+      } finally {
+        Deno.env.delete("CF_TIMING_MEASURES_CAP");
+      }
+    });
+
+    it("keeps the budget across a toggle, since the entries are still there", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-toggle");
+      for (let i = 0; i < 2; i++) {
+        logger.timeStart("phase", "nine");
+        logger.timeEnd("phase", "nine");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(2);
+
+      // Turning it off and on again must not hand back a budget the retained
+      // entries are still spending, or a toggling caller grows without bound.
+      setTimingMeasuresEnabled(false);
+      setTimingMeasuresEnabled(true);
+      expect(getTimingMeasuresState().emitted).toBe(2);
+      logger.timeStart("phase", "nine");
+      logger.timeEnd("phase", "nine");
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/nine#`)
+        ).length,
+      ).toBe(2);
+    });
   });
 });

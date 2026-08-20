@@ -2010,7 +2010,7 @@ export async function runTests(
   // Emission is process-global, so a run that turns it on owes the process its
   // previous state back — otherwise a later `runTests()` without the option
   // keeps emitting into a buffer nobody will read.
-  const priorMeasureState = getTimingMeasuresState().enabled;
+  const priorMeasures = getTimingMeasuresState();
   const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
     ? []
     : undefined;
@@ -2212,7 +2212,9 @@ export async function runTests(
   if (options.timingMeasuresOut && captured) {
     await writeTimingMeasures(options.timingMeasuresOut, captured);
   }
-  setTimingMeasuresEnabled(priorMeasureState);
+  // Both halves of what was borrowed: the switch and the ceiling. Restoring
+  // only the switch would leave the raised cap behind for the whole process.
+  setTimingMeasuresEnabled(priorMeasures.enabled, { cap: priorMeasures.cap });
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);

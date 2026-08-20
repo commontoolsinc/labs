@@ -8,12 +8,10 @@
  *
  * The roll-up is the point. A logger records a span against its full joined key
  * path and against nothing shorter, so `cell/get/user-data` never contributes
- * to `cell/get`. That is the right call for the statistics, and it is exactly
- * what hides a call explosion: the count that matters is the one at the level
- * where it starts multiplying, and no stored row holds it. This computes those
- * levels after the fact.
+ * to `cell/get` and no stored row holds a total for a prefix. This computes
+ * those totals after the fact.
  *
- * This groups by how keys are NAMED, not by who called whom, so `calls` counts
+ * It groups by how keys are NAMED, not by who called whom, so `calls` counts
  * every span at a prefix or below it and can only fall as you descend. Read
  * `ms/call` to find where time concentrates, and the two `self` columns to tell
  * a level that is itself expensive from one that merely contains expensive
@@ -25,10 +23,10 @@
  *   deno run --allow-read aggregate-measures.ts < measures.json
  *   deno run --allow-read aggregate-measures.ts measures.json --sort=calls
  *
- * One caveat about a `cf test` capture: `withPhase` emits its own measure under
- * a `cf-test/` prefix as well as recording the span through a logger, so those
- * phases appear twice — once as `cf-test/<keys>` and once as `<keys>`. Read one
- * branch or the other rather than summing across both.
+ * A `cf test` capture holds only what a logger recorded: `withPhase` emits a
+ * measure of its own too, under a `cf-test/` name without the logger's prefix,
+ * and the capture does not collect it. Reading the timeline directly rather
+ * than from a written capture is where both would appear.
  */
 
 interface MeasureEntry {

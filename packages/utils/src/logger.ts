@@ -558,15 +558,20 @@ export function setTimingMeasuresEnabled(
   enabled: boolean,
   options?: { cap?: number },
 ): void {
-  _emitTimingMeasures = enabled;
-  if (options?.cap !== undefined) {
+  // Validated before anything is assigned, so a rejected call leaves the
+  // switch exactly as it found it rather than half-applied.
+  if (
+    options?.cap !== undefined && (!Number.isInteger(options.cap) ||
+      options.cap <= 0)
+  ) {
     // A cap of `NaN`, `Infinity`, or zero would disable the guard rather than
     // configure it, and the guard is the only thing bounding retention.
-    if (!Number.isInteger(options.cap) || options.cap <= 0) {
-      throw new RangeError(
-        `Timing measure cap must be a positive integer: ${options.cap}`,
-      );
-    }
+    throw new RangeError(
+      `Timing measure cap must be a positive integer: ${options.cap}`,
+    );
+  }
+  _emitTimingMeasures = enabled;
+  if (options?.cap !== undefined) {
     _timingMeasureCap = options.cap;
   } else {
     const envCap = getEnvMeasureCap();

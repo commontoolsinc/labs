@@ -156,10 +156,10 @@ show. `ms/call` says which level is expensive, and the two `self` columns
 separate a level that is itself slow from one that merely contains slow
 children.
 
-Note for a `cf test` capture: `withPhase` emits its own measure under a
-`cf-test/` prefix as well as recording the span through a logger, so those
-phases appear twice — once as `cf-test/<keys>` and once as `<keys>`. Read one
-branch or the other rather than summing across both.
+Only spans a logger recorded reach the file. `withPhase` also emits a measure
+of its own, under a `cf-test/` name and without the logger's prefix, and the
+capture leaves it on the timeline rather than writing it — so a phase appears
+once, under its logger keys, and the counts do not double.
 
 That answers where the time went. It does not answer who asked, and for a key
 that runs everywhere it cannot: a logger records against its own key no matter
