@@ -127,8 +127,8 @@ network confinement model.
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` together) that compiles and runs a pattern against a deployed
   Fabric space from the trusted host side and returns a live result cell
-  reference, optionally registering the piece in the space's piece list at a
-  caller-chosen slug so a person can open it; see
+  reference; `assign_slug` names and lists a piece afterwards, so a person can
+  open it; see
   [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:
@@ -851,19 +851,19 @@ it or the preset supplied it — is recorded as `fabricSessionCfc` in
 the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
-over-cap source is a structured tool error), an optional `inputs` object, an
-optional `resultSchema`, and an optional `register`. An `inputs` string value
-that is a whole-string LLM-friendly link (`/of:fid1:.../path`) is passed to the
-pattern as a live cell reference; everything else passes through as plain JSON.
-A link that resolves into a space other than the configured session space is
-refused with a structured error before anything is created, and an input whose
-value does not match the compiled pattern's argument schema for its key is
-refused the same way — named after the offending key, with no piece persisted.
-What supplies the value does not change that question: a live cell is measured
-by what it currently holds, and a plain JSON value by itself. So is an input the
-pattern's argument schema does not declare at all, listing the names the pattern
-does declare: a misnamed input is the mismatch a shape check cannot see, since
-the pattern then runs with that argument undefined and renders a complete page
+over-cap source is a structured tool error), an optional `inputs` object, and an
+optional `resultSchema`. An `inputs` string value that is a whole-string
+LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
+reference; everything else passes through as plain JSON. A link that resolves
+into a space other than the configured session space is refused with a
+structured error before anything is created, and an input whose value does not
+match the compiled pattern's argument schema for its key is refused the same way
+— named after the offending key, with no piece persisted. What supplies the
+value does not change that question: a live cell is measured by what it
+currently holds, and a plain JSON value by itself. So is an input the pattern's
+argument schema does not declare at all, listing the names the pattern does
+declare: a misnamed input is the mismatch a shape check cannot see, since the
+pattern then runs with that argument undefined and renders a complete page
 holding no values. Only a pattern whose argument schema names its properties,
 and does not admit further ones, is measured that way — an
 `additionalProperties` that is `true`, or that is a schema describing what an
@@ -892,65 +892,50 @@ origin is recorded, because model-authored source starts detached under the
 piece source-lifecycle spec. Run→piece provenance is carried by the run's
 persisted artifacts instead — run-state and the tool-output artifact record the
 `pieceId`. When the run's abort signal fires after the piece exists — while the
-tool is waiting for the pattern to settle, or while it is registering the piece
-— the tool stops the created piece and returns a structured `cancelled` error;
-the signal is the only cancellation source — there is no timeout. Stopping a
-piece does not remove it from the space's piece list, so an abort that lands
-between the registry join and the slug assignment removes it too: a cancelled
-run hands back no `resultRef`, so a piece left listed under no slug would be one
-nothing addresses. A join still in flight when the abort won is undone by the
-publishing continuation instead, which reads the cancellation mark the moment
-the join returns, so exactly one of the two paths performs the removal.
+tool is waiting for the pattern to settle — the tool stops the created piece and
+returns a structured `cancelled` error; the signal is the only cancellation
+source — there is no timeout.
 
-A slug assignment already under way when the abort lands is the one durable
-effect a cancelled run does not undo, and the `cancelled` message names the slug
-so a person is told rather than left to discover it. The redirect an assignment
-writes is a pure function of its target and the slug document it is based on, so
-two writers pointing the same name at the same piece write byte-identical
-values, and the document carries no per-assignment identity by which a
-withdrawal could tell this run's assignment from a later writer's. Recording one
-would mean a marker inside a shared on-disk format kept solely for a cleanup
-path, so the assignment stands. The abort races the write rather than waiting on
-it, so the message says the name may still resolve to the created piece, and
-reports the piece as this path left it — delisted when the removal answered that
-it removed something, left listed when it did not. This matches how cancellation
-treats the run's other durable effects — the piece itself is stopped, never
-deleted.
+Naming is a separate operation. `assign_slug` takes a handle token referring to
+a piece — a `run_pattern` `resultRef`, or any granted or discovered piece
+reference — and a `slug`, the named address the piece is reachable at, in the
+same lowercase-hyphen form every fabric slug uses. It registers the piece in the
+space's piece list through the default pattern and then points the slug at it,
+the same two steps `cf piece new` performs. Keeping the two tools apart is
+deliberate: whether a piece deserves a public name is a decision the caller can
+make later, about any piece it can reference, and revise by naming a replacement
+under a fresh slug — and the operation discloses nothing, since the slug is the
+caller's own word and the address behind the token stays trusted-side. The token
+must name a piece itself, in the run's own space: a position inside one, a
+reference into another space, and a document with no pattern identity are each
+refused with a structured error.
 
-`register` is how a run publishes its result to a person. It takes one required
-field, `slug` — the named address the piece is reachable at, in the same
-lowercase-hyphen form every fabric slug uses — and asks for the piece to join
-the space's piece list. The slug is validated, and then checked for
-availability, before anything is compiled, so an unusable slug and a slug
-already in use are both structured errors that persist no piece. The
-availability question fails closed: a slug is free only on the outcomes that say
-nothing is there — no document, a malformed one, one that is not a piece, one
-carrying no piece id — and any other failure refuses the call saying the
-availability could not be established, because reporting a storage error as a
-free name would write over whatever is there. That check is what stops a run
-from taking over a name a person already opens: assigning a slug is a blind
-write, so without it a model naming `home` would repoint `home` at whatever it
-had just written. It is a check and not a lock — resolution and assignment are
-not atomic, so a slug that becomes taken in between is still overwritten — and
-it closes the case that arises rather than a race against a concurrent writer.
-Registration itself runs after the pattern has settled: the piece joins the
-space's registry through the default pattern, and the slug is then pointed at
-it, the same two steps `cf piece new` performs. A space with no default pattern
-has no registry to join; `run_pattern` reports that as `registrationError` on an
-otherwise `ok` output rather than bootstrapping the space's root, so the
-computation and its `resultRef` survive a failed publish. `register` sets the
-address, not the title: what the piece list displays is the pattern's own `NAME`
-result, so a pattern that wants a title sets `NAME` in its source.
+The slug is validated, then checked for availability, before anything is
+written, so an unusable slug and a slug already naming another piece are both
+structured errors that change nothing. The availability question fails closed: a
+slug is free only on the outcomes that say nothing is there — no document, a
+malformed one, one that is not a piece, one carrying no piece id — and any other
+failure refuses the call saying the availability could not be established,
+because reporting a storage error as a free name would write over whatever is
+there. That check is what stops a caller from taking over a name a person
+already opens: assigning a slug is a blind write, so without it a model naming
+`home` would repoint `home` at whatever it referenced. It is a check and not a
+lock — resolution and assignment are not atomic, so a slug that becomes taken in
+between is still overwritten — and it closes the case that arises rather than a
+race against a concurrent writer. A slug that already points at the very piece
+the token names answers `ok` rather than a refusal: the request is already true.
+`assign_slug` sets the address, not the title: what the piece list displays is
+the pattern's own `NAME` result, so a pattern that wants a title sets `NAME` in
+its source.
 
-Every `run_pattern` invocation persists a piece in the configured space,
-registered or not. A cancelled run stops its piece, but no piece is ever
-deleted, and each piece's source-history revision is a storage-retention root
-the piece list does not reveal. Registration changes only whether a piece is
-findable, never whether it is retained: an unregistered piece is exactly as
-durable as a registered one, and registering makes a retained piece visible to
-the tooling that could otherwise not see it. Tooling that enumerates a space's
-contents from the piece list must not assume the list is exhaustive, and there
-is no garbage collection for these pieces yet.
+Every `run_pattern` invocation persists a piece in the configured space, named
+or not. A cancelled run stops its piece, but no piece is ever deleted, and each
+piece's source-history revision is a storage-retention root the piece list does
+not reveal. Naming changes only whether a piece is findable, never whether it is
+retained: an unnamed piece is exactly as durable as a named one, and naming
+makes a retained piece visible to the tooling that could otherwise not see it.
+Tooling that enumerates a space's contents from the piece list must not assume
+the list is exhaustive, and there is no garbage collection for these pieces yet.
 
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
@@ -996,17 +981,17 @@ happened, and the failing computation's own text is withheld from model context
 throws — while the run artifact keeps it. An empty result with no observed cause
 still reports ok, since silence is not evidence of failure.
 
-A registered run adds `registration` to that output: `{ slug }`, plus `url` when
-the harness can compose one honestly. The URL is the session's API URL, the
-space, and the slug — the address `cf piece new` prints — and it appears only
-when `--fabric-space` names the space. A space configured as a `did:key` has no
-URL that is not built from that DID, and a bare fabric identifier does not cross
-the model boundary, so the output carries the slug alone rather than a
-fabricated link. Nothing in `registration` is swapped for a handle token,
-because nothing in it is a fabric reference: the slug is the model's own word
-and the URL is the operator's API URL and space name. `registrationError`, which
-can carry a DID from an authorization failure, is scrubbed for bare fabric
-identifiers like the other free-text fields. Compiler diagnostics come back as
+A successful `assign_slug` returns `{ slug }`, plus `url` when the harness can
+compose one honestly. The URL is the session's API URL, the space, and the slug
+— the address `cf piece new` prints — and it appears only when `--fabric-space`
+names the space. A space configured as a `did:key` has no URL that is not built
+from that DID, and a bare fabric identifier does not cross the model boundary,
+so the output carries the slug alone rather than a fabricated link. Nothing in
+that output is swapped for a handle token, because nothing in it is a fabric
+reference: the slug is the model's own word and the URL is the operator's API
+URL and space name. Its error `message`, which can carry a DID from an
+authorization failure, is scrubbed for bare fabric identifiers like the other
+free-text fields. Compiler diagnostics come back as
 `{ status: "compile-error", message }` so the model can iterate on the source;
 bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
 module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder

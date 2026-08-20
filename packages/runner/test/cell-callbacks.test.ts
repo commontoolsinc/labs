@@ -268,6 +268,7 @@ describe("Cell commit callbacks", () => {
     const inner = {
       journal: {},
       clearReadOnly() {},
+      status: () => ({ status: "ready", journal: {} }),
       commit: () => Promise.reject(rejection),
     } as unknown as IStorageTransaction;
     const extended = new ExtendedStorageTransaction(inner);

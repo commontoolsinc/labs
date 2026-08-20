@@ -1994,6 +1994,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "write_file",
       "delegate_task",
       "run_pattern",
+      "assign_slug",
       "describe_handle",
     ],
   );

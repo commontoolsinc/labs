@@ -76,6 +76,12 @@ export const test = new Command()
     "--pattern-coverage-dir <dir:string>",
     "Write pattern runtime coverage LCOV artifacts to this directory.",
   )
+  .option(
+    "--timing-measures-out <file:string>",
+    "Emit a performance.measure per logger time span and write them here as " +
+      "JSON. Aggregate with skills/perf-investigation/scripts/" +
+      "aggregate-measures.ts.",
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -159,6 +165,9 @@ export const test = new Command()
       statsActionLimit: options.statsActionLimit,
       storageStats: options.storageStats,
       storageStatsLimit: options.storageStatsLimit,
+      timingMeasuresOut: options.timingMeasuresOut
+        ? resolve(Deno.cwd(), options.timingMeasuresOut)
+        : undefined,
       patternCoverageDir,
       continuousUI: Deno.env.get("CF_TEST_CONTINUOUS_UI") === "1",
     });

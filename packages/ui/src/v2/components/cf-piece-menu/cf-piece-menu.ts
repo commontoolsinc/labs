@@ -4,6 +4,14 @@ import {
 } from "@commonfabric/html/client";
 import type { DID } from "@commonfabric/identity";
 import { isDID } from "@commonfabric/identity";
+import {
+  appViewToUrlPath,
+  navigate,
+  type NavigationCommand,
+  openInNewTab,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/navigation";
 import { parseFabricRef } from "@commonfabric/runner/shared";
 import {
   $conn,
@@ -20,14 +28,6 @@ import type {
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
-import {
-  appViewToUrlPath,
-  navigate,
-  type NavigationCommand,
-  openInNewTab,
-  preserveAppViewMode,
-  urlToAppView,
-} from "@commonfabric/shell/shared";
 import { css, html, nothing, type TemplateResult } from "lit";
 import { state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";

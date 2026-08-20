@@ -25,6 +25,7 @@
     "./packages/cf-harness",
     "./packages/llm",
     "./packages/memory",
+    "./packages/navigation",
     "./packages/patterns",
     "./packages/patterns/auth",
     "./packages/pure-json",

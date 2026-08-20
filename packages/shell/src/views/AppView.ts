@@ -1,4 +1,10 @@
 import { type DID, KeyStore } from "@commonfabric/identity";
+import {
+  isEmbeddedView,
+  isViewingDefaultPatternView,
+  replaceNavigation,
+  updatePageTitle,
+} from "@commonfabric/navigation";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
 import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import {
@@ -11,12 +17,6 @@ import { Task, TaskStatus } from "@lit/task";
 import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 
-import {
-  isEmbeddedView,
-  isViewingDefaultPatternView,
-  replaceNavigation,
-  updatePageTitle,
-} from "../../shared/mod.ts";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";

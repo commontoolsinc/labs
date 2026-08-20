@@ -129,6 +129,10 @@ import {
   type RunPatternToolInput,
   type RunPatternToolOutput,
 } from "./tools/run-pattern.ts";
+import type {
+  AssignSlugToolInput,
+  AssignSlugToolOutput,
+} from "./tools/assign-slug.ts";
 import {
   type RunSkillScriptToolInput,
   type RunSkillScriptToolOutput,
@@ -158,6 +162,7 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
 }
 
@@ -173,6 +178,7 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
 }
 

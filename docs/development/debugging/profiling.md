@@ -24,6 +24,20 @@ A logger constructed disabled is quiet, not inert.
 So the first move is reading, not instrumenting. The phase timings and call
 counts for anything already wrapped exist before you touch the code.
 
+What is *not* on by default is emission. `CF_TIMING_MEASURES=1` makes every
+recorded span also emit a `performance.measure`, which is what puts it on the
+timeline of the process that ran it and what step 4 aggregates. It is off
+because the volume is meant for a tool rather than for a person: a topics
+pattern test emits more than 800,000 spans, and a human opening a timeline wants
+the phases someone deliberately named, not every span the runtime recorded. Turn
+it on for the length of an investigation and read it with something that
+aggregates.
+
+`CF_TIMING_MEASURES_CAP` raises the ceiling. It matters more than it looks:
+emission stops at the cap rather than sampling, so a run that hits it leaves an
+early-run prefix, and attributing a whole run from its setup is the mistake that
+invites.
+
 ## 1. Find the phase
 
 ```bash
@@ -118,10 +132,79 @@ those by name instead of widening the summary.
 A count that is too high is visible at the top level. The caller that multiplies
 it is not.
 
-Keep splitting the phase into subphases and comparing counts between adjacent
-levels. Compare the counts, not shares of a total: each key is timed
-independently and nothing aggregates, so a child's contribution cannot be
-inferred by subtracting it from its parent. The level where a count stops being
+Two ways to get there. By hand, keep splitting the phase into subphases and
+compare counts between adjacent levels — the counts themselves, not shares of a
+total, since each key is timed independently and a child's contribution cannot
+be inferred by subtracting it from its parent.
+
+Or let the measures do it. With emission on (step 0):
+
+```bash
+deno task cf test <file> --timing-measures-out /tmp/measures.json
+deno run --allow-read skills/perf-investigation/scripts/aggregate-measures.ts /tmp/measures.json
+```
+
+`aggregate-measures.ts` rolls every span up by key prefix and prints calls,
+total, time per call, and the spans recorded at exactly that level. That roll-up
+is what the stored statistics cannot give you — a logger records against its
+full joined path and nothing shorter, so no row holds a total for a prefix.
+
+Read it for where time concentrates, not for a call explosion. It groups keys by
+how they are NAMED, so `calls` counts every span at a prefix or below it and can
+only fall as you descend; a count that rises is not something this view can
+show. `ms/call` says which level is expensive, and the two `self` columns
+separate a level that is itself slow from one that merely contains slow
+children.
+
+Only spans a logger recorded reach the file. `withPhase` also emits a measure
+of its own, under a `cf-test/` name and without the logger's prefix, and the
+capture leaves it on the timeline rather than writing it — so a phase appears
+once, under its logger keys, and the counts do not double.
+
+That answers where the time went. It does not answer who asked, and for a key
+that runs everywhere it cannot: a logger records against its own key no matter
+which caller reached it. `attribute-measures.ts` recovers the caller from the
+intervals — spans nest, so whichever span was open when another began is the one
+that called it:
+
+```bash
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read              # who calls it
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read --via=traverse   # and how many each does
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read --chains     # the full chains
+```
+
+### Keep asking until the shape stops changing
+
+Each answer here suggests the next question, and the investigation is not
+finished when one of them returns a number — it is finished when the shape stops
+changing. Drive it yourself rather than stopping at the first table:
+
+1. **What dominates?** Aggregate. If one key is most of the spans, it is the
+   subject.
+2. **Who calls it?** Attribute. A key that runs everywhere names no caller in
+   its own row.
+3. **Frequency or width?** Read `--via` for the ratio, not the totals. Many
+   callers doing a little each is a frequency problem, fixed by calling less.
+   Few doing a great deal each is a width problem, fixed by making one call ask
+   for less — and those live at opposite ends of the stack.
+4. **Is the unit cost flat?** Compare time per child across the buckets. Flat
+   means volume and nothing else; rising with size means a second defect inside
+   the heavy calls, and it is worth separating before either is fixed.
+5. **Who calls the heavy ones?** `--heavy=N`. This is the question most easily
+   skipped, and its answer is routinely different from step 2's — a call site
+   can be dominated by a handful of instances whose callers are nothing like the
+   typical one.
+6. **Repeat on whatever step 5 named**, until either a pattern repeats across
+   the heavy instances or the chain reaches uninstrumented ground.
+
+Reaching uninstrumented ground is a result, not a dead end. A large root share
+says those spans ran outside every wrapped region, and the next move is to wrap
+one level above the thing you were chasing and run again — which is step 2 of
+this list with a better vantage point. Say so explicitly rather than reporting
+the attributable fraction as though it were the whole. The level where a count stops being
 proportional to the work and starts being proportional to the work squared is
 the level that introduced the multiplication — that is the caller to fix, and it
 is frequently not the

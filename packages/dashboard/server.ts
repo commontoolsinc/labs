@@ -27,7 +27,7 @@
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
-import { friendlyError } from "./lib.ts";
+import { friendlyError, githubOperationsInProgress } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell } from "./render.ts";
@@ -199,13 +199,22 @@ function activeTileView(tile: Tile, view: TileView): TileView {
 }
 
 function grayStaleTileUpdates(now: number): void {
-  let changed = false;
-  for (const active of activeTileUpdates.values()) {
+  const newlyStale: string[] = [];
+  for (const [tileId, active] of activeTileUpdates) {
     if (active.stale || now - active.startedAt < STALE_UPDATE_MS) continue;
     active.stale = true;
-    changed = true;
+    newlyStale.push(`${tileId} (${Math.max(0, now - active.startedAt)} ms)`);
   }
-  if (changed) {
+  if (newlyStale.length) {
+    const sources = [...activeRunSourceUpdates];
+    const github = githubOperationsInProgress(now).map((operation) =>
+      `${operation.id} ${operation.path} (${operation.stage}, ${operation.elapsedMs} ms)`
+    );
+    console.error(
+      `dashboard refresh still pending: tiles ${newlyStale.join(", ")}; ` +
+        `active run sources ${sources.length ? sources.join(", ") : "none"}; ` +
+        `active GitHub operations ${github.length ? github.join(", ") : "none"}`,
+    );
     lastChange = now;
     updateFaviconRedSince(now, false);
     broadcast(dashboardUpdate());

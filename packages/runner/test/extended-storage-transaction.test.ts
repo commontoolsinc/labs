@@ -75,6 +75,106 @@ describe("extended-storage-transaction", () => {
     });
   });
 
+  describe("commit on a transaction that is no longer open", () => {
+    // A second commit reports the transaction's terminal state as its result.
+    // It runs none of the commit-path work: the CFC relevance probes read
+    // stored metadata through the transaction, which admits no reads once its
+    // commit is in flight, settled, or aborted. The underlying transaction
+    // holds a single commit verdict, which stays with the commit that is
+    // running.
+    it("returns the completion error while the first commit is in flight", async () => {
+      const tx = runtime.edit();
+      runtime.getCell(space, "double-commit", undefined, tx).set({
+        title: "once",
+      });
+      const flushed: string[] = [];
+      const verdicts: string[] = [];
+      const settlements: string[] = [];
+      tx.enqueuePostCommitEffect({
+        id: "double-commit-effect",
+        kind: "test",
+        flush: () => {
+          flushed.push("flushed");
+        },
+      });
+      tx.addVerdictCallback((_tx, result) => {
+        verdicts.push(result.error ? result.error.name : "ok");
+      });
+      tx.addCommitCallback((_tx, result) => {
+        settlements.push(result.error ? result.error.name : "ok");
+      });
+
+      const first = tx.commit();
+      expect(tx.status().status).toBe("pending");
+      const second = await tx.commit();
+      expect(second.error?.name).toBe("StorageTransactionCompleteError");
+
+      expect((await first).error).toBeUndefined();
+      await tx.postCommitEffectsSettled();
+      expect(verdicts).toEqual(["ok"]);
+      expect(settlements).toEqual(["ok"]);
+      expect(flushed).toEqual(["flushed"]);
+    });
+
+    it("returns the completion error after the first commit settled", async () => {
+      const tx = runtime.edit();
+      runtime.getCell(space, "double-commit-settled", undefined, tx).set({
+        title: "once",
+      });
+      expect((await tx.commit()).error).toBeUndefined();
+      const second = await tx.commit();
+      expect(second.error?.name).toBe("StorageTransactionCompleteError");
+    });
+
+    it("returns the abort reason after the transaction was aborted", async () => {
+      const tx = runtime.edit();
+      runtime.getCell(space, "commit-after-abort", undefined, tx).set({
+        title: "once",
+      });
+      tx.abort("done with this one");
+      const result = await tx.commit();
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+    });
+
+    describe("with flow labels persisted", () => {
+      // The flow-labels probe is what reads stored metadata, and it runs only
+      // with the dial on, which the shared runtime leaves off. An aborted
+      // transaction keeps its read and write activity so the scheduler can
+      // rebuild the action's dependencies, so the probe has work to walk
+      // there; a settled one does not.
+      beforeEach(async () => {
+        await runtime.dispose();
+        await storageManager.close();
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          cfcFlowLabels: "persist",
+        });
+      });
+
+      it("returns the completion error while the first commit is in flight", async () => {
+        const tx = runtime.edit();
+        runtime.getCell(space, "labeled-double-commit", undefined, tx).set({
+          title: "once",
+        });
+        const first = tx.commit();
+        const second = await tx.commit();
+        expect(second.error?.name).toBe("StorageTransactionCompleteError");
+        expect((await first).error).toBeUndefined();
+      });
+
+      it("returns the abort reason after the transaction was aborted", async () => {
+        const tx = runtime.edit();
+        runtime.getCell(space, "labeled-commit-after-abort", undefined, tx)
+          .set({ title: "once" });
+        tx.abort("done with this one");
+        const result = await tx.commit();
+        expect(result.error?.name).toBe("StorageTransactionAborted");
+      });
+    });
+  });
+
   describe("a wrapped transaction", () => {
     it("answers for the instant as the transaction it wraps does", async () => {
       const { tx, cell } = await seeded("wrapped-instant");

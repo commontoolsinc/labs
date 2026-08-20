@@ -93,11 +93,6 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
       "cli mounts and drives fuse, while fuse's cell bridge reads pieces " +
       "through cli's piece and callable helpers.",
   },
-  {
-    packages: ["shell", "ui"],
-    reason: "shell builds its views out of ui components, while several ui " +
-      "components read shell's shared navigation and space state.",
-  },
 ];
 
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".mts"]);

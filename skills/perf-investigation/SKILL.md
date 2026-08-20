@@ -130,6 +130,32 @@ you begin and what you can trust:
   process with no browser; a worker CPU profile comes from a different process
   over CDP. Bracketing a phase is what gives a profile its interval, but the
   bracket has to be on the same side of that boundary as the samples.
+- **Every recorded span can put itself on the timeline.** `CF_TIMING_MEASURES=1`
+  — or `cf test --timing-measures-out <file>` — makes each logger time span emit
+  a `performance.measure` as well as recording into the statistics, across the
+  whole stack rather than only what someone wrapped by hand. It is off by
+  default because the volume is for a tool, not a person: a topics pattern test
+  emits over 800,000 spans, and a human opening a timeline wants the phases
+  someone named rather than every span the runtime recorded.
+  `skills/perf-investigation/scripts/aggregate-measures.ts` rolls the result up
+  by key prefix, which is what the statistics cannot do: a logger records
+  against its full joined path and nothing shorter, so the count at the level
+  where it starts multiplying exists in no stored row.
+- **Intervals recover the caller.** A key that runs everywhere is recorded
+  against itself whoever reached it, so no aggregate can say who is responsible.
+  Spans nest, so the span open when another began is the one that called it:
+  `skills/perf-investigation/scripts/attribute-measures.ts` rebuilds that tree
+  and answers who, how deep, and how many each caller asked for. Read its ratio
+  rather than its totals — few callers asking for a great deal each is a width
+  problem, many asking for a little is a frequency one, and they are fixed at
+  opposite ends of the stack.
+
+Ask the next question rather than reporting the first table. Who calls it,
+frequency or width, is the unit cost flat, and — the one most easily skipped —
+who calls the _heavy_ instances, whose callers are routinely not the typical
+ones. `docs/development/debugging/profiling.md` carries that ladder. A chain
+that reaches uninstrumented ground has produced a result rather than a dead end:
+it names where to wrap next.
 
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a

@@ -16,19 +16,18 @@ import {
   type PresentationParticipant,
 } from "@commonfabric/integration";
 import {
-  AppState,
   AppView,
   appViewToUrlPath,
-  deserialize,
   isAppViewEqual,
-} from "@commonfabric/shell/shared";
+} from "@commonfabric/navigation";
+import { AppState, deserialize } from "@commonfabric/shell/app-state";
 
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
 import { getPresentationSession } from "./presentation/session.ts";
-import { waitFor } from "./utils.ts";
+import { waitFor, waitForCondition } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 
@@ -48,6 +47,8 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       "Could not serialize identity. Requires 'noble' implementation.",
     );
   }
+
+  await waitForCondition(page, () => globalThis.app !== undefined);
 
   await page!.evaluate<
     Promise<void>,

@@ -327,6 +327,7 @@ Deno.test("github users: unavailable or malformed organization data stays gray",
     reply(url: URL): unknown | Response;
     sub: string;
     log: string;
+    requestLog?: string[];
   }[] = [
     {
       reply: (url) =>
@@ -334,6 +335,10 @@ Deno.test("github users: unavailable or malformed organization data stays gray",
           ? new Response("forbidden", { status: 403 })
           : [],
       sub: "auth failed",
+      requestLog: [
+        `for orgs/${ORG}/members?per_page=100&page=1 returned HTTP 403`,
+        "forbidden",
+      ],
       log:
         `github users: could not read organization users: GitHub API orgs/${ORG}/members?per_page=100&page=1 failed: HTTP 403`,
     },
@@ -346,6 +351,11 @@ Deno.test("github users: unavailable or malformed organization data stays gray",
           })
           : [],
       sub: "rate limit hit",
+      requestLog: [
+        `for orgs/${ORG}/outside_collaborators?per_page=100&page=1 returned HTTP 403`,
+        "rate limit 0 remaining of ?",
+        "rate limit exceeded",
+      ],
       log:
         `github users: could not read organization users: GitHub API orgs/${ORG}/outside_collaborators?per_page=100&page=1 failed: HTTP 403 (rate-limited)`,
     },
@@ -367,7 +377,15 @@ Deno.test("github users: unavailable or malformed organization data stays gray",
       assertEquals(view.value, "—");
       assertEquals(view.sub, testCase.sub);
       assertEquals(wire.writes, []);
-      assertEquals(wire.logged, [testCase.log]);
+      if (testCase.requestLog) {
+        assertEquals(wire.logged.length, 2);
+        for (const part of testCase.requestLog) {
+          assertStringIncludes(wire.logged[0], part);
+        }
+        assertEquals(wire.logged[1], testCase.log);
+      } else {
+        assertEquals(wire.logged, [testCase.log]);
+      }
     });
   }
 });

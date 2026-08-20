@@ -115,7 +115,10 @@ import {
   takeSchemaRefusalTx,
   unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
-import { TransactionAborted } from "./transaction-errors.ts";
+import {
+  TransactionAborted,
+  TransactionCompleteError,
+} from "./transaction-errors.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -2098,6 +2101,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): Promise<Result<Unit, CommitError>> {
     if (this.statusOverride?.status === "error") {
       return { error: this.statusOverride.error };
+    }
+    // A transaction that is no longer open takes none of the commit-path
+    // work below. The CFC relevance probes read stored metadata through this
+    // transaction, and one whose commit is in flight, settled, or aborted
+    // admits no reads. The terminal state is reported here as the result. The
+    // underlying transaction holds a single commit verdict, and that verdict
+    // belongs to the commit that is running.
+    const openState = this.tx.status();
+    if (openState.status !== "ready") {
+      return {
+        error: openState.status === "error"
+          ? openState.error
+          : TransactionCompleteError(),
+      };
     }
     const readOnly = this.isReadOnly();
     if (readOnly) {

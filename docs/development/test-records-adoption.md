@@ -1,8 +1,9 @@
 # Adopting test-run records in another repository
 
-This guide is written for an agent implementing the test-run record system
-of [the plan](../plans/test-run-telemetry.md) in another repository of the
-organization. The storage, schema, library, and personal keys already
+This guide is written for an agent implementing the test-run record
+system — designed in [an archived
+plan](../history/plans/test-run-telemetry.md) — in another repository of
+the organization. The storage, schema, library, and personal keys already
 exist; an adopting repository adds its own identities, producers, and relay
 and leans on everything shared.
 

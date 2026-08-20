@@ -6,6 +6,11 @@ import {
 } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
+  AppView,
+  isViewingDefaultPatternView,
+  navigate,
+} from "@commonfabric/navigation";
+import {
   type ErrorNotification,
   type RuntimeClient,
   RuntimeErrorCode,
@@ -20,16 +25,13 @@ import {
   AppState,
   AppStateConfigKey,
   AppStateSerialized,
-  AppView,
   assertIdentityChangeAllowed,
   clone,
   isAppStateConfigKey,
-  isViewingDefaultPatternView,
-  navigate,
   resolveIdentity,
   serialize,
   ShellApp,
-} from "../../shared/mod.ts";
+} from "../lib/app-state.ts";
 import {
   clearRuntimeDebugGlobals,
   type CommonfabricDebugState,
@@ -210,7 +212,7 @@ export class XRootView extends BaseView implements ShellApp {
           // Epic H3a render ceiling (see lib/host-toggles.ts).
           ...runtimeHostFlags(),
           // lib-shell emits address-shaped targets ({spaceDid, pieceId});
-          // mapNavigationView (shared/navigate.ts) maps a DID back to the
+          // mapNavigationView (src/lib/navigation.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.
           navigate,
           // Purely additive; null when telemetry is disabled.

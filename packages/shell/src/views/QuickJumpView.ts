@@ -1,10 +1,10 @@
 import type { DID } from "@commonfabric/identity";
+import { navigate } from "@commonfabric/navigation";
 import { PageHandle } from "@commonfabric/runtime-client";
 import { Task } from "@lit/task";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 
-import { navigate } from "../../shared/mod.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { BaseView } from "./BaseView.ts";
 
