@@ -57,7 +57,6 @@ setupHostToggles();
 
 const root = document.querySelector<XRootView>("x-root-view");
 if (!root) throw new Error("No root view found.");
-globalThis.app = root;
 
 // Opens the browser key store, hands it to the root element, and restores a
 // logged-in session from the stored root identity when there is one.
@@ -81,3 +80,9 @@ if (deviceLink.kind !== "absent") {
 await initializeKeys(root);
 
 const _navigation = new Navigation(root);
+
+// `globalThis.app` is the integration-driver readiness boundary. Publishing
+// it before Navigation is installed lets a driver change the view while this
+// module is awaiting the KeyStore, only for Navigation's initial URL apply to
+// overwrite that newer view when bootstrap resumes.
+globalThis.app = root;
