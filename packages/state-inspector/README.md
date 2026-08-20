@@ -235,15 +235,21 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   reconstruct reports it as `extent.unreadable` rather than folding it into
   `truncated`, because raising `--limit` does not recover one. `entities` never
   has any: it returns a row for an unreadable entity rather than dropping it.
-- **A scan sees what a read sees.** Every space-wide scan enumerates through
-  `visibleEntityRows`, and `listScopes` and `contentFingerprint` read through
-  the same branch chain — a fingerprint hashes the values ITS branch reads, or
-  it certifies a parent's content under a child's name. `visibleEntityRows`
-  walks branch ancestry the way `reconstructDocument` does — a child branch
-  lists the entities it inherited at the fork, not only the ones written on it —
-  and drops entities whose visible head is a `delete`. `entities` is the
-  exception that keeps tombstones, because it describes the space's records;
-  that is why its `extent.total` can exceed `graph`'s over the same space.
+  The HTML explorer banners both, because a generated page is a file that
+  outlives the stderr notice — it gets opened later and shared with someone who
+  never ran the command.
+- **A scan sees what a read sees.** `visibleRevisionRows` is the one enumeration
+  of what a branch can see, attributing each (scope, entity) to the nearest
+  branch holding it; `visibleEntityRows`, `listScopes`, `scopeOverlay`, the HTML
+  bundle's overlay discovery, and `contentFingerprint` all read through it, so
+  no view can report one domain while describing another — a fingerprint hashes
+  the values ITS branch reads, or it certifies a parent's content under a
+  child's name. `visibleEntityRows` walks branch ancestry the way
+  `reconstructDocument` does — a child branch lists the entities it inherited at
+  the fork, not only the ones written on it — and drops entities whose visible
+  head is a `delete`. `entities` is the exception that keeps tombstones, because
+  it describes the space's records; that is why its `extent.total` can exceed
+  `graph`'s over the same space.
 - **The other caps are silent**: `history` / `hot` / `conflicts` row limits, and
   the HTML stale-read pass, which caps per bundle and marks un-analyzed cells
   rather than showing them clean. There a count at a round cap may be truncated

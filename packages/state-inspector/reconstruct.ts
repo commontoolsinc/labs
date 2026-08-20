@@ -165,6 +165,59 @@ export function branchReadChain(
   return chain;
 }
 
+/** One (scope, entity) a read on a branch can see, and where it comes from. */
+export interface VisibleRevisionRow {
+  scope: string;
+  id: string;
+  /** Revisions on the branch that OWNS it — the history a read can reach. */
+  revisions: number;
+  /** The chain link that owns it. */
+  link: BranchReadLink;
+}
+
+/**
+ * Every (scope, entity) a read on this branch can see, each attributed to the
+ * nearest branch holding it — `resolveBranchRow`'s rule applied to a whole
+ * space instead of one entity.
+ *
+ * Enumeration and reading have to agree about what a branch can see, or a view
+ * reports one domain while describing another: a listing that covers inherited
+ * entities beside a scope list that does not, or a page naming a per-user scope
+ * while showing no cells in it. This is the enumeration those callers share.
+ * Narrow with `scope` or `id` when only part of the space is wanted; the
+ * remaining shape is identical either way.
+ */
+export function visibleRevisionRows(
+  space: SpaceDb,
+  opts: { branch?: string; scope?: string; id?: string } = {},
+): VisibleRevisionRow[] {
+  const conditions = ["branch = ?", "seq <= ?"];
+  if (opts.scope !== undefined) conditions.push("scope_key = ?");
+  if (opts.id !== undefined) conditions.push("id = ?");
+  const stmt = space.db.prepare(
+    `SELECT scope_key, id, count(*) revs FROM revision
+     WHERE ${conditions.join(" AND ")} GROUP BY scope_key, id`,
+  );
+  const rows: VisibleRevisionRow[] = [];
+  const claimed = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch ?? "")) {
+    const params: (string | number)[] = [link.branch, link.atSeq];
+    if (opts.scope !== undefined) params.push(opts.scope);
+    if (opts.id !== undefined) params.push(opts.id);
+    for (
+      const r of stmt.all<{ scope_key: string; id: string; revs: number }>(
+        ...params,
+      )
+    ) {
+      const key = `${r.scope_key}\u0000${r.id}`;
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      rows.push({ scope: r.scope_key, id: r.id, revisions: r.revs, link });
+    }
+  }
+  return rows;
+}
+
 /**
  * Resolve the single revision row visible for `id` at `atSeq` on `branch`,
  * replicating the engine's `readRowForBranch` (`engine.ts`): take the latest

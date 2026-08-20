@@ -17,6 +17,7 @@ import { buildSpaceGraph, type SpaceGraph } from "./graph.ts";
 import { spaceTimeline, type SpaceTimelineEntry } from "./timetravel.ts";
 import { buildAllDetails, type EntityDetail } from "./detail.ts";
 import type { ScanExtent } from "./model.ts";
+import { visibleRevisionRows } from "./reconstruct.ts";
 import {
   listScopes,
   type Participant,
@@ -70,16 +71,21 @@ export function buildInspectorBundle(
 
   // Entities that carry per-user/session state (in a non-space scope, or in
   // more than one scope) get a full scope overlay so the explorer can show the
-  // per-identity divergence the space-scope view hides.
-  const overlayIds = space.db
-    .prepare(
-      `SELECT id FROM revision WHERE branch = ?
-       GROUP BY id
-       HAVING count(DISTINCT scope_key) > 1
-           OR sum(CASE WHEN scope_key != 'space' THEN 1 ELSE 0 END) > 0`,
+  // per-identity divergence the space-scope view hides. Discovered over the
+  // same branch-visible domain the tree and the scope list use — a child branch
+  // inherits its parent's per-user state, and a page that named a user scope
+  // while finding no cells in it would report the divergence as absent.
+  const scoped = new Map<string, Set<string>>();
+  for (const row of visibleRevisionRows(space, { branch })) {
+    const scopes = scoped.get(row.id) ?? new Set<string>();
+    scopes.add(row.scope);
+    scoped.set(row.id, scopes);
+  }
+  const overlayIds = [...scoped.entries()]
+    .filter(([, scopes]) =>
+      scopes.size > 1 || [...scopes].some((scope) => scope !== "space")
     )
-    .all<{ id: string }>(branch)
-    .map((r) => r.id);
+    .map(([id]) => id);
   const overlays = overlayIds.map((id) => scopeOverlay(space, id, { branch }));
 
   const listing = buildAllDetails(space, { branch, scope, limit });
@@ -688,9 +694,31 @@ export function renderInspectorHtml(bundle: InspectorBundle): string {
     : "";
   // The header's entity count is the whole space, while the tree and graph hold
   // only what the scan reached. Say so, or the two read as one number.
-  const capLine = bundle.extent.truncated
-    ? `<span class="stats" style="color:var(--piece)">⚠ capped at ${bundle.extent.limit} of ${bundle.extent.total} entities · rebuild with a higher --limit for the rest</span>`
-    : "";
+  //
+  // Both kinds of shortfall have to appear ON THE PAGE. A capped or partial
+  // explorer is a FILE — opened days later, shared with someone who never ran
+  // the command — so the notice `cf` wrote to stderr at generation time is not
+  // there to be read, and this banner is the only thing that survives.
+  const warnings: string[] = [];
+  if (bundle.extent.truncated) {
+    warnings.push(
+      `⚠ capped at ${bundle.extent.limit} of ${bundle.extent.total} entities · rebuild with a higher --limit for the rest`,
+    );
+  }
+  if (bundle.extent.unreadable > 0) {
+    // Named apart from the cap: a higher limit does not recover an entity whose
+    // stored payload will not decode.
+    warnings.push(
+      `⚠ ${bundle.extent.unreadable} of ${bundle.extent.total} entities could not be reconstructed and are missing below · a higher --limit will not recover them`,
+    );
+  }
+  const capLine = warnings
+    .map((text) =>
+      `<span class="stats" style="color:var(--piece)">${
+        escapeHtml(text)
+      }</span>`
+    )
+    .join("\n  ");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

@@ -55,7 +55,11 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
-import { branchReadChain, reconstructDocument } from "./reconstruct.ts";
+import {
+  branchReadChain,
+  reconstructDocument,
+  visibleRevisionRows,
+} from "./reconstruct.ts";
 import type { EntityDocument, ReconstructOptions } from "./reconstruct.ts";
 
 export type EntityKind =
@@ -541,50 +545,46 @@ export function visibleEntityRows(
   } = {},
 ): EntityScanRow[] {
   const scope = opts.scope ?? "space";
-  // Revisions per entity on ONE branch, up to that branch's cut.
-  const perBranch = space.db.prepare(
-    `SELECT id, count(*) revisions FROM revision
-     WHERE branch = ? AND scope_key = ? AND seq <= ?
-     GROUP BY id`,
-  );
+  const branch = opts.branch ?? "";
+  const rows = visibleRevisionRows(space, { branch, scope });
+
   // Entities on ONE branch whose LAST row up to the cut is a delete. Asked for
   // the other way round — find the deletes, then ask which are final — because
   // deletes are a sliver of a space's rows, where deriving every entity's head
-  // op reads all of them.
-  const tombstoned = space.db.prepare(
-    `SELECT r.id FROM revision r
-     WHERE r.branch = ? AND r.scope_key = ? AND r.op = 'delete' AND r.seq <= ?
-       AND NOT EXISTS (
-         SELECT 1 FROM revision h
-         WHERE h.branch = r.branch AND h.id = r.id AND h.scope_key = r.scope_key
-           AND h.seq <= ?
-           AND (h.seq > r.seq OR (h.seq = r.seq AND h.op_index > r.op_index))
-       )`,
-  );
-
-  const rows: EntityScanRow[] = [];
-  const claimed = new Set<string>();
-  for (const link of branchReadChain(space, opts.branch ?? "")) {
-    const gone = new Set(
-      tombstoned
-        .all<{ id: string }>(link.branch, scope, link.atSeq, link.atSeq)
-        .map((r) => r.id),
+  // op reads all of them. Keyed by the branch that OWNS the entity: a delete on
+  // a farther link is hidden by the nearer branch that claimed it.
+  const gone = new Set<string>();
+  if (!opts.includeDeleted) {
+    const tombstoned = space.db.prepare(
+      `SELECT r.id FROM revision r
+       WHERE r.branch = ? AND r.scope_key = ? AND r.op = 'delete' AND r.seq <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM revision h
+           WHERE h.branch = r.branch AND h.id = r.id
+             AND h.scope_key = r.scope_key AND h.seq <= ?
+             AND (h.seq > r.seq OR (h.seq = r.seq AND h.op_index > r.op_index))
+         )`,
     );
-    for (
-      const row of perBranch.all<EntityScanRow>(link.branch, scope, link.atSeq)
-    ) {
-      // Nearest link wins, exactly as a read resolves it: a nearer branch that
-      // holds ANY row for an entity owns it, including when that row is the
-      // delete that hides what the parent still holds.
-      if (claimed.has(row.id)) continue;
-      claimed.add(row.id);
-      if (gone.has(row.id) && !opts.includeDeleted) continue;
-      rows.push(row);
+    for (const link of branchReadChain(space, branch)) {
+      for (
+        const r of tombstoned.all<{ id: string }>(
+          link.branch,
+          scope,
+          link.atSeq,
+          link.atSeq,
+        )
+      ) {
+        gone.add(`${link.branch}\u0000${r.id}`);
+      }
     }
   }
-  return rows.sort((a, b) =>
-    b.revisions - a.revisions || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-  );
+
+  return rows
+    .filter((r) => !gone.has(`${r.link.branch}\u0000${r.id}`))
+    .map((r) => ({ id: r.id, revisions: r.revisions }))
+    .sort((a, b) =>
+      b.revisions - a.revisions || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    );
 }
 
 /**
