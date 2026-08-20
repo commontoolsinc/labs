@@ -76,10 +76,12 @@ const didMatch = /(did:key:[A-Za-z0-9]+)\.sqlite$/.exec(snapshot);
 const spaceDid = didMatch ? didMatch[1] : null;
 
 // A capped listing would hand the export a subset of the space's pieces, and a
-// rollback payload missing topics reads exactly like a complete one. A `--kind`
-// scan walks the whole space whenever the space holds fewer pieces than the
-// limit, so naming a limit past any plausible piece count costs nothing and
-// removes the cliff entirely.
+// rollback payload missing topics reads exactly like a complete one. The limit
+// is named past any plausible piece count so the cap never bites in practice —
+// but a finite cap is still a cliff, and `cfJson` reads only stdout, so the
+// notice `cf` writes to stderr would go by unseen. `--require-complete` turns
+// the same condition into a nonzero exit, which `cf()` DOES raise: the export
+// either covers every piece in the space or it does not get written.
 const PIECE_LIMIT = 1_000_000;
 
 const pieces = await cfJson<EntityRow[]>([
@@ -90,6 +92,7 @@ const pieces = await cfJson<EntityRow[]>([
   "piece",
   "--limit",
   String(PIECE_LIMIT),
+  "--require-complete",
   "--json",
 ]);
 

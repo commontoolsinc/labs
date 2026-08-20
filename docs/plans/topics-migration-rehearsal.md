@@ -61,7 +61,7 @@ against it before the live attempt.
 
 ```bash
 # every piece in the space, with the pattern identity it currently carries
-deno task cf inspect entities $DB --kind piece --json \
+deno task cf inspect entities $DB --kind piece --require-complete --json \
   | jq -r '.[].id' \
   | while read -r id; do
       deno task cf inspect piece $DB "$id" --json \
@@ -72,6 +72,11 @@ deno task cf inspect entities $DB --kind piece --json \
 grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E|WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8' \
   topics-manifest.tsv | cut -f2 | sort | uniq -c   # expect 39 / 34 / 1
 ```
+
+`--require-complete` is load-bearing, not decoration: the piece listing is
+capped like every space-wide scan, and a manifest short by a topic reads exactly
+like a complete one. The flag makes a capped scan exit nonzero, so a truncated
+manifest is never written.
 
 The count check is the point: the space holds 319 pieces across 150 identities,
 so "did I migrate the right 74?" is a question the manifest answers and a

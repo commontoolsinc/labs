@@ -20,13 +20,13 @@ import { reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
-  countEntities,
   DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   modelFromDocument,
   type ModuleEntry,
   type ScanExtent,
+  visibleEntityRows,
 } from "./model.ts";
 
 export type EdgeKind = "pattern" | "argument" | "owns" | "link";
@@ -92,22 +92,18 @@ export function buildSpaceGraph(
   const includeLinks = opts.includeLinks ?? true;
   const own = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
-  // One row past the limit is asked for and dropped: getting it is what proves
-  // the space holds more entities than this graph covers.
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit + 1);
+  // The entities a read on this branch can see, tombstones already dropped —
+  // the same set this graph is built from, so `extent.total` counts what a
+  // complete graph would hold and truncation is a fact rather than an inference
+  // from a count landing on the cap.
+  const rows = visibleEntityRows(space, { branch, scope });
   const truncated = rows.length > limit;
-  if (truncated) rows.pop();
+  const scanned = truncated ? rows.slice(0, limit) : rows;
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
   const moduleIndex = new Map<string, ModuleEntry>();
-  for (const r of rows) {
+  for (const r of scanned) {
     let doc: EntityDocument | undefined;
     try {
       doc = reconstructDocument(space, { id: r.id, branch, scope });
@@ -237,7 +233,7 @@ export function buildSpaceGraph(
     stats: { nodesByKind, edgesByKind, externalEdges },
     extent: {
       limit,
-      total: countEntities(space, { branch, scope }),
+      total: rows.length,
       truncated,
     },
   };

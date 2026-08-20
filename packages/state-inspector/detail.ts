@@ -25,16 +25,16 @@ import {
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { branchReadChain, reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
-  countEntities,
   DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   type ModuleEntry,
   type ScanExtent,
+  visibleEntityRows,
 } from "./model.ts";
 
 /** A resolved reference to another entity (or a cross-space target). */
@@ -471,23 +471,19 @@ export function buildAllDetails(
   const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
   const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
-  // One row past the limit is asked for and dropped: getting it is what proves
-  // the space holds entities this pass does not describe.
-  const rows = space.db
-    .prepare(
-      `SELECT id, count(*) revisions FROM revision
-       WHERE branch = ? AND scope_key = ?
-       GROUP BY id ORDER BY revisions DESC LIMIT ?`,
-    )
-    .all<{ id: string; revisions: number }>(branch, scope, limit + 1);
+  // The entities a read on this branch can see, tombstones already dropped —
+  // the same set the pass below describes, so `extent.total` counts what a
+  // complete pass would return and truncation is a fact rather than an
+  // inference from a count landing on the cap.
+  const rows = visibleEntityRows(space, { branch, scope });
   const truncated = rows.length > limit;
-  if (truncated) rows.pop();
+  const scanned = truncated ? rows.slice(0, limit) : rows;
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
-  for (const r of rows) {
+  for (const r of scanned) {
     let doc: EntityDocument | undefined;
     try {
       doc = reconstructDocument(space, { id: r.id, branch, scope });
@@ -541,21 +537,26 @@ export function buildAllDetails(
 
   const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
 
-  // Pass 3: per-entity detail + version log.
+  // Pass 3: per-entity detail + version log. The log spans the same branch
+  // ancestry the rows came from — an entity a child branch INHERITED has its
+  // writes on the parent, and reading only local rows would describe it with an
+  // empty history.
+  const chain = branchReadChain(space, branch);
   const versionStmt = space.db.prepare(
     `SELECT r.seq, r.op, c.session_id, c.created_at
      FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
      ORDER BY r.seq ASC, r.op_index ASC`,
   );
   const out: EntityDetail[] = [];
   for (const [id, doc] of docs) {
-    const versions = versionStmt
-      .all<{ seq: number; op: string; session_id: string; created_at: string }>(
-        branch,
-        id,
-        scope,
+    const versions = chain
+      .flatMap((link) =>
+        versionStmt.all<
+          { seq: number; op: string; session_id: string; created_at: string }
+        >(link.branch, id, scope, link.atSeq)
       )
+      .sort((a, b) => a.seq - b.seq)
       .map((v) => ({
         seq: v.seq,
         op: v.op,
@@ -580,7 +581,7 @@ export function buildAllDetails(
     ),
     extent: {
       limit,
-      total: countEntities(space, { branch, scope }),
+      total: rows.length,
       truncated,
     },
   };
