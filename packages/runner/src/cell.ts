@@ -1066,11 +1066,15 @@ export class CellImpl<T extends FabricValue>
       resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
     }
 
+    // The link's schema may ride as a content-addressed reference; the
+    // stream marker lives on the resolved document.
+    const streamSchema = isObjectNotArray(resolvedToValueLink.schema)
+      ? resolveExternalRootRefForStructure(
+        resolvedToValueLink.schema as JSONSchemaObj,
+      )
+      : resolvedToValueLink.schema;
     if (
-      ContextualFlowControl.getAsCellValues(resolvedToValueLink.schema).at(
-        0,
-      ) ===
-        "stream"
+      ContextualFlowControl.getAsCellValues(streamSchema).at(0) === "stream"
     ) {
       return true;
     }
