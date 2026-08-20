@@ -23,6 +23,23 @@ export default pattern<{ who?: Writable<string | Default<"world">> }>(({ who }) 
   }],
 });
 
+const programOf = (
+  props: string,
+  destructure: string,
+  body: string,
+): RuntimeProgram => ({
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: `/// <cts-enable />
+import { NAME, pattern, str, Writable, Default } from "commonfabric";
+export default pattern<${props}>((${destructure}) => {
+  ${body}
+});
+`,
+  }],
+});
+
 const GREETING = "return { who, greeting: str`Hello, ${who}!` };";
 
 describe("str builtin", () => {
@@ -42,14 +59,12 @@ describe("str builtin", () => {
     await storageManager?.close();
   });
 
-  const runProgram = async (
+  const runSource = async (
     runtime: Runtime,
-    body: string,
+    program: RuntimeProgram,
     label: string,
   ) => {
-    const compiled = await runtime.patternManager.compilePattern(
-      programFor(body),
-    );
+    const compiled = await runtime.patternManager.compilePattern(program);
     const tx = runtime.edit();
     const resultCell = runtime.getCell<Record<string, unknown>>(
       space,
@@ -63,6 +78,9 @@ describe("str builtin", () => {
     await result.pull();
     return { compiled, result };
   };
+
+  const runProgram = (runtime: Runtime, body: string, label: string) =>
+    runSource(runtime, programFor(body), label);
 
   it("interpolates a reactive substitution", async () => {
     const runtime = newRuntime();
@@ -134,6 +152,105 @@ describe("str builtin", () => {
       );
     } finally {
       await runtime.dispose();
+    }
+  });
+
+  it("reads a substituted array as its value, not as a link", async () => {
+    const runtime = newRuntime();
+    try {
+      const { result } = await runSource(
+        runtime,
+        programOf(
+          `{
+  list?: Writable<string[] | Default<["a", "b"]>>;
+  n?: Writable<number | Default<0>>;
+  flag?: Writable<boolean | Default<false>>;
+}`,
+          "{ list, n, flag }",
+          "return { list, n, flag, greeting: str`${list} ${n} ${flag}` };",
+        ),
+        "value-read",
+      );
+      // An array renders through its own `toString` ("a,b") only if the
+      // substitution arrived as a VALUE. `STR_ARGUMENT_SCHEMA` leaves `values`
+      // without an `items` schema precisely so its elements resolve; were that
+      // to stop, the element would arrive as an unresolved link sigil and
+      // render "[object Object]" instead. Numbers and booleans pin the two
+      // falsy substitutions the interpolation must not treat as absent.
+      expect(result.key("greeting").get()).toBe(`${["a", "b"]} ${0} ${false}`);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("interpolates per element inside a map", async () => {
+    const runtime = newRuntime();
+    try {
+      const { result } = await runSource(
+        runtime,
+        programOf(
+          `{ items?: Writable<string[] | Default<["a", "b"]>> }`,
+          "{ items }",
+          "return { items, labels: items.map((item) => str`<${item}>`) };",
+        ),
+        "map-op",
+      );
+      // The shape shipped patterns actually use: one `str` node per element,
+      // minted inside the map's op sub-pattern rather than at pattern scope.
+      expect(result.key("labels").get()).toEqual(["<a>", "<b>"]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("renders with native parity after resuming the piece in a cold runtime", async () => {
+    const cause = "native-parity-resume";
+    const body = "return { who, greeting: str`v=${undefined} ${null}` };";
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      const tx1 = rt1.edit();
+      const compiled = await rt1.patternManager.compilePattern(
+        programFor(body),
+        { space, tx: tx1 },
+      );
+      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+        space,
+        cause,
+        undefined,
+        tx1,
+      );
+      // deno-lint-ignore no-explicit-any
+      const r1 = rt1.run(tx1, compiled, {}, resultCell1) as any;
+      await tx1.commit();
+      await r1.pull();
+      expect(r1.key("greeting").get()).toBe(`v=${undefined} ${null}`);
+
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      // The substitutions cross into the data model on the way to the inputs
+      // cell, and `undefined` is the value a JSON round-trip would quietly
+      // turn into `null` — which would render "null" here and diverge from the
+      // template literal only AFTER a resume, long past the fresh-run test
+      // above.
+      const tx2 = rt2.edit();
+      const resultCell2 = rt2.getCell<Record<string, unknown>>(
+        space,
+        cause,
+        undefined,
+        tx2,
+      );
+      await tx2.commit();
+      await resultCell2.sync();
+      expect(await rt2.start(resultCell2)).toBe(true);
+      await resultCell2.pull();
+      expect(
+        (resultCell2.getAsQueryResult() as { greeting: string }).greeting,
+      ).toBe(`v=${undefined} ${null}`);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
     }
   });
 
