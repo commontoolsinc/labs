@@ -7,14 +7,17 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,
+  isExternalSchemaRef,
+  recomposeSchema,
   SchemaNotDecomposableError,
 } from "./schema-decompose.ts";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   type AnyCell,
@@ -229,6 +232,35 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
 }
 
 /**
+ * Rewrites reference-form link schemas inside `value` back to their inline
+ * (recomposed) form. A `data:` document is self-contained by construction —
+ * the value lives in the id and no write ever installs anything alongside
+ * it — so a link serialized into one carries its schema inline, exactly as
+ * with the flag off. A reference whose closure the registry cannot supply
+ * stays a reference; the traversal's loader gates that read either way.
+ */
+export function inlineExternalSchemaRefsInValue<T>(value: T): T {
+  return mapLinkSchemas(value as never, (schema) => {
+    if (!isObjectNotArray(schema)) return schema;
+    const ref = (schema as JSONSchemaObj).$ref;
+    if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+    try {
+      const recomposed = recomposeSchema(ref, lookupSchemaDocument);
+      // A closure of one document recomposes with an empty `$defs`; drop it
+      // so the inline form round-trips to the schema the writer was handed.
+      const inline = isObjectNotArray(recomposed) &&
+          isObjectNotArray(recomposed.$defs) &&
+          Object.keys(recomposed.$defs).length === 0
+        ? (({ $defs: _empty, ...rest }) => rest)(recomposed)
+        : recomposed;
+      return internSchema(inline as JSONSchema) as never;
+    } catch {
+      return schema;
+    }
+  }) as T;
+}
+
+/**
  * Creates a sigil reference (link or alias) with shared logic
  */
 export function createSigilLinkFromParsedLink(
@@ -344,6 +376,22 @@ export function sanitizeSchemaForLinks(
 ): JSONSchema | undefined {
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
+  }
+  // A reference-form schema sanitizes as its resolved document: the strip is
+  // a structural operation, and letting a reference pass through unstripped
+  // would carry `asCell` entries into stored link schemas the flag-off
+  // sanitize removed — a reader would mint handles where values are
+  // expected. The sanitized (inline) result re-externalizes at the emission
+  // site as usual. An unresolvable reference passes through unchanged.
+  {
+    const ref = (schema as JSONSchemaObj).$ref;
+    if (typeof ref === "string" && isExternalSchemaRef(ref)) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        schema as JSONSchemaObj,
+      );
+      if (isObjectNotArray(resolved)) schema = resolved;
+      else return schema;
+    }
   }
 
   // Memoize by input identity: sanitize is a pure function of
