@@ -741,7 +741,11 @@ the per-epic implementation notes).
 
 ### `cfcWriteFloor`
 
-- **Toggle via.** `RuntimeOptions.cfcWriteFloor`.
+- **Toggle via.** `RuntimeOptions.cfcWriteFloor`; per-environment through the
+  `remoteClient` preset param, which `PiecesController.initialize` accepts and
+  forwards. The pattern multi-runtime harness routes it on to each worker
+  runtime, per session or for the whole harness, so an integration test can
+  drive real patterns against an enforcing floor.
 - **Added by.** Bernhard Seefeld, in "write-side requiredIntegrity floor (Epic
   D3, SC-18)" (#4479, 2026-07-02).
 - **Purpose.** A write-side minimum-integrity check. Values are `off`,
@@ -752,7 +756,7 @@ the per-epic implementation notes).
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `enforce` once field testing confirms the floor does not
   over-reject legitimate writes.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
+- **Status on 2026-08-19.** Implemented and in staged rollout.
 - **Path to removal.** Once integrity propagation is complete and the floor is
   proven safe, the check could fold into the base enforcement ladder and the
   separate dial could be retired.
