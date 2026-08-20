@@ -30,8 +30,13 @@ export async function attachDeclaredDataFiles(
   resolver: ProgramResolver,
 ): Promise<RuntimeProgram> {
   const { collectDataFileNames, TARGET } = compilerStack();
+  // A data file is not code and is never parsed as code. One already attached
+  // is in `files` like any other entry, and its bytes may happen to read as a
+  // `dataFile()` call.
+  const alreadyAttached = new Set(program.dataFiles ?? []);
   const declaredBy = new Map<string, string>();
   for (const file of program.files) {
+    if (alreadyAttached.has(file.name)) continue;
     for (const name of collectDataFileNames(file, TARGET)) {
       if (!declaredBy.has(name)) declaredBy.set(name, file.name);
     }

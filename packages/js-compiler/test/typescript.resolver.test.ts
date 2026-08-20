@@ -168,6 +168,56 @@ describe("typescript/resolver.ts", () => {
       )).toEqual([]);
     });
 
+    it("ignores a call through a parameter of the same name", () => {
+      // The inner `dataFile` is the parameter, not the import, so the file it
+      // names is not one this module reads.
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "function helper(dataFile: (s: string) => string) {\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "}\n" +
+          'export default () => [helper((s) => s), dataFile("/real.json")];\n',
+      )).toEqual(["/real.json"]);
+    });
+
+    it("ignores a call through a local of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  const dataFile = (s: string) => s;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through a destructured binding of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default (input: { dataFile: (s: string) => string }) => {\n" +
+          "  const { dataFile } = input;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through a shadowed namespace alias", () => {
+      expect(names(
+        'import * as cf from "commonfabric";\n' +
+          "export default (cf: { dataFile: (s: string) => string }) =>\n" +
+          '  cf.dataFile("/shadowed.json");\n',
+      )).toEqual([]);
+    });
+
+    it("reads a call whose scope shadows some other name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  const other = 1;\n" +
+          '  return [other, dataFile("/data/cities.json")];\n' +
+          "};\n",
+      )).toEqual(["/data/cities.json"]);
+    });
+
     it("finds nothing in a module that never imports it", () => {
       expect(names("export const x = 1;\n")).toEqual([]);
     });

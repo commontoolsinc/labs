@@ -142,4 +142,26 @@ describe("attachDeclaredDataFiles", () => {
     );
     assertEquals(result.dataFiles, ["/data/notes.txt", "/data/cities.json"]);
   });
+
+  it("never reads an attached data file as source", async () => {
+    // The bytes of this data file happen to read as a module that declares
+    // another one. It is data, so it is not parsed and declares nothing.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/main.tsx", contents: "export default 1;\n" },
+        {
+          name: "/data/sample.txt",
+          contents: 'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("/data/absent.json");\n',
+        },
+      ],
+      dataFiles: ["/data/sample.txt"],
+    };
+    const resolved = await attachDeclaredDataFiles(
+      program,
+      sourceOnly({}),
+    );
+    assertEquals(resolved.dataFiles, ["/data/sample.txt"]);
+  });
 });

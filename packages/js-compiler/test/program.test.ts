@@ -434,4 +434,12 @@ describe("HttpProgramResolver.resolveDataFile", () => {
     const resolver = at("https://example.com/main.tsx", "[]");
     expect(await resolver.resolveDataFile("data/cities.json")).toBe(undefined);
   });
+
+  it("reports a refusal as a refusal, not as a missing file", async () => {
+    for (const status of [401, 403, 500]) {
+      const resolver = at("https://example.com/main.tsx", "no", status);
+      await expect(resolver.resolveDataFile("/data/cities.json")).rejects
+        .toThrow(`${status}`);
+    }
+  });
 });

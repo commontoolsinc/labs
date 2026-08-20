@@ -256,7 +256,16 @@ export class HttpProgramResolver implements ProgramResolver {
     const url = new URL(this.#mainUrl);
     url.pathname = normalize(name);
     const res = await this.#fetchImpl(url);
-    if (!res.ok) return undefined;
+    // Absent is the caller's to report, against the module that read the name.
+    // Anything else — unauthorized, forbidden, a server fault — is not absence,
+    // and saying the file is missing would send the reader after the wrong
+    // thing.
+    if (res.status === 404) return undefined;
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch data file ${url}: ${res.status} ${res.statusText}`,
+      );
+    }
     return {
       name,
       contents: decodeDataFile(new Uint8Array(await res.arrayBuffer()), name),
