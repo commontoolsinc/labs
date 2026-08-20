@@ -352,13 +352,6 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
-/**
- * Marks a module-evaluation frame. Its presence is how the action-execution
- * guard admits the transformer's module-scope builder mints while an action is
- * suspended; `filename` names the evaluation for diagnostics.
- */
-export type SourceLocationContext = { filename: string };
-
 export type Frame = {
   parent?: Frame;
   cause?: unknown;
@@ -388,7 +381,12 @@ export type Frame = {
    */
   eventTime?: number;
   unsafe_binding?: UnsafeBinding;
-  sourceLocationContext?: SourceLocationContext;
+  /**
+   * Marks a module-evaluation frame. Its presence is the whole signal: it is
+   * how the action-execution guard admits the transformer's module-scope
+   * builder mints while an action is suspended.
+   */
+  moduleEvaluation?: true;
   /**
    * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
    * this frame whose space DID was not yet cached. The runner resolves these

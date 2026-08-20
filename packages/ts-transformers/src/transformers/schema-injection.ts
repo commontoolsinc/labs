@@ -2595,20 +2595,13 @@ function resolveLiftAppliedInputAndCallback(
 }
 
 /**
- * Whether `expression` names a callback, for recognizing the schema-first
- * `handler` form and for keeping the trailing-options check from
- * spread-replacing a callback with the injected result options.
- *
- * Callback-ness is SEMANTIC — the checker's call signatures — never a
- * whitelist of spellings. Four review rounds each found the spelling the
- * previous round's syntax list missed (inline arrow, const reference,
- * function declaration, property access); asking the type ends the family,
- * because a schema is never callable and a callback always is, however it
- * is written. Two backstops cover the type information going missing
- * rather than a spelling: the syntactic resolver catches a local
- * `any`-typed callback (no call signatures to ask), and the declaration
- * fallback catches an IMPORTED one — the resolver cannot cross modules,
- * but the aliased symbol's declaration still says what the value is.
+ * The arrow or function expression `expression` denotes, looking through
+ * parentheses, `as` / `satisfies` / type assertions, and the function-hardening
+ * helper the pipeline wraps callbacks in. Syntactic by design: it answers
+ * "which function node is this" for a node the transformer must rewrite, so it
+ * resolves nothing it cannot point at in this file. Use
+ * {@link isCallbackReference} for the semantic question of whether a value is
+ * callable at all.
  */
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,

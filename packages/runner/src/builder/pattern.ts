@@ -1160,9 +1160,7 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...frame,
   };
 
@@ -1213,9 +1211,7 @@ export function pushFrameFromCause(
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...(inHandler && { inHandler: true }),
     ...(frameKind && { frameKind }),
     ...(eventTime !== undefined && { eventTime }),

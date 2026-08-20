@@ -1419,7 +1419,7 @@ export class Engine extends EventTarget {
 
       const frame = pushFrame({
         runtime: this.ctRuntime,
-        sourceLocationContext: { filename: `${evalId}.js` },
+        moduleEvaluation: true,
       });
 
       let loaded: ReturnType<typeof loadModuleGraph>;

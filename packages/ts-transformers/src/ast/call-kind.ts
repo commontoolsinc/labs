@@ -719,7 +719,23 @@ function unwrapHardenedCallbackExpression(
   return expression.arguments[0];
 }
 
-/** Returns whether `expression` denotes a callable callback value. */
+/**
+ * Whether `expression` names a callback. Recognizes the schema-first `handler`
+ * form, keeps the trailing-options check from spread-replacing a callback with
+ * the injected result options, and anchors a builder artifact whose callback is
+ * reached indirectly.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Four review rounds each found the spelling the
+ * previous round's syntax list missed (inline arrow, const reference,
+ * function declaration, property access); asking the type ends the family,
+ * because a schema is never callable and a callback always is, however it
+ * is written. Two backstops cover the type information going missing
+ * rather than a spelling: the syntactic resolver catches a local
+ * `any`-typed callback (no call signatures to ask), and the declaration
+ * fallback catches an IMPORTED one — the resolver cannot cross modules,
+ * but the aliased symbol's declaration still says what the value is.
+ */
 export function isCallbackReference(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
@@ -737,6 +753,10 @@ export function isCallbackReference(
   const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
   if (declaration === undefined) return false;
   if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
   return ts.isVariableDeclaration(declaration) &&
     declaration.initializer !== undefined &&
     resolveCallbackFunctionExpression(declaration.initializer, checker) !==

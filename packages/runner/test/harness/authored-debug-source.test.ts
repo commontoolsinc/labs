@@ -7,6 +7,7 @@ import {
   recordAuthoredDebugSource,
 } from "../../src/harness/authored-debug-source.ts";
 import { recordVerifiedProvenance } from "../../src/harness/verified-provenance.ts";
+import { noteDerivedCopy } from "../../src/builder/pattern-metadata.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../../src/cfc/implementation-identity.ts";
 import type { Module } from "../../src/builder/types.ts";
 import type { HarnessedFunction } from "../../src/harness/types.ts";
@@ -53,6 +54,39 @@ describe("authored-debug-source", () => {
           implementation: forged,
         })?.kind,
       ).not.toBe("verified");
+    });
+  });
+
+  describe("getAuthoredDebugSource()", () => {
+    it("resolves a derived copy through to its root original", () => {
+      const root = () => {};
+      const derived = () => {};
+      recordAuthoredDebugSource(root, {
+        src: "cf:module/hash/main.tsx:5:2",
+        bindingName: "root",
+      });
+      noteDerivedCopy(derived, root);
+
+      expect(getAuthoredDebugSource(derived)).toEqual({
+        src: "cf:module/hash/main.tsx:5:2",
+        bindingName: "root",
+      });
+    });
+
+    it("prefers a derived copy's own entry over the root's", () => {
+      const root = () => {};
+      const derived = () => {};
+      recordAuthoredDebugSource(root, { bindingName: "root" });
+      recordAuthoredDebugSource(derived, { bindingName: "derived" });
+      noteDerivedCopy(derived, root);
+
+      expect(getAuthoredDebugSource(derived)).toEqual({
+        bindingName: "derived",
+      });
+    });
+
+    it("returns undefined for an unrecorded function with no derivation", () => {
+      expect(getAuthoredDebugSource(() => {})).toBeUndefined();
     });
   });
 

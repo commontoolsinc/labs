@@ -1642,8 +1642,15 @@ execution. After verified evaluation, `Engine.recordModuleProvenance` joins the
 module identity, runtime symbol, and source path into
 `cf:module/<identity>/<path>:<line>:<col>` and records it in the separate
 debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
-accessors read that map. Verified provenance, authorization, scheduling, and
-artifact hardening do not read it.
+accessors read that map, resolving a derived factory (`asScope` / `inSpace`)
+through to the root the walk recorded. Verified provenance, authorization,
+scheduling, and artifact hardening do not read it.
+
+The join happens after a module evaluates, because only the namespace walk
+knows which symbol a function was bound to. A diagnostic raised *during* module
+evaluation therefore has no authored position available and must name its
+subject some other way — the closure-capture diagnostic falls back to the
+callback body preview, which is stamped at mint time.
 
 Because this metadata is out of band, every new compiler-artifact transport or
 cache must deliberately carry and validate it. Omitting that plumbing is safe

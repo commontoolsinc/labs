@@ -1209,6 +1209,15 @@ served through a debug-only `WeakMap`. There is no runtime source-resolution
 work left to gate, and identity, authorization, and scheduling remain
 independent of `fn.src`.
 
+TODO(gideon): drop this entry once no shell development build still in
+circulation sets the flag. It is the one entry in this appendix that no
+reference in the tree points at, so it earns its place only for the developer
+whose local environment or deploy config still carries
+`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` — the flag was environment-settable and
+defaulted on in shell development builds, so those values outlive the code.
+Once that has aged out, this entry is pure history and belongs in neither this
+document nor any other.
+
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 
 The second gate that held the **home** root (home.tsx) out of

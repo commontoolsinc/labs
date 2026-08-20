@@ -134,6 +134,23 @@ describe("authored source sidecar", () => {
     expect(hoisted.name).toBe("hoisted");
   });
 
+  it("serves the root position on asScope and inSpace derivations", async () => {
+    const { main } = await makeEngine().compileAndEvaluateModules(PROGRAM);
+    type DerivableFactory = DebugAnnotated & {
+      asScope: (scope: unknown) => DebugAnnotated;
+      inSpace: (space?: unknown) => DebugAnnotated;
+    };
+    const root = (main as { default?: DerivableFactory }).default!;
+    const rootSrc = root.src;
+
+    expect(rootSrc?.endsWith(authoredAt(9, "({ value }) =>"))).toBe(true);
+    // Both mint a FRESH factory object, so neither carries a provenance entry
+    // of its own; the debug map resolves through the same derivation link the
+    // content-addressed entry ref uses.
+    expect(root.asScope({}).src).toBe(rootSrc);
+    expect(root.inSpace().src).toBe(rootSrc);
+  });
+
   it("preserves authored positions on a source-free warm load", async () => {
     const engine = makeEngine();
     const { modules, entryIdentity } = await engine.compileToRecordGraph(

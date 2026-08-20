@@ -4,6 +4,8 @@
  * scheduling.
  */
 
+import { resolveOriginal } from "../builder/pattern-metadata.ts";
+
 /** Authored debug fields served by a builder implementation. */
 export interface AuthoredDebugSource {
   /** Canonical `cf:module/.../<path>:<line>:<col>` source location. */
@@ -25,11 +27,25 @@ export function recordAuthoredDebugSource(
   }
 }
 
-/** Returns the authored debug metadata recorded for `fn`. */
+/**
+ * Returns the authored debug metadata recorded for `fn` — the exact function
+ * first, then its derivation root.
+ *
+ * The fallback matters for `PatternFactory.asScope(...)` / `.inSpace(...)`,
+ * which mint FRESH factory objects: the provenance walk records the module's
+ * exported root, so a derived factory has no entry of its own. This mirrors
+ * how `getArtifactEntryRef` / `getPatternSourcePath` resolve through
+ * `resolveOriginal`, and stays debug-only — `resolveOriginal` is a pure walk
+ * of the runner-private derivation link and grants nothing.
+ */
 export function getAuthoredDebugSource(
   fn: unknown,
 ): AuthoredDebugSource | undefined {
-  return typeof fn === "function" ? authoredDebugSourceByFn.get(fn) : undefined;
+  if (typeof fn !== "function") return undefined;
+  const own = authoredDebugSourceByFn.get(fn);
+  if (own !== undefined) return own;
+  const root = resolveOriginal(fn as object);
+  return root === fn ? undefined : authoredDebugSourceByFn.get(root);
 }
 
 /**

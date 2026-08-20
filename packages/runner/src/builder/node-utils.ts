@@ -25,9 +25,12 @@ export function connectInputAndOutputs(node: NodeRef) {
           : undefined;
         // A factory applied during module evaluation predates the provenance
         // walk that records authored positions, so the location is routinely
-        // absent here and the message reads without one.
-        const sourceLocation = getAuthoredDebugSource(implementation)?.src ??
-          null;
+        // absent here. The body preview is stamped at mint time and does not
+        // depend on that walk, so it names the offending callback either way.
+        const debugSource = getAuthoredDebugSource(implementation);
+        const preview = typeof implementation === "function"
+          ? (implementation as { preview?: string }).preview
+          : undefined;
         throw new Error(
           closureCaptureErrorMessage({
             capturedCell: {
@@ -35,7 +38,8 @@ export function connectInputAndOutputs(node: NodeRef) {
               scope: exported.scope,
               name: exported.name,
             },
-            sourceLocation,
+            sourceLocation: debugSource?.src ?? null,
+            implementationPreview: preview ?? null,
           }),
         );
       }
