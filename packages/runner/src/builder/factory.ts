@@ -115,7 +115,7 @@ import {
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-      "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> if present, or ensure you are using the Common Fabric build process",
+      "help: the CTS transforms run as part of the Common Fabric build process; check that you are compiling through it",
   );
 };
 
