@@ -40,6 +40,7 @@ import {
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  isCompleteScan,
   isEntityKind,
   listCommits,
   listEntityModels,
@@ -106,18 +107,49 @@ function out(
  * or a rollback payload — and turns the same condition into a nonzero exit with
  * nothing written to stdout at all.
  */
-function noteTruncation(
+function noteIncompleteScan(
   extent: ScanExtent,
   what: string,
   requireComplete?: boolean,
 ): void {
-  if (!extent.truncated) return;
-  const capped = `capped at --limit ${extent.limit} ${what}; the space holds ` +
-    `${extent.total} entities in all`;
-  if (requireComplete) {
-    throw new Error(`${capped}. --require-complete refuses a partial result.`);
+  if (isCompleteScan(extent)) return;
+  const reasons: string[] = [];
+  if (extent.truncated) {
+    reasons.push(
+      `capped at --limit ${extent.limit} ${what}; the space holds ` +
+        `${extent.total} entities in all — raise --limit for the rest`,
+    );
   }
-  console.error(`NOTE: ${capped}. Raise --limit for the rest.`);
+  if (extent.unreadable > 0) {
+    // Named apart from the cap, because the remedy is different: a raised
+    // limit does not recover an entity whose payload will not decode.
+    reasons.push(
+      `${extent.unreadable} of ${extent.total} entities could not be ` +
+        `reconstructed and are absent from this result — raising --limit ` +
+        `will not recover them`,
+    );
+  }
+  if (requireComplete) {
+    throw new Error(
+      `${reasons.join("; ")}. --require-complete refuses a partial result.`,
+    );
+  }
+  for (const reason of reasons) console.error(`NOTE: ${reason}.`);
+}
+
+/**
+ * The cap a scan will apply, refusing anything an entity count could not reach.
+ * A fractional `--limit` is a typo with a silent failure mode — entities are
+ * counted one at a time, so a cap of 1.5 is a cap nothing ever equals — and a
+ * negative one asks for a listing that cannot exist.
+ */
+function validatedLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of entities, not ${limit}.`,
+    );
+  }
+  return limit;
 }
 
 /** The flag that turns a capped result into a failure. Shared by every scan. */
@@ -1020,15 +1052,16 @@ export const inspect = new Command()
         `Unknown --kind "${kind}". Expected one of: ${entityKinds.join(", ")}.`,
       );
     }
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       const listing = listEntityModels(s, {
-        limit: options.limit,
+        limit,
         branch: options.branch,
         kind,
       });
       const rows = listing.entities;
-      noteTruncation(
+      noteIncompleteScan(
         listing.extent,
         kind ? `${kind} entities` : "entities",
         options.requireComplete,
@@ -1141,16 +1174,17 @@ export const inspect = new Command()
   )
   .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       let g: SpaceGraph = buildSpaceGraph(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
         includeLinks: options.links !== false,
       });
       if (options.root) g = subgraphAround(g, options.root, options.depth);
-      noteTruncation(g.extent, "entities", options.requireComplete);
+      noteIncompleteScan(g.extent, "entities", options.requireComplete);
       if (options.dot) {
         console.log(graphToDot(g));
         return;
@@ -1240,6 +1274,7 @@ export const inspect = new Command()
   )
   .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     if (options.json) {
       throw new ValidationError(
         'Option "--json" and the "html" command are mutually exclusive.',
@@ -1252,9 +1287,9 @@ export const inspect = new Command()
         scope: options.scope,
         generatedAt: new Date().toISOString(),
         liveBase: options.appUrl,
-        limit: options.limit,
+        limit,
       });
-      noteTruncation(bundle.extent, "entities", options.requireComplete);
+      noteIncompleteScan(bundle.extent, "entities", options.requireComplete);
       const html = renderInspectorHtml(bundle);
       if (options.out) {
         Deno.writeTextFileSync(options.out, html);

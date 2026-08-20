@@ -217,7 +217,9 @@ fixed recipe. The recurring debugging questions and where they resolve:
   nothing on stdout. Check that status where it is produced: a shell pipeline
   reports its LAST command's status, so a scan piped into `jq` and a redirect
   refuses, and the redirect still writes an empty file and reports success.
-  Capture the scan on its own, or set `pipefail`. The other caps stay silent —
+  Capture the scan on its own, or set `pipefail`. It refuses for either kind of
+  incompleteness — a cap reached, or an entity that would not reconstruct, which
+  a higher `--limit` never recovers. The other caps stay silent —
   history/hot/contention row limits, and the HTML stale-read pass, which caps
   per bundle and _marks_ un-analyzed cells rather than showing them clean. There
   a count equal to a round cap is still the tell.

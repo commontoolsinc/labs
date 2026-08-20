@@ -29,6 +29,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { annotate, summarize } from "./decode.ts";
 import {
+  branchReadChain,
   type EntityDocument,
   reconstructDocument,
   selectAtPath,
@@ -82,24 +83,47 @@ const KIND_ORDER: Record<ScopeKind, number> = {
   other: 3,
 };
 
-/** Enumerate the scopes present in a space, with entity/revision counts. */
+/**
+ * Enumerate the scopes a read on this branch can see, with entity/revision
+ * counts.
+ *
+ * Reads through branch ancestry, because a child branch inherits its parent's
+ * per-user and per-session state along with everything else: enumerating only
+ * the scopes written ON the branch drops those, and a caller that walks this
+ * list to cover "every scope" would cover a subset without knowing. Each
+ * (scope, entity) is attributed to the nearest branch holding it, exactly as a
+ * read resolves it, so counts describe what is visible from here rather than
+ * summing a parent's history into a child's. A space with no child branches
+ * has a one-link chain, where this is the query it always was.
+ */
 export function listScopes(
   space: SpaceDb,
   opts: { branch?: string } = {},
 ): Scope[] {
-  const branch = opts.branch ?? "";
-  const rows = space.db
-    .prepare(
-      `SELECT scope_key, count(DISTINCT id) ents, count(*) revs
-       FROM revision WHERE branch = ? GROUP BY scope_key`,
-    )
-    .all<{ scope_key: string; ents: number; revs: number }>(branch);
-  return rows
-    .map((r) => ({
-      ...parseScope(r.scope_key),
-      entities: r.ents,
-      revisions: r.revs,
-    }))
+  const stmt = space.db.prepare(
+    `SELECT scope_key, id, count(*) revs FROM revision
+     WHERE branch = ? AND seq <= ? GROUP BY scope_key, id`,
+  );
+  const totals = new Map<string, { entities: number; revisions: number }>();
+  const claimed = new Set<string>();
+  for (const link of branchReadChain(space, opts.branch ?? "")) {
+    for (
+      const r of stmt.all<{ scope_key: string; id: string; revs: number }>(
+        link.branch,
+        link.atSeq,
+      )
+    ) {
+      const key = `${r.scope_key}\u0000${r.id}`;
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      const total = totals.get(r.scope_key) ?? { entities: 0, revisions: 0 };
+      total.entities += 1;
+      total.revisions += r.revs;
+      totals.set(r.scope_key, total);
+    }
+  }
+  return [...totals.entries()]
+    .map(([scope_key, total]) => ({ ...parseScope(scope_key), ...total }))
     .sort((a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.revisions - a.revisions
     );

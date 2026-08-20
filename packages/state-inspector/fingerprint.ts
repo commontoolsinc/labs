@@ -157,6 +157,7 @@ export function generatedInternalCellIds(
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch: options.branch ?? "",
     });
     const internal = (doc as Record<string, unknown> | undefined)?.internal;
     if (!Array.isArray(internal)) continue;
@@ -216,9 +217,13 @@ export function contentFingerprint(
       excludedGenerated++;
       continue;
     }
+    // The models come from this branch, so the values must too — reading the
+    // default branch here would hash a parent's content under a child's name
+    // and certify two different spaces as identical.
     const doc = reconstructDocument(space, {
       id: model.id,
       scope: model.scope,
+      branch,
     });
     const value = (doc as Record<string, unknown> | undefined)?.value;
     let hash: string | null = null;

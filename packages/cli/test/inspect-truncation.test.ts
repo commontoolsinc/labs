@@ -113,7 +113,7 @@ describe("cf inspect capped listings", () => {
       expect(result.code).toBe(0);
       expect(notices(result)).toEqual([
         `NOTE: capped at --limit 3 entities; the space holds ${TOTAL} ` +
-        `entities in all. Raise --limit for the rest.`,
+        `entities in all — raise --limit for the rest.`,
       ]);
     });
   });
@@ -167,7 +167,7 @@ describe("cf inspect capped listings", () => {
       expect(result.code).toBe(0);
       expect(notices(result)).toEqual([
         `NOTE: capped at --limit 2 piece entities; the space holds ${TOTAL} ` +
-        `entities in all. Raise --limit for the rest.`,
+        `entities in all — raise --limit for the rest.`,
       ]);
     });
   });
@@ -204,9 +204,19 @@ describe("cf inspect capped listings", () => {
       const result = await cf(`inspect graph ${path} --limit 3 --json`);
       expect(result.code).toBe(0);
       const graph = JSON.parse(result.stdout.join("\n")) as {
-        extent: { limit: number; total: number; truncated: boolean };
+        extent: {
+          limit: number;
+          total: number;
+          truncated: boolean;
+          unreadable: number;
+        };
       };
-      expect(graph.extent).toEqual({ limit: 3, total: TOTAL, truncated: true });
+      expect(graph.extent).toEqual({
+        limit: 3,
+        total: TOTAL,
+        truncated: true,
+        unreadable: 0,
+      });
     });
   });
 
@@ -248,6 +258,44 @@ describe("cf inspect capped listings", () => {
       );
       expect(html.code).not.toBe(0);
       expect(html.stdout.join("").trim()).toBe("");
+    });
+  });
+
+  it("refuses a result missing an entity it could not read, which no higher limit recovers", async () => {
+    await withStore(async (path) => {
+      // A payload that will not decode is dropped by the graph pass, and the
+      // cap was never reached — so without its own count the scan would report
+      // itself complete over a smaller set.
+      const db = new Database(path);
+      db.prepare(
+        `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+         VALUES ('of:corrupt', 9001, 0, 'set', '<<<not a document>>>', 1)`,
+      ).run();
+      db.close();
+
+      const noted = await cf(`inspect graph ${path}`);
+      expect(noted.code).toBe(0);
+      expect(notices(noted).join("")).toContain(
+        "could not be reconstructed and are absent",
+      );
+      // Not the cap notice: the remedies differ, and a raised limit recovers
+      // nothing here.
+      expect(notices(noted).join("")).not.toContain("capped at --limit");
+
+      const refused = await cf(`inspect graph ${path} --require-complete`);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stdout.join("").trim()).toBe("");
+      expect(stripAnsi(refused.stderr.join("\n"))).toContain(
+        "--require-complete refuses a partial result",
+      );
+    });
+  });
+
+  it("rejects a fractional `--limit` rather than applying a cap no count can reach", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect entities ${path} --limit 1.5`);
+      expect(result.code).not.toBe(0);
+      expect(stripAnsi(result.stderr.join("\n"))).toContain("--limit");
     });
   });
 

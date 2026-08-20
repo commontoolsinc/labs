@@ -29,11 +29,11 @@ import { branchReadChain, reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
-  DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   type ModuleEntry,
   type ScanExtent,
+  scanLimit,
   visibleEntityRows,
 } from "./model.ts";
 
@@ -468,7 +468,7 @@ export function buildAllDetails(
 ): DetailListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
+  const limit = scanLimit(opts.limit);
   const ownDid = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
   // The entities a read on this branch can see, tombstones already dropped —
@@ -478,6 +478,7 @@ export function buildAllDetails(
   const rows = visibleEntityRows(space, { branch, scope });
   const truncated = rows.length > limit;
   const scanned = truncated ? rows.slice(0, limit) : rows;
+  let unreadable = 0;
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
@@ -490,7 +491,12 @@ export function buildAllDetails(
     } catch {
       doc = undefined;
     }
-    if (!doc) continue;
+    if (!doc) {
+      // Enumerated but not described: counted, never silently dropped, or a pass
+      // that skipped it would report itself complete over a smaller set.
+      unreadable++;
+      continue;
+    }
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -583,6 +589,7 @@ export function buildAllDetails(
       limit,
       total: rows.length,
       truncated,
+      unreadable,
     },
   };
 }

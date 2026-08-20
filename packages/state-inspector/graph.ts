@@ -20,12 +20,12 @@ import { reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
-  DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   modelFromDocument,
   type ModuleEntry,
   type ScanExtent,
+  scanLimit,
   visibleEntityRows,
 } from "./model.ts";
 
@@ -88,7 +88,7 @@ export function buildSpaceGraph(
 ): SpaceGraph {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
+  const limit = scanLimit(opts.limit);
   const includeLinks = opts.includeLinks ?? true;
   const own = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
@@ -99,6 +99,7 @@ export function buildSpaceGraph(
   const rows = visibleEntityRows(space, { branch, scope });
   const truncated = rows.length > limit;
   const scanned = truncated ? rows.slice(0, limit) : rows;
+  let unreadable = 0;
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
@@ -110,7 +111,12 @@ export function buildSpaceGraph(
     } catch {
       doc = undefined;
     }
-    if (!doc) continue;
+    if (!doc) {
+      // Enumerated but not placed in the graph: counted, never silently dropped, or a pass
+      // that skipped it would report itself complete over a smaller set.
+      unreadable++;
+      continue;
+    }
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -235,6 +241,7 @@ export function buildSpaceGraph(
       limit,
       total: rows.length,
       truncated,
+      unreadable,
     },
   };
 }
