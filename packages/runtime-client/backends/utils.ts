@@ -2,7 +2,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
-  isFabricValue,
+  isValidFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -24,6 +24,7 @@ import {
   linkRefFrom,
   refuseFabricInstance,
 } from "@commonfabric/runner/shared";
+import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "../protocol/mod.ts";
@@ -111,12 +112,9 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
  * fabric data -- one of them a cell's own raw value.
  */
 export function assertFabricLoggerFlags(
-  breakdown: Record<
-    string,
-    Record<string, Record<string, Record<string, unknown> | null>>
-  >,
+  breakdown: LoggerFlagsBreakdown,
 ): asserts breakdown is LoggerFlagsData {
-  if (isFabricValue(breakdown)) return;
+  if (isValidFabricValue(breakdown)) return;
 
   throw new Error(
     "Cannot send logger flags on this connection, not being a " +
