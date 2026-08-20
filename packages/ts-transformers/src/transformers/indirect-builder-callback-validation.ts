@@ -16,13 +16,18 @@
  * refusal to the compile that produced the module, where the offending
  * argument can be pointed at.
  *
- * Deliberately narrow in both directions. Only the argument the verifier
- * treats as the callback is judged, mirroring its per-builder positions, so a
- * trusted-builder result passed in a data position is never mistaken for a
- * miswritten callback. And an argument is judged only once it is
- * function-bearing by the checker's call signatures, so a call that passes
- * something else entirely keeps whatever diagnostic already describes it
- * rather than collecting a second, less accurate one.
+ * Only the argument the verifier treats as the callback is judged, mirroring
+ * its per-builder positions, so a trusted-builder result passed in a data
+ * position is never mistaken for a miswritten callback. Within that argument
+ * the resolution mirrors the verifier's too: it follows a name through the
+ * declarations this module makes, so an alias of a local function
+ * (`const alias = bump`) is accepted exactly as the verifier accepts it.
+ *
+ * An argument is judged only once it is function-bearing by the checker's
+ * call signatures. That is what keeps a call that passes something else
+ * entirely to its own diagnostic, and it is also what separates a builder
+ * DEFINITION from an application of one — `updateData(state)` classifies as a
+ * builder call as well, and the argument it carries is state.
  */
 
 import ts from "typescript";
@@ -66,8 +71,9 @@ function validateCallbackArgument(
   const checker = context.checker;
   const callback = callbackArgument(call, builderName, checker);
   if (!callback) return;
-  // Not function-bearing at all: a different mistake, already described by
-  // whatever rejects it. Saying "callback" about it would misname the problem.
+  // Function-bearing is also what separates a builder DEFINITION from an
+  // application of one: `updateData(state)` classifies as a builder call too,
+  // and its argument is state, not a callback.
   if (!isCallbackReference(callback, checker)) return;
   if (resolvesToSameModuleFunction(callback, call.getSourceFile(), checker)) {
     return;
@@ -118,37 +124,47 @@ function callbackArgument(
   }
 }
 
-/** Whether the callback resolves to a function declared in this module. */
+/**
+ * Whether the callback resolves to a function this module declares.
+ *
+ * Follows a name through this module's own declarations the way the verifier
+ * follows it through the compiled module's bindings: a function declaration
+ * ends the walk, and a variable initializer continues it, so a chain of
+ * aliases ending at a local function resolves. A name declared elsewhere does
+ * not, because the verifier reads one module at a time.
+ */
 function resolvesToSameModuleFunction(
   argument: ts.Expression,
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
+  seen: Set<ts.Node> = new Set(),
 ): boolean {
-  const resolved = resolveCallbackFunctionExpression(argument, checker);
-  if (resolved && resolved.getSourceFile().fileName === sourceFile.fileName) {
-    return true;
-  }
-  return sameModuleFunctionDeclaration(argument, sourceFile, checker) !==
-    undefined;
-}
-
-/**
- * The `function` declaration an identifier names in this module, if any.
- * Declarations hoist, so the declaration may follow the use.
- */
-function sameModuleFunctionDeclaration(
-  argument: ts.Expression,
-  sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker,
-): ts.FunctionDeclaration | undefined {
   const target = unwrapExpression(argument);
-  if (!ts.isIdentifier(target)) return undefined;
+  if (seen.has(target)) return false;
+  seen.add(target);
+
+  if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
+    return target.getSourceFile().fileName === sourceFile.fileName;
+  }
+  if (!ts.isIdentifier(target)) return false;
+
   const symbol = checker.getSymbolAtLocation(target);
   const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  if (!declaration || !ts.isFunctionDeclaration(declaration)) return undefined;
-  return declaration.getSourceFile().fileName === sourceFile.fileName
-    ? declaration
-    : undefined;
+  if (
+    declaration === undefined ||
+    declaration.getSourceFile().fileName !== sourceFile.fileName
+  ) {
+    return false;
+  }
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolvesToSameModuleFunction(
+      declaration.initializer,
+      sourceFile,
+      checker,
+      seen,
+    );
 }
 
 /** How the callback is reached, for the diagnostic's first clause. */
