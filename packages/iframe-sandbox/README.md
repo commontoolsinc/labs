@@ -55,11 +55,18 @@ guest.subscribe("counter");
 guest.write("counter", 1n);
 ```
 
-A value crosses in either direction as a `codec-realm` encoding, which carries
-the whole `FabricValue` domain — a `FabricBytes` arrives as a `FabricBytes`
-rather than as the bare object structured cloning would leave. Both realms run
-the same `@commonfabric/data-model`, which is what makes an encoding written in
-one decodable in the other.
+`reportGuestError(error)` is the other half of the client, sending an error the
+host dispatches as a `common-iframe-error` event on the element. It stands apart
+from `connectGuestContext()` because an error reporter is a thing a guest
+installs ahead of whatever else it does.
+
+Each message crosses in either direction as a single `codec-realm` encoding —
+the whole message, not the value inside it — which carries the whole
+`FabricValue` domain: a `FabricBytes` arrives as a `FabricBytes` rather than as
+the bare object structured cloning would leave. Both realms run the same
+`@commonfabric/data-model`, which is what makes an encoding written in one
+decodable in the other. What stays plain is the addressing the outer frame
+routes on, which it reads and so cannot have encoded.
 
 `read()` does not return the value: the host answers a read the same way it
 announces a subscribed key's change, so both arrive at the handler.

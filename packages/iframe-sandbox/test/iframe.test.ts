@@ -20,6 +20,7 @@ setIframeTestHandler();
 // uses them, so a body reads as the guest code it is.
 const GUEST_PROLOG = `<script type="module">
 import { connectGuestContext } from "/guest.js";
+import { realmFromFabricValue as encodeForHost } from "/codec.js";
 
 let onUpdate = (key, value) => {};
 const guest = connectGuestContext((key, value) => onUpdate(key, value));
@@ -277,24 +278,25 @@ read("payload");
   }
 });
 
-Deno.test("an undecodable write is dropped and the frame carries on", async () => {
+Deno.test("an undecodable message is dropped and the frame carries on", async () => {
   cleanupFixtures();
   try {
     const context = new ContextShim();
 
-    // The first message bypasses the guest client to post what an untrusted
-    // guest can post: a write whose tuple is shaped right and whose value slot
-    // holds something no encode produced. The second is an ordinary write, and
-    // messages arrive in order, so its landing is the point past which the
-    // first one would have landed had it been taken.
+    // The first two bypass the guest client to post what an untrusted guest
+    // can post: a plain message this protocol does not write, and an encoding
+    // that decodes to something no arm of it matches. The third is an ordinary
+    // write, and messages arrive in order, so its landing is the point past
+    // which the other two would have landed had either been taken.
     const body = GUEST_PROLOG + `
-parent.postMessage({ type: "write", data: ["undecodable", 123] }, "*");
+parent.postMessage({ type: "write", data: ["unencoded", 123] }, "*");
+parent.postMessage(encodeForHost({ type: "write", data: "not a tuple" }), "*");
 write("after", 1);
 ` + GUEST_EPILOG;
     const iframe = await render(body, context);
 
     await waitForContextValue(context, iframe, "after", (value) => value === 1);
-    assertEquals(context.get(iframe, "undecodable"), undefined);
+    assertEquals(context.get(iframe, "unencoded"), undefined);
   } finally {
     cleanupFixtures();
   }

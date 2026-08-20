@@ -35,30 +35,38 @@ document.cookie = "testcookie=1; SameSite=None;";
 // for inspection.
 const CSP_REPORTER = `
 <script>
+// Classic, and first in the document, because a violation fires while the
+// document is still parsing and a module script does not run until it has
+// finished. Listening has to happen now; sending can wait for the module
+// below, so what fires early is held until there is something to send it
+// with.
+window.__pending = [];
+window.__report = (error) => window.__pending.push(error);
 document.addEventListener('securitypolicyviolation', e => {
-  window.parent.postMessage({
-    type: 'error',
-    data: {
-      description: "CSP:" + e.violatedDirective,
-      source: e.sourceFile,
-      lineno: 0,
-      colno: 0,
-      stacktrace: "",
-    }
-  }, '*');
+  window.__report({
+    description: "CSP:" + e.violatedDirective,
+    source: e.sourceFile,
+    lineno: 0,
+    colno: 0,
+    stacktrace: "",
+  });
 });
 window.onerror = function (message, source, lineno, colno, error) {
-  window.parent.postMessage({
-    type: "error",
-    data: {
-      description: message,
-      source: source,
-      lineno: lineno,
-      colno: colno,
-      stacktrace: error && error.stack ? error.stack : new Error().stack,
-    },
-  }, '*');
+  window.__report({
+    description: message,
+    source: source,
+    lineno: lineno,
+    colno: colno,
+    stacktrace: error && error.stack ? error.stack : new Error().stack,
+  });
 }
+</script>
+<script type="module">
+import { reportGuestError } from "/guest.js";
+
+window.__report = reportGuestError;
+for (const error of window.__pending) reportGuestError(error);
+window.__pending.length = 0;
 </script>
 `;
 

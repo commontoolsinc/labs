@@ -108,7 +108,26 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
       case IPC.IPCGuestMessageType.Passthrough: {
-        this.onGuestMessage(outerMessage.data);
+        // The guest is untrusted, so this payload is a claim on two counts:
+        // that it is an encoding at all, and that what it encodes is a message
+        // this protocol writes. The decode settles the first -- it holds the
+        // marker this build mints -- and `isGuestMessage()` the second. Either
+        // refusal drops the message and leaves the frame running.
+        let decoded: FabricValue;
+        try {
+          decoded = fabricFromRealmValue(outerMessage.data);
+        } catch (error) {
+          console.warn(
+            `common-iframe-sandbox: undecodable guest message: ` +
+              String(error),
+          );
+          return;
+        }
+        if (!IPC.isGuestMessage(decoded)) {
+          console.warn("common-iframe-sandbox: malformed guest message.");
+          return;
+        }
+        this.onGuestMessage(decoded);
         return;
       }
     }
@@ -153,37 +172,12 @@ export class CommonIframeSandboxElement extends LitElement {
       case IPC.GuestMessageType.Read: {
         const key = message.data;
         const value = IframeHandler.read(this, this.context, key);
-        this.toGuest({
-          id: this.frameId,
-          type: IPC.IPCHostMessageType.Passthrough,
-          data: {
-            type: IPC.HostMessageType.Update,
-            data: [key, realmFromFabricValue(value)],
-          },
-        });
+        this.toGuestUpdate(key, value);
         return;
       }
 
       case IPC.GuestMessageType.Write: {
-        const [key, encoded] = message.data;
-        // The encoded tree is ceded to the decode, which is legitimate because
-        // it arrived by `postMessage()`: it is this frame's own clone, and
-        // nothing else can be reading it.
-        //
-        // The guest is untrusted, so the tuple's shape being right says
-        // nothing about what is in the value slot. The decode is the authority
-        // on that -- it is what holds the marker this build mints -- and what
-        // it refuses is dropped here, leaving the frame to carry on.
-        let value: FabricValue;
-        try {
-          value = fabricFromRealmValue(encoded);
-        } catch (error) {
-          console.warn(
-            `common-iframe-sandbox: undecodable write to \`${key}\`: ` +
-              String(error),
-          );
-          return;
-        }
+        const [key, value] = message.data;
         IframeHandler.write(this, this.context, key, value);
         return;
       }
@@ -257,15 +251,21 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   private notifySubscribers(key: string, value: FabricValue) {
-    const response: IPC.IPCHostMessage = {
+    this.toGuestUpdate(key, value);
+  }
+
+  // Sends `key`'s value to the guest. The whole `HostMessage` is what the
+  // encoding covers, the outer frame handing this arm's payload through
+  // without reading it.
+  private toGuestUpdate(key: string, value: FabricValue) {
+    this.toGuest({
       id: this.frameId,
       type: IPC.IPCHostMessageType.Passthrough,
-      data: {
+      data: realmFromFabricValue({
         type: IPC.HostMessageType.Update,
-        data: [key, realmFromFabricValue(value)],
-      },
-    };
-    this.toGuest(response);
+        data: [key, value],
+      }),
+    });
   }
 
   private toGuest(event: IPC.IPCHostMessage) {

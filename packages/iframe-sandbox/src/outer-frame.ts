@@ -45,10 +45,9 @@ window.addEventListener("error", onOuterError);
 toHost({ type: "ready" });
 
 function onMessage(e) {
-  if (!e.data || typeof e.data.type !== "string") {
-    return;
-  }
-
+  // The inner frame's payload is passed through without being read. It is a
+  // \`codec-realm\` encoding, whose shape is the format's business and not
+  // this frame's, and the host is what decodes and vets it.
   if (e.source === INNER_WINDOW) {
     assertInitialized();
     toHost({
@@ -56,6 +55,11 @@ function onMessage(e) {
       type: "passthrough",
       data: e.data,
     });
+    return;
+  }
+
+  // What this frame routes on, it reads.
+  if (!e.data || typeof e.data.type !== "string") {
     return;
   }
 

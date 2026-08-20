@@ -6,8 +6,8 @@
  * `./ipc.ts` describes, encodes and decodes the values in them, and hands the
  * guest a `FabricValue` for a `FabricValue` the host read.
  *
- * The API is deliberately minimal -- it covers the four operations the
- * protocol has, plus the teardown of its own listener.
+ * The API is deliberately minimal -- it covers the operations the protocol
+ * has, plus the teardown of its own listener.
  */
 
 import {
@@ -17,10 +17,10 @@ import {
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import {
+  type GuestError,
   type GuestMessage,
   GuestMessageType,
-  type HostMessage,
-  HostMessageType,
+  isHostMessage,
 } from "./ipc.ts";
 
 /**
@@ -61,30 +61,23 @@ export type GuestContext = {
  */
 export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
   const toHost = (message: GuestMessage): void => {
-    globalThis.parent.postMessage(message, "*");
+    globalThis.parent.postMessage(realmFromFabricValue(message), "*");
   };
 
   // A guest window receives whatever anyone able to reach it posts, so an
-  // arriving message is a claim rather than a fact. One that does not have an
-  // update's shape, or whose value the decode refuses, is not this protocol's
-  // and is left alone.
+  // arriving message is a claim rather than a fact. What is not an encoding,
+  // and what does not decode to a message this protocol writes, is left alone.
   const onMessage = (event: MessageEvent): void => {
-    const message = event.data as HostMessage | undefined;
-    if (
-      message?.type !== HostMessageType.Update ||
-      !Array.isArray(message.data) || message.data.length !== 2 ||
-      typeof message.data[0] !== "string"
-    ) {
-      return;
-    }
-
-    const [key, encoded] = message.data;
-    let value: FabricValue;
+    let decoded: FabricValue;
     try {
-      value = fabricFromRealmValue(encoded);
+      decoded = fabricFromRealmValue(event.data);
     } catch {
       return;
     }
+    if (!isHostMessage(decoded)) {
+      return;
+    }
+    const [key, value] = decoded.data;
     onUpdate(key, value);
   };
 
@@ -96,10 +89,7 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
     },
 
     write(key: string, value: FabricValue): void {
-      toHost({
-        type: GuestMessageType.Write,
-        data: [key, realmFromFabricValue(value)],
-      });
+      toHost({ type: GuestMessageType.Write, data: [key, value] });
     },
 
     subscribe(...keys: string[]): void {
@@ -114,4 +104,18 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
       globalThis.removeEventListener("message", onMessage);
     },
   };
+}
+
+/**
+ * Reports an error to the host, which dispatches it as a `common-iframe-error`
+ * event on the element.
+ *
+ * Standalone rather than a {@link GuestContext} method, an error reporter
+ * being a thing a guest installs ahead of whatever else it does.
+ */
+export function reportGuestError(error: GuestError): void {
+  globalThis.parent.postMessage(
+    realmFromFabricValue({ type: GuestMessageType.Error, data: error }),
+    "*",
+  );
 }
