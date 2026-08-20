@@ -883,6 +883,12 @@ export type Engine = {
    * a patched revision costs a base document plus every patch over it.
    */
   documentCache: Map<string, EntityDocument | null>;
+  /**
+   * Where {@link cacheDocumentForRevision} puts entries while a commit is
+   * open, so they reach {@link Engine.documentCache} only once its rows are
+   * durable. Absent outside {@link applyCommit}.
+   */
+  stagedDocumentCache?: Map<string, EntityDocument | null>;
 };
 
 export class ConflictError extends Error {
@@ -2593,10 +2599,28 @@ export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
 ): AppliedCommit => {
-  return engine.database.transaction(applyCommitTransaction).immediate(
-    engine,
-    options,
-  );
+  // A commit reads its own uncommitted rows — snapshot materialization asks
+  // for the state it has just written — and those reads are worth keeping,
+  // being of the revisions everything is about to ask for. They are held aside
+  // until the rows behind them are durable: a transaction that throws rolls
+  // SQLite back, and an entry recorded from what it wrote would describe a
+  // revision that never happened. A retry then writes its own revision at the
+  // sequence and operation index the rolled-back one had.
+  const staged = new Map<string, EntityDocument | null>();
+  engine.stagedDocumentCache = staged;
+  try {
+    const applied = engine.database.transaction(applyCommitTransaction)
+      .immediate(engine, options);
+    // Durable now, so what was read from those rows can be remembered.
+    engine.stagedDocumentCache = undefined;
+    for (const [key, document] of staged) {
+      cacheDocumentForRevision(engine, key, document);
+    }
+    return applied;
+  } finally {
+    // Also the rollback path, where `staged` is dropped unread.
+    engine.stagedDocumentCache = undefined;
+  }
 };
 
 export type UpsertSchedulerObservationOptions = {
@@ -6996,13 +7020,20 @@ const DOCUMENT_CACHE_MAX_ENTRIES = 256;
  * needed: the same entity has a different document per branch and per scope,
  * and a different one again at each point in its history.
  *
- * The stored row's own `op` and the length of its data join them, which is
- * what keeps this honest about a claim the engine does not enforce. Nothing in
- * the engine rewrites a revision — the table is only ever appended to — but
- * nothing stops something else from doing it either, and the engine validates
- * what it decodes precisely because a stored row can be wrong. A row rewritten
- * underneath a cached entry no longer matches its key, so it misses, decodes,
- * and is validated exactly as it would have been.
+ * The stored row's `op` and the length of its data join the address, and both
+ * are a cheap discriminator rather than a check on content. Two rows of the
+ * same op and size answer to the same key; and for a revision reconstructed
+ * from patches the key says nothing at all about the base, snapshot and patch
+ * rows the reconstruction read. Making it a real check would mean hashing
+ * every row a read touches, which is the pass over the bytes this cache exists
+ * to avoid.
+ *
+ * What the cache rests on is that the engine only ever appends revisions, so
+ * what one decodes to does not change while the process runs. The shape in the
+ * key covers the part of that which is cheap to cover — a row replaced by
+ * something of a different size — and so keeps the engine's validate-on-decode
+ * meaningful against it (`v2-engine-validation.test.ts`). A database that was
+ * already wrong when it was opened is caught by the first decode either way.
  */
 const documentCacheKey = (
   branch: BranchName,
@@ -7019,6 +7050,20 @@ const documentCacheKey = (
 /**
  * Remember the document a revision decodes to.
  *
+ * A read taken inside an open transaction is not remembered. Commits read
+ * their own uncommitted rows — snapshot materialization asks for the state it
+ * has just written — and a transaction that goes on to throw leaves SQLite as
+ * it was while this map would keep describing a revision that never happened.
+ * A retry then writes its own revision at the sequence and operation index the
+ * rolled-back one had, and had that entry survived, patch data of the same
+ * length would answer to the same key. Declining to record is what closes
+ * that, rather than clearing the map afterwards: it holds for every writer
+ * rather than for the one that remembered to.
+ *
+ * Nothing stops a read inside a transaction from being SERVED. An entry was
+ * recorded from durable state, and a transaction that has written its own
+ * revision resolves to that revision's own sequence — a different key.
+ *
  * Eviction is wholesale rather than least-recently-used: the working set is
  * small and the bound is generous, so a run that reaches it is one whose
  * access pattern a cache of this size was not going to serve anyway, and
@@ -7029,6 +7074,13 @@ const cacheDocumentForRevision = (
   key: string,
   document: EntityDocument | null,
 ): void => {
+  if (engine.stagedDocumentCache !== undefined) {
+    engine.stagedDocumentCache.set(key, document);
+    return;
+  }
+  if (engine.database.inTransaction) {
+    return;
+  }
   if (engine.documentCache.size >= DOCUMENT_CACHE_MAX_ENTRIES) {
     engine.documentCache.clear();
   }
