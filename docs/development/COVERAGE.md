@@ -325,6 +325,50 @@ moved — a sibling branch in the same file is the next one to flap.
 follows that line from a group-level `+2` down to the two integration hits that
 covered it in one run and not the next.
 
+### Failure reports reached only when the operation fails
+
+A fourth shape is the branch that reports a failure: the `if (error)` arm of an
+asynchronous recovery, the log line that says a write was refused. The recovery
+around it runs on every resume, and the report inside it runs only when the
+write underneath fails. No test asks for that write to fail, so whether the line
+is covered comes down to whether some suite, somewhere in the run, happened to
+tear a runtime down while one was in flight.
+
+The list coordinators' resume-seed recovery was one of those. A coordinator
+resuming against a result container with no durable value pulls the container
+and seeds an empty array once the pull settles, and it warns when either the
+pull or the seed fails. One workspace shard on one `main` run reached the seed's
+warning three times; no other artifact in that run or the next reached it at
+all.
+
+Reaching such a branch takes a failing operation, not a failing environment, so
+give the recovery its operation as a parameter.
+`seedResultContainerWhenPullSettles()` in
+`packages/runner/src/builtins/list-result-container-seed.ts` takes the runtime,
+the container, a predicate saying whether the coordinator still holds it, the
+pull to wait on, and the logger to report through.
+`packages/runner/test/list-result-container-seed.test.ts` then hands it a pull
+that rejects and a runtime whose commits are refused. Each failure case asserts
+the message key and the error carried with it, so a report that changed which
+failure it named fails rather than staying green on the line count.
+
+A guard reached only on a retry takes the same treatment. `editWithRetry()`
+runs its action synchronously on the first attempt, so a liveness check inside
+the action reads as unable to disagree with the one the caller just made — and
+as a dead line. It is not: a retryable rejection is followed by an `await` of
+the conflict's catch-up gate and then a fresh call that runs the action again.
+A test reaches it by refusing the first commit with a `ConflictError` whose
+`readyToRetry` gate flips the liveness answer, and asserts the commit count so
+that a version which stopped retrying fails rather than passing vacuously.
+
+Extracting it also settled where the branch lives. The same recovery had been
+written out three times, once each in `map.ts`, `filter.ts` and `flatmap.ts`, so
+one failure report was three separate branches waiting to flap, and two of them
+had never been covered on any run.
+[The investigation record](../history/development/coverage-flake-list-resume-seed-2026-08-20.md)
+follows the five lines from the group-level `+3` down to the single artifact
+that covered them.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:
