@@ -994,7 +994,7 @@ const buildSubagentSystemPrompt = (
             "Use run_skill_script for those exact scripts when they fit the delegated task.",
             ...(profileConfig.skillScriptExecutionTarget === "host"
               ? [
-                "This profile runs allowlisted skill scripts through host execution; pass the leased local CDP endpoint explicitly in script args.",
+                "This profile runs allowlisted skill scripts through host execution. Do not pass --cdp; the harness supplies the leased endpoint to the script itself.",
               ]
               : []),
           ]
