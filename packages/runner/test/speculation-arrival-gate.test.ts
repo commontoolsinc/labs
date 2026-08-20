@@ -56,6 +56,7 @@ import {
   resolveScopeKey,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -338,9 +339,6 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     // store: no wave destination — the speculation overlay is the
     // default seal destination, but this pin drives the replica seam
     // directly with a scripted verdict.
-    const { StorageManager } = await import(
-      "@commonfabric/runner/storage/cache.deno"
-    );
     const manager = StorageManager.emulate({ as: aliceSigner });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

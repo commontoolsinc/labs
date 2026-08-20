@@ -2490,18 +2490,19 @@ export class WaveAccumulator
     const key = `${space}\0${acting.user}`;
     let verdict = this.#foreignGrantVerdicts.get(key);
     if (verdict === undefined) {
-      verdict = (async () => this.#foreignWriteGrant!(space, acting))().then(
-        (granted) => granted,
-        (error) => {
-          logger.warn("foreign-write-grant-probe-failed", () => [
-            `the foreign-write authority probe for ${space} (acting ` +
-            `${acting.user}) failed; refusing the crossing fail-closed ` +
-            "for this wave (protocol.md §2b)",
-            error,
-          ]);
-          return false;
-        },
-      );
+      verdict = (async () => await this.#foreignWriteGrant!(space, acting))()
+        .then(
+          (granted) => granted,
+          (error) => {
+            logger.warn("foreign-write-grant-probe-failed", () => [
+              `the foreign-write authority probe for ${space} (acting ` +
+              `${acting.user}) failed; refusing the crossing fail-closed ` +
+              "for this wave (protocol.md §2b)",
+              error,
+            ]);
+            return false;
+          },
+        );
       this.#foreignGrantVerdicts.set(key, verdict);
     }
     return verdict;

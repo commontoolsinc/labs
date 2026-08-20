@@ -26,7 +26,10 @@ import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { waitForSettled } from "@commonfabric/runner/executor/watermark";
+import {
+  waitForSettled,
+  watermarkCell,
+} from "@commonfabric/runner/executor/watermark";
 import type { MemorySpace } from "@commonfabric/runner";
 import {
   initializePiecesController,
@@ -97,9 +100,6 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // Observe W BEFORE the edit: the edit advances the space head by at
     // least one, so settled-for-this-edit means W reached past the
     // pre-edit watermark.
-    const { watermarkCell } = await import(
-      "@commonfabric/runner/executor/watermark"
-    );
     const watermarkBefore =
       (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
         ?.seq ?? 0;

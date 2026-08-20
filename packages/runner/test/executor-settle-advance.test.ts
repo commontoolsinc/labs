@@ -556,7 +556,10 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     // the content, and `advanceTo` (computed before the fold) sits
     // BELOW the folded commit's seq.
     const FOLD_DOC_ID = "of:s1-pin6-mid-seal-fold";
-    let engineRef: Engine.Engine | undefined;
+    // The server's engine store is get-or-create and memoized, so
+    // fetching it before the host opens hands the interceptor below the
+    // same instance the serving loop will use.
+    const engine = await server.engineForSpace(space);
     let armed = false;
     let injectionDone = false;
     let foldError: string | undefined;
@@ -584,9 +587,9 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
         const origCommit = tx.commit.bind(tx);
         (tx as { commit: typeof origCommit }).commit = async () => {
           if (
-            armed && !injectionDone && engineRef !== undefined &&
+            armed && !injectionDone &&
             watermarkSeqValue !== undefined &&
-            watermarkSeqValue > maxAuthoredSeq(engineRef)
+            watermarkSeqValue > maxAuthoredSeq(engine)
           ) {
             injectionDone = true;
             const foldTx = originalEdit();
@@ -616,8 +619,6 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     };
     host = newHost();
     openClient();
-    const engine = await server.engineForSpace(space);
-    engineRef = engine;
 
     // The ordinary S1 flow first (pin 1's shape), UNARMED: input,
     // served derivation, the first quiescence advance completes clean.

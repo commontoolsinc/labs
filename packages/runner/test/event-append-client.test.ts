@@ -27,6 +27,7 @@ import type {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { SpeculationOverlayDestination } from "../src/speculation/overlay-destination.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import {
   EventAppendQueue,
@@ -35,6 +36,10 @@ import {
   type QueuedEventAppend,
 } from "../src/storage/event-append-queue.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import {
+  flushMicrotasks,
+  scriptedIntentManager,
+} from "./speculation-intent-test-utils.ts";
 
 const spaceSigner = await Identity.fromPassphrase("event append space");
 const space = spaceSigner.did() as MemorySpace;
@@ -583,12 +588,6 @@ describe("intent outcome consumption (events.md §5's client signal)", () => {
   // (visits, microtask, release, T25, no scheduler node, OFF) lives in
   // `speculation-intent-listener.test.ts`.
   it("consequenced retires; dropped/errored retire AND signal; the intent listener releases with its last tracked id", async () => {
-    const { SpeculationOverlayDestination } = await import(
-      "../src/speculation/overlay-destination.ts"
-    );
-    const { scriptedIntentManager, flushMicrotasks } = await import(
-      "./speculation-intent-test-utils.ts"
-    );
     const scripted = scriptedIntentManager();
     const runtimeStub = { storageManager: scripted.manager } as never;
     const destination = new SpeculationOverlayDestination(runtimeStub);

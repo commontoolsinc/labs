@@ -1233,6 +1233,7 @@ describe("stage F serving loop", () => {
     host = new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
       createRuntime: async () => {
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
@@ -1352,6 +1353,7 @@ describe("stage F serving loop", () => {
     host = new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
       createRuntime: async () => {
         activationTimes.push(Date.now());
         const manager = SharedServerStorageManager.connectTo(server, {

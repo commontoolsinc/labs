@@ -10,6 +10,7 @@ import {
   propagateRendererTrustedEvent,
 } from "../cfc/ui-contract.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { ServedEventDispatch } from "./types.ts";
 
 // Wake shaping (timing side-channel mitigation, see
 // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md). The moment a pattern observes
@@ -277,7 +278,7 @@ export interface DeliverOpts {
    * held delivery unchanged — same defensive plumbing as above (drained
    * store entries are never renderer-trusted, so shaping never holds
    * them in practice). */
-  served?: import("./types.ts").ServedEventDispatch;
+  served?: ServedEventDispatch;
   /** The client-echo cascade thread (QueuedEvent.parentEventId), carried
    * through a held delivery unchanged — defensive plumbing like `served`
    * (a cascade send from a handler frame is never renderer-trusted). */

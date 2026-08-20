@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import { applyCommit, close, open, ProtocolError, read } from "../v2/engine.ts";
 
 const createEngine = async () => {
@@ -51,7 +52,6 @@ Deno.test("memory v2 engine drops the observation tables and never backfills sch
   const { engine, path } = await createEngine();
   close(engine);
   try {
-    const { Database } = await import("@db/sqlite");
     const raw = await new Database(path);
     raw.exec(`
       CREATE TABLE scheduler_observation (
