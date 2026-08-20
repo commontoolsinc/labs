@@ -47,6 +47,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
@@ -2147,7 +2148,24 @@ function toolInputRequiredIntegrityFailure(
   if (!isObjectOrArray(schema)) {
     return undefined;
   }
-  const ifc = schema.ifc;
+  // A reference-form schema resolves before the walk. This is a security
+  // gate, so an unresolvable reference fails CLOSED — a floor could hide
+  // behind it — unlike the schemaless degradation structural readers use.
+  let structural = schema;
+  const ref = (structural as JSONSchemaObj).$ref;
+  if (typeof ref === "string" && isExternalSchemaRef(ref)) {
+    const resolved = ContextualFlowControl.resolveSchemaRefs(
+      structural as JSONSchemaObj,
+    );
+    if (!isObjectOrArray(resolved)) {
+      return `field "${
+        path || "(root)"
+      }" carries a schema reference this session cannot resolve; ` +
+        `refusing the call (fail closed)`;
+    }
+    structural = resolved;
+  }
+  const ifc = structural.ifc;
   if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
@@ -2168,8 +2186,8 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  if (isObjectOrArray(schema.properties)) {
-    for (const [key, childSchema] of Object.entries(schema.properties)) {
+  if (isObjectOrArray(structural.properties)) {
+    for (const [key, childSchema] of Object.entries(structural.properties)) {
       // Only gate fields the model actually supplied. An absent (e.g. optional)
       // field carries no value to gate; treating it as `undefined` would fail
       // an optional field's floor and over-block the call. A required field the
@@ -2198,13 +2216,13 @@ function toolInputRequiredIntegrityFailure(
   // previously went entirely ungated: this walk never descended
   // prefixItems.
   if (Array.isArray(value)) {
-    const prefixItems = Array.isArray(schema.prefixItems)
-      ? schema.prefixItems
+    const prefixItems = Array.isArray(structural.prefixItems)
+      ? structural.prefixItems
       : undefined;
     for (let index = 0; index < value.length; index++) {
       const slotSchema = prefixItems !== undefined && index < prefixItems.length
         ? prefixItems[index]
-        : schema.items;
+        : structural.items;
       if (!isObjectOrArray(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
