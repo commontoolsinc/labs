@@ -27,6 +27,7 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   Cell,
+  decomposeSchema,
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
@@ -39,8 +40,11 @@ import {
   isCellResult,
   isReadableCell,
   isSlugAddress,
+  lookupSchemaDocument,
   type MemorySpace,
   NAME,
+  parseExternalSchemaRef,
+  recomposeSchema,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -2260,7 +2264,15 @@ export function withDeclaredFieldProse(
   served: JSONSchema | true,
   declared: JSONSchema | undefined,
 ): JSONSchema | true {
-  if (served === true || declared === undefined || !isObjectOrArray(served)) {
+  if (served === true || !isObjectOrArray(served)) {
+    return served;
+  }
+  // A caller-facing surface serves the expanded form: a schema stored as a
+  // content-addressed reference recomposes here, with `$defs` names
+  // recovered from the declared document — the stored form knows a
+  // definition only by its hash.
+  served = expandServedSchemaReference(served, declared);
+  if (declared === undefined || !isObjectOrArray(served)) {
     return served;
   }
   const edits: DescriptionEdit[] = [];
@@ -2275,6 +2287,66 @@ export function withDeclaredFieldProse(
     { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
   );
   return applyDescriptionEdits(served, edits);
+}
+
+/**
+ * Recomposes a served schema stored as a content-addressed reference into
+ * its expanded form, keeping the reference's siblings (a `description`
+ * beside a `$ref` stays beside the expansion). An unresolvable reference is
+ * served as it is — the surface cannot invent structure.
+ */
+function expandServedSchemaReference(
+  served: JSONSchema & object,
+  declared: JSONSchema | undefined,
+): JSONSchema {
+  const ref = (served as { $ref?: unknown }).$ref;
+  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
+    return served;
+  }
+  const nameByHash = declaredDefNamesByHash(declared);
+  let recomposed: JSONSchema;
+  try {
+    recomposed = recomposeSchema(ref, lookupSchemaDocument, {
+      nameFor: (hash) => nameByHash.get(hash),
+    });
+  } catch {
+    return served;
+  }
+  const { $ref: _expanded, ...siblings } = served as Record<string, unknown>;
+  return isObjectOrArray(recomposed)
+    ? { ...recomposed, ...siblings } as JSONSchema
+    : recomposed;
+}
+
+/**
+ * The declared document's `$defs` names, keyed by the content hash each
+ * definition decomposes to — the same hashes the served document's
+ * references carry, so a recomposition can put the author's names back.
+ */
+function declaredDefNamesByHash(
+  declared: JSONSchema | undefined,
+): Map<string, string> {
+  const names = new Map<string, string>();
+  if (!isObjectOrArray(declared) || !isObjectOrArray(declared.$defs)) {
+    return names;
+  }
+  for (const name of Object.keys(declared.$defs)) {
+    try {
+      const { rootRef } = decomposeSchema(
+        {
+          $ref: encodeJsonPointer(["#", "$defs", name]),
+          $defs: declared.$defs,
+        } as Parameters<typeof decomposeSchema>[0],
+      );
+      const parsed = parseExternalSchemaRef(rootRef);
+      if (parsed !== undefined && !names.has(parsed.taggedHash)) {
+        names.set(parsed.taggedHash, name);
+      }
+    } catch {
+      // An undecomposable definition keeps its hash-derived name.
+    }
+  }
+  return names;
 }
 
 /**

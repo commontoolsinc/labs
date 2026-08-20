@@ -1,6 +1,11 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { schemaToTypeString } from "@commonfabric/runner";
+import {
+  lookupSchemaDocument,
+  parseExternalSchemaRef,
+  recomposeSchema,
+  schemaToTypeString,
+} from "@commonfabric/runner";
 import {
   isObjectNotArray,
   type ReadonlyRecord,
@@ -757,6 +762,12 @@ export async function resolveExecInvocation(
   rawArgs: string[],
   deps: ExecInputResolverDeps = {},
 ): Promise<ResolvedExecInvocation> {
+  // The parse reads the input schema's structure (its properties become the
+  // verb's flags), so a schema served as a content-addressed reference
+  // expands here, locally to this invocation — the caller's spec object is
+  // untouched, and the help path applies its own expansion with the
+  // author's `$defs` names.
+  spec = withExpandedInputSchema(spec);
   const implicit = await resolveImplicitPipedHandlerInput(spec, rawArgs, deps);
   if (implicit) {
     return implicit;
@@ -771,6 +782,28 @@ export async function resolveExecInvocation(
     parsed,
     input: await resolveParsedExecInput(spec, parsed, deps),
   };
+}
+
+function withExpandedInputSchema(spec: ExecCommandSpec): ExecCommandSpec {
+  const schema = spec.inputSchema;
+  if (!isSchemaObject(schema)) return spec;
+  const ref = (schema as { $ref?: unknown }).$ref;
+  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
+    return spec;
+  }
+  try {
+    const recomposed = recomposeSchema(ref, lookupSchemaDocument);
+    const { $ref: _expanded, ...siblings } = schema as Record<string, unknown>;
+    return {
+      ...spec,
+      inputSchema: isSchemaObject(recomposed)
+        ? { ...recomposed, ...siblings } as JSONSchema
+        : recomposed,
+    };
+  } catch {
+    // An unresolvable reference parses as it would have anyway.
+    return spec;
+  }
 }
 
 function schemaDescription(schema: JSONSchema): string | undefined {
