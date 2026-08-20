@@ -162,6 +162,12 @@ ones. `docs/development/debugging/profiling.md` carries that ladder. A chain
 that reaches uninstrumented ground has produced a result rather than a dead end:
 it names where to wrap next.
 
+A chain that reaches uninstrumented ground has not run out of data. The harness
+phases that attribution treats as transparent still locate those spans in the
+run, and whatever finished immediately before them is a caller nobody wrapped —
+`attribute-measures.ts --roots` reads both out of the capture you already have,
+and names where the next span would attribute the most.
+
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
 hypothesis. Confirm it correlates — that it moves with the real measurement
