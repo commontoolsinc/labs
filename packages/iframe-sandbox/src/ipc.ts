@@ -1,93 +1,86 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
-// Diagram of the IPC messages between the Host
-// environment, and the intermediary guest iframe.
+// Diagram of the messages between the Host environment, the intermediary outer
+// frame, and the guest in the inner frame.
 //
-// ┌──────────────┐              ┌───────────────┐
-// │     Host     │              │     Guest     │
-// └───────┬──────┘              └───────┬───────┘
-//         │                             │
-//         │◄───────────READY────────────┤
-//         │                             │
-//         ├────────────INIT────────────►│
-//    ┌───►│                             │
-//    │    ├────────LOAD-DOCUMENT───────►│
-//    │    │                             │
-//    │    │◄───────────LOAD─────────────┤
-//    │    │                             │◄───┐
-//    │    │◄────────PASSTHROUGH────────►│    │
-//    │    ▼                             ▼    │
-//    └────┘                             └────┘
+// ┌──────────────┐        ┌───────────────┐        ┌───────────────┐
+// │     Host     │        │  Outer frame  │        │     Guest     │
+// └───────┬──────┘        └───────┬───────┘        └───────┬───────┘
+//         │                       │                        │
+//         │◄────────READY─────────┤                        │
+//         │                       │                        │
+//         ├─────LOAD-DOCUMENT────►│                        │
+//         │                       ├────────srcdoc─────────►│
+//         │◄─────────LOAD─────────┤                        │
+//         │                       │                        │
+//         ├──────────────────PORT (transferred)───────────►│
+//         │◄═════════════════════ port ═══════════════════►│
+//         │                       │                        │
+//         │◄──────ERROR───────────┤◄───────(unread)────────┤
+//
+// The host and the guest hold the two ends of a `MessagePort` and every
+// message of the key/value protocol -- `HostMessage` and `GuestMessage` --
+// crosses on it. The outer frame carries the CSP and loads documents; it
+// relays nothing that protocol says.
+//
+// The one thing it does pass along is whatever the guest posts to it, which it
+// forwards without reading. A guest has a port for everything it means to say,
+// so a message arriving by that route is a guest reporting that it could not
+// use the port -- a way to raise an alarm, not a second way to talk.
+
+/**
+ * Sent alongside the transferred port, so a guest recognizes the handoff by
+ * what the message says rather than by having to treat every arriving message
+ * as a candidate.
+ */
+export const GUEST_PORT_HANDOFF = "common-iframe-sandbox:port";
 
 export enum IPCHostMessageType {
-  // Host initializing guest with data (namely, ID).
-  Init = "init",
-  // Host instructing guest to load a new document.
+  // Host instructing the outer frame to load a new document.
   LoadDocument = "load-document",
-  // Host instructing guest to pass through a `HostMessage`.
-  Passthrough = "passthrough",
 }
 
-/**
- * Messages from the system to the host. In case of passthrough it is system
- * sending message to the guest through the host.
- */
-export type IPCHostMessage =
-  | { id: number; type: IPCHostMessageType.Init }
-  | { id: number; type: IPCHostMessageType.LoadDocument; data: string }
-  | { id: number; type: IPCHostMessageType.Passthrough; data: HostMessage };
+/** A message from the host to the outer frame. */
+export type IPCHostMessage = {
+  type: IPCHostMessageType.LoadDocument;
+  data: string;
+};
 
 export enum IPCGuestMessageType {
-  // Guest alerting the host that it is ready.
+  // Outer frame alerting the host that it is ready.
   Ready = "ready",
-  // An error occurred in the outer frame.
-  Error = "error",
-  // Guest inner frame has loaded.
+  // Outer frame's inner document has loaded, so there is a guest to hand a
+  // port to.
   Load = "load",
-  // Guest passing a `GuestMessage`.
-  Passthrough = "passthrough",
+  // An error in the outer frame itself.
+  OuterError = "outer-error",
+  // An error the guest raised outside its port.
+  GuestError = "guest-error",
 }
 
-/**
- * Messages from the host to the system and in case of pass through it is guest
- * message routed through the host.
- */
+/** A message from the outer frame to the host. */
 export type IPCGuestMessage =
   | { type: IPCGuestMessageType.Ready }
-  | { id: number; type: IPCGuestMessageType.Load }
-  | { id: number; type: IPCGuestMessageType.Error; data: unknown }
-  | { id: number; type: IPCGuestMessageType.Passthrough; data: GuestMessage };
+  | { type: IPCGuestMessageType.Load }
+  | { type: IPCGuestMessageType.OuterError; data: unknown }
+  | { type: IPCGuestMessageType.GuestError; data: unknown };
 
 export function isIPCGuestMessage(
   message: unknown,
 ): message is IPCGuestMessage {
-  if (typeof message !== "object" || message === null) {
-    return false;
-  }
-  if (!("type" in message)) {
+  if (
+    typeof message !== "object" || message === null || !("type" in message)
+  ) {
     return false;
   }
   switch (message.type) {
-    case IPCGuestMessageType.Ready: {
+    case IPCGuestMessageType.Ready:
+    case IPCGuestMessageType.Load: {
       return true;
     }
-    case IPCGuestMessageType.Error:
-    case IPCGuestMessageType.Passthrough:
-    case IPCGuestMessageType.Load: {
-      if (
-        message.type !== IPCGuestMessageType.Load &&
-        (!("data" in message) || message.data == null)
-      ) {
-        return false;
-      }
-      if (
-        message.type === IPCGuestMessageType.Passthrough &&
-        "data" in message &&
-        !isGuestMessage(message.data)
-      ) {
-        return false;
-      }
-      return ("id" in message) && message.id != null;
+    case IPCGuestMessageType.OuterError:
+    case IPCGuestMessageType.GuestError: {
+      return "data" in message && message.data != null;
     }
   }
   return false;
