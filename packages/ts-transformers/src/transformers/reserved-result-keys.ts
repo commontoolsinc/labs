@@ -101,12 +101,13 @@ export function reportOpaqueReservedResultKeys(
     message: `pattern() output ${plural ? "fields" : "field"} ${names} ` +
       `${plural ? "are" : "is"} declared \`unknown\`, so the result schema ` +
       `carries \`{ type: "unknown" }\` there. \`unknown\` declares a field ` +
-      `that holds a reference to another piece: a reader gets back an opaque ` +
-      `reference carrying no properties rather than the value. A reserved ` +
-      `key at the root of a result holds what this pattern produced — the ` +
-      `screen it built, the name it chose — so declaring it that way loses ` +
-      `that value for every reader, while the renderer, which supplies its ` +
-      `own schema, goes on working.${advice} Below the root, and on the ` +
+      `that holds a reference to another piece. A reader of such a field ` +
+      `gets an opaque reference carrying no properties rather than the ` +
+      `value. A reserved key at the root of a result holds what this ` +
+      `pattern produced: the screen it built, the name it chose. Declaring ` +
+      `it \`unknown\` throws that value away for every reader. The screen ` +
+      `goes on rendering, because the renderer supplies its own schema and ` +
+      `never reads the declared one.${advice} Below the root, and on the ` +
       `argument side, a reserved key may stay \`unknown\`: there it does ` +
       `name another piece's field.`,
     node: anchor,
