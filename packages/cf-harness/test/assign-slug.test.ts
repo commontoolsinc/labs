@@ -262,6 +262,74 @@ describe("assign-slug", () => {
       expect(output.message).toContain("failed while listing");
     });
 
+    it("does not list the piece twice when retried after a failed assignment", async () => {
+      // A first call can join the registry and then fail at the slug write.
+      // The retry must settle the name without appending a second entry.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+
+      const originalGetSpace = pieces.getSpace.bind(pieces);
+      const originalAdd = pieces.add.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        // The join has landed; make the assignment that follows fail once.
+        pieces.getSpace = () => {
+          pieces.getSpace = originalGetSpace;
+          throw new Error("slug assignment refused");
+        };
+      };
+      const first = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.add = originalAdd;
+      pieces.getSpace = originalGetSpace;
+      const failed = first.output as AssignSlugToolErrorOutput;
+      expect(failed.status).toBe("error");
+      expect(failed.message).toContain("failed while naming");
+
+      const retry = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      expect((retry.output as AssignSlugToolSuccessOutput).status).toBe("ok");
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        created.pieceId,
+      );
+    });
+
+    it("reports a structured error when the referenced piece cannot be loaded", async () => {
+      // A storage or connection failure while loading the referent is the
+      // tool's answer to give, not an exception to escape with.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const originalGetCellFromLink = pieces.runtime.getCellFromLink.bind(
+        pieces.runtime,
+      );
+      pieces.runtime.getCellFromLink = ((
+        ...args: Parameters<Runtime["getCellFromLink"]>
+      ) => {
+        const cell = originalGetCellFromLink(...args);
+        (cell as unknown as { sync: () => Promise<unknown> }).sync = () =>
+          Promise.reject(new Error("storage unavailable"));
+        return cell;
+        // deno-lint-ignore no-explicit-any
+      }) as any;
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.runtime.getCellFromLink = originalGetCellFromLink;
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("could not load the referenced piece");
+      expect(output.message).toContain("storage unavailable");
+    });
+
     it("refuses when the slug's availability could not be established, assigning nothing", async () => {
       // A resolution that fails operationally — storage error, sync that
       // never landed — says nothing about what the slug holds. Reading it as

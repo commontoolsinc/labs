@@ -10,6 +10,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
+  asSerializableValue,
   RUN_PATTERN_MAX_SOURCE_TEXT_BYTES,
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
@@ -992,6 +993,32 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolSuccessOutput;
       expect(output.status).toBe("ok");
       expect(output.value).toEqual({ titleLength: 6 });
+    });
+
+    it("returns a `cancelled` output when the signal aborts while the settle race is underway", async () => {
+      // The abort lands after the race over the settle barrier has been
+      // entered — a microtask later, not before — so the live race path
+      // itself answers, rather than the pre-aborted short-circuit.
+      const controller = new AbortController();
+      const runtimeWithSettled = runtime as unknown as {
+        settled: () => Promise<void>;
+      };
+      runtimeWithSettled.settled = () => {
+        queueMicrotask(() => controller.abort());
+        return new Promise<void>(() => {});
+      };
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+      }, { signal: controller.signal });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+    });
+
+    it("serializes a plain value and answers undefined for one JSON cannot carry", () => {
+      expect(asSerializableValue({ n: 1 })).toEqual({ n: 1 });
+      expect(asSerializableValue(7n)).toBeUndefined();
     });
 
     it("returns a `cancelled` output and stops the piece when the signal aborts during the settle barrier", async () => {

@@ -851,8 +851,8 @@ it or the preset supplied it — is recorded as `fabricSessionCfc` in
 the harness's own `cfcMode`.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
-over-cap source is a structured tool error), an optional `inputs` object, an and
-an optional `resultSchema`. An `inputs` string value that is a whole-string
+over-cap source is a structured tool error), an optional `inputs` object, and an
+optional `resultSchema`. An `inputs` string value that is a whole-string
 LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
 reference; everything else passes through as plain JSON. A link that resolves
 into a space other than the configured session space is refused with a

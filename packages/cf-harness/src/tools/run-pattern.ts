@@ -232,7 +232,7 @@ export const scrubBareFabricIdentifiers = (text: string): string =>
  * serialized link form. Returns `undefined` when the value does not
  * serialize.
  */
-const asSerializableValue = (value: unknown): unknown => {
+export const asSerializableValue = (value: unknown): unknown => {
   try {
     const encoded = JSON.stringify(value);
     return encoded === undefined ? undefined : JSON.parse(encoded);

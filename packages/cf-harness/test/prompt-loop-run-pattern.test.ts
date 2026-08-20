@@ -374,6 +374,69 @@ describe("prompt-loop run_pattern model boundary", () => {
     }
   });
 
+  it("keeps a bare fabric identifier in an assign_slug error out of the model-facing tool message", async () => {
+    const did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+    let calls = 0;
+    const fetchFn: typeof fetch = () => {
+      calls += 1;
+      const payload = calls === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-1",
+                type: "function",
+                function: {
+                  name: "assign_slug",
+                  arguments: JSON.stringify({
+                    token: "/of:fid1:abc",
+                    slug: "doubling-report",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Done." },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "assign-slug-scrub",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () =>
+          Promise.reject(new Error(`authorization denied for ${did}`)),
+      }),
+      fetchFn,
+    });
+
+    const result = await loop.runPrompt({ prompt: "Name the piece." });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain(
+      "could not establish the fabric session",
+    );
+    expect(toolMessage?.content).not.toContain(did);
+    expect(toolMessage?.content).toContain("[fabric-id]");
+  });
+
   it("keeps bare fabric identifiers in compile diagnostics out of the model-facing tool message while the artifact keeps the raw text", async () => {
     const signer = await Identity.fromPassphrase("run-pattern scrub");
     const storageManager = StorageManager.emulate({ as: signer });

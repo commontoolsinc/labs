@@ -261,19 +261,27 @@ export const assignSlugTool: HarnessToolDefinition<
       ...link,
       schema: undefined,
     });
-    await cell.sync();
-    // The same discriminator the slug resolver applies to what a slug
-    // redirects to: a document with no pattern identity is not a piece, and
-    // naming it would put a dead entry in the piece list.
-    if (getPatternIdentityRef(cell) === undefined) {
+    try {
+      await cell.sync();
+    } catch (error) {
+      return errorOutput(
+        `assign_slug could not load the referenced piece: ${
+          errorMessage(error)
+        }`,
+      );
+    }
+    // The same discriminators the slug resolver applies to what a slug
+    // redirects to: a document with no pattern identity, or no piece id, is
+    // not a piece, and naming it would put a dead entry in the piece list.
+    const targetId = pieceId(cell);
+    if (getPatternIdentityRef(cell) === undefined || targetId === undefined) {
       return errorOutput(
         "assign_slug token does not refer to a piece; only a piece can be named",
       );
     }
-    const targetId = pieceId(cell);
     const availability = await slugAvailability(pieces, slug);
     if (availability.state === "taken") {
-      if (targetId !== undefined && availability.pieceId === targetId) {
+      if (availability.pieceId === targetId) {
         // The name already points where the caller is pointing it, so the
         // request is already true, and saying so beats refusing it. The
         // contract's other half still has to hold: a slug can point at a
@@ -309,8 +317,10 @@ export const assignSlugTool: HarnessToolDefinition<
     try {
       // The registry join goes first, so a failure between the two leaves a
       // listed-but-unnamed piece — visible and reachable by its handle —
-      // rather than an orphan name pointing outside the list.
-      await pieces.add([cell]);
+      // rather than an orphan name pointing outside the list. Membership is
+      // ensured rather than appended: a retry after exactly that failure
+      // must not list the piece twice.
+      await ensureRegistered(pieces, cell, targetId);
       await assignSlug(pieces, cell, slug);
     } catch (error) {
       return errorOutput(

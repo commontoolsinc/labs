@@ -59,9 +59,10 @@ readiness.
   `run_pattern` tool, which compiles model-authored pattern source and runs it
   against the configured Fabric space over a lazy authorized session. The Fabric
   identity remains outside Docker, the session is constrained to one configured
-  space, and an optional caller-chosen slug registers the created piece in that
-  space's piece list. Neither surface admits arbitrary host commands, and
-  `run_pattern` is present only when a fabric session is configured.
+  space, and the separate `assign_slug` tool registers a piece the run holds a
+  handle to in that space's piece list under a caller-chosen slug. Neither
+  surface admits arbitrary host commands, and both fabric-session tools are
+  present only when a fabric session is configured.
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.
@@ -183,14 +184,13 @@ in-flight external side effect.
    semantics while operator tooling retains resolvable provenance.
 5. **Durable trusted-host pattern execution.** Each `run_pattern` call creates a
    detached Fabric piece whose source revision remains a retention root. The
-   piece is unlisted unless the call requests registration; abort stops it and
-   best-effort delists it, but an in-flight slug assignment may remain. There is
-   no deadline, resource ceiling, deletion, or garbage collection. Fabric
-   session CFC posture can refuse tainted strict writes, but resource lifecycle
-   and registration settlement remain incomplete. Owner: `cf-harness` and Fabric
-   runtime tooling. Retirement: callers can bound, enumerate, retain, and delete
-   tool-created resources, and cancellation fully settles both registry
-   membership and assigned names.
+   piece stays out of the piece list until `assign_slug` names it; abort stops
+   the created piece. There is no deadline, resource ceiling, deletion, or
+   garbage collection. Fabric session CFC posture can refuse tainted strict
+   writes, but resource lifecycle and registration settlement remain incomplete.
+   Owner: `cf-harness` and Fabric runtime tooling. Retirement: callers can
+   bound, enumerate, retain, and delete tool-created resources, and cancellation
+   fully settles both registry membership and assigned names.
 
 ## Test evidence
 
