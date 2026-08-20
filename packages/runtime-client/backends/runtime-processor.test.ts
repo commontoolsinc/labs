@@ -13,6 +13,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -2877,6 +2878,57 @@ describe("runtime-client CellRef conversion", () => {
     // Nested too, the walk reaching it through the container rebuild.
     expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
     expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
+});
+
+describe("RuntimeProcessor.getLoggerCounts", () => {
+  // The handler reads process-global logger state, so each case raises its own
+  // flag and clears it again rather than leaving one for the next.
+  function withFlag(metadata: Record<string, unknown>, body: () => void): void {
+    const logger = getLogger("getLoggerCounts-test");
+    logger.flag("probe", "id:1", true, metadata);
+    try {
+      body();
+    } finally {
+      logger.resetFlags();
+    }
+  }
+
+  it("carries a raised flag's metadata through to the response", () => {
+    // No `this` is read, so the handler runs against a bare receiver.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ a: 1 }, () => {
+      const response = RuntimeProcessor.prototype.getLoggerCounts.call(
+        processor,
+        { type: RequestType.GetLoggerCounts },
+      );
+
+      expect(Object.keys(response).sort()).toEqual([
+        "counts",
+        "flags",
+        "metadata",
+        "timing",
+      ]);
+      expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
+        a: 1,
+      });
+    });
+  });
+
+  it("refuses to answer at all when a flag holds unsendable metadata", () => {
+    // The assertion is wired into the handler, not merely available beside it:
+    // a `Date` raised anywhere in the process stops this read.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ when: new Date(0) }, () => {
+      expect(() =>
+        RuntimeProcessor.prototype.getLoggerCounts.call(
+          processor,
+          { type: RequestType.GetLoggerCounts },
+        )
+      ).toThrow(/not being a `FabricValue`/);
+    });
   });
 });
 

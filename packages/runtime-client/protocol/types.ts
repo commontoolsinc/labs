@@ -629,9 +629,7 @@ export type LoggerTimingData = Record<
 
 /**
  * Active logger flags, by logger name, flag name and id. A flag set without
- * metadata is `null`, and so is one whose metadata does not survive vetting at
- * the boundary -- the two are not distinguished here, the flag's presence
- * being what this carries and the metadata being incidental to it.
+ * metadata is `null`.
  */
 export type LoggerFlagsData = Record<
   string,
