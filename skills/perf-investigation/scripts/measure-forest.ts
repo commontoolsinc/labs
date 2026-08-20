@@ -32,10 +32,16 @@ export interface Span {
   parent: number;
 }
 
-/** `cell/get/user-data#4127` names the span `cell/get/user-data`. */
+/** Emitted entries carry this, so clearing can be selective. */
+export const MEASURE_PREFIX = "cf:";
+
+/** `cf:cell/get/user-data#4127` names the span `cell/get/user-data`. */
 export function keyOf(name: string): string {
-  const hash = name.lastIndexOf("#");
-  return hash === -1 ? name : name.slice(0, hash);
+  const body = name.startsWith(MEASURE_PREFIX)
+    ? name.slice(MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  return hash === -1 ? body : body.slice(0, hash);
 }
 
 /**

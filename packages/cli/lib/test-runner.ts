@@ -69,12 +69,15 @@ import {
   clearTimingMeasures,
   getLogger,
   getLoggerCountsBreakdown,
+  getTimingMeasuresState,
   getTimingStatsBreakdown,
   resetAllCountBaselines,
   resetAllLoggerCounts,
   resetAllTimingBaselines,
   resetAllTimingStats,
+  resetTimingMeasureBudget,
   setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
 
@@ -131,20 +134,36 @@ async function withPhase<T>(
   }
 }
 
+interface CapturedMeasure {
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
 /**
- * Write every emitted timing measure out as JSON, then drop them.
+ * Take this file's emitted measures off the timeline.
  *
- * The entries are the only copy and nothing else clears them, so draining here
- * is what keeps a long run from growing its buffer without bound.
+ * Draining per file rather than reading once at the end is what makes a
+ * multi-file run work at all: each file starts by clearing the timeline, so
+ * anything not collected before the next one begins is gone.
  */
-async function writeTimingMeasures(path: string): Promise<void> {
-  const entries = performance.getEntriesByType("measure").map((entry) => ({
-    name: entry.name,
-    startTime: entry.startTime,
-    duration: entry.duration,
-  }));
-  await Deno.writeTextFile(path, JSON.stringify(entries));
+function drainTimingMeasures(into: CapturedMeasure[]): void {
+  for (const entry of performance.getEntriesByType("measure")) {
+    if (!entry.name.startsWith(TIMING_MEASURE_PREFIX)) continue;
+    into.push({
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    });
+  }
   clearTimingMeasures();
+}
+
+async function writeTimingMeasures(
+  path: string,
+  entries: readonly CapturedMeasure[],
+): Promise<void> {
+  await Deno.writeTextFile(path, JSON.stringify(entries));
   console.log(
     `\nWrote ${entries.length} timing measure(s) to ${path}. Aggregate with:` +
       `\n  deno run --allow-read ` +
@@ -992,6 +1011,9 @@ export async function runTestPattern(
   const startTime = performance.now();
   performance.clearMarks();
   performance.clearMeasures();
+  // The line above drops this run's emitted measures along with everything
+  // else, so the budget they were charged against has to come back too.
+  resetTimingMeasureBudget();
   resetAllLoggerCounts();
   resetAllTimingStats();
 
@@ -1985,6 +2007,13 @@ export async function runTests(
   results: TestRunResult[];
 }> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  // Emission is process-global, so a run that turns it on owes the process its
+  // previous state back — otherwise a later `runTests()` without the option
+  // keeps emitting into a buffer nobody will read.
+  const priorMeasureState = getTimingMeasuresState().enabled;
+  const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
+    ? []
+    : undefined;
   if (options.timingMeasuresOut) setTimingMeasuresEnabled(true);
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
@@ -2028,6 +2057,10 @@ export async function runTests(
       console.log(`  ✗ ${formatError(error)}`);
       recordFile(testPath, true, performance.now() - fileStarted);
       continue;
+    } finally {
+      // Before the next file clears the timeline, and on the failure path too:
+      // a file that wedged is often the one whose measures are wanted.
+      if (captured) drainTimingMeasures(captured);
     }
     allResults.push(result);
 
@@ -2171,9 +2204,10 @@ export async function runTests(
   }
   recordsFragment?.close();
 
-  if (options.timingMeasuresOut) {
-    await writeTimingMeasures(options.timingMeasuresOut);
+  if (options.timingMeasuresOut && captured) {
+    await writeTimingMeasures(options.timingMeasuresOut, captured);
   }
+  setTimingMeasuresEnabled(priorMeasureState);
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);

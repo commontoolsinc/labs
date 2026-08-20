@@ -15,7 +15,9 @@ import {
 import {
   clearTimingMeasures,
   getTimingMeasuresState,
+  resetTimingMeasureBudget,
   setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -1956,7 +1958,11 @@ describe("logger", () => {
       logger.timeStart("phase", "one");
       logger.timeEnd("phase", "one");
 
-      expect(measureNames().some((n) => n.startsWith("phase/one#"))).toBe(
+      expect(
+        measureNames().some((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/one#`)
+        ),
+      ).toBe(
         false,
       );
       // The statistics are recorded either way — that is the whole point of
@@ -1970,7 +1976,9 @@ describe("logger", () => {
       logger.timeStart("phase", "two");
       logger.timeEnd("phase", "two");
 
-      const mine = measureNames().filter((n) => n.startsWith("phase/two#"));
+      const mine = measureNames().filter((n) =>
+        n.startsWith(`${TIMING_MEASURE_PREFIX}phase/two#`)
+      );
       expect(mine.length).toBe(1);
     });
 
@@ -1982,7 +1990,9 @@ describe("logger", () => {
         logger.timeEnd("phase", "three");
       }
 
-      const mine = measureNames().filter((n) => n.startsWith("phase/three#"));
+      const mine = measureNames().filter((n) =>
+        n.startsWith(`${TIMING_MEASURE_PREFIX}phase/three#`)
+      );
       expect(mine.length).toBe(2);
       expect(new Set(mine).size).toBe(2);
     });
@@ -1995,7 +2005,7 @@ describe("logger", () => {
       logger.timeEnd("phase", "four");
 
       const entry = performance.getEntriesByType("measure").find((e) =>
-        e.name.startsWith("phase/four#")
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/four#`)
       );
       expect(entry).toBeDefined();
       expect(entry!.startTime).toBeGreaterThanOrEqual(started);
@@ -2011,7 +2021,11 @@ describe("logger", () => {
         logger.timeEnd("phase", "five");
       }
 
-      expect(measureNames().filter((n) => n.startsWith("phase/five#")).length)
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/five#`)
+        ).length,
+      )
         .toBe(3);
       expect(getTimingMeasuresState().emitted).toBe(3);
       // Every span still reached the statistics; only emission stopped.
@@ -2027,9 +2041,55 @@ describe("logger", () => {
 
       clearTimingMeasures();
       expect(getTimingMeasuresState().emitted).toBe(0);
-      expect(measureNames().some((n) => n.startsWith("phase/six#"))).toBe(
+      expect(
+        measureNames().some((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/six#`)
+        ),
+      ).toBe(
         false,
       );
+    });
+
+    it("leaves measures it did not emit alone", () => {
+      setTimingMeasuresEnabled(true);
+      performance.measure("someone-elses-measure", {
+        start: performance.now(),
+        end: performance.now(),
+      });
+      const logger = getLogger("measure-foreign");
+      logger.timeStart("phase", "seven");
+      logger.timeEnd("phase", "seven");
+
+      clearTimingMeasures();
+      // The host's timeline is shared; draining this feature must not take a
+      // page's own instrumentation with it.
+      expect(measureNames()).toContain("someone-elses-measure");
+      expect(
+        measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+      ).toBe(false);
+      performance.clearMeasures("someone-elses-measure");
+    });
+
+    it("emits again after something else clears the timeline", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-external-clear");
+      for (let i = 0; i < 5; i++) {
+        logger.timeStart("phase", "eight");
+        logger.timeEnd("phase", "eight");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(2);
+
+      // A test runner resetting between files does exactly this, and the
+      // budget has to follow or later files emit nothing at all.
+      performance.clearMeasures();
+      resetTimingMeasureBudget();
+      logger.timeStart("phase", "eight");
+      logger.timeEnd("phase", "eight");
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/eight#`)
+        ).length,
+      ).toBe(1);
     });
   });
 });

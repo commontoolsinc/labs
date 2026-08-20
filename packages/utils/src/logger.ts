@@ -503,6 +503,16 @@ let _timingMeasureCapReported = false;
 /** A monotonic suffix, so two spans on one key stay distinguishable. */
 let _timingMeasureSequence = 0;
 
+/**
+ * What marks a measure as this logger's.
+ *
+ * The performance timeline is shared with whatever else the host instruments,
+ * so emitted entries carry a prefix for two reasons: clearing can then remove
+ * only what this emitted rather than destroying a page's own measures, and a
+ * human scanning a timeline can tell logger spans from application ones.
+ */
+export const TIMING_MEASURE_PREFIX = "cf:";
+
 function getEnvMeasuresEnabled(): boolean {
   if (isDeno()) {
     try {
@@ -577,8 +587,27 @@ export function getTimingMeasuresState(): {
  */
 export function clearTimingMeasures(): void {
   try {
-    performance.clearMeasures();
+    // By name rather than wholesale: the timeline belongs to the host, and a
+    // page or worker that instruments itself would otherwise lose its own
+    // measures to a call that claims only to drain this feature's.
+    for (const entry of performance.getEntriesByType("measure")) {
+      if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
+        performance.clearMeasures(entry.name);
+      }
+    }
   } catch { /* not every host implements it */ }
+  resetTimingMeasureBudget();
+}
+
+/**
+ * Give the budget back without touching the timeline.
+ *
+ * Something other than this feature may clear the timeline — a test runner
+ * resetting between files does — and the count of what has been emitted has to
+ * follow, or emission stays stopped against a cap it no longer owes anything
+ * to.
+ */
+export function resetTimingMeasureBudget(): void {
   _timingMeasuresEmitted = 0;
   _timingMeasureCapReported = false;
 }
@@ -1193,10 +1222,13 @@ export class Logger {
       return;
     }
     try {
-      performance.measure(`${path}#${++_timingMeasureSequence}`, {
-        start: startTime,
-        end: startTime + elapsed,
-      });
+      performance.measure(
+        `${TIMING_MEASURE_PREFIX}${path}#${++_timingMeasureSequence}`,
+        {
+          start: startTime,
+          end: startTime + elapsed,
+        },
+      );
       _timingMeasuresEmitted++;
     } catch {
       // Instrumentation never fails the thing it is measuring.

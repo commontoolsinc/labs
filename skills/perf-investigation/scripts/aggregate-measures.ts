@@ -46,10 +46,14 @@ interface Bucket {
   children: Map<string, Bucket>;
 }
 
-/** `cell/get/user-data#4127` names the span `cell/get/user-data`. */
+/** `cf:cell/get/user-data#4127` names the span `cell/get/user-data`. */
+const MEASURE_PREFIX = "cf:";
 function keyOf(name: string): string {
-  const hash = name.lastIndexOf("#");
-  return hash === -1 ? name : name.slice(0, hash);
+  const body = name.startsWith(MEASURE_PREFIX)
+    ? name.slice(MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  return hash === -1 ? body : body.slice(0, hash);
 }
 
 function emptyBucket(path: string, depth: number): Bucket {
