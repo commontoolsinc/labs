@@ -27,6 +27,7 @@ type ParticipantState = {
   recorder: FrameRecorder;
   started: boolean;
   stopped: boolean;
+  removeAfterNavigationHook: () => void;
 };
 
 const slug = (value: string): string =>
@@ -77,7 +78,9 @@ export class PresentationSession {
     const participantDir = join(this.#config.outputDir, "participants", id);
     await page.setViewportSize(this.#config.viewport);
     installPresentationInteractions(page, this.#config, { label, color });
-    page.setAfterNavigationHook(() => this.start(page));
+    const removeAfterNavigationHook = page.addAfterNavigationHook(
+      () => this.start(page),
+    );
     const recorder = new FrameRecorder(page, {
       participantDir,
       id,
@@ -94,6 +97,7 @@ export class PresentationSession {
       started: false,
       stopped: false,
       manifest: recorder.manifest(),
+      removeAfterNavigationHook,
     };
     this.#participants.push(state);
     this.#byPage.set(page, state);
@@ -129,7 +133,7 @@ export class PresentationSession {
       this.#manifest.status = "capture-failed";
       this.#manifest.error ??= state.manifest.error;
     } finally {
-      page.setAfterNavigationHook(undefined);
+      state.removeAfterNavigationHook();
       presentationInteractions(page)?.uninstall();
       this.#syncManifest();
     }

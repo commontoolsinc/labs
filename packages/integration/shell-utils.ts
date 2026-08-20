@@ -36,6 +36,19 @@ import { waitFor, waitForCondition } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 
+/**
+ * Blocks until the shell behind `page` is there to be driven.
+ *
+ * `globalThis.app` is the handle every driver reaches the shell through, and
+ * the shell publishes it as the last step of its bootstrap module, after
+ * opening the browser key store. That module body runs on past the document's
+ * `load` event, so a navigation that resolves on `load` hands back a page whose
+ * shell is still booting, for the couple of milliseconds the key store takes.
+ */
+export async function waitForShellReady(page: Page): Promise<void> {
+  await waitForCondition(page, () => globalThis.app !== undefined);
+}
+
 // Pass the key over the boundary. When the state is returned,
 // the key is serialized to Uint8Arrays, and then turned into regular arrays,
 // which can then by transferred across the astral boundary.
@@ -78,7 +91,7 @@ async function loginToPublishedApp(
   transferrableId: TransferrableInsecureCryptoKeyPair,
   nextDID: string,
 ): Promise<void> {
-  await waitForCondition(page, () => globalThis.app !== undefined);
+  await waitForShellReady(page);
 
   await page!.evaluate<
     Promise<void>,
@@ -437,6 +450,9 @@ export class ShellIntegration {
   }
 
   #attachPage(page: Page) {
+    // Every navigation this page performs returns only once the shell behind
+    // it can be driven, so a test that reloads reaches a booted shell.
+    page.addAfterNavigationHook(() => waitForShellReady(page));
     page.addEventListener("console", (e: ConsoleEvent) => {
       if (e.detail.type === "error") {
         this.#errorLogs.push(e.detail.text);
