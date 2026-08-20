@@ -86,7 +86,7 @@ export async function setSlugLink(
   const indexCell = slugIndexCell(pieces);
   await indexCell.sync();
 
-  await pieces.runtime.editWithRetry((tx) => {
+  const { error } = await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
@@ -107,6 +107,12 @@ export async function setSlugLink(
     // never see a name without its slug or a slug without its name.
     indexCell.withTx(tx).key(validSlug).set(true);
   });
+  if (error) {
+    throw new Error(
+      `Setting slug "${validSlug}" failed with ${error.name}: ${error.message}`,
+      { cause: error },
+    );
+  }
 
   await pieces.runtime.idle();
   await pieces.synced();
