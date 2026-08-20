@@ -2138,5 +2138,42 @@ describe("logger", () => {
         expect(parseTimingMeasureCap(bad)).toBeUndefined();
       }
     });
+
+    it("keeps working when the host's performance API refuses", () => {
+      // Instrumentation must never fail the thing it is measuring, and not
+      // every host implements every part of the timeline. Both seams swallow
+      // it: the span is still recorded into the statistics, and draining still
+      // returns the budget.
+      const realMeasure = performance.measure;
+      const realClear = performance.clearMeasures;
+      const boom = () => {
+        throw new Error("no performance API here");
+      };
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-hostile-host");
+      try {
+        // A real entry first, so the drain below has something to reach for —
+        // otherwise it finds nothing to clear and never calls the seam under
+        // test.
+        logger.timeStart("phase", "ten");
+        logger.timeEnd("phase", "ten");
+        expect(getTimingMeasuresState().emitted).toBe(1);
+
+        (performance as { clearMeasures: unknown }).clearMeasures = boom;
+        expect(() => clearTimingMeasures()).not.toThrow();
+        expect(getTimingMeasuresState().emitted).toBe(0);
+
+        (performance as { measure: unknown }).measure = boom;
+        expect(() => {
+          logger.timeStart("phase", "eleven");
+          logger.timeEnd("phase", "eleven");
+        }).not.toThrow();
+        // The statistics still hold it: only the timeline entry was lost.
+        expect(logger.getTimeStats("phase", "eleven")?.count).toBe(1);
+      } finally {
+        performance.measure = realMeasure;
+        performance.clearMeasures = realClear;
+      }
+    });
   });
 });

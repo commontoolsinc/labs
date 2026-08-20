@@ -587,8 +587,10 @@ export function setTimingMeasuresEnabled(
   if (options?.cap !== undefined) {
     _timingMeasureCap = options.cap;
   } else {
-    const envCap = getEnvMeasureCap();
-    if (envCap !== undefined) _timingMeasureCap = envCap;
+    // Coalesced rather than branched: an environment that names no usable cap
+    // leaves the current one alone, and there is nothing here that only some
+    // runs execute.
+    _timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
   }
   // The budget deliberately survives this. It counts entries that are still on
   // the timeline, so returning it without draining them would let a caller
