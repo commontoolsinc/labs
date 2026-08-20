@@ -5,8 +5,6 @@ import * as IPC from "./ipc.ts";
 import { getIframeContextHandler, Receipt } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 
-let FRAME_IDS = 0;
-
 type CommonIframeLoadState = "" | "loading" | "loaded";
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
@@ -46,9 +44,8 @@ export class CommonIframeSandboxElement extends LitElement {
     }
   `;
 
-  // Static id for this component for its lifetime.
-  private frameId: number = ++FRAME_IDS;
   #src = "";
+  private guestPort: MessagePort | undefined;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
   private subscriptions: Map<string, Receipt> = new Map();
@@ -61,14 +58,45 @@ export class CommonIframeSandboxElement extends LitElement {
       throw new Error(`common-iframe-sandbox: Already initialized.`);
     }
     this.initialized = true;
-    this.toGuest({
-      id: this.frameId,
-      type: IPC.IPCHostMessageType.Init,
-    });
     if (this.src) {
       this.loadInnerDoc();
     }
   }
+
+  // Gives the newly loaded guest one end of a fresh channel, and takes the
+  // other. Each document is its own realm, so each gets its own port and the
+  // previous one is closed rather than left to be answered by a realm that no
+  // longer exists.
+  private openGuestPort() {
+    this.guestPort?.close();
+    this.guestPort = undefined;
+
+    // The guest is the inner frame, which is a frame of the outer one. A
+    // cross-origin frame is unreachable for anything but this: indexed access
+    // and `postMessage`, which is what a transfer rides.
+    const guestWindow = this.iframeRef.value?.contentWindow?.frames[0];
+    if (!guestWindow) {
+      console.error("common-iframe-sandbox: No guest frame to open a port to.");
+      return;
+    }
+
+    const channel = new MessageChannel();
+    this.guestPort = channel.port1;
+    channel.port1.onmessage = this.onGuestPortMessage;
+    channel.port1.start();
+    guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
+  }
+
+  private onGuestPortMessage = (event: MessageEvent) => {
+    if (!IPC.isGuestMessage(event.data)) {
+      console.error(
+        "common-iframe-sandbox: Malformed message from guest.",
+        event.data,
+      );
+      return;
+    }
+    this.onGuestMessage(event.data);
+  };
 
   // Message from the outer frame.
   private onMessage = (event: MessageEvent) => {
@@ -88,26 +116,62 @@ export class CommonIframeSandboxElement extends LitElement {
 
     switch (outerMessage.type) {
       case IPC.IPCGuestMessageType.Load: {
+        this.openGuestPort();
         this.loadState = "loaded";
         this.dispatchEvent(new CustomEvent("load"));
         return;
       }
-      case IPC.IPCGuestMessageType.Error: {
+      case IPC.IPCGuestMessageType.OuterError: {
         console.error(
-          `common-iframe-sandbox: Error from outer frame: ${outerMessage.data}`,
+          "common-iframe-sandbox: Error from outer frame:",
+          outerMessage.data,
         );
+        return;
+      }
+      case IPC.IPCGuestMessageType.GuestError: {
+        // The guest raised this outside its port, and the outer frame passed
+        // it along without reading it, so this is the first look anything has
+        // had at it.
+        const raised = outerMessage.data;
+        if (
+          IPC.isGuestMessage(raised) &&
+          raised.type === IPC.GuestMessageType.Error
+        ) {
+          this.dispatchGuestError(raised.data);
+        } else {
+          console.error(
+            "common-iframe-sandbox: Unreadable alarm from guest.",
+            raised,
+          );
+        }
         return;
       }
       case IPC.IPCGuestMessageType.Ready: {
         this.onOuterReady();
         return;
       }
-      case IPC.IPCGuestMessageType.Passthrough: {
-        this.onGuestMessage(outerMessage.data);
-        return;
-      }
     }
   };
+
+  private dispatchGuestError(
+    { description, source, lineno, colno, stacktrace }: IPC.GuestError,
+  ) {
+    this.dispatchEvent(
+      new CustomEvent("common-iframe-error", {
+        detail: {
+          description,
+          message: description,
+          source,
+          lineno,
+          colno,
+          stacktrace,
+          stack: stacktrace,
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
 
   // Message from the inner frame.
   private onGuestMessage(message: IPC.GuestMessage) {
@@ -124,38 +188,14 @@ export class CommonIframeSandboxElement extends LitElement {
 
     switch (message.type) {
       case IPC.GuestMessageType.Error: {
-        const { description, source, lineno, colno, stacktrace } = message.data;
-        const error = {
-          description,
-          message: description,
-          source,
-          lineno,
-          colno,
-          stacktrace,
-          stack: stacktrace,
-        };
-
-        this.dispatchEvent(
-          new CustomEvent("common-iframe-error", {
-            detail: error,
-            bubbles: true,
-            composed: true,
-          }),
-        );
+        this.dispatchGuestError(message.data);
         return;
       }
 
       case IPC.GuestMessageType.Read: {
         const key = message.data;
         const value = IframeHandler.read(this, this.context, key);
-        this.toGuest({
-          id: this.frameId,
-          type: IPC.IPCHostMessageType.Passthrough,
-          data: {
-            type: IPC.HostMessageType.Update,
-            data: [key, value],
-          },
-        });
+        this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
         return;
       }
 
@@ -226,27 +266,22 @@ export class CommonIframeSandboxElement extends LitElement {
       this.subscriptions.clear();
     }
 
-    this.toGuest({
-      id: this.frameId,
+    this.toOuterFrame({
       type: IPC.IPCHostMessageType.LoadDocument,
       data: this.src,
     });
   }
 
   private notifySubscribers(key: string, value: unknown) {
-    const response: IPC.IPCHostMessage = {
-      id: this.frameId,
-      type: IPC.IPCHostMessageType.Passthrough,
-      data: {
-        type: IPC.HostMessageType.Update,
-        data: [key, value],
-      },
-    };
-    this.toGuest(response);
+    this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
   }
 
-  private toGuest(event: IPC.IPCHostMessage) {
-    this.iframeRef.value?.contentWindow?.postMessage(event, "*");
+  private toOuterFrame(message: IPC.IPCHostMessage) {
+    this.iframeRef.value?.contentWindow?.postMessage(message, "*");
+  }
+
+  private toGuest(message: IPC.HostMessage) {
+    this.guestPort?.postMessage(message);
   }
 
   private boundOnMessage = this.onMessage.bind(this);

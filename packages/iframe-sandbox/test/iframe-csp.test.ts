@@ -1,3 +1,5 @@
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   assert,
   assertDeepEquals,
@@ -82,13 +84,11 @@ window.onerror = function (message, source, lineno, colno, error) {
 //
 // `barrierControls` below holds the conversions to it honest.
 const BARRIER = `
-<script>
-addEventListener('load', () => {
-  window.parent.postMessage({
-    type: 'write',
-    data: ['barrier', true],
-  }, '*');
-});
+<script type="module">
+import { connectGuestContext } from "/guest.js";
+
+const guest = connectGuestContext(() => {});
+addEventListener('load', () => guest.write('barrier', true));
 </script>
 `;
 
@@ -408,11 +408,27 @@ function defineTest(
     // The event bubbles and is composed, so the document sees it. Listening
     // there rather than on the element catches an error the host dispatches
     // before `render` hands the element back.
-    const errors: unknown[] = [];
+    const errors: string[] = [];
+    let noticeError: (() => void) | undefined;
     const onError = (event: Event) => {
       errors.push((event as CustomEvent).detail.description);
+      noticeError?.();
     };
     document.addEventListener("common-iframe-error", onError);
+
+    // Resolves with the first error's description, from the collection this
+    // listener has been filling since before the frame existed. A case whose
+    // error is dispatched during the load `render` waits on has already been
+    // recorded by the time this is called.
+    const firstErrorDescription = (): Promise<string> => {
+      if (errors.length > 0) {
+        return Promise.resolve(errors[0]);
+      }
+      const deferred = defer<string>();
+      noticeError = () => deferred.resolve(errors[0]);
+      return deferred.promise;
+    };
+
     try {
       const context = new ContextShim();
       const body = `
@@ -430,14 +446,11 @@ function defineTest(
         );
         assertDeepEquals(errors, []);
       } else {
-        const event = await waitForEvent(
-          iframe,
-          "common-iframe-error",
-        ) as CustomEvent;
+        const description = await firstErrorDescription();
         if (typeof expected === "string") {
-          assertEquals(event.detail.description, expected);
+          assertEquals(description, expected);
         } else {
-          assert(expected.test(event.detail.description));
+          assert(expected.test(description));
         }
       }
     } finally {
