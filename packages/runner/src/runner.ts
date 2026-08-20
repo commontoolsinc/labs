@@ -1441,10 +1441,13 @@ export class Runner {
               : new Error(error.message);
           }
           if (
-            error.name === "StorageTransactionAborted" &&
+            (error.name === "CfcCommitRefusalError" ||
+              error.name === "StorageTransactionAborted") &&
             error.message.startsWith("CFC enforcement rejected commit")
           ) {
-            throw new Error(error.message, { cause: error.reason });
+            throw new Error(error.message, {
+              cause: (error as { reason?: unknown }).reason,
+            });
           }
         }
 

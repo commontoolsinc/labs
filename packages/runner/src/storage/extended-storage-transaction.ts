@@ -2393,15 +2393,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.enforcementMode !== "observe" &&
         this.#cfcState.prepare.status !== "prepared"
       ) {
-        const detail = this.#cfcState.prepare.status === "invalidated"
-          ? `: ${this.#cfcState.prepare.reasons[0]}`
-          : "";
+        const reasons = this.#cfcState.prepare.status === "invalidated"
+          ? this.#cfcState.prepare.reasons
+          : [];
+        const detail = reasons.length > 0 ? `: ${reasons[0]}` : "";
         return this.rejectCommitBeforeStorage({
           error: {
-            name: "StorageTransactionAborted",
+            name: "CfcCommitRefusalError",
             message:
               `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
-            reason: new Error("cfc-relevant-transaction-not-prepared"),
+            reasons,
           },
         });
       }

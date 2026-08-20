@@ -33,6 +33,7 @@ import {
 import type {
   ActionStats,
   NonIdempotentReport,
+  NonSettlingDeferredAction,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
@@ -1987,23 +1988,45 @@ export class Scheduler {
     }
   }
 
-  /** Labels the first few deferred actions, readable name first when known. */
-  private describeDeferredActions(actions: readonly Action[]): string[] {
+  /**
+   * Describes the first few deferred actions: readable label, plus the piece
+   * the action serves when its scheduler observation identity says — the
+   * attribution a builtin's `raw:` label cannot provide. The identity's
+   * pieceId is `<scope>:<id>` of the piece's result cell; the marker carries
+   * the id alone, the form consumers compare against.
+   */
+  private describeDeferredActions(
+    actions: readonly Action[],
+  ): NonSettlingDeferredAction[] {
     const maxListedActions = 10;
     return actions.slice(0, maxListedActions).map((action) => {
       const actionId = this.getActionId(action);
       const info = getSchedulerActionTelemetryInfo(action);
       const readableName = info?.moduleName ?? info?.patternName;
-      return readableName && readableName !== actionId
+      const label = readableName && readableName !== actionId
         ? `${readableName} (${actionId})`
         : actionId;
+      const identity = (action as Partial<TelemetryAnnotations>)
+        .schedulerObservationIdentity;
+      if (identity === undefined) return { label };
+      const separator = identity.pieceId.indexOf(":");
+      return {
+        label,
+        pieceId: separator >= 0
+          ? identity.pieceId.slice(separator + 1)
+          : identity.pieceId,
+        ...(identity.ownerSpace !== undefined
+          ? { space: identity.ownerSpace }
+          : {}),
+      };
     });
   }
 
   private warnNonSettlingActions(
     actions: readonly Action[],
-    labels: readonly string[],
+    deferredActions: readonly NonSettlingDeferredAction[],
   ): void {
+    const labels = deferredActions.map((entry) => entry.label);
     const omittedCount = actions.length - labels.length;
     const actionList = labels.length > 0
       ? labels.join(", ") +
