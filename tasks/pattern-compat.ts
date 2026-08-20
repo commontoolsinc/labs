@@ -35,6 +35,15 @@ import {
 import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 import {
+  deriveRequiredPatternKeys,
+  recordExistsUnder,
+  reportBreakRegistryFindings,
+} from "./pattern-break-registry-guards.ts";
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
+} from "../packages/piece/src/system-pattern-url.ts";
+import {
   acceptedBreakKey,
   checkPattern,
   type Finding,
@@ -63,6 +72,31 @@ async function main() {
   } catch (error) {
     console.error(formatError(error));
     Deno.exit(2);
+  }
+
+  // The required set comes from the runtime's own constants, through the same
+  // derivation `pattern-vintage` uses, so the two gates cannot come to
+  // different answers about what auto-updates.
+  const required = deriveRequiredPatternKeys(
+    [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE],
+  );
+  if ("error" in required) {
+    console.error(required.error);
+    Deno.exit(1);
+  }
+  // The registries are judged before any pattern is: an entry that names a
+  // required pattern or points at no decision record is wrong regardless of
+  // what this shard's findings turn out to be.
+  const registryReport = reportBreakRegistryFindings({
+    requiredPatternKeys: required.keys,
+    recordExists: recordExistsUnder(),
+    // Tier 1 owns the unevaluable list, so Tier 1 is where it is judged: a
+    // required pattern listed there escapes this gate altogether.
+    unevaluable: UNEVALUABLE_PATTERNS,
+  });
+  if (registryReport !== undefined) {
+    console.error(registryReport);
+    Deno.exit(1);
   }
 
   const allFiles = await collectPatternFiles();

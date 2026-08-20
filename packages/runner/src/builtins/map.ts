@@ -26,6 +26,7 @@ import {
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
@@ -339,50 +340,22 @@ export function map(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      const pending = result.sync();
       // The container's durable value is still streaming in; its arrival
-      // re-triggers this reconcile (the probe read above is journaled). If the
-      // container was never persisted — so nothing will ever stream in to
-      // re-trigger — seed [] once the pull settles, so the coordinator is not
-      // left wedged waiting for a value that will never arrive.
-      const seedIfStillAbsent = () =>
-        !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
-          if (!active) return;
-          // Out-of-band recovery write (serving-loop.md §3d, RULED
-          // 2026-08-05): this tx is minted OUTSIDE any scheduler run, so
-          // nothing else stamps it, and on a SERVING runtime the wave
-          // REFUSES an unstamped seal — the seed then never lands and
-          // the demanded derivation stays wedged while editWithRetry
-          // burns on the refusal (the lunch-gate throw storm). The seed
-          // is legitimate server work but not a derivation or handler
-          // run: declare it with the sanctioned internal bookkeeping
-          // kind, like the pattern-swap setup write. Stamped inside the
-          // callback so every retry's fresh tx carries it. A no-op on
-          // the OFF arm; under client speculation bookkeeping commits
-          // exactly as unstamped txs do (overlay routes only
-          // derivation-kind runs).
-          runtime.stampServerRun(seedTx, {
-            actionId: `map/resume-seed/${parentCell.sourceURI}`,
-            kind: "bookkeeping",
-          });
-          const container = result!.withTx(seedTx);
-          if (container.getRaw() === undefined) container.set([]);
-        }).then(({ error }) => {
-          if (error) {
-            logger.warn(
-              "resume-seed",
-              "seeding the empty result container failed",
-              { error },
-            );
-          }
-        });
-      // Run on either outcome (resolve or reject); the seed recovers from the
-      // pull's own rejection, so log it rather than dropping it silently.
-      pending.finally(seedIfStillAbsent).catch((error) => {
-        logger.warn("resume-pull", "resume container pull rejected", {
-          error,
-        });
-      });
+      // re-triggers this reconcile (the probe read above is journaled). A
+      // container that was never persisted has nothing to stream in, so the
+      // seed below ends the wait once the pull settles. The id names the
+      // seed's out-of-band recovery write; the helper stamps it with the
+      // sanctioned bookkeeping kind (serving-loop.md §3d) so a SERVING
+      // runtime's wave accepts the seal. Same shape in filter.ts/flatmap.ts.
+      const container = result;
+      seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => active && result === container,
+        container.sync(),
+        logger,
+        `map/resume-seed/${parentCell.sourceURI}`,
+      );
       return;
     }
     // Resume preservation: on a resume reconcile the input list itself may not be

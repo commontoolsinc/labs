@@ -49,6 +49,12 @@ export interface AcceptedContractBreak {
   paths: readonly string[];
   /** Why the break was accepted. */
   reason: string;
+  /**
+   * Repo-relative path of the decision record under `docs/history/` — the
+   * deliberation behind this entry's declaration. Its existence is enforced
+   * when either gate runs (`pattern-break-registry-guards.ts`).
+   */
+  record: string;
 }
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
@@ -106,6 +112,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "fields go. `index` is the full-board survey surface, and its rows ARE " +
       "the topics: a row's own address is the topic's, so the copied `fid` " +
       "field goes with the copy.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
   {
     // The same removal seen from a topic: its own `crossrefs` row, and the
@@ -141,5 +148,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "`unknown` — the one field that lets the verb read a payload and tell a " +
       "reference from a bare string, which it now rejects rather than storing " +
       "inert.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
 ];

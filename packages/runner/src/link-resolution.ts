@@ -1,5 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   linkPayloadAtProbe,
@@ -23,7 +25,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress, CfcDereferenceTrace } from "./cfc/types.ts";
 import { canFollowScopedLink, narrowerScopeCap } from "./scope.ts";
-import type { SchemaScope } from "./builder/types.ts";
+import type { JSONSchema, SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -38,6 +40,17 @@ export type ResolvedFullLink = NormalizedFullLink & {
   // type-script only marker, doesn't appear in actual data
   [resolvedFullLinkBrand]: true;
 };
+
+/**
+ * Whether `schema` constrains nothing at all: absent, JSON Schema `true`, or
+ * an empty object. Such a schema selects every value, so it says nothing the
+ * schema a resolution is already carrying does not, and a hop onto a link
+ * bearing one keeps carrying rather than adopting it. `false` is not one of
+ * these — it selects nothing, which is information.
+ */
+const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
+  schema === undefined || schema === true ||
+  (isObjectOrArray(schema) && !isNontrivialSchema(schema));
 
 const MAX_PATH_RESOLUTION_LENGTH = 100;
 
@@ -286,6 +299,12 @@ const resolutionMemoVariant = (
  * Links can point to another (document, path) pair, and may appear either at
  * leaf nodes or in the middle of a document. This resolver transparently
  * follows such links and detects cycles.
+ *
+ * The resolved link carries a schema. A followed link's own stored schema
+ * describes the value at its target, where the caller's describes the value at
+ * the source, so the stored one replaces what the resolution carried in. One
+ * that constrains nothing describes nothing, so the caller's schema keeps
+ * traveling instead; see `schemaConstrainsNothing()`.
  *
  * A cycle is detected if the exact (document, path) pair is visited more than
  * once. This detects cycles like:
@@ -579,7 +598,9 @@ export function resolveLinkTracingDereferences(
         // so the shift reduces to target-path length minus our own.
         nextHop.link.path.length - link.path.length,
       );
-      if (nextLink.schema === undefined && link.schema !== undefined) {
+      if (
+        schemaConstrainsNothing(nextLink.schema) && link.schema !== undefined
+      ) {
         link = {
           ...nextLink,
           schema: link.schema,
