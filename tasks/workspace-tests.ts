@@ -215,15 +215,31 @@ const FLAG_FORWARDING_RUNNERS = new Set([
   "./tasks",
 ]);
 
-/** The `test` task a member's manifest defines, when it defines one. */
+/** A directory, given as a path or a URL, as a URL that resolves against. */
+function directoryUrl(root: string | URL): URL {
+  if (root instanceof URL) return root;
+  const resolved = path.resolve(root);
+  return path.toFileUrl(
+    resolved.endsWith(path.SEPARATOR)
+      ? resolved
+      : `${resolved}${path.SEPARATOR}`,
+  );
+}
+
+/**
+ * The `test` task a member's manifest defines, when it defines one.
+ * `deno.json` is read first because Deno resolves it first, so a member
+ * carrying both is read the way its own tooling reads it.
+ */
 export async function memberTestTask(
   member: string,
-  root: string | URL = "./",
+  root: string | URL = Deno.cwd(),
 ): Promise<string | undefined> {
-  for (const manifest of ["deno.jsonc", "deno.json"]) {
+  const rootUrl = directoryUrl(root);
+  for (const manifest of ["deno.json", "deno.jsonc"]) {
     let text: string;
     try {
-      text = await Deno.readTextFile(new URL(`${member}/${manifest}`, root));
+      text = await Deno.readTextFile(new URL(`${member}/${manifest}`, rootUrl));
     } catch {
       continue;
     }
@@ -254,7 +270,7 @@ export function acceptsJUnitPath(
 /** The members whose leaves take the flag, read from their manifests. */
 export async function junitCapableMembers(
   members: readonly string[],
-  root: string | URL = "./",
+  root: string | URL = Deno.cwd(),
 ): Promise<Set<string>> {
   const capable = new Set<string>();
   for (const member of members) {

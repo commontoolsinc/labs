@@ -4,6 +4,7 @@ import {
   assertTaskTestsIncluded,
   initializeDb,
   junitCapableMembers,
+  memberTestTask,
   parseDisabledPackageList,
   readWorkspaceMembers,
   runTests,
@@ -496,6 +497,45 @@ Deno.test("acceptsJUnitPath takes a runner only when it is known to forward", ()
   assertEquals(acceptsJUnitPath("./tasks", runner), true);
   assertEquals(acceptsJUnitPath("./packages/cli", runner), false);
   assertEquals(acceptsJUnitPath("./packages/dashboard", runner), false);
+});
+
+Deno.test("memberTestTask accepts a directory path as well as a URL", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-root-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    // A plain path is the natural thing to pass, and reading through it
+    // must find the manifest rather than quietly reporting none.
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+    assertEquals(
+      await memberTestTask("./packages/probe", new URL(`file://${dir}/`)),
+      "deno test",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("memberTestTask reads deno.json ahead of deno.jsonc", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-order-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    // Deno resolves deno.json first, so that is the task that governs.
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.json`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "echo 'No tests defined.'" } }),
+    );
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("the workspace's capable members are read from their manifests", async () => {
