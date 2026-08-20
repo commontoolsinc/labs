@@ -146,49 +146,45 @@ export class FileSystemProgramResolver implements ProgramResolver {
   }
 
   resolveSource(specifier: string): Promise<Source | undefined> {
-    if (!specifier || specifier[0] !== "/") {
-      return Promise.resolve(undefined);
-    }
-    const absPath = normalize(
-      join(
-        this.fsRoot,
-        specifier.substring(1, specifier.length).replaceAll("/", SEPARATOR),
-      ),
-    );
-    if (isOutsideRoot(relative(this.fsRoot, absPath))) {
-      throw new Error(
-        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
-      );
-    }
-    const realPath = this.#realPath(absPath);
-    if (isOutsideRoot(relative(this.realFsRoot, realPath))) {
-      throw new Error(
-        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
-      );
-    }
+    const realPath = this.#groundedRealPath(specifier, "Import");
+    if (realPath === undefined) return Promise.resolve(undefined);
     return Promise.resolve({
       name: specifier,
       contents: this.#readFile(realPath),
     });
   }
 
-  resolveDataFile(name: string): Promise<Source | undefined> {
+  // Async so that a refusal — an escaping name, bytes that are not text —
+  // arrives as a rejection. A method that returns a promise and also throws
+  // where it is called cannot be handled one way.
+  async resolveDataFile(name: string): Promise<Source | undefined> {
     requireDeno("FileSystemProgramResolver");
-    const path = this.#groundedPath(name);
-    if (path === undefined) return Promise.resolve(undefined);
-    let bytes: Uint8Array;
+    let realPath: string | undefined;
     try {
-      bytes = Deno.readFileSync(path);
+      realPath = this.#groundedRealPath(name, "Data file");
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        return Promise.resolve(undefined);
-      }
+      // A name with nothing behind it is the caller's to report, against the
+      // module that read it. An escape is refused here, as it is for a module.
+      if (error instanceof Deno.errors.NotFound) return undefined;
       throw error;
     }
-    return Promise.resolve({ name, contents: decodeDataFile(bytes, name) });
+    if (realPath === undefined) return undefined;
+    return {
+      name,
+      contents: decodeDataFile(await Deno.readFile(realPath), name),
+    };
   }
 
-  #groundedPath(specifier: string): string | undefined {
+  /**
+   * The real path a grounded specifier names, or undefined when the specifier
+   * is not grounded against the root at all.
+   *
+   * A path that leaves the root is refused twice over: once as written, and
+   * again after symbolic links are followed, so a link inside the root cannot
+   * name a file outside it. `kind` names the thing being resolved in that
+   * refusal, since a module and a data file both arrive here.
+   */
+  #groundedRealPath(specifier: string, kind: string): string | undefined {
     if (!specifier || specifier[0] !== "/") return undefined;
     const absPath = normalize(
       join(
@@ -198,10 +194,16 @@ export class FileSystemProgramResolver implements ProgramResolver {
     );
     if (isOutsideRoot(relative(this.fsRoot, absPath))) {
       throw new Error(
-        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
       );
     }
-    return absPath;
+    const realPath = this.#realPath(absPath);
+    if (isOutsideRoot(relative(this.realFsRoot, realPath))) {
+      throw new Error(
+        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+      );
+    }
+    return realPath;
   }
 
   #realPath(path: string): string {

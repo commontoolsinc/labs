@@ -1565,33 +1565,32 @@ export async function savePiecePattern(
     await Deno.mkdir(dirname(outFilePath), { recursive: true });
     await Deno.writeTextFile(outFilePath, contents);
   }
-  reportUndeclaredDataFiles(program);
+  const undeclared = undeclaredDataFiles(program);
+  if (undeclared.length > 0) {
+    console.log(
+      `\nThis pattern carries ${undeclared.length} data file(s) its source ` +
+        `does not name.\nPass them on the next setsrc, or they are dropped ` +
+        `from that revision:\n` +
+        undeclared.map((name) => `  --datafile .${name}`).join("\n"),
+    );
+  }
 }
 
 /**
- * Report the data files a later `setsrc` would have to be told about.
+ * The data files a later `setsrc` would have to be told about.
  *
  * A file the recovered source reads by name is declared, so rebuilding the
  * package from this directory attaches it again on its own. A file the source
  * cannot name — one read by a computed path, or one that ships with a pattern
  * that does not read it — is on disk with nothing recording that it was data,
- * and would come back as an ordinary file nobody stores. Naming the flags here
- * is what keeps the round trip whole.
+ * and would come back as an ordinary file nobody stores. Naming those is what
+ * keeps the round trip whole.
  */
-function reportUndeclaredDataFiles(program: RuntimeProgram): void {
+export function undeclaredDataFiles(program: RuntimeProgram): string[] {
   const declared = new Set(
     program.files.flatMap((file) => collectDataFileNames(file, TARGET)),
   );
-  const undeclared = (program.dataFiles ?? []).filter((name) =>
-    !declared.has(name)
-  );
-  if (undeclared.length === 0) return;
-  console.log(
-    `\nThis pattern carries ${undeclared.length} data file(s) its source ` +
-      `does not name.\nPass them on the next setsrc, or they are dropped ` +
-      `from that revision:\n` +
-      undeclared.map((name) => `  --datafile .${name}`).join("\n"),
-  );
+  return (program.dataFiles ?? []).filter((name) => !declared.has(name));
 }
 
 export async function applyPieceInput(config: PieceConfig, input: object) {

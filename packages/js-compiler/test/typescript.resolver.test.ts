@@ -154,6 +154,20 @@ describe("typescript/resolver.ts", () => {
       )).toEqual(["/data/cities.json"]);
     });
 
+    it("ignores an inline type-only specifier, which binds no value", () => {
+      expect(names(
+        'import { pattern, type dataFile } from "commonfabric";\n' +
+          "export default pattern(() => ({}));\n",
+      )).toEqual([]);
+    });
+
+    it("ignores an import that binds no names at all", () => {
+      expect(names(
+        'import "commonfabric";\n' +
+          'export default () => dataFile("/data/cities.json");\n',
+      )).toEqual([]);
+    });
+
     it("finds nothing in a module that never imports it", () => {
       expect(names("export const x = 1;\n")).toEqual([]);
     });
