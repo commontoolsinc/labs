@@ -6,41 +6,34 @@ back into the dialog. The behaviors below are facts about the builtin
 (`packages/runner/src/builtins/llm-dialog.ts`) that pattern authors cannot
 derive from its type signature.
 
-## Built-in tools are always injected
+## Built-in tools are injected unless you turn them off
 
-`llmDialog` builds its tool catalog from the tools the pattern passes **plus a
-set of built-in management tools**: `read`, `invoke`, `schema`, `pin`,
-`unpin`, `presentResult`, and `updateArgument`. Models frequently prefer these
-generic tools over a pattern's custom ones, which shows up as the model
-"ignoring" the tools you wrote.
+`llmDialog` builds its tool catalog from the tools the pattern passes **plus
+six built-in management tools**: `read`, `invoke`, `schema`, `pin`, `unpin`,
+and `updateArgument`. Models frequently prefer these generic tools over a
+pattern's custom ones, which shows up as the model "ignoring" the tools you
+wrote.
 
-To run with only your own tools, pass `builtinTools: false` in the inputs.
-Anything other than `false` — including omitting it — leaves the built-ins on.
+Pass `builtinTools: false` to suppress those six. Anything other than `false`
+— including omitting it — leaves them on.
 
-## An external tool with a built-in's name wins
+`presentResult` is **not** one of the six and the flag does not control it: it
+is added after the catalog is built, whenever a `resultSchema` is present. So
+`builtinTools: false` alone does not guarantee that only pattern-supplied
+tools are advertised.
 
-Tool calls resolve against the external (pattern-supplied) catalog first and
-fall back to the built-in names second. Supplying a tool named like a built-in
-therefore overrides the built-in — deliberately. The corollary: an accidental
-name collision silently replaces built-in behavior rather than erroring.
+## A tool named like a built-in is a collision, not a clean override
 
-## Passing an options object literal can fail type-checking
+The two halves disagree, so do not rely on this. Catalog construction records
+the external tool's model-facing definition first and then writes the built-in
+definition over it at the same name, while dispatch resolves the external
+catalog first. On a collision the model therefore sees the **built-in's**
+schema and description, but a call is executed against the **external** tool —
+which can invoke it with the wrong input shape.
 
-The transformer's typing for builtin inputs (`Opaque<T>`) triggers excess-
-property checking on inline object literals. A call that passes an option the
-checker cannot reconcile — `builtinTools: false` is the recurring example —
-fails when written inline and compiles when the object is extracted to a
-variable first:
-
-```typescript
-// Shown for illustration only.
-// ❌ May fail excess-property checking inline
-llmDialog({ messages, tools, builtinTools: false });
-
-// ✅ Extract the inputs object to a variable
-const dialogInputs = { messages, tools, builtinTools: false };
-llmDialog(dialogInputs);
-```
+Treat a name collision with a built-in as a bug to avoid: name pattern tools
+distinctly from `read`, `invoke`, `schema`, `pin`, `unpin`, and
+`updateArgument`.
 
 ## A tool that writes caller state must be a handler
 

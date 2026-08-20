@@ -33,14 +33,20 @@ mutation style. Don't.
    missing `$` binding — see [reactivity-issues](../reactivity-issues.md))
    instead of changing how the handler writes.
 
-## A Different Staleness: the Worker Bundle Survives a Service-Worker Clear
+## A Different Staleness: the Page Still Runs Old Code
 
 If what looks stale is *code* rather than data — a redeployed pattern or a
-rebuilt runtime that the page seems not to pick up — note that the pattern
-runtime's web worker outlives a service-worker clear plus reload. Clearing the
-service worker refreshes what the page fetches, not the worker already
-running. To load a fresh worker bundle, close the browser session entirely
-(`agent-browser close`) and reopen; a reload is not enough.
+rebuilt runtime that the page seems not to pick up — the reload itself is not
+the suspect. The pattern runtime's worker is a dedicated `Worker` owned by the
+document, so a reload tears it down and the next load builds a new one from
+whatever the page is served.
+
+That "whatever the page is served" is where staleness lives: a service worker
+still controlling the page, or an HTTP cache entry, can hand the new document
+the old bundle. Clearing the service worker registration and hard-reloading is
+the targeted fix. Restarting the browser session (`agent-browser close`, then
+reopen) also clears it, by starting from a fresh profile and controller state
+rather than by killing a surviving worker.
 
 ## See Also
 

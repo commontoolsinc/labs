@@ -1,9 +1,10 @@
 # Stale Source Closure: Reserved Helper Symbol on Load
 
 **Error:** `Source cannot contain reserved helper symbol '__cfHelpers'.` while
-loading an already-deployed piece — most often a space's default pattern, with
-an accompanying `Could not initialize default pattern` warning. Related faces
-of the same condition: `source closure recompiled to <X>, expected <Y>`, or a
+loading an already-deployed piece — most often a space's default pattern, in
+which case the CLI wraps it as
+`Could not initialize the space's default pattern: …`. Related faces of the
+same condition: `source closure recompiled to <X>, expected <Y>`, or a
 source-closure verification failure.
 
 **Cause:** The piece's stored source closure holds transformer-processed
