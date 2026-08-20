@@ -768,15 +768,14 @@ run_piece_call_retry() {
   # --- 6. An absent payload the verb cannot run without is refused, id intact.
   # The mirror of scenario 5 for the second-most-likely agent mistake:
   # forgetting the payload rather than misspelling a field. `recordNote`'s
-  # event schema sits behind a top-level local $ref, so the CLI derives no
-  # flags from it and an explicit `invoke` with no payload parses to an
-  # absent (undefined) event. Before the absent-payload gate (verb contract
-  # D5) this dispatched: the handler ran with no event, recorded
-  # "(no event)", and the receipt spent the invocation id — the corrected
-  # same-id retry then reported deduplicated with the correction never
-  # applied. Now the gate normalizes absence to {} against the resolved
-  # object schema and refuses because `required` survives relaxation, so
-  # nothing dispatches and the same id still buys the corrected call.
+  # event schema sits behind a top-level local $ref, and the CLI reads the
+  # definition's fields through it, so an explicit `invoke` carrying none is
+  # refused by name — `note` is required and nothing supplies it.
+  # What this scenario pins is not which door refuses but what the refusal
+  # costs: nothing dispatches, so the invocation id is never spent and the
+  # corrected same-id retry below still applies. A dispatch here would run
+  # the handler with no event and burn the id, leaving the retry
+  # deduplicated against an outcome the caller never wanted.
   RETRY_PIECE_6=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_6=$(new_invocation_id)
   set +e
@@ -788,8 +787,8 @@ run_piece_call_retry() {
     error "An absent payload against a required-fields verb should fail, got: $ABSENT_OUT"
   fi
   case "$ABSENT_OUT" in
-    *'Invalid input for "recordNote"'*'no payload was supplied'*) ;;
-    *) error "An absent-payload refusal should say no payload was supplied, got: $ABSENT_OUT" ;;
+    *'Missing required flag --note'*) ;;
+    *) error "An absent-payload refusal should name the missing field, got: $ABSENT_OUT" ;;
   esac
   assert_message_count "$RETRY_PIECE_6" 0 \
     "A refused absent-payload call must not record a message"

@@ -759,12 +759,18 @@ export function declaredEventFields(
   // caller a `--value` whose string could not satisfy the object it named.
   //
   // `resolveCfcSchemaRefs` rather than `localRefTarget`, because a `$ref` may
-  // carry SIBLINGS and 2020-12 says they apply: `{$ref, properties: {...}}`
-  // declares the target's fields and its own. Jumping to the target returns
-  // the definition alone and drops them, which would put this door back in
-  // disagreement with the validator — reading fewer fields than a payload is
-  // judged against, rather than none. Merging is also what carries the two
-  // `$defs` scopes, which a ref site and its target do not share.
+  // carry SIBLINGS and the runtime applies them. It flattens the ref site OVER
+  // its target keyword by keyword, so a `properties` written beside the ref
+  // replaces the target's rather than joining it — which is the resolution the
+  // validator performs, and therefore the field list a payload is judged
+  // against. Jumping to the target instead returns the definition alone: for
+  // `{$ref → {query}, properties: {limit}}` that names `--query`, which the
+  // validator refuses as an undeclared field, and hides `--limit`, which it
+  // accepts. Which fields exist is the validator's answer to give; this door
+  // reports it rather than deriving a second one.
+  //
+  // Merging is also what reconciles the two `$defs` scopes, which a ref site
+  // and its target do not share.
   //
   // It answers `undefined` where a ref dangles or cycles, which fails toward
   // "not a fields position" — the scalar vocabulary, exactly where an

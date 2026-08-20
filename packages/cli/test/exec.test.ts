@@ -863,6 +863,52 @@ describe("parseExecArgs edge cases", () => {
     expect(help).not.toContain("Input type:\n  void");
   });
 
+  it("keeps a defaulted field optional on the help page too", () => {
+    // The page and the parser must answer required-ness the same way. Labelling
+    // `--mode` required while the last line says a bare invoke works, and while
+    // the parser accepts one, is the page contradicting itself and the caller.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/RefreshEvent",
+      asCell: ["stream"],
+      $defs: {
+        RefreshEvent: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      },
+    } as unknown as JSONSchema);
+
+    const help = renderExecHelp("/tmp/x.handler", spec);
+    expect(help).toContain('--mode <string>  Optional. Default: "fast".');
+    // Usage names what a call must carry, and this one need carry nothing.
+    expect(help).not.toContain("[invoke] --mode");
+    expect(help).toContain("Invoke alone will call the handler");
+    expect(parseExecArgs(spec, []).input).toEqual({});
+  });
+
+  it("leaves a verb schema-less when its $ref lands on no fields", () => {
+    // Only where the ref reaches a fields position is there anything to derive.
+    // A ref to a scalar, to a position naming nothing, or one that does not
+    // resolve leaves the verb invoking bare, as it did before it was followed.
+    const streamOf = (defs: Record<string, unknown>) => ({
+      $ref: "#/$defs/Target",
+      asCell: ["stream"],
+      $defs: defs,
+    } as unknown as JSONSchema);
+
+    for (
+      const inputSchema of [
+        streamOf({ Target: {} }),
+        streamOf({ Target: { type: "string" } }),
+        streamOf({}),
+      ]
+    ) {
+      expect(parseExecArgs(makeSpec("handler", inputSchema), []).input)
+        .toBeUndefined();
+    }
+  });
+
   it("counts a defaulted field as supplied rather than owed", () => {
     // The payload gate relaxes `required` for a field carrying a default, so
     // demanding it at the flag door would refuse a call the runtime fills in.

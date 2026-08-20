@@ -107,10 +107,6 @@ function objectProperties(
   return declaredEventFields(schema)?.properties ?? null;
 }
 
-function requiredFlags(schema: JSONSchema): Set<string> {
-  return declaredEventFields(schema)?.required ?? new Set();
-}
-
 function schemaType(schema: JSONSchema): string | undefined {
   return isSchemaObject(schema) ? schema.type as string | undefined : undefined;
 }
@@ -636,8 +632,15 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
   // root looks bare either way, so reading it alone called such a verb
   // schema-less and rendered its page as `void`: no input type, no flags, and
   // no sign that the fields the parser accepts exist at all.
+  //
+  // What settles it is where the ref LANDS, not that one is written. A ref
+  // reaching a fields position describes an event and the verb is not
+  // schema-less; a ref to a scalar, to a position naming nothing, or one that
+  // does not resolve describes no fields to derive, and the classification
+  // stays where it was — a verb that invoked bare goes on doing so rather
+  // than being refused for an event nothing could name.
   if (typeof schema.$ref === "string") {
-    return false;
+    return objectProperties(schema) === null;
   }
   return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
 }
@@ -861,7 +864,7 @@ function specificFlagLines(schema: JSONSchema): string[] {
     ];
   }
 
-  const required = requiredFlags(schema);
+  const required = requiredEventFieldsOwed(schema);
   const descriptors = Object.entries(properties).map(
     ([key, propertySchema]) => {
       const flagName = flagNameForKey(key);
@@ -1055,7 +1058,7 @@ function usageLine(
     return `${prefix} ${verb} --value ${valuePlaceholder(spec.inputSchema)}`;
   }
 
-  const required = requiredFlags(spec.inputSchema);
+  const required = requiredEventFieldsOwed(spec.inputSchema);
   const requiredUsages = Object.entries(properties)
     .filter(([key]) => required.has(key))
     .map(([key, propertySchema]) =>
