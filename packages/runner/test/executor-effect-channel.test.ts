@@ -1243,6 +1243,28 @@ describe("Phase 4 client-effect channel", () => {
     result.key("go").send({});
     const sessionId = clientManager.id;
     let target: string | undefined;
+    // PRE-EXISTING FLAKE FIX (found by W3.1's full-suite gate;
+    // attribution: red 1/10 at the PRE-S1 base e386a01be under load,
+    // same timeout — not an S1 behavior change): this poll raced the
+    // DESIGNED enact→ack→retire pipeline. The client channel enacts
+    // the pushed intent immediately, acks (an authored commit), and
+    // the next wave RETIRES the entry — the entry's engine lifetime is
+    // one push round trip plus one wave (~30–80 ms), so a 20-ms poll
+    // sometimes never observes the live entry. The intent's engine
+    // OBSERVABLE is therefore either the live entry, or the RETIRED
+    // state: the effects doc's session instance EXISTS (only the
+    // server's intent write creates it) with the entry list already
+    // pruned and the enactment recorded. The optimistic (speculative)
+    // enactment alone must NOT satisfy the wait — it fires before any
+    // server work — hence the instance-head witness, and the target's
+    // served-create is separately awaited below either way.
+    const effectsInstanceExists = () =>
+      (engine.database.prepare(
+        `SELECT COUNT(*) AS n FROM head WHERE id = :id AND scope_key = :key`,
+      ).get({
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+        key: resolvePrincipalSessionKey(aliceSigner.did(), sessionId),
+      }) as { n: number }).n > 0;
     await waitUntil(
       () => {
         const intents = intentsOf(engine, aliceSigner.did(), sessionId);
@@ -1250,9 +1272,14 @@ describe("Phase 4 client-effect channel", () => {
           target = String(intents[0].args?.target?.id ?? "");
           return true;
         }
+        if (navigations.length >= 1 && effectsInstanceExists()) {
+          target = navigations[0];
+          return true;
+        }
         return false;
       },
-      "the served intent (with its target) to land",
+      "the served intent to land (live entry, or retired with the " +
+        "instance minted and the enactment recorded)",
     );
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -1270,15 +1297,23 @@ describe("Phase 4 client-effect channel", () => {
     expect(clientRuntime.speculationOverlay?.eventEchoSealCount).toBe(2);
 
     // Non-vacuity: the target doc EXISTS, created server-side
-    // (derived-class revisions present)…
-    const targetRevisions = engine.database.prepare(
-      `SELECT c.class AS class, COUNT(*) AS n
+    // (derived-class revisions present)… — awaited, not point-read:
+    // when the wait above observed the RETIRED state via the enacted
+    // navigation, the optimistic enactment can precede the serving
+    // side's own create by a beat (same flake-fix as above).
+    const readTargetRevisions = () =>
+      engine.database.prepare(
+        `SELECT c.class AS class, COUNT(*) AS n
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
        WHERE r.id = :id GROUP BY c.class`,
-    ).all({ id: target }) as Array<{ class: string; n: number }>;
-    expect(
-      targetRevisions.filter((row) => row.class === "derived").length,
-    ).toBeGreaterThan(0);
+      ).all({ id: target }) as Array<{ class: string; n: number }>;
+    await waitUntil(
+      () =>
+        readTargetRevisions().filter((row) => row.class === "derived")
+          .length > 0,
+      "the target's served (derived-class) create to land",
+    );
+    const targetRevisions = readTargetRevisions();
     // …and NOT ONE of its revisions rode an authored-class commit: the
     // client's navigate-deferred start diverted (protocol.md §1's
     // "client commits nothing but intent" posture) — the belt over the
