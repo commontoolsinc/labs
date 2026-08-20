@@ -39,13 +39,17 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
+  armSenderEcho,
   clickCfButton,
   clickTrustedActionAndWaitForText,
   collectBrowserLoadSummary,
   fillCfInput,
+  installSenderEchoProbe,
   logBrowserLoadSummary,
+  logSenderEchoSummary,
   logStepTimings,
   readCfInputValue,
+  readSenderEchoReport,
   StepTimer,
   waitForDisabled,
   waitForRuntimeIdle,
@@ -368,11 +372,21 @@ describe(
         // protocol (fresh store, load recorded, medians + quartiles). Off
         // by default: the ordinary gate run is unchanged.
         if (CHAT_SERIES > 0) {
+          // The sender-echo probe (W4): beside each post's arrival at the
+          // OTHER browser, time the sender's OWN speculative render of it
+          // (click → the text in the sender's transcript), page-clock only.
+          await installSenderEchoProbe(pages[0]);
           const perPost: number[] = [];
           for (let i = 0; i < CHAT_SERIES; i++) {
             const text = `series ${i} ${userNames[0]}`;
             await fillCfInput(pages[0], "#trusted-message-draft", text);
             await waitForDisabled(pages[0], "#trusted-send-button", false);
+            await armSenderEcho(
+              pages[0],
+              `series ${i}`,
+              "#trusted-conversation-preview",
+              text,
+            );
             const t0 = performance.now();
             await clickCfButton(pages[0], "#trusted-send-button");
             await waitForText(pages[1], "#trusted-conversation-preview", text);
@@ -404,6 +418,11 @@ describe(
             `[chat-series] per-post ms: ${
               perPost.map((v) => v.toFixed(0)).join(" ")
             }`,
+          );
+          logSenderEchoSummary(
+            "chat-series sender",
+            CHAT_SERIES_ARM,
+            await readSenderEchoReport(pages[0]),
           );
         }
 

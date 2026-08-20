@@ -20,6 +20,7 @@
  */
 
 import { env, type Page, waitFor } from "@commonfabric/integration";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -30,12 +31,16 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
+  armSenderEcho,
   clickCfButton,
   clickCfButtonsConcurrently,
   collectBrowserLoadSummary,
   fillCfInput,
+  installSenderEchoProbe,
   logBrowserLoadSummary,
+  logSenderEchoSummary,
   logStepTimings,
+  readSenderEchoReport,
   StepTimer,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
@@ -44,6 +49,17 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
+// The opt-in sender-echo instrument (W4): time each authored click to the
+// SENDER's own speculative render, beside the cross-browser waits. Off by
+// default: the ordinary gate run is unchanged.
+const SENDER_ECHO = Deno.env.get("CF_SENDER_ECHO") === "1";
+const SENDER_ECHO_ARM = (() => {
+  const raw = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+  const on = raw === undefined
+    ? SERVER_EXECUTION_DEFAULT_ENABLED
+    : raw === "true";
+  return on ? "ON" : "OFF";
+})();
 
 const HOST = "Alice";
 const GUEST = "Bob";
@@ -211,6 +227,12 @@ describe("lunch poll: two users vote on a shared option", () => {
             waitForRuntimeIdle(guestPage),
           ]),
       );
+      if (SENDER_ECHO) {
+        await Promise.all([
+          installSenderEchoProbe(hostPage),
+          installSenderEchoProbe(guestPage),
+        ]);
+      }
 
       // Host joins first -> becomes host/admin. Fresh identities carry no
       // shared profile, so the join card opens on the profile create/pick
@@ -222,6 +244,12 @@ describe("lunch poll: two users vote on a shared option", () => {
         "host name filled",
         () => fillCfInput(hostPage, "#lp-join-name", HOST),
       );
+      // Sender echo: the host's own speculative roster render — the joined
+      // count ticking to "1 joined" on the CLICKING browser (the count, not
+      // the name: the presentation overlay already renders "Alice").
+      if (SENDER_ECHO) {
+        await armSenderEcho(hostPage, "host-join", "body", "1 joined");
+      }
       await clickCfButton(hostPage, "#lp-join-button");
       await timer.run(
         "host joined (name in roster)",
@@ -241,6 +269,12 @@ describe("lunch poll: two users vote on a shared option", () => {
       // landing, so its wall time is at least a server round trip.
       await clickCfButton(guestPage, "#lp-guest-button");
       await fillCfInput(guestPage, "#lp-join-name", GUEST);
+      // Sender echo: the guest's own speculative join — "2 joined" on the
+      // CLICKING browser (W0 measured this echo at 7–16 ms; the confirmed
+      // exact-chip roster below is the landing, this is the speculation).
+      if (SENDER_ECHO) {
+        await armSenderEcho(guestPage, "guest-join", "body", "2 joined");
+      }
       await clickCfButton(guestPage, "#lp-join-button");
       const confirmedRoster = async (page: Page): Promise<boolean> => {
         const chips = await participantChipNames(page);
@@ -266,6 +300,12 @@ describe("lunch poll: two users vote on a shared option", () => {
 
       // Host adds the shared option.
       await fillCfInput(hostPage, "#lp-add-option-input", OPTION_A);
+      // Sender echo: the host's own speculative render of the added option
+      // (the typed draft lives in an input VALUE, so the pre-check cannot
+      // trip on it; the option card's TEXT is the render).
+      if (SENDER_ECHO) {
+        await armSenderEcho(hostPage, "host-add-option-A", "body", OPTION_A);
+      }
       await clickCfButton(hostPage, "#lp-add-option-button");
       await timer.run(
         "option A propagates to both",
@@ -331,6 +371,14 @@ describe("lunch poll: two users vote on a shared option", () => {
         waitForSettledText(hostPage, "body", OPTION_B),
         waitForSettledText(guestPage, "body", OPTION_B),
       ]);
+      // Sender echo: the guest's own speculative tally after its red vote —
+      // the board's count ticking to "3 votes" on the CLICKING browser. (The
+      // concurrent green pair above carries NO echo sample: two senders share
+      // one expectation text, so a render there is not attributable to the
+      // observing page's own click.)
+      if (SENDER_ECHO) {
+        await armSenderEcho(guestPage, "guest-veto-B", "body", "3 votes");
+      }
       await clickCfButton(guestPage, voteButton(OPTION_B, "red"));
       // The third vote (red on option B) lands on both browsers — the count
       // reaches "3 votes" — while option A's tally is unchanged at "2 love it".
@@ -347,6 +395,19 @@ describe("lunch poll: two users vote on a shared option", () => {
       );
     } finally {
       logStepTimings("lunch-poll vote", timer);
+      if (SENDER_ECHO) {
+        for (
+          const [page, label] of [
+            [hostPage, "lunch host"],
+            [guestPage, "lunch guest"],
+          ] as const
+        ) {
+          const report = await readSenderEchoReport(page).catch(() =>
+            undefined
+          );
+          if (report) logSenderEchoSummary(label, SENDER_ECHO_ARM, report);
+        }
+      }
       for (
         const [page, label] of [[hostPage, HOST], [guestPage, GUEST]] as const
       ) {
