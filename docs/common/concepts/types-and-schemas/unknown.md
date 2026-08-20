@@ -86,6 +86,13 @@ schema. The loss shows up wherever the tree is read as a value instead — a
 pattern that reads another pattern's screen, a pattern test that inspects one —
 and what those get is an empty object.
 
+The compiler refuses that declaration, at the root of a result and only there:
+`pattern-result:opaque-reserved-key`, one diagnostic naming every reserved key
+the result leaves opaque. It covers every key the framework puts on a result —
+`[TYPE]`, `[NAME]`, `[UI]`, `[TILE_UI]`, `[CHIP_UI]`, `[FS]`, `[TESTS]` — for
+the same reason: a key whose spelling the framework fixed holds a value this
+pattern produced.
+
 The consuming side of the same field goes the other way, and the two
 declarations are independent of each other. A pattern that takes another
 pattern's result as an argument and only renders it declares that position
