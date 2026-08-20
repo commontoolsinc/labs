@@ -81,12 +81,19 @@ export function buildForest(entries: readonly MeasureEntry[]): Span[] {
     // still the answer, and stopping at the twin would report a root instead.
     for (let k = open.length - 1; k >= 0; k--) {
       const candidate = spans[open[k]];
-      if (candidate.end < span.end) break;
       if (candidate.start === span.start && candidate.end === span.end) {
-        continue;
+        // A twin says nothing about which called which, but it does share
+        // whatever contains it — so its answer is this span's answer, and
+        // taking it keeps a long run of identical intervals from rescanning
+        // the whole run for each one.
+        span.parent = candidate.parent;
+        break;
       }
-      span.parent = open[k];
-      break;
+      if (candidate.end >= span.end) {
+        span.parent = open[k];
+        break;
+      }
+      // Overlapping without containing: an outer span may still contain this.
     }
     open.push(i);
   }

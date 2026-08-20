@@ -531,14 +531,27 @@ function getEnvMeasuresEnabled(): boolean {
  * sample — and a reader who does not know that will attribute a whole run from
  * its setup. Raising it has to be reachable from wherever emission is.
  */
+/**
+ * What `CF_TIMING_MEASURES_CAP` means, separated from reading it.
+ *
+ * Separate because the decision is the part with a rule in it — anything that
+ * does not name a positive integer is ignored rather than applied, since a cap
+ * of zero or `NaN` would disable the guard from outside the process. Reading an
+ * environment variable needs a permission this package's test suite
+ * deliberately does not grant, and the rule should be testable without one.
+ */
+export function parseTimingMeasureCap(
+  raw: string | undefined,
+): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function getEnvMeasureCap(): number | undefined {
   if (isDeno()) {
     try {
-      const raw = Deno.env.get("CF_TIMING_MEASURES_CAP");
-      if (raw) {
-        const parsed = Number(raw);
-        if (Number.isInteger(parsed) && parsed > 0) return parsed;
-      }
+      return parseTimingMeasureCap(Deno.env.get("CF_TIMING_MEASURES_CAP"));
     } catch { /* ignore permission errors */ }
   }
   return undefined;

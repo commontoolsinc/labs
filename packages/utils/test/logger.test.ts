@@ -15,6 +15,7 @@ import {
 import {
   clearTimingMeasures,
   getTimingMeasuresState,
+  parseTimingMeasureCap,
   resetTimingMeasureBudget,
   setTimingMeasuresEnabled,
   TIMING_MEASURE_PREFIX,
@@ -2126,6 +2127,16 @@ describe("logger", () => {
           n.startsWith(`${TIMING_MEASURE_PREFIX}phase/nine#`)
         ).length,
       ).toBe(2);
+    });
+
+    it("reads a cap out of an environment value, or refuses it", () => {
+      expect(parseTimingMeasureCap("4242")).toBe(4242);
+      // Anything that does not name a positive integer is ignored rather than
+      // applied: a zero or NaN cap would disable the guard from outside the
+      // process, which is the one thing the environment must not be able to do.
+      for (const bad of ["", undefined, "0", "-1", "1.5", "not-a-number"]) {
+        expect(parseTimingMeasureCap(bad)).toBeUndefined();
+      }
     });
   });
 });

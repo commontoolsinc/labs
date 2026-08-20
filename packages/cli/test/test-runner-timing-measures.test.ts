@@ -72,12 +72,17 @@ describe(
       expect(compiles(await runCapturing([FIXTURE, FIXTURE]))).toBe(2);
     });
 
-    it("leaves emission as it found it", async () => {
-      const before = getTimingMeasuresState().enabled;
+    it("leaves emission and the cap as it found them", async () => {
+      const before = getTimingMeasuresState();
       await runCapturing(FIXTURE);
+      const after = getTimingMeasuresState();
       // Emission is process-global; a run that borrows it owes it back, or
       // every later run in the process pays for a capture nobody reads.
-      expect(getTimingMeasuresState().enabled).toBe(before);
+      expect(after.enabled).toBe(before.enabled);
+      // The ceiling is borrowed too — the run raises it because it drains per
+      // file. Left behind, it removes the retention bound for the whole
+      // process, which is the one thing the cap exists to provide.
+      expect(after.cap).toBe(before.cap);
     });
 
     it("emits nothing when the option is absent", async () => {
