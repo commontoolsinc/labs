@@ -359,19 +359,29 @@ critical-path item above; report
 **DONE 2026-08-19 (W3.1)**: S1 RULED (item (10)) and LANDED
 (protocol.md §4's quiescence-advance amendment, the space-server
 seat, red-first pins, OW43 CLOSED, the lunch skip LIFTED on 6/6 —
-items (9)/(10)); S2 stays the flagged follow-on (ruling (8)), S3 not
-taken; (5) W4 — the
+items (9)/(10)); S2 stays the flagged follow-on, acknowledged and
+deferred (ruling (8)), S3 not
+taken; (4′) the owner-rulings batch — **DONE 2026-08-19, NO OPEN
+OWNER QUESTIONS** (α1b RATIFIED; flag 9 accepted, OW44 minted; OW31's
+read side RULED; shape (b) acknowledged/deferred — the rulings block
+below carries each); NEXT: the combined W2.1+S1 INDEPENDENT REVIEW —
+RUNNING (read-only, concurrent) → a fixer pass if its findings need
+one → the #6043 ledger update → (5) W4 — the
 settle-time re-benchmark (server settle measured explicitly,
-`waitForSettled`) — **not before the chosen seat lands and the lunch
-gate is 3/3 with honest swatch walls**; (6) the CONFIDENCE VERDICT to
+`waitForSettled`) — its gate (**not before the chosen seat lands and
+the lunch gate is 3/3 with honest swatch walls**) MET 2026-08-19, per
+the coordination block above; (6) the CONFIDENCE VERDICT to
 the owner; (7) on "no fundamental issue", land the train on main with
 the flag OFF (siblings stacked; default lanes OFF) and continue on
 main; (8) the flip's ordered gates as listed under Phase 7 (skip list
 EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
 benchmark against the ruled bar), then the flip PR and the soak.
 
-**Owner rulings (state at 2026-08-18; recommendations on file for the
-open ones):** (1) served-handler DOUBLE-DISPATCH parity gap — **RULED
+**Owner rulings (state at 2026-08-19 — NO OPEN OWNER QUESTIONS: the
+2026-08-19 batch ruled OW31's read side (3), flag 9 (6) and α1b (7),
+and acknowledged/deferred shape (b) (8); #5968's Flags (5) stay on
+file awaiting ratify-or-direct, flagged, not blocking):** (1)
+served-handler DOUBLE-DISPATCH parity gap — **RULED
 2026-08-18** ("agreed with your recommendations"): events.md §4 states
 the one-entry-one-COMPLETED-delivery invariant (not completed in its
 appending wave → the drain alone dispatches; a derivation-kind
@@ -387,8 +397,17 @@ provisioning, `.inSpace()` genesis); genesis is signed by the new
 space's own keys and names the acting user OWNER in that same first
 commit, the service neither owner nor actor; the served writes are
 already delegated, the one defect is the served genesis ACL's content
-(service-owned), the READ side needs a read-only service class
-(recommended, not yet ruled) — work order recorded (register OW31; the
+(service-owned); the READ side — **RULED 2026-08-19** (owner,
+verbatim: "ACL can be read with service identity, but all other reads
+must be user identity (but if this is wrong, flag for follow-up work
+after merging to main if criteria succeeds)"): the service identity
+may read the ACL ONLY, every other served read runs under the USER's
+identity (mirroring the ruled write posture), SUPERSEDING the scoping
+report's read-only-service-class recommendation (the report stays as
+history); if the posture proves wrong during the build, FLAG for
+follow-up after merging to main (the merge happening if the
+confidence criteria succeed) rather than blocking — work order
+recorded (register OW31; the
 scoping report beside the closeout), implementation OWED POST-MERGE,
 BEFORE the flip PR, OFF-invisible; (4) the design-pass set —
 **ACCEPTED 2026-08-18** (owner, verbatim: "ruling set is accepted";
@@ -417,20 +436,36 @@ demoted to fallback (§2F);
 live completion failure, `plainProgramOf`), UNRULED;
 (6) W0's flag 9 — the closure follows `source` wiring (a schema-narrowed
 root watch demands the piece's whole internal graph; over-demand, never
-under-demand — the W0 report's §2(b)/§4) — RECOMMENDATION on file
-(accept the tracker's set as the demand set; filtering by id class a
-future row), awaiting the owner;
-(7) **α1b ratification — PENDING (2026-08-19)**: events.md §4's DATED
-clarification (the late-seal refusal of in-flight LT1 copies) now
-includes the AMENDED sibling paragraph from W3's fix pass — the
+under-demand — the W0 report's §2(b)/§4) — **RULED 2026-08-19,
+accepted as recommended** (owner, verbatim: "log as a future
+improvement, together with not running the pattern on the client
+immediately"): the tracker's closure IS the demand set; register row
+OW44 minted as the future improvement, pairing the closure filtering
+(id class / value reach) WITH lazy client instantiation (the client
+not running the pattern immediately), trigger the optimize-on-main
+phase;
+(7) **α1b ratification — RULED 2026-08-19, RATIFIED as it stands**
+(owner, verbatim: "ack", to the ratify-as-written recommendation):
+events.md §4's DATED clarification (the late-seal refusal of
+in-flight LT1 copies) —
+including the AMENDED sibling paragraph from W3's fix pass: the
 lt1-only survivor marking (B1/F1), the orphan refusal's same-eventId
 sibling fold, the late-seal SPLIT residual stated, and the
-named-not-built tightening — recommendation: ratify as written;
-(8) **cascade-id shape (b) — PENDING, owner-level** (deterministic
+named-not-built tightening — now carries the RULED marker with the
+attributed quote, the DATED/AMENDED trail kept as history; the
+split-residual tightening stays a named follow-on;
+(8) **cascade-id shape (b) — ACKNOWLEDGED / DEFERRED 2026-08-19**
+(owner, verbatim: "ack, revisit later if flicker is too high or as
+optimization. honestly, flicker might be acceptable for a first
+launch since status quo flickers as well."): deterministic
 cascade ids derived from the parent event id + the send ordinal, both
-sides; the register's FUTURE row beside W2.1): structurally removes
-the swatch-stall exposure — the echo stands until the child's own
-landing; its register trigger now names the stall;
+sides; the register's FUTURE row beside W2.1 — structurally removes
+the swatch-stall exposure (the echo stands until the child's own
+landing), and its register trigger names the stall; the trigger is
+CONFIRMED, and the owner's recorded judgment — first-launch flicker
+likely acceptable, the status quo flickers as well — SOFTENS W4's
+flicker bar (W4 still reports the flicker counters, so "too high" is
+a number);
 (9) **the lunch ON-skip lift — DONE 2026-08-19 (W3.1)**: the stall
 resolved (S1 landed, ruling (10) below) and the gate ran 6/6 GREEN
 fresh-store on the ON-built binary at tip `f250feacd` (sha256
@@ -457,8 +492,10 @@ coordinator's recommendation of S1:
 > S1 sounds good.
 
 — owner (Berni), 2026-08-19. That rules seat S1 and nothing else
-(α1b's ratification (7) and flag 9 (6) stay pending; shape (b) (8)
-stays the flagged follow-on; S3 not taken). Landed by W3.1: the
+(α1b's ratification (7) and flag 9 (6), then still pending, are RULED
+by the later 2026-08-19 batch above; shape (b) (8) stays the flagged
+follow-on, acknowledged/deferred the same day; S3 not taken). Landed
+by W3.1: the
 protocol.md §4 quiescence-advance amendment (the governing sentence
 quoted there, the extension dated and attributed), the serving-loop
 §3 drain-settle step, the space-server seat with `settleAdvances`

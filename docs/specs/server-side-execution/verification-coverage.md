@@ -2707,7 +2707,9 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   CLASS in the memory ACL policy (`acl.readOnlyServiceDids`: a READ
   floor, never WRITE or OWNER by that class, never a genesis
   initializer; ON: the process identity; OFF: empty) is the
-  RECOMMENDATION on file, NOT yet ruled; (iv) flagged residual for the
+  scoping report's RECOMMENDATION on file — SUPERSEDED by the READ
+  ruling below (RULED 2026-08-19: ACL-only service reads); (iv)
+  flagged residual for the
   owner's eye: the genesis ACL's `"*": WRITE` wildcard (the client's
   own rollout default) leaves the service — and every authenticated
   principal — with WRITE on the new space via the wildcard; "the user
@@ -2733,6 +2735,28 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   list. Does not gate landing the stack OFF (the grant is flag-gated;
   OFF the configured list is used verbatim); the flip PR's gate reads
   against the built posture.
+
+  **READ side RULED 2026-08-19 — service identity reads the ACL ONLY;
+  every other served read runs under the USER's identity.** Owner, in
+  chat:
+
+  > ACL can be read with service identity, but all other reads must
+  > be user identity (but if this is wrong, flag for follow-up work
+  > after merging to main if criteria succeeds)
+
+  — owner (Berni), 2026-08-19. This rules the read side and
+  SUPERSEDES the scoping report's read-only-service-class
+  recommendation (finding (iii) above; `acl.readOnlyServiceDids` is
+  not taken — the report stays as the evidence and the history): the
+  service identity may read a space's ACL, and EVERY OTHER served
+  read — `session.open` on a user's home space included — runs under
+  the acting USER's identity, mirroring the ruled write posture's
+  delegated carriage. Escape hatch, per the ruling's own words: if
+  this proves wrong during the OW31 build, FLAG for follow-up work
+  after merging to main (the merge happening if the confidence
+  criteria succeed) rather than blocking on it. The build — the write
+  and read postures together — stays OWED POST-MERGE, BEFORE the flip
+  PR; OFF-invisible; does not gate landing the stack OFF.
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -3722,8 +3746,12 @@ supply; OW29/OW32/OW34 closed):
     beside the closeout); implementation OWED post-merge, BEFORE the
     flip PR; OFF-invisible; does not gate landing the stack OFF (the
     grant is flag-gated; OFF uses the configured list verbatim). The
-    READ-side replacement (a read-only service class) is the
-    recommendation on file, not yet ruled.
+    READ side is RULED 2026-08-19 (the row above carries the verbatim
+    quote): the service identity reads the ACL ONLY, every other
+    served read runs under the acting user's identity — SUPERSEDING
+    the scoping report's read-only-service-class recommendation; if
+    the posture proves wrong during the build, flag for follow-up
+    after merging to main rather than blocking.
   - Not rows, recorded: #5991's ledger comment POSTED 2026-08-18
     (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
     the second review round's report recovered on-branch beside the
@@ -4070,6 +4098,10 @@ supply; OW29/OW32/OW34 closed):
       RECOMMENDATION ON FILE: accept the tracker's set as the demand set
       (it is what the client is delivered anyway); do NOT filter the demand
       pass by id class / value reach. Owner-visible; not a binding change.
+      RULED 2026-08-19: accepted as recommended — the tracker's closure IS
+      the demand set; the filtering is logged as a future improvement,
+      PAIRED with lazy client instantiation, as row OW44 (the owner-rulings
+      delta below carries the owner's verbatim quote).
     - **the no-grace push-growth wake / pre-seal closure refresh** — the
       two named fix shapes for the one-push-late structural-growth cycle;
       NOT built (W0's numbers did not force it: sub-second at p50 on every
@@ -4507,13 +4539,29 @@ supply; OW29/OW32/OW34 closed):
     no flicker, the child's own mark retires its own echo, one identity
     for one cascade hop. Worse: a spec-level identity change (events.md
     §4), two code paths that must agree byte-for-byte, and a retry
-    story to re-rule. Owner-level; the coordinator is putting it to the
-    owner. Trigger: the OPEN swatch stall (5/13 at the W2.1 + (α)
+    story to re-rule. Owner-level; put to the owner 2026-08-19 —
+    ACKNOWLEDGED / DEFERRED (below). Trigger: the OPEN swatch stall
+    (5/13 at the W2.1 + (α)
     configuration, 2026-08-19 — (b) structurally removes the exposure:
     the echo stands until the child's own landing) if the root cause
     lands in this seat; the flicker witness reading non-zero on the W4
     acceptance workloads at a rate the owner will not accept; or when
     per-hop intents are wanted.
+
+    **ACKNOWLEDGED / DEFERRED by the owner — 2026-08-19.** Owner, in
+    chat:
+
+    > ack, revisit later if flicker is too high or as optimization.
+    > honestly, flicker might be acceptable for a first launch since
+    > status quo flickers as well.
+
+    — owner (Berni), 2026-08-19. The trigger above is CONFIRMED as
+    written, with the owner's judgment recorded beside it: the flicker
+    is likely ACCEPTABLE for a first launch (the status quo flickers
+    as well), which SOFTENS W4's flicker bar — W4 still reports the
+    flicker counters, so "too high" stays a number the owner can read,
+    not a feeling. Not scheduled; revisit if that number is too high,
+    or as optimization.
 - **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
   durable stream entry is delivered to its handler exactly once as a
   COMPLETED run (events.md §4, RULED 2026-08-18); the build is the
@@ -4780,6 +4828,56 @@ supply; OW29/OW32/OW34 closed):
     events 28/28, purge/refusal/orphan 0/0/0, settleAdvances 54 over
     193 waves — quiescence-only, never per-wave (busy-path
     neutrality at workload level).
+
+- **Stage C owner-rulings delta (2026-08-19) — the four open owner
+  items answered in chat; one row minted (OW44).** No owner question
+  stays open on the arc after this batch (#5968's Flags 1–4 remain on
+  file awaiting ratify-or-direct, flagged, not blocking). The four:
+  α1b — events.md §4's late-seal-refusal clarification RATIFIED as it
+  stands in the W3 fix pass's amended form (owner, verbatim: "ack");
+  the RULED 2026-08-19 marker and the attributed quote live in
+  events.md §4, the DATED/AMENDED trail kept as history, and the
+  split-residual tightening stays a named, not-built follow-on. OW31's
+  READ side — RULED 2026-08-19 (the OW31 row above carries the
+  verbatim quote): the service identity reads the ACL ONLY, every
+  other served read runs under the acting user's identity, SUPERSEDING
+  the scoping report's read-only-service-class recommendation, with
+  the flag-don't-block escape hatch recorded; build unchanged — owed
+  post-merge, before the flip PR. Shape (b) — ACKNOWLEDGED / DEFERRED
+  with the trigger confirmed and the owner's first-launch-flicker
+  judgment recorded on the FUTURE row above (it softens W4's flicker
+  bar; the counters still report, so "too high" stays a number). W0's
+  flag 9 — the tracker's closure ACCEPTED as the demand set, the
+  filtering logged as a future improvement paired with lazy client
+  instantiation: the row below.
+  - **OW44 — FUTURE (optimize-on-main) — filter the demand closure
+    toward the rendered subset, TOGETHER WITH lazy client
+    instantiation (the client not running the pattern immediately).**
+    W0's flag 9
+    ([`stage-c/w0-dprime-report.md`](../../history/plans/server-execution-v2/stage-c/w0-dprime-report.md)
+    §2(b)/§4): the tracker's closure follows a piece root's
+    `source`/process wiring, so a schema-narrowed root watch demands
+    the piece's WHOLE internal graph (ifElse inputs = both branches;
+    handler bindings) — over-demand, never under-demand. RULED
+    2026-08-19: the closure (the piece graph, `source`-wired) IS the
+    demand set, accepted as recommended; the narrowing is a future
+    improvement, coupled by the owner with the client side. Owner, in
+    chat:
+
+    > log as a future improvement, together with not running the
+    > pattern on the client immediately
+
+    — owner (Berni), 2026-08-19. The row pairs, per that coupling:
+    (i) filtering the demand closure toward the rendered subset (by
+    id class / value reach — flag 9's named shapes), and (ii) LAZY
+    CLIENT INSTANTIATION — the client not running the pattern
+    immediately, so what a session demands (today: the tracker's
+    closure, hence the whole piece graph) can narrow toward what is
+    actually rendered rather than being forced wide by the client's
+    own immediate run. Trigger: the optimize-on-main phase (the
+    owner's landing posture — land OFF, then continue optimizing on
+    main); not a gate for landing the stack, and not one of the
+    flip's ordered gates.
 
 ## 4. Standing rule
 

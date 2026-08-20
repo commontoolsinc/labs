@@ -326,7 +326,9 @@ ambient-state one.
   in-flight residue the purge cannot reach, which its own wording ("does
   not complete within its appending wave") requires — recorded as a
   DATED clarification of the enforcement paragraph, not a change to the
-  ruled sentence. **(α1) the purge:** synchronously at the flush-deadline
+  ruled sentence; RATIFIED as amended — RULED 2026-08-19 (the marker
+  and the owner's quote close the AMENDED note below). **(α1) the
+  purge:** synchronously at the flush-deadline
   decision, every scheduler-QUEUED LT1 in-process copy (`served !==
   undefined && served.streamEntry === undefined`, not yet dispatched) is
   removed (`events.lt1LeftoversPurged`); no notice lands on the entry
@@ -362,7 +364,8 @@ ambient-state one.
   and exactly one derived commit naming each event — with the killing
   mutations recorded in the W3 build report.
 - **AMENDED by W3's independent review (2026-08-19; B1 / M1 — the
-  same-eventId SIBLING shape):** an event can contribute SEVERAL
+  same-eventId SIBLING shape); RATIFIED as it stands — RULED
+  2026-08-19 (the close of this note):** an event can contribute SEVERAL
   transactions to one wave — the handler run plus a separate
   event-handler-stamped tx carrying the same `eventId`, in production
   the served `navigateTo`'s intent tx (builtins.md §4), committed inline
@@ -397,6 +400,22 @@ ambient-state one.
   tightening that also withdraws the timing-orphaned sibling from the
   appending wave (so intent and consequences re-land together) is
   named, not built — owner-visible.
+
+  **RULED 2026-08-19 — the late-seal-refusal clarification RATIFIED
+  as it now stands**, in this amended form (the lt1-only survivor
+  marking, the orphan refusal's same-eventId sibling fold, the
+  late-seal SPLIT residual stated, the tightening named and not
+  built), answering the coordinator's ratification question (the
+  plan's owner item (7); recommendation: ratify as written). The
+  owner, in chat:
+
+  > ack
+
+  — owner (Berni), 2026-08-19. The DATED/AMENDED trail above stays
+  as the amendment history — the marker records ratification, it
+  does not erase the trail — and the split-residual tightening
+  (withdrawing the timing-orphaned sibling so intent and consequences
+  re-land together) STAYS a named, not-built follow-on.
 
 FORBIDDEN: a processed-events table; per-event acks from clients;
 handler-run provenance records; a handler delivery with no durable
