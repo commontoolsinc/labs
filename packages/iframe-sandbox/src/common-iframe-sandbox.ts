@@ -169,12 +169,22 @@ export class CommonIframeSandboxElement extends LitElement {
         // The encoded tree is ceded to the decode, which is legitimate because
         // it arrived by `postMessage()`: it is this frame's own clone, and
         // nothing else can be reading it.
-        IframeHandler.write(
-          this,
-          this.context,
-          key,
-          fabricFromRealmValue(encoded),
-        );
+        //
+        // The guest is untrusted, so the tuple's shape being right says
+        // nothing about what is in the value slot. The decode is the authority
+        // on that -- it is what holds the marker this build mints -- and what
+        // it refuses is dropped here, leaving the frame to carry on.
+        let value: FabricValue;
+        try {
+          value = fabricFromRealmValue(encoded);
+        } catch (error) {
+          console.warn(
+            `common-iframe-sandbox: undecodable write to \`${key}\`: ` +
+              String(error),
+          );
+          return;
+        }
+        IframeHandler.write(this, this.context, key, value);
         return;
       }
 

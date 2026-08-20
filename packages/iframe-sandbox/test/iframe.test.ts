@@ -276,3 +276,26 @@ read("payload");
     cleanupFixtures();
   }
 });
+
+Deno.test("an undecodable write is dropped and the frame carries on", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+
+    // The first message bypasses the guest client to post what an untrusted
+    // guest can post: a write whose tuple is shaped right and whose value slot
+    // holds something no encode produced. The second is an ordinary write, and
+    // messages arrive in order, so its landing is the point past which the
+    // first one would have landed had it been taken.
+    const body = GUEST_PROLOG + `
+parent.postMessage({ type: "write", data: ["undecodable", 123] }, "*");
+write("after", 1);
+` + GUEST_EPILOG;
+    const iframe = await render(body, context);
+
+    await waitForContextValue(context, iframe, "after", (value) => value === 1);
+    assertEquals(context.get(iframe, "undecodable"), undefined);
+  } finally {
+    cleanupFixtures();
+  }
+});

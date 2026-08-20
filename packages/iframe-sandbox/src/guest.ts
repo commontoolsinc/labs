@@ -7,7 +7,7 @@
  * guest a `FabricValue` for a `FabricValue` the host read.
  *
  * The API is deliberately minimal -- it covers the four operations the
- * protocol has and nothing beyond them.
+ * protocol has, plus the teardown of its own listener.
  */
 
 import {
@@ -51,6 +51,9 @@ export type GuestContext = {
 
   /** Unsubscribe from each of `keys`. */
   unsubscribe(...keys: string[]): void;
+
+  /** Stop listening for host messages. */
+  disconnect(): void;
 };
 
 /**
@@ -61,13 +64,28 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
     globalThis.parent.postMessage(message, "*");
   };
 
+  // A guest window receives whatever anyone able to reach it posts, so an
+  // arriving message is a claim rather than a fact. One that does not have an
+  // update's shape, or whose value the decode refuses, is not this protocol's
+  // and is left alone.
   const onMessage = (event: MessageEvent): void => {
     const message = event.data as HostMessage | undefined;
-    if (message?.type !== HostMessageType.Update) {
+    if (
+      message?.type !== HostMessageType.Update ||
+      !Array.isArray(message.data) || message.data.length !== 2 ||
+      typeof message.data[0] !== "string"
+    ) {
       return;
     }
+
     const [key, encoded] = message.data;
-    onUpdate(key, fabricFromRealmValue(encoded));
+    let value: FabricValue;
+    try {
+      value = fabricFromRealmValue(encoded);
+    } catch {
+      return;
+    }
+    onUpdate(key, value);
   };
 
   globalThis.addEventListener("message", onMessage);
@@ -90,6 +108,10 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
 
     unsubscribe(...keys: string[]): void {
       toHost({ type: GuestMessageType.Unsubscribe, data: keys });
+    },
+
+    disconnect(): void {
+      globalThis.removeEventListener("message", onMessage);
     },
   };
 }
