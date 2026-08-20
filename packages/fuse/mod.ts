@@ -9,6 +9,7 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 
+import { setLLMUrl } from "@commonfabric/llm";
 import { linkRefFrom } from "@commonfabric/runner/shared";
 
 import {
@@ -705,6 +706,8 @@ export async function main(argv: string[] = Deno.args) {
   try {
     const apiUrl = args["api-url"];
     if (apiUrl) {
+      // Patterns this mount runs reach the LLM through the same deployment.
+      setLLMUrl(apiUrl);
       bridge = new CellBridge(tree, args["exec-cli"] || "", {
         cfcAnnotations: cfcAnnotationsEnabled,
         statusProvider: () => ({

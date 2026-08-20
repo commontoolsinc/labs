@@ -193,7 +193,7 @@ describe("shell piece tests", () => {
 
     try {
       const controller = await PiecesController.initialize({
-        spaceName: SPACE_NAME,
+        space: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
       });

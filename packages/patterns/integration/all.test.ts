@@ -52,7 +52,7 @@ describe("Compile all patterns", () => {
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
       const cc = await initializePiecesController({
-        spaceName: `${name}-${crypto.randomUUID()}`,
+        space: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,
       });

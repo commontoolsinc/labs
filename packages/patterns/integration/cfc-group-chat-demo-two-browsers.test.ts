@@ -99,7 +99,7 @@ describe(
         ),
       );
       cc = await initializePiecesController({
-        spaceName: SPACE_NAME,
+        space: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identities[0],
       });

@@ -34,7 +34,7 @@ describe("Chat pattern test", () => {
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
       cc = await initializePiecesController({
-        spaceName: SPACE_NAME,
+        space: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
       });

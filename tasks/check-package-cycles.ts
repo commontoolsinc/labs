@@ -87,12 +87,6 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
       "runtime-client protocol, while runtime-client's protocol types and " +
       "worker backend are defined in terms of html's VDOM operations.",
   },
-  {
-    packages: ["cli", "fuse"],
-    reason:
-      "cli mounts and drives fuse, while fuse's cell bridge reads pieces " +
-      "through cli's piece and callable helpers.",
-  },
 ];
 
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".mts"]);
