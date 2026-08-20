@@ -53,16 +53,19 @@ export class CommonIframeSandboxElement extends LitElement {
   private subscriptions: Map<string, Receipt> = new Map();
 
   /**
-   * Handles the outer frame reporting itself ready, which it does once, on its
-   * own load. The guest documents that follow are each announced by their own
-   * load rather than by this. Loads `src` if there is one; otherwise the next
-   * assignment to `src` does it.
+   * Handles the outer frame reporting itself ready, which it does on its own
+   * load. That is once for an element that stays where it is, and again each
+   * time the frame reloads -- which detaching the element and reattaching it
+   * does. The guest documents in between are each announced by their own load
+   * rather than by this.
+   *
+   * Whatever the previous frame held went with it, so this lets go of that
+   * guest and loads `src` into the new frame. With no `src`, the next
+   * assignment to one does the loading.
    */
   private onOuterReady() {
-    if (this.initialized) {
-      throw new Error(`common-iframe-sandbox: Already initialized.`);
-    }
     this.initialized = true;
+    this.releaseGuest();
     if (this.src) {
       this.loadInnerDoc();
     }
@@ -283,17 +286,14 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   /**
-   * Asks the outer frame to load `src`, and lets go of the guest that is being
-   * replaced: its subscriptions are cancelled and its port is closed here
-   * rather than when the replacement arrives, so it cannot write over the
-   * interval in which it is still running and already superseded.
+   * Lets go of the current guest, if there is one: its subscriptions are
+   * cancelled and its port is closed. Called where a guest stops being this
+   * element's, which is when one is asked to be replaced and when the frame
+   * holding it has gone.
    */
-  private loadInnerDoc() {
-    this.loadState = "loading";
+  private releaseGuest() {
     this.closeGuestPort();
 
-    // Remove all active subscriptions when navigating
-    // to a new document.
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler != null) {
       for (const [_, receipt] of this.subscriptions) {
@@ -301,7 +301,16 @@ export class CommonIframeSandboxElement extends LitElement {
       }
       this.subscriptions.clear();
     }
+  }
 
+  /**
+   * Asks the outer frame to load `src`, letting go of the guest being replaced
+   * first, so that guest cannot write over the interval in which it is still
+   * running and already superseded.
+   */
+  private loadInnerDoc() {
+    this.loadState = "loading";
+    this.releaseGuest();
     this.toOuterFrame({
       type: IPC.IPCHostMessageType.LoadDocument,
       data: this.src,

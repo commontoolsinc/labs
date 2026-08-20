@@ -269,3 +269,31 @@ write("after", 1);
     cleanupFixtures();
   }
 });
+
+Deno.test("a reattached element loads its document into the frame it gets", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = GUEST_PROLOG + `
+write("ran", 1);
+` + GUEST_EPILOG;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Detaching destroys the frame the element rendered, and reattaching gets
+    // it a new one -- which reports itself ready, as the first one did. The
+    // teardown lands on a later task than the removal, so the two have to be
+    // told apart by a turn of the event loop rather than by adjacency.
+    const parent = iframe.parentElement!;
+    context.set(iframe, "ran", undefined);
+    parent.remove();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    document.body.appendChild(parent);
+
+    // The guest in the new frame runs the same document, so its write is what
+    // says the element found its way back rather than going quietly mute.
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+  } finally {
+    cleanupFixtures();
+  }
+});
