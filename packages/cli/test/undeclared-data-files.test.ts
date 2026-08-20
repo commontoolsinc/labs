@@ -8,7 +8,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { RuntimeProgram } from "@commonfabric/runner";
+import { join } from "@std/path";
 import {
+  savePiecePattern,
   undeclaredDataFiles,
   undeclaredDataFileWarning,
 } from "../lib/piece.ts";
@@ -114,5 +116,110 @@ describe("undeclaredDataFileWarning", () => {
     expect(warning).toContain("2 data file(s)");
     expect(warning).toContain("--datafile ./a.txt");
     expect(warning).toContain("--datafile ./b.txt");
+  });
+});
+
+describe("savePiecePattern", () => {
+  const CONFIG = {
+    apiUrl: "https://cf.dev",
+    space: "common-knowledge",
+    identity: "~/.my.key",
+    piece: "p",
+  };
+
+  // The command reads one thing from the piece — its source program — and
+  // writes what it finds. Everything else about a piece is beside the point.
+  const piecesOver = (program: RuntimeProgram | undefined) => () =>
+    Promise.resolve({
+      get: () =>
+        Promise.resolve({
+          getPatternSourceProgram: () => Promise.resolve(program),
+        }),
+      // deno-lint-ignore no-explicit-any
+    } as any);
+
+  // Runs `body` with console.log captured, returning what it received.
+  async function captureLog(body: () => Promise<void>): Promise<string> {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) =>
+      lines.push(args.map(String).join(" "));
+    try {
+      await body();
+    } finally {
+      console.log = original;
+    }
+    return lines.join("\n");
+  }
+
+  it("writes every file the package holds, data included", async () => {
+    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
+    try {
+      await savePiecePattern(CONFIG, out, {
+        loadPieces: piecesOver(
+          program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
+            "/data/cities.json",
+          ]),
+        ),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      });
+      expect(await Deno.readTextFile(join(out, "main.tsx"))).toBe(READS_CITIES);
+      expect(await Deno.readTextFile(join(out, "data/cities.json"))).toBe("[]");
+    } finally {
+      await Deno.remove(out, { recursive: true });
+    }
+  });
+
+  it("stays quiet when the source accounts for every data file", async () => {
+    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
+    try {
+      const logged = await captureLog(async () => {
+        await savePiecePattern(CONFIG, out, {
+          loadPieces: piecesOver(
+            program({ "/main.tsx": READS_CITIES, "/data/cities.json": "[]" }, [
+              "/data/cities.json",
+            ]),
+          ),
+          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        });
+      });
+      expect(logged).toBe("");
+    } finally {
+      await Deno.remove(out, { recursive: true });
+    }
+  });
+
+  it("names a data file the written source cannot re-derive", async () => {
+    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
+    try {
+      const logged = await captureLog(async () => {
+        await savePiecePattern(CONFIG, out, {
+          loadPieces: piecesOver(
+            program({
+              "/main.tsx": "export default 1;\n",
+              "/extra.txt": "hi",
+            }, ["/extra.txt"]),
+          ),
+          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        });
+      });
+      expect(logged).toContain("--datafile ./extra.txt");
+    } finally {
+      await Deno.remove(out, { recursive: true });
+    }
+  });
+
+  it("refuses a piece that holds no pattern source", async () => {
+    const out = await Deno.makeTempDir({ prefix: "getsrc-" });
+    try {
+      await expect(
+        savePiecePattern(CONFIG, out, {
+          loadPieces: piecesOver(undefined),
+          resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        }),
+      ).rejects.toThrow("does not contain a pattern source");
+    } finally {
+      await Deno.remove(out, { recursive: true });
+    }
   });
 });

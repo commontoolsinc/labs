@@ -1540,10 +1540,15 @@ export async function checkPiecePattern(
 export async function savePiecePattern(
   config: PieceConfig,
   outPath: string,
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
   await ensureDir(outPath);
-  const pieces = await loadPieces(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
