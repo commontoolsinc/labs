@@ -1,12 +1,14 @@
 # A field typed `unknown` reads back as a reference
 
-**Symptom:** a field holds a real value — another piece, a nested object — and
-every read of it through the declaring type carries none of that value: it is
-truthy and compares equal to what it names, but every property of it is
-`undefined`. No compile error, no runtime error, no warning. Rendering the same
-path still works, which is what makes this confusing:
+**Symptom:** a field holds a real value — another piece, a nested object, the
+screen a pattern just built — and every read of it through the declaring type
+carries none of that value: it is truthy and compares equal to what it names,
+but every property of it is `undefined`. No runtime error and no warning.
+Rendering the same path still works, which is what makes this confusing:
 `<cf-render $cell={entry.piece} />` shows the piece while `entry.piece.label`
-right beside it is undefined.
+right beside it is undefined. In a pattern test the same shape reads as `{}`:
+`textContent(piece[UI])` is empty even though the piece on screen shows the
+tree.
 
 ```typescript
 // Shown at module scope.
@@ -37,12 +39,48 @@ it under a schema of its own (`asSchema(rendererVDOMSchema)` —
 `html/src/in-process.ts` when the reconciler runs in the caller's own process),
 while every read of the *value* comes back empty.
 
-Two transformer diagnostics cover neighboring cases and neither catches this
+Three transformer diagnostics cover neighboring cases and none catches this
 one: `reactive-capture:unknown-type` reports a closure capture whose inferred
-type is `unknown`, and `schema:unknown-type-access` reports a property typed
+type is `unknown`, `schema:unknown-type-access` reports a property typed
 `unknown` accessed directly on a lift or handler parameter
-(`ts-transformers/src/transformers/type-shrinking.ts`). Reaching the field
-through an array element inside a callback, as below, is outside both.
+(`ts-transformers/src/transformers/type-shrinking.ts`), and
+`pattern-result:opaque-reserved-key` reports the reserved-key case below.
+Reaching the field through an array element inside a callback, as further
+below, is outside all three.
+
+## When the opaque field is the pattern's own screen
+
+The same reference semantics reach `[UI]` and `[NAME]`, and at the root of a
+pattern's own result they are the wrong reading. A reserved key's spelling
+belongs to the framework rather than to whoever described it, so the value
+under it there is one that pattern produced: the screen it built, the name it
+chose. Declared `unknown`, that value is gone for every reader, while the piece
+goes on rendering — the renderer reads `$UI` under a schema of its own. A
+pattern test inspecting the screen, or another pattern reading it, gets `{}`.
+
+```typescript
+// Shown as alternative snippets.
+// The screen this pattern renders, declared as a reference to someone else's.
+type Wrong = { [NAME]: unknown; [UI]: unknown; label: string };
+```
+
+```typescript
+// Shown as alternative snippets.
+// The same result, naming what each field holds.
+type Right = { [NAME]: string; [UI]: VNode; label: string };
+```
+
+The compiler rejects the first form: `pattern-result:opaque-reserved-key`,
+raised at the `pattern()` call by `reserved-result-keys.ts` in
+`packages/ts-transformers`. It reaches the root of a **result** schema and
+nothing else, which leaves two shapes legal and needed. Below the root, a
+reserved key names a field of another piece, where `unknown` is what keeps the
+field a reference to that piece's own screen rather than a copy, so the
+controls in it stay bound to the piece that owns them. On the argument side, a
+declaration has to keep accepting every value it accepted before, so a consumer
+view of a result type holds `unknown` even where the producing type names
+`VNode`. `unknown`'s own page states that producer/consumer split:
+[`docs/common/concepts/types-and-schemas/unknown.md`](../../../common/concepts/types-and-schemas/unknown.md).
 
 ## What decides whether a read materializes
 
