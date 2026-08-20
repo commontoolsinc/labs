@@ -26,6 +26,7 @@ import {
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
@@ -325,33 +326,16 @@ export function map(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      const pending = result.sync();
       // The container's durable value is still streaming in; its arrival
-      // re-triggers this reconcile (the probe read above is journaled). If the
-      // container was never persisted — so nothing will ever stream in to
-      // re-trigger — seed [] once the pull settles, so the coordinator is not
-      // left wedged waiting for a value that will never arrive.
-      const seedIfStillAbsent = () =>
-        !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
-          if (!active) return;
-          const container = result!.withTx(seedTx);
-          if (container.getRaw() === undefined) container.set([]);
-        }).then(({ error }) => {
-          if (error) {
-            logger.warn(
-              "resume-seed",
-              "seeding the empty result container failed",
-              { error },
-            );
-          }
-        });
-      // Run on either outcome (resolve or reject); the seed recovers from the
-      // pull's own rejection, so log it rather than dropping it silently.
-      pending.finally(seedIfStillAbsent).catch((error) => {
-        logger.warn("resume-pull", "resume container pull rejected", {
-          error,
-        });
-      });
+      // re-triggers this reconcile (the probe read above is journaled). A
+      // container that was never persisted has nothing to stream in, so the
+      // seed below ends the wait once the pull settles.
+      seedResultContainerWhenPullSettles(
+        runtime,
+        () => active ? result : undefined,
+        result.sync(),
+        logger,
+      );
       return;
     }
     // Resume preservation: on a resume reconcile the input list itself may not be
