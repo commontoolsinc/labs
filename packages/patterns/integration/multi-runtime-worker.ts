@@ -11,7 +11,11 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  isValidFabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import {
@@ -28,6 +32,7 @@ import {
 } from "./pieces-controller.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /**
@@ -486,10 +491,20 @@ const handlers: Record<
 
   async loggerCounts() {
     await idle();
-    // `LoggerBreakdown` is an index signature intersected with `total`, and
-    // `LogCounts` beneath it is an interface, so neither is assignable to
-    // `FabricPlainObject` however plain the counts are.
-    return getLoggerCountsBreakdown() as unknown as FabricValue;
+    const counts = getLoggerCountsBreakdown();
+    // The declaration cannot say this is a `FabricValue`: `LoggerBreakdown` is
+    // an index signature intersected with `total`, and `LogCounts` beneath it
+    // is an interface. Nor can `utils` be where that is said, `data-model`
+    // depending on it. So the question is settled by checking, the same way
+    // `assertFabricLoggerFlags()` settles it for the flag breakdown the
+    // runtime connection sends.
+    if (!isValidFabricValue(counts)) {
+      throw new Error(
+        "Cannot send logger counts across this boundary, not being a " +
+          `\`FabricValue\`: ${backtickQuote(toCompactDebugString(counts))}`,
+      );
+    }
+    return counts;
   },
 
   async dispose() {

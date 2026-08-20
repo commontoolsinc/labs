@@ -15,6 +15,7 @@ import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -64,6 +65,22 @@ describe("multi-runtime harness value fidelity", () => {
       }, not a FabricBytes`,
     );
     assertEquals(read.slice(), CONTENT);
+  });
+
+  it("carries a logger-count breakdown across the boundary", async () => {
+    // Nothing else that runs calls this command -- `storm-driver.ts` and
+    // `lunch-poll-diagnose.ts` are tools and the adoption bench is ignored --
+    // so this is what stands between a breakdown the encoding refuses and a
+    // diagnostic that fails only when someone reaches for it.
+    const counts = await alice.loggerCounts();
+    assert(
+      typeof counts.total === "number",
+      `no total in ${toCompactDebugString(counts)}`,
+    );
+    assert(
+      Object.keys(counts).length > 1,
+      "a breakdown naming no logger at all",
+    );
   });
 
   it("reads back a weird number as itself", async () => {
