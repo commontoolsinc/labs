@@ -18,6 +18,7 @@ import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -33,7 +34,13 @@ export interface DecodedLink {
   space?: string;
   path?: readonly string[];
   scope?: string;
-  hasSchema: boolean;
+  /**
+   * The schema stored on the link, or `undefined` when it stores none. A
+   * stored schema is a JSON Schema, so `true` and `false` are among the values
+   * it can hold — `true` constrains nothing, `false` admits nothing — and
+   * neither may be synthesized to stand for a schema that is merely present.
+   */
+  schema?: Json;
 }
 
 type Json = unknown;
@@ -67,7 +74,7 @@ function payloadToLink(payload: Record<string, Json>): DecodedLink {
       ? (payload.path as readonly string[])
       : undefined,
     scope: typeof payload.scope === "string" ? payload.scope : undefined,
-    hasSchema: payload.schema !== undefined,
+    schema: payload.schema,
   };
 }
 
@@ -178,7 +185,7 @@ export function summarizeLink(link: DecodedLink): string {
   const space = link.space
     ? ` @${escapeTerminalText(shortDid(link.space) ?? "")}`
     : "";
-  const schema = link.hasSchema ? " +schema" : "";
+  const schema = link.schema !== undefined ? " +schema" : "";
   return `🔗 ${id}${path}${space}${schema}`;
 }
 
@@ -198,9 +205,121 @@ interface AnnotationLeave {
 type AnnotationFrame = AnnotationVisit | AnnotationLeave;
 
 /**
+ * Largest schema, in bytes of stored JSON, written into annotated output as
+ * itself. A link's schema is unbounded and routinely dwarfs the value carrying
+ * it — kilobytes of `$defs` hanging off one array element — so a larger one is
+ * summarized by `elideSchema()` instead. The bound is on stored size rather
+ * than on depth, because a schema is metadata about the link rather than part
+ * of the value's own shape, and so is not what a caller's `maxDepth` is
+ * budgeting.
+ */
+const MAX_INLINE_SCHEMA_BYTES = 200;
+
+const utf8 = new TextEncoder();
+
+/**
+ * Byte length of `value` as JSON. Falls back to measuring the annotated form
+ * for what `JSON.stringify()` refuses — a `bigint` anywhere in the value, or a
+ * cycle — so that a schema holding one is still measurable rather than fatal.
+ * `annotate()` lowers both, and neither it nor `JSON.stringify()` recurses, so
+ * the fallback has nothing left to fail on however deeply the value nests.
+ *
+ * The measurement is of the value as stored, which a `FabricSpecialObject`
+ * under-reports: it stringifies to `{}` whatever it holds. Such a schema can
+ * therefore be written out inline while rendering a little longer than the
+ * bound. Nothing downstream reads the count as an allocation size.
+ */
+function jsonByteLength(value: Json): number {
+  try {
+    return utf8.encode(JSON.stringify(value)).length;
+  } catch {
+    const json = JSON.stringify(annotate(value, Number.POSITIVE_INFINITY));
+    return utf8.encode(json).length;
+  }
+}
+
+/**
+ * Truncated hash of `schema`, or `undefined` when it cannot be computed —
+ * hashing descends recursively, so a schema nested past the call stack has no
+ * digest to report. An absent digest means it was not computed, and two
+ * summaries that both lack one say nothing about whether their schemas agree.
+ */
+function schemaDigest(schema: Json): string | undefined {
+  try {
+    return hashStringOf(schema).slice(0, 12);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Summary of a schema too large to write out as itself: its top-level keys,
+ * its size in bytes as stored, and a truncated hash of it. Different digests
+ * prove the two schemas differ; equal ones make them overwhelmingly likely to
+ * agree without proving it, since the hash is truncated. Either way that is
+ * usually enough to settle whether one link's schema is stale against
+ * another's, and `--full-depth` settles it outright.
+ *
+ * `bytes` is always present. `digest` is absent when it could not be computed,
+ * for which see `schemaDigest()`, and `keys` when the stored schema is not an
+ * object and so has none.
+ */
+function schemaSummary(schema: Json, bytes: number): Json {
+  const digest = schemaDigest(schema);
+  return {
+    ...(isNameWalkable(schema) ? { keys: Object.keys(schema) } : {}),
+    bytes,
+    ...(digest === undefined ? {} : { digest }),
+  };
+}
+
+/**
+ * The `$link` fields describing the schema stored on a link: `schema` holding
+ * it as itself when it is small enough to read or when `maxDepth` is infinite,
+ * and `$schemaSummary` holding a `schemaSummary()` of it otherwise. Never
+ * synthesizes a schema — a rendered `true` means `true` was what the link
+ * stored.
+ *
+ * The summary is a SIBLING of `schema` rather than a value under it, and the
+ * two are never both present. A link can store a schema of any shape, so a
+ * summary written into the `schema` slot could be a schema some link really
+ * holds, and a reader would have no way to tell the summary from the thing it
+ * summarizes. Nothing stored reaches a `$`-prefixed sibling — `payloadToLink()`
+ * bounds what a link contributes to `id`, `space`, `path`, `scope`, and
+ * `schema` — so the distinction holds for every possible stored value rather
+ * than for the ones that happen not to collide.
+ *
+ * "As itself" is the annotated form, not the stored bytes. A schema is walked
+ * like any other value, so a sigil-shaped literal inside one — under `const`,
+ * `default`, or `enum` — reads back as `{ $link }` or `{ $ref }` the way it
+ * would anywhere else in the output. That keeps the rendering JSON-safe, which
+ * the stored form is not: a `bigint` in a schema breaks `JSON.stringify()`
+ * outright, and a `FabricLink` in one flattens to `{}` and disappears. A
+ * summary's digest hashes the stored schema rather than this rendering, so it
+ * stays the thing to compare two schemas by.
+ */
+function linkSchemaFields(
+  schema: Json,
+  maxDepth: number,
+): Record<string, Json> {
+  if (!Number.isFinite(maxDepth)) {
+    return { schema: annotate(schema, Number.POSITIVE_INFINITY) };
+  }
+  // Measured before rendering, so that a schema headed for a summary is never
+  // walked into a copy that only gets discarded. A space's worth of links each
+  // carrying kilobytes of `$defs` is the case that makes the difference.
+  const bytes = jsonByteLength(schema);
+  return bytes <= MAX_INLINE_SCHEMA_BYTES
+    ? { schema: annotate(schema, Number.POSITIVE_INFINITY) }
+    : { $schemaSummary: schemaSummary(schema, bytes) };
+}
+
+/**
  * Transform a stored value into an annotated, JSON-printable form. Links
  * become `{ $link: … }`, entity refs become `{ $ref: … }`, and streams become
- * `"$stream"`. `maxDepth` limits how many nested containers are retained.
+ * `"$stream"`. `maxDepth` limits how many nested containers are retained, and
+ * an infinite one additionally writes out every link's schema in full; see
+ * `linkSchemaFields()` for what a finite one does with a large schema.
  */
 export function annotate(v: Json, maxDepth = 8): Json {
   const root: Record<string, Json> = {};
@@ -235,7 +354,11 @@ export function annotate(v: Json, maxDepth = 8): Json {
           ...(link.path && link.path.length ? { path: link.path } : {}),
           ...(link.space ? { space: link.space } : {}),
           ...(link.scope ? { scope: link.scope } : {}),
-          ...(link.hasSchema ? { schema: true } : {}),
+          // `maxDepth` rather than `frame.depth`: full schema fidelity is a
+          // property of the whole rendering, not of where a link sits in it.
+          ...(link.schema !== undefined
+            ? linkSchemaFields(link.schema, maxDepth)
+            : {}),
         },
       });
       continue;
