@@ -1824,7 +1824,14 @@ export class SpeculationOverlayDestination
         // masked a delivered healed value until the next authored
         // commit anywhere in the space. With S1 every floor is
         // reachable on a quiet space; each new input still lifts the
-        // previous generation mid-stream.
+        // previous generation mid-stream. (The combined review's F2
+        // found — and its fix pass closed — the one self-inflicted
+        // exception: content folding into the advance wave's still-open
+        // commit window consumed the latch and left the folded seq
+        // uncovered until the next authored input; the consume is now
+        // gated on the wave having stayed bookkeeping-only, so the next
+        // quiescence covers the folded tail. The register's S1 residual
+        // list carries the entry.)
         let floor = entry.confirmedFloor;
         let blocked = false;
         for (const origin of entry.originLocalSeqs) {

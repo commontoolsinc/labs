@@ -364,13 +364,28 @@ deferred (ruling (8)), S3 not
 taken; (4′) the owner-rulings batch — **DONE 2026-08-19, NO OPEN
 OWNER QUESTIONS** (α1b RATIFIED; flag 9 accepted, OW44 minted; OW31's
 read side RULED; shape (b) acknowledged/deferred — the rulings block
-below carries each); NEXT: the combined W2.1+S1 INDEPENDENT REVIEW —
-RUNNING (read-only, concurrent) → a fixer pass if its findings need
-one → the #6043 ledger update → (5) W4 — the
+below carries each); (4″) the combined W2.1+S1 INDEPENDENT REVIEW —
+**DONE 2026-08-20**: read-only at `4bf914a70`, verdict
+**LANDABLE-WITH-FIXES (2 MAJOR / 5 MINOR / 8 notes)** — no blocker,
+no lost/duplicated delivery, no OFF change; OW43's closure verified
+justified and the skip lift corroborated (an independent 7th green
+lunch run, {1:16}); the FIX ROUND landed the same day on the train
+tip: **F1 FIXED** (the seal-time jobless checks walk the cascade
+thread — the late-grandchild-of-silent-child strand closed, pins
+W2.1-3-ext/6/7 red-first) and **F2 FIXED** (the latch consume gated
+on bookkeeping-only advance waves — the mid-seal content fold no
+longer strands the folded tail; deterministic pin 6 red-first),
+F3/F5/F6/F7 fixed, F4 register-noted on the (b) row; reports
+on-branch (`stage-c/combined-w21-s1-review-report.md` verbatim +
+`…-fix-report.md`); both PR ledgers updated (#6039 notes the F1 fix
+rides the train tip); the fix-tip gates: lunch 3/3 with every swatch
+wall 1 ms and {1:16}, chat n=20 median 375 ms with settleAdvances
+quiescence-only → (5) W4 — the
 settle-time re-benchmark (server settle measured explicitly,
 `waitForSettled`) — its gate (**not before the chosen seat lands and
-the lunch gate is 3/3 with honest swatch walls**) MET 2026-08-19, per
-the coordination block above; (6) the CONFIDENCE VERDICT to
+the lunch gate is 3/3 with honest swatch walls**) MET 2026-08-19 and
+RE-MET 2026-08-20 at the fix tip, per the coordination block above;
+(6) the CONFIDENCE VERDICT to
 the owner; (7) on "no fundamental issue", land the train on main with
 the flag OFF (siblings stacked; default lanes OFF) and continue on
 main; (8) the flip's ordered gates as listed under Phase 7 (skip list

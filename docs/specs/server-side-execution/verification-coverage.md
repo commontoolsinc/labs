@@ -4518,6 +4518,33 @@ supply; OW29/OW32/OW34 closed):
     (`lt1LeftoversPurged 1` in ~1 run in 2: the click alone in one
     commit, the drained child in the next) is the flicker the mark-
     frame-keyed witness catches (0–1 per browser per run).
+    **UPDATE 2026-08-20 (combined W2.1+S1 review, F1 MAJOR — FIXED on
+    the train tip):** the seal-time jobless checks were ONE LEVEL deep
+    (eventId or direct parent) while the thread can be deeper — a LATE
+    grandchild of a SILENT (write-less) cascade child sealed after the
+    root's mark passed both checks, registered, and stranded forever
+    (the silent child has no entry, is never retired, never joins the
+    jobless set; probe-verified by the reviewer: `entryCount=1,
+    dropped=false, retired=false`). Both checks (pre-seal and the
+    post-`sealInto` re-check) now walk the `parentEventId` chain
+    through `#cascadeParents` (`#joblessByAncestry` — the
+    `#cascadeReaches` walk on ids). Pins, red-first on the pre-fix
+    code: W2.1-3 extended with the late-silent-grandchild seal (RED:
+    the entry registered, drops +2 not +3), **W2.1-6** (the mid-seal
+    mark arrival caught at the post-`sealInto` re-check through the
+    chain; RED: `entryCount` 1, no drop). The review also named the
+    SILENT truncation modes (F6 MINOR): a `#cascadeParents` eviction at
+    the 4096 bound and a walk stopped at the 64-hop depth cap are
+    indistinguishable from "no ancestor" at walk time — both now
+    COUNTED (`cascadeThreadEvictionCount` / `cascadeWalkDepthCapCount`,
+    logger keys `cascade-thread-evicted` / `cascade-walk-depth-capped`;
+    pin **W2.1-7**), so if either bound is ever hit in the wild the
+    stranding presents WITH telemetry (the strand itself remains the
+    stated bounded-design posture — eviction needs ~4096 cascade seals
+    within one intent round trip). The flicker-witness docstring on the
+    churn surface (F5 MINOR) was still basis-keyed text from before the
+    witness refinement — rewritten to the mark-frame semantics with
+    both heuristic biases and their directions stated.
   - **FUTURE / owner-level — (b) deterministic cascade ids (NOT built;
     the reason the flicker exists).** Derive a cascade child's event id
     on BOTH sides from the parent event id + the send ordinal within the
@@ -4562,6 +4589,29 @@ supply; OW29/OW32/OW34 closed):
     flicker counters, so "too high" stays a number the owner can read,
     not a feeling. Not scheduled; revisit if that number is too high,
     or as optimization.
+
+    **Instrument bias note (2026-08-20, combined review F4 — the
+    trigger's counter is a floor, not an exact count).** The flicker
+    witness (`overlayCascadeEchoFlickers`) systematically UNDER-counts
+    the COALESCED-PURGED shape: when both voters' clicks mark in ONE
+    commit that carries the OTHER voter's confirmed add while THIS
+    voter's child was purged (the root-cause report's green-run shape,
+    s6/s13 — a COMMON shape, not a corner), the shared list doc moves
+    to the mark's own seq via the foreign write, reads "arrived", and
+    the purged voter's real one-wave flicker is NOT counted. It also
+    over-counts on the equality cutoff (an unchanged authoritative
+    value moves no seq and reads "unarrived") and on a late same-frame
+    sidecar append over-stating the mark seq. Directionally: whoever
+    reads this row's trigger at W4 should treat a NONZERO reading as
+    real flicker evidence and a LOW/ZERO reading as NOT proof of
+    little flicker — the bias in the common shape is downward. A
+    seq-level witness cannot attribute a same-frame move to a specific
+    writer; counting the shape exactly needs value-level (or
+    writer-attributed) evidence — deliberately NOT built in the fix
+    round (it would change the decision instrument right before the
+    owner reads it); the biases are now also stated on the churn
+    surface's docstring (F5). Disposition: NOT CHANGED (code), this
+    note is the register record.
 - **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
   durable stream entry is delivered to its handler exactly once as a
   COMPLETED run (events.md §4, RULED 2026-08-18); the build is the
@@ -4802,7 +4852,28 @@ supply; OW29/OW32/OW34 closed):
     commit itself, definitionally — a client derivation READING the
     watermark doc could carry that seq in its floor and linger to
     the next transition (no known reader does; the id class is
-    excluded from piece demand).
+    excluded from piece demand); (iv) **[FOUND by the combined review
+    2026-08-19 (F2 MAJOR) — FIXED 2026-08-20 in its fix round]** the
+    once-per-transition latch was consumed even when the advance-only
+    wave picked up CONTENT mid-seal (a transaction sealing between the
+    quiescence gate's snapshot and the wave detach joins the still-open
+    closing wave — the watermark-tx commit and `#sealChain` awaits are
+    the window): the fold's content armed the latch, the seal-consume
+    immediately erased it, and the folded seq — ABOVE the advance's
+    pre-fold target — stayed uncovered until the next authored input
+    (the swatch-stall shape, reintroduced in a microtask-wide race;
+    same consequence bound as residual (i), but S1's own bookkeeping
+    and previously unflagged). Fix: the consume is gated on
+    `closing.contentContributionCount === 0` — a fold leaves the latch
+    armed and the NEXT quiescence covers the folded tail (the
+    reviewer's probe-validated shape, 28/28 green against the pinned
+    population). Pin 6 makes the interleaving DETERMINISTIC (a
+    serving-runtime `edit()` wrapper injects a derivation-kind commit
+    when the quiescence advance's watermark write commits, then
+    asserts the fold landed in the SAME wave commit — loud abort
+    otherwise) and was RED on the unfixed code: W frozen below the
+    folded seq, timeout. The sweep comment's "every floor is reachable
+    on a quiet space" carries the pointer.
   - For OW38/W4: quiescence advances are split in the stats
     (`settleAdvances`), so the settle-time metric excludes the
     advance-only waves; the growth-landing adjacency attribution is
@@ -4878,6 +4949,53 @@ supply; OW29/OW32/OW34 closed):
     owner's landing posture — land OFF, then continue optimizing on
     main); not a gate for landing the stack, and not one of the
     flip's ordered gates.
+
+- **Stage C combined W2.1+S1 independent review + fix round delta
+  (2026-08-20).** The combined adversarial review of W2.1 (cascade-echo
+  retirement), W3.1/S1 (drain-settle quiescence advance), and the
+  receipt-race flake fix — read-only, at `4bf914a70` (= the train tip
+  minus one docs-only commit) — returned **LANDABLE-WITH-FIXES: 2
+  MAJOR / 5 MINOR / 8 notes**; report on-branch verbatim:
+  [`stage-c/combined-w21-s1-review-report.md`](../../history/plans/server-execution-v2/stage-c/combined-w21-s1-review-report.md),
+  dispositions with red/green evidence:
+  [`stage-c/combined-w21-s1-fix-report.md`](../../history/plans/server-execution-v2/stage-c/combined-w21-s1-fix-report.md).
+  Every fix landed ON THE TRAIN TIP (`claude/server-exec-v2-w3-alpha`)
+  — F1 touches W2.1's client file that lives lower in the stack; the
+  fix rides the tip, no lower branch was rebased. Dispositions: **F1
+  (MAJOR) FIXED** — the seal-time jobless checks walk the cascade
+  thread (the W2.1 row's UPDATE above carries the mechanism and pins
+  W2.1-3-extended/W2.1-6); **F2 (MAJOR) FIXED** — the latch consume
+  gated on the advance wave having stayed bookkeeping-only (the S1
+  row's residual (iv) above carries the mechanism and pin 6); **F3
+  (MINOR) FIXED** — S1 pin 1's client clause is now PUSH-HALF honest
+  (a watermark sink installed before any advance exists must observe a
+  DELIVERED value above the authored coverage; under the reviewer's
+  S1-P1 mutation — the advance wave's `noteExecutorCommit` skipped —
+  the pin goes RED at 10 s, re-verified in the fix round, where the
+  pre-fix pins all stayed green); **F4 (MINOR) NOT CHANGED (code) —
+  register note landed** on the shape-(b) FUTURE row above (the
+  flicker counter under-counts the coalesced-purged shape; read it as
+  a floor); **F5 (MINOR) FIXED** — the churn-surface docstring
+  re-keyed to the mark-frame semantics with both biases stated; **F6
+  (MINOR) FIXED (counter, the preferred shape)** —
+  `cascadeThreadEvictionCount` / `cascadeWalkDepthCapCount` + logger
+  keys, pin W2.1-7; **F7 (nit) FIXED** — `#ownWaveSeqs` bounded at
+  4096, oldest evicted (fail-closed degradation only; on a healthy
+  space the prune-at-advance keeps the set near-empty). The 8 notes:
+  acknowledged in the fix report §4 (no code action beyond F6's
+  counter, which also covers the depth-64 note); the reviewer verified
+  OW43's closure justified, the skip lift doubly satisfied (adding an
+  independent 7th green lunch run with `{1:16}` store multiplicity),
+  and the flake fix real. One NEW pre-existing flake surfaced during
+  the fix round's suite battery and was attributed by the ritual
+  before any blame: `executor-effect-channel.test.ts`'s "served intent
+  (T2 hops 1–4)" step times out at "waiting for the intent to land in
+  alice's session instance" (~1/8 under load ~2) — reproduced at the
+  UNFIXED tip `7e1d5a8ff` with the byte-identical assert (baseline
+  worktree, 1/7), so NOT a fix-round regression and NOT the
+  receipt-race pin `78959c26c` fixed (different step, different wait);
+  left un-fixed here (out of the round's scope), flagged for its own
+  red-first pass.
 
 ## 4. Standing rule
 
