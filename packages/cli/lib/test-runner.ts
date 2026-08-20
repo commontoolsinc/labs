@@ -66,13 +66,18 @@ import type {
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   type CDFPoint,
+  clearTimingMeasures,
   getLogger,
   getLoggerCountsBreakdown,
+  getTimingMeasuresState,
   getTimingStatsBreakdown,
   resetAllCountBaselines,
   resetAllLoggerCounts,
   resetAllTimingBaselines,
   resetAllTimingStats,
+  resetTimingMeasureBudget,
+  setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
 
@@ -127,6 +132,43 @@ async function withPhase<T>(
     phaseLogger.timeEnd(...keys);
     performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
   }
+}
+
+interface CapturedMeasure {
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
+/**
+ * Take this file's emitted measures off the timeline.
+ *
+ * Draining per file rather than reading once at the end is what makes a
+ * multi-file run work at all: each file starts by clearing the timeline, so
+ * anything not collected before the next one begins is gone.
+ */
+function drainTimingMeasures(into: CapturedMeasure[]): void {
+  for (const entry of performance.getEntriesByType("measure")) {
+    if (!entry.name.startsWith(TIMING_MEASURE_PREFIX)) continue;
+    into.push({
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    });
+  }
+  clearTimingMeasures();
+}
+
+async function writeTimingMeasures(
+  path: string,
+  entries: readonly CapturedMeasure[],
+): Promise<void> {
+  await Deno.writeTextFile(path, JSON.stringify(entries));
+  console.log(
+    `\nWrote ${entries.length} timing measure(s) to ${path}. Aggregate with:` +
+      `\n  deno run --allow-read ` +
+      `skills/perf-investigation/scripts/aggregate-measures.ts ${path}`,
+  );
 }
 
 function formatError(error: unknown): string {
@@ -311,6 +353,16 @@ export interface TestRunnerOptions {
   patternCoverageDir?: string;
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+  /**
+   * Emit a `performance.measure` per logger time span and write them here.
+   *
+   * The statistics a run prints are aggregates: they say a key was reached
+   * 4,000 times and what that cost on average, and nothing about which of
+   * them nested inside which. The measures keep each span's own interval, so
+   * a consumer can roll them up by key prefix and find the level where the
+   * count starts multiplying.
+   */
+  timingMeasuresOut?: string;
   /**
    * Run against a caller-supplied identity and storage manager, and observe
    * what the run instantiates.
@@ -959,6 +1011,9 @@ export async function runTestPattern(
   const startTime = performance.now();
   performance.clearMarks();
   performance.clearMeasures();
+  // The line above drops this run's emitted measures along with everything
+  // else, so the budget they were charged against has to come back too.
+  resetTimingMeasureBudget();
   resetAllLoggerCounts();
   resetAllTimingStats();
 
@@ -1952,6 +2007,19 @@ export async function runTests(
   results: TestRunResult[];
 }> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  // Emission is process-global, so a run that turns it on owes the process its
+  // previous state back — otherwise a later `runTests()` without the option
+  // keeps emitting into a buffer nobody will read.
+  const priorMeasures = getTimingMeasuresState();
+  const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
+    ? []
+    : undefined;
+  if (options.timingMeasuresOut) {
+    // Draining per file means the buffer never holds more than one file's
+    // worth, so the default ceiling — which exists to bound a process that
+    // never drains — would only truncate the capture for no benefit.
+    setTimingMeasuresEnabled(true, { cap: Number.MAX_SAFE_INTEGER });
+  }
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
@@ -1994,6 +2062,10 @@ export async function runTests(
       console.log(`  ✗ ${formatError(error)}`);
       recordFile(testPath, true, performance.now() - fileStarted);
       continue;
+    } finally {
+      // Before the next file clears the timeline, and on the failure path too:
+      // a file that wedged is often the one whose measures are wanted.
+      if (captured) drainTimingMeasures(captured);
     }
     allResults.push(result);
 
@@ -2136,6 +2208,18 @@ export async function runTests(
     recordFile(testPath, totalFailed > failedBefore, result.totalDurationMs);
   }
   recordsFragment?.close();
+
+  try {
+    if (options.timingMeasuresOut && captured) {
+      await writeTimingMeasures(options.timingMeasuresOut, captured);
+    }
+  } finally {
+    // Both halves of what was borrowed, and in a `finally` because a failed
+    // write must not strand them: the switch left on costs every later run in
+    // the process, and the raised ceiling left behind removes the retention
+    // bound entirely.
+    setTimingMeasuresEnabled(priorMeasures.enabled, { cap: priorMeasures.cap });
+  }
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);
