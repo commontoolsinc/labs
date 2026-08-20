@@ -98,7 +98,12 @@ decides to ship is declared instead, in `tasks/pattern-compat-accepted-breaks.ts
   contract, so no baseline, so no check, forever. Fix it, or add it to
   `tasks/pattern-compat-unevaluable.ts` with a reason. That allowlist can only
   shrink: a listed pattern that evaluates again must leave the list, or its
-  exemption outlives the breakage it was granted for.
+  exemption outlives the breakage it was granted for. It may never name a
+  required pattern, and the gate refuses one that does: listing a root is a
+  wider exemption than any accepted break — not one finding forgiven but the
+  pattern not gated at all — and the roots that update aggressively and
+  unconditionally are the ones that can least afford it. For those, fixing
+  the pattern is the only move.
 
 An already-recorded contract is not re-validated. It was proved when recorded
 and has not changed since, and both the definition validator and the subset

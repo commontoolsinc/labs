@@ -29,7 +29,10 @@
  */
 
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
-import { ACCEPTED_STATE_DROPS } from "./pattern-vintage-accepted-drops.ts";
+import {
+  ACCEPTED_STATE_DROPS,
+  patternKeyClaims,
+} from "./pattern-vintage-accepted-drops.ts";
 import { fromFileUrl } from "@std/path/from-file-url";
 import {
   reportUnmappedUrls,
@@ -100,27 +103,32 @@ function recordPathProblem(record: string): string | undefined {
 /**
  * Whether a key written in an exemption list addresses a required pattern.
  *
- * Membership is judged the way the lists' own consumers resolve a key, not by
- * string equality. `acceptedDropsFor` claims an entry whose key is a path
- * SUFFIX of the manifest's pattern path, so an entry written `home.tsx`
- * exempts `system/home.tsx` — and an exact `has()` would let the shorter
- * spelling walk straight around every floor here.
+ * Asked through `patternKeyClaims` — the registries' own matcher — rather
+ * than by string equality or by a rule this module derives for itself. A
+ * floor that judged membership its own way would accept a spelling the
+ * consumer honors, which is the whole of how an exemption walks around it.
  *
- * The other two lists match exactly, so this refuses a suffix-written entry
- * that exempts nothing today. That asymmetry is deliberate and cheap: a
- * prohibition may exceed the convention it protects, and the spelling nobody
- * needs is the one a reader cannot tell from the spelling that bites.
+ * Asked in BOTH directions, because the consumer anchors its suffix on the
+ * manifest path while a required pattern arrives here as a key. A key
+ * SHORTER than the required one claims it by being a suffix of it
+ * (`home.tsx` for `system/home.tsx`), and a key LONGER than it claims it by
+ * carrying a path prefix the manifest also carries
+ * (`packages/patterns/system/home.tsx`, or the `api/patterns/` route a
+ * manifest's `main` may name). Either spelling reaches the same pattern, so
+ * the floor has to refuse both.
  *
- * The `/` is part of the test rather than a bare `endsWith`: without it
- * `whome.tsx` would answer for `system/home.tsx`, which is a different
- * pattern that no required key addresses.
+ * The relation is prefix-agnostic on purpose: reconstructing a manifest path
+ * to compare against would hardcode one of the prefixes a manifest can
+ * actually carry, and the floor would be blind to the others.
  */
 function namesRequiredPattern(
   requiredPatternKeys: ReadonlySet<string>,
   pattern: string,
 ): boolean {
   for (const key of requiredPatternKeys) {
-    if (key === pattern || key.endsWith(`/${pattern}`)) return true;
+    if (patternKeyClaims(key, pattern) || patternKeyClaims(pattern, key)) {
+      return true;
+    }
   }
   return false;
 }

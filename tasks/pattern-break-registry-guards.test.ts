@@ -152,6 +152,47 @@ describe("pattern-break-registry-guards", () => {
     expect(findings[0].detail).toContain("required pattern");
   });
 
+  it("refuses a required pattern written with a longer path prefix", () => {
+    // The other side of the relation. `acceptedDropsFor` anchors its suffix
+    // on the MANIFEST path, so a key carrying a prefix the manifest also
+    // carries claims the same root — including the `api/patterns/` route a
+    // manifest's `main` may name.
+    for (
+      const pattern of [
+        "patterns/system/home.tsx",
+        "packages/patterns/system/home.tsx",
+        "api/patterns/system/home.tsx",
+      ]
+    ) {
+      const findings = guardBreakRegistryEntries({
+        entries: [entry({ pattern })],
+        requiredPatternKeys: new Set(["system/home.tsx"]),
+        recordExists: () => true,
+      });
+      expect(findings.length).toBe(1);
+      expect(findings[0].detail).toContain("required pattern");
+    }
+  });
+
+  it("allows a pattern no required key addresses in either direction", () => {
+    // The near misses the segment boundary has to keep apart, on both sides:
+    // a longer path through a different directory, and shorter spellings
+    // that only share trailing text.
+    for (
+      const pattern of [
+        "packages/patterns/subsystem/home.tsx",
+        "system/whome.tsx",
+        "whome.tsx",
+      ]
+    ) {
+      expect(guardBreakRegistryEntries({
+        entries: [entry({ pattern })],
+        requiredPatternKeys: new Set(["system/home.tsx"]),
+        recordExists: () => true,
+      })).toEqual([]);
+    }
+  });
+
   it("allows a pattern the required key merely ends with textually", () => {
     // The boundary the suffix rule needs: `home.tsx` is claimed because the
     // separator lines up, but `whome.tsx` is a different pattern that no
