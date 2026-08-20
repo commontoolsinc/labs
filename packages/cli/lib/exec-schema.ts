@@ -11,6 +11,8 @@ import { cliCommand } from "./cli-name.ts";
 import {
   declaredEventFields,
   eventSchemaJudgesRootFields,
+  requiredEventFieldsOwed,
+  verbRunsWithoutPayload,
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
@@ -552,8 +554,13 @@ function parseObjectInput(
 
   // Only enforce required fields for schema-derived flags.
   // JSON input validation is deferred to the runner.
+  //
+  // What is enforced is what the caller is OWED to supply, not what the
+  // schema marks required: a field carrying a default is answered by the
+  // pattern, and demanding it here refuses a call the runtime would have
+  // filled in and dispatched.
   if (!usedJson) {
-    for (const key of requiredFlags(schema)) {
+    for (const key of requiredEventFieldsOwed(schema)) {
       if (!(key in input)) {
         throw new Error(`Missing required flag --${flagNameForKey(key)}`);
       }
@@ -688,6 +695,14 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
     return false;
   }
   if (schema.type !== undefined || schema.properties !== undefined) {
+    return false;
+  }
+  // A `$ref` beside the stream marker describes the event — in the definition
+  // rather than at the root, which is where a pattern routinely puts it. The
+  // root looks bare either way, so reading it alone called such a verb
+  // schema-less and rendered its page as `void`: no input type, no flags, and
+  // no sign that the fields the parser accepts exist at all.
+  if (typeof schema.$ref === "string") {
     return false;
   }
   return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
@@ -1176,8 +1191,7 @@ function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
   if (isSchemaLessHandlerInput(schema)) {
     return true;
   }
-  const properties = objectProperties(schema);
-  return properties !== null && requiredFlags(schema).size === 0;
+  return verbRunsWithoutPayload(schema);
 }
 
 export function parseExecArgs(

@@ -742,21 +742,35 @@ export function declaredEventFields(
   schema: JSONSchema | undefined,
 ): DeclaredEventFields | null {
   if (!isSchemaObject(schema)) return null;
+  // A top-level local `$ref` is resolved before the position is read, because
+  // a stream's event schema is routinely written through one:
+  // `{$ref: "#/$defs/AddEvent", asCell: ["stream"], $defs: {...}}` puts every
+  // field in the definition and none at the root. The indirection is only
+  // NEEDED for a recursive event type, but a pattern gets it either way, and
+  // a verb should not lose its flags over how its schema happens to be spelled.
+  //
+  // Both payload doors already resolve it — `normalizeAbsentVerbPayload` and
+  // `eventSchemaJudgesRootFields` — so reading the root unresolved here was
+  // the two doors disagreeing about the same schema: the verb's fields were
+  // judged on arrival while every flag surface reported none, leaving the
+  // caller a `--value` whose string could not satisfy the object it named.
+  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const target = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(target)) return null;
+  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
   // The gate the flag surfaces have always applied, widened by exactly one
   // term. A position stating `type: "object"` or carrying `properties` is a
   // fields position, and now so is one carrying `allOf` — because that is
-  // where its fields live. A root `$ref` is deliberately NOT resolved here:
-  // doing so would give flags to verbs that have never had them, which is a
-  // wider change than reading a conjunction and belongs to whoever wants it.
-  const statesItsOwnFields = schema.type === "object" || !!schema.properties;
-  if (!statesItsOwnFields && !Array.isArray(schema.allOf)) return null;
+  // where its fields live.
+  const statesItsOwnFields = target.type === "object" || !!target.properties;
+  if (!statesItsOwnFields && !Array.isArray(target.allOf)) return null;
   // A disjunction BESIDE properties is not a reason to report none. It adds
   // constraints the flag surfaces cannot express, but the properties it sits
   // next to are still declared and still typed, and refusing to name them
   // would take away flags that already worked. `declaredFieldsAt` reads the
   // conjunction and steps over the disjunction, which is the whole of what is
   // wanted here — a root check would only discard the fields beside it.
-  const declared = declaredFieldsAt(schema, cfcSchemaChildRoot(schema, schema));
+  const declared = declaredFieldsAt(target, targetRoot);
   // A conjunction earns the object path only by CONTRIBUTING fields. `allOf:
   // [{type: "string"}]` constrains a scalar, and admitting it here would route
   // a single-value verb through flag parsing and offer it a vocabulary of
@@ -771,6 +785,52 @@ export function declaredEventFields(
     }
   }
   return { properties, required: declared.required };
+}
+
+/**
+ * Whether a verb can be invoked carrying no payload at all.
+ *
+ * A field marked `required` that carries a `default` does not make a payload
+ * mandatory: `normalizeAbsentVerbPayload` turns absence into `{}` and the
+ * runtime fills the default in. Reading `required` raw would refuse at the
+ * flag door a call the payload door accepts and dispatches — the same
+ * disagreement between the two doors that `declaredEventFields` settles for
+ * WHICH fields exist, asked here about whether any of them is owed.
+ *
+ * `relaxDefaultedRequired` is the runtime's own answer to "what does a
+ * default satisfy", which is why it is borrowed rather than restated.
+ */
+export function verbRunsWithoutPayload(
+  schema: JSONSchema | undefined,
+): boolean {
+  return declaredEventFields(schema) !== null &&
+    requiredEventFieldsOwed(schema).size === 0;
+}
+
+/**
+ * The fields a caller must actually supply, which is `required` minus every
+ * field a default already answers for.
+ *
+ * The distinction matters at two doors that used to read `required` raw: the
+ * one deciding whether a bare invoke is allowed, and the one enforcing
+ * per-flag presence. Both would refuse a call the runtime accepts and fills
+ * in, and a caller told "Missing required flag --mode" about a field with a
+ * default has been sent to supply what the pattern already supplies.
+ *
+ * Returns the declared `required` unchanged when there is nothing to relax or
+ * the schema cannot be relaxed — failing toward the stricter answer, since a
+ * wrongly-relaxed field would be refused by the runtime instead, and further
+ * from the caller.
+ */
+export function requiredEventFieldsOwed(
+  schema: JSONSchema | undefined,
+): Set<string> {
+  const declared = declaredEventFields(schema);
+  if (declared === null) return new Set();
+  if (declared.required.size === 0) return declared.required;
+  if (!isSchemaObject(schema)) return declared.required;
+  const relaxed = relaxDefaultedRequired(schema, schema, new Map());
+  return declaredEventFields(relaxed)?.required ?? declared.required;
 }
 
 /**

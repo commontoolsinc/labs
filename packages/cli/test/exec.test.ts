@@ -777,6 +777,75 @@ describe("parseExecArgs edge cases", () => {
       .toEqual({ fooBar: 5 });
   });
 
+  it("derives flags from fields behind a top-level $ref", () => {
+    // The shape a stream's event is routinely written in. Its fields sit in
+    // the definition, and a caller should not have to know that to name them.
+    const refSchema = (
+      properties: Record<string, JSONSchema>,
+      required: string[],
+    ): JSONSchema => ({
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      $defs: { AddEvent: { type: "object", properties, required } },
+    } as JSONSchema);
+
+    const one = makeSpec(
+      "handler",
+      refSchema({ query: { type: "string" } }, ["query"]),
+    );
+    expect(parseExecArgs(one, ["--query", "Milk"]).input)
+      .toEqual({ query: "Milk" });
+    // One field, so it answers to --value as well — the same rule any
+    // single-field verb follows, reached through the indirection.
+    expect(parseExecArgs(one, ["--value", "Milk"]).input)
+      .toEqual({ query: "Milk" });
+
+    const two = makeSpec(
+      "handler",
+      refSchema(
+        { query: { type: "string" }, limit: { type: "number" } },
+        ["query"],
+      ),
+    );
+    expect(parseExecArgs(two, ["--query", "Milk", "--limit", "5"]).input)
+      .toEqual({ query: "Milk", limit: 5 });
+    expect(() => parseExecArgs(two, ["--value", "Milk"]))
+      .toThrow(/this verb declares 2: "--query", "--limit"/);
+    expect(() => parseExecArgs(two, ["--quer", "Milk"]))
+      .toThrow(/Did you mean "--query"\?/);
+
+    // The page reports the resolved event rather than calling it void, and
+    // names the flags the parser accepts.
+    const help = renderExecHelp("/tmp/x.handler", one);
+    expect(help).toContain("query: string");
+    expect(help).toContain("--query <string>");
+    expect(help).not.toContain("Input type:\n  void");
+  });
+
+  it("counts a defaulted field as supplied rather than owed", () => {
+    // The payload gate relaxes `required` for a field carrying a default, so
+    // demanding it at the flag door would refuse a call the runtime fills in.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        mode: { type: "string", default: "fast" },
+        note: { type: "string" },
+      },
+      required: ["mode"],
+    });
+    expect(parseExecArgs(spec, []).input).toEqual({});
+    expect(parseExecArgs(spec, ["--note", "hi"]).input).toEqual({ note: "hi" });
+
+    // A required field with no default is still owed.
+    const owed = makeSpec("handler", {
+      type: "object",
+      properties: { mode: { type: "string" } },
+      required: ["mode"],
+    });
+    expect(() => parseExecArgs(owed, ["invoke"]))
+      .toThrow(/Missing required flag --mode/);
+  });
+
   it("lets a verb's single field be named by --value as well as its own name", () => {
     const spec = makeSpec("handler", {
       type: "object",
@@ -3108,13 +3177,10 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  // Characterized first (pre-D5, observed passing on unmodified code with
-  // the dispatch assertion): a mounted handler invoked with nothing at all
-  // dispatched `undefined` when its event schema sat behind a top-level
-  // local $ref the arg parser derives no flags from. The gate now normalizes
-  // absence to `{}` against the resolved object schema and refuses when
-  // `required` survives relaxation — nothing dispatches, so an invocation id
-  // would never have been spent.
+  // A mounted handler whose event schema sits behind a top-level local $ref
+  // is refused at the flag door, which reads the definition's fields and can
+  // name the type the caller must supply. Nothing dispatches, so an
+  // invocation id is never spent.
   it("refuses an absent payload for a mounted handler that cannot run without one", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -3153,7 +3219,7 @@ describe("mounted callable resolution and execution", () => {
         },
       ),
     ).rejects.toThrow(
-      /Invalid input for "add": no payload was supplied.*query.*send a payload/,
+      /Handler requires input\. Expected type: \{\s*query: string\s*\}/,
     );
 
     expect(harness.tracker.handlerWrites).toEqual([]);
