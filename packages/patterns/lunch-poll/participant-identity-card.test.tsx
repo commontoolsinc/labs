@@ -198,7 +198,12 @@ export default pattern(() => {
   const assert_rename_keeps_identity = assert(() =>
     alexCard.isJoined === true &&
     (users.get() ?? []).length === 2 &&
-    hasText(alexCard[UI], "") === true
+    // The point of the break, stated as an assertion: the roster entry still
+    // carries the JOIN-TIME name, which no longer matches what the viewer is
+    // called, and they stay joined anyway because the entry is matched by
+    // profile cell. A name-keyed roster would have lost them here.
+    (users.get() ?? [])[0]?.name === "Alex" &&
+    equals((users.get() ?? [])[0]?.profile, alexProfile)
   );
 
   return {

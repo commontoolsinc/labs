@@ -70,7 +70,6 @@ export interface PollOptionCardInput {
   /** One-based display rank, or undefined while the parent ranking settles. */
   rank: number | undefined;
 
-  /** Resolved current viewer name; required for per-option vote styling. */
   /** The viewer's profile cell — identity, compared with `equals()`. */
   viewerProfile?: LunchProfileCell;
 
