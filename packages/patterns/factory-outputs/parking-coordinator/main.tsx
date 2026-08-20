@@ -400,7 +400,7 @@ const renameParkingAdminRole = (
       : role
   );
 
-export type ParkingAdminChangeKind = "toggle" | "rename" | "remove";
+type ParkingAdminChangeKind = "toggle" | "rename" | "remove";
 
 export interface ParkingAdminChangeEvent {
   /** Person whose role changes; for a rename, the name they had before. */
@@ -409,7 +409,7 @@ export interface ParkingAdminChangeEvent {
   newName?: string;
 }
 
-export interface ParkingAdminChangeState {
+interface ParkingAdminChangeState {
   kind: ParkingAdminChangeKind;
   adminRegistry: ParkingAdminRegistryCell;
   managerMode: ParkingAdminManagerModeCell;
@@ -423,11 +423,25 @@ export interface ParkingAdminChangeState {
  * another action in this pattern, or another pattern sharing the registry cell
  * — is rejected by the runtime rather than by a convention.
  *
+ * It stays private to this module. Its checks read the cells it is bound to,
+ * so a module that could import it could bind it to a registry it wants to
+ * change and to state of its own that says the change is allowed. Private, the
+ * only binding is the one below, against this pattern's own cells. A handler
+ * that carries a `uiContract` can afford to be exported, because the event
+ * itself has to come from the reviewed surface; this one is driven by
+ * `editPerson` and `removePerson` as well as by the button, so it has no event
+ * requirement to lean on.
+ *
  * `rename` and `remove` follow a change the people list already made, so they
  * arrive as events from `editPerson` and `removePerson` instead of writing the
  * roster there.
+ *
+ * What none of this reaches is who the acting person is: that is a name read
+ * out of `people`, per the demo identity model above, so a caller that supplies
+ * `people` supplies the answer. A pattern wanting real authority here needs a
+ * stable user identity first.
  */
-export const commitParkingAdminChange = handler<
+const commitParkingAdminChange = handler<
   ParkingAdminChangeEvent,
   ParkingAdminChangeState
 >((event, { kind, adminRegistry, managerMode, people, selectedPersonName }) => {

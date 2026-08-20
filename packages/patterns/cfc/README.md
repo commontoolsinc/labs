@@ -105,10 +105,13 @@ below.
 ## Floor An Admin Registry
 
 A `requiredIntegrity` floor is a requirement on the value being written, and the
-runtime also screens the reads that fed that write. Five rules follow. A pattern
-that breaks one of the first four has declared a protection its own writes
-cannot satisfy, so the runtime refuses every write to the path it was meant to
-guard. The fifth is what keeps the protection from locking everyone out.
+runtime also screens the reads that fed that write. Five rules follow, and they
+fail in three different ways. Break one of the first three and the floor is
+unsatisfiable: the runtime refuses every write to the path the floor was meant
+to guard. Break the fourth and the writes go through, endorsed by something the
+user granted themselves — the protection is there and it admits the wrong
+writer. Break the fifth and the registry ends up holding authority that nobody
+can exercise and nobody can repair.
 
 **Mint on the path the floor sits on.** The floor asks what the value at that
 exact path carries. `AddIntegrity` on an array's items endorses the items; it
