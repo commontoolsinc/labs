@@ -56,6 +56,7 @@ import {
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
@@ -288,6 +289,7 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       cfcEnforcementMode,
       cfcFlowLabels,
+      cfcWriteFloor,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -313,6 +315,7 @@ export class PiecesController<T = unknown> {
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
+      cfcWriteFloor?: CfcWriteFloorMode;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -342,6 +345,7 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+      ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
       navigateCallback: (target) =>
         registerNavigatedPiece(piecesRef.current!, target),
       trustSnapshotProvider: () => ({

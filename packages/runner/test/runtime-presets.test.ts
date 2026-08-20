@@ -220,6 +220,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         patternCoverage,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -229,6 +230,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         patternCoverage,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
       });
     });
 

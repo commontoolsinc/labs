@@ -13,7 +13,10 @@ import {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import {
+  type CfcWriteFloorMode,
+  markRendererTrustedEvent,
+} from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
   initializePiecesController,
@@ -220,13 +223,18 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
+  async init(
+    { rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs, cfcWriteFloor },
+  ) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
       space: spaceName as string,
+      ...(cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: cfcWriteFloor as CfcWriteFloorMode }
+        : {}),
     });
     if (diagnostics === true) {
       const scheduler = controller().runtime.scheduler;

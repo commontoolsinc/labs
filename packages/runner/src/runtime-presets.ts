@@ -51,9 +51,11 @@
  * |                            | rollout)                                         |
  * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
  * |                            | delta (host-controlled rollout)                  |
- * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
+ * | cfcWriteFloor              | core-default (off); remoteClient delta           |
+ * |                            | (host-controlled rollout) — flip in coreOptions  |
+ * |                            | when a first-party rollout begins                |
+ * | cfcTriggerReadGating       | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
- * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
@@ -97,6 +99,7 @@
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcWriteFloorMode,
   TrustSnapshot,
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
@@ -307,12 +310,13 @@ export interface RemoteClientPresetParams extends CoreParams {
   patternCoverage?: PatternCoverageCollector;
   /**
    * Host-controlled rollout dials, the browserWorker precedent: a client
-   * host (cf-harness's fabric session) may raise enforcement and turn on
-   * flow-label persistence for one session without moving the fleet posture
-   * in `coreOptions`.
+   * host (cf-harness's fabric session, the pattern integration harness) may
+   * raise enforcement, turn on flow-label persistence, and raise the write
+   * floor for one session without moving the fleet posture in `coreOptions`.
    */
   cfcEnforcementMode?: CfcEnforcementMode;
   cfcFlowLabels?: CfcFlowLabelsMode;
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -392,6 +396,9 @@ export const runtimePresets = {
         : {}),
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
+        : {}),
+      ...(params.cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: params.cfcWriteFloor }
         : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
