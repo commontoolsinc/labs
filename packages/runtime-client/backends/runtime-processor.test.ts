@@ -13,6 +13,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -46,6 +47,7 @@ import {
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import {
+  assertFabricLoggerFlags,
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
@@ -2876,6 +2878,117 @@ describe("runtime-client CellRef conversion", () => {
     // Nested too, the walk reaching it through the container rebuild.
     expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
     expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
+});
+
+describe("RuntimeProcessor.getLoggerCounts", () => {
+  // The handler reads process-global logger state, so each case raises its own
+  // flag and clears it again rather than leaving one for the next.
+  function withFlag(metadata: Record<string, unknown>, body: () => void): void {
+    const logger = getLogger("getLoggerCounts-test");
+    logger.flag("probe", "id:1", true, metadata);
+    try {
+      body();
+    } finally {
+      logger.resetFlags();
+    }
+  }
+
+  it("carries a raised flag's metadata through to the response", () => {
+    // No `this` is read, so the handler runs against a bare receiver.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ a: 1 }, () => {
+      const response = RuntimeProcessor.prototype.getLoggerCounts.call(
+        processor,
+        { type: RequestType.GetLoggerCounts },
+      );
+
+      expect(Object.keys(response).sort()).toEqual([
+        "counts",
+        "flags",
+        "metadata",
+        "timing",
+      ]);
+      expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
+        a: 1,
+      });
+    });
+  });
+
+  it("refuses to answer at all when a flag holds unsendable metadata", () => {
+    // The assertion is wired into the handler, not merely available beside it:
+    // a `Date` raised anywhere in the process stops this read.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ when: new Date(0) }, () => {
+      expect(() =>
+        RuntimeProcessor.prototype.getLoggerCounts.call(
+          processor,
+          { type: RequestType.GetLoggerCounts },
+        )
+      ).toThrow(/not being a `FabricValue`/);
+    });
+  });
+});
+
+describe("assertFabricLoggerFlags", () => {
+  it("accepts metadata that vets, and a flag raised without any", () => {
+    // A `Logger` takes `Record<string, unknown>` and constrains it no further,
+    // so what it holds is established here or not at all.
+    const flags = {
+      runner: {
+        "action invalid input": {
+          "action:ok": { a: 1, b: ["x", null] },
+          "action:bare": null,
+        },
+      },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
+  });
+
+  it("refuses a flag named with a key no fabric record carries", () => {
+    // `__proto__` and `constructor` are refused as fabric keys deliberately,
+    // and `1-fabric-values.md` specifies it. An IPC payload is a `FabricValue`
+    // per se -- the envelope as much as the metadata, a record of fabric values
+    // being one itself -- so a flag named one of them cannot cross, and saying
+    // so is the point rather than a limitation to route around.
+    const flags = { runner: { constructor: { "id:1": { a: 1 } } } };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      /not being a `FabricValue`/,
+    );
+  });
+
+  it("throws, rendering what it refused", () => {
+    // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
+    // shape that would otherwise cross as something the far side cannot read.
+    const flags = {
+      runner: {
+        "action invalid input": { "action:bad": { when: new Date(0) } },
+      },
+    };
+
+    // The rendering is what says which flag is at fault. Asserted through the
+    // flag's own id rather than the whole string, so a change to how a `Date`
+    // renders does not read as this breaking.
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      /Cannot send logger flags on this connection, not being a `FabricValue`/,
+    );
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(/action:bad/);
+  });
+
+  it("throws rather than dropping the metadata and reporting the flag", () => {
+    // The disposition itself, asserted: dropping the metadata would leave the
+    // payload reporting a flag whose contents had silently gone, which is the
+    // loss "Death before confusion!" rules out.
+    const flags = {
+      runner: { sample: { "id:1": { fn: () => 0 } } },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow();
+    expect(flags.runner.sample["id:1"]).not.toBe(null);
   });
 });
 

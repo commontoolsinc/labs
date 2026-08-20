@@ -2,7 +2,9 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  isValidFabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   Cell,
   JSONSchema,
@@ -22,9 +24,11 @@ import {
   linkRefFrom,
   refuseFabricInstance,
 } from "@commonfabric/runner/shared";
+import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "../protocol/mod.ts";
-import { CellRef, PageRef } from "../protocol/types.ts";
+import { CellRef, type LoggerFlagsData, PageRef } from "../protocol/types.ts";
 
 /**
  * Converts a value arriving over the connection into the form the worker
@@ -89,6 +93,33 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     );
   }
   return value;
+}
+
+/**
+ * Asserts that a logger flag breakdown is carriable on the connection. Its
+ * shape is the declaration's -- `getLoggerFlagsBreakdown()` reports records to
+ * the leaf -- and what the declaration leaves open is the leaves themselves,
+ * `Logger` taking a `Record<string, unknown>` and constraining it no further.
+ * So the whole question is whether the breakdown is a `FabricValue`.
+ *
+ * A breakdown that is not one throws rather than travelling with the offending
+ * metadata dropped. Dropping it would leave the payload reporting a flag whose
+ * metadata had silently gone, which is the loss "Death before confusion!"
+ * rules out.
+ *
+ * Nothing reaches the throw today, de facto rather than by construction: no
+ * flag gates it, and every producer that raises a flag with metadata passes
+ * fabric data -- one of them a cell's own raw value.
+ */
+export function assertFabricLoggerFlags(
+  breakdown: LoggerFlagsBreakdown,
+): asserts breakdown is LoggerFlagsData {
+  if (isValidFabricValue(breakdown)) return;
+
+  throw new Error(
+    "Cannot send logger flags on this connection, not being a " +
+      `\`FabricValue\`: ${backtickQuote(toCompactDebugString(breakdown))}`,
+  );
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {

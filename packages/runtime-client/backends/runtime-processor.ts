@@ -180,6 +180,7 @@ import {
   postRuntimeError,
 } from "./runtime-error.ts";
 import {
+  assertFabricLoggerFlags,
   createCellRef,
   createPageRef,
   getCell,
@@ -188,6 +189,23 @@ import {
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodecEngine();
+
+/** Each registered logger's enabled state and level. */
+function loggerMetadata(): LoggerMetadata {
+  const global = globalThis as unknown as {
+    commonfabric?: { logger?: Record<string, Logger> };
+  };
+  const result: LoggerMetadata = {};
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
+      result[name] = {
+        enabled: !logger.disabled,
+        level: (logger.level ?? "info") as LogLevel,
+      };
+    }
+  }
+  return result;
+}
 
 function spaceAclResponse(
   runtime: Runtime,
@@ -1570,26 +1588,11 @@ export class RuntimeProcessor {
 
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
-    const metadata = this.#getLoggerMetadata();
+    const metadata = loggerMetadata();
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
+    assertFabricLoggerFlags(flags);
     return { counts, metadata, timing, flags };
-  }
-
-  #getLoggerMetadata(): LoggerMetadata {
-    const global = globalThis as unknown as {
-      commonfabric?: { logger?: Record<string, Logger> };
-    };
-    const result: LoggerMetadata = {};
-    if (global.commonfabric?.logger) {
-      for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
-        result[name] = {
-          enabled: !logger.disabled,
-          level: (logger.level ?? "info") as LogLevel,
-        };
-      }
-    }
-    return result;
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {
