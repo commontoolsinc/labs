@@ -215,12 +215,32 @@ one: checks every row's precondition before writing, applies serially in plan
 order, stops at the first failure naming the remainder by piece, and
 recomputes what is outstanding on each invocation.
 
+It also needs a read that does not exist yet in the right shape. A piece's
+pattern identity is reachable live and without running the piece, but only
+through paths that carry far more than the identity: per-piece inspection
+also pulls the whole input document, the whole result, and the link graph in
+both directions, and the space-wide listing runs every piece it lists. Both
+are diagnostics. A plan over a large board needs the identity alone, one
+cheap read per piece, and that is a small addition to machinery that already
+exists rather than new capability.
+
+The snapshot-download path is not the answer here, and stage 1 should not
+reach for it. It caches the downloaded store indefinitely with no expiry, and
+the flag that re-downloads is on the pull command rather than on the reads —
+so a second read after a run would be served the pre-run snapshot and report
+that nothing had moved. A resume check backed by that is not slow or
+approximate, it is confidently wrong, which is the one failure mode a resume
+check must not have.
+
 - [ ] A plan is generated from a selector and checked in as an artifact.
 - [ ] Preconditions are proved for every row before the first write.
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] A run interrupted partway is completed by re-invoking the same command,
       and the pieces that landed are not rewritten.
 - [ ] A stopped run names every unattempted piece, not a count of them.
+- [ ] The precondition read reports live state on every invocation, and a
+      test proves it: a read taken after a change reflects the change. A
+      cached answer here would make resume confidently wrong.
 
 ### 2. Verification as its own pass
 
@@ -306,14 +326,13 @@ settled before work starts.
    command surface. This interacts with
    [CLI surface shape](cli-surface-shape.md), and it is the first decision
    because every later stage inherits it.
-2. **Where preconditions are evaluated** — *stage 1*, and forced rather than
-   deferrable. Reading a piece's current state from a store file is cheap
-   and offline, and it is how a rehearsal against a local copy would
-   naturally do it. A live deployment may offer no such access, and a
-   precondition check that only works against a copy would leave the live
-   run — the one that cannot be reset — as the least verified of the two.
-   Either the check works over the API as well, or the rehearsal is
-   measuring a mechanism the live run does not use.
+2. ~~**Where preconditions are evaluated.**~~ **Resolved: over the API, and
+   stage 1 builds the read.** A piece's pattern identity is readable from a
+   live deployment without running the piece — the piece inspection path
+   loads the cell with execution off and reports the identity ref — so the
+   same check serves a rehearsal and a live run, and neither is verified by
+   a mechanism the other does not use. What does not yet exist is a read of
+   the right *shape*: see below.
 3. **Scope of a compatibility override** — *stage 1*. An override that lets
    one refused piece through is a per-piece decision today. Applied to a
    plan, one flag covering every row turns many decisions into one, which is
