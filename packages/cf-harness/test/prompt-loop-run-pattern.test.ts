@@ -248,7 +248,6 @@ describe("prompt-loop run_pattern model boundary", () => {
       // A real default pattern, so the space has a piece registry to join.
       const defaultRoot = await pieces.create(
         [
-          "/// <cf-disable-transform />",
           "import { handler, pattern, type Cell } from 'commonfabric';",
           "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
           "  true,",

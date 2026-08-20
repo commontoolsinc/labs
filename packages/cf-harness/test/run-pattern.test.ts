@@ -161,7 +161,6 @@ const DOUBLED_RESULT_SCHEMA = {
  * space has a REAL registry rather than the detached always-empty fallback.
  */
 const DEFAULT_PATTERN_SOURCE = [
-  "/// <cf-disable-transform />",
   "import { handler, pattern, type Cell } from 'commonfabric';",
   "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
   "  true,",
