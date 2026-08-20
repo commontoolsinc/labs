@@ -110,7 +110,7 @@ Those container kinds appear to authors in three main buckets:
    property values, variable initializers, call arguments, array elements, and
    direct function return expressions
 3. callback-local value-expression sites inside supported collection
-   callbacks, both the reactive operators and plain-array value callbacks
+   callbacks, both the reactive operators and plain-array `map` callbacks
 
 Explicit computation callbacks such as `computed`, `action`, `lift`, and
 `handler` are important boundaries, but their bodies are **not** blanket

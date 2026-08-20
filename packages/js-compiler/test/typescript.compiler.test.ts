@@ -129,6 +129,36 @@ async function resolveAndCompileToModules(
 }
 
 describe("TypeScriptCompiler", () => {
+  it("registers virtual environment types as default libraries", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.ts", {
+        "/main.ts": "export const values = [1, 2, 3];",
+      }),
+    );
+    let classifications: Record<string, boolean> | undefined;
+
+    compiler.compileToModules(resolved, {
+      beforeTransformers: (program) => {
+        classifications = Object.fromEntries(
+          program.getSourceFiles()
+            .filter((sourceFile) => sourceFile.fileName.startsWith("$types/"))
+            .map((sourceFile) => [
+              sourceFile.fileName,
+              program.isSourceFileDefaultLibrary(sourceFile),
+            ]),
+        );
+        return [];
+      },
+    });
+
+    expect(classifications).toEqual({
+      "$types/dom.d.ts": true,
+      "$types/es2023.d.ts": true,
+      "$types/jsx.d.ts": true,
+    });
+  });
+
   it("compileToModules emits per-module CommonJS for each source", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
