@@ -93,7 +93,8 @@ round-trip correctly.
 > **must accept** both padded and unpadded input for compatibility; standard-base64
 > characters (`+`, `/`) are still invalid and must be rejected. This convention
 > applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDay@1` state
-> values, and to the `hash` field of `Hash@1` state.
+> values, to the `hash` field of `Hash@1` state, and to the `publicKey` and
+> `privateKey` fields of `KeyPair@1` state.
 
 The JSON key for a tagged value is the tag with `/` prepended, per Section 2:
 a value under `Link@1` is written `{ "/Link@1": <state> }`. What follows
@@ -122,6 +123,24 @@ example `fid1`), and `hash` is the hash bytes as an unpadded base64url string,
 per the convention above. On decoding, a state that is not an object, or whose
 fields are not strings, produces a `ProblematicValue`. See `1-fabric-values.md`
 Section 1.4.9.
+
+### `KeyPair@1` — asymmetric key pairs
+
+State is `{ algorithm: string, publicKey: string, privateKey: string }`.
+`algorithm` names the algorithm in Web Crypto's normalized spelling (for
+example `Ed25519`), and the two keys are their raw bytes as unpadded base64url
+strings, per the convention above. On decoding, a state that is not an object,
+or whose fields are not strings, produces a `ProblematicValue`, as does a key
+that is not valid base64url.
+
+**Only a pair that holds key material has a state here.** A `FabricKeyPair`
+that holds `CryptoKey` handles instead is refused: encoding one throws rather
+than producing a state. That refusal is the format's contract with a
+non-extractable key, whose material is by construction unreachable — there is
+nothing to write down, and a state naming the algorithm alone would claim to
+carry a key it did not. Such a pair crosses under the realm encoding
+(Section 3.4 of [4-realm-encoding.md](./4-realm-encoding.md)) and nowhere else.
+See `1-fabric-values.md` Section 1.4.11.
 
 ### `RegExp@1` — regular expressions
 

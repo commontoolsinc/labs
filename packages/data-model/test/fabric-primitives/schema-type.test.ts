@@ -26,6 +26,7 @@ import {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
   schemaTypeOfFabricPrimitive,
 } from "@/fabric-primitives/index.ts";
@@ -63,6 +64,16 @@ const CASES: readonly {
     ctor: FabricHash,
     make: () => new FabricHash(new Uint8Array(32), "fid1"),
     name: "FabricHash",
+  },
+  {
+    ctor: FabricKeyPair,
+    make: () =>
+      new FabricKeyPair(
+        "Ed25519",
+        new Uint8Array([1]),
+        new Uint8Array([2]),
+      ),
+    name: "FabricKeyPair",
   },
   {
     ctor: FabricRegExp,

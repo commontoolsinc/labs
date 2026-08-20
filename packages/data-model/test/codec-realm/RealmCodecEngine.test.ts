@@ -38,6 +38,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
@@ -1150,6 +1151,54 @@ describe("RealmCodecEngine", () => {
       expect(report.facts?.lookalikeIsArray).toBe(true);
       expect(report.facts?.lookalikeTag).toBe("EpochDay@1");
       expect(report.classes?.lookalike).toBe("Array");
+    });
+
+    it("carries a `FabricKeyPair`'s handles across as live `CryptoKey`s", async () => {
+      // The whole reason this class has a realm arm and no JSON one. A
+      // non-extractable key cannot produce its bytes, so no format that writes
+      // bytes down can carry it; cloning carries the key itself, and what has
+      // to be shown is that what lands on the far side is still that key
+      // rather than a shape resembling it.
+      const source = await crypto.subtle.generateKey(
+        { name: "Ed25519" },
+        false,
+        ["sign", "verify"],
+      ) as CryptoKeyPair;
+
+      const report = await crossRealm({ keyPair: new FabricKeyPair(source) });
+
+      expect(report.ok).toBe(true);
+      expect(report.classes).toEqual({ keyPair: "FabricKeyPair" });
+      expect(report.facts?.keyPair).toEqual({
+        algorithm: "Ed25519",
+        hasMaterial: false,
+        publicKeyClass: "CryptoKey",
+        privateKeyClass: "CryptoKey",
+        privateKeyType: "private",
+        // Extractability intact: a key that could not be exported here must
+        // not become one that can be exported there.
+        privateKeyExtractable: false,
+        privateKeyUsages: ["sign"],
+      });
+    });
+
+    it("carries a `FabricKeyPair`'s material across as bytes", async () => {
+      const report = await crossRealm({
+        keyPair: new FabricKeyPair(
+          "Ed25519",
+          new Uint8Array([1, 2, 3]),
+          new Uint8Array([250, 251]),
+        ),
+      });
+
+      expect(report.ok).toBe(true);
+      expect(report.classes).toEqual({ keyPair: "FabricKeyPair" });
+      expect(report.facts?.keyPair).toEqual({
+        algorithm: "Ed25519",
+        hasMaterial: true,
+        publicKey: [1, 2, 3],
+        privateKey: [250, 251],
+      });
     });
 
     it("expands a nonterminal codec's state, terminating what is inside it", async () => {

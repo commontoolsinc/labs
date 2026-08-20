@@ -74,6 +74,7 @@ import type {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import type {
@@ -501,6 +502,7 @@ export interface BuilderFunctionsAndConstants {
   FabricLink: typeof FabricLink;
   FabricBytes: typeof FabricBytes;
   FabricRegExp: typeof FabricRegExp;
+  FabricKeyPair: typeof FabricKeyPair;
   FabricError: typeof FabricError;
 
   // Debug stringifiers

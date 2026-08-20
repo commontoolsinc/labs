@@ -117,6 +117,7 @@ type FabricValue =
   | FabricEpochDay
   | FabricHash
   | FabricBytes
+  | FabricKeyPair
   | FabricRegExp
 
   // (c) Branded fabric types (custom types implementing the fabric protocol)
@@ -343,7 +344,8 @@ has a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3),
 but it is a `FabricPrimitive`, not a `FabricInstance`.
 
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDay`,
-`FabricHash`, `FabricBytes`, `FabricRegExp`) are **not** `FabricInstance`s —
+`FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) are **not**
+`FabricInstance`s —
 they are `FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
 `FabricSpecialObject`, and the `FabricValue` union includes
 `FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
@@ -438,10 +440,11 @@ copying in the common case and centralizes the freeze-state logic for all
 wrapper types.
 
 Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
-`FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricRegExp`) are
-**`FabricPrimitive` subclasses** and do not extend `FabricInstance`. They are
-included in `FabricValue` via the `FabricSpecialObject` arm of the union
-(Section 1.4.6). See Sections 1.4.5 through 1.4.10.
+`FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`,
+`FabricRegExp`) are **`FabricPrimitive` subclasses** and do not extend
+`FabricInstance`. They are included in `FabricValue` via the
+`FabricSpecialObject` arm of the union (Section 1.4.6). See Sections 1.4.5
+through 1.4.11.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
 |------------------------|---------|----------|--------------|-------|
@@ -449,6 +452,7 @@ included in `FabricValue` via the `FabricSpecialObject` arm of the union
 | `FabricEpochDay` | `FabricPrimitive` | `EpochDay@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
 | `FabricHash` | `FabricPrimitive` | `Hash@1` | `Uint8Array` (hash bytes, private) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<tag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). Wire state is `{ tag, hash }` (see Section 1.4.9). |
 | `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. Input bytes are copied at construction time. Callers access bytes via `slice()`, `copyInto()`, and `length`. |
+| `FabricKeyPair` | `FabricPrimitive` | `KeyPair@1` | Either two `CryptoKey` handles, or an algorithm name and the two keys' bytes | Asymmetric key pair. Which of the two states it holds decides what it can do: only the material state has a JSON encoding or a hash, and only the handle state can hand back a `CryptoKeyPair` (see Section 1.4.11). |
 | `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh native `RegExp` clone per call. Extra enumerable properties on a native `RegExp` cause rejection. |
 
 #### Extra Enumerable Properties
@@ -461,7 +465,7 @@ includes them in its output, and `decode()` restores them on the
 decoded instance (Section 1.4.2).
 
 **`FabricMap`, `FabricSet`, `FabricRegExp`, `FabricEpochNsec`,
-`FabricEpochDay`, `FabricHash`, `FabricBytes`** must NOT carry
+`FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`** must NOT carry
 extra enumerable
 properties. Their
 stored value contains only the essential native data (entries, items,
@@ -1181,7 +1185,81 @@ primitive, it hosts its own `[JSON_CODEC]` (tag `Bytes@1`), the same shape as
 `FabricEpochNsec` and `FabricEpochDay`. The hashing system uses the
 dedicated `TAG_BYTES` primitive tag (Section 6.3).
 
-#### 1.4.11 `FabricLink`
+#### 1.4.11 `FabricKeyPair`
+
+`FabricKeyPair` holds an asymmetric key pair, in one of two states:
+
+* It **holds handles**: two `CryptoKey`s, whose material the holding realm may
+  have no way to reach.
+* It **holds material**: the two keys as bytes, beside the name of the
+  algorithm they belong to.
+
+The union is inside the class rather than beside it because the property that
+matters here belongs to the value's state rather than to its type. A pair
+either holds material or holds handles, and only the first can be written down.
+A single fabric type covers the pair whole, so a carrier of one — a message
+field, a cell — has nothing to narrow.
+
+```typescript
+// Shown for illustration only.
+// file: packages/data-model/fabric-primitives/FabricKeyPair.ts
+
+export class FabricKeyPair extends FabricPrimitive {
+  readonly #algorithm: string;
+  readonly #publicKey: CryptoKey | FabricBytes;
+  readonly #privateKey: CryptoKey | FabricBytes;
+
+  constructor(pair: CryptoKeyPair);
+  constructor(
+    algorithm: string,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
+  );
+
+  /** The algorithm name, in Web Crypto's normalized spelling. */
+  get algorithm(): string;
+
+  /** Whether this instance holds key material, as opposed to handles. */
+  get hasMaterial(): boolean;
+
+  /** A fresh `CryptoKeyPair`. Throws when this instance holds material. */
+  get cryptoKeyPair(): CryptoKeyPair;
+
+  /** The public key's bytes. Throws when this instance holds handles. */
+  get publicKeyBytes(): FabricBytes;
+
+  /** The private key's bytes. Throws when this instance holds handles. */
+  get privateKeyBytes(): FabricBytes;
+}
+```
+
+A pair holding handles is constructed from a `CryptoKeyPair` whose two keys are
+a public/private pair agreeing on their algorithm; anything else is refused.
+`algorithm` is then read from the keys rather than stored beside them. A pair
+holding material is constructed from an algorithm name and the two keys' bytes,
+which it copies unless handed a `FabricBytes`, that being already immutable and
+sole-owned.
+
+**Only the material state is representable outside a live realm.** A
+`CryptoKey`'s material is reachable only through `SubtleCrypto.exportKey()`,
+which is asynchronous where a codec's `encode()` is synchronous, and which a
+non-extractable key refuses outright. So:
+
+- The JSON encoding **refuses** a pair holding handles: encoding one throws
+  (Section 3.4 of [3-json-encoding.md](./3-json-encoding.md)).
+- The **hash** of a pair holding handles is undefined, and computing one throws
+  (Section 4.17 of [2-hash-byte-format.md](./2-hash-byte-format.md)). Its
+  algorithm name alone is shared by every key that uses that algorithm, so
+  hashing it would give distinct keys one identity.
+- The **realm encoding** carries the keys themselves (Section 3.4 of
+  [4-realm-encoding.md](./4-realm-encoding.md)), which is what a transport
+  preserving `CryptoKey` makes possible.
+
+The refusals are the point rather than a gap. The formats that persist and
+inspect a value are exactly the ones that must not be able to represent a key
+whose whole purpose is that its material cannot be extracted.
+
+#### 1.4.12 `FabricLink`
 
 `FabricLink` is a fabric-native `FabricInstance` — like the wrapper classes of
 Sections 1.4.2–1.4.4, but not wrapping any native JS type — that represents a
@@ -1236,7 +1314,7 @@ export class FabricLink extends BaseFabricInstance {
 }
 ```
 
-#### 1.4.12 `bigint` — Not Wrapped
+#### 1.4.13 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `FabricValue` layer directly, like `undefined`. No
@@ -1245,7 +1323,7 @@ rides through the `FabricValue` layer directly, like `undefined`. No
 `UndefinedCodec` — there is no owned class to host a `[CODEC]`); see
 Section 4.5.
 
-#### 1.4.13 Design Notes
+#### 1.4.14 Design Notes
 
 > **Why wrapper classes instead of inline encoder branches?** Each wrapper
 > genuinely implements `FabricInstance` and hosts its own `[CODEC]`, so the
@@ -3150,6 +3228,7 @@ organized into four categories by high nibble:
 | `TAG_HASH`        | `0x29` | 41      | `FabricHash`                      |
 | `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
 | `TAG_REGEXP`      | `0x2B` | 43      | `FabricRegExp`                    |
+| `TAG_KEY_PAIR`    | `0x2C` | 44      | `FabricKeyPair` (holding material) |
 
 **Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
 payload of a primitive type with a digest, when doing so shortens the byte
@@ -3291,6 +3370,8 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricEpochDay` uses TAG_EPOCH_DAY (dedicated primitive tag).
   // - `FabricHash` uses TAG_HASH (dedicated primitive tag).
   // - `FabricRegExp` uses TAG_REGEXP (dedicated primitive tag).
+  // - `FabricKeyPair` uses TAG_KEY_PAIR (dedicated primitive tag), and only
+  //   when it holds material; hashing one that holds handles throws.
   //
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
@@ -3306,6 +3387,8 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
   // - `FabricRegExp`:     hash(TAG_REGEXP, hashStr(source), hashStr(flags),
   //                               hashStr(flavor))
+  // - `FabricKeyPair`:    hash(TAG_KEY_PAIR, hashStr(algorithm),
+  //                               hashOf(publicKey), hashOf(privateKey))
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),

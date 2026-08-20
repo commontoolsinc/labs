@@ -44,6 +44,9 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricHash`. */
     Hash: "Hash@1",
 
+    /** Constant for class `FabricKeyPair`. */
+    KeyPair: "KeyPair@1",
+
     /** Constant for class `FabricRegExp`. */
     RegExp: "RegExp@1",
 

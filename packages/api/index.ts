@@ -216,6 +216,46 @@ export interface FabricRegExpConstructor {
 export declare const FabricRegExp: FabricRegExpConstructor;
 
 /**
+ * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
+ * a primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * An instance either holds handles -- two `CryptoKey`s, whose material this
+ * realm may have no way to reach -- or holds material, the two keys as bytes.
+ * `hasMaterial` says which, and the accessor belonging to the other arm
+ * throws.
+ */
+export interface FabricKeyPair extends FabricPrimitive {
+  readonly algorithm: string;
+  readonly hasMaterial: boolean;
+
+  /**
+   * A fresh `CryptoKeyPair` holding this instance's two keys, returned anew on
+   * each call so the record is never aliased out. Throws when this instance
+   * holds material.
+   */
+  readonly cryptoKeyPair: CryptoKeyPair;
+
+  /** The public key's bytes. Throws when this instance holds handles. */
+  readonly publicKeyBytes: FabricBytes;
+
+  /** The private key's bytes. Throws when this instance holds handles. */
+  readonly privateKeyBytes: FabricBytes;
+}
+
+export interface FabricKeyPairConstructor {
+  new (pair: CryptoKeyPair): FabricKeyPair;
+  new (
+    algorithm: string,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
+  ): FabricKeyPair;
+  prototype: FabricKeyPair;
+}
+
+export declare const FabricKeyPair: FabricKeyPairConstructor;
+
+/**
  * Structured state for constructing a `FabricError`. The fixed-schema slots
  * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
  * whose keys must not collide with the slot names.
@@ -1828,6 +1868,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricEpochDay",
     "FabricEpochNsec",
     "FabricHash",
+    "FabricKeyPair",
     "FabricRegExp",
   ] as const,
 );
