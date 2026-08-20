@@ -212,7 +212,10 @@ fixed recipe. The recurring debugging questions and where they resolve:
   on stderr in _both_ modes, so silence there means you hold the whole set; a
   `--json` consumer that discards stderr discards the only warning it gets.
   `entities --kind` selects _during_ the scan, so `--limit` counts entities of
-  that kind, not entities walked to find them. The other caps stay silent —
+  that kind, not entities walked to find them. **Scripting a backup or rollback
+  payload? Pass `--require-complete`** — a capped scan then exits nonzero with
+  nothing on stdout, so an incomplete payload cannot be written by a pipeline
+  that only checks the exit code. The other caps stay silent —
   history/hot/contention row limits, and the HTML stale-read pass, which caps
   per bundle and _marks_ un-analyzed cells rather than showing them clean. There
   a count equal to a round cap is still the tell.

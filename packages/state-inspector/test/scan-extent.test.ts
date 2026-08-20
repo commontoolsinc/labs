@@ -20,7 +20,9 @@ import {
   entityKinds,
   isEntityKind,
   listEntityModels,
+  visibleEntityRows,
 } from "../model.ts";
+import { reconstructDocument } from "../reconstruct.ts";
 import { buildAllDetails } from "../detail.ts";
 import { buildSpaceGraph, subgraphAround } from "../graph.ts";
 import { buildInspectorBundle, renderInspectorHtml } from "../html.ts";
@@ -44,7 +46,6 @@ CREATE TABLE branch (
   fork_seq INTEGER, created_seq INTEGER NOT NULL DEFAULT 0,
   head_seq INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
 );
-INSERT INTO branch (name, head_seq, status) VALUES ('', 39, 'active');
 `;
 
 const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
@@ -55,6 +56,10 @@ interface SeedEntity {
   /** The stored document, written once per revision. */
   document: Record<string, unknown>;
   revisions: number;
+  /** Branch the revisions are written on. Defaults to the space branch. */
+  branch?: string;
+  /** Written after the revisions: the entity's visible head is a tombstone. */
+  deleted?: boolean;
 }
 
 /** Six busy cells, one module, three quiet pieces — busiest scanned first. */
@@ -90,27 +95,68 @@ const ENTITIES: SeedEntity[] = [
 const TOTAL = ENTITIES.length;
 const PIECES = ENTITIES.filter((e) => e.id.startsWith("of:piece-")).length;
 
-function seed(path: string): void {
+function seed(
+  path: string,
+  entities: SeedEntity[] = ENTITIES,
+  branches: { name: string; parent?: string; forkSeq?: number }[] = [],
+): void {
   const db = new Database(path, { create: true });
   db.exec(SCHEMA);
+  const branchRow = db.prepare(
+    `INSERT INTO branch (name, parent_branch, fork_seq, head_seq)
+     VALUES (?, ?, ?, 9999)`,
+  );
+  for (const b of branches) {
+    branchRow.run(b.name, b.parent ?? null, b.forkSeq ?? null);
+  }
   const commit = db.prepare(
-    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
-     VALUES (?, ?, ?, '{}', '{}')`,
+    `INSERT INTO "commit" (seq, branch, session_id, local_seq, original, resolution)
+     VALUES (?, ?, ?, ?, '{}', '{}')`,
   );
   const rev = db.prepare(
-    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
-     VALUES (?, ?, 0, 'set', ?, ?)`,
+    `INSERT INTO revision (branch, id, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, 0, ?, ?, ?)`,
   );
   let seq = 0;
-  for (const entity of ENTITIES) {
+  const write = (entity: SeedEntity, op: string, data: string | null) => {
+    seq++;
+    const branch = entity.branch ?? "";
+    commit.run(seq, branch, SESSION, seq);
+    rev.run(branch, entity.id, seq, op, data, seq);
+  };
+  for (const entity of entities) {
     for (let n = 0; n < entity.revisions; n++) {
-      seq++;
-      commit.run(seq, SESSION, seq);
-      rev.run(entity.id, seq, JSON.stringify(entity.document), seq);
+      write(entity, "set", JSON.stringify(entity.document));
     }
+    if (entity.deleted) write(entity, "delete", null);
   }
   db.close();
 }
+
+/** Open a space seeded for one test, and clean it up after. */
+async function withSeeded(
+  entities: SeedEntity[],
+  branches: { name: string; parent?: string; forkSeq?: number }[],
+  run: (space: SpaceDb) => void,
+): Promise<void> {
+  const dir = await Deno.makeTempDir({ prefix: "state-inspector-scan-" });
+  seed(`${dir}/space.sqlite`, entities, branches);
+  const space = openSpace(`${dir}/space.sqlite`);
+  try {
+    run(space);
+  } finally {
+    space.close();
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
+const cells = (n: number, revisions: number, opts: Partial<SeedEntity> = {}) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `of:cell-${i + 1}`,
+    document: { value: `cell ${i + 1}` },
+    revisions,
+    ...opts,
+  }));
 
 describe("scan-extent", () => {
   let dir: string;
@@ -118,7 +164,7 @@ describe("scan-extent", () => {
 
   beforeAll(async () => {
     dir = await Deno.makeTempDir({ prefix: "state-inspector-scan-extent-" });
-    seed(`${dir}/space.sqlite`);
+    seed(`${dir}/space.sqlite`, ENTITIES, [{ name: "" }]);
     space = openSpace(`${dir}/space.sqlite`);
   });
 
@@ -280,6 +326,229 @@ describe("scan-extent", () => {
         buildInspectorBundle(space, { limit: TOTAL }),
       );
       expect(html).not.toContain("capped at");
+    });
+  });
+
+  describe("visibleEntityRows()", () => {
+    it("returns the entities a child branch inherited from its parent, not only the ones written on it", async () => {
+      await withSeeded(
+        [
+          ...cells(3, 2),
+          {
+            id: "of:kid",
+            document: { value: "kid" },
+            revisions: 1,
+            branch: "kid",
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 6 }],
+        (kidSpace) => {
+          // The parent's entities are readable from the child (that is what
+          // `reconstructDocument` resolves), so the scan has to enumerate them.
+          expect(
+            reconstructDocument(kidSpace, { id: "of:cell-1", branch: "kid" }),
+          ).toEqual({ value: "cell 1" });
+          expect(
+            visibleEntityRows(kidSpace, { branch: "kid" }).map((r) => r.id),
+          ).toEqual(["of:cell-1", "of:cell-2", "of:cell-3", "of:kid"]);
+        },
+      );
+    });
+
+    it("omits an entity a child branch deleted, while the parent still lists it", async () => {
+      await withSeeded(
+        [
+          ...cells(2, 1),
+          {
+            id: "of:cell-1",
+            document: { value: "cell 1" },
+            revisions: 0,
+            branch: "kid",
+            deleted: true,
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 2 }],
+        (space) => {
+          // The child's delete is the nearest row, so it hides the entity the
+          // parent still holds — the same resolution a read makes.
+          expect(
+            reconstructDocument(space, { id: "of:cell-1", branch: "kid" }),
+          ).toBeUndefined();
+          expect(
+            visibleEntityRows(space, { branch: "kid" }).map((r) => r.id),
+          ).toEqual(["of:cell-2"]);
+          expect(visibleEntityRows(space).map((r) => r.id)).toEqual([
+            "of:cell-1",
+            "of:cell-2",
+          ]);
+        },
+      );
+    });
+
+    it("omits an entity whose visible head is a delete, and returns it under `includeDeleted`", async () => {
+      await withSeeded(
+        [
+          ...cells(2, 1),
+          {
+            id: "of:gone",
+            document: { value: "gone" },
+            revisions: 1,
+            deleted: true,
+          },
+        ],
+        [{ name: "" }],
+        (deleted) => {
+          expect(visibleEntityRows(deleted).map((r) => r.id)).toEqual([
+            "of:cell-1",
+            "of:cell-2",
+          ]);
+          expect(
+            visibleEntityRows(deleted, { includeDeleted: true }).map((r) =>
+              r.id
+            ),
+          ).toContain("of:gone");
+        },
+      );
+    });
+  });
+
+  describe("a child branch's scans", () => {
+    /** Three inherited entities and one written on the child itself. */
+    const inherited = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          ...cells(3, 2),
+          {
+            id: "of:kid",
+            document: { value: "kid" },
+            revisions: 1,
+            branch: "kid",
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 6 }],
+        run,
+      );
+
+    it("counts the inherited entities in the extent rather than reporting a complete listing", async () => {
+      await inherited((kidSpace) => {
+        const listing = listEntityModels(kidSpace, { branch: "kid", limit: 2 });
+        expect(listing.extent).toEqual({ limit: 2, total: 4, truncated: true });
+      });
+    });
+
+    it("describes an inherited entity with the version log of the branch that holds its writes", async () => {
+      await inherited((kidSpace) => {
+        const listing = buildAllDetails(kidSpace, { branch: "kid" });
+        expect(listing.extent.total).toBe(4);
+        const detail = listing.details.find((d) => d.id === "of:cell-1");
+        // Two writes, both on the parent before the fork — an empty log here
+        // would describe an entity the child reads fine as having no history.
+        expect(detail?.versions.map((v) => v.seq)).toEqual([1, 2]);
+      });
+    });
+  });
+
+  describe("a space holding a deleted entity", () => {
+    /** Two live cells and one whose visible head is a tombstone. */
+    const withTombstone = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          ...cells(2, 2),
+          {
+            id: "of:gone",
+            document: { value: "gone" },
+            revisions: 1,
+            deleted: true,
+          },
+        ],
+        [{ name: "" }],
+        run,
+      );
+
+    it("counts only the entities a detail pass describes, so a limit above them reports no truncation", async () => {
+      await withTombstone((space) => {
+        const listing = buildAllDetails(space, { limit: 2 });
+        expect(listing.details.map((d) => d.id)).toEqual([
+          "of:cell-1",
+          "of:cell-2",
+        ]);
+        // Counting the tombstone would make this 3 of a 2-entity limit, and
+        // announce a cap over a pass that described everything it could.
+        expect(listing.extent).toEqual({
+          limit: 2,
+          total: 2,
+          truncated: false,
+        });
+      });
+    });
+
+    it("counts only the entities a graph holds", async () => {
+      await withTombstone((space) => {
+        expect(buildSpaceGraph(space, { limit: 2 }).extent).toEqual({
+          limit: 2,
+          total: 2,
+          truncated: false,
+        });
+      });
+    });
+
+    it("keeps the tombstone in the entity listing, which describes the space's records", async () => {
+      await withTombstone((space) => {
+        const listing = listEntityModels(space);
+        expect(listing.entities.map((e) => e.id)).toContain("of:gone");
+        expect(listing.extent.total).toBe(3);
+      });
+    });
+  });
+
+  describe("a module that ranks below the pieces pointing at it", () => {
+    /** Three busy pieces; their module written once, so it sorts last. */
+    const PIECE_DOC = {
+      value: { $NAME: "Topic" },
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+    };
+    const quietModule = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          ...Array.from({ length: 3 }, (_, i) => ({
+            id: `of:piece-${i + 1}`,
+            document: PIECE_DOC,
+            revisions: 3,
+          })),
+          {
+            id: "of:mod",
+            document: {
+              value: {
+                kind: "source",
+                identity: MODULE_IDENTITY,
+                code: "export default () => null;\n",
+                filename: "/api/patterns/notes/notebook.tsx",
+                imports: [],
+              },
+            },
+            revisions: 1,
+          },
+        ],
+        [{ name: "" }],
+        run,
+      );
+
+    it("resolves the pattern of every piece a capped `kind` scan returns", async () => {
+      await quietModule((space) => {
+        // The module sorts last, so a scan that stopped at the cap never
+        // reached it. Assert that first: it is what keeps the assertion below
+        // from passing vacuously.
+        expect(
+          listEntityModels(space, { limit: 2 }).entities.map((e) => e.kind),
+        ).toEqual(["piece", "piece"]);
+
+        const listing = listEntityModels(space, { kind: "piece", limit: 2 });
+        expect(listing.extent.truncated).toBe(true);
+        expect(listing.entities.map((e) => e.lineage.pattern?.moduleId))
+          .toEqual(
+            ["of:mod", "of:mod"],
+          );
+      });
     });
   });
 });

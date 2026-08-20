@@ -92,7 +92,7 @@ function out(
 }
 
 /**
- * Report a capped result on stderr.
+ * Report a capped result on stderr, before any of it reaches stdout.
  *
  * A capped listing is a SUBSET that looks exactly like a complete one, so it
  * has to announce itself — and stderr is the one channel that reaches both
@@ -100,14 +100,31 @@ function out(
  * without the parsed bytes on stdout changing shape, which is what an envelope
  * around the array would have cost every caller for a condition most runs
  * never hit. Silence on stderr means the result IS the whole set.
+ *
+ * A notice only reaches a reader who is looking. `--require-complete` is for
+ * the caller who cannot afford to miss it — a script whose output is a backup
+ * or a rollback payload — and turns the same condition into a nonzero exit with
+ * nothing written to stdout at all.
  */
-function noteTruncation(extent: ScanExtent, what: string): void {
+function noteTruncation(
+  extent: ScanExtent,
+  what: string,
+  requireComplete?: boolean,
+): void {
   if (!extent.truncated) return;
-  console.error(
-    `NOTE: capped at --limit ${extent.limit} ${what}; the space holds ` +
-      `${extent.total} entities. Raise --limit for the rest.`,
-  );
+  const capped = `capped at --limit ${extent.limit} ${what}; the space holds ` +
+    `${extent.total} entities in all`;
+  if (requireComplete) {
+    throw new Error(`${capped}. --require-complete refuses a partial result.`);
+  }
+  console.error(`NOTE: ${capped}. Raise --limit for the rest.`);
 }
+
+/** The flag that turns a capped result into a failure. Shared by every scan. */
+const requireCompleteOption = [
+  "--require-complete",
+  "Exit nonzero instead of returning a capped result.",
+] as const;
 
 function splitPath(p?: string): string[] {
   return p ? p.split("/").filter(Boolean) : [];
@@ -995,6 +1012,7 @@ export const inspect = new Command()
     "Max entities to return; a capped result is noted on stderr.",
     { default: DEFAULT_SCAN_LIMIT },
   )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
     const kind = options.kind;
     if (kind !== undefined && !isEntityKind(kind)) {
@@ -1010,6 +1028,11 @@ export const inspect = new Command()
         kind,
       });
       const rows = listing.entities;
+      noteTruncation(
+        listing.extent,
+        kind ? `${kind} entities` : "entities",
+        options.requireComplete,
+      );
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
           console.log("(no entities)");
@@ -1035,7 +1058,6 @@ export const inspect = new Command()
           ]).toString(),
         );
       });
-      noteTruncation(listing.extent, kind ? `${kind} entities` : "entities");
     } finally {
       s.close();
     }
@@ -1117,6 +1139,7 @@ export const inspect = new Command()
     "Max entities to reconstruct; a capped result is noted on stderr.",
     { default: DEFAULT_SCAN_LIMIT },
   )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
     const s = await openByToken(space, options);
     try {
@@ -1127,9 +1150,9 @@ export const inspect = new Command()
         includeLinks: options.links !== false,
       });
       if (options.root) g = subgraphAround(g, options.root, options.depth);
+      noteTruncation(g.extent, "entities", options.requireComplete);
       if (options.dot) {
         console.log(graphToDot(g));
-        noteTruncation(g.extent, "entities");
         return;
       }
       out(!!options.json, g, () => {
@@ -1194,7 +1217,6 @@ export const inspect = new Command()
           );
         }
       });
-      noteTruncation(g.extent, "entities");
     } finally {
       s.close();
     }
@@ -1216,6 +1238,7 @@ export const inspect = new Command()
     "Max entities to reconstruct; a capped result is noted on stderr.",
     { default: DEFAULT_SCAN_LIMIT },
   )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
     if (options.json) {
       throw new ValidationError(
@@ -1231,6 +1254,7 @@ export const inspect = new Command()
         liveBase: options.appUrl,
         limit: options.limit,
       });
+      noteTruncation(bundle.extent, "entities", options.requireComplete);
       const html = renderInspectorHtml(bundle);
       if (options.out) {
         Deno.writeTextFileSync(options.out, html);
@@ -1241,7 +1265,6 @@ export const inspect = new Command()
       } else {
         console.log(html);
       }
-      noteTruncation(bundle.extent, "entities");
     } finally {
       s.close();
     }

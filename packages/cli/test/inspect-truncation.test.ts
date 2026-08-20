@@ -113,7 +113,7 @@ describe("cf inspect capped listings", () => {
       expect(result.code).toBe(0);
       expect(notices(result)).toEqual([
         `NOTE: capped at --limit 3 entities; the space holds ${TOTAL} ` +
-        `entities. Raise --limit for the rest.`,
+        `entities in all. Raise --limit for the rest.`,
       ]);
     });
   });
@@ -167,7 +167,7 @@ describe("cf inspect capped listings", () => {
       expect(result.code).toBe(0);
       expect(notices(result)).toEqual([
         `NOTE: capped at --limit 2 piece entities; the space holds ${TOTAL} ` +
-        `entities. Raise --limit for the rest.`,
+        `entities in all. Raise --limit for the rest.`,
       ]);
     });
   });
@@ -207,6 +207,47 @@ describe("cf inspect capped listings", () => {
         extent: { limit: number; total: number; truncated: boolean };
       };
       expect(graph.extent).toEqual({ limit: 3, total: TOTAL, truncated: true });
+    });
+  });
+
+  it("refuses a capped result under `--require-complete`, with nothing on stdout", async () => {
+    await withStore(async (path) => {
+      const result = await cf(
+        `inspect entities ${path} --limit 3 --json --require-complete`,
+      );
+      expect(result.code).not.toBe(0);
+      // A partial payload written before the failure is the whole hazard: a
+      // pipeline that redirects stdout would keep the subset it was refused.
+      expect(result.stdout.join("").trim()).toBe("");
+      expect(stripAnsi(result.stderr.join("\n"))).toContain(
+        "--require-complete refuses a partial result",
+      );
+    });
+  });
+
+  it("returns the whole listing under `--require-complete` when the limit covers the space", async () => {
+    await withStore(async (path) => {
+      const result = await cf(
+        `inspect entities ${path} --limit ${TOTAL} --json --require-complete`,
+      );
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout.join("\n")).length).toBe(TOTAL);
+    });
+  });
+
+  it("refuses a capped graph and a capped HTML explorer under `--require-complete`", async () => {
+    await withStore(async (path) => {
+      const graph = await cf(
+        `inspect graph ${path} --limit 3 --require-complete`,
+      );
+      expect(graph.code).not.toBe(0);
+      expect(graph.stdout.join("").trim()).toBe("");
+
+      const html = await cf(
+        `inspect html ${path} --limit 3 --require-complete`,
+      );
+      expect(html.code).not.toBe(0);
+      expect(html.stdout.join("").trim()).toBe("");
     });
   });
 
