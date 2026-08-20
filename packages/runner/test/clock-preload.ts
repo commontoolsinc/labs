@@ -55,6 +55,9 @@ installFakeClock({
     // deadline, renew cadence), and pins 3/5 assert QUIET-window
     // behavior (nothing further commits) over real elapsed time.
     "executor-settle-advance",
+    // The land-off all-no-op-wave pin drives the same serving loop and
+    // S1 quiescence advance — the same wall-clock pacing contract.
+    "executor-no-op-wave",
     // The Phase-3 client event-append suite drives a live memory server
     // plus the queue's real-time discharge pacing (retry backoff is a
     // wall-clock policy, and the tests wait on transport edges with
