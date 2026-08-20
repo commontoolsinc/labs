@@ -91,47 +91,91 @@ describe("link-schema", () => {
       expect(annotatedLink(sigilLink(schema)).schema).toEqual(schema);
     });
 
-    it("returns a summary naming the top-level keys of a large schema", () => {
+    it("describes a large schema under `$schemaSummary`, naming its top-level keys", () => {
       const schema = largeSchema("a description long enough to matter");
-      const rendered = annotatedLink(sigilLink(schema)).schema as {
-        $elidedSchema: { keys: string[]; bytes: number; digest: string };
+      const link = annotatedLink(sigilLink(schema));
+      const summary = link.$schemaSummary as {
+        keys: string[];
+        bytes: number;
+        digest: string;
       };
-      expect(rendered.$elidedSchema.keys).toEqual([
+      expect(summary.keys).toEqual([
         "type",
         "description",
         "properties",
         "required",
       ]);
-      expect(rendered.$elidedSchema.bytes).toBe(
+      expect(summary.bytes).toBe(
         new TextEncoder().encode(JSON.stringify(schema)).length,
       );
-      expect(typeof rendered.$elidedSchema.digest).toBe("string");
+      expect(typeof summary.digest).toBe("string");
     });
 
-    it("returns a summary sized by the stored schema rather than by its rendering", () => {
+    it("omits `schema` for a link whose schema it summarizes", () => {
+      const link = annotatedLink(sigilLink(largeSchema("wide")));
+      // The two never both appear, so a `schema` key always means the value
+      // beside it is what the link stores.
+      expect(Object.hasOwn(link, "schema")).toBe(false);
+      expect(Object.hasOwn(link, "$schemaSummary")).toBe(true);
+    });
+
+    it("describes a summary-shaped stored schema under `schema`, not `$schemaSummary`", () => {
+      // The summary of a large schema, stored verbatim as some other link's
+      // schema. Placing a summary in the `schema` slot would render these two
+      // identically; the sibling slot is what keeps them apart.
+      const summarized = annotatedLink(sigilLink(largeSchema("wide")));
+      const forged = annotatedLink(
+        sigilLink({ $schemaSummary: summarized.$schemaSummary }),
+      );
+      expect(forged.schema).toEqual({
+        $schemaSummary: summarized.$schemaSummary,
+      });
+      expect(Object.hasOwn(forged, "$schemaSummary")).toBe(false);
+      expect(Object.hasOwn(summarized, "schema")).toBe(false);
+    });
+
+    it("describes a schema sized as stored rather than as rendered", () => {
       // A sigil renders longer than it is stored, so a summary measuring the
       // rendering reports a size the store does not hold.
       const schema = {
         const: { "/": "of:target" },
         description: "x".repeat(300),
       };
-      const rendered = annotatedLink(sigilLink(schema)).schema as {
-        $elidedSchema: { bytes: number };
+      const summary = annotatedLink(sigilLink(schema)).$schemaSummary as {
+        bytes: number;
       };
-      expect(rendered.$elidedSchema.bytes).toBe(
+      expect(summary.bytes).toBe(
         new TextEncoder().encode(JSON.stringify(schema)).length,
       );
     });
 
-    it("returns a summary of a schema `JSON.stringify()` refuses", () => {
+    it("describes a schema `JSON.stringify()` refuses", () => {
       // A `bigint` in a schema is not serializable, so the size that decides
       // the summary comes from the annotated form instead of the stored one.
       const schema = { const: 1n, description: "x".repeat(300) };
-      const rendered = annotatedLink(sigilLink(schema)).schema as {
-        $elidedSchema: { keys: string[]; bytes: number };
+      const summary = annotatedLink(sigilLink(schema)).$schemaSummary as {
+        keys: string[];
+        bytes: number;
       };
-      expect(rendered.$elidedSchema.keys).toEqual(["const", "description"]);
-      expect(rendered.$elidedSchema.bytes).toBeGreaterThan(300);
+      expect(summary.keys).toEqual(["const", "description"]);
+      expect(summary.bytes).toBeGreaterThan(300);
+    });
+
+    it("describes a schema nested past the call stack, without a digest", () => {
+      // Hashing descends recursively, so a schema this deep has no digest to
+      // report. Reporting none beats failing the whole rendering.
+      let deep: Record<string, unknown> = { type: "string" };
+      for (let level = 0; level < 20_000; level++) {
+        deep = { properties: { a: deep } };
+      }
+      const summary = annotatedLink(sigilLink(deep)).$schemaSummary as {
+        keys: string[];
+        bytes: number;
+        digest?: string;
+      };
+      expect(summary.keys).toEqual(["properties"]);
+      expect(summary.bytes).toBeGreaterThan(20_000);
+      expect(summary.digest).toBe(undefined);
     });
 
     it("returns a large schema in full at infinite `maxDepth`", () => {
@@ -143,22 +187,10 @@ describe("link-schema", () => {
       expect(annotated.$link.schema).toEqual(schema);
     });
 
-    it("returns a schema summary distinct from every schema a link can store", () => {
-      const summarized = annotatedLink(sigilLink(largeSchema("wide")))
-        .schema as Record<string, unknown>;
-      // A reader who cannot tell an elision from the thing elided is back to
-      // reading a fabricated schema, so the summary carries a key no schema
-      // of its own does.
-      expect(Object.keys(summarized)).toEqual(["$elidedSchema"]);
-      expect(summarized).not.toEqual(true);
-      expect(summarized).not.toEqual({});
-    });
-
     it("returns different digests for two schemas of the same shape", () => {
       const digestOf = (description: string) =>
-        (annotatedLink(sigilLink(largeSchema(description))).schema as {
-          $elidedSchema: { digest: string };
-        }).$elidedSchema.digest;
+        (annotatedLink(sigilLink(largeSchema(description)))
+          .$schemaSummary as { digest: string }).digest;
       // A stale schema and its replacement agree on every top-level key, so
       // the digest is what a diff of two revisions has to separate them by.
       expect(digestOf("one description")).not.toBe(digestOf("another one"));

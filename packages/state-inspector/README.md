@@ -68,16 +68,19 @@ failure mode it guards against:
   (content-addressed ids). The scan labels `cross-space-linked` (real replica →
   drift bug) vs `no-cross-space-link` (likely instance).
 - **A `schema` under `$link` is the schema the link stores**, never a stand-in
-  for one. A stored schema is a JSON Schema, so `true` (constrains nothing) and
-  `false` (admits nothing) are values a link can really hold, and the difference
-  decides how the runtime resolves a hop through that link. A schema too large
-  to read inline is replaced by a `$elidedSchema` summary — top-level keys, byte
-  count, and a digest that separates two schemas of the same shape — which is
-  not a schema and is not mistakable for one. `--full-depth` writes every schema
-  out in full — annotated like any other value, so a sigil-shaped literal under
-  `const` / `default` / `enum` reads back as `$link` / `$ref`; the digest hashes
-  the stored schema, so that is what to compare two links by. No `schema` key at
-  all means the link stores none.
+  for one. A stored schema is a JSON Schema, so `true` (selects every value) and
+  `false` (selects none) are values a link can really hold, and they say
+  different things about what that link constrains. A schema too large to read
+  inline is described by a `$schemaSummary` **beside** `schema` rather than
+  under it — top-level keys, byte count as stored, and a truncated digest. The
+  slot is what carries the distinction: a link can store a schema of any shape,
+  so a summary placed under `schema` could be a schema some link really holds,
+  while nothing stored reaches a `$`-prefixed sibling. The two never both
+  appear, and neither appearing means the link stores no schema. Different
+  digests prove two schemas differ; equal ones make agreement overwhelmingly
+  likely without proving it. `--full-depth` writes every schema out in full —
+  annotated like any other value, so a sigil-shaped literal under `const` /
+  `default` / `enum` reads back as `$link` / `$ref`.
 
 ## Fidelity — reconstruction is the engine's, not a fork
 
