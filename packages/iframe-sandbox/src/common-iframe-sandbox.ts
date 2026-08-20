@@ -2,7 +2,7 @@ import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
-import { getIframeContextHandler, Receipt } from "./context.ts";
+import { type Context, getIframeContextHandler, Receipt } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 
 type CommonIframeLoadState = "" | "loading" | "loaded";
@@ -56,7 +56,14 @@ export class CommonIframeSandboxElement extends LitElement {
    * context, so the frame reattaching brings is a different window.
    */
   private readyWindow: Window | undefined;
-  private subscriptions: Map<string, Receipt> = new Map();
+  /**
+   * The guest's live subscriptions by key, each held with the context it was
+   * taken out against. A receipt is only good to the context that issued it,
+   * and `context` is a property a consumer may reassign, so what cancels a
+   * subscription is the pair rather than the receipt alone.
+   */
+  private subscriptions: Map<string, { context: Context; receipt: Receipt }> =
+    new Map();
 
   /**
    * Handles the outer frame reporting itself ready, which it does on its own
@@ -278,7 +285,7 @@ export class CommonIframeSandboxElement extends LitElement {
             (key, value) => this.notifySubscribers(key, value),
             doNotSendMyDataBack,
           );
-          this.subscriptions.set(key, receipt);
+          this.subscriptions.set(key, { context: this.context, receipt });
         }
         return;
       }
@@ -291,11 +298,11 @@ export class CommonIframeSandboxElement extends LitElement {
         for (const key of keys) {
           // A receipt is opaque and may be any value the handler returns,
           // including falsy ones like `0`. Test for the entry, not the value.
-          if (!this.subscriptions.has(key)) {
+          const entry = this.subscriptions.get(key);
+          if (entry === undefined) {
             continue;
           }
-          const receipt = this.subscriptions.get(key);
-          IframeHandler.unsubscribe(this, this.context, receipt);
+          IframeHandler.unsubscribe(this, entry.context, entry.receipt);
           this.subscriptions.delete(key);
         }
         return;
@@ -305,7 +312,8 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * Lets go of the current guest, if there is one: its subscriptions are
-   * cancelled and its port is closed. Called where a guest stops being this
+   * cancelled, each against the context it was taken out against, and its port
+   * is closed. Called where a guest stops being this
    * element's, which is when one is asked to be replaced and when the frame
    * holding it has gone.
    */
@@ -314,8 +322,8 @@ export class CommonIframeSandboxElement extends LitElement {
 
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler != null) {
-      for (const [_, receipt] of this.subscriptions) {
-        IframeHandler.unsubscribe(this, this.context, receipt);
+      for (const { context, receipt } of this.subscriptions.values()) {
+        IframeHandler.unsubscribe(this, context, receipt);
       }
       this.subscriptions.clear();
     }

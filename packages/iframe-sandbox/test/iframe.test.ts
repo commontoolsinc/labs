@@ -359,3 +359,45 @@ ${GUEST_EPILOG}`;
     cleanupFixtures();
   }
 });
+
+Deno.test("a subscription is cancelled against the context that issued it", async () => {
+  cleanupFixtures();
+  try {
+    const first = new ContextShim({ watched: 1 });
+    const body = `${GUEST_PROLOG}
+subscribe("watched");
+write("ready", true);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, first);
+    await waitForContextValue(
+      first,
+      iframe,
+      "ready",
+      (value) => value === true,
+    );
+    assertEquals(first.callbacks.length, 1);
+
+    // A receipt is only good to the context that issued it, and `context` is a
+    // property a consumer may reassign. Swapping it here and then asking for a
+    // new document is what separates cancelling against the context the
+    // subscription was taken out against from cancelling against whichever one
+    // happens to be current.
+    const second = new ContextShim();
+    // @ts-ignore This is a lit property.
+    iframe.context = second;
+    // @ts-ignore This is a lit property.
+    iframe.src = `${GUEST_PROLOG}
+write("second-ran", true);
+${GUEST_EPILOG}`;
+
+    await waitForContextValue(
+      second,
+      iframe,
+      "second-ran",
+      (value) => value === true,
+    );
+    assertEquals(first.callbacks.length, 0);
+  } finally {
+    cleanupFixtures();
+  }
+});
