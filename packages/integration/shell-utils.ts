@@ -28,7 +28,7 @@ import {
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
 import { getPresentationSession } from "./presentation/session.ts";
-import { waitFor } from "./utils.ts";
+import { waitFor, waitForCondition } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 
@@ -48,6 +48,8 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       "Could not serialize identity. Requires 'noble' implementation.",
     );
   }
+
+  await waitForCondition(page, () => globalThis.app !== undefined);
 
   await page!.evaluate<
     Promise<void>,
