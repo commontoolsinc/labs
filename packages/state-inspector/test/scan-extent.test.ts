@@ -219,6 +219,7 @@ describe("scan-extent", () => {
         "owned-cell",
         "free-cell",
         "unknown",
+        "deleted",
       ]);
     });
   });

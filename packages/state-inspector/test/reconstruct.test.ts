@@ -13,7 +13,11 @@ import { Database } from "@db/sqlite";
 
 import { openSpace } from "../db.ts";
 import { annotate, parseSigilLink } from "../decode.ts";
-import { getValueAt, reconstructDocument } from "../reconstruct.ts";
+import {
+  getValueAt,
+  reconstructDocument,
+  reconstructOutcome,
+} from "../reconstruct.ts";
 import {
   entityHistory,
   hotEntities,
@@ -215,6 +219,23 @@ Deno.test("state-inspector autopsy core", async (t) => {
           reconstructDocument(space, { id: "of:missing" }),
           undefined,
         );
+      });
+
+      await t.step("an outcome names why there is no document", () => {
+        // `reconstructDocument` answers "no document" for both of these; only
+        // the outcome separates a deletion from an entity that was never here.
+        assertEquals(
+          reconstructOutcome(space, { id: "of:B" }).status,
+          "deleted",
+        );
+        assertEquals(
+          reconstructOutcome(space, { id: "of:missing" }).status,
+          "absent",
+        );
+        const live = reconstructOutcome(space, { id: "of:B", atSeq: 2 });
+        assertEquals(live.status, "present");
+        assert(live.status === "present");
+        assertEquals(live.document.value, { x: true });
       });
 
       await t.step("summary counts match the seed", () => {

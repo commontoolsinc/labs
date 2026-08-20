@@ -25,9 +25,10 @@ import {
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
@@ -503,18 +504,17 @@ export function buildAllDetails(
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
   for (const r of scanned) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    if (!doc) {
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    if (outcome.status !== "present") {
       // Enumerated but not described: counted, never silently dropped, or a pass
-      // that skipped it would report itself complete over a smaller set.
+      // that skipped it would report itself complete over a smaller set. It
+      // still earns a label, so a link INTO it resolves to why it cannot be
+      // read rather than to nothing.
+      labelOf.set(r.id, absentEntity(outcome.status));
       unreadable++;
       continue;
     }
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -598,6 +598,7 @@ export function buildAllDetails(
     "owned-cell": 4,
     "free-cell": 5,
     unknown: 6,
+    deleted: 7,
   };
   return {
     details: out.sort(

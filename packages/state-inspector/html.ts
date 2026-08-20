@@ -167,6 +167,7 @@ const STYLE = `
   --accent:#2563eb; --hover:#eef2ff;
   --piece:#f59e0b; --module:#3b82f6; --stream:#ec4899; --schema:#8b5cf6;
   --owned-cell:#10b981; --free-cell:#9ca3af; --unknown:#d1d5db;
+  --deleted:#71717a;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --line:#1f2937;
@@ -243,7 +244,7 @@ svg { max-width:100%; border:1px solid var(--line); border-radius:8px; backgroun
 const APP = String.raw`
 const B = JSON.parse(document.getElementById("bundle").textContent);
 const KC = { piece:"var(--piece)", module:"var(--module)", stream:"var(--stream)",
-  schema:"var(--schema)", "owned-cell":"var(--owned-cell)", "free-cell":"var(--free-cell)", unknown:"var(--unknown)" };
+  schema:"var(--schema)", "owned-cell":"var(--owned-cell)", "free-cell":"var(--free-cell)", unknown:"var(--unknown)", deleted:"var(--deleted)" };
 const EC = { pattern:"#2563eb", argument:"#16a34a", owns:"#6b7280", link:"#9ca3af" };
 const byId = new Map(B.details.map(d => [d.id, d]));
 const overlayById = new Map((B.overlays||[]).map(o => [o.id, o]));
