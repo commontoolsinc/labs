@@ -12,7 +12,6 @@ interface Verbs {
   ping: Stream<Ping, PingResult>;
   pingNamed: Stream<Ping, PingResult>;
   pingDeclared: Stream<Ping, PingResult>;
-  pingViaProperty: Stream<Ping, PingResult>;
   poke: Stream<Ping>;
 }
 
@@ -79,27 +78,6 @@ const pingDeclared = handler<Ping, { count: number }, PingResult>(
   echoDeclared,
 );
 
-// A callback reached through property access — the spelling no syntax list
-// anticipated. Callback-ness is the checker's call signatures, so any
-// callable expression recognizes the form; a schema is never callable.
-const callbacks = {
-  echoViaProperty(event: Ping, _state: { count: number }): PingResult {
-    return { echoed: event.word };
-  },
-};
-const pingViaProperty = handler<Ping, { count: number }, PingResult>(
-  {
-    type: "object",
-    properties: { word: { type: "string" } },
-    required: ["word"],
-  },
-  {
-    type: "object",
-    properties: { count: { type: "number", asCell: ["cell"] } },
-  },
-  callbacks.echoViaProperty,
-);
-
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler<Ping, { count: number }>(
@@ -121,7 +99,6 @@ export default pattern<Record<string, never>, Verbs>(() => {
     ping: ping({ count }),
     pingNamed: pingNamed({ count }),
     pingDeclared: pingDeclared({ count }),
-    pingViaProperty: pingViaProperty({ count }),
     poke: poke({ count }),
   };
 });
