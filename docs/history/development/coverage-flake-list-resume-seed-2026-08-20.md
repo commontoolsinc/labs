@@ -89,13 +89,12 @@ That takes every line of the recovery to a nonzero count from the new test file
 alone, and removes the two duplicate copies of it from the package's uncovered
 total.
 
-The liveness check inside the transaction body is what a reader is most likely
-to mistake for a dead line, and the first draft of this change deleted it on
-that reading. `editWithRetry()` runs the body synchronously on the first
-attempt, immediately after the caller has just asked the same question, so the
-two can never disagree there. They can on a retry: a retryable rejection is
-followed by an `await` of the conflict's catch-up gate and then a fresh call
-that runs the body again, which is exactly the window a coordinator's teardown
-lands in. The check stays, and the case that releases the container from inside
-the catch-up gate is what covers it — the only reason it read as uncovered
-before is that nothing drove a retry.
+The liveness check inside the transaction body reads as a dead line and is not
+one. `editWithRetry()` runs that body synchronously on the first attempt,
+immediately after the caller has asked the same question, so on that attempt
+the two cannot disagree. They can on a retry: a retryable rejection is followed
+by an `await` of the conflict's catch-up gate and a pull of the document the
+conflict names, and then a fresh call that runs the body again. Those awaits
+are the window a coordinator's teardown lands in. The line read as uncovered
+because nothing in the suites drove a seed through a retry, which is this
+document's subject wearing a different hat.
