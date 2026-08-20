@@ -33,6 +33,30 @@ operations exist, but that they are **known to work before anyone needs
 them** — which is what the drill below is for, and why it is a success
 criterion rather than a nicety.
 
+### An upgrade is two runs, not one
+
+Every upgrade is rehearsed against a scratch deployment holding a copy of the
+board, and only then run against the deployment holding the live one. The two
+runs are the same operation against different stakes, and the differences are
+what the tooling has to respect:
+
+- **The rehearsal can be reset; the live run cannot.** There is no space
+  reset for a production deployment, so the only reversal available there is
+  a rollback through this tooling, from a record captured before the run
+  started. That makes rollback a prerequisite of the first live run rather
+  than a later convenience.
+- **The plan is the thing compared across the two.** A plan generated against
+  the copy and a plan generated against the live board should differ only in
+  ways someone can explain, and that comparison is the last check before the
+  live attempt. It is only possible because the plan is a file.
+- **The live run happens inside a quiet window**, against data that is being
+  written to right up until it starts. Its plan is therefore generated at the
+  start of that window, not inherited from the rehearsal.
+
+A rehearsal that used different tooling from the live run would rehearse
+something else. Both runs use the same commands and the same plan format;
+what changes is the deployment they name.
+
 ## The three operations
 
 | | selects | applies | reverses with |
@@ -171,8 +195,18 @@ the execution strategy does.
 ## Building it
 
 Five stages. Each one leaves something usable on its own, and the order is
-chosen so that the next Topics upgrade is unblocked by the first two rather
-than by all five.
+chosen around what each kind of run needs:
+
+- **Stages 1–2 are enough to rehearse.** A run against a resettable copy
+  needs a plan, preconditions, a resumable apply, and a way to judge the
+  result. If it goes wrong, the copy is reset and the pass is repeated.
+- **Stages 1–3 are the floor for a live run.** Rollback is not an
+  improvement on the live path, it is the only reversal available there, and
+  it has to be exercised on the copy before it is relied on against the real
+  board.
+- **Stages 4–5 are independent of both.** Repair answers a different need
+  than an upgrade, and session reuse only makes an existing operation
+  faster.
 
 ### 1. The plan, and retarget
 
@@ -212,6 +246,9 @@ the source the plan recorded for it.
       something else since the retarget stops the reversal rather than being
       overwritten.
 - [ ] A rollback is itself resumable.
+- [ ] The reversal is exercised against a copy, in the drill, before any live
+      run is allowed to depend on it. A rollback path first attempted during
+      the incident it exists for is not a rollback path.
 
 ### 4. Repair
 
@@ -269,11 +306,14 @@ settled before work starts.
    command surface. This interacts with
    [CLI surface shape](cli-surface-shape.md), and it is the first decision
    because every later stage inherits it.
-2. **Where preconditions are evaluated** — *stage 1*. Reading a piece's
-   current state from a store file is cheap and offline, but requires
-   filesystem access to the space. The same question has to be answerable
-   over the API for a space reached only that way. Whether both are
-   supported, or one is canonical, is undecided.
+2. **Where preconditions are evaluated** — *stage 1*, and forced rather than
+   deferrable. Reading a piece's current state from a store file is cheap
+   and offline, and it is how a rehearsal against a local copy would
+   naturally do it. A live deployment may offer no such access, and a
+   precondition check that only works against a copy would leave the live
+   run — the one that cannot be reset — as the least verified of the two.
+   Either the check works over the API as well, or the rehearsal is
+   measuring a mechanism the live run does not use.
 3. **Scope of a compatibility override** — *stage 1*. An override that lets
    one refused piece through is a per-piece decision today. Applied to a
    plan, one flag covering every row turns many decisions into one, which is
