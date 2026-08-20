@@ -60,6 +60,29 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
 /**
+ * Report the outcome of seeding an empty result container on resume.
+ *
+ * The seed edit runs against live storage and can lose a commit race, so which
+ * arm of it executes is a property of the run rather than of the code — the
+ * reason it takes the outcome as a parameter and is called on every seed
+ * instead of testing `error` at the call site. That keeps the failure arm
+ * reachable from a unit test that hands it an error directly, rather than
+ * leaving its coverage to whether a race happened to occur (see
+ * `docs/development/COVERAGE.md`, "Coverage must not depend on the execution
+ * environment").
+ *
+ * @internal Exported for testing.
+ */
+export function reportResumeSeedOutcome(error: unknown): void {
+  if (!error) return;
+  logger.warn(
+    "resume-seed",
+    "seeding the empty result container failed",
+    { error },
+  );
+}
+
+/**
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
@@ -336,15 +359,7 @@ export function map(
           if (!active) return;
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
-        }).then(({ error }) => {
-          if (error) {
-            logger.warn(
-              "resume-seed",
-              "seeding the empty result container failed",
-              { error },
-            );
-          }
-        });
+        }).then(({ error }) => reportResumeSeedOutcome(error));
       // Run on either outcome (resolve or reject); the seed recovers from the
       // pull's own rejection, so log it rather than dropping it silently.
       pending.finally(seedIfStillAbsent).catch((error) => {

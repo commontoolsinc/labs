@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { Identity } from "@commonfabric/identity";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -10,6 +11,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { Cell } from "../src/cell.ts";
 import { ENTITY_URI_SCHEMES } from "../src/entity-kind.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { reportResumeSeedOutcome } from "../src/builtins/map.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import {
@@ -1213,5 +1215,31 @@ describe("list builtin resume container defer", () => {
       (rc) => rc.key("doubled").getAsQueryResult() ?? [],
       [2, 4, 6],
     );
+  });
+
+  // The seed above edits live storage, so whether its edit fails is a property
+  // of the run: the reporting arm is reached only when the edit loses a commit
+  // race, which leaves its coverage to chance and the ratchet reading a
+  // regression on pull requests that touched nothing near it. The report takes
+  // the outcome as a parameter for that reason, so both arms are driveable
+  // here without a race to arrange.
+  describe("reporting the seed's outcome", () => {
+    const seedWarnCount = (): number => {
+      const counts = getLoggerCountsBreakdown()["runner.map"] ?? {};
+      return (counts as Record<string, { warn?: number }>)["resume-seed"]
+        ?.warn ?? 0;
+    };
+
+    it("warns when the seed edit failed", () => {
+      const before = seedWarnCount();
+      reportResumeSeedOutcome(new Error("commit lost the race"));
+      expect(seedWarnCount()).toBe(before + 1);
+    });
+
+    it("stays silent when the seed edit succeeded", () => {
+      const before = seedWarnCount();
+      reportResumeSeedOutcome(undefined);
+      expect(seedWarnCount()).toBe(before);
+    });
   });
 });
