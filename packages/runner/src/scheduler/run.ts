@@ -60,11 +60,17 @@ const logger = getLogger("scheduler", {
  * along on the emitted measure instead, and only when emission is on.
  *
  * The module or pattern name is what a reader recognizes; the action id is the
- * fallback for an action that carries neither.
+ * fallback for an action that carries neither, and for one that carries an
+ * empty string — which is a name a reader cannot use, not a name.
+ *
+ * Called only when a measure is actually being emitted. Building it walks and
+ * formats every annotated read and write, which is far more than the two names
+ * used here, and paying that per action on the ordinary path — emission off,
+ * which is every production run — is not a trade this is worth.
  */
 function actionMeasureDetail(action: Action, actionId: string): string {
   const info = getSchedulerActionTelemetryInfo(action);
-  return info?.moduleName ?? info?.patternName ?? actionId;
+  return info?.moduleName || info?.patternName || actionId;
 }
 
 export type ActionInvocationResult =
@@ -81,8 +87,10 @@ export function invokeReactiveAction(state: {
   readonly tx: IExtendedStorageTransaction;
   readonly actionStartTime: number;
 }): Promise<ActionInvocationResult> {
-  // Outside the `try`, because the failure paths below name the action too.
-  const measureDetail = actionMeasureDetail(args.action, args.actionId);
+  // A thunk, not a value: the logger calls it only when it will emit, so an
+  // ordinary run never builds it. Outside the `try` because the failure paths
+  // below name the action too.
+  const measureDetail = () => actionMeasureDetail(args.action, args.actionId);
   try {
     // Track executing action for parent-child relationship tracking.
     state.setExecutingAction(args.action, args.actionId);

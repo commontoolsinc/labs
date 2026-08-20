@@ -524,6 +524,30 @@ export const TIMING_MEASURE_PREFIX = "cf:";
  */
 export const TIMING_MEASURE_DETAIL = "|";
 
+/**
+ * Make a key or a detail safe to put in a measure name.
+ *
+ * Reversibly, because both are arbitrary strings a caller chose: substituting
+ * the separators away would map `a|b` and `a/b` onto one name, and two actions
+ * that differ only there would then report as one row. Percent-encoding is the
+ * cheapest thing that survives a round trip, and `%` goes first so decoding
+ * cannot mistake an encoded byte for one the caller wrote.
+ */
+export function encodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%", "%25")
+    .replaceAll(TIMING_MEASURE_DETAIL, "%7C")
+    .replaceAll("#", "%23");
+}
+
+/** The inverse of {@link encodeMeasureField}. */
+export function decodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%23", "#")
+    .replaceAll("%7C", TIMING_MEASURE_DETAIL)
+    .replaceAll("%25", "%");
+}
+
 /** The detail carried by an emitted measure, if it has one. */
 export function detailOfMeasure(name: string): string | undefined {
   const body = name.startsWith(TIMING_MEASURE_PREFIX)
@@ -532,7 +556,9 @@ export function detailOfMeasure(name: string): string | undefined {
   const hash = body.lastIndexOf("#");
   const withoutSequence = hash === -1 ? body : body.slice(0, hash);
   const bar = withoutSequence.indexOf(TIMING_MEASURE_DETAIL);
-  return bar === -1 ? undefined : withoutSequence.slice(bar + 1);
+  return bar === -1
+    ? undefined
+    : decodeMeasureField(withoutSequence.slice(bar + 1));
 }
 
 function getEnvMeasuresEnabled(): boolean {
@@ -1029,13 +1055,24 @@ export class Logger {
    * stay keyed by the path alone, so a caller can identify an occurrence
    * without multiplying the rows by every value the detail takes.
    */
-  timeEndDetailed(detail: string, ...keys: string[]): number | undefined {
+  timeEndDetailed(
+    detail: string | (() => string),
+    ...keys: string[]
+  ): number | undefined {
     const keyPath = keys.join("/");
     const startTime = this.#activeTimers.get(keyPath);
     if (startTime === undefined) return undefined;
     this.#activeTimers.delete(keyPath);
     const elapsed = performance.now() - startTime;
-    this.#recordTime(elapsed, keys, startTime, detail);
+    // Resolved only when it will be used. A caller whose detail costs anything
+    // to produce passes a function, and pays nothing on the ordinary path
+    // where emission is off — which is every production run.
+    const resolved = !_emitTimingMeasures
+      ? undefined
+      : typeof detail === "function"
+      ? detail()
+      : detail;
+    this.#recordTime(elapsed, keys, startTime, resolved);
     return elapsed;
   }
 
@@ -1303,14 +1340,14 @@ export class Logger {
       return;
     }
     try {
-      // The separators are structure, so a detail carrying one would make the
-      // name unparseable; they are replaced rather than the detail refused,
-      // because losing a span is a worse answer than renaming it.
-      const named = detail
-        ? `${path}${TIMING_MEASURE_DETAIL}${
-          detail.replaceAll(TIMING_MEASURE_DETAIL, "/").replaceAll("#", "_")
-        }`
-        : path;
+      // Both fields are encoded, not just the detail: a key is a caller's
+      // string as much as a detail is, and one containing a separator would
+      // otherwise be parsed back as a key and a detail that were never there.
+      const named = detail === undefined
+        ? encodeMeasureField(path)
+        : `${encodeMeasureField(path)}${TIMING_MEASURE_DETAIL}${
+          encodeMeasureField(detail)
+        }`;
       performance.measure(
         `${TIMING_MEASURE_PREFIX}${named}#${++_timingMeasureSequence}`,
         {

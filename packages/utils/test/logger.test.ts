@@ -1947,7 +1947,9 @@ describe("logger", () => {
 
   describe("timing measures", () => {
     afterEach(() => {
-      setTimingMeasuresEnabled(false);
+      // The cap deliberately survives toggling emission, so a test that set a
+      // small one would otherwise silently throttle every test after it.
+      setTimingMeasuresEnabled(false, { cap: 1_000 });
       clearTimingMeasures();
     });
 
@@ -2198,19 +2200,66 @@ describe("logger", () => {
       expect(details.sort()).toEqual(["topics/main", "topics/topic"]);
     });
 
-    it("keeps a detail from making a name unparseable", () => {
+    it("carries a detail containing separators through unchanged", () => {
       setTimingMeasuresEnabled(true);
       const logger = getLogger("measure-detail-hostile");
       logger.timeStart("phase", "twelve");
-      // The separators are structure. A detail carrying one is renamed rather
-      // than refused: losing the span would be the worse answer.
-      logger.timeEndDetailed("a|b#c", "phase", "twelve");
+      logger.timeEndDetailed("a|b#c%d", "phase", "twelve");
 
       const entry = performance.getEntriesByType("measure").find((e) =>
         e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/twelve`)
       );
       expect(entry).toBeDefined();
-      expect(detailOfMeasure(entry!.name)).toBe("a/b_c");
+      // Reversibly, not by substitution: two details differing only in which
+      // separator they contain must not come back as the same string, or two
+      // distinct actions report as one row.
+      expect(detailOfMeasure(entry!.name)).toBe("a|b#c%d");
+    });
+
+    it("keeps details that differ only by a separator distinct", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail-collide");
+      for (const detail of ["a|b", "a/b", "a#b", "a_b"]) {
+        logger.timeStart("phase", "collide");
+        logger.timeEndDetailed(detail, "phase", "collide");
+      }
+      const seen = performance.getEntriesByType("measure")
+        .filter((e) =>
+          e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/collide`)
+        )
+        .map((e) => detailOfMeasure(e.name));
+      expect(new Set(seen).size).toBe(4);
+    });
+
+    it("does not build a detail that will not be emitted", () => {
+      setTimingMeasuresEnabled(false);
+      const logger = getLogger("measure-detail-lazy");
+      let built = 0;
+      logger.timeStart("phase", "lazy");
+      logger.timeEndDetailed(
+        () => {
+          built++;
+          return "expensive";
+        },
+        "phase",
+        "lazy",
+      );
+      // Emission is off on every production run, and a caller whose detail
+      // costs anything to produce must not pay for it there.
+      expect(built).toBe(0);
+      expect(logger.getTimeStats("phase", "lazy")?.count).toBe(1);
+
+      setTimingMeasuresEnabled(true);
+      logger.timeStart("phase", "lazy");
+      logger.timeEndDetailed(
+        () => {
+          built++;
+          return "expensive";
+        },
+        "phase",
+        "lazy",
+      );
+      expect(built).toBe(1);
     });
 
     it("reports no detail for a span that was not named", () => {

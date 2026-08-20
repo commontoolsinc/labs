@@ -46,25 +46,38 @@ export const MEASURE_DETAIL = "|";
  * and grouping by it is the whole point, so an occurrence's identity is
  * stripped here and read separately by anything that wants it.
  */
-export function keyOf(name: string): string {
+/**
+ * The emitter percent-encodes both fields, so a key or detail containing a
+ * separator survives the round trip instead of being read back as a split that
+ * was never there.
+ */
+function decodeField(value: string): string {
+  return value
+    .replaceAll("%23", "#")
+    .replaceAll("%7C", MEASURE_DETAIL)
+    .replaceAll("%25", "%");
+}
+
+function splitName(name: string): { key: string; detail?: string } {
   const body = name.startsWith(MEASURE_PREFIX)
     ? name.slice(MEASURE_PREFIX.length)
     : name;
   const hash = body.lastIndexOf("#");
   const withoutSequence = hash === -1 ? body : body.slice(0, hash);
   const bar = withoutSequence.indexOf(MEASURE_DETAIL);
-  return bar === -1 ? withoutSequence : withoutSequence.slice(0, bar);
+  return bar === -1 ? { key: decodeField(withoutSequence) } : {
+    key: decodeField(withoutSequence.slice(0, bar)),
+    detail: decodeField(withoutSequence.slice(bar + 1)),
+  };
+}
+
+export function keyOf(name: string): string {
+  return splitName(name).key;
 }
 
 /** Which occurrence this span was, where the emitter named one. */
 export function detailOf(name: string): string | undefined {
-  const body = name.startsWith(MEASURE_PREFIX)
-    ? name.slice(MEASURE_PREFIX.length)
-    : name;
-  const hash = body.lastIndexOf("#");
-  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
-  const bar = withoutSequence.indexOf(MEASURE_DETAIL);
-  return bar === -1 ? undefined : withoutSequence.slice(bar + 1);
+  return splitName(name).detail;
 }
 
 /**

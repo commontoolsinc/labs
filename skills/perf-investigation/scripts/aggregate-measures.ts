@@ -61,7 +61,13 @@ function keyOf(name: string): string {
   const hash = body.lastIndexOf("#");
   const withoutSequence = hash === -1 ? body : body.slice(0, hash);
   const bar = withoutSequence.indexOf("|");
-  return bar === -1 ? withoutSequence : withoutSequence.slice(0, bar);
+  const key = bar === -1 ? withoutSequence : withoutSequence.slice(0, bar);
+  // The emitter percent-encodes the field, so a key containing a separator
+  // comes back whole rather than as a split that was never there.
+  return key.replaceAll("%23", "#").replaceAll("%7C", "|").replaceAll(
+    "%25",
+    "%",
+  );
 }
 
 function emptyBucket(path: string, depth: number): Bucket {
