@@ -23,7 +23,7 @@ export class CommonIframeSandboxElement extends LitElement {
     const previousValue = this.#src;
     this.#src = value;
     this.requestUpdate("src", previousValue);
-    if (this.initialized && value !== previousValue) {
+    if (this.readyWindow && value !== previousValue) {
       this.loadInnerDoc();
     }
   }
@@ -49,7 +49,13 @@ export class CommonIframeSandboxElement extends LitElement {
   /** The host's end of the channel to the current guest, while there is one. */
   private guestPort: MessagePort | undefined;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
-  private initialized: boolean = false;
+  /**
+   * The outer-frame window whose `ready` this element last acted on, once one
+   * has. Its identity is what tells a frame that has been replaced from the
+   * one already in hand: detaching the element discards the frame's browsing
+   * context, so the frame reattaching brings is a different window.
+   */
+  private readyWindow: Window | undefined;
   private subscriptions: Map<string, Receipt> = new Map();
 
   /**
@@ -62,9 +68,17 @@ export class CommonIframeSandboxElement extends LitElement {
    * Whatever the previous frame held went with it, so this lets go of that
    * guest and loads `src` into the new frame. With no `src`, the next
    * assignment to one does the loading.
+   *
+   * `source` is the window that reported it, and a second report from the one
+   * already in hand is refused: a frame says this once, so hearing it twice
+   * from the same window is this element's model of the frame's lifetime being
+   * wrong rather than a frame having been replaced.
    */
-  private onOuterReady() {
-    this.initialized = true;
+  private onOuterReady(source: Window) {
+    if (source === this.readyWindow) {
+      throw new Error(`common-iframe-sandbox: Already initialized.`);
+    }
+    this.readyWindow = source;
     this.releaseGuest();
     if (this.src) {
       this.loadInnerDoc();
@@ -174,7 +188,7 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
       case IPC.IPCGuestMessageType.Ready: {
-        this.onOuterReady();
+        this.onOuterReady(event.source as Window);
         return;
       }
     }

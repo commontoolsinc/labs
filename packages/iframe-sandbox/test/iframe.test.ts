@@ -1,5 +1,6 @@
 import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
 import {
+  assert,
   assertDeepEquals,
   assertEquals,
   cleanupFixtures,
@@ -293,6 +294,40 @@ write("ran", 1);
     // The guest in the new frame runs the same document, so its write is what
     // says the element found its way back rather than going quietly mute.
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("a second ready from the frame already in hand is refused", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = GUEST_PROLOG + `
+write("ran", 1);
+` + GUEST_EPILOG;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Reached into rather than driven, because the outer frame reports itself
+    // ready once and nothing outside it can send that message: the element
+    // takes it only from the window it rendered. So the refusal is asserted
+    // where it is made.
+    const inner = iframe as unknown as {
+      iframeRef: { value?: HTMLIFrameElement };
+      onOuterReady: (source: Window) => void;
+      readyWindow?: Window;
+    };
+    const reporting = inner.iframeRef.value!.contentWindow!;
+    assertEquals(inner.readyWindow, reporting);
+
+    let refusal = "";
+    try {
+      inner.onOuterReady(reporting);
+    } catch (error) {
+      refusal = String(error);
+    }
+    assert(refusal.includes("Already initialized"));
   } finally {
     cleanupFixtures();
   }
