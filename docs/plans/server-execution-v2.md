@@ -36,10 +36,23 @@ with the survival test as the gate on anything that feels needed.
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. State as of 2026-08-20: **W4 (the
+it in the PR that moves the state. State as of 2026-08-20 (late):
+**LAND-OFF IN PROGRESS — the integration PR is OPEN:
+[#6096](https://github.com/commontoolsinc/labs/pull/6096)
+(`claude/server-exec-v2-land-off` = the train tip `45cca4167` + the
+merge of `origin/main` `bbcc7a348` + the reconciliation), CI pending —
+its run is the stack's FIRST-EVER CI execution; the coordinator merges
+on green.** The merge's conflict ledger, the five tx-boundary
+interaction findings (lead: the all-no-op wave is safe-by-construction,
+pinned green by `packages/runner/test/executor-no-op-wave.test.ts`),
+the full suite counts, the reproduced ON gates (lunch 3/3 {1:16}, chat
+n=20, note n=20), and the W4-lite re-anchor live in
+[the land-off reconciliation report](../history/plans/server-execution-v2/stage-c/land-off-reconciliation-report.md).
+Before that: **W4 (the
 acceptance measurement) is DONE — 6 of 7 bars PASS** (ordered next
-action (5) below carries the numbers and the report link); the next
-action is (6), the coordinator's confidence verdict. The consolidated stage-C record —
+action (5) below carries the numbers and the report link); next
+action (6), the coordinator's confidence verdict, fed the owner's
+approval of the landing strategy this PR executes. The consolidated stage-C record —
 benchmark verdicts, attribution, the tuning trio, the double-dispatch
 dossier, the design-pass state, the process rules — is the frozen
 [stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md),
@@ -402,10 +415,14 @@ sub-half-second) — report
 raw under `stage-c/w4-raw/`; OW38 (i) LANDED with it, (ii) the flip bar
 stays the owner's;
 (6) the CONFIDENCE VERDICT to
-the owner — **NEXT: the coordinator assembles it from the W4 acceptance
-readout**; (7) on "no fundamental issue", land the train on main with
-the flag OFF (siblings stacked; default lanes OFF) and continue on
-main; (8) the flip's ordered gates as listed under Phase 7 (skip list
+the owner — the W4 readout carried it, and the owner approved the
+landing strategy; (7) land the train on main with
+the flag OFF — **IN PROGRESS 2026-08-20: integration PR
+[#6096](https://github.com/commontoolsinc/labs/pull/6096) OPEN (one
+merge of main into the train tip, both intents preserved; the
+reconciliation report beside the closeout carries the ledger,
+findings, and verification), CI pending, the coordinator merges on
+green** — then continue on main; (8) the flip's ordered gates as listed under Phase 7 (skip list
 EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
 benchmark against the ruled bar), then the flip PR and the soak.
 
