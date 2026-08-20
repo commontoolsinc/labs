@@ -19,5 +19,8 @@ The tour and the walkthrough describe one session, driven by one script.
 `deno task check-verb-session-sync` holds both documents to the demo: a `cf`
 command either quotes a line the demo runs or carries a `# not in the demo`
 comment saying why it cannot, and an act number must name an act the demo has.
-The agent's entry is not yet held to a script, so its commands are checked by
-review rather than by CI.
+The agent's entry is held to that script for the claim it is built on — step 12
+asserts that the registry does not list a piece a handler created, and that the
+piece reads on its own address regardless. Its remaining commands are not
+quoted from the demo, so `check-verb-session-sync` does not cover them and they
+are checked by review.
