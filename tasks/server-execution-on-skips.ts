@@ -88,23 +88,42 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the load pass runs under the flush deadline), so the surface runs —
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
- * Every list is EMPTY but for THREE `phase-7` entries: two `patterns`
+ * Every list is EMPTY but for TWO `phase-7` entries: one `patterns`
  * — topics-navigation (Phase 4's mixed-posture entry, re-justified by
  * Phase 7 — the ON shell build now runs in the ON lanes, the inherited
- * red did not lift) and `lunch-poll-vote` (added by the Phase 7 fixer
- * on the independent review, 2026-08-16, for the client-side
- * `scheduler-non-settling` loop — verification-coverage.md OW32 — whose
- * mechanism fan-out stage B fixed; the entry now carries the gate's
- * residual, a bimodal served-vote no-op; its sibling
- * `cfc-group-chat-demo-two-browsers` was UN-SKIPPED by fan-out stage B,
- * 2026-08-17: 3/3 green fresh-store under the full ON posture) — and
- * one `runner` entry, `pattern-and-data-persistence`, red once the
- * runner integration clients DECLARE the ON posture (the lane was mixed
- * before; verification-coverage.md OW33) — plus two STEP-level
+ * red did not lift) — and one `runner` entry,
+ * `pattern-and-data-persistence`, red once the runner integration
+ * clients DECLARE the ON posture (the lane was mixed before;
+ * verification-coverage.md OW33) — plus two STEP-level
  * `runtime-client` entries in `integration/client.test.ts` (the CT-1606
  * PerUser header render, 3/3 red; the single-navigateTo dispatch, 1/3
  * red) whose file otherwise runs ON. The ON arm otherwise runs the full
  * suites; the flip PR lands only once this list is empty again.
+ *
+ * `lunch-poll-vote` LIFTED by stage-C W3.1 (2026-08-19, tip
+ * f250feacd): the gate's blocker — the swatch stall — was root-caused
+ * (a diverged speculation layer with no reachable retirement on a
+ * quiet space; stage-c/swatch-stall-rootcause.md) and its class fix
+ * S1 (the drain-settle quiescence advance, RULED 2026-08-19,
+ * protocol.md §4) landed with red-first pins. Lift evidence: 6/6
+ * GREEN fresh-store on the ON-built binary at the tip (sha256
+ * 53a712cede690b6e…, `No default model available` per run, loads
+ * 2.3–3.7, gtimeout 520 s) — totals 3 467–4 334 ms; the stalled step
+ * ("both voters' swatches visible") walled at 1 ms in EVERY run — a
+ * normal arrival, no 28-s recovery, no timeout; joins honest
+ * (confirmed roster, 254–256 ms); events appended/processed 11/12
+ * with the one purged LT1 leftover ×4 and 11/11 ×2 (the clicks
+ * coalesced — no purge); consequence multiplicity {1:16} in ALL SIX
+ * stores (the (α) exactly-once invariant); settleAdvances 10–13 per
+ * run (the S1 advance live at quiescence). The earlier entry text
+ * (the W2 cascade-echo residual and the OW35 history it carried) is
+ * preserved in git history and the register's W2.1/OW43 rows.
+ * The history it kept: added by the Phase 7 fixer on the independent
+ * review (2026-08-16) for the client-side scheduler-non-settling
+ * loop (OW32) whose mechanism fan-out stage B fixed; re-justified by
+ * stage-C W3 (2026-08-19) after OW35's close for the W2 cascade-echo
+ * residual; its sibling `cfc-group-chat-demo-two-browsers` was
+ * un-skipped by fan-out stage B (2026-08-17, 3/3 green).
  */
 /**
  * The two-browser gates' Phase-7 reason (the client-side
@@ -159,36 +178,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "rather than green-by-vacuity; lifts when the ON shell build " +
         "lands in CI (verification-coverage.md OW25) AND the " +
         "inherited red is fixed.",
-    },
-    {
-      file: "integration/lunch-poll-vote.test.ts",
-      phase: "phase-7",
-      reason: "Stage-C design build W3 (2026-08-19): the served-handler " +
-        "DOUBLE DISPATCH this gate carried (#5969's Flag 1 — one durable " +
-        "event run once WITHOUT and once WITH a streamEntry when the " +
-        "flush deadline cut the appending wave; W0's l1 toggled a vote " +
-        "OFF that way) is CLOSED — events.md §4's one-entry-one-completed-" +
-        "run sentence is enforced at the deadline purge, the late-seal " +
-        "refusal, and the orphan refusal (verification-coverage.md OW35 " +
-        "CLOSED); at the W3 tip the gate is GREEN 3/3 fresh-store under " +
-        "the full ON posture (walls 36/20/17 s; `appended 11 / processed " +
-        "12`, the 12th the purged LT1 leftover the drain delivers; every " +
-        "event in exactly one derived commit; 3 vote adds, 0 toggles). " +
-        "The entry STAYS for a residual that is NOT the serving loop's: " +
-        "the step 'both join lands (count reaches 2)' passes in 7–16 ms " +
-        "— before any server round trip — on a stranded CLIENT cascade " +
-        "echo (the join is the click handler's LT1 cascade child; its " +
-        "speculative echo carries a client-minted cascade id " +
-        "`retireIntent` never matches, and its `$event`-caused user " +
-        "entity is a doc the server never writes, so the arrival gate " +
-        "never retires it: the host renders spec-Alice + confirmed Alice), " +
-        "and FAILS when the first probe lands after the guest's confirmed " +
-        "join (W0 l3: '3 joined', 300 s). That is W2's (the intent " +
-        "listener / T2 family; verification-coverage.md's W3 block carries " +
-        "the evidence and two candidate shapes). Lifts when W2's " +
-        "cascade-echo fix lands (or the step is re-pointed at the " +
-        "CONFIRMED count) AND this gate greens ≥3/3 fresh-store under the " +
-        "full ON posture; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

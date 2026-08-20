@@ -327,6 +327,17 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   §5 as an accidental layer-lifting path (the only run with commit
   reverts: a rejection cascade drops speculation layers), consistent
   with the §3 endgame; not a lift basis.
+  **S1 LANDED + the skip LIFTED (2026-08-19, W3.1, tip `f250feacd`):**
+  the ruling at owner item (10) below; protocol.md §4's
+  quiescence-advance amendment + the space-server seat + red-first
+  pins (`executor-settle-advance.test.ts`; OW43 CLOSED); the lunch
+  gate 6/6 green with every swatch wall at 1 ms (item (9) above
+  carries the ledger); the chat n=20 smoke at the tip: PROVISIONAL,
+  one run, load 4.3–4.4 — series complete, median 544 ms (q1 459 /
+  q3 563 / max 622), events 28/28, purge/refusal/orphan 0/0/0,
+  settleAdvances 54 over 193 waves (quiescence-only, never
+  per-wave). W4's gate condition — "the chosen seat lands and the
+  lunch gate is green with honest swatch walls" — is now MET.
 
 **Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
 (posted; the second review round's report recovered on-branch); (2) the
@@ -345,9 +356,11 @@ train tip `42674af15`; the tip counts in PR #6043's body); (3) the
 SWATCH-STALL root cause — **DONE 2026-08-19, ROOT-CAUSED** (the
 critical-path item above; report
 `stage-c/swatch-stall-rootcause.md`); (4) its fix in the RIGHT seat —
-NOW THE OWNER'S CALL: seats S1–S4 on file (the item above;
-recommendation S1 now (once ruled — request (10)), S2 the flagged
-follow-on (ruling (8)), S3 only as a stopgap); (5) W4 — the
+**DONE 2026-08-19 (W3.1)**: S1 RULED (item (10)) and LANDED
+(protocol.md §4's quiescence-advance amendment, the space-server
+seat, red-first pins, OW43 CLOSED, the lunch skip LIFTED on 6/6 —
+items (9)/(10)); S2 stays the flagged follow-on (ruling (8)), S3 not
+taken; (5) W4 — the
 settle-time re-benchmark (server settle measured explicitly,
 `waitForSettled`) — **not before the chosen seat lands and the lunch
 gate is 3/3 with honest swatch walls**; (6) the CONFIDENCE VERDICT to
@@ -418,9 +431,18 @@ cascade ids derived from the parent event id + the send ordinal, both
 sides; the register's FUTURE row beside W2.1): structurally removes
 the swatch-stall exposure — the echo stands until the child's own
 landing; its register trigger now names the stall;
-(9) **the lunch ON-skip lift — PENDING on evidence**: lift = the
-swatch stall resolved + 3/3 green on the train tip (the register's
-W2.1 row carries the blocker-class flag);
+(9) **the lunch ON-skip lift — DONE 2026-08-19 (W3.1)**: the stall
+resolved (S1 landed, ruling (10) below) and the gate ran 6/6 GREEN
+fresh-store on the ON-built binary at tip `f250feacd` (sha256
+`53a712cede690b6e…`, `No default model available` per run, loads
+2.3–3.7): totals 3 467–4 334 ms, joins honest 254–256 ms, the stalled
+step ("both voters' swatches visible") **1 ms in every run** — no
+28-s recovery, no timeout; events 11/12 with the purged LT1 leftover
+×4 and 11/11 ×2 (clicks coalesced); consequence multiplicity {1:16}
+in all six stores; settleAdvances 10–13 per run. The entry is removed
+from `tasks/server-execution-on-skips.ts` (the lift ledger lives in
+that file's header comment and the skip-list test asserts the
+one-entry state);
 (10) **the S1 watermark ruling — RULED 2026-08-19** (the swatch-stall
 report's fix seat S1; register OW43). The request: amend the RULED
 "W covers inputs" sentence so the space-server's watermark also

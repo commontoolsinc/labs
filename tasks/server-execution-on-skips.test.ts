@@ -136,48 +136,40 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list holds exactly TWO phase-7 entries — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) plus lunch-poll-vote (the two-browser gate the P7 independent review found red on the client-side scheduler-non-settling loop — OW32 — whose mechanism fan-out stage B fixed; the entry now carries the gate's residual); cfc-group-chat-demo-two-browsers was UN-SKIPPED by fan-out stage B (3/3 green fresh-store under the full ON posture, 2026-08-17) — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list holds exactly ONE phase-7 entry — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7); lunch-poll-vote was LIFTED by stage-C W3.1 (2026-08-19: the swatch stall root-caused, its class fix S1 landed, 6/6 green fresh-store on the ON-built tip with every swatch wall at 1 ms — the file's header comment carries the ledger); cfc-group-chat-demo-two-browsers was UN-SKIPPED by fan-out stage B (3/3 green fresh-store under the full ON posture, 2026-08-17) — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   assertEquals(out, [
-    "--ignore=integration/topics-navigation.test.ts," +
-    "integration/lunch-poll-vote.test.ts",
+    "--ignore=integration/topics-navigation.test.ts",
   ]);
   const report = err[0];
   assertMatch(
     report,
     /patterns: SKIP integration\/topics-navigation\.test\.ts \(until phase-7\)/,
   );
-  assertMatch(
-    report,
-    /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
-  );
-  // The two-browsers gate RUNS in the ON arm now (fan-out stage B).
+  // The two-browser gates RUN in the ON arm now: cfc-group-chat
+  // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
       skip.file === "integration/cfc-group-chat-demo-two-browsers.test.ts"
     ),
     false,
   );
-  // The lunch entry's reason is LOUD and states the residual mechanism as
-  // observed, names the closed walls and the owning register rows, and
-  // keeps the flip's condition.
-  const lunch = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
-    skip.file === "integration/lunch-poll-vote.test.ts"
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
+      skip.file === "integration/lunch-poll-vote.test.ts"
+    ),
+    false,
   );
-  if (lunch === undefined) throw new Error("missing lunch-poll-vote entry");
-  assertEquals(lunch.phase, "phase-7");
-  // Stage-C design build W3 (2026-08-19): the served-handler double
-  // dispatch (OW35) is CLOSED and the entry now carries the gate's
-  // remaining residual — the CLIENT cascade-echo stranding on the join
-  // step (W2's), named as such — never the refuted served-wish-timing
-  // story.
-  assertMatch(lunch.reason, /OW35/);
-  assertMatch(lunch.reason, /castVote|vote OFF/);
-  assertMatch(lunch.reason, /cascade echo|cascade-echo/);
-  assertMatch(lunch.reason, /W2/);
-  assertMatch(lunch.reason, /flip PR needs this list EMPTY/);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
+  // The remaining entry keeps the loud-skip contract: its reason names
+  // the red's mechanism and the flip's condition.
+  const topics = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
+    skip.file === "integration/topics-navigation.test.ts"
+  );
+  if (topics === undefined) throw new Error("missing topics-navigation entry");
+  assertEquals(topics.phase, "phase-7");
+  assertMatch(topics.reason, /OW25/);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

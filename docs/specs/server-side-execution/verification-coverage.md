@@ -4762,6 +4762,24 @@ supply; OW29/OW32/OW34 closed):
     still take the landing slot — the pre-existing MINOR-4
     heuristic, now cross-referenceable against the settleAdvances
     series timestamps).
+  - The LUNCH GATE at the W3.1 tip (`f250feacd`, ON-built binary
+    sha256 `53a712cede690b6e…`, fresh store + posture + `No default
+    model available` per run, loads 2.3–3.7): **6/6 GREEN**, totals
+    3 467–4 334 ms, joins honest (confirmed roster) 254–256 ms, and
+    the stalled step — "both voters' swatches visible" — walled at
+    **1 ms in every run** (no 28-s recovery, no timeout); events
+    appended/processed 11/12 with the one purged LT1 leftover in 4
+    runs and 11/11 in 2 (the clicks coalesced — no purge; both
+    shapes exactly-once); consequence multiplicity **{1:16} in all
+    six stores**; settleAdvances 10–13 per run (S1 live at
+    quiescence). **The lunch ON skip is LIFTED** (the entry removed;
+    the ledger lives in `tasks/server-execution-on-skips.ts`'s
+    header comment; the skip-list test asserts the one-entry state).
+    Chat n=20 smoke at the tip (PROVISIONAL, one run, load 4.3–4.4):
+    series complete, median 544 ms (q1 459 / q3 563 / max 622),
+    events 28/28, purge/refusal/orphan 0/0/0, settleAdvances 54 over
+    193 waves — quiescence-only, never per-wave (busy-path
+    neutrality at workload level).
 
 ## 4. Standing rule
 
