@@ -20,6 +20,12 @@
 //     advances to cover it WITHOUT any new authored commit — and the
 //     advance reaches the CLIENT through the ordinary watermark-doc
 //     push (RED on the pre-S1 tip: W stays below the tail forever).
+//     The client clause is PUSH-HALF honest (combined review
+//     2026-08-19, F3): a watermark sink installed before any advance
+//     exists must observe a delivered value above the authored
+//     coverage — with the advance wave's `noteExecutorCommit` skipped
+//     (probe S1-P1), `waitForSettled` self-satisfies through its own
+//     fresh subscription's initial pull, and THIS clause goes red.
 //  2. the diverged layer retires at quiescence (the report §5 probe
 //     shape, minimal seam): a client re-derivation reads the PUSHED
 //     derived value and seals a layer whose value DIVERGES from the
@@ -36,6 +42,14 @@
 //  5. busy-space neutrality: under a continuous input stream the
 //     advance never fires mid-stream (quiescence never holds); it
 //     fires once at the trailing quiescence transition.
+//  6. the latch survives a mid-seal content fold (combined review
+//     2026-08-19, F2): content sealing into the advance wave's
+//     still-open commit window (between the gate snapshot and the wave
+//     detach) arms the latch and the seal-consume must NOT erase it —
+//     the folded content's seq sits above the advance's target, so a
+//     consumed latch strands it below W until the next authored input
+//     (RED on the pre-fix code: W frozen below the folded seq). The
+//     consume is gated on `contentContributionCount === 0`.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -46,8 +60,15 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
-import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
+import {
+  readWatermarkSeq,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
+  waitForSettled,
+  watermarkCell,
+  watermarkDocLink,
+} from "../src/executor/watermark.ts";
 import { stampSpeculationRunContext } from "../src/speculation/overlay-destination.ts";
+import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const spaceSigner = await Identity.fromPassphrase("settle advance space");
@@ -197,6 +218,25 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     openClient();
     const engine = await server.engineForSpace(space);
 
+    // F3 (combined review 2026-08-19): the PUSH-half witness. A sink on
+    // the watermark doc installed BEFORE any advance exists observes
+    // every LATER value only through the production push path — the
+    // advance wave's `noteExecutorCommit` marks the watermark doc's
+    // dirty key, and the refresh delivers exactly the dirty keys; the
+    // initial sync pull at subscribe time can only see the pre-input
+    // watermark (below every authored seq this test mints). So a
+    // DELIVERED value above the authored coverage is push-half
+    // evidence the `waitForSettled` clause below cannot give (probe
+    // S1-P1: with the advance wave's `noteExecutorCommit` skipped,
+    // `waitForSettled` self-satisfies through the initial pull of its
+    // own fresh subscription — THIS clause is the one that goes red).
+    const pushedWatermarks: number[] = [];
+    const wmCell = watermarkCell(clientRuntime, space);
+    await wmCell.sync();
+    const cancelWmSink = wmCell.sink((value) => {
+      if (typeof value?.seq === "number") pushedWatermarks.push(value.seq);
+    });
+
     // The client's demand + the authored input (the wave's trigger).
     const clientResult = clientRuntime.getCell<{ total: number }>(
       space,
@@ -269,6 +309,15 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     const stats = host.stats();
     expect(stats.settleAdvances.count).toBeGreaterThanOrEqual(1);
     expect(stats.settleAdvances.lastDelta).toBeGreaterThanOrEqual(1);
+    // F3: the advance was DELIVERED to the pre-installed sink — a value
+    // above the final authored coverage arrived through the push path
+    // (both sides recomputed per poll, as above).
+    await waitUntil(
+      () => pushedWatermarks.some((seq) => seq > maxAuthoredSeq(engine)),
+      "the quiescence advance to arrive at the client via the " +
+        "production push (noteExecutorCommit → dirty key → refresh)",
+    );
+    cancelWmSink();
     cancelDemand();
   });
 
@@ -486,6 +535,186 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     // advance (readWatermarkSeq's absent-doc read is 0).
     expect(derivedSeqs(engine).length).toBe(0);
     expect(readWatermarkSeq(engine)).toBe(0);
+    cancelDemand();
+  });
+
+  it("pin 6 — the latch survives a mid-seal content fold (combined review 2026-08-19, F2): content sealing into the advance wave's still-open commit window leaves the latch ARMED, so the NEXT quiescence covers the folded tail — no stall until the next authored input", async () => {
+    servePattern("s1f-arg", "s1f-result");
+    // THE MID-SEAL INJECTION SEAM (the review's interleaving, made
+    // deterministic): between the quiescence gate's snapshot and the
+    // wave detach, the cycle awaits the watermark tx's commit — any
+    // transaction sealing in that window joins the still-open closing
+    // wave (`#openWave` reuses `#currentWave`; a serving-runtime
+    // `commit()` resolves at SEAL acceptance, before the wave commits,
+    // so awaiting it inside the window cannot deadlock). The wrapper
+    // below intercepts the serving runtime's `edit()`: when an ARMED
+    // one-shot sees a watermark ["seq"] write whose value exceeds every
+    // authored seq (exactly pin 1's quiescence-advance discriminator —
+    // an input-driven advance can never exceed the authored head), it
+    // commits a DERIVATION-kind content write before letting the
+    // watermark tx commit — the wave then carries BOTH the advance and
+    // the content, and `advanceTo` (computed before the fold) sits
+    // BELOW the folded commit's seq.
+    const FOLD_DOC_ID = "of:s1-pin6-mid-seal-fold";
+    let engineRef: Engine.Engine | undefined;
+    let armed = false;
+    let injectionDone = false;
+    let foldError: string | undefined;
+    const innerSetup = onServingRuntime;
+    onServingRuntime = async (runtime) => {
+      await innerSetup?.(runtime);
+      const originalEdit = runtime.edit.bind(runtime);
+      type Tx = ReturnType<Runtime["edit"]>;
+      (runtime as { edit: () => Tx }).edit = () => {
+        const tx = originalEdit();
+        const origWrite = tx.writeValueOrThrow.bind(tx);
+        let watermarkSeqValue: number | undefined;
+        (tx as { writeValueOrThrow: typeof origWrite }).writeValueOrThrow = (
+          link,
+          value,
+        ) => {
+          if (
+            link.id === SERVER_EXECUTION_WATERMARK_DOC_ID &&
+            typeof value === "number"
+          ) {
+            watermarkSeqValue = value;
+          }
+          return origWrite(link, value);
+        };
+        const origCommit = tx.commit.bind(tx);
+        (tx as { commit: typeof origCommit }).commit = async () => {
+          if (
+            armed && !injectionDone && engineRef !== undefined &&
+            watermarkSeqValue !== undefined &&
+            watermarkSeqValue > maxAuthoredSeq(engineRef)
+          ) {
+            injectionDone = true;
+            const foldTx = originalEdit();
+            stampWaveRunContext(foldTx, {
+              actionId: "s1-pin6-mid-seal-fold",
+              kind: "derivation",
+            });
+            foldTx.writeValueOrThrow(
+              {
+                ...watermarkDocLink(space),
+                id: FOLD_DOC_ID as ReturnType<
+                  typeof watermarkDocLink
+                >["id"],
+                path: [],
+              },
+              { folded: true },
+            );
+            const folded = await foldTx.commit();
+            if (folded.error !== undefined) {
+              foldError = folded.error.message;
+            }
+          }
+          return origCommit();
+        };
+        return tx;
+      };
+    };
+    host = newHost();
+    openClient();
+    const engine = await server.engineForSpace(space);
+    engineRef = engine;
+
+    // The ordinary S1 flow first (pin 1's shape), UNARMED: input,
+    // served derivation, the first quiescence advance completes clean.
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "s1f-result",
+      undefined,
+    );
+    await clientResult.sync();
+    const cancelDemand = clientResult.sink(() => {});
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "s1f-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ n: 6 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "the served derivation to reach the client",
+    );
+    await waitUntil(
+      () => readWatermarkSeq(engine) > maxAuthoredSeq(engine),
+      "the first (clean) quiescence advance",
+    );
+
+    // ARM, then drive ONE more content generation: the quiescence
+    // advance for ITS tail is the one the seam poisons. Arming happens
+    // BEFORE the input exists, so the injection cannot race the
+    // advance.
+    armed = true;
+    {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ n: 7 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => clientResult.key("total").get() === 49,
+      "the second served derivation to reach the client",
+    );
+    await waitUntil(() => injectionDone, "the mid-seal fold injection");
+    expect(foldError).toBeUndefined();
+
+    // The interleaving REALLY happened (loud abort, not a vacuous
+    // green): the folded content write and the advance's watermark
+    // write landed in the SAME wave commit.
+    await waitUntil(
+      () =>
+        (Engine.selectCommitsSince(engine, {
+          fromSeq: 0,
+          limit: 10_000,
+        }) as Array<{ seq: number; writes?: Array<{ id: string }> }>)
+          .some((record) =>
+            (record.writes ?? []).some((write) => write.id === FOLD_DOC_ID)
+          ),
+      "the folded commit to appear in the engine",
+    );
+    const commits = Engine.selectCommitsSince(engine, {
+      fromSeq: 0,
+      limit: 10_000,
+    }) as Array<{ seq: number; writes?: Array<{ id: string }> }>;
+    const foldCommits = commits.filter((record) =>
+      (record.writes ?? []).some((write) => write.id === FOLD_DOC_ID)
+    );
+    expect(foldCommits.length).toBe(1);
+    const foldSeq = foldCommits[0].seq;
+    expect(
+      (foldCommits[0].writes ?? []).some((write) =>
+        write.id === SERVER_EXECUTION_WATERMARK_DOC_ID
+      ),
+    ).toBe(true);
+    const authoredBefore = authoredCount(engine);
+
+    // THE PIN (RED on the unfixed code: the fold's content ARMED the
+    // latch and the advance's seal-consume immediately erased it —
+    // `advanceTo` sits below the folded seq, the next echo cycle finds
+    // the latch false, and W freezes below the folded content until
+    // the next authored input, which never comes): with the consume
+    // gated on the wave having stayed bookkeeping-only, the latch
+    // stays armed and the NEXT quiescence covers the folded tail.
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= foldSeq,
+      `the next quiescence advance to cover the folded tail (folded ` +
+        `content at seq ${foldSeq}; W frozen below it means the latch ` +
+        "was consumed by the fold-carrying advance wave)",
+    );
+    // No authored commit drove the recovery.
+    expect(authoredCount(engine)).toBe(authoredBefore);
+    // And the client heals through the ordinary push.
+    const settled = await waitForSettled(clientRuntime, space, foldSeq, {
+      timeoutMs: 10_000,
+    });
+    expect(settled).toBeGreaterThanOrEqual(foldSeq);
     cancelDemand();
   });
 });

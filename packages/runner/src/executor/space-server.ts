@@ -352,8 +352,17 @@ export class SpaceServer implements TransactionSealDestination {
    * inside the insert transaction — so an in-flight authored notice, a
    * late-authored record, or any foreign commit above the base is a
    * hole the walk stops at: fail-closed, never covering a seq the loop
-   * has not accounted). Pruned as W advances. */
+   * has not accounted). Pruned as W advances; BOUNDED (combined review
+   * 2026-08-19, F7) so a space whose W is persistently CLAMPED (a
+   * wedged shadow floor — already surfaced as `watermarkClamped`
+   * churn) cannot grow it without limit: past the cap the OLDEST entry
+   * is evicted, which can only open a hole at the walk's base — the
+   * advance then stops below the evicted seq (fail-closed, the pre-S1
+   * posture for that tail), never claims an unaccounted one. On a
+   * healthy space the prune-at-advance keeps the set near-empty and
+   * the bound is never reached. */
   readonly #ownWaveSeqs = new Set<number>();
+  static readonly #MAX_OWN_WAVE_SEQS = 4096;
   /** S1's once-per-quiescence-transition latch: armed when a wave with
    * CONTENT contributions (derivation/event-handler kinds — commits
    * whose seq can enter a client read basis) lands; consumed when the
@@ -3523,6 +3532,14 @@ export class SpaceServer implements TransactionSealDestination {
       // bookkeeping-only commit (this advance itself, an input-driven
       // advance-only wave) is never chased.
       this.#ownWaveSeqs.add(outcome.seq);
+      if (this.#ownWaveSeqs.size > SpaceServer.#MAX_OWN_WAVE_SEQS) {
+        // F7 (combined review 2026-08-19): the bound bites only on a
+        // persistently clamped space (see the field's comment) —
+        // evicting the OLDEST entry degrades the advance to fail-closed
+        // for the evicted tail, never to unsoundness.
+        const oldest = this.#ownWaveSeqs.values().next();
+        if (!oldest.done) this.#ownWaveSeqs.delete(oldest.value);
+      }
       if (closing.contentContributionCount > 0) {
         this.#settleAdvanceOwed = true;
       }
@@ -3533,9 +3550,26 @@ export class SpaceServer implements TransactionSealDestination {
         for (const seq of this.#ownWaveSeqs) {
           if (seq <= advanceTo) this.#ownWaveSeqs.delete(seq);
         }
-        if (settleAdvanceFrom !== undefined) {
-          // The quiescence advance SEALED: consume the latch (a failed
-          // seal above kept it armed for the idle-wait retry).
+        if (
+          settleAdvanceFrom !== undefined &&
+          closing.contentContributionCount === 0
+        ) {
+          // The quiescence advance SEALED as a bookkeeping-only wave:
+          // consume the latch (a failed seal above kept it armed for
+          // the idle-wait retry). Content having FOLDED into the
+          // advance's still-open wave instead — a seal landing between
+          // the gate snapshot and the wave detach; the watermark-tx
+          // commit and `#sealChain` awaits are the window — leaves the
+          // latch ARMED (combined review 2026-08-19, F2): the folded
+          // content's seq sits ABOVE this advance's target (computed
+          // before the fold), so consuming here would strand it below
+          // W until the next authored input — the swatch-stall shape
+          // reintroduced in a microtask-wide race. The arm above
+          // already re-set the latch for exactly that case; the NEXT
+          // quiescence covers the folded tail, and ITS advance-only
+          // wave consumes normally. The stats block rides the consume
+          // deliberately: a fold-carrying wave was not advance-ONLY,
+          // so W4's subtraction arithmetic must not subtract it.
           this.#settleAdvanceOwed = false;
           stats.settleAdvances.count += 1;
           stats.settleAdvances.lastDelta = advanceTo - settleAdvanceFrom;

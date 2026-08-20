@@ -1977,11 +1977,23 @@ export interface ChurnCounters {
    * the click handler's cascade child, its echo carries a client-minted id
    * no mark ever names and writes an entity doc the server never writes. */
   overlayCascadeEchoRetired: number;
-  /** Stage C W2.1: the subset retired while NO doc the echo wrote had yet
-   * moved past its basis (`speculation-overlay/cascade-echo-retired-
-   * unarrived`) — the FLICKER witness: the server's cascade child had not
-   * landed at this client when its echo went (the purged-LT1-leftover
-   * shape, W3's α1: drained a wave after the parent's consequence). */
+  /** Stage C W2.1: the subset retired on a consequenced parent's mark
+   * while NO doc the echo wrote held a confirmed value at or after the
+   * MARK frame's seq (`speculation-overlay/cascade-echo-retired-
+   * unarrived`) — the FLICKER witness: the server's cascade child had
+   * not landed at this client when its echo went (the
+   * purged-LT1-leftover shape, W3's α1: drained a wave after the
+   * parent's consequence). Keyed on the MARK's frame, not the echo's
+   * read basis (a concurrent writer moves a doc past the basis without
+   * the child having landed). A HEURISTIC — the shape-(b) decision
+   * instrument, so read the biases (combined review 2026-08-19, F4/F5):
+   * it UNDER-counts the coalesced-purged shape (a foreign write to a
+   * written doc landing in the mark's own frame reads "arrived" — e.g.
+   * both voters marking in ONE commit that carries the OTHER voter's
+   * add while THIS voter's child was purged), and OVER-counts on the
+   * equality cutoff (an unchanged authoritative value moves no seq and
+   * reads "unarrived"). Treat a nonzero reading as real flicker
+   * evidence and a zero as NOT proof of none. */
   overlayCascadeEchoFlickers: number;
 }
 
