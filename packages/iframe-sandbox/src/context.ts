@@ -1,6 +1,6 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
-import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
+import type { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 
 // This is typically an `Action` (possibly a new or old implementation),
 // but type it as unknown, can handle in handler.
