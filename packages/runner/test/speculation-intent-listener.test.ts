@@ -567,7 +567,10 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
 //          grandchild behind a SILENT child (one that wrote nothing — no
 //          entry of its own) is reached through the thread (mutation:
 //          the link is not recorded for a no-write child → the grandchild
-//          stands);
+//          stands); and — F1, combined review 2026-08-19 — a LATE
+//          grandchild OF the silent child drops at seal through the
+//          ancestry WALK (the silent child never joined the jobless set;
+//          the one-level check let it register and strand);
 //  W2.1-4. the FLICKER witness counts a cascade echo retired on its
 //          parent's consequenced mark while no doc it wrote had landed at
 //          or after the mark's frame — including when a concurrent writer
@@ -576,7 +579,13 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
 //          cascade (mutations: key on the basis → the concurrent-writer
 //          case reads arrived; arm on the drop arm → it counts);
 //  W2.1-5. OFF arm unchanged — pin 11's shape stands: the overlay does
-//          not exist OFF, and every W2.1 line lives inside it.
+//          not exist OFF, and every W2.1 line lives inside it;
+//  W2.1-6. the post-sealInto RE-CHECK walks the thread too (F1's second
+//          seat): a mark landing while a silent child's grandchild is
+//          mid-seal withdraws the collected entry at the re-check;
+//  W2.1-7. F6 telemetry: depth-capped walks and thread evictions are
+//          counted (`cascadeWalkDepthCapCount` /
+//          `cascadeThreadEvictionCount`) — truncation is observable.
 
 const W21_SIDECAR = "of:stream-events:w21-click";
 
@@ -633,21 +642,30 @@ const cascadeDestination = () => {
    * empty list seals NOTHING (a child that only forwards). */
   const echoOf = (
     eventId: string,
-    options: { parentEventId?: string; writes: string[]; floor?: number },
+    options: {
+      parentEventId?: string;
+      writes: string[];
+      floor?: number;
+      /** Hold `sealInto` open until this settles — the mid-seal window
+       * (the post-await re-check's subject: a mark landing while the
+       * seal is in flight). */
+      holdSeal?: Promise<void>;
+    },
   ) => {
     nextFloor = options.floor ?? 40;
     const tx = {
       tx: {
         sourceAction: { name: "handler" },
-        sealInto: (collector: {
+        sealInto: async (collector: {
           sealSpaceCommit: (
             space: MemorySpace,
             native: unknown,
             source: unknown,
           ) => Promise<unknown>;
-        }) =>
-          options.writes.length === 0
-            ? Promise.resolve({ ok: {} })
+        }) => {
+          if (options.holdSeal !== undefined) await options.holdSeal;
+          return options.writes.length === 0
+            ? { ok: {} }
             : collector.sealSpaceCommit(
               SPACE,
               {
@@ -660,7 +678,8 @@ const cascadeDestination = () => {
                 preconditions: [],
               },
               { sourceAction: { name: "handler" } },
-            ).then(() => ({ ok: {} })),
+            ).then(() => ({ ok: {} }));
+        },
       },
     } as unknown as IExtendedStorageTransaction;
     stampSpeculationRunContext(tx, {
@@ -847,6 +866,20 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
     }));
     expect(destination.lateEchoDropCount).toBe(dropsBefore + 2);
     expect(destination.entryCount(SPACE)).toBe(0);
+    // F1 (combined review 2026-08-19, MAJOR): a LATE grandchild of the
+    // SILENT child. The silent forwarder has no entry, was never
+    // retired, and never joined the jobless set — so the one-level
+    // parent check let this seal REGISTER and strand forever (no mark
+    // of its own ever comes; P's retirement already ran; its entity doc
+    // never arrives, so the sweep's arrival gate never passes). The
+    // seal-time jobless checks now walk the thread: silent → P, and P
+    // is terminal. RED on the pre-fix code: entryCount 1, drops +2.
+    await destination.seal(echoOf("evt:c:0:late-silent-grandchild", {
+      parentEventId: "evt:c:0:silent",
+      writes: ["of:lsg-list", "of:lsg-entity"],
+    }));
+    expect(destination.lateEchoDropCount).toBe(dropsBefore + 3);
+    expect(destination.entryCount(SPACE)).toBe(0);
     // And a fresh intent's cascade still registers (nothing over-broad).
     seedAppend(["evt-p", "evt-r"]);
     destination.trackIntent(SPACE, W21_SIDECAR, "evt-r");
@@ -916,6 +949,92 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
     expect(destination.entryCount(SPACE)).toBe(0);
     expect(destination.cascadeEchoRetirementCount).toBe(4);
     expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(2);
+    destination.close();
+  });
+
+  it("W2.1-6: the post-sealInto re-check walks the thread too (combined review 2026-08-19, F1) — P's mark landing while a SILENT child's grandchild is MID-SEAL withdraws the collected entry at the re-check instead of registering it (mutation: the re-check one level deep → the grandchild registers and strands)", async () => {
+    const { destination, echoOf, seedAppend, markConsequenced } =
+      cascadeDestination();
+    seedAppend(["evt-p"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p");
+    // The silent forwarder threads itself to P at its seal.
+    await destination.seal(echoOf("evt:c:0:silent", {
+      parentEventId: "evt-p",
+      writes: [],
+    }));
+    expect(destination.entryCount(SPACE)).toBe(0);
+    // The grandchild's seal STARTS — the thread records grandchild →
+    // silent and the PRE-seal check passes (P is not yet terminal) —
+    // then parks mid-`sealInto` (a busy client's parked dispatch).
+    const gate = Promise.withResolvers<void>();
+    const sealing = destination.seal(echoOf("evt:c:0:mid-seal-grandchild", {
+      parentEventId: "evt:c:0:silent",
+      writes: ["of:msg-list", "of:msg-entity"],
+      holdSeal: gate.promise,
+    }));
+    // P's mark arrives while the grandchild is in flight: retireIntent
+    // runs (nothing to retire — the grandchild has no entry yet, the
+    // silent child never had one), P joins the terminal set.
+    markConsequenced(0, {});
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(0);
+    const dropsBefore = destination.lateEchoDropCount;
+    // The seal resumes: the post-await re-check must walk silent → P
+    // and withdraw the collected entry. RED on the pre-fix code: the
+    // one-level re-check misses the chain — the entry registers and
+    // strands (entryCount 1, no drop).
+    gate.resolve();
+    expect((await sealing).ok).toBeDefined();
+    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.lateEchoDropCount).toBe(dropsBefore + 1);
+    destination.close();
+  });
+
+  it("W2.1-7: F6 telemetry (combined review 2026-08-19) — a walk stopped at the 64-hop depth cap and a thread eviction at the 4096 bound are COUNTED, so a silently-stranding truncation is observable at all (pre-F6 both presented as the original stranding with zero telemetry)", async () => {
+    const { destination, echoOf, seedAppend, markConsequenced } =
+      cascadeDestination();
+    seedAppend(["evt-p"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p");
+    // A chain DEEPER than the cap: 66 silent forwarders hop-0 … hop-65
+    // (hop-0's parent is P), then a writing descendant under hop-65.
+    let parent = "evt-p";
+    for (let i = 0; i < 66; i++) {
+      await destination.seal(echoOf(`evt:c:0:hop-${i}`, {
+        parentEventId: parent,
+        writes: [],
+      }));
+      parent = `evt:c:0:hop-${i}`;
+    }
+    await destination.seal(echoOf("evt:c:0:deep", {
+      parentEventId: parent,
+      writes: ["of:deep-list"],
+    }));
+    expect(destination.entryCount(SPACE)).toBe(1);
+    // The deep seals' own jobless-ancestry walks already hit the cap
+    // (their chains exceed 64) — the counter moves at seal time.
+    const capsAfterSeals = destination.cascadeWalkDepthCapCount;
+    expect(capsAfterSeals).toBeGreaterThanOrEqual(1);
+    markConsequenced(0, {});
+    await flushMicrotasks();
+    // The deep entry STANDS (the cap bounds the retirement walk — the
+    // pre-existing posture, stated in the W2.1 report), and the capped
+    // walk is COUNTED rather than silent.
+    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.cascadeWalkDepthCapCount).toBeGreaterThan(
+      capsAfterSeals,
+    );
+    // The eviction counter: flood the thread map past its 4096 bound
+    // with unrelated one-hop links (fresh child, nonexistent parent —
+    // the cheapest insert). The evicted links are the OLDEST; each
+    // eviction is counted.
+    expect(destination.cascadeThreadEvictionCount).toBe(0);
+    for (let i = 0; i < 4100; i++) {
+      await destination.seal(echoOf(`evt:c:1:filler-${i}`, {
+        parentEventId: `evt:c:9:filler-parent-${i}`,
+        writes: [],
+      }));
+    }
+    expect(destination.cascadeThreadEvictionCount).toBeGreaterThanOrEqual(1);
     destination.close();
   });
 });

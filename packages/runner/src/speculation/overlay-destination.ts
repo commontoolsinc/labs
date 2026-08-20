@@ -289,6 +289,15 @@ export class SpeculationOverlayDestination
    * flicker witness (see `retireIntent`). */
   #cascadeEchoRetirements = 0;
   #cascadeEchoRetirementsUnarrived = 0;
+  /** F6 telemetry (combined review 2026-08-19): the silent-strand
+   * distinguishers. A `#cascadeParents` eviction at the 4096 bound, or
+   * an ancestry walk stopped at the 64-hop depth cap with chain
+   * remaining, makes a live descendant read as "no ancestor" — the
+   * walk gives up and the entry strands exactly like the pre-W2.1
+   * posture, with nothing else to see. Zero in every expected
+   * workload; nonzero is the signal to look. */
+  #cascadeThreadEvictions = 0;
+  #cascadeWalkDepthCaps = 0;
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
   /** Fired-intent notice watch (events.md §5, speculation.md §4 step 2,
@@ -403,6 +412,21 @@ export class SpeculationOverlayDestination
    * unavailable. */
   get cascadeEchoRetirementUnarrivedCount(): number {
     return this.#cascadeEchoRetirementsUnarrived;
+  }
+
+  /** DIAGNOSTIC (tests): cascade thread links evicted at the 4096
+   * bound (combined review 2026-08-19, F6) — nonzero means ancestry
+   * walks may have been silently truncated (descendants of a terminal
+   * root can strand with no other telemetry). */
+  get cascadeThreadEvictionCount(): number {
+    return this.#cascadeThreadEvictions;
+  }
+
+  /** DIAGNOSTIC (tests): ancestry walks stopped at the 64-hop depth
+   * cap with chain remaining (combined review 2026-08-19, F6) — the
+   * depth-cap sibling of `cascadeThreadEvictionCount`. */
+  get cascadeWalkDepthCapCount(): number {
+    return this.#cascadeWalkDepthCaps;
   }
 
   /** DIAGNOSTIC (tests): intents outstanding across every space — the
@@ -532,12 +556,18 @@ export class SpeculationOverlayDestination
     // jobless intent, and the dropped run's own id joins the set so
     // grandchildren fold in. The server's authoritative run of the intent
     // produced (or produces, in later waves) the durable cascade; the
-    // client's late copies have no job at any depth.
+    // client's late copies have no job at any depth. "At any depth" is
+    // literal (combined review 2026-08-19, F1): the check walks the
+    // WHOLE `parentEventId` chain through `#cascadeParents`, not just
+    // the direct parent — a SILENT (write-less) forwarder child has no
+    // entry, is never retired, and never joins the jobless set, so a
+    // one-level check let its LATE grandchild register after the root's
+    // mark and strand forever (no mark of its own ever comes; its
+    // client-derived entity doc is never written by the server, so the
+    // sweep's arrival gate never passes).
     if (
       context?.kind === "event-handler" && context.eventId !== undefined &&
-      (this.#terminalIntents.has(context.eventId) ||
-        (context.parentEventId !== undefined &&
-          this.#terminalIntents.has(context.parentEventId)))
+      this.#joblessByAncestry(context.eventId, context.parentEventId)
     ) {
       this.#noteJoblessIntent(context.eventId);
       this.#droppedLateEchoTxs.add(tx);
@@ -723,15 +753,16 @@ export class SpeculationOverlayDestination
     }
     if (
       context?.kind === "event-handler" && context.eventId !== undefined &&
-      (this.#terminalIntents.has(context.eventId) ||
-        (context.parentEventId !== undefined &&
-          this.#terminalIntents.has(context.parentEventId)))
+      this.#joblessByAncestry(context.eventId, context.parentEventId)
     ) {
       // The late-echo rule's post-await re-check (self-review finding 5,
       // the closed arm's shape): the terminal signal landed while
       // `sealInto` was in flight — `retireIntent` ran before this entry
       // existed, so registering now would strand exactly the echo the
       // rule closes. Withdraw the collected entries; the seal reports ok.
+      // Walks the whole thread like the pre-seal check (combined review
+      // 2026-08-19, F1): a mark landing mid-seal for a grandchild of a
+      // SILENT child is caught only through the chain.
       this.#noteJoblessIntent(context.eventId);
       this.#droppedLateEchoTxs.add(tx);
       this.#lateEchoDrops += 1;
@@ -1203,7 +1234,14 @@ export class SpeculationOverlayDestination
   }
 
   /** Record a cascade child → emitter link (stage C W2.1; see
-   * `#cascadeParents`). Bounded like the jobless set (oldest pruned). */
+   * `#cascadeParents`). Bounded like the jobless set (oldest pruned).
+   * An eviction is COUNTED (combined review 2026-08-19, F6): a pruned
+   * link is indistinguishable from "no ancestor" at walk time, so a
+   * live chain through it silently strands its descendants (the
+   * pre-W2.1 posture) — hitting the bound within one intent round trip
+   * takes ~4096 cascade seals (implausible; the bound is the report's
+   * stated design), but if it ever happens in the wild this counter is
+   * the only telemetry. */
   #noteCascadeParent(eventId: string, parentEventId: string): void {
     if (this.#cascadeParents.has(eventId)) return;
     this.#cascadeParents.set(eventId, parentEventId);
@@ -1212,8 +1250,34 @@ export class SpeculationOverlayDestination
         SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS
     ) {
       const oldest = this.#cascadeParents.keys().next();
-      if (!oldest.done) this.#cascadeParents.delete(oldest.value);
+      if (!oldest.done) {
+        this.#cascadeParents.delete(oldest.value);
+        this.#cascadeThreadEvictions += 1;
+        logger.debug("cascade-thread-evicted", () => [
+          `cascade thread link ${oldest.value} evicted at the ` +
+          `${SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS} bound — ` +
+          "a live chain through it now reads as having no ancestor " +
+          "(walks stop there; descendants of a terminal root beyond it " +
+          "can strand silently)",
+        ]);
+      }
     }
+  }
+
+  /** A cascade ancestry walk stopped at the depth cap with chain
+   * remaining (combined review 2026-08-19, F6): deeper ancestry is
+   * invisible to both the retirement walk and the seal-time jobless
+   * check, so descendants of a terminal root beyond the cap strand
+   * silently (the pre-W2.1 posture). Counted so the cap's being hit is
+   * observable at all. */
+  #noteCascadeWalkDepthCapped(): void {
+    this.#cascadeWalkDepthCaps += 1;
+    logger.debug("cascade-walk-depth-capped", () => [
+      "a cascade ancestry walk stopped at the " +
+      `${SpeculationOverlayDestination.#MAX_CASCADE_DEPTH}-hop cap with ` +
+      "chain remaining — deeper ancestry is invisible (descendants of " +
+      "a terminal root beyond the cap can strand silently)",
+    ]);
   }
 
   /** Whether a live entry is a client cascade DESCENDANT of `ancestor`:
@@ -1224,11 +1288,42 @@ export class SpeculationOverlayDestination
   #cascadeReaches(entry: OverlayEntry, ancestor: string): boolean {
     let id = entry.parentEventId;
     let hops = 0;
-    while (
-      id !== undefined &&
-      hops < SpeculationOverlayDestination.#MAX_CASCADE_DEPTH
-    ) {
+    while (id !== undefined) {
+      if (hops >= SpeculationOverlayDestination.#MAX_CASCADE_DEPTH) {
+        this.#noteCascadeWalkDepthCapped();
+        return false;
+      }
       if (id === ancestor) return true;
+      id = this.#cascadeParents.get(id);
+      hops += 1;
+    }
+    return false;
+  }
+
+  /** Whether an event-handler seal is JOBLESS BY ANCESTRY (stage C
+   * W2.1; combined review 2026-08-19, F1): its own intent — or ANY
+   * cascade ancestor, walking `parentEventId` through the thread — has
+   * already reached a terminal consequence. The one-level form of this
+   * check (eventId or direct parent only) missed a LATE grandchild of
+   * a SILENT (write-less) cascade child: the silent child has no
+   * entry, is never retired, and never joins the jobless set, so the
+   * grandchild sealing after the root's mark registered and stranded
+   * forever. Same bounded walk as `#cascadeReaches`, on ids instead of
+   * entries — the root is in `#terminalIntents` via
+   * `#settleIntentConsequence`, so the chain walk finds it. */
+  #joblessByAncestry(
+    eventId: string,
+    parentEventId: string | undefined,
+  ): boolean {
+    if (this.#terminalIntents.has(eventId)) return true;
+    let id = parentEventId;
+    let hops = 0;
+    while (id !== undefined) {
+      if (hops >= SpeculationOverlayDestination.#MAX_CASCADE_DEPTH) {
+        this.#noteCascadeWalkDepthCapped();
+        return false;
+      }
+      if (this.#terminalIntents.has(id)) return true;
       id = this.#cascadeParents.get(id);
       hops += 1;
     }
