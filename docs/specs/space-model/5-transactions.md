@@ -185,14 +185,16 @@ outcome:
 | `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
 | `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
-| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or CFC enforcement refused to hand the transaction over. A re-run is a genuinely new attempt, and costs no round-trip. |
+| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`), which a fresh attempt prepares against the current inputs. A re-run is a genuinely new attempt, and costs no round-trip. |
 | `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
 
 Everything else is **terminal on the first attempt**: a `ProtocolError` (the
 server refused the commit's shape), an unmarked `AuthorizationError` (the server
 evaluated the request and denied it), a `PreconditionFailedError` (permanent by
 definition — the client must not retry), a `RowLabelCommitError` (a commit-time
-rule refused the data), a `StoreError`, or the generic `TransactionError`. Those
+rule refused the data), a `CfcCommitRefusalError` (the client-side CFC boundary
+refused the transaction's own reads and writes before storage saw them), a
+`StoreError`, or the generic `TransactionError`. Those
 are deterministic with respect to the committed data: a re-run recomputes the
 identical refused write, and each doomed attempt costs a server round-trip plus
 a revert notification to the cell's subscribers.
