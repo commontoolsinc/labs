@@ -322,7 +322,7 @@ describe("Engine.compileToRecordGraph", () => {
         compiled.id,
         compiled.graph,
         compiled.mainSpecifier,
-        MULTI.files,
+        MULTI,
       );
       expect((main as { total(): number }).total()).toBe(42);
       expect(coverage.report().totals.coveredRuntimeLines).toBeGreaterThan(0);
@@ -348,7 +348,7 @@ describe("Engine.compileToRecordGraph", () => {
         compiled.id,
         compiled.graph,
         compiled.mainSpecifier,
-        MULTI.files,
+        MULTI,
       );
       expect((main as { total(): number }).total()).toBe(42);
       const report = coverage.report();

@@ -9,6 +9,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
+import { collectDataFileNames } from "@commonfabric/js-compiler";
+import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
@@ -1548,22 +1550,48 @@ export async function savePiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  const files = await piece.getPatternSourceFiles();
+  const program = await piece.getPatternSourceProgram();
 
-  if (files) {
-    for (const { name, contents } of files) {
-      if (name[0] !== "/") {
-        throw new Error("Ungrounded file in pattern.");
-      }
-      const outFilePath = join(outPath, name.substring(1));
-      await Deno.mkdir(dirname(outFilePath), { recursive: true });
-      await Deno.writeTextFile(outFilePath, contents);
-    }
-  } else {
+  if (!program) {
     throw new Error(
       `Piece "${resolvedConfig.piece}" does not contain a pattern source.`,
     );
   }
+  for (const { name, contents } of program.files) {
+    if (name[0] !== "/") {
+      throw new Error("Ungrounded file in pattern.");
+    }
+    const outFilePath = join(outPath, name.substring(1));
+    await Deno.mkdir(dirname(outFilePath), { recursive: true });
+    await Deno.writeTextFile(outFilePath, contents);
+  }
+  reportUndeclaredDataFiles(program);
+}
+
+/**
+ * Report the data files a later `setsrc` would have to be told about.
+ *
+ * A file the recovered source reads by name is declared, so rebuilding the
+ * package from this directory attaches it again on its own. A file the source
+ * cannot name — one read by a computed path, or one that ships with a pattern
+ * that does not read it — is on disk with nothing recording that it was data,
+ * and would come back as an ordinary file nobody stores. Naming the flags here
+ * is what keeps the round trip whole.
+ */
+function reportUndeclaredDataFiles(program: RuntimeProgram): void {
+  const declared = new Set(
+    program.files.flatMap((file) => collectDataFileNames(file, TARGET)),
+  );
+  const undeclared = (program.dataFiles ?? []).filter((name) =>
+    !declared.has(name)
+  );
+  if (undeclared.length === 0) return;
+  console.log(
+    `\nThis pattern carries ${undeclared.length} data file(s) its source ` +
+      `does not name.\nPass them on the next setsrc, or they are dropped ` +
+      `from that revision:\n` +
+      undeclared.map((name) => `  --datafile .${name}`).join("\n"),
+  );
 }
 
 export async function applyPieceInput(config: PieceConfig, input: object) {

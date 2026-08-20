@@ -115,6 +115,83 @@ export function collectImportSpecifiers(
   return getImports(source, target, { includeImportTypeNodes: true });
 }
 
+/** The module an authored pattern takes the runtime's own names from. */
+const FABRIC_MODULE = "commonfabric";
+
+/** The runtime function that reads a data file stored with the program. */
+const DATA_FILE_READER = "dataFile";
+
+/**
+ * Returns the data-file names `source` declares, as the paths its `dataFile()`
+ * calls name.
+ *
+ * A pattern declares the code it depends on by importing it and the data it
+ * depends on by reading it, so this is the data-side counterpart of the import
+ * scan: both read a declaration out of the source rather than take one from a
+ * caller.
+ *
+ * Only a call to the runtime's own `dataFile` counts, and only where the
+ * argument is a string literal. The binding is followed through a renaming
+ * import and through a namespace import, so `df("/x.json")` and
+ * `cf.dataFile("/x.json")` are the same declaration as the plain call. A
+ * type-only import binds no value and so declares nothing. A computed path
+ * cannot be read from the source at all, and stays the caller's to name.
+ */
+export function collectDataFileNames(
+  source: Source,
+  target: ts.ScriptTarget,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    source.name,
+    source.contents,
+    target,
+    true,
+  );
+  const direct = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!ts.isStringLiteral(specifier) || specifier.text !== FABRIC_MODULE) {
+      continue;
+    }
+    const clause = statement.importClause;
+    if (clause === undefined || clause.isTypeOnly) continue;
+    const bindings = clause.namedBindings;
+    if (bindings === undefined) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+      continue;
+    }
+    for (const element of bindings.elements) {
+      if (element.isTypeOnly) continue;
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (imported === DATA_FILE_READER) direct.add(element.name.text);
+    }
+  }
+  if (direct.size === 0 && namespaces.size === 0) return [];
+
+  const names: string[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const reads = ts.isIdentifier(callee)
+        ? direct.has(callee.text)
+        : ts.isPropertyAccessExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          namespaces.has(callee.expression.text) &&
+          callee.name.text === DATA_FILE_READER;
+      const argument = node.arguments[0];
+      if (reads && argument !== undefined && ts.isStringLiteral(argument)) {
+        names.push(argument.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return names;
+}
+
 function getImports(
   source: Source,
   target: ts.ScriptTarget,

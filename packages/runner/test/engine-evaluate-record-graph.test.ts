@@ -10,6 +10,7 @@ import {
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 describe("Engine.evaluateRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -112,7 +113,7 @@ describe("Engine.evaluateRecordGraph()", () => {
         id,
         graph,
         mainSpecifier,
-        program.files,
+        program,
       );
       expect(result.main!["default"]).toBe(42);
     } finally {
@@ -192,7 +193,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(result.main?.default).toBe(42);
     expect(
@@ -258,8 +259,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     expect(result.main?.default).toBe(42);
     expect(
@@ -267,6 +267,38 @@ describe("Engine.evaluateRecordGraph()", () => {
         path.startsWith("/data/")
       ),
     ).toBe(false);
+  });
+
+  it("marks the data files on the program it records for an export", async () => {
+    // Every exported pattern is recorded with the program it came from, and
+    // that program names data entries among its files. Recorded without
+    // `dataFiles`, the entries are there with nothing saying they are data, so
+    // anything that later builds from that program compiles the JSON.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "import { pattern } from 'commonfabric';\n" +
+            "export const child = pattern(() => ({ value: 1 }));\n" +
+            "export default child;\n",
+        },
+        { name: "/data/cities.json", contents: '["Oslo"]\n' },
+      ],
+      dataFiles: ["/data/cities.json"],
+    };
+
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program,
+    );
+    const child = (result.main as Record<string, unknown>).child;
+    expect(getPatternProgram(child)?.dataFiles).toEqual(["/data/cities.json"]);
   });
 
   it("reads an attached data file's bytes from the pattern", async () => {
@@ -844,7 +876,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(25);
   });
@@ -888,7 +920,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(25);
   });

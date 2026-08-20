@@ -88,20 +88,29 @@ export function readDataFileSource(
       `Data file "${dataPath}" must be within root directory "${fsRoot}".`,
     );
   }
-  const bytes = Deno.readFileSync(realDataPath);
-  let contents: string;
+  return {
+    name: groundedSourceName(relativeDataPath),
+    contents: decodeDataFile(Deno.readFileSync(realDataPath), dataPath),
+  };
+}
+
+/**
+ * Decode a data file's bytes as the text a source package stores.
+ *
+ * A source package holds text, so the bytes are decoded as UTF-8 strictly: a
+ * file that is not valid UTF-8 is reported by `name` rather than stored with
+ * replacement characters in place of the bytes that were read. `ignoreBOM`
+ * keeps a leading byte order mark in the result instead of consuming it, since
+ * a data file is stored byte for byte and dropping the mark would deploy
+ * something other than the authored file.
+ */
+export function decodeDataFile(bytes: Uint8Array, name: string): string {
   try {
-    // `ignoreBOM` keeps a leading byte order mark in `contents` instead of
-    // consuming it. A data file is stored byte-for-byte, so dropping the mark
-    // would deploy something other than the authored file.
-    contents = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
       .decode(bytes);
   } catch {
-    throw new Error(
-      `Data file "${dataPath}" is not valid UTF-8 text.`,
-    );
+    throw new Error(`Data file "${name}" is not valid UTF-8 text.`);
   }
-  return { name: groundedSourceName(relativeDataPath), contents };
 }
 
 // Resolve a program using the file system.
@@ -163,6 +172,38 @@ export class FileSystemProgramResolver implements ProgramResolver {
     });
   }
 
+  resolveDataFile(name: string): Promise<Source | undefined> {
+    requireDeno("FileSystemProgramResolver");
+    const path = this.#groundedPath(name);
+    if (path === undefined) return Promise.resolve(undefined);
+    let bytes: Uint8Array;
+    try {
+      bytes = Deno.readFileSync(path);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return Promise.resolve(undefined);
+      }
+      throw error;
+    }
+    return Promise.resolve({ name, contents: decodeDataFile(bytes, name) });
+  }
+
+  #groundedPath(specifier: string): string | undefined {
+    if (!specifier || specifier[0] !== "/") return undefined;
+    const absPath = normalize(
+      join(
+        this.fsRoot,
+        specifier.substring(1, specifier.length).replaceAll("/", SEPARATOR),
+      ),
+    );
+    if (isOutsideRoot(relative(this.fsRoot, absPath))) {
+      throw new Error(
+        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+      );
+    }
+    return absPath;
+  }
+
   #realPath(path: string): string {
     requireDeno("FileSystemProgramResolver");
     return Deno.realPathSync(path);
@@ -206,6 +247,18 @@ export class HttpProgramResolver implements ProgramResolver {
     const url = new URL(this.#mainUrl);
     url.pathname = normalize(specifier);
     return this.#fetch(url);
+  }
+
+  async resolveDataFile(name: string): Promise<Source | undefined> {
+    if (!name || name[0] !== "/") return undefined;
+    const url = new URL(this.#mainUrl);
+    url.pathname = normalize(name);
+    const res = await this.#fetchImpl(url);
+    if (!res.ok) return undefined;
+    return {
+      name,
+      contents: decodeDataFile(new Uint8Array(await res.arrayBuffer()), name),
+    };
   }
 
   async #fetch(url: URL): Promise<Source> {

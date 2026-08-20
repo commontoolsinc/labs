@@ -19,6 +19,7 @@ export {
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
 export {
+  collectDataFileNames,
   collectImportSpecifiers,
   resolveImportSpecifier,
 } from "./typescript/resolver.ts";

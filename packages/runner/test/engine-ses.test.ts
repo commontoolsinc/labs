@@ -94,7 +94,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBeDefined();
   });
@@ -125,7 +125,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBeDefined();
   });
@@ -185,7 +185,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBeDefined();
   });
@@ -218,7 +218,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBeDefined();
   });
@@ -254,7 +254,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toHaveLength(3);
     expect(typeof main?.default?.[0]).toBe("string");
@@ -286,7 +286,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toEqual({
       gmail: { value: "gmail.readonly" },
@@ -316,7 +316,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBeInstanceOf(RegExp);
     expect(main?.default?.test("hello")).toBe(true);
@@ -387,7 +387,7 @@ describe("Engine in SES mode", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe("Person");
   });

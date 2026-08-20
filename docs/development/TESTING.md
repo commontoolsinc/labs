@@ -229,10 +229,13 @@ run directory.
 ## Patterns that read data files
 
 A pattern calling `dataFile()` reads a file attached to the program under test.
-Every kind of test attaches them where it builds that program: `cf test` takes
-repeatable `--datafile` paths, a `generated-patterns` scenario names them in
-`dataFiles` grounded by `dataRoot`, and a browser integration test passes
-`dataFilePaths` to `resolveLocalProgram`.
+The call names the file, and that is the declaration every test path reads:
+`resolveLocalProgram` attaches what the source asks for, so a pattern under
+test behaves the way it does deployed without the test restating anything. A
+file the source cannot name — one read by a computed path — is added where the
+test builds the program: `cf test` takes repeatable `--datafile` paths, a
+`generated-patterns` scenario names them in `dataFiles` grounded by `dataRoot`,
+and a browser integration test passes `dataFilePaths` to `resolveLocalProgram`.
 
 A browser integration test needs nothing further: the data travels to the
 browser inside the compiled pattern the space holds, so there is no file to

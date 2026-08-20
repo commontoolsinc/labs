@@ -15,10 +15,12 @@ every entry with repeatable `--test` flags on `piece new` and every later
 `piece setsrc`. Manual browser or CLI verification does not replace the
 automated tests. Deployment packages and type-checks attached tests but does not
 run them. A file the pattern ships with that is not code — a fixture, a lookup
-table — attaches the same way with repeatable `--datafile` flags, is stored
-verbatim rather than compiled, and is read with `dataFile(path)` from
-`commonfabric`. `cf check` and `cf test` take `--datafile` too, so a pattern
-that reads one is checkable and testable locally.
+table — is read with `dataFile(path)` from `commonfabric` and stored verbatim
+rather than compiled. That call is the whole declaration: store the file under
+the program root at the path it names, and every command that builds the pattern
+attaches it, so a pattern that reads one is checkable, testable, and deployable
+with no extra flag. `--datafile` remains for a file the source cannot name, such
+as one read by a computed path.
 
 Also read the foundational reactivity references before implementing or
 debugging pattern state:

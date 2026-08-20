@@ -3506,16 +3506,6 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * The pattern's authored source files (see {@link getPatternSourceProgram}).
-   * Returns undefined when no verified source closure exists.
-   */
-  async getPatternSourceFiles(): Promise<
-    { name: string; contents: string }[] | undefined
-  > {
-    return (await this.getPatternSourceProgram())?.files;
-  }
-
-  /**
    * Detach from the current origin, restore an exact retained source revision,
    * or follow an origin recorded by an earlier revision.
    */
