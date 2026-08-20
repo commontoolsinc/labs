@@ -245,15 +245,11 @@ export function inlineExternalSchemaRefsInValue<T>(value: T): T {
     const ref = (schema as JSONSchemaObj).$ref;
     if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
     try {
-      const recomposed = recomposeSchema(ref, lookupSchemaDocument);
-      // A closure of one document recomposes with an empty `$defs`; drop it
-      // so the inline form round-trips to the schema the writer was handed.
-      const inline = isObjectNotArray(recomposed) &&
-          isObjectNotArray(recomposed.$defs) &&
-          Object.keys(recomposed.$defs).length === 0
-        ? (({ $defs: _empty, ...rest }) => rest)(recomposed)
-        : recomposed;
-      return internSchema(inline as JSONSchema) as never;
+      // Recomposition never mints an empty `$defs` (a closure of one
+      // document returns the body alone), so the result rides as it is.
+      return internSchema(
+        recomposeSchema(ref, lookupSchemaDocument),
+      ) as never;
     } catch {
       return schema;
     }

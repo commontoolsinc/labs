@@ -872,16 +872,30 @@ export function resolveExternalRootRefForStructure(
   if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
   const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
   if (!isObjectNotArray(resolved)) return schema;
-  // Resolution can mint a member view with the group's `$defs` attached;
-  // a view whose group contributed nothing carries an empty one. Drop it —
-  // consumers compare and combine these structurally, and the writer's
-  // sanitized input never had it.
+  // Resolution can mint a member view with the group's `$defs` attached; a
+  // view whose group contributed nothing carries an empty one. Drop it so
+  // consumers compare and combine these structurally as the writer's
+  // sanitized input — but only when nothing in the body names a local
+  // definition, so the strip can never orphan a `#/...` reference. (With an
+  // empty `$defs` such a reference already dangles; the guard states the
+  // invariant instead of inferring it from emptiness.)
   if (
     isObjectNotArray(resolved.$defs) &&
-    Object.keys(resolved.$defs).length === 0
+    Object.keys(resolved.$defs).length === 0 &&
+    !hasLocalSchemaRef(resolved)
   ) {
     const { $defs: _empty, ...rest } = resolved as JSONSchemaObj;
     return internSchema(rest) as JSONSchemaObj;
   }
   return resolved as JSONSchemaObj;
+}
+
+/** Whether the schema's body (its `$defs` excluded) names a local `#/...`. */
+function hasLocalSchemaRef(schema: JSONSchema): boolean {
+  const refs = new Set<string>();
+  findCfcSchemaRefs(schema, refs);
+  for (const ref of refs) {
+    if (ref.startsWith("#")) return true;
+  }
+  return false;
 }
