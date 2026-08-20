@@ -373,6 +373,34 @@ numeric literal emits a number rather than the string the node carries — so a
 branch that changed what it produced would fail rather than stay green on the
 line count.
 
+### A fact the checkout supplies
+
+A line can also sit behind a fact the code reads from the machine it is
+running on: the branch the checkout is on, the platform, whether some tool is
+installed. `tasks/test-records.ts` stamps a local test run with the branch,
+and records one only when git names one. Continuous integration builds a pull
+request from a detached merge commit, where `git branch --show-current` prints
+nothing, so the arm that records a branch ran on a developer's machine and not
+in that job. Its coverage then came from whatever else in the run happened to
+build a context, which is what made it move.
+
+A test that creates a scratch repository on a named branch does reach the arm,
+and asserting that git's answer reaches the context is worth doing. It does
+not settle the coverage, though, because it buys the line with a subprocess:
+the line is covered where git is installed, behaves as the test expects, and
+is allowed to run, and not elsewhere.
+
+Separate reading the facts from deciding what they mean.
+`buildLocalContext()` asks git for the commit, the branch and the status, and
+hands the three answers to `composeLocalContext()`, which turns them into the
+context. Reaching the arm that records a branch is then a matter of saying
+what git said, so a unit test states the facts and asserts the context they
+compose into. `tasks/test-records-flap-coverage.test.ts` holds one case per
+arm: a branch git named, the empty string a detached checkout produces, and
+the absent answer a directory outside a repository produces. Nothing in that
+file runs a subprocess or reads the surrounding checkout, so every arm runs on
+every machine.
+
 ### What the check says when the regression is not the pull request's
 
 The gate compares whole-group counts, so a flapping line fails whichever pull
