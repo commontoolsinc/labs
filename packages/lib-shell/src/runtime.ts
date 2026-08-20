@@ -1,6 +1,7 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
+import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
@@ -178,20 +179,6 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    */
   telemetry?: RuntimeTelemetrySink;
 };
-
-const NavigationEventName = "cf-navigate";
-
-class NavigationEvent extends CustomEvent<RuntimeNavigationTarget> {
-  command: RuntimeNavigationTarget;
-  constructor(command: RuntimeNavigationTarget) {
-    super(NavigationEventName, { detail: command });
-    this.command = command;
-  }
-}
-
-function defaultNavigate(command: RuntimeNavigationTarget) {
-  globalThis.dispatchEvent(new NavigationEvent(command));
-}
 
 /**
  * Fetch the worker bundle hash from the build manifest. This cache-busts the
@@ -621,7 +608,7 @@ export class RuntimeInternals extends EventTarget {
     // The target is an address: (space, piece). Mapping a space DID back
     // to a human-readable view (e.g. a spaceName URL) is the embedder's
     // view-state concern, handled in its navigate callback.
-    (this.#callbacks.navigate ?? defaultNavigate)({
+    (this.#callbacks.navigate ?? navigate)({
       spaceDid: cell.space(),
       pieceId,
     });

@@ -7,13 +7,13 @@ import { BaseElement } from "../../core/base-element.ts";
 import "../cf-avatar/index.ts";
 
 import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   type CfcLabelView,
   NAME,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 
 import { ownerPrincipalFromLabel } from "../../core/cfc-label.ts";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";

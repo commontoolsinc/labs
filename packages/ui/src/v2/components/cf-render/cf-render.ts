@@ -1,5 +1,6 @@
 import { getPieceBoundary, render } from "@commonfabric/html/client";
 import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   CHIP_UI,
@@ -7,7 +8,6 @@ import {
   TILE_UI,
   type VNode,
 } from "@commonfabric/runtime-client";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 import { css, html, PropertyValues } from "lit";
 import { state } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";

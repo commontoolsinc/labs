@@ -1,11 +1,12 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import type { DID } from "@commonfabric/identity";
 import {
   navigate,
   replaceNavigation,
   updatePageTitle,
-} from "../shared/navigate.ts";
+} from "@commonfabric/navigation";
 
 // Host-embedding contract seam 3 (docs/features/host-embedding.md §3): a host
 // embeds by listening on `globalThis` for the navigation CustomEvents these
@@ -18,8 +19,8 @@ import {
 // (`defaultNavigate` in packages/lib-shell) produces `{spaceDid, pieceId}` and
 // is already guarded by packages/shell/test/runtime-navigation.test.ts.
 //
-// The cancellable `cf-open-external` new-tab hook is untested here BY DESIGN: it
-// lands with CT-1830 on branch ct-1830-cf-open-external and is tested there.
+// The cancellable `cf-open-external` new-tab hook is covered by its own file,
+// navigate.test.ts, which exercises the cancellation contract end to end.
 
 const spaceDid = "did:key:z6Mk-host-embedding-navigate-contract" as DID;
 

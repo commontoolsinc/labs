@@ -16,12 +16,11 @@ import {
   type PresentationParticipant,
 } from "@commonfabric/integration";
 import {
-  AppState,
   AppView,
   appViewToUrlPath,
-  deserialize,
   isAppViewEqual,
-} from "@commonfabric/shell/shared";
+} from "@commonfabric/navigation";
+import { AppState, deserialize } from "@commonfabric/shell/app-state";
 
 import {
   collectPatternCoverage,
