@@ -29,41 +29,62 @@ import { dirname, fromFileUrl } from "@std/path";
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 /**
- * Extensions this governs: the languages the repository AUTHORS.
+ * Extensions whose contents are not text at all.
  *
- * Scoped by extension rather than applied to every tracked file because the
- * tree also carries text that is not authored code, where a control byte
- * may be the data itself rather than a mistake: a `.txt` hashing fixture
- * whose CRLF endings are its whole point, a `.tldr` drawing, and the prose
- * under `docs/history/`, which is a frozen record that may not be edited to
- * satisfy a rule about today's source.
+ * The rule governs every tracked file by default, so what is written down is
+ * the exemption rather than the coverage. That direction is deliberate: an
+ * allow-list of authored formats has to be complete to be true, and each time
+ * this one was written it missed something the repository already tracked —
+ * C, TLA, JSONL, SVG, a web manifest, a Dockerfile with no extension at all.
+ * A new binary format that is not listed here produces a false positive,
+ * which someone fixes by adding a line; a new SOURCE format under an
+ * allow-list produces silence, which nobody sees.
  */
-const SOURCE_EXTENSIONS: readonly string[] = [
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".json",
-  ".jsonc",
-  ".sh",
-  ".yml",
-  ".yaml",
-  ".html",
-  ".css",
-  ".py",
-  ".toml",
-  ".cfg",
+const BINARY_EXTENSIONS: readonly string[] = [
+  ".db",
+  ".db-shm",
+  ".db-wal",
+  ".gz",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".pdf",
+  ".png",
+  ".sqlite",
+  ".ttf",
+  ".wasm",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".zip",
 ];
 
 /**
- * Paths whose contents this repository does not author.
+ * Tracked text this repository does not author as code, where a control byte
+ * is the content rather than a mistake.
  *
- * The bundled TypeScript library declarations arrive from upstream with CRLF
- * endings. Rewriting them would be a change to a vendored artifact for the
- * sake of a rule about our own source, and re-vendoring would undo it.
+ * Each is named individually rather than bucketed, because the reasons are
+ * different and a reader deciding whether to add a line needs to know which
+ * kind of case theirs is.
  */
-const VENDORED_PREFIXES: readonly string[] = [
+const EXEMPT_PATHS: readonly string[] = [
+  // A hashing fixture whose CRLF endings are the whole point of the fixture.
+  "packages/content-hash/test/fixture-frank.txt",
+  // A drawing, stored as tab-separated data.
+  "packages/memory/memory.tldr",
+];
+
+/**
+ * Trees this rule may not reach.
+ *
+ * `docs/history/` is a frozen record: `docs/README.md` permits only
+ * mechanical edits there, so a gate about today's source may not require a
+ * content change to it. The bundled TypeScript declarations arrive from
+ * upstream with CRLF, and rewriting a vendored artifact would be undone on
+ * the next re-vendoring.
+ */
+const EXEMPT_PREFIXES: readonly string[] = [
+  "docs/history/",
   "packages/static/assets/types/",
 ];
 
@@ -71,8 +92,12 @@ const VENDORED_PREFIXES: readonly string[] = [
 const NEWLINE = 0x0a;
 
 export function isGovernedPath(path: string): boolean {
-  if (VENDORED_PREFIXES.some((prefix) => path.startsWith(prefix))) return false;
-  return SOURCE_EXTENSIONS.some((extension) => path.endsWith(extension));
+  if (EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix))) return false;
+  if (EXEMPT_PATHS.includes(path)) return false;
+  const dot = path.lastIndexOf(".");
+  const slash = path.lastIndexOf("/");
+  const extension = dot > slash ? path.slice(dot).toLowerCase() : "";
+  return !BINARY_EXTENSIONS.includes(extension);
 }
 
 export interface ControlViolation {
@@ -85,22 +110,31 @@ export interface ControlViolation {
 }
 
 /**
- * Every governed control codepoint in `contents`, one entry per codepoint
- * rather than per occurrence.
+ * Every governed control byte in `contents`, one entry per byte value rather
+ * than per occurrence.
  *
- * Reported that way because the failure a reader needs to act on is "this
- * file contains NULs", and a file with CRLF endings would otherwise print a
- * line per line of the file and bury every other finding in the run.
+ * Scans RAW BYTES rather than decoded text, which is exact rather than a
+ * shortcut: a UTF-8 multibyte sequence is built from bytes at or above 0x80,
+ * so no character above U+007F can contribute a byte below 0x20. Every byte
+ * under 0x20 in the stream is therefore that control character itself, and
+ * counting LF bytes gives the same line numbers a decode would.
+ *
+ * It also fails CLOSED on a file that is not valid UTF-8. Decoding first and
+ * skipping what would not decode meant a blob of `[0xff, 0x00, 0x0a]` — which
+ * holds the very NUL this exists to catch — was reported clean.
+ *
+ * Reported per byte value because the finding a reader acts on is "this file
+ * contains NULs"; a CRLF file would otherwise print a line per line of the
+ * file and bury every other finding in the run.
  */
-export function controlViolations(contents: string): Omit<
+export function controlViolations(contents: Uint8Array): Omit<
   ControlViolation,
   "file"
 >[] {
   const first = new Map<number, number>();
   const counts = new Map<number, number>();
   let line = 1;
-  for (const character of contents) {
-    const code = character.codePointAt(0)!;
+  for (const code of contents) {
     if (code === NEWLINE) {
       line += 1;
       continue;
@@ -122,6 +156,10 @@ export function controlViolations(contents: string): Omit<
  * Each record is `<mode> <object> <stage>\t<path>`, NUL-separated. Split out
  * from the command so the parse is provable without a repository, including
  * the shapes it must decline rather than guess at.
+ *
+ * Only regular-file entries come back. The mode is read rather than dropped
+ * because a symlink and a submodule are both tracked entries whose object is
+ * not source.
  */
 export function parseIndexRecords(output: string): [string, string][] {
   const blobs: [string, string][] = [];
@@ -129,7 +167,11 @@ export function parseIndexRecords(output: string): [string, string][] {
     if (record === "") continue;
     const tab = record.indexOf("\t");
     if (tab === -1) continue;
-    const id = record.slice(0, tab).split(" ")[1];
+    const [mode, id] = record.slice(0, tab).split(" ");
+    // Regular files only. A symlink's blob is its target path and a gitlink's
+    // object is a commit, so batching either would lint index metadata as
+    // though it were source — and this tree tracks 49 symlinks.
+    if (mode !== "100644" && mode !== "100755") continue;
     blobs.push([id, record.slice(tab + 1)]);
   }
   return blobs;
@@ -233,20 +275,20 @@ export async function scan(root: string): Promise<ControlViolation[]> {
     .filter(([, path]) => isGovernedPath(path));
   const contents = await blobContents(root, governed.map(([id]) => id));
 
+  // Fail CLOSED on a short batch. An unavailable blob would otherwise skip
+  // that file AND every file after it, and the gate would report success over
+  // source nothing read.
+  if (contents.length !== governed.length) {
+    throw new Error(
+      `git cat-file returned ${contents.length} of ${governed.length} ` +
+        `blob(s); the tree was not fully read`,
+    );
+  }
+
   const violations: ControlViolation[] = [];
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  for (let i = 0; i < governed.length && i < contents.length; i++) {
-    const file = governed[i][1];
-    let text: string;
-    try {
-      text = decoder.decode(contents[i]);
-    } catch {
-      // A governed extension can still hold bytes that are not UTF-8. A file
-      // this cannot read is one it cannot judge, not a violation.
-      continue;
-    }
-    for (const found of controlViolations(text)) {
-      violations.push({ file, ...found });
+  for (let i = 0; i < governed.length; i++) {
+    for (const found of controlViolations(contents[i])) {
+      violations.push({ file: governed[i][1], ...found });
     }
   }
 

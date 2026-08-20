@@ -10,6 +10,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert } from "@std/assert";
 import { join } from "@std/path";
+
+const bytes = (text: string) => new TextEncoder().encode(text);
 import {
   controlViolations,
   isGovernedPath,
@@ -42,7 +44,9 @@ async function fixtureRepo(
 ): Promise<string> {
   const root = await Deno.makeTempDir({ prefix: "check-control-characters-" });
   await git(root, "init", "-q");
-  await Deno.writeTextFile(join(root, name), contents);
+  const at = join(root, name);
+  await Deno.mkdir(join(at, ".."), { recursive: true });
+  await Deno.writeTextFile(at, contents);
   await git(root, "add", name);
   if (options.autocrlf) {
     // Set AFTER staging, so the blob holds LF and only the checkout converts.
@@ -59,17 +63,20 @@ async function fixtureRepo(
 describe("check-control-characters", () => {
   describe("controlViolations()", () => {
     it("returns nothing for source that is only text and newlines", () => {
-      expect(controlViolations("const a = 1;\nconst b = 2;\n")).toEqual([]);
+      expect(controlViolations(bytes("const a = 1;\nconst b = 2;\n"))).toEqual(
+        [],
+      );
     });
 
     it("returns nothing for an escape written as source characters", () => {
       // The whole point of the rule: this is the spelling it asks for, so it
       // has to read as clean. These are five ordinary characters.
-      expect(controlViolations("const sep = `${a}\\x00${b}`;\n")).toEqual([]);
+      expect(controlViolations(bytes("const sep = `${a}\\x00${b}`;\n")))
+        .toEqual([]);
     });
 
     it("reports a literal NUL with the line it first appears on", () => {
-      expect(controlViolations("a\nb\nconst s = \u0000;\n")).toEqual([
+      expect(controlViolations(bytes("a\nb\nconst s = \u0000;\n"))).toEqual([
         { line: 3, code: 0x00, count: 1 },
       ]);
     });
@@ -77,59 +84,73 @@ describe("check-control-characters", () => {
     it("counts a codepoint once per file rather than once per occurrence", () => {
       // A CRLF file would otherwise report a finding per line and bury every
       // other file in the run.
-      expect(controlViolations("a\r\nb\r\nc\r\n")).toEqual([
+      expect(controlViolations(bytes("a\r\nb\r\nc\r\n"))).toEqual([
         { line: 1, code: 0x0d, count: 3 },
       ]);
     });
 
     it("reports a literal tab", () => {
-      expect(controlViolations("const a = 1;\n\tconst b = 2;\n")).toEqual([
-        { line: 2, code: 0x09, count: 1 },
-      ]);
+      expect(controlViolations(bytes("const a = 1;\n\tconst b = 2;\n")))
+        .toEqual([
+          { line: 2, code: 0x09, count: 1 },
+        ]);
     });
 
     it("allows characters at or above 0x20, including non-ASCII", () => {
-      expect(controlViolations('const s = "— ✓ é";\n')).toEqual([]);
+      expect(controlViolations(bytes('const s = "— ✓ é";\n'))).toEqual([]);
     });
   });
 
   describe("isGovernedPath()", () => {
-    it("governs the authored source extensions", () => {
+    it("governs every authored format, including ones no list named", () => {
+      // The inversion's point: an allow-list has to be complete to be true,
+      // and each of these was tracked while a list of extensions missed it.
       for (
         const path of [
           "tasks/a.ts",
           "packages/ui/b.tsx",
           "x.js",
-          "y.jsx",
-          "z.mjs",
-          "deno.json",
           "deno.jsonc",
+          "scripts/run.sh",
+          ".github/workflows/ci.yml",
+          "packages/fuse/verify-structs.c",
+          "docs/specs/memory-v2/tla/PendingStacks.tla",
+          "packages/shell/public/manifest.webmanifest",
+          "tasks/test-identity-aliases.jsonl",
+          "packages/shell/public/assets/cf.svg",
+          "Dockerfile.toolshed",
+          "docs/README.md",
         ]
       ) {
         expect(isGovernedPath(path)).toBe(true);
       }
     });
 
-    it("leaves fixtures and prose alone", () => {
-      // Text by accident rather than by authorship: a control byte there may
-      // be the data itself.
+    it("exempts formats whose contents are not text", () => {
+      for (
+        const path of ["a.png", "b.sqlite", "c.gz", "d.ttf", "e.db-wal"]
+      ) {
+        expect(isGovernedPath(path)).toBe(false);
+      }
+    });
+
+    it("exempts the named data fixtures and the trees it may not reach", () => {
       for (
         const path of [
-          "docs/README.md",
-          "packages/piece/test/vintages/x.sqlite",
-          "a.txt",
-          "b.lcov",
+          "packages/content-hash/test/fixture-frank.txt",
+          "packages/memory/memory.tldr",
+          "docs/history/specs/pattern-id-retirement.md",
+          "packages/static/assets/types/es2023.d.ts",
         ]
       ) {
         expect(isGovernedPath(path)).toBe(false);
       }
     });
 
-    it("leaves the vendored type declarations alone", () => {
-      // Upstream ships them with CRLF; rewriting a vendored artifact for the
-      // sake of a rule about our own source would be undone on re-vendoring.
-      expect(isGovernedPath("packages/static/assets/types/es2023.d.ts"))
-        .toBe(false);
+    it("governs a text file that shares a name with an exempt one", () => {
+      // The fixture is exempt by PATH, not by name: another `fixture-frank.txt`
+      // elsewhere is ordinary tracked text.
+      expect(isGovernedPath("packages/other/fixture-frank.txt")).toBe(true);
     });
   });
 
@@ -190,8 +211,21 @@ describe("check-control-characters", () => {
     });
 
     it("ignores the same byte in a file it does not govern", async () => {
-      const root = await fixtureRepo("subject.md", "prose \u0000 here\n");
+      // A binary extension. Live prose is governed now — a NUL in a Markdown
+      // document breaks grep there exactly as it does in source.
+      const root = await fixtureRepo("chart.png", "binary \u0000 here\n");
       expect(await scan(root)).toEqual([]);
+    });
+
+    it("governs live prose, and exempts only the frozen record", async () => {
+      const root = await fixtureRepo("docs/guide.md", "prose \u0000 here\n");
+      expect((await scan(root)).map((v) => v.file)).toEqual(["docs/guide.md"]);
+
+      const frozen = await fixtureRepo(
+        "docs/history/old.md",
+        "prose \u0000 here\n",
+      );
+      expect(await scan(frozen)).toEqual([]);
     });
 
     it("exits 1 and names the file when a violation stands", async () => {
@@ -219,16 +253,51 @@ describe("check-control-characters", () => {
       expect(await scan(root)).toEqual([]);
     });
 
-    it("skips a governed file whose stored bytes are not UTF-8", async () => {
-      // The extension governs, but the contents may still not decode. A file
-      // this check cannot read is one it cannot judge, not a violation.
+    it("catches a control byte in a blob that is not valid UTF-8", async () => {
+      // Decoding first and skipping what would not decode was fail-OPEN: this
+      // blob holds the very NUL the gate exists to catch. Raw bytes are exact
+      // here rather than a shortcut — a UTF-8 multibyte sequence is built from
+      // bytes at or above 0x80, so nothing above U+007F can contribute one
+      // below 0x20.
       const root = await fixtureRepo("subject.ts", "placeholder\n");
       await Deno.writeFile(
         join(root, "subject.ts"),
-        new Uint8Array([0xff, 0xfe, 0x41, 0x0a]),
+        new Uint8Array([0xff, 0x00, 0x0a]),
       );
       await gitAdd(root, "subject.ts");
+      expect(await scan(root)).toEqual([
+        { file: "subject.ts", line: 1, code: 0x00, count: 1 },
+      ]);
+    });
+
+    it("does not read a symlink's target as source", async () => {
+      // A symlink's blob is its target path and a gitlink's object is a
+      // commit; batching either lints index metadata as though it were source.
+      const root = await fixtureRepo("subject.ts", "const a = 1;\n");
+      await Deno.symlink("subject.ts", join(root, "link.ts"));
+      await gitAdd(root, "link.ts");
       expect(await scan(root)).toEqual([]);
+      expect(
+        parseIndexRecords(
+          "120000 abc123 0\tlink.ts\x00100644 def456 0\ta.ts\x00",
+        ),
+      ).toEqual([["def456", "a.ts"]]);
+    });
+
+    it("throws rather than skip a file whose blob is unavailable", async () => {
+      // A short batch would otherwise skip that file AND every file after it,
+      // and the gate would report success over source nothing read.
+      const root = await fixtureRepo("subject.ts", "const a = 1;\n");
+      const id = (await new Deno.Command("git", {
+        args: ["rev-parse", ":subject.ts"],
+        cwd: root,
+        stdout: "piped",
+      }).output()).stdout;
+      const sha = new TextDecoder().decode(id).trim();
+      await Deno.remove(
+        join(root, ".git", "objects", sha.slice(0, 2), sha.slice(2)),
+      );
+      await expect(scan(root)).rejects.toThrow("was not fully read");
     });
 
     it("throws when git cannot list the tree", async () => {
