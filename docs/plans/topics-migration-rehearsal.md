@@ -60,9 +60,12 @@ is the migration manifest: run it before pass one, check the output in, and diff
 against it before the live attempt.
 
 ```bash
-# every piece in the space, with the pattern identity it currently carries
-deno task cf inspect entities $DB --kind piece --require-complete --json \
-  | jq -r '.[].id' \
+# every piece in the space, with the pattern identity it currently carries.
+# The scan is captured on its own, NOT piped: a pipeline reports its LAST
+# command's status, so a refusal in the first stage would leave `sort` writing
+# an empty manifest and reporting success.
+pieces=$(deno task cf inspect entities $DB --kind piece --require-complete --json) &&
+  jq -r '.[].id' <<<"$pieces" \
   | while read -r id; do
       deno task cf inspect piece $DB "$id" --json \
         | jq -r '[.id, (.pattern.identity // "unresolved"), (.pattern.filename // "-")] | @tsv'
@@ -75,8 +78,11 @@ grep -E 'PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY|-85Wmyd9iwUjbpwnTYR2YolxkMU
 
 `--require-complete` is load-bearing, not decoration: the piece listing is
 capped like every space-wide scan, and a manifest short by a topic reads exactly
-like a complete one. The flag makes a capped scan exit nonzero, so a truncated
-manifest is never written.
+like a complete one. The flag makes a capped scan exit nonzero — but an exit
+status only travels as far as the shell carries it, which is why the scan runs
+on its own line and the manifest is written under `&&`. A refused scan then
+never reaches the redirect, so it leaves the previous manifest untouched rather
+than replacing it with an empty one.
 
 The count check is the point: the space holds 319 pieces across 150 identities,
 so "did I migrate the right 74?" is a question the manifest answers and a
