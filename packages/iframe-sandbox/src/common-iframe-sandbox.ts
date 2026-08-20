@@ -62,12 +62,14 @@ export class CommonIframeSandboxElement extends LitElement {
    * Handles the outer frame reporting itself ready, which it does on its own
    * load. That is once for an element that stays where it is, and again each
    * time the frame reloads -- which detaching the element and reattaching it
-   * does. The guest documents in between are each announced by their own load
+   * across a turn of the event loop does, a move within one leaving the frame
+   * alone. The guest documents in between are each announced by their own load
    * rather than by this.
    *
    * Whatever the previous frame held went with it, so this lets go of that
-   * guest and loads `src` into the new frame. With no `src`, the next
-   * assignment to one does the loading.
+   * guest and loads `src` into the new frame. With no `src` there is nothing
+   * to load and nothing loaded, which is what the load state then says; the
+   * next assignment to one does the loading.
    *
    * `source` is the window that reported it, and a second report from the one
    * already in hand is refused: a frame says this once, so hearing it twice
@@ -82,6 +84,8 @@ export class CommonIframeSandboxElement extends LitElement {
     this.releaseGuest();
     if (this.src) {
       this.loadInnerDoc();
+    } else {
+      this.loadState = "";
     }
   }
 
@@ -319,8 +323,10 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * Asks the outer frame to load `src`, letting go of the guest being replaced
-   * first, so that guest cannot write over the interval in which it is still
-   * running and already superseded.
+   * before asking rather than once the replacement arrives. What that guest
+   * sends over the interval between the two reaches a closed port, which is
+   * the whole of what this end can promise about a document still running in a
+   * frame it has asked to be rid of.
    */
   private loadInnerDoc() {
     this.loadState = "loading";

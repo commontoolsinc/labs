@@ -35,14 +35,14 @@ Deno.test("read and writes", async () => {
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body = GUEST_PROLOG + `
+    const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "a" && value === 1) {
     write(key, value + 1); 
   }
 };
 read('a');
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 
     await waitForContextValue(context, iframe, "a", (value) => value === 2);
@@ -60,7 +60,7 @@ Deno.test("subscribes", async () => {
     // can be used to mark a point in the update stream. It reports arrivals
     // under its own key to leave `updates` holding only what the test asserts
     // on.
-    const body = GUEST_PROLOG + `
+    const body = `${GUEST_PROLOG}
 const updates = [];
 onUpdate = (key, value) => {
   if (key === "barrier") {
@@ -77,7 +77,7 @@ onUpdate = (key, value) => {
 subscribe("a");
 subscribe("barrier");
 write("ready", true);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(
       context,
@@ -127,18 +127,18 @@ Deno.test("handles multiple iframes", async () => {
     const context1 = new ContextShim({ a: 1 });
     const context2 = new ContextShim({ b: 100 });
 
-    const body1 = GUEST_PROLOG + `
+    const body1 = `${GUEST_PROLOG}
 write("b", 1);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
 
-    const body2 = GUEST_PROLOG + `
+    const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b" && value === 100) {
     write("a", 200); 
   }
 };
 read("b");
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe1 = await render(body1, context1);
     const iframe2 = await render(body2, context2);
     // Each frame writes one key: iframe1 writes "b" into context1, and iframe2
@@ -160,12 +160,12 @@ Deno.test("handles loading new documents", async () => {
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body1 = GUEST_PROLOG + `
+    const body1 = `${GUEST_PROLOG}
 write("b", 1);
-` + GUEST_EPILOG;
-    const body2 = GUEST_PROLOG + `
+${GUEST_EPILOG}`;
+    const body2 = `${GUEST_PROLOG}
 write("c", 1);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(context, iframe, "b", (value) => value === 1);
     // @ts-ignore This is a lit property.
@@ -181,11 +181,11 @@ Deno.test("cancels subscriptions between documents", async () => {
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body1 = GUEST_PROLOG + `
+    const body1 = `${GUEST_PROLOG}
 subscribe("a");
 write("ready1", true);
-` + GUEST_EPILOG;
-    const body2 = GUEST_PROLOG + `
+${GUEST_EPILOG}`;
+    const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b") {
     write("got-b-update", true);
@@ -196,7 +196,7 @@ onUpdate = (key, value) => {
 };
 subscribe("b");
 write("ready2", true);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(
       context,
@@ -244,14 +244,14 @@ Deno.test("what a guest posts outside its port raises an alarm, not a write", as
     // error, and it is dropped. The second is the alarm a guest with no
     // working port has, which is the whole reason that route still exists.
     // The third is an ordinary write, and it lands last.
-    const body = GUEST_PROLOG + `
+    const body = `${GUEST_PROLOG}
 parent.postMessage({ type: "write", data: ["relayed", 1] }, "*");
 parent.postMessage({ type: "error", data: {
   description: "raised without a port",
   source: "", lineno: 0, colno: 0, stacktrace: "",
 } }, "*");
 write("after", 1);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 
     try {
@@ -275,9 +275,9 @@ Deno.test("a reattached element loads its document into the frame it gets", asyn
   cleanupFixtures();
   try {
     const context = new ContextShim();
-    const body = GUEST_PROLOG + `
+    const body = `${GUEST_PROLOG}
 write("ran", 1);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
 
@@ -303,9 +303,9 @@ Deno.test("a second ready from the frame already in hand is refused", async () =
   cleanupFixtures();
   try {
     const context = new ContextShim();
-    const body = GUEST_PROLOG + `
+    const body = `${GUEST_PROLOG}
 write("ran", 1);
-` + GUEST_EPILOG;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
 
@@ -328,6 +328,33 @@ write("ran", 1);
       refusal = String(error);
     }
     assert(refusal.includes("Already initialized"));
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("an element that gets a frame and has no source says nothing is loaded", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = `${GUEST_PROLOG}
+write("ran", 1);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Driven rather than staged, for the reason the refusal test gives: a
+    // frame reports itself ready once, and the report cannot be sent from
+    // anywhere else. A window this element has not seen stands for the frame a
+    // reattach would bring.
+    const inner = iframe as unknown as {
+      onOuterReady: (source: Window) => void;
+      loadState: string;
+    };
+    // @ts-ignore This is a lit property.
+    iframe.src = "";
+    inner.onOuterReady({} as Window);
+    assertEquals(inner.loadState, "");
   } finally {
     cleanupFixtures();
   }
