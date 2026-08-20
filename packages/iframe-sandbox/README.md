@@ -38,7 +38,51 @@ via `setIframeContextHandler(handler)`. The handler is called with the `context`
 provided to the iframe, and the handler determines how values are stored and
 retrieved. See [context.ts](/common-iframe-sandbox/src/context.ts).
 
+## The guest side
+
+Guest content reaches the context through
+[guest.ts](/common-iframe-sandbox/src/guest.ts), exported as
+`@commonfabric/iframe-sandbox/guest`:
+
+```js
+import { connectGuestContext } from "@commonfabric/iframe-sandbox/guest";
+
+const guest = connectGuestContext((key, value) => {
+  // `value` is what the host read for `key`.
+});
+
+guest.subscribe("counter");
+guest.write("counter", 1);
+```
+
+The host and the guest hold the two ends of a `MessagePort`, and every message
+of this protocol crosses on it. A guest may call these operations at once: the
+port arrives once the document has loaded, and what is said before it does is
+sent when it comes, in the order it was said.
+
+`read()` does not return the value. The host answers a read the same way it
+announces a subscribed key's change, so both arrive at the handler.
+
+### Raising an alarm without a port
+
+`reportGuestError(error)` reaches the host by the guest's parent rather than by
+the port, so it works from a guest that has no working port — a document whose
+scripts a policy blocked, or one that failed before the handoff. The host
+dispatches it as a `common-iframe-error` event on the element.
+
+That route carries nothing else. It is one-way, and a guest cannot be answered
+on it; anything a guest means to say about the context goes over the port.
+
 ## How it works
+
+Three realms are involved, all in the browser: the **host** page holding the
+element, the **outer frame** it renders, and the **guest** in the inner frame.
+The outer frame carries the CSP and loads documents. It routes nothing of this
+protocol — the host hands each freshly loaded guest one end of a `MessagePort`,
+and the two talk directly.
+
+The one thing the outer frame passes along is whatever the guest posts to it,
+which it forwards without reading, that being the alarm route described above.
 
 `common-iframe-sandbox` is a [Lit] element that manages rendering content in an
 iframe, using [CSP]. Due to
@@ -56,8 +100,11 @@ frame that propagates to the inner (untrusted) frame across browsers.
 
 ## Missing Functionality
 
-- Audit the IPC communication (`postMessage()`) with origin-bounds and ensure
-  other frames can't spoof messages.
+- Audit the remaining `postMessage()` communication with origin-bounds and
+  ensure other frames can't spoof messages. This covers the host's exchange with
+  the outer frame and the alarm route out of a guest; the key/value traffic
+  between host and guest is not among it, a port being reachable only by whoever
+  holds an end.
 - Abort on unsupported browsers.
 - Further testing.
 
