@@ -2079,7 +2079,7 @@ preserved from the original initializer (`preserveNodeSourceMap`).
 Running at stage 22 means causes are derived from the final lowered shape:
 `computed`/`action`/JSX expression sites have already become lift/handler
 applications and IIFE-local consts (stages 9–14), schemas are injected and
-generated (15, 17), and builder calls are hoisted (16). Two concrete
+generated (18, 20), and builder calls are hoisted (19). Two concrete
 dependencies on `BuilderCallHoistingTransformer` (§11):
 
 - Hoisted module-scope consts are named `__cfLift_N` / `__cfHandler_N` /
@@ -2200,7 +2200,7 @@ verifier compares against (§14.4). The transformer performs no dedupe or
 collision check: it does not look for existing declarations of the guard names
 before inserting.
 
-### 14.3 Ordering (why stage 22)
+### 14.3 Ordering (why stage 23)
 
 The stage sits in the trailing module-scope emission group (23
 `ModuleScopeShadowing`, 24 `ModuleScopeCfData`, 26

@@ -102,13 +102,27 @@ Deno.test("a same-module function declaration is accepted", async () => {
   );
 });
 
-Deno.test("an argument that is not function-bearing is left alone", async () => {
-  // A different mistake, already described by whatever rejects it; naming it
-  // a callback here would misreport the problem.
+Deno.test("an alias of a same-module function is accepted", async () => {
+  // The verifier propagates the function classification through the alias, so
+  // rejecting this would refuse a module it loads.
   assertEquals(
     (await errorsIn(`
-      const schema = { type: "object" } as const;
-      const inc = lift(schema as never);
+      function bump(n: number) {
+        return n + 1;
+      }
+      const alias = bump;
+      const inc = lift(alias);
+    `)).length,
+    0,
+  );
+});
+
+Deno.test("an argument that is not function-bearing is left alone", async () => {
+  // The verifier rejects this too, but as a different mistake — and whatever
+  // already describes it does so more accurately than a callback diagnostic.
+  assertEquals(
+    (await errorsIn(`
+      const inc = lift({ type: "object" } as never);
     `)).length,
     0,
   );
