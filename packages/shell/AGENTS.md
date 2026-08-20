@@ -28,7 +28,12 @@ runtime and gives a user a way to move around their spaces. Entry point is
   and `setConfig`. `src/lib/app-state.ts` names the part of that surface a
   caller outside the element sees as `ShellApp`: the shell's `Navigation` takes
   one, and `src/index.ts` publishes the root element on `globalThis.app` under
-  that type, which is how integration tests drive the page.
+  that type, which is how integration tests drive the page. That publication is
+  the last step of bootstrap, after the key store opens and `Navigation` is
+  installed, so a page that has fired `load` has not necessarily reached it. A
+  driver that navigates or reloads and then reaches for `globalThis.app` waits
+  for it to appear first — `login` in `packages/integration/shell-utils.ts`
+  does, and `packages/shell/integration/login.test.ts` holds it to that.
 - Navigation is the other way in, and it does not come from a shell view. Anyone
   holding `@commonfabric/navigation` calls `navigate(...)`, which dispatches a
   `cf-navigate` event on `globalThis`; the `Navigation` class in
