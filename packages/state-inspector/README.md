@@ -27,11 +27,24 @@ exist** and resolves lineage from them:
 | `schema`     | value is a JSONSchema (`{ type, properties\|$defs }`)                    |
 | `owned-cell` | carries a `result` ownership back-link                                   |
 | `free-cell`  | a bare `value`, owned by no piece                                        |
+| `deleted`    | the visible head row is a `delete` — a tombstone                         |
+| `unknown`    | here but unreadable, or a path-set nothing above recognizes              |
 
 Lineage: a piece → its input (`argument`), its pattern (`patternIdentity` → the
 module entity), its owned cells (`internal`); an owned cell → its owner
 (`result`). This is why `entities` / `piece` / `graph` can speak in pieces and
 links rather than raw blobs.
+
+**An entity with no document says which kind of nothing it is.** Reconstruction
+comes back empty for four unrelated reasons, and reporting them alike makes
+"show me what is broken" unaskable. A tombstone is `deleted`. The other three
+are `unknown` — meaning the entity is there and cannot be read — separated by
+label: `(undecodable)` for a payload that does not decode, `(no data)` for a
+`set` that stored none, and `{paths}` for a document that decoded into a shape
+nothing recognizes. So `--kind deleted` asks for deletions and `--kind unknown`
+asks for trouble. A tombstone's shape is genuinely gone at HEAD: `history <id>`
+shows the delete op, and `value-at --seq` before it recovers what the entity
+was.
 
 **`scope_key` partitions an entity by identity.** The same cell id can hold a
 shared `space` value AND a per-`user:<DID>` override AND a
@@ -206,6 +219,12 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   inspector never guesses that a legacy row belongs to the shared `space`
   context. This is currently an API surface, not a standalone `cf inspect`
   subcommand.
+- **`entities` is the inventory; `graph` and `html` are structural.** The
+  listing carries every id holding a revision, tombstones included. The graph
+  draws a tombstone only where an edge already points at one, since a deleted
+  entity has no structure of its own — but an entity that is here and unreadable
+  gets a node either way, so corruption never hides in a view that drops what it
+  cannot read.
 - **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
   marked rather than shown as clean. A count at a round cap may be truncated —
   narrow with flags or a per-entity command.

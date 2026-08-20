@@ -24,9 +24,11 @@ import {
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
+  type AbsentEntity,
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
@@ -429,6 +431,36 @@ function detailFromDoc(
   };
 }
 
+/**
+ * The detail for an entity that carries no document: no value, no lineage, no
+ * links. Its version log is what is left to read, and it is the part that says
+ * what happened to it.
+ */
+function absentDetail(
+  id: string,
+  absent: AbsentEntity,
+  versions: VersionRow[],
+): EntityDetail {
+  return {
+    id,
+    kind: absent.kind,
+    regime: "n/a",
+    owned: false,
+    label: absent.label,
+    role: roleFor(absent.kind, false),
+    paths: [],
+    valueShape: "absent",
+    value: undefined,
+    valuePreview: absent.label,
+    revisions: versions.length,
+    headSeq: versions.length ? versions[versions.length - 1].seq : null,
+    firstSeq: versions.length ? versions[0].seq : null,
+    versions,
+    lineage: {},
+    outLinks: [],
+  };
+}
+
 function roleFor(kind: EntityKind, owned: boolean): string {
   switch (kind) {
     case "piece":
@@ -443,6 +475,8 @@ function roleFor(kind: EntityKind, owned: boolean): string {
       return "owned cell";
     case "free-cell":
       return "free cell";
+    case "deleted":
+      return "deleted entity";
     default:
       return "entity";
   }
@@ -471,16 +505,21 @@ export function buildAllDetails(
 
   // Pass 1: reconstruct + module index + base labels.
   const docs = new Map<string, EntityDocument>();
+  // Entities carrying no document, by why they carry none. A link into one
+  // resolves to its label through `labelOf`, so an outgoing link to a deleted
+  // entity says so rather than resolving to nothing.
+  const unread = new Map<string, AbsentEntity>();
   const moduleIndex = new Map<string, ModuleEntry>();
   const labelOf = new Map<string, { kind: EntityKind; label: string }>();
   for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    if (outcome.status !== "present") {
+      const absent = absentEntity(outcome.status);
+      unread.set(r.id, absent);
+      labelOf.set(r.id, absent);
+      continue;
     }
-    if (!doc) continue;
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -534,9 +573,8 @@ export function buildAllDetails(
      WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
      ORDER BY r.seq ASC, r.op_index ASC`,
   );
-  const out: EntityDetail[] = [];
-  for (const [id, doc] of docs) {
-    const versions = versionStmt
+  const versionsOf = (id: string): VersionRow[] =>
+    versionStmt
       .all<{ seq: number; op: string; session_id: string; created_at: string }>(
         branch,
         id,
@@ -548,7 +586,17 @@ export function buildAllDetails(
         session: v.session_id,
         createdAt: v.created_at,
       }));
-    out.push(detailFromDoc(id, doc, ctx, versions));
+
+  const out: EntityDetail[] = [];
+  for (const [id, doc] of docs) {
+    out.push(detailFromDoc(id, doc, ctx, versionsOf(id)));
+  }
+  // An entity that is here but unreadable gets a detail of its own, so the
+  // explorer can select the node the graph draws for it. A tombstone has
+  // nothing to show beyond its history, which `history` already tells.
+  for (const [id, absent] of unread) {
+    if (absent.kind === "deleted") continue;
+    out.push(absentDetail(id, absent, versionsOf(id)));
   }
 
   const order: Record<EntityKind, number> = {
@@ -559,6 +607,7 @@ export function buildAllDetails(
     "owned-cell": 4,
     "free-cell": 5,
     unknown: 6,
+    deleted: 7,
   };
   return out.sort(
     (a, b) => order[a.kind] - order[b.kind] || (b.revisions - a.revisions),

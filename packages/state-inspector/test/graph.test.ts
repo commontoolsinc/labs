@@ -65,7 +65,10 @@ function seed(path: string) {
     JSON.stringify({
       value: { $NAME: "My Notebook", $UI: {}, link: link("of:owned") },
       argument: link("of:input"),
-      internal: [{ partialCause: "q", link: link("of:owned") }],
+      internal: [
+        { partialCause: "q", link: link("of:owned") },
+        { partialCause: "d", link: link("of:gone") },
+      ],
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
       schema: { type: "object", properties: {}, $defs: {} },
     }),
@@ -83,6 +86,19 @@ function seed(path: string) {
   );
   commit.run(5, 5);
   rev.run("of:free", 5, JSON.stringify({ value: "x" }), 5);
+
+  // Two entities with no readable document: a tombstone the piece links to,
+  // and a corrupt entity nothing links to at all.
+  const op = db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, 0, ?, ?, ?)`,
+  );
+  commit.run(6, 6);
+  op.run("of:gone", 6, "set", JSON.stringify({ value: 1 }), 6);
+  commit.run(7, 7);
+  op.run("of:gone", 7, "delete", null, 7);
+  commit.run(8, 8);
+  op.run("of:orphanCorrupt", 8, "set", "{not json at all", 8);
 
   db.close();
 }
@@ -130,6 +146,25 @@ Deno.test("entity graph: nodes, edges, neighborhood, dot", async (t) => {
         assert(ids.has("of:piece"));
         // the unrelated free cell is not within 1 hop of the input cell.
         assert(!ids.has("of:free"));
+      });
+
+      await t.step("an absent target says which kind of absent", () => {
+        const byId = Object.fromEntries(g.nodes.map((n) => [n.id, n]));
+        // A link into a tombstone resolves to a `deleted` stub rather than the
+        // "(absent)" every unreadable target used to share.
+        assertEquals(byId["of:gone"].kind, "deleted");
+        assertEquals(byId["of:gone"].label, "(deleted)");
+        assertEquals(byId["of:gone"].present, false);
+      });
+
+      await t.step("an unreadable entity is a node even unlinked", () => {
+        const byId = Object.fromEntries(g.nodes.map((n) => [n.id, n]));
+        // Nothing links at it, so dropping absent documents hid it entirely —
+        // corruption a structural view drops is corruption nobody finds.
+        assertEquals(byId["of:orphanCorrupt"].kind, "unknown");
+        assertEquals(byId["of:orphanCorrupt"].label, "(undecodable)");
+        // It is in this space, unlike a cross-space stub.
+        assertEquals(byId["of:orphanCorrupt"].present, true);
       });
 
       await t.step("graphToDot emits a digraph with the piece node", () => {
