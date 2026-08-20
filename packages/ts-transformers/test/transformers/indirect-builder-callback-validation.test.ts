@@ -85,6 +85,25 @@ describe("indirect-builder-callback-validation", () => {
       expect(errors).toHaveLength(1);
     });
 
+    it("reports a callback this module exports", async () => {
+      // CommonJS emit reads an exported binding as `exports.f`, and the
+      // verifier's grammar admits only a bare identifier.
+      const errors = await errorsIn(`
+        export const bump = (n: number) => n + 1;
+        const inc = lift(bump);
+      `);
+      expect(errors).toHaveLength(1);
+    });
+
+    it("reports a callback exported by a trailing clause", async () => {
+      const errors = await errorsIn(`
+        const bump = (n: number) => n + 1;
+        const inc = lift(bump);
+        export { bump };
+      `);
+      expect(errors).toHaveLength(1);
+    });
+
     it("reports a generator written at the call", async () => {
       // `tryParseDirectFunction` accepts `async`, never `function*`.
       const errors = await errorsIn(`
