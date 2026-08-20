@@ -13,9 +13,13 @@
  * where it starts multiplying, and no stored row holds it. This computes those
  * levels after the fact.
  *
- * Read it by scanning down a branch and watching `calls` against `ms/call`. A
- * level whose calls jump by a large factor over its parent's, while its own
- * time per call stays flat, is where the multiplication was introduced.
+ * This groups by how keys are NAMED, not by who called whom, so `calls` counts
+ * every span at a prefix or below it and can only fall as you descend. Read
+ * `ms/call` to find where time concentrates, and the two `self` columns to tell
+ * a level that is itself expensive from one that merely contains expensive
+ * children. For who called whom — and for a count that can rise — use
+ * `attribute-measures.ts`, which reconstructs the call tree from the
+ * intervals.
  *
  *   deno run --allow-read aggregate-measures.ts measures.json
  *   deno run --allow-read aggregate-measures.ts < measures.json
@@ -96,8 +100,8 @@ export function aggregate(entries: readonly MeasureEntry[]): Bucket {
 
 export function render(root: Bucket, sortBy: "time" | "calls"): string {
   const lines: string[] = [
-    "  calls      total ms     ms/call        self  key",
-    "  -----      --------     -------        ----  ---",
+    "  calls      total ms     ms/call    self n   self ms  key",
+    "  -----      --------     -------    ------   -------  ---",
   ];
   const walk = (bucket: Bucket) => {
     const kids = [...bucket.children.values()].sort((a, b) =>
@@ -107,13 +111,14 @@ export function render(root: Bucket, sortBy: "time" | "calls"): string {
       const perCall = child.calls === 0 ? 0 : child.time / child.calls;
       // Spans recorded at this exact level, where there are any, separate
       // "this level is slow" from "this level fans out into slow children".
-      const self = child.own === 0 ? "" : `${child.own}x`;
+      const selfN = child.own === 0 ? "" : String(child.own);
+      const selfMs = child.own === 0 ? "" : child.ownTime.toFixed(1);
       lines.push(
         `${String(child.calls).padStart(7)} ${
           child.time.toFixed(1).padStart(11)
-        } ${perCall.toFixed(3).padStart(11)} ${self.padStart(11)}  ${
-          "  ".repeat(child.depth - 1)
-        }${child.path.split("/").pop()}`,
+        } ${perCall.toFixed(3).padStart(11)} ${selfN.padStart(9)} ${
+          selfMs.padStart(9)
+        }  ${"  ".repeat(child.depth - 1)}${child.path.split("/").pop()}`,
       );
       walk(child);
     }

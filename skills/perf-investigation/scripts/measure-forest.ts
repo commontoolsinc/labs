@@ -75,7 +75,15 @@ export function buildForest(entries: readonly MeasureEntry[]): Span[] {
       open.pop();
     }
     const top = open.length ? open[open.length - 1] : -1;
-    if (top !== -1 && spans[top].end >= span.end) span.parent = top;
+    // A strictly larger interval is a container. An identical one is two spans
+    // that began and ended together, which says nothing about which called
+    // which — and guessing there would invent a caller.
+    if (
+      top !== -1 && spans[top].end >= span.end &&
+      !(spans[top].start === span.start && spans[top].end === span.end)
+    ) {
+      span.parent = top;
+    }
     open.push(i);
   }
   return spans;

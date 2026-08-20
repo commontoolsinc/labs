@@ -559,11 +559,23 @@ export function setTimingMeasuresEnabled(
   options?: { cap?: number },
 ): void {
   _emitTimingMeasures = enabled;
-  const envCap = getEnvMeasureCap();
-  if (options?.cap !== undefined) _timingMeasureCap = options.cap;
-  else if (envCap !== undefined) _timingMeasureCap = envCap;
-  _timingMeasuresEmitted = 0;
-  _timingMeasureCapReported = false;
+  if (options?.cap !== undefined) {
+    // A cap of `NaN`, `Infinity`, or zero would disable the guard rather than
+    // configure it, and the guard is the only thing bounding retention.
+    if (!Number.isInteger(options.cap) || options.cap <= 0) {
+      throw new RangeError(
+        `Timing measure cap must be a positive integer: ${options.cap}`,
+      );
+    }
+    _timingMeasureCap = options.cap;
+  } else {
+    const envCap = getEnvMeasureCap();
+    if (envCap !== undefined) _timingMeasureCap = envCap;
+  }
+  // The budget deliberately survives this. It counts entries that are still on
+  // the timeline, so returning it without draining them would let a caller
+  // toggling emission retain another whole cap's worth — the growth the cap
+  // exists to bound. `clearTimingMeasures()` is what gives it back.
 }
 
 /** Whether measure emission is currently on, and what it has spent. */

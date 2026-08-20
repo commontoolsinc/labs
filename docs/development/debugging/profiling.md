@@ -145,12 +145,21 @@ deno run --allow-read skills/perf-investigation/scripts/aggregate-measures.ts /t
 ```
 
 `aggregate-measures.ts` rolls every span up by key prefix and prints calls,
-total, and time per call at each level. That roll-up is precisely what the stored statistics
-cannot give you — a logger records against its full joined path and nothing
-shorter, so the count at the level where multiplication begins is in no row.
-Scan down a branch: the level whose calls jump by a large factor over its
-parent's while its own time per call stays flat is the one that introduced the
-multiplication.
+total, time per call, and the spans recorded at exactly that level. That roll-up
+is what the stored statistics cannot give you — a logger records against its
+full joined path and nothing shorter, so no row holds a total for a prefix.
+
+Read it for where time concentrates, not for a call explosion. It groups keys by
+how they are NAMED, so `calls` counts every span at a prefix or below it and can
+only fall as you descend; a count that rises is not something this view can
+show. `ms/call` says which level is expensive, and the two `self` columns
+separate a level that is itself slow from one that merely contains slow
+children.
+
+Note for a `cf test` capture: `withPhase` emits its own measure under a
+`cf-test/` prefix as well as recording the span through a logger, so those
+phases appear twice — once as `cf-test/<keys>` and once as `<keys>`. Read one
+branch or the other rather than summing across both.
 
 That answers where the time went. It does not answer who asked, and for a key
 that runs everywhere it cannot: a logger records against its own key no matter

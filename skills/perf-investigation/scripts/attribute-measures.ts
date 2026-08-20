@@ -76,7 +76,9 @@ const ROOT = "(root — no instrumented span above)";
 if (wantChains) {
   const chains = new Map<string, number>();
   for (const i of hits) {
-    const chain = collapseRepeats(ancestors(spans, i)).slice(0, 5);
+    // Aggregate on the whole chain; truncating first would merge callers that
+    // differ only above the cut and report them as one.
+    const chain = collapseRepeats(ancestors(spans, i));
     const sig = chain.length ? chain.join("  <  ") : ROOT;
     chains.set(sig, (chains.get(sig) ?? 0) + 1);
   }
@@ -84,16 +86,26 @@ if (wantChains) {
   for (
     const [chain, n] of [...chains].sort((a, b) => b[1] - a[1]).slice(0, 15)
   ) {
-    console.log(`  ${String(n).padStart(8)}  ${chain}`);
+    // Truncate for the eye only, after the counting is done.
+    const parts = chain.split("  <  ");
+    const shown = parts.length > 5
+      ? `${parts.slice(0, 5).join("  <  ")}  <  …(+${parts.length - 5})`
+      : chain;
+    console.log(`  ${String(n).padStart(8)}  ${shown}`);
   }
 } else if (via) {
   // Every `via` span, with how many target spans it directly contains and what
   // called it. The ratio is the point; the totals only say where to look.
   const perParent = new Map<number, number>();
   for (const i of hits) {
-    const parent = spans[i].parent;
-    if (parent !== -1 && spans[parent].key === via) {
-      perParent.set(parent, (perParent.get(parent) ?? 0) + 1);
+    // The nearest enclosing `via`, not the immediate parent: an instrumented
+    // span sitting between the two is common, and counting only direct
+    // children would report zero for a call that plainly runs inside it.
+    for (let p = spans[i].parent; p !== -1; p = spans[p].parent) {
+      if (spans[p].key === via) {
+        perParent.set(p, (perParent.get(p) ?? 0) + 1);
+        break;
+      }
     }
   }
   const byCaller = new Map<

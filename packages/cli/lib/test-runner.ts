@@ -2014,7 +2014,12 @@ export async function runTests(
   const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
     ? []
     : undefined;
-  if (options.timingMeasuresOut) setTimingMeasuresEnabled(true);
+  if (options.timingMeasuresOut) {
+    // Draining per file means the buffer never holds more than one file's
+    // worth, so the default ceiling — which exists to bound a process that
+    // never drains — would only truncate the capture for no benefit.
+    setTimingMeasuresEnabled(true, { cap: Number.MAX_SAFE_INTEGER });
+  }
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
