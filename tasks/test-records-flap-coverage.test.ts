@@ -32,7 +32,7 @@ describe("composeLocalContext() flap coverage", () => {
       branch: "",
       status: "",
     }, () => undefined);
-    expect(context.branch).toBeUndefined();
+    expect(Object.hasOwn(context, "branch")).toBe(false);
     expect(context.commit).toBe("b".repeat(40));
   });
 
@@ -41,7 +41,7 @@ describe("composeLocalContext() flap coverage", () => {
     // changes in is dirty.
     const unnamed = composeLocalContext({}, () => undefined);
     expect(unnamed.commit).toBe("unknown");
-    expect(unnamed.branch).toBeUndefined();
+    expect(Object.hasOwn(unnamed, "branch")).toBe(false);
     expect(unnamed.dirty).toBe(false);
 
     const dirty = composeLocalContext({
