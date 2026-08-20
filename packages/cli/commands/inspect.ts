@@ -21,6 +21,7 @@ import {
   contendedEntities,
   convergenceExact,
   convergenceScanExact,
+  DEFAULT_SCAN_LIMIT,
   // Remote acquisition (`cf inspect --remote` / `pull`).
   defaultCacheDir,
   describeIdentity,
@@ -29,6 +30,7 @@ import {
   discoverSpaceDbs,
   entityConflicts,
   entityHistory,
+  entityKinds,
   entityTimeline,
   escapeTerminalText,
   type ExactConvergenceResult,
@@ -38,6 +40,8 @@ import {
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  isCompleteScan,
+  isEntityKind,
   listCommits,
   listEntityModels,
   listRemoteSpaces,
@@ -50,6 +54,7 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  type ScanExtent,
   type Scope,
   scopeOverlay,
   type SpaceGraph,
@@ -86,6 +91,72 @@ function out(
   if (json) console.log(stringify(data));
   else render();
 }
+
+/**
+ * Report a capped result on stderr, before any of it reaches stdout.
+ *
+ * A capped listing is a SUBSET that looks exactly like a complete one, so it
+ * has to announce itself — and stderr is the one channel that reaches both
+ * readers. A human sees it beside the table; a `--json` consumer sees it
+ * without the parsed bytes on stdout changing shape, which is what an envelope
+ * around the array would have cost every caller for a condition most runs
+ * never hit. Silence on stderr means the result IS the whole set.
+ *
+ * A notice only reaches a reader who is looking. `--require-complete` is for
+ * the caller who cannot afford to miss it — a script whose output is a backup
+ * or a rollback payload — and turns the same condition into a nonzero exit with
+ * nothing written to stdout at all.
+ */
+function noteIncompleteScan(
+  extent: ScanExtent,
+  what: string,
+  requireComplete?: boolean,
+): void {
+  if (isCompleteScan(extent)) return;
+  const reasons: string[] = [];
+  if (extent.truncated) {
+    reasons.push(
+      `capped at --limit ${extent.limit} ${what}; the space holds ` +
+        `${extent.total} entities in all — raise --limit for the rest`,
+    );
+  }
+  if (extent.unreadable > 0) {
+    // Named apart from the cap, because the remedy is different: a raised
+    // limit does not recover an entity whose payload will not decode.
+    reasons.push(
+      `${extent.unreadable} of ${extent.total} entities could not be ` +
+        `reconstructed and are absent from this result — raising --limit ` +
+        `will not recover them`,
+    );
+  }
+  if (requireComplete) {
+    throw new Error(
+      `${reasons.join("; ")}. --require-complete refuses a partial result.`,
+    );
+  }
+  for (const reason of reasons) console.error(`NOTE: ${reason}.`);
+}
+
+/**
+ * The cap a scan will apply, refusing anything an entity count could not reach.
+ * A fractional `--limit` is a typo with a silent failure mode — entities are
+ * counted one at a time, so a cap of 1.5 is a cap nothing ever equals — and a
+ * negative one asks for a listing that cannot exist.
+ */
+function validatedLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of entities, not ${limit}.`,
+    );
+  }
+  return limit;
+}
+
+/** The flag that turns a capped result into a failure. Shared by every scan. */
+const requireCompleteOption = [
+  "--require-complete",
+  "Exit nonzero instead of returning a capped result.",
+] as const;
 
 function splitPath(p?: string): string[] {
   return p ? p.split("/").filter(Boolean) : [];
@@ -964,20 +1035,37 @@ export const inspect = new Command()
   )
   .option(
     "--kind <kind:string>",
-    "Filter: piece | module | stream | schema | owned-cell | free-cell | unknown.",
+    `Filter: ${entityKinds.join(" | ")}. --limit then counts entities of ` +
+      `this kind, not entities scanned to find them.`,
   )
   .option("--branch <branch:string>", "Branch (default: '').")
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to return; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const kind = options.kind;
+    if (kind !== undefined && !isEntityKind(kind)) {
+      throw new ValidationError(
+        `Unknown --kind "${kind}". Expected one of: ${entityKinds.join(", ")}.`,
+      );
+    }
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
-      let rows = listEntityModels(s, {
-        limit: options.limit,
+      const listing = listEntityModels(s, {
+        limit,
         branch: options.branch,
+        kind,
       });
-      if (options.kind) rows = rows.filter((r) => r.kind === options.kind);
+      const rows = listing.entities;
+      noteIncompleteScan(
+        listing.extent,
+        kind ? `${kind} entities` : "entities",
+        options.requireComplete,
+      );
       out(!!options.json, rows, () => {
         if (rows.length === 0) {
           console.log("(no entities)");
@@ -1079,19 +1167,24 @@ export const inspect = new Command()
   .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).", {
     conflicts: ["json"],
   })
-  .option("--limit <n:number>", "Max entities to reconstruct.", {
-    default: 5000,
-  })
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       let g: SpaceGraph = buildSpaceGraph(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
         includeLinks: options.links !== false,
       });
       if (options.root) g = subgraphAround(g, options.root, options.depth);
+      noteIncompleteScan(g.extent, "entities", options.requireComplete);
       if (options.dot) {
         console.log(graphToDot(g));
         return;
@@ -1174,7 +1267,14 @@ export const inspect = new Command()
     "--app-url <url:string>",
     "Live shell base origin for deep links (e.g. https://host).",
   )
+  .option(
+    "--limit <n:number>",
+    "Max entities to reconstruct; a capped result is noted on stderr.",
+    { default: DEFAULT_SCAN_LIMIT },
+  )
+  .option(...requireCompleteOption)
   .action(async (options, space) => {
+    const limit = validatedLimit(options.limit);
     if (options.json) {
       throw new ValidationError(
         'Option "--json" and the "html" command are mutually exclusive.',
@@ -1187,7 +1287,9 @@ export const inspect = new Command()
         scope: options.scope,
         generatedAt: new Date().toISOString(),
         liveBase: options.appUrl,
+        limit,
       });
+      noteIncompleteScan(bundle.extent, "entities", options.requireComplete);
       const html = renderInspectorHtml(bundle);
       if (options.out) {
         Deno.writeTextFileSync(options.out, html);
