@@ -711,6 +711,52 @@ describe("scan-extent", () => {
     });
   });
 
+  describe("an entity deleted in one scope and live in another", () => {
+    const MINE = "user:did:key:zBob";
+    /** Shared value kept; the per-user copy written and then deleted. */
+    const halfDeleted = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          { id: "of:x", document: { value: "shared" }, revisions: 1 },
+          {
+            id: "of:x",
+            document: { value: "bob's" },
+            revisions: 1,
+            scope: MINE,
+            deleted: true,
+          },
+        ],
+        [{ name: "" }],
+        run,
+      );
+
+    it("reports the deletion as divergence rather than dropping the scope", async () => {
+      await halfDeleted((space) => {
+        // `visibleRevisionRows` enumerates RECORDS, so a tombstoned head still
+        // reaches the overlay. Filtering tombstones there would leave one
+        // variant and report `divergent: false` — erasing the very difference
+        // an overlay is for. `visibleEntityRows` is the read-visible set.
+        const overlay = scopeOverlay(space, "of:x");
+        expect(overlay.variants.map((v) => `${v.scope}=${v.summary}`)).toEqual([
+          `space="shared"`,
+          `${MINE}=(absent)`,
+        ]);
+        expect(overlay.divergent).toBe(true);
+      });
+    });
+
+    it("keeps the scope out of the read-visible entity rows", async () => {
+      await halfDeleted((space) => {
+        expect(visibleEntityRows(space, { scope: MINE })).toEqual([]);
+        expect(
+          visibleEntityRows(space, { scope: MINE, includeDeleted: true }).map((
+            r,
+          ) => r.id),
+        ).toEqual(["of:x"]);
+      });
+    });
+  });
+
   describe("the standalone HTML explorer", () => {
     it("marks a page missing an entity it could not reconstruct, not only a capped one", async () => {
       await withSeeded(

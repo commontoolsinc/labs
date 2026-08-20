@@ -74,7 +74,9 @@ export function buildInspectorBundle(
   // per-identity divergence the space-scope view hides. Discovered over the
   // same branch-visible domain the tree and the scope list use — a child branch
   // inherits its parent's per-user state, and a page that named a user scope
-  // while finding no cells in it would report the divergence as absent.
+  // while finding no cells in it would report the divergence as absent. Records
+  // rather than readable entities, so an entity deleted in one scope and live
+  // in another still reaches the overlay that exists to show that.
   const scoped = new Map<string, Set<string>>();
   for (const row of visibleRevisionRows(space, { branch })) {
     const scopes = scoped.get(row.id) ?? new Set<string>();

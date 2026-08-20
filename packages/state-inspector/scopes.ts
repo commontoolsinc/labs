@@ -100,6 +100,9 @@ export function listScopes(
   space: SpaceDb,
   opts: { branch?: string } = {},
 ): Scope[] {
+  // Counts cover every entity the branch holds records for, tombstoned ones
+  // included: a scope is a fact about what the store contains, and one whose
+  // entities were all deleted is still a scope that was written to.
   const totals = new Map<string, { entities: number; revisions: number }>();
   for (const row of visibleRevisionRows(space, { branch: opts.branch })) {
     const total = totals.get(row.scope) ?? { entities: 0, revisions: 0 };
@@ -358,9 +361,11 @@ export function scopeOverlay(
   opts: { branch?: string } = {},
 ): ScopeOverlay {
   const branch = opts.branch ?? "";
-  // The scopes this branch can SEE for the entity, not only those written on
-  // it: an inherited entity's per-user variants live on the parent, and an
-  // overlay that missed them would report no divergence where there is some.
+  // The scopes this branch holds records for, not only those written on it: an
+  // inherited entity's per-user variants live on the parent, and an overlay
+  // that missed them would report no divergence where there is some. Tombstoned
+  // heads are wanted here too — an entity present in one scope and DELETED in
+  // another is a divergence, and `(absent)` below is its own class of one.
   const rows = visibleRevisionRows(space, { branch, id })
     .map((r) => ({ scope_key: r.scope, revs: r.revisions }));
   // Content-key each variant from the RAW reconstructed value (hashStringOf is

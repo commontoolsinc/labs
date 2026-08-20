@@ -176,16 +176,23 @@ export interface VisibleRevisionRow {
 }
 
 /**
- * Every (scope, entity) a read on this branch can see, each attributed to the
+ * Every (scope, entity) this branch has RECORDS for, each attributed to the
  * nearest branch holding it — `resolveBranchRow`'s rule applied to a whole
  * space instead of one entity.
+ *
+ * Records, not readable entities: an entity whose head is a `delete` is
+ * enumerated here, because a tombstone is something the branch holds and
+ * several callers need to know about it. `visibleEntityRows` is the read-
+ * visible set, and drops them. Do not mistake one for the other — the reason
+ * this function exists is that the ancestry rule was being written once per
+ * caller and drifting one caller at a time, and a caller that reads this as
+ * "what a read returns" reintroduces exactly that.
  *
  * Enumeration and reading have to agree about what a branch can see, or a view
  * reports one domain while describing another: a listing that covers inherited
  * entities beside a scope list that does not, or a page naming a per-user scope
- * while showing no cells in it. This is the enumeration those callers share.
- * Narrow with `scope` or `id` when only part of the space is wanted; the
- * remaining shape is identical either way.
+ * while showing no cells in it. Narrow with `scope` or `id` when only part of
+ * the space is wanted; the remaining shape is identical either way.
  */
 export function visibleRevisionRows(
   space: SpaceDb,
