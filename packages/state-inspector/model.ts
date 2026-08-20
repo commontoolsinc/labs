@@ -460,6 +460,17 @@ export function isEntityKind(value: string): value is EntityKind {
 export const DEFAULT_SCAN_LIMIT = 5000;
 
 /**
+ * The cap a scan will actually apply, for a limit that may be anything a caller
+ * passed. Entities are counted one at a time, so a cap has to be a whole
+ * number: a fractional one no integer count can ever equal is a cap that never
+ * takes effect, and the three scans disagreed about which way to round it.
+ */
+export function scanLimit(limit: number | undefined): number {
+  if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SCAN_LIMIT;
+  return Math.max(0, Math.floor(limit));
+}
+
+/**
  * How far a capped space-wide scan reached. A scan that stops at its cap
  * returns a SUBSET, and a caller that cannot tell a capped result from a
  * complete one will read the subset as the whole space — so every capped scan
@@ -476,6 +487,20 @@ export interface ScanExtent {
   total: number;
   /** True when the scan reached more of what was asked for than `limit`. */
   truncated: boolean;
+  /**
+   * Entities the scan enumerated and could NOT describe — a payload that would
+   * not decode, or a reconstruction that threw. A separate count from
+   * `truncated` because it is a separate kind of incompleteness: raising
+   * `limit` does not recover one. Zero where a pass returns a row for every
+   * entity it reached, as `listEntityModels` does by modeling an unreadable
+   * entity `unknown`.
+   */
+  unreadable: number;
+}
+
+/** Whether a scan returned less than the whole set, for any reason. */
+export function isCompleteScan(extent: ScanExtent): boolean {
+  return !extent.truncated && extent.unreadable === 0;
 }
 
 /** One entity a scan can reach, and how many of its revisions it can see. */
@@ -620,7 +645,7 @@ export function listEntityModels(
 ): EntityListing {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
+  const limit = scanLimit(opts.limit);
   const kind = opts.kind;
 
   // A listing describes the space's RECORDS, so it keeps tombstones (they model
@@ -745,6 +770,10 @@ export function listEntityModels(
       limit,
       total: rows.length,
       truncated,
+      // A listing returns a row for every entity it reached: one that would not
+      // decode is modeled `unknown` rather than dropped, so nothing is missing
+      // from the result for this pass to report.
+      unreadable: 0,
     },
   };
 }

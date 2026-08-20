@@ -226,16 +226,24 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   an `extent`, and the HTML header marks the page. Silence means the result IS
   the whole set. `entities --kind` selects during the scan, so `--limit` counts
   the entities of that kind rather than the entities scanned to find them.
-  `--require-complete` turns a capped result into a nonzero exit with nothing on
-  stdout, for a caller whose output is a backup or a rollback payload and who
-  cannot afford to miss a notice.
+  `--require-complete` turns an incomplete result into a nonzero exit with
+  nothing on stdout, for a caller whose output is a backup or a rollback payload
+  and who cannot afford to miss a notice. A `--limit` that is not a whole number
+  of entities is refused, since a cap no count can reach is a cap that never
+  applies.
+- **Not every gap is a cap.** A scan that enumerates an entity it cannot
+  reconstruct reports it as `extent.unreadable` rather than folding it into
+  `truncated`, because raising `--limit` does not recover one. `entities` never
+  has any: it returns a row for an unreadable entity rather than dropping it.
 - **A scan sees what a read sees.** Every space-wide scan enumerates through
-  `visibleEntityRows`, which walks branch ancestry the way `reconstructDocument`
-  does — a child branch lists the entities it inherited at the fork, not only
-  the ones written on it — and drops entities whose visible head is a `delete`.
-  `entities` is the exception that keeps tombstones, because it describes the
-  space's records; that is why its `extent.total` can exceed `graph`'s over the
-  same space.
+  `visibleEntityRows`, and `listScopes` and `contentFingerprint` read through
+  the same branch chain — a fingerprint hashes the values ITS branch reads, or
+  it certifies a parent's content under a child's name. `visibleEntityRows`
+  walks branch ancestry the way `reconstructDocument` does — a child branch
+  lists the entities it inherited at the fork, not only the ones written on it —
+  and drops entities whose visible head is a `delete`. `entities` is the
+  exception that keeps tombstones, because it describes the space's records;
+  that is why its `extent.total` can exceed `graph`'s over the same space.
 - **The other caps are silent**: `history` / `hot` / `conflicts` row limits, and
   the HTML stale-read pass, which caps per bundle and marks un-analyzed cells
   rather than showing them clean. There a count at a round cap may be truncated

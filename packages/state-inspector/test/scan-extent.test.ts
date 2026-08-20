@@ -17,12 +17,17 @@ import { Database } from "@db/sqlite";
 import { openSpace, type SpaceDb } from "../db.ts";
 import {
   countEntities,
+  DEFAULT_SCAN_LIMIT,
   entityKinds,
+  isCompleteScan,
   isEntityKind,
   listEntityModels,
+  scanLimit,
   visibleEntityRows,
 } from "../model.ts";
 import { reconstructDocument } from "../reconstruct.ts";
+import { contentFingerprint } from "../fingerprint.ts";
+import { listScopes } from "../scopes.ts";
 import { buildAllDetails } from "../detail.ts";
 import { buildSpaceGraph, subgraphAround } from "../graph.ts";
 import { buildInspectorBundle, renderInspectorHtml } from "../html.ts";
@@ -60,7 +65,15 @@ interface SeedEntity {
   branch?: string;
   /** Written after the revisions: the entity's visible head is a tombstone. */
   deleted?: boolean;
+  /** Scope the revisions are written under. Defaults to the shared scope. */
+  scope?: string;
 }
+
+/** A stored payload `decodeStored` cannot read, standing in for a bad write. */
+const UNDECODABLE = "<<< not a document >>>" as unknown as Record<
+  string,
+  unknown
+>;
 
 /** Six busy cells, one module, three quiet pieces — busiest scanned first. */
 const ENTITIES: SeedEntity[] = [
@@ -114,19 +127,25 @@ function seed(
      VALUES (?, ?, ?, ?, '{}', '{}')`,
   );
   const rev = db.prepare(
-    `INSERT INTO revision (branch, id, seq, op_index, op, data, commit_seq)
-     VALUES (?, ?, ?, 0, ?, ?, ?)`,
+    `INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, ?, 0, ?, ?, ?)`,
   );
   let seq = 0;
   const write = (entity: SeedEntity, op: string, data: string | null) => {
     seq++;
     const branch = entity.branch ?? "";
     commit.run(seq, branch, SESSION, seq);
-    rev.run(branch, entity.id, seq, op, data, seq);
+    rev.run(branch, entity.id, entity.scope ?? "space", seq, op, data, seq);
   };
   for (const entity of entities) {
     for (let n = 0; n < entity.revisions; n++) {
-      write(entity, "set", JSON.stringify(entity.document));
+      write(
+        entity,
+        "set",
+        entity.document === UNDECODABLE
+          ? (UNDECODABLE as unknown as string)
+          : JSON.stringify(entity.document),
+      );
     }
     if (entity.deleted) write(entity, "delete", null);
   }
@@ -215,6 +234,7 @@ describe("scan-extent", () => {
         limit: 3,
         total: TOTAL,
         truncated: true,
+        unreadable: 0,
       });
     });
 
@@ -247,6 +267,7 @@ describe("scan-extent", () => {
         limit: 2,
         total: TOTAL,
         truncated: true,
+        unreadable: 0,
       });
     });
 
@@ -270,6 +291,7 @@ describe("scan-extent", () => {
         limit: 0,
         total: TOTAL,
         truncated: true,
+        unreadable: 0,
       });
     });
   });
@@ -277,7 +299,12 @@ describe("scan-extent", () => {
   describe("buildSpaceGraph()", () => {
     it("returns the cap it applied and that the space outran it", () => {
       const graph = buildSpaceGraph(space, { limit: 3 });
-      expect(graph.extent).toEqual({ limit: 3, total: TOTAL, truncated: true });
+      expect(graph.extent).toEqual({
+        limit: 3,
+        total: TOTAL,
+        truncated: true,
+        unreadable: 0,
+      });
     });
 
     it("returns `truncated` false for a limit the whole space fits inside", () => {
@@ -303,6 +330,7 @@ describe("scan-extent", () => {
         limit: 3,
         total: TOTAL,
         truncated: true,
+        unreadable: 0,
       });
     });
 
@@ -432,7 +460,12 @@ describe("scan-extent", () => {
     it("counts the inherited entities in the extent rather than reporting a complete listing", async () => {
       await inherited((kidSpace) => {
         const listing = listEntityModels(kidSpace, { branch: "kid", limit: 2 });
-        expect(listing.extent).toEqual({ limit: 2, total: 4, truncated: true });
+        expect(listing.extent).toEqual({
+          limit: 2,
+          total: 4,
+          truncated: true,
+          unreadable: 0,
+        });
       });
     });
 
@@ -478,6 +511,7 @@ describe("scan-extent", () => {
           limit: 2,
           total: 2,
           truncated: false,
+          unreadable: 0,
         });
       });
     });
@@ -488,6 +522,7 @@ describe("scan-extent", () => {
           limit: 2,
           total: 2,
           truncated: false,
+          unreadable: 0,
         });
       });
     });
@@ -548,6 +583,130 @@ describe("scan-extent", () => {
           .toEqual(
             ["of:mod", "of:mod"],
           );
+      });
+    });
+  });
+
+  describe("scanLimit()", () => {
+    it("floors a fractional limit, which no entity count could ever equal", () => {
+      expect(scanLimit(1.5)).toBe(1);
+      expect(scanLimit(-3)).toBe(0);
+      expect(scanLimit(undefined)).toBe(DEFAULT_SCAN_LIMIT);
+      expect(scanLimit(NaN)).toBe(DEFAULT_SCAN_LIMIT);
+    });
+  });
+
+  describe("a fractional limit", () => {
+    it("caps every scan the same way rather than passing through one of them", async () => {
+      await withSeeded(cells(2, 1), [{ name: "" }], (space) => {
+        // Before normalizing, `kept.length === limit` could never hold against
+        // 1.5, so the entity listing returned BOTH entities while detail and
+        // graph returned one — three scans disagreeing on one input.
+        expect(listEntityModels(space, { limit: 1.5 }).entities.length).toBe(1);
+        expect(buildAllDetails(space, { limit: 1.5 }).details.length).toBe(1);
+        expect(buildSpaceGraph(space, { limit: 1.5 }).extent).toEqual({
+          limit: 1,
+          total: 2,
+          truncated: true,
+          unreadable: 0,
+        });
+      });
+    });
+  });
+
+  describe("a space holding an entity that will not decode", () => {
+    /** One readable entity and one whose stored payload is not decodable. */
+    const withCorrupt = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          { id: "of:good", document: { value: "readable" }, revisions: 1 },
+          { id: "of:bad", document: UNDECODABLE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        run,
+      );
+
+    it("counts the entity a detail pass could not describe rather than dropping it silently", async () => {
+      await withCorrupt((space) => {
+        const listing = buildAllDetails(space);
+        expect(listing.details.map((d) => d.id)).toEqual(["of:good"]);
+        // `truncated` stays false — the cap was never reached — so without a
+        // count of its own this pass would report itself complete over one of
+        // two entities, and `--require-complete` would exit 0.
+        expect(listing.extent.truncated).toBe(false);
+        expect(listing.extent.unreadable).toBe(1);
+        expect(isCompleteScan(listing.extent)).toBe(false);
+      });
+    });
+
+    it("counts the entity a graph could not place", async () => {
+      await withCorrupt((space) => {
+        const graph = buildSpaceGraph(space);
+        expect(graph.extent.unreadable).toBe(1);
+        expect(isCompleteScan(graph.extent)).toBe(false);
+      });
+    });
+
+    it("reports the entity listing complete, because it returns a row for one it cannot read", async () => {
+      await withCorrupt((space) => {
+        const listing = listEntityModels(space);
+        expect(listing.entities.map((e) => e.id).sort()).toEqual([
+          "of:bad",
+          "of:good",
+        ]);
+        expect(listing.extent.unreadable).toBe(0);
+        expect(isCompleteScan(listing.extent)).toBe(true);
+      });
+    });
+  });
+
+  describe("a fingerprint of a child branch", () => {
+    const MINE = "user:did:key:zBob";
+    /** A parent entity the child overrides, and a parent-only user scope. */
+    const forked = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          { id: "of:shared", document: { value: "PARENT" }, revisions: 1 },
+          {
+            id: "of:mine",
+            document: { value: "parent user state" },
+            revisions: 1,
+            scope: MINE,
+          },
+          {
+            id: "of:shared",
+            document: { value: "CHILD" },
+            revisions: 1,
+            branch: "kid",
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 2 }],
+        run,
+      );
+
+    it("enumerates the per-user scope the child inherited rather than only its own", async () => {
+      await forked((space) => {
+        expect(listScopes(space, { branch: "kid" }).map((s) => s.raw)).toEqual(
+          listScopes(space).map((s) => s.raw),
+        );
+        expect(listScopes(space, { branch: "kid" }).map((s) => s.raw))
+          .toContain(MINE);
+      });
+    });
+
+    it("hashes the value the branch reads, not the parent's", async () => {
+      await forked((space) => {
+        // The read resolves the child's override; a fingerprint that hashed the
+        // default branch would certify two different contents as identical —
+        // the one failure this module exists to prevent.
+        expect(reconstructDocument(space, { id: "of:shared", branch: "kid" }))
+          .toEqual({ value: "CHILD" });
+        const kid = contentFingerprint(space, { branch: "kid" });
+        const root = contentFingerprint(space);
+        const shared = (r: typeof kid) =>
+          r.perEntity.find((e) => e.id === "of:shared")?.hash;
+        expect(shared(kid)).not.toBe(shared(root));
+        expect(kid.perEntity.map((e) => e.scope)).toContain(MINE);
       });
     });
   });
