@@ -203,7 +203,7 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 // appends arguments nowhere; identity, iframe-sandbox, and dashboard run
 // browser harnesses that record through the deno-web-test reporter instead;
 // home-schemas, generated-patterns, and patterns/auth have no tests.
-const JUNIT_CAPABLE_MEMBERS = new Set([
+export const JUNIT_CAPABLE_MEMBERS = new Set([
   "./packages/agents-host",
   "./packages/background-piece-service",
   "./packages/cf-harness",
@@ -217,6 +217,7 @@ const JUNIT_CAPABLE_MEMBERS = new Set([
   "./packages/leb128",
   "./packages/lib-shell",
   "./packages/llm",
+  "./packages/navigation",
   "./packages/piece",
   "./packages/runner",
   "./packages/runtime-client",

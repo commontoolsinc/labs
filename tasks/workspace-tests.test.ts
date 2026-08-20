@@ -1,7 +1,9 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { parse as parseJsonc } from "@std/jsonc";
 import {
   assertTaskTestsIncluded,
   initializeDb,
+  JUNIT_CAPABLE_MEMBERS,
   parseDisabledPackageList,
   readWorkspaceMembers,
   runTests,
@@ -453,4 +455,44 @@ Deno.test("runTests reports a failure when every member is disabled", async () =
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+// A member whose test task is one plain `deno test` invocation can take an
+// appended --junit-path, so its leaves belong in the junit-capable set. A
+// package that lands without being added runs its tests and records none of
+// them, which is invisible until someone asks why the package has no history.
+// Tasks that chain commands, or that route through a runner, are outside the
+// rule and stay governed by the comment on the set itself.
+Deno.test("every member running one plain deno test is junit-capable", async () => {
+  const members = await readWorkspaceMembers();
+  const missing: string[] = [];
+  for (const member of members) {
+    let task: string | undefined;
+    for (const manifest of ["deno.jsonc", "deno.json"]) {
+      try {
+        const parsed = parseJsonc(
+          await Deno.readTextFile(`${member}/${manifest}`),
+        ) as { tasks?: Record<string, string | { command?: string }> };
+        // A task is either the command string or an object carrying it.
+        const entry = parsed?.tasks?.test;
+        task = typeof entry === "string" ? entry : entry?.command;
+        if (task !== undefined) break;
+      } catch {
+        // The other manifest name, or a member without one, answers instead.
+      }
+    }
+    if (task === undefined) continue;
+    const chained = task.includes("&&") || task.includes(";") ||
+      task.includes("|");
+    const plainDenoTest = /(^|\s)deno test(\s|$)/.test(task);
+    if (plainDenoTest && !chained && !JUNIT_CAPABLE_MEMBERS.has(member)) {
+      missing.push(`${member} (task: ${task})`);
+    }
+  }
+  assertEquals(
+    missing,
+    [],
+    "add these to JUNIT_CAPABLE_MEMBERS in tasks/workspace-tests.ts so their " +
+      "per-test results reach the record store",
+  );
 });
