@@ -23,6 +23,11 @@
  *   # the most common full call chains
  *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --chains
  *
+ *   # where to add the next span, for the ones nothing encloses
+ *   deno run --allow-read attribute-measures.ts measures.json --key=traverse --roots
+ *   #   ...ignoring a key so frequent it is always the nearest thing to end
+ *   deno run --allow-read attribute-measures.ts measures.json --key=traverse --roots --ignore=tx/read
+ *
  * Read the `--via` table for the ratio rather than the totals. A caller with
  * few parent spans and many children each is a width problem — one call doing
  * too much — and is fixed differently from a caller with many parent spans
@@ -50,6 +55,8 @@ const via = flag("via");
 const heavy = Number(flag("heavy") ?? "0");
 const wantChains = Deno.args.includes("--chains");
 const wantDetail = Deno.args.includes("--detail");
+const wantRoots = Deno.args.includes("--roots");
+const ignored = new Set((flag("ignore") ?? "").split(",").filter(Boolean));
 
 if (!target) {
   console.error(
@@ -116,6 +123,86 @@ if (wantDetail) {
       );
     }
     if (unnamed > 0) console.log(`\n${unnamed} span(s) carried no detail.`);
+  }
+} else if (wantRoots) {
+  // A root is an honest answer — the span ran outside every instrumented
+  // region — but it is not a useful one on its own. These two views turn it
+  // into a place to put the next span, from data already in hand.
+  const roots = hits.filter((i) => callerOf(spans, i) === undefined);
+  console.log(
+    `\n${roots.length} of ${hits.length} ${target} spans have no ` +
+      `instrumented caller.`,
+  );
+  if (roots.length === 0) {
+    console.log("Nothing to locate: every span already sits inside a span.");
+  } else {
+    // The harness phases are transparent to attribution on purpose, but for a
+    // span nothing else encloses they are the only thing that locates it.
+    const byAny = new Map<string, number>();
+    for (const i of roots) {
+      const parent = spans[i].parent;
+      byAny.set(
+        parent === -1 ? "(nothing at all)" : spans[parent].key,
+        (byAny.get(parent === -1 ? "(nothing at all)" : spans[parent].key) ??
+          0) + 1,
+      );
+    }
+    console.log("\nwhat encloses them once nothing is treated as transparent:");
+    for (
+      const [key, n] of [...byAny].sort((a, b) => b[1] - a[1]).slice(0, 12)
+    ) {
+      console.log(`  ${String(n).padStart(7)}  ${key}`);
+    }
+
+    // What finished immediately before. A shared predecessor across many roots
+    // is a caller nobody wrapped: it ran, returned, and the work followed it.
+    const ends = spans.map((_, i) => i).sort((a, b) =>
+      spans[a].end - spans[b].end
+    );
+    const endTimes = ends.map((i) => spans[i].end);
+    const before = new Map<string, number>();
+    for (const i of roots) {
+      const t = spans[i].start;
+      let lo = 0, hi = endTimes.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (endTimes[mid] <= t) lo = mid + 1;
+        else hi = mid;
+      }
+      let label = "(nothing before)";
+      for (let j = lo - 1; j >= 0; j--) {
+        const candidate = spans[ends[j]];
+        // Only spans nothing encloses, and never the target itself. A child of
+        // whatever ran previously is almost always the nearest thing to have
+        // ended, and it says nothing: it belongs to that work rather than
+        // handing off to this. The previous top-level span is the handoff.
+        if (candidate.parent !== -1 || candidate.key === target) continue;
+        if (ignored.has(candidate.key)) continue;
+        label = candidate.key;
+        break;
+      }
+      before.set(label, (before.get(label) ?? 0) + 1);
+    }
+    console.log("\nwhat finished most recently before each began:");
+    for (
+      const [key, n] of [...before].sort((a, b) => b[1] - a[1]).slice(0, 12)
+    ) {
+      console.log(`  ${String(n).padStart(7)}  ${key}`);
+    }
+    // No attempt to flag which name is noise: a key that dominates because it
+    // is emitted constantly and one that dominates because it really is the
+    // handoff look identical from here, and guessing wrong would point an
+    // investigation at the wrong place with a confident-sounding label.
+    console.log(
+      "\nA name concentrated in both views is where a span would attribute " +
+        "the\nmost, and the two disagreeing is worth more than either alone: " +
+        "one says\nwhen in the run, the other says what handed off to it.",
+    );
+    console.log(
+      "\nA key emitted constantly is always the nearest thing to have ended, " +
+        "so it\ncrowds this column without handing off to anything. Pass " +
+        "--ignore=a,b to\ndrop such a key and see what is behind it.",
+    );
   }
 } else if (wantChains) {
   const chains = new Map<string, number>();
