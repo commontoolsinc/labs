@@ -76,8 +76,8 @@ available`; ✓ = test green; wall = the deno test wall):
 
 | run | workload | arm | port | start (UTC) | load before → after | wall | result |
 |---|---|---|---|---|---|---|---|
-| smoke0-chat | chat n=3 @0.5 s | OFF (instrument smoke) | 8960 | 08:03 | 3.83 → 3.55 | 19 s | ✓ (not a ledger series; n=3) |
-| smoke0-lunch | lunch | OFF (instrument smoke) | 8960 | 08:05 | 2.85 → 2.63 | 16 s | ✓ |
+| smoke0-chat | chat n=3 @0.5 s | OFF (instrument smoke) | 8960 | 08:03:44 | 3.83 → 3.55 | 19 s | ✓ (not a ledger series; n=3) |
+| smoke0-lunch | lunch | OFF (instrument smoke) | 8960 | 08:04:38 | 2.85 → 2.63 | 16 s | ✓ |
 | c1a | chat n=20 @2 s | OFF₁ | 8960 | 08:14:39 | 4.04/3.29/3.12 → 4.76/3.61/3.25 | 55 s | ✓ series |
 | c1 | chat n=20 @2 s | ON | 8961 | 08:15:56 | 4.81/3.68/3.28 → 4.29/3.80/3.36 | 68 s | ✓ series COMPLETE |
 | c1b | chat n=20 @2 s | OFF₂ | 8962 | 08:18:15 | 3.68/3.87/3.42 → 4.29/4.04/3.52 | 56 s | ✓ series |
@@ -86,16 +86,16 @@ available`; ✓ = test green; wall = the deno test wall):
 | l1b | lunch | OFF₂ | 8962 | 08:20:31 | 3.93/3.93/3.52 → 3.52/3.83/3.50 | 12 s | ✓ |
 | l2 | lunch | ON rep 2 | 8961 | 08:21:19 | 3.03/3.71/3.46 → 2.59/3.57/3.41 | 14 s | ✓ GREEN |
 | l3 | lunch | ON rep 3 | 8961 | 08:21:52 | 2.27/3.47/3.38 → 2.70/3.48/3.39 | 12 s | ✓ GREEN |
-| n1a | note n=20 | OFF₁ | 8960 | 08:22:38 | 2.63/3.43/3.37 → 4.57(≈) | 81 s | ✓ 2/2 steps |
+| n1a | note n=20 | OFF₁ | 8960 | 08:22:37 | 2.63/3.43/3.37 → 2.58/3.27/3.31 | 81 s | ✓ 2/2 steps |
 | n1 | note n=20 | ON | 8961 | 08:24:24 | 2.68/3.24/3.30 → 3.77/3.45/3.37 | 89 s | series n=20 COMPLETE; rc=1 — both steps failed the browser-console gate on the PRE-EXISTING `splitDefinitions` error (§6.2) |
 | n1b | note n=20 | OFF₂ | 8962 | 08:26:20 | 2.70/3.18/3.27 → 3.64/3.47/3.38 | 93 s | ✓ 2/2 steps |
 | c2 | chat n=20 @2 s | ON rep 2 | 8961 | 08:29:41 | 4.61/3.72/3.48 → 2.81/3.36/3.36 | 59 s | ✓ series COMPLETE |
 | c2b | chat n=20 @2 s | OFF₃ | 8962 | 08:31:00 | 2.65/3.29/3.33 → 3.14/3.35/3.35 | 54 s | ✓ series |
 | n2 | note n=20 | ON rep 2 | 8961 | 08:32:14 | 2.73/3.25/3.31 → 4.78/4.07/3.64 | 93 s | series n=20 COMPLETE; rc=1 — same pre-existing console-gate shape |
 | n2b | note n=20 | OFF₃ | 8962 | 08:34:30 | 3.88/3.91/3.59 → 3.32/3.68/3.53 | 79 s | ✓ 2/2 steps |
-| l2b | lunch | OFF₃ (trailing) | 8962 | 08:36 | 2.59/3.48/3.46 → 2.95/3.51/3.47 | 12 s | ✓ |
-| n3p | note n=20 | ON, INSTRUMENTED (profile knob) | 8961 | 08:41 | 1.38/2.44/2.99 → 3.30/2.88/3.10 | 95 s | series complete; rc=1 same gate shape; labeled — excluded from the primary series |
-| n3pb | note n=20 | OFF, INSTRUMENTED | 8962 | 08:43 | 2.87/2.80/3.07 → 3.71/3.07/3.14 | 80 s | ✓; labeled — excluded from the primary series |
+| l2b | lunch | OFF₃ (trailing) | 8962 | 08:35:54 | 2.59/3.48/3.46 → 2.95/3.51/3.47 | 12 s | ✓ |
+| n3p | note n=20 | ON, INSTRUMENTED (profile knob) | 8961 | 08:41:26 | 1.38/2.44/2.99 → 3.30/2.88/3.10 | 95 s | series complete; rc=1 same gate shape; labeled — excluded from the primary series |
+| n3pb | note n=20 | OFF, INSTRUMENTED | 8962 | 08:43:18 | 2.87/2.80/3.07 → 3.71/3.07/3.14 | 80 s | ✓; labeled — excluded from the primary series |
 
 Zero orphaned headless shells after any run; port verified free after
 every teardown. The ON run walls themselves collapsed vs the
@@ -339,8 +339,9 @@ raw reading now includes the DESIGNED quiescence advances (S1), so the
 subtraction is the like-for-like successor of the re-benchmark's 2.05–3.20
 raw values; total ON store commits remain 2.1–4.7× BELOW OFF. The wave
 count per authored input fell exactly as the row predicted
-(`wavesBudgetExhausted` 79/33 vs 777/739; waves/input value-only
-1.11–1.45 vs the multi-cycle cuts before). Not silenced; stated.
+(`wavesBudgetExhausted` 79/33 vs 777/739; waves per input, value-only,
+1.16–1.45 on chat/lunch and 2.0–2.2 on note, vs the multi-cycle cuts
+before). Not silenced; stated.
 
 ## 5. The OFF byte-identity witness
 
