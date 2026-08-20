@@ -863,6 +863,26 @@ describe("parseExecArgs edge cases", () => {
     expect(help).not.toContain("Input type:\n  void");
   });
 
+  it("spells a boolean without a placeholder, and a boolean value with one", () => {
+    // A boolean FIELD is named bare in Usage, because writing the flag is
+    // already the whole of saying true — a placeholder there would invite a
+    // value the parser does not take in that position.
+    const field = makeSpec("handler", {
+      type: "object",
+      properties: { done: { type: "boolean" } },
+      required: ["done"],
+    });
+    const fieldHelp = renderExecHelp("/tmp/x.handler", field);
+    expect(fieldHelp).toContain("[invoke] --done\n");
+    expect(fieldHelp).not.toContain("--done <boolean>");
+
+    // A verb whose whole event IS a boolean has no field to name, so the
+    // value rides `--value` and the placeholder says which value it takes.
+    const whole = makeSpec("tool", { type: "boolean" });
+    const wholeHelp = renderExecHelp("/tmp/x.tool", whole);
+    expect(wholeHelp).toContain("--value <boolean>");
+  });
+
   it("keeps a defaulted field optional on the help page too", () => {
     // The page and the parser must answer required-ness the same way. Labelling
     // `--mode` required while the last line says a bare invoke works, and while
