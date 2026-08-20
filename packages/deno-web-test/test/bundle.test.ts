@@ -13,4 +13,8 @@ Deno.test("a `bundle` entry is bundled onto the server root", async function () 
     ),
     stdoutText,
   );
+  assert(
+    /a bundled module loads into a sandboxed iframe \.\.\. ok/.test(stdoutText),
+    stdoutText,
+  );
 });
