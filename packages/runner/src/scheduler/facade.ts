@@ -97,10 +97,7 @@ import {
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
-import {
-  runSchedulerAction,
-  type SchedulerActionRunState,
-} from "./run.ts";
+import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
@@ -166,9 +163,9 @@ import type {
   EventHandler,
   EventPreflightTraceContext,
   QueuedEvent,
-  ServedEventDispatch,
   ReactivityLog,
   SchedulerObservationIdentity,
+  ServedEventDispatch,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,

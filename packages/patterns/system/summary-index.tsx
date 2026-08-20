@@ -66,9 +66,7 @@ export const searchPattern = pattern<
         // action was rescheduled without backoff (worker storm). Match
         // extractSummary's typeof discipline above.
         const value = entry.get();
-        const summary = typeof value?.summary === "string"
-          ? value.summary
-          : "";
+        const summary = typeof value?.summary === "string" ? value.summary : "";
         const name = typeof value?.name === "string" ? value.name : "";
         return summary.toLowerCase().includes(lowerQuery) ||
           name.toLowerCase().includes(lowerQuery);

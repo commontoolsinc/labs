@@ -628,7 +628,10 @@ describe("late space host hints", () => {
       // The REPLACEMENT queue discharges the preserved intent with no
       // fresh fire; the working host's engine holds the entry.
       const delivered = await outcome;
-      expect(delivered).toEqual({ delivered: false, refused: "event queue closed" });
+      expect(delivered).toEqual({
+        delivered: false,
+        refused: "event queue closed",
+      });
       const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
         const doc = await workingServer.readDocument(
