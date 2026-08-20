@@ -46,6 +46,8 @@ import {
   isSlugAddress,
   type MemorySpace,
   NAME,
+  type NormalizedFullLink,
+  resolveLink,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -65,6 +67,7 @@ import {
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
+import { entityKindOfIdString } from "@commonfabric/runner/entity-kind";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
@@ -3652,18 +3655,95 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(
-  config: PieceConfig,
-  deps: PieceOperationDependencies = {},
-): Promise<{
+/**
+ * A result field whose value the runtime read out of a computed cell. Such a
+ * cell holds what its last committed derivation produced, and nothing
+ * re-derives it when a reader reads it, so its value can name an earlier
+ * instant than the argument the derivation ran over.
+ */
+export interface CachedResultField {
+  /** The field's name on the piece's result. */
+  name: string;
+  /** The computed entity the field's value was read from. */
+  id: string;
+  /**
+   * The commit the entity's document last stood at. Absent when the local
+   * replica holds no confirmed version of that document.
+   */
+  derivedAtCommit?: number;
+}
+
+/**
+ * The commit `link`'s document last stood at, read from the space's local
+ * replica. Commit sequences are assigned per space, so two documents read from
+ * one replica can be ordered against each other.
+ */
+function commitOfDocument(
+  runtime: Runtime,
+  link: NormalizedFullLink,
+): number | undefined {
+  const provider = runtime.storageManager.open(link.space);
+  return provider.replica.get({ id: link.id, scope: link.scope })?.since;
+}
+
+/**
+ * Which of `names` a read of `resultCell` answers from a computed cell.
+ *
+ * The runtime's own link resolution decides this, so the entity named is the
+ * one the value came out of rather than the first link the field stores. A
+ * field whose stored link crosses a computed cell on the way to live state —
+ * a derived list of links into the argument, say — reads live state and is
+ * left out. Every id that is not a computed one counts as live, unknown URI
+ * schemes included, which is the strict reading `entityKindOfIdString`
+ * requires of its callers.
+ */
+export function cachedResultFields(
+  resultCell: Cell<unknown>,
+  names: readonly string[],
+): CachedResultField[] {
+  const runtime = resultCell.runtime;
+  const tx = runtime.readTx();
+  const cached: CachedResultField[] = [];
+  for (const name of names) {
+    const resolved = resolveLink(
+      runtime,
+      tx,
+      resultCell.key(name).getAsNormalizedFullLink(),
+    );
+    if (entityKindOfIdString(resolved.id) !== "computed") continue;
+    const derivedAtCommit = commitOfDocument(runtime, resolved);
+    cached.push({
+      name,
+      id: resolved.id,
+      ...(derivedAtCommit !== undefined && { derivedAtCommit }),
+    });
+  }
+  return cached;
+}
+
+/** What {@link inspectPiece} reports about one piece. */
+export interface PieceInspection {
   id: string;
   name?: string;
   patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
+  /**
+   * The commit the argument document behind `source` last stood at. It comes
+   * from the same per-space sequence as a {@link CachedResultField}'s own
+   * commit, so the two order against each other.
+   */
+  sourceCommit?: number;
+  /** The fields of `result` a read answers from a computed cell's cache. */
+  cachedResultFields: CachedResultField[];
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
-}> {
+}
+
+export async function inspectPiece(
+  config: PieceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceInspection> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   let resolvedConfig: PieceConfig;
   try {
@@ -3701,13 +3781,29 @@ export async function inspectPiece(
     id: piece.id,
     name: piece.name(),
   }));
+  const resultCell = await piece.result.getCell();
+  const inputCell = await piece.input.getCell();
+  const runtime = resultCell.runtime;
+  const sourceCommit = commitOfDocument(
+    runtime,
+    resolveLink(
+      runtime,
+      runtime.readTx(),
+      inputCell.getAsNormalizedFullLink(),
+    ),
+  );
+  const cached = isObjectNotArray(result)
+    ? cachedResultFields(resultCell, Object.keys(result))
+    : [];
 
   return {
     id,
     name,
     patternRef,
     source,
+    ...(sourceCommit !== undefined && { sourceCommit }),
     result,
+    cachedResultFields: cached,
     readingFrom,
     readBy,
   };
@@ -3716,15 +3812,7 @@ export async function inspectPiece(
 async function inspectSlugTargetCell(
   pieces: PiecesController,
   slug: string,
-): Promise<{
-  id: string;
-  name?: string;
-  patternRef?: PiecePatternRef;
-  source?: Readonly<unknown>;
-  result: Readonly<unknown>;
-  readingFrom: Array<{ id: string; name?: string }>;
-  readBy: Array<{ id: string; name?: string }>;
-}> {
+): Promise<PieceInspection> {
   const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
@@ -3752,6 +3840,9 @@ async function inspectSlugTargetCell(
     name,
     patternRef,
     result,
+    cachedResultFields: isObjectNotArray(result)
+      ? cachedResultFields(target, Object.keys(result))
+      : [],
     readingFrom: [],
     readBy: [],
   };

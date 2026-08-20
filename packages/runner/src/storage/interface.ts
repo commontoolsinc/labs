@@ -28,6 +28,7 @@ import {
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
+  type Revision,
   type Signer,
   type State,
   type The as MediaType,
@@ -2162,9 +2163,11 @@ export type EventAppendDeliveryOutcome =
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
-   * does not have it.
+   * does not have it. The state carries `since`, the commit sequence the
+   * entry's document last stood at in this space, so two entries read from
+   * one replica can be ordered against each other.
    */
-  get(entry: BaseMemoryAddress): State | undefined;
+  get(entry: BaseMemoryAddress): Revision<State> | undefined;
 
   /**
    * The doc's visible document (confirmed + this replica's pending

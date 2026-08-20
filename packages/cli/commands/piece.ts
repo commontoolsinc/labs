@@ -70,6 +70,7 @@ import {
   stepPiece,
 } from "../lib/piece.ts";
 import type {
+  CachedResultField,
   ExecutedPieceCallable,
   PieceCallablesListing,
 } from "../lib/piece.ts";
@@ -385,6 +386,45 @@ export function pieceDescribeJson(
     ...(inputs !== undefined ? { inputs } : {}),
     ...verbListingJson(listingPart, all),
   };
+}
+
+/**
+ * The `--- Cached Result Fields ---` section of `cf piece inspect`, without
+ * the blank line that separates it from the section above.
+ *
+ * The `--- Result ---` block prints a live value and a cached one the same
+ * way, so this section names which of the two each field is, and says what
+ * instant a cached one answers for. `sourceCommit` is the commit the argument
+ * document behind `--- Source (Inputs) ---` stands at. It comes from the same
+ * per-space sequence as a field's own commit, so the two order against each
+ * other.
+ */
+export function renderCachedResultFields(
+  cached: readonly CachedResultField[],
+  sourceCommit: number | undefined,
+): string {
+  const lines = ["--- Cached Result Fields ---"];
+  if (cached.length === 0) {
+    lines.push("  (none)");
+    return lines.join("\n");
+  }
+  lines.push(
+    "Each field below reads a computed cell, which holds the value its last",
+    "committed derivation produced. Reading it does not re-derive it.",
+  );
+  if (sourceCommit !== undefined) {
+    lines.push(`Source (Inputs) stands at commit ${sourceCommit}.`);
+  }
+  for (const field of cached) {
+    lines.push(
+      `  - ${field.name}: ${
+        field.derivedAtCommit === undefined
+          ? "the local replica holds no commit for it"
+          : `last derived at commit ${field.derivedAtCommit}`
+      }`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function renderPieceSummaries(
@@ -2181,6 +2221,13 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     } else {
       output += "\n<no result data>";
     }
+
+    output += `\n\n${
+      renderCachedResultFields(
+        pieceData.cachedResultFields,
+        pieceData.sourceCommit,
+      )
+    }`;
 
     output += "\n\n--- Reading From ---";
     if (pieceData.readingFrom.length > 0) {

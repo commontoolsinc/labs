@@ -420,6 +420,14 @@ deno task cf piece step --piece ID ...  # Required!
 deno task cf piece inspect --piece ID ...
 ```
 
+`piece inspect` prints a `--- Cached Result Fields ---` section naming the
+result fields whose values come out of a computed cell, with the commit each was
+last derived at. The commit the argument document stands at is printed beside
+them, drawn from the same per-space sequence, so a field that has not been
+re-derived since the argument moved reads as behind it. Result fields the
+section does not name read live state. `--json` carries the same information as
+`cachedResultFields` and `sourceCommit`.
+
 **Handler testing workflow** (automated test → deploy → call → step → inspect):
 
 ```bash
