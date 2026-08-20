@@ -35,12 +35,12 @@ If this document conflicts with code or passing tests, code/tests win.
 Before AST transforms, `transformCfDirective()`:
 
 1. Locates the first non-empty source line.
-2. Injects, ahead of it:
-   - `import { __cfHelpers } from "commonfabric";` (a named import of the
-     internal helper binding, not a namespace import)
-   - a forwarding `h(...)` helper delegating to `__cfHelpers.h` (so authors
-     need not import the JSX factory manually, and so the helper module is not
-     tree-shaken before binding).
+2. Prepends `import { __cfHelpers } from "commonfabric";` ahead of it (a named
+   import of the internal helper binding, not a namespace import), and appends
+   after the source a forwarding `h(...)` helper delegating to
+   `__cfHelpers.h` — so authors need not import the JSX factory manually, and
+   the helper module is not tree-shaken before binding. §16.5 depends on that
+   split: exactly one line is prepended.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
 
 These string-level steps run in `transformCfDirective()`
@@ -2711,9 +2711,10 @@ authored bytes. `injectCfHelpers` (`src/core/cf-helpers.ts`) builds
 appended after the source. The runner compensates in its `mapSpan`
 (`patternCoverageOptionsForCompile`, `packages/runner/src/harness/engine.ts`):
 
-- every span is shifted by `lineOffset: -1` — or `0` when the source disables
-  the transform (`sourceDisablesCfTransform`), since the opt-out path blanks
-  the directive line in place and injects nothing;
+- every span is shifted by `lineOffset: -1`, the single prepended line — or by
+  `0` for the two shapes that reach the compiler unchanged: a stored legacy
+  envelope whose bytes already carry the helper import, and a file with no
+  content line to inject ahead of;
 - spans falling outside `[1, authoredLineCount]` after the shift are vetoed
   (`mapSpan` returns `undefined`), which drops counters from injected helper
   code: the prepended import could never span (imports are excluded, §16.2),

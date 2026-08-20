@@ -246,7 +246,7 @@ take priority over opaque micro-optimizations.
 
 ## 6. Constraints And Invariants
 
-## C-001 Default-On With Explicit Opt-Out
+## C-001 Applies To Every File
 
 Transform-heavy behavior applies to every file a program carries; there is no
 per-file opt-out.
