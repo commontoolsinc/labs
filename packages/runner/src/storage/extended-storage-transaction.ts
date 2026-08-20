@@ -1503,9 +1503,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * link schemas carrying external refs, expands each to its closure
    * through the realm registry (the link writer registered the documents
    * when it stamped the reference), and blind-writes the documents at the
-   * canonical space scope. Runs before CFC prepare (so the writes are part
-   * of the prepared digest) and again at commit for transactions that
-   * never prepare; the dedupe set makes the second pass a no-op.
+   * canonical space scope. The staging happens eagerly, as each carrying
+   * write stages (`#stageSchemaDocsForValue` from write()/writeOrThrow()),
+   * so the transaction is self-consistent and a same-transaction read
+   * through the staged link resolves its references. This full scan runs
+   * before CFC prepare (so the writes are part of the prepared digest) and
+   * again at commit for transactions that never prepare — a backstop for
+   * values staged past the write choke points; the dedupe set makes
+   * repeated passes no-ops.
    *
    * A hash the registry cannot supply is skipped: only a hand-crafted
    * value carries a reference its writer never registered. The commit
@@ -1523,52 +1528,69 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
     for (const space of spaces) {
       for (const detail of this.getWriteDetails(space)) {
-        if (detail.address.id.startsWith("cid:")) continue;
-        if (detail.value === undefined) continue;
-        const hashes = new Set<string>();
-        // Link positions only: `$alias` records are binding vocabulary by
-        // CONTEXT — in a transaction's written values they are plain data,
-        // and scanning them here would treat data that merely looks like a
-        // binding as a schema carrier. Binding schemas externalized by the
-        // pattern serializer resolve through the realm registry.
-        mapLinkSchemas(detail.value, (schema) => {
-          for (
-            const hash of collectExternalSchemaRefHashes(
-              schema as SchemaDocJSONSchema,
-            )
-          ) {
-            hashes.add(hash);
-          }
-          return schema;
-        });
-        const pending = [...hashes];
-        while (pending.length > 0) {
-          const hash = pending.pop()!;
-          const key = `${space}|${hash}`;
-          if (this.#ensuredSchemaDocs.has(key)) continue;
-          this.#ensuredSchemaDocs.add(key);
-          const document = lookupSchemaDocument(hash);
-          if (document === undefined) {
-            logger.warn("schema-doc-materialize", () => [
-              "A written link references a schema document the registry cannot supply:",
-              `cid:${hash}`,
-            ]);
-            continue;
-          }
-          this.#runPrivilegedSystemWrite(() => {
-            this.writeOrThrow(
-              {
-                space,
-                id: `cid:${hash}` as URI,
-                type: "application/json",
-                path: [],
-              },
-              { value: document },
-            );
-          });
-          pending.push(...collectExternalSchemaRefHashes(document));
-        }
+        this.#stageSchemaDocsForValue(space, detail.address.id, detail.value);
       }
+    }
+  }
+
+  /**
+   * Stages the schema-document closure behind one written value (see
+   * `#materializeReferencedSchemaDocuments` for the contract). Deliberately
+   * per-transaction: two concurrent transactions writing the same schema
+   * each stage their own copy rather than eliding against the other's
+   * uncommitted write, so neither carries an ordering dependency on the
+   * other — `cid:` re-sets of identical content apply as no-ops.
+   */
+  #stageSchemaDocsForValue(
+    space: MemorySpace,
+    id: string,
+    value: FabricValue | undefined,
+  ): void {
+    if (!getContentAddressedSchemasConfig()) return;
+    if (id.startsWith("cid:")) return;
+    if (value === undefined) return;
+    const hashes = new Set<string>();
+    // Link positions only: `$alias` records are binding vocabulary by
+    // CONTEXT — in a transaction's written values they are plain data,
+    // and scanning them here would treat data that merely looks like a
+    // binding as a schema carrier. Binding schemas externalized by the
+    // pattern serializer resolve through the realm registry.
+    mapLinkSchemas(value, (schema) => {
+      for (
+        const hash of collectExternalSchemaRefHashes(
+          schema as SchemaDocJSONSchema,
+        )
+      ) {
+        hashes.add(hash);
+      }
+      return schema;
+    });
+    const pending = [...hashes];
+    while (pending.length > 0) {
+      const hash = pending.pop()!;
+      const key = `${space}|${hash}`;
+      if (this.#ensuredSchemaDocs.has(key)) continue;
+      this.#ensuredSchemaDocs.add(key);
+      const document = lookupSchemaDocument(hash);
+      if (document === undefined) {
+        logger.warn("schema-doc-materialize", () => [
+          "A written link references a schema document the registry cannot supply:",
+          `cid:${hash}`,
+        ]);
+        continue;
+      }
+      this.#runPrivilegedSystemWrite(() => {
+        this.writeOrThrow(
+          {
+            space,
+            id: `cid:${hash}` as URI,
+            type: "application/json",
+            path: [],
+          },
+          { value: document },
+        );
+      });
+      pending.push(...collectExternalSchemaRefHashes(document));
     }
   }
 
@@ -1856,7 +1878,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.invalidateReadResultCache();
-    return this.tx.write(address, value, options);
+    const result = this.tx.write(address, value, options);
+    if (result.ok) {
+      this.#stageSchemaDocsForValue(address.space, address.id, value);
+    }
+    return result;
   }
 
   writeOrThrow(
@@ -1942,6 +1968,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
+    // The staged value may carry link schemas with external refs; stage
+    // their closure with it (the write-side delivery guarantee, and what
+    // makes a same-transaction read through the link resolve). The `cid:`
+    // writes this issues recurse harmlessly: the stager skips them by id.
+    this.#stageSchemaDocsForValue(address.space, address.id, value);
   }
 
   writeValueOrThrow(
@@ -1987,18 +2018,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
       const noteWriteIdentity = () => this.noteWriteIdentity();
+      // Collected while the batch consumes the generator, staged after it
+      // returns: the schema-document closure behind each written link (the
+      // write-side delivery guarantee, and what makes a same-transaction
+      // read through the link resolve). Staging mid-batch would inject
+      // writes while `writeBatch` is applying runs.
+      const staged: { address: IMemorySpaceAddress; value: FabricValue }[] = [];
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
+            if (!write.delete && getContentAddressedSchemasConfig()) {
+              staged.push({ address, value: write.value });
+            }
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
       );
       if (result.error) {
         throw toThrowable(result.error);
+      }
+      for (const write of staged) {
+        this.#stageSchemaDocsForValue(
+          write.address.space,
+          write.address.id,
+          write.value,
+        );
       }
       return;
     }
