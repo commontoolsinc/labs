@@ -365,7 +365,7 @@ describe("composeBundleSourceMap", () => {
 
   it("overrides the recorded source path when `source` is given", () => {
     // Compiler maps record only the basename; the override rewrites it to the
-    // full module path so resolved coordinates match the verified-source set.
+    // full module path so mapped error stacks keep the authored path.
     const mapA = buildMap("a.js", [{ gen: 1, src: "main.tsx", orig: 10 }]);
     const composed = composeBundleSourceMap(
       [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],

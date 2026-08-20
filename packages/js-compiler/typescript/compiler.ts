@@ -1,5 +1,6 @@
 import * as path from "@std/path";
 
+import type { BuilderSourceSitesV1 } from "@commonfabric/ts-transformers/runtime-contract";
 import { getLogger } from "@commonfabric/utils/logger";
 import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import type {
@@ -262,12 +263,14 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
 export interface TransformerPipelineResult {
   factories: ts.TransformerFactory<ts.SourceFile>[];
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getBuilderSourceSites?: () => ReadonlyMap<string, BuilderSourceSitesV1>;
   getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
 }
 
 export interface CompiledTypeScriptModule {
   js: string;
   sourceMap?: SourceMap;
+  builderSourceSites?: BuilderSourceSitesV1;
   policyManifests?: readonly unknown[];
 }
 
@@ -473,6 +476,7 @@ export class TypeScriptCompiler {
       beforeTransformers,
       sourceCollector,
       getDiagnostics,
+      getBuilderSourceSites,
       getPolicyManifests,
     } = createTransformers(
       tsProgram,
@@ -541,6 +545,7 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
+    const builderSourceSites = getBuilderSourceSites?.();
     const policyManifests = getPolicyManifests?.();
     const result = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
@@ -551,6 +556,9 @@ export class TypeScriptCompiler {
       result.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(builderSourceSites?.get(sourceName) === undefined
+          ? {}
+          : { builderSourceSites: builderSourceSites.get(sourceName) }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),
@@ -622,11 +630,15 @@ export class TypeScriptCompiler {
     }
 
     // Transform + emit, collecting (not throwing) transformer diagnostics.
-    const { beforeTransformers, getDiagnostics, getPolicyManifests } =
-      createTransformers(
-        tsProgram,
-        inputOptions,
-      );
+    const {
+      beforeTransformers,
+      getDiagnostics,
+      getBuilderSourceSites,
+      getPolicyManifests,
+    } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
     const { diagnostics: emitDiagnostics } = tsProgram.emit(
       undefined,
       undefined,
@@ -661,6 +673,7 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
+    const builderSourceSites = getBuilderSourceSites?.();
     const policyManifests = getPolicyManifests?.();
     const modules = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
@@ -670,6 +683,9 @@ export class TypeScriptCompiler {
       modules.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(builderSourceSites?.get(sourceName) === undefined
+          ? {}
+          : { builderSourceSites: builderSourceSites.get(sourceName) }),
         ...(policyManifests?.get(sourceName)?.length
           ? { policyManifests: policyManifests.get(sourceName) }
           : {}),
@@ -704,10 +720,14 @@ function createTransformers(
   beforeTransformers: ts.TransformerFactory<ts.SourceFile>[];
   sourceCollector?: SourceCollector;
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getBuilderSourceSites?: () => ReadonlyMap<string, BuilderSourceSitesV1>;
   getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
 } {
   let factories: ts.TransformerFactory<ts.SourceFile>[] = [];
   let getDiagnostics: (() => readonly TransformerDiagnosticInfo[]) | undefined;
+  let getBuilderSourceSites:
+    | (() => ReadonlyMap<string, BuilderSourceSitesV1>)
+    | undefined;
   let getPolicyManifests:
     | (() => ReadonlyMap<string, readonly unknown[]>)
     | undefined;
@@ -721,6 +741,7 @@ function createTransformers(
       // New: TransformerPipelineResult with factories and getDiagnostics
       factories = result.factories;
       getDiagnostics = result.getDiagnostics;
+      getBuilderSourceSites = result.getBuilderSourceSites;
       getPolicyManifests = result.getPolicyManifests;
     }
   }
@@ -728,6 +749,7 @@ function createTransformers(
   const out: ReturnType<typeof createTransformers> = {
     beforeTransformers: factories,
     getDiagnostics,
+    getBuilderSourceSites,
     getPolicyManifests,
   };
 

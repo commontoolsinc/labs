@@ -1,5 +1,8 @@
 import type { Program } from "@commonfabric/js-compiler";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
 import type { MemorySpace } from "../runtime.ts";
 import type { HoistRegistrationSink } from "../sandbox/module-record-compiler.ts";
 
@@ -85,6 +88,8 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: PatternCoverageSpan[];
+  /** Debug-only authored sites, keyed by runtime artifact symbol. */
+  builderSourceSites?: BuilderSourceSitesV1;
   /** Compiler-issued policy manifests, transported separately from JS exports. */
   policyManifests?: readonly unknown[];
 }

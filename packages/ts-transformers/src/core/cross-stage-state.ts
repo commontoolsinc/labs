@@ -6,7 +6,10 @@ import type {
   SyntheticReactiveCollectionRegistry,
   TypeRegistry,
 } from "./transformers.ts";
-import type { CfcPolicyCompilerManifestV1 } from "./runtime-contract.ts";
+import type {
+  BuilderSourceSitesV1,
+  CfcPolicyCompilerManifestV1,
+} from "./runtime-contract.ts";
 
 /**
  * Per-node side table, mirroring the TypeScript compiler's internal `NodeLinks`
@@ -65,10 +68,22 @@ export interface NodeTypeLinks {
  *     `mark*` methods here do not invalidate — the context wrapper does.)
  */
 export class CrossStageState {
+  readonly #builderSourceSites = new Map<string, BuilderSourceSitesV1>();
   readonly #policyManifests = new Map<
     string,
     readonly CfcPolicyCompilerManifestV1[]
   >();
+
+  recordBuilderSourceSites(
+    fileName: string,
+    sidecar: BuilderSourceSitesV1,
+  ): void {
+    this.#builderSourceSites.set(fileName, sidecar);
+  }
+
+  getBuilderSourceSites(): ReadonlyMap<string, BuilderSourceSitesV1> {
+    return this.#builderSourceSites;
+  }
 
   recordPolicyManifests(
     fileName: string,

@@ -7,6 +7,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { isCell, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
+import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
 import {
   externalizeSchema,
   getStableInternalPathSegment,
@@ -645,6 +646,11 @@ function factoryFromPattern<T, R>(
       } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
 
+    // A pattern carries provenance on the factory itself rather than on a
+    // separate implementation. Install the same lazy sidecar accessors used by
+    // lift and handler implementations before the factory can be hardened.
+    defineAuthoredDebugAccessors(factory);
+
     // `asScope` / `inSpace` mint fresh factory objects; record them as
     // derivation copies so identity facts resolve through to the root factory
     // — in particular the content-addressed artifact entry ref, which is what
@@ -1154,9 +1160,7 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...frame,
   };
 
@@ -1207,9 +1211,7 @@ export function pushFrameFromCause(
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
-    ...(parent?.sourceLocationContext && {
-      sourceLocationContext: parent.sourceLocationContext,
-    }),
+    ...(parent?.moduleEvaluation && { moduleEvaluation: true as const }),
     ...(inHandler && { inHandler: true }),
     ...(frameKind && { frameKind }),
     ...(eventTime !== undefined && { eventTime }),

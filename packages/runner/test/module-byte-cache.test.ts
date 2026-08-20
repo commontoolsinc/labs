@@ -59,6 +59,9 @@ class FakeByteCache implements ModuleByteCache {
         ...(x.patternCoverageSpans === undefined
           ? {}
           : { patternCoverageSpans: x.patternCoverageSpans }),
+        ...(x.builderSourceSites === undefined
+          ? {}
+          : { builderSourceSites: x.builderSourceSites }),
         ...(x.policyManifests === undefined
           ? {}
           : { policyManifests: x.policyManifests }),

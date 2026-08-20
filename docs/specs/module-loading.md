@@ -179,16 +179,16 @@ lazy `compartment.importNow` inside `execute`.
 ### Identity flow into action identity
 
 - [`Engine.recordModuleProvenance`][c1] records each emitted module's identity
-  and the module-scope symbols it exports or hoists, and
-  [`Engine.canonicalModuleSource`][c1] translates a prefixed source-map path back
-  to the reload-stable `cf:module/<identity>/<authoredPath>`.
+  and the module-scope symbols it exports or hoists, and joins each symbol to
+  the authored position the compiler recorded for it in that module's
+  builder-source-site sidecar.
 - The scheduler's durable implementation fingerprint is stamped from that
   provenance at action creation (`applyImplementationHash`, `packages/runner/src/runner.ts`)
   and read back by [`schedulerImplementationFingerprint`][c12]. It is a content
-  hash, not a source location: `.src` (written by
-  [`annotateFunctionDebugMetadata`][c11], via
-  [`getExternalSourceLocation`][c11]) is debug-only and is never consulted for
-  identity.
+  hash, not a source location: `.src` is served lazily from the debug-only
+  [`authored-debug-source`][c16] map, through accessors
+  [`defineAuthoredDebugAccessors`][c16] installs during builder construction,
+  and is never consulted for identity.
 
 ## Model
 
@@ -468,11 +468,13 @@ inputs also require the integration described in
    globals seen by siblings.
 
 The per-load program prefix survives on the *diagnostic* path only: source maps
-and `fn.src` resolve through `/<programId>/<authoredPath>`, while identities are
-computed prefix-free. Consumers that must present a load-independent spelling
-normalize through the Engine's `storedFilenameFor`, which strips the prefix and
-unmaps fabric-mount paths, and through [`Engine.canonicalModuleSource`][c1],
-which translates a prefixed path to `cf:module/<identity>/<authoredPath>`.
+resolve through `/<programId>/<authoredPath>`, while identities are computed
+prefix-free. Consumers that must present a load-independent spelling normalize
+through the Engine's `storedFilenameFor`, which strips the prefix and unmaps
+fabric-mount paths. Debug `fn.src` reaches the same load-independent spelling
+without a source map: `recordModuleProvenance` joins the module identity to the
+sidecar's authored coordinates, yielding
+`cf:module/<identity>/<authoredPath>:<line>:<col>`.
 
 ## Compilation Cache
 
@@ -741,10 +743,14 @@ map twice: once composed under the per-load `<evalId>.js` name, and once under
 the module's own eval `sourceURL`, shifted by the CommonJS factory-wrapper line,
 because the browser surfaces the per-module eval frame in `new Error().stack`.
 When a warm cached record retained no authored map, an identity map keyed on the
-module's authored name is registered instead, so the frame still canonicalizes
-to `cf:module/<hash>/<path>` and CFC verified-source identity does not downgrade.
-Diagnostic names are `cf:module/<hash>/<path>` rather than a bundle-relative
-location, which is both stable and directly meaningful as an identity.
+module's authored name is registered instead, so the frame names the module
+source rather than a raw bundle coordinate. Diagnostic names are
+`cf:module/<hash>/<path>` rather than a bundle-relative location, which is both
+stable and directly meaningful as an identity.
+
+Source maps serve error stacks only. A builder artifact's debug `fn.src` is
+independent of them: the compiler records authored positions in a per-module
+sidecar, so a warm load that retained no map still serves them.
 
 ## Interaction With Persistent Scheduler State
 
@@ -833,6 +839,7 @@ This spec supplies the stable implementation identity that
 [c13]: ../../packages/data-model/src/value-hash.ts
 [c14]: ../../packages/runner/src/compilation-cache/cell-cache.ts
 [c15]: ../../packages/runner/src/sandbox/runtime-module-policy.ts
+[c16]: ../../packages/runner/src/harness/authored-debug-source.ts
 
 - Compile and evaluate entry points: [`Engine.compileToRecordGraph`][c1],
   [`Engine.compileResolvedToRecordGraph`][c1],
@@ -861,8 +868,11 @@ This spec supplies the stable implementation identity that
 - SES lockdown and source-map registration: [`ensureSESInitialized`][c10],
   [`SESRuntime.loadSourceMapLazy`][c10]; the error-mapping entry point the
   harness invokes pattern functions through is [`SESRuntime.exec`][c10].
-- Debug-only source annotation: [`annotateFunctionDebugMetadata`][c11] via
-  [`getExternalSourceLocation`][c11].
+- Debug-only source annotation: the [`recordAuthoredDebugSource`][c16] /
+  [`defineAuthoredDebugAccessors`][c16] map. Function-backed node and handler
+  implementations install their accessors through
+  [`annotateFunctionDebugMetadata`][c11]; pattern factories call
+  `defineAuthoredDebugAccessors` directly.
 - Scheduler fingerprints: [`schedulerImplementationFingerprint`][c12] and
   [`schedulerRuntimeFingerprint`][c12].
 - Hash primitive: [`hashStringOf`][c13] (and [`hashOf`][c13]).

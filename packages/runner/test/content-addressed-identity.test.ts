@@ -95,9 +95,8 @@ describe("content-addressed action identity", () => {
     // The non-exported `bump` handler registers via the transformer's
     // `__cfReg` hoist; its symbol is the hoist/binding name.
     expect(typeof provenance!.symbol).toBe("string");
-    // (`fn.src` is no longer asserted here: it is lazy/debug-only and off by
-    // default, and identity no longer depends on it — provenance is the source
-    // of truth above.)
+    // `fn.src` is intentionally not part of this assertion: it is lazy,
+    // debug-only sidecar data, and provenance is the identity source of truth.
   });
 
   it("re-lifting a hardened registered implementation keeps its identity (no wrapper fork)", async () => {
