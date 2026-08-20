@@ -531,12 +531,22 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
-export type MetaLinkField =
-  | "pattern"
-  | "argument"
-  | "result";
+export const META_LINK_FIELDS = Object.freeze(
+  [
+    "pattern",
+    "argument",
+    "result",
+  ] as const,
+);
+
+export type MetaLinkField = typeof META_LINK_FIELDS[number];
 
 /**
+ * The meta fields, the document-root siblings of `value` that the raw meta
+ * seam (`getMetaRaw`/`setMetaRaw`) addresses. This list is the authority:
+ * {@link MetaField} is derived from it, and {@link isMetaField} tests
+ * membership at runtime.
+ *
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
  * The `internal` field contains a manifest with links to derived internal cells.
@@ -552,19 +562,31 @@ export type MetaLinkField =
  * code reads the field directly through its own verifier seams; display
  * consumers get the redacted view via getCfcLabel.
  */
-export type MetaField =
-  | MetaLinkField
-  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // active web or `cf:` source origin
-  | "pieceSourceHistory" // append-only source revisions and retention roots
-  | "patternRepository" // optional caller-supplied repository locator
-  | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
-  // reference recorded when system-pattern auto-update replaces an unloadable
-  // sourceless root — the recovery pointer for a displaced custom program
-  | "internal"
-  | "schema"
-  | "slug";
+export const META_FIELDS = Object.freeze(
+  [
+    ...META_LINK_FIELDS,
+    "patternIdentity", // content-addressed {identity, symbol} pattern reference
+    "patternSetupIdentity", // setup-completion {identity, symbol} marker
+    "patternSource", // active web or `cf:` source origin
+    "pieceSourceHistory", // append-only source revisions and retention roots
+    "patternRepository", // optional caller-supplied repository locator
+    "displacedPattern", // {identity, symbol, displacedAt}: the prior pattern
+    // reference recorded when system-pattern auto-update replaces an unloadable
+    // sourceless root — the recovery pointer for a displaced custom program
+    "internal",
+    "schema",
+    "slug",
+  ] as const,
+);
+
+export type MetaField = typeof META_FIELDS[number];
+
+const META_FIELD_SET: ReadonlySet<string> = new Set(META_FIELDS);
+
+/** Whether the given field name addresses the raw meta seam. */
+export function isMetaField(field: string): field is MetaField {
+  return META_FIELD_SET.has(field);
+}
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
