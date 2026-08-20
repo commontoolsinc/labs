@@ -5,11 +5,11 @@ verify it actually worked, and recover it when it breaks. Written for someone
 (human or agent) operating the poll for the first time — read top to bottom
 once.
 
-> **Status (2026-08-20): live-deployable.** Every command below was run against
-> `rapids`: a fresh `cf piece new`, a `setsrc` over a populated piece, the smoke
-> test, the state copy, and the reset handlers. The visit history and its
-> per-visit vote snapshots live in a plain **`PerSpace<HistoryEntry[]>` array**
-> (`visits`), each entry embedding its own vote snapshot.
+> **Status (2026-08-20): live-deployable.** The CLI paths below were exercised
+> against `rapids`: a fresh `cf piece new`, a `setsrc` over a populated piece,
+> the smoke test, the state copy, and the reset handlers. The visit history and
+> its per-visit vote snapshots live in a plain **`PerSpace<HistoryEntry[]>`
+> array** (`visits`), each entry embedding its own vote snapshot.
 
 ## Where the data lives (mental model)
 
@@ -159,10 +159,13 @@ which is why both the test commands and the flags are required.
   **host** is a separate, in-poll role (first joiner — see Identity below).
 
 **Command spellings:** the data commands are `cf get`, `cf set` and `cf call`.
-The `cf piece get` / `cf piece set` / `cf piece call` spellings still run, print
-a deprecation notice on stderr, and stop working on 2026-08-31. The
-piece-lifecycle commands keep the `cf piece` prefix: `new`, `setsrc`, `getsrc`,
-`step`, `inspect`, `render`, `ls`, `rm`, `verbs`, `recreate-root`.
+The `cf piece get` / `cf piece set` / `cf piece call` spellings still run and
+print a deprecation notice on stderr naming the day they stop working.
+`PIECE_DATA_SPELLING_END_DATE` in
+[`packages/cli/commands/piece.ts`](../../cli/commands/piece.ts) is where that
+day is set, and the notice quotes it. The piece-lifecycle commands keep the
+`cf piece` prefix: `new`, `setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`,
+`rm`, `verbs`, `recreate-root`.
 
 ## Option A — update the existing piece in place (recommended)
 
@@ -249,7 +252,7 @@ deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q \
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
         e.loggedBy = null;
-        for (const s of e.votes) s.voterLink = null;
+        for (const s of e.votes ?? []) s.voterLink = null;
       }
       console.log(JSON.stringify(v));
     ' \
