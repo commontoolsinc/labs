@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { waitForSettled } from "@commonfabric/runner/executor/watermark";
 import type { MemorySpace } from "@commonfabric/runner";
 import {
@@ -100,8 +100,9 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       "fixtures",
       "sx2-navigate.tsx",
     );
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath },
     );
     piece = await cc.create(program, { start: true });
   });

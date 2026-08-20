@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   waitForSettled,
   watermarkCell,
@@ -118,8 +118,9 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       "counter",
       "counter.tsx",
     );
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath },
     );
     piece = await cc.create(program, { start: true });
     // The live reader is the DEMAND (serving-loop.md §1): it keeps the
