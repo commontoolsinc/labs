@@ -7,6 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { SigilLink } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -344,13 +345,13 @@ describe("Schema - Examples", () => {
       });
 
       // Make sure the schema is correct and it is still anchored at the root
-      expect(current.schema).toEqual({ type: "string" });
+      expect(resolvedSchema(current.schema)).toEqual({ type: "string" });
       expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
         id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
         scope: "space",
-        schema: current.schema,
+        schema: externalRefTo({ type: "string" }),
       });
 
       // .get() the currently selected cell. This should not change when
@@ -379,7 +380,7 @@ describe("Schema - Examples", () => {
         path: ["foo"],
         space,
         scope: "space",
-        schema: omitSchema,
+        schema: externalRefTo(omitSchema),
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);

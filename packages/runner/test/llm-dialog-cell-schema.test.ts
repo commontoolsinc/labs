@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Pattern } from "../src/builder/types.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -118,7 +119,7 @@ describe("getCellSchema", () => {
     const bareRef = runtime
       .getCell(space, "get-cell-schema-holder", undefined, tx)
       .key("ref");
-    const schema = getCellSchema(bareRef as any) as any;
+    const schema = resolvedSchema(getCellSchema(bareRef as any)) as any;
 
     expect(schema?.properties?.name?.type).toBe("string");
   });
@@ -151,7 +152,7 @@ describe("getCellSchema", () => {
     const linkSchema = (bareRef as any).asSchemaFromLinks()
       .getAsNormalizedFullLink().schema;
     expect(linkSchema).toBeUndefined();
-    const schema = getCellSchema(bareRef as any) as any;
+    const schema = resolvedSchema(getCellSchema(bareRef as any)) as any;
 
     expect(schema?.description).toBe("A #doubler piece.");
     expect(schema?.properties?.doubled?.type).toBe("number");

@@ -16,6 +16,7 @@ import {
   isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
@@ -471,7 +472,8 @@ describe("pattern-binding", () => {
         resultCell,
       ) as { profile: unknown };
 
-      expect(parseLink(result.profile, resultCell)).toEqual({
+      const parsed = parseLink(result.profile, resultCell)!;
+      expect({ ...parsed, schema: resolvedSchema(parsed.schema) }).toEqual({
         ...argumentCell.getAsNormalizedFullLink(),
         path: ["profile"],
         scope: "user",
@@ -502,7 +504,7 @@ describe("pattern-binding", () => {
             partialCause: "name",
             path: [],
             scope: "space",
-            schema: { default: "Ada" },
+            schema: externalRefTo({ default: "Ada" }),
           },
         });
       } finally {

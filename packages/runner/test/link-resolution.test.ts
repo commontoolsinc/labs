@@ -6,6 +6,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { type JSONSchema } from "../src/builder/types.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import {
   areNormalizedLinksSame,
@@ -255,7 +256,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(schema);
+      expect(resolvedSchema(resolved.schema)).toEqual(schema);
     });
 
     it("should adjust schema for nested paths", () => {
@@ -297,7 +298,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           name: { type: "string" },
@@ -462,7 +463,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of cell1.nested
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           value: { type: "string" },
@@ -518,7 +519,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of an array item
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           id: { type: "number" },
@@ -567,7 +568,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(destinationSchema);
+      expect(resolvedSchema(resolved.schema)).toEqual(destinationSchema);
     });
 
     it("should treat empty schema objects as permissive links", () => {
@@ -662,7 +663,7 @@ describe("link-resolution", () => {
       const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of the array item
-      expect(resolved.schema).toEqual({
+      expect(resolvedSchema(resolved.schema)).toEqual({
         type: "object",
         properties: {
           deep: { type: "string" },
@@ -703,7 +704,7 @@ describe("link-resolution", () => {
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
 
-      expect(resolved.schema).toEqual(schemaWithAdditional);
+      expect(resolvedSchema(resolved.schema)).toEqual(schemaWithAdditional);
     });
 
     it("should handle schemas with both top-level and nested links", () => {
@@ -748,7 +749,7 @@ describe("link-resolution", () => {
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
       const resolved = resolveLink(runtime, tx, parsedLink);
-      expect(resolved.schema).toEqual(schema2);
+      expect(resolvedSchema(resolved.schema)).toEqual(schema2);
     });
 
     it("should remove schema when remaining path field is not in schema", () => {
@@ -791,7 +792,7 @@ describe("link-resolution", () => {
       // First verify the link to targetCell has the schema
       const dataLink = parseLink(sourceCell.key("data"), sourceCell)!;
       const dataResolved = resolveLink(runtime, tx, dataLink);
-      expect(dataResolved.schema).toEqual(schema);
+      expect(resolvedSchema(dataResolved.schema)).toEqual(schema);
 
       // Now resolve a path that goes through the link to "length".
       // The resolver will:

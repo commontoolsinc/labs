@@ -13,6 +13,7 @@ import {
   findAndInlineDataUriLinks,
 } from "../src/data-uri.ts";
 import { Runtime } from "../src/runtime.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -694,13 +695,14 @@ describe("data URI inlining", () => {
         "/": {
           [LINK_V1_TAG]: {
             path: ["level1", "level2"],
-            // Schema should be resolved for the nested path
-            schema: {
+            // Schema should be resolved for the nested path (and re-emitted
+            // as a reference to the narrowed document)
+            schema: externalRefTo({
               type: "object",
               properties: {
                 level3: { type: "string" },
               },
-            },
+            }),
           },
         },
       });
@@ -854,7 +856,7 @@ describe("data URI inlining", () => {
         "/": {
           [LINK_V1_TAG]: {
             path: ["field", "subfield"],
-            schema: { type: "string" },
+            schema: externalRefTo({ type: "string" }),
           },
         },
       });

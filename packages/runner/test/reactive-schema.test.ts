@@ -6,6 +6,7 @@ import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -281,9 +282,10 @@ describe("Reactive Schema Support", () => {
 
       // Check that schema was set
       expect(alias.schema).toBeDefined();
-      expect(alias.schema.type).toBe("object");
-      expect(alias.schema.properties?.name).toEqual({ type: "string" });
-      expect(alias.schema.properties?.age).toEqual({ type: "number" });
+      const aliasSchema = resolvedSchema(alias.schema) as any;
+      expect(aliasSchema.type).toBe("object");
+      expect(aliasSchema.properties?.name).toEqual({ type: "string" });
+      expect(aliasSchema.properties?.age).toEqual({ type: "number" });
     });
 
     it("should track schema through pattern bindings", () => {
@@ -323,7 +325,7 @@ describe("Reactive Schema Support", () => {
 
       // Check the age property schema
       expect(alias.schema).toBeDefined();
-      expect(alias.schema).toEqual({ type: "number" });
+      expect(resolvedSchema(alias.schema)).toEqual({ type: "number" });
     });
   });
 

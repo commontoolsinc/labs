@@ -32,6 +32,7 @@ import {
   setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
 import { reactive } from "../src/builder/reactive.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -390,7 +391,7 @@ describe("module", () => {
           $alias: {
             partialCause: ["a", "b"],
             path: [],
-            schema: { default: 1 },
+            schema: externalRefTo({ default: 1 }),
             scope: "space",
           },
         },

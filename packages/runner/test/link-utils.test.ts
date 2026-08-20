@@ -27,6 +27,7 @@ import {
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -556,7 +557,7 @@ describe("link-utils", () => {
             id: "of:test",
             path: ["nested", "value"],
             space: space,
-            schema: { type: "number" },
+            schema: externalRefTo({ type: "number" }),
           },
         },
       });
@@ -689,7 +690,9 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true });
 
-      expect(linkRefPayload(result).schema).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual(
+        schema,
+      );
     });
 
     it("should strip stream cell schemas from links when requested", () => {
@@ -716,7 +719,7 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true, keepAsCell: KeepAsCell.None });
 
-      expect(linkRefPayload(result).schema).toEqual({
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual({
         type: "object",
         properties: {
           title: { type: "string" },
