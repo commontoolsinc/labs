@@ -504,6 +504,18 @@ let _timingMeasureCapReported = false;
 let _timingMeasureSequence = 0;
 
 /**
+ * Whether the next span would actually reach the timeline.
+ *
+ * Emission being on is not the same as a measure being emitted: once the cap is
+ * reached nothing more is written, and a caller that pays to build a detail
+ * should stop paying at the same moment — which is precisely the longest run,
+ * where it would otherwise cost the most.
+ */
+function willEmitTimingMeasure(): boolean {
+  return _emitTimingMeasures && _timingMeasuresEmitted < _timingMeasureCap;
+}
+
+/**
  * What marks a measure as this logger's.
  *
  * The performance timeline is shared with whatever else the host instruments,
@@ -1066,8 +1078,9 @@ export class Logger {
     const elapsed = performance.now() - startTime;
     // Resolved only when it will be used. A caller whose detail costs anything
     // to produce passes a function, and pays nothing on the ordinary path
-    // where emission is off — which is every production run.
-    const resolved = !_emitTimingMeasures
+    // where emission is off — which is every production run — nor once the cap
+    // has stopped emission partway through one.
+    const resolved = !willEmitTimingMeasure()
       ? undefined
       : typeof detail === "function"
       ? detail()

@@ -2262,6 +2262,28 @@ describe("logger", () => {
       expect(built).toBe(1);
     });
 
+    it("stops building details once the cap has stopped emission", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-detail-capped");
+      let built = 0;
+      for (let i = 0; i < 6; i++) {
+        logger.timeStart("phase", "capped");
+        logger.timeEndDetailed(
+          () => {
+            built++;
+            return `run-${i}`;
+          },
+          "phase",
+          "capped",
+        );
+      }
+      // Emission being on is not the same as a measure being written: past the
+      // cap nothing reaches the timeline, so nothing should be built for it —
+      // and that is the longest run, where it would cost the most.
+      expect(built).toBe(2);
+      expect(logger.getTimeStats("phase", "capped")?.count).toBe(6);
+    });
+
     it("reports no detail for a span that was not named", () => {
       setTimingMeasuresEnabled(true);
       const logger = getLogger("measure-no-detail");
