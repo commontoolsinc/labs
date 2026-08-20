@@ -6,7 +6,7 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 // Relative import (not "@commonfabric/utils/types") for the same rollup
 // reason as traverse.ts.
-import { isObjectNotArray, isObjectOrArray } from "../../utils/src/types.ts";
+import { isObjectOrArray } from "../../utils/src/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
