@@ -501,14 +501,15 @@ describe("module", () => {
 
   describe("action function", () => {
     it("throws error when called directly without CTS transforms", () => {
-      // action() is only valid once CTS transforms rewrite it to handler().
-      // A direct runtime call should still fail and point callers at the opt-out flag.
+      // action() is only valid once CTS transforms rewrite it to handler(), so
+      // a direct runtime call fails and names the build process that does it.
       expect(() => {
         action<{ data: string }>(({ data }) => {
           void data;
         });
       }).toThrow(
-        "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
+        "action() must be used with CTS transforms enabled - it is rewritten" +
+          " to handler() at compile time by the Common Fabric build process",
       );
     });
 

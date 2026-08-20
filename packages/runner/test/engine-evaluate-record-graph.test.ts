@@ -8,6 +8,10 @@ import {
   signer,
   StorageManager,
 } from "./engine-test-support.ts";
+import {
+  compileWithEntryBody,
+  evaluateWithEntryBody,
+} from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
@@ -682,40 +686,36 @@ describe("Engine.evaluateRecordGraph()", () => {
   it("rejects raw mutable top-level exports without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            "export default {",
-            "  nested: { count: 1 },",
-            "};",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        "exports.default = { nested: { count: 1 } };\n",
+      ),
+    ).rejects.toThrow();
   });
 
   it("rejects raw top-level helper calls without __cf_data()", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            "function build() {",
-            "  return { count: 1 };",
-            "}",
-            "export default build();",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        [
+          "function build() {",
+          "  return { count: 1 };",
+          "}",
+          "exports.default = build();",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow(
       "Top-level call results must be wrapped in __cf_data() in SES mode",
     );
   });
@@ -928,23 +928,24 @@ describe("Engine.evaluateRecordGraph()", () => {
   it("throws when handler() relies on CTS inference without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            'import { handler } from "commonfabric";',
-            "export default handler((_event: { count: number }, state: { count: number }) => {",
-            "  state.count = state.count + 1;",
-            "});",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
-      "Handler requires schemas or CTS transformer",
-    );
+    // A handler built from a single callback has no schemas of its own and
+    // depends on the ones CTS infers, so a body that never went through the
+    // transform has to fail rather than build a schemaless handler.
+    await expect(
+      evaluateWithEntryBody(
+        engine,
+        program,
+        [
+          'const commonfabric_1 = require("commonfabric");',
+          "exports.default = commonfabric_1.handler((_event, state) => {",
+          "  state.count = state.count + 1;",
+          "});",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow("Handler requires schemas or CTS transformer");
   });
 
   it("keeps handler implementation refs bound to the handler callback", async () => {

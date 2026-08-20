@@ -8,6 +8,7 @@ import {
   signer,
   StorageManager,
 } from "./engine-test-support.ts";
+import { compileWithEntryBody } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 describe("Engine in SES mode", () => {
   let runtime: Runtime;
@@ -435,21 +436,19 @@ describe("Engine in SES mode", () => {
   it("rejects top-level IIFEs that try to hide mutable state", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            "const state = (() => ({ count: 0 }))();",
-            "export default 42;",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
-      "Only trusted builder calls",
-    );
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        [
+          "const state = (() => ({ count: 0 }))();",
+          "exports.default = 42;",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow("Only trusted builder calls");
   });
 
   it("rejects top-level patternTool() bindings in SES mode", async () => {
@@ -546,26 +545,22 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
-  it("rejects untransformed toSchema() before evaluation in SES mode", async () => {
+  it("rejects a toSchema() call that compile-time substitution never replaced", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "/// <cf-disable-transform />",
-            'import { toSchema } from "commonfabric";',
-            "export default toSchema<{ count: number }>({",
-            "  default: { count: 0 },",
-            "});",
-          ].join("\n"),
-        },
-      ],
+      files: [{ name: "/main.ts", contents: "export default 42;\n" }],
     };
 
-    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
-      "Only trusted builder calls",
-    );
+    await expect(
+      compileWithEntryBody(
+        engine,
+        program,
+        [
+          'const { toSchema } = require("commonfabric");',
+          "exports.default = toSchema({ default: { count: 0 } });",
+        ].join("\n"),
+      ),
+    ).rejects.toThrow("Only trusted builder calls");
   });
 
   it("hardens direct top-level functions against hidden mutable state", async () => {
