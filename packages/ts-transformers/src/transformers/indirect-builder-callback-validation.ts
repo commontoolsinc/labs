@@ -153,7 +153,16 @@ function resolvesToSameModuleFunction(
   }
   if (!ts.isIdentifier(target)) return false;
 
-  const declarations = (checker.getSymbolAtLocation(target)?.declarations ?? [])
+  const symbol = checker.getSymbolAtLocation(target);
+  // An exported binding is read as `exports.<name>` after CommonJS emit, and
+  // the verifier's grammar admits only a bare identifier — so the name the
+  // compiled module carries is not one it can resolve.
+  if (
+    symbol !== undefined && isExportedFromModule(symbol, sourceFile, checker)
+  ) {
+    return false;
+  }
+  const declarations = (symbol?.declarations ?? [])
     .filter((declaration) =>
       declaration.getSourceFile().fileName === sourceFile.fileName
     );
@@ -170,6 +179,31 @@ function resolvesToSameModuleFunction(
       checker,
       seen,
     );
+}
+
+/**
+ * Whether this module exports the binding, under any spelling — an `export`
+ * modifier or a trailing `export { … }` clause both make the compiled
+ * reference `exports.<name>`.
+ */
+function isExportedFromModule(
+  symbol: ts.Symbol,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): boolean {
+  const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
+  if (moduleSymbol === undefined) return false;
+  const declarations = symbol.declarations ?? [];
+  return checker.getExportsOfModule(moduleSymbol).some((exported) => {
+    const local = (exported.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(exported)
+      : exported;
+    if (local === symbol) return true;
+    const exportedDeclarations = local.declarations ?? [];
+    return declarations.some((declaration) =>
+      exportedDeclarations.includes(declaration)
+    );
+  });
 }
 
 /** A function declaration that survives to emit as a direct callback. */
