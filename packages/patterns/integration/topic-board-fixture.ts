@@ -222,7 +222,7 @@ export async function seedTopicBoard(
   };
 
   const cc = await initializePiecesController({
-    spaceName: options.spaceName,
+    space: options.spaceName,
     apiUrl: options.apiUrl,
     identity: options.identity,
   });

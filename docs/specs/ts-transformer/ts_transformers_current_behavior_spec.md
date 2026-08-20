@@ -112,6 +112,14 @@ present; no stage handles a missing one.
      idempotency guards. It uses a plain presence check with **no**
      `getOriginalNode` fallback (it tags synthetic nodes whose original is the
      pre-injection user call).
+   - `patternResultAnchor` — for a `toSchema` call SchemaInjection created to
+     describe a pattern's **result**, the authored node a diagnostic about that
+     schema points at. It is what tells SchemaGeneration which of a file's
+     `toSchema` calls is a result rather than an argument, a handler's event or
+     a nested claim; §6.12 is the rule that reads it. Like `schemaInjected` it
+     is a plain identity lookup with **no** `getOriginalNode` fallback: the
+     marker sits on the synthetic call SchemaInjection built, and that node
+     reaches SchemaGeneration as the same object.
 3. **Marker family** — node/symbol-keyed `WeakSet`s whose membership checks fall
    back through `getOriginalNode`, and whose mutators are coupled to the
    context's reactive-analysis cache invalidation (invalidation is a
@@ -848,6 +856,10 @@ report these through the same collector (deduplicated via §2.2's
   reactive-root read at a position that stage cannot lower
 - **Error** `pattern-result:unknown-type` (`schema-injection.ts:2621`) — see
   §6.6
+- **Error** `pattern-result:opaque-reserved-key`
+  (`reserved-result-keys.ts`, called from `schema-generator.ts`) — a pattern's
+  own result declares one of the framework's reserved keys `unknown` at its
+  root; see §6.12
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
   be `{ type: "unknown" }` and the runner would not materialize it, reading it
@@ -868,6 +880,58 @@ report these through the same collector (deduplicated via §2.2's
   rework); the internal throw remains only for compiler-synthesized culprits
   (a true pipeline bug) and for the culprit-already-compute disagreement
   shape.
+
+### 6.12 Reserved keys at the root of a pattern's own result
+
+A reserved key's spelling belongs to the framework rather than to whoever
+described it: a pattern result carries `$UI` and `$NAME` whatever the author's
+type says. At the root of a result, then, the value under such a key is one
+this pattern produced — the screen it built, the name it chose. `unknown` is
+the declaration for a field holding a reference to another piece, and it
+projects to an empty object carrying only a back-to-cell annotation, so a
+result that declares a reserved key `unknown` loses that value for every reader
+of it. Rendering is unaffected: a piece's screen is read under a schema the
+renderer supplies, and the pattern's declared result schema never enters that
+path. That is what makes the defect invisible until something reads the screen
+as a value.
+
+`reportOpaqueReservedResultKeys` (`src/transformers/reserved-result-keys.ts`)
+reports it as **Error** `pattern-result:opaque-reserved-key`, naming every
+offending key in one diagnostic. It runs from SchemaGeneration, which is the
+one place a declared result exists as the schema it generated — whatever type
+the author named, and whichever inference path §10.2 took to reach it.
+SchemaInjection records the result schema calls and the node to point at
+(§2.2's `patternResultAnchor`).
+
+The rule reaches the root of a result schema and nothing else. Two shapes stay
+legal, and a rule written without them breaks working patterns:
+
+- **The argument side.** An argument schema is checked contravariantly by
+  `deno task pattern-compat` — it has to keep accepting every value it
+  accepted before — so a consumer that takes stored pieces of any vintage
+  cannot narrow it. `BackwardsCompatibleProfile` in
+  `packages/patterns/system/profile-home.tsx` is such a seam.
+- **Below the root.** A reserved key one level down names a field of another
+  piece, where `unknown` is what keeps the field a reference to that piece's own
+  screen rather than a copy, so the controls in it stay bound to the piece that
+  owns them. `packages/patterns/record.tsx` reads a sub-piece's settings screen
+  that way.
+
+Root-ness follows a `$ref` into `$defs`, because a `$ref` measures the same
+value against another schema — a recursive result type emits exactly that
+shape. It follows nothing else: a `$ref` the generator cannot resolve locally,
+or a root that is a combinator rather than an object, is left alone.
+
+The list of reserved keys is `FRAMEWORK_RESULT_KEYS`
+(`packages/utils/src/framework-result-keys.ts`). The runner builds pattern
+results and reads those keys back off them, this package decides what a
+pattern may declare about them, and neither may import the other, so the
+spelling sits in a package below both and the runner's builder surface
+re-exports it.
+
+A `pattern()` call that already carries both schemas as arguments is left as
+SchemaInjection finds it (§10.2), so no result schema is recorded for it and
+the rule does not reach a hand-written schema literal.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
@@ -1693,7 +1757,10 @@ Behavior:
 3. extract `widenLiterals` generation option
 4. generate schema via a `SchemaGenerator` instance
 5. merge non-generation options into resulting schema object
-6. emit literal as:
+6. report `pattern-result:opaque-reserved-key` when this call describes a
+   pattern's result and the generated schema leaves a reserved key opaque at
+   its root (§6.12)
+7. emit literal as:
    - `<schemaAst> as const satisfies __cfHelpers.JSONSchema`
 
 Special path:
@@ -3311,6 +3378,7 @@ re-listing it. The enforced sources of truth:
 | Recognized runtime exports + which are reactive origins (§5, §6.3) | `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY` (`src/core/commonfabric-runtime-registry.ts`) | `test/core/commonfabric-runtime-registry.test.ts` asserts coverage of the runner builder factory |
 | SES self-contained callback boundaries (§6.5) | `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES` (`src/transformers/pattern-context-validation.ts`) | excludes `sqlite-row-label-rule` by design |
 | Lowerable expression-site container kinds (§6.7) | `getExpressionContainerKind` (`expression-site-policy.ts`) | — |
+| Reserved keys the framework puts on a pattern result (§6.12) | `FRAMEWORK_RESULT_KEYS` (`packages/utils/src/framework-result-keys.ts`) | imported by both readers rather than restated: this package cannot import the runner, which imports it, so the shared spelling sits below both and `packages/runner/src/builder/types.ts` re-exports it onto the builder surface |
 | Diagnostic `type:` strings | the emitting transformer's `reportDiagnostic` calls | grep `type: "…"` per validator |
 | Auto-`.for()` cause triggers, cause-path grammar, and the `__patternResult` root (§13) | `shouldAddReactiveFor` / `createForCall` / `PATTERN_RESULT_CAUSE` (`src/transformers/reactive-variable-for.ts`) | emitted shapes pinned by the stable-cause tests in `test/transform.test.ts` |
 | Shadow-guard binding set + canonical guard text (§14) | `SHADOWED_FACTORY_BINDINGS` / `createFactoryShadowGuardSource()` (`packages/utils/src/sandbox-contract.ts`); insertion point `findFactoryGuardInsertionIndex` (`src/transformers/module-scope-shadowing.ts`) | emission byte-pinned by ~all fixture expected outputs; verifier consumes the same constants via `RESERVED_FACTORY_BINDINGS` (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`); `cf view`'s `SCAFFOLDING_NAMES` (`packages/cli/lib/view/languages/typescript/vocab.ts`) is an unimported copy — check for drift |

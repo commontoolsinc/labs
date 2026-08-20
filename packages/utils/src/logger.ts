@@ -860,15 +860,8 @@ export class Logger {
    * filters out the message.
    */
   get counts(): LogCounts {
-    return {
-      debug: this.#counts.debug,
-      info: this.#counts.info,
-      warn: this.#counts.warn,
-      error: this.#counts.error,
-      get total(): number {
-        return this.debug + this.info + this.warn + this.error;
-      },
-    };
+    const { debug, info, warn, error } = this.#counts;
+    return { debug, info, warn, error, total: debug + info + warn + error };
   }
 
   /**
@@ -878,14 +871,13 @@ export class Logger {
   get countsByKey(): Record<string, LogCounts> {
     const result: Record<string, LogCounts> = {};
     for (const [key, counts] of Object.entries(this.#countsByKey)) {
+      const { debug, info, warn, error } = counts;
       result[key] = {
-        debug: counts.debug,
-        info: counts.info,
-        warn: counts.warn,
-        error: counts.error,
-        get total(): number {
-          return this.debug + this.info + this.warn + this.error;
-        },
+        debug,
+        info,
+        warn,
+        error,
+        total: debug + info + warn + error,
       };
     }
     return result;

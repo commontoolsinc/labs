@@ -19,6 +19,7 @@ import { unwrapExpression } from "../utils/expression.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
+import { reportOpaqueReservedResultKeys } from "./reserved-result-keys.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -161,6 +162,19 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         const emittedSchema = typeof finalSchema === "boolean"
           ? finalSchema
           : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
+        // This is the one place a pattern's declared result exists as the
+        // schema it generated, whatever type the author named and whichever
+        // inference path SchemaInjection took to reach it. SchemaInjection
+        // recorded which calls describe a result, and the node to point at.
+        const patternResultAnchor = context.state
+          .lookupPatternResultSchemaAnchor(node);
+        if (patternResultAnchor) {
+          reportOpaqueReservedResultKeys(
+            context,
+            emittedSchema,
+            patternResultAnchor,
+          );
+        }
         const schemaAst = createSchemaAst(emittedSchema, context.factory);
 
         // Wrap in `as const satisfies JSONSchema` so that schema-inference
