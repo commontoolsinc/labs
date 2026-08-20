@@ -507,6 +507,34 @@ Deno.test("github spend: a prior month we can't read shortens the chart, it does
   assertEquals(v.duration, 18 * D); // January 1st to the settled 18th only
 });
 
+Deno.test("github spend: optional billing failures log while current data remains usable", async () => {
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) =>
+    errors.push(parts.map(String).join(" "));
+  try {
+    const result = await view("2026-01-20T09:00:00Z", {
+      [usagePath(2026, 1)]: {
+        usageItems: [
+          ...days(2026, 1, 1, 10, 18),
+          stillReporting("2026-01-18"),
+        ],
+      },
+      [usagePath(2025, 12)]: new TypeError("prior billing disconnected"),
+      [budgetsPath()]: new TypeError("budget disconnected"),
+    });
+    assertEquals(result.status, "good");
+    assertEquals(result.value, "~$310/mo");
+    assertEquals(errors.length, 2);
+    assertStringIncludes(errors[0], budgetsPath());
+    assertStringIncludes(errors[0], "budget disconnected");
+    assertStringIncludes(errors[1], usagePath(2025, 12));
+    assertStringIncludes(errors[1], "prior billing disconnected");
+  } finally {
+    console.error = realError;
+  }
+});
+
 Deno.test("github spend: an unavailable prior month is not zero-spend history", async () => {
   const v = await view("2026-01-03T09:00:00Z", {
     [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 2, 20) },
@@ -583,6 +611,29 @@ Deno.test("github spend: the classic plan falls back to minutes against the incl
   assertEquals(over.value, "1000 paid min");
   // An org the endpoint reports no allowance for is not an org 100% through one.
   assertEquals((await classic(0, 0, 0)).status, "good");
+});
+
+Deno.test("github spend: enhanced billing outages log before classic fallback", async () => {
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) =>
+    errors.push(parts.map(String).join(" "));
+  try {
+    const result = await view("2026-01-20T09:00:00Z", {
+      [usagePath(2026, 1)]: new TypeError("enhanced billing disconnected"),
+      [classicPath()]: {
+        total_minutes_used: 1000,
+        included_minutes: 3000,
+        total_paid_minutes_used: 0,
+      },
+    });
+    assertEquals(result.status, "good");
+    assertEquals(errors.length, 1);
+    assertStringIncludes(errors[0], usagePath(2026, 1));
+    assertStringIncludes(errors[0], "enhanced billing disconnected");
+  } finally {
+    console.error = realError;
+  }
 });
 
 Deno.test("github spend: both billing endpoints unreachable -> gray with a calm reason", async () => {

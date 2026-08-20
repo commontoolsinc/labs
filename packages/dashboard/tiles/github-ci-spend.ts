@@ -237,6 +237,7 @@ async function githubDollarSpend(
     const response = await github<{ budgets?: Budget[] }>(
       `organizations/${org}/settings/billing/budgets`,
       token,
+      { ignoreStatuses: [404] },
     );
     budgets = readBudgets(response.budgets ?? []);
   } catch {
@@ -245,6 +246,7 @@ async function githubDollarSpend(
   const report = await github<{ usageItems?: UsageItem[] }>(
     usagePath(org, year, month0 + 1),
     token,
+    { ignoreStatuses: [404] },
   );
   if (!Array.isArray(report.usageItems)) {
     throw new GitHubUsageShapeError("billing usage unavailable");
@@ -304,6 +306,7 @@ async function githubDollarSpend(
       const previous = await github<{ usageItems?: UsageItem[] }>(
         usagePath(org, previousYear, previousMonth + 1),
         token,
+        { ignoreStatuses: [404] },
       );
       if (Array.isArray(previous.usageItems)) {
         noteReport(previous.usageItems);
