@@ -171,7 +171,7 @@ if (import.meta.main) {
     spans[a].end - spans[b].end
   );
   const ends = byEnd.map((i) => spans[i].end);
-  function endedBefore(time: number): string {
+  const endedBefore = (time: number): string => {
     let lo = 0;
     let hi = ends.length;
     while (lo < hi) {
@@ -180,7 +180,7 @@ if (import.meta.main) {
       else hi = mid;
     }
     return lo === 0 ? "(nothing)" : spans[byEnd[lo - 1]].key;
-  }
+  };
 
   const stretches: { ms: number; inside: string; after: string }[] = [];
   for (const index of measurable) {
