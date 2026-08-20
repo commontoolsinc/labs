@@ -3738,6 +3738,22 @@ supply; OW29/OW32/OW34 closed):
     timings with the designed advance-only waves excluded, and the
     amplification arithmetic subtracts them; the sx2-serving-loop
     budgets already do.)
+    **(i) LANDED 2026-08-20 with W4's acceptance benchmark**
+    (`stage-c/w4-acceptance-report.md`, raw series under
+    `stage-c/w4-raw/`): the settle-time series measured explicitly on
+    the OFF₁→ON→OFF₂ protocol at the train tip — server settle
+    all-inputs coverage p50 **18/15 ms chat, 17/20/17 ms lunch,
+    28/22 ms note** (value-only 15–21 ms; structural-growth to landing
+    p50 258–520 ms; every p50 sub-second — the design pass's
+    pre-recommendation bar holds on the measured numbers), reported
+    beside the send→other-browser series (chat median 520/421 ms ON vs
+    217–253 OFF; the several-second sends gone) and the new
+    sender-echo series (the one bar that FAILS as worded: not ms-class
+    in either arm, ON 1.5–2.4× OFF on chat, attributed to the client
+    (e) term). **(ii) stays OWED to the owner**: the flip's numeric
+    BAR is the owner's ruling — W4 reports the numbers and does not
+    rule; the flip gate (plan Phase 7 task 1 item 4) still reads
+    against the RULED bar once the owner sets it.
   - OW31 (row above, RULED 2026-08-18): the write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
     user's identity does; a provisioned space's genesis is signed by

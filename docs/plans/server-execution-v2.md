@@ -32,11 +32,14 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-19) — read this first
+## Coordination state (2026-08-20) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. The consolidated stage-C record —
+it in the PR that moves the state. State as of 2026-08-20: **W4 (the
+acceptance measurement) is DONE — 6 of 7 bars PASS** (ordered next
+action (5) below carries the numbers and the report link); the next
+action is (6), the coordinator's confidence verdict. The consolidated stage-C record —
 benchmark verdicts, attribution, the tuning trio, the double-dispatch
 dossier, the design-pass state, the process rules — is the frozen
 [stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md),
@@ -384,9 +387,23 @@ quiescence-only → (5) W4 — the
 settle-time re-benchmark (server settle measured explicitly,
 `waitForSettled`) — its gate (**not before the chosen seat lands and
 the lunch gate is 3/3 with honest swatch walls**) MET 2026-08-19 and
-RE-MET 2026-08-20 at the fix tip, per the coordination block above;
+RE-MET 2026-08-20 at the fix tip — **DONE 2026-08-20 (verdict: 6 of 7
+acceptance bars PASS)**: server settle all-inputs p50 **18/15 ms chat,
+17/20/17 ms lunch** (sub-second bar PASS both journeys; growth-to-landing
+p50 258–520 ms); the several-second sends GONE (chat arrival median
+520/421 ms vs OFF 217–253, was 7.4–9.7 s; lunch 3/3 green, joins 254 ms,
+swatch walls 1 ms, {1:16}); note createToView FLAT and below OFF at p50
+(991/829 vs 1 100–1 193); `lease.lost` 0 in 7/7, no `walkRuns` key, OFF
+witness held, OW37 re-read 1.55–2.22 advance-subtracted; the ONE failed
+bar is the sender echo as worded (not ms-class in either arm; ON 1.5–2.4×
+OFF on chat — attributed to the client (e) term, absolute values
+sub-half-second) — report
+[`stage-c/w4-acceptance-report.md`](../history/plans/server-execution-v2/stage-c/w4-acceptance-report.md),
+raw under `stage-c/w4-raw/`; OW38 (i) LANDED with it, (ii) the flip bar
+stays the owner's;
 (6) the CONFIDENCE VERDICT to
-the owner; (7) on "no fundamental issue", land the train on main with
+the owner — **NEXT: the coordinator assembles it from the W4 acceptance
+readout**; (7) on "no fundamental issue", land the train on main with
 the flag OFF (siblings stacked; default lanes OFF) and continue on
 main; (8) the flip's ordered gates as listed under Phase 7 (skip list
 EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
@@ -1487,3 +1504,6 @@ and the reports beside it):**
 | **STAGE-C RE-BENCHMARK** (2026-08-18, trio tip `b54bf5215`, no LLM model, loads 2–5; [report](../history/plans/server-execution-v2/stage-c/stage-c-rebenchmark-report.md)) — chat series n=20 @2 s | OFF ×3 / ON ×2 | ON **COMPLETES 2/2** (272 s, 251 s walls): p50 **9 734 / 7 397 ms**, p95 14 020 / 13 805 vs OFF p50 **242 / 221 / 220 ms**, p95 400 / 288 / 367 (31–44×); steps: message propagation 2.6–3.0 s vs 6–17 ms, lockdown 3.3–4.1 s vs 3–21 ms, room 9.5–10.2 s vs 2–3 ms; `overlayArrivalSweeps` 85–95 per browser, `overlayLateEchoDrops` 0; ON per-post cost climbs 5 → 14 s across the series |
 | same re-benchmark — lunch | OFF ×2 / ON ×2 | ON **GREEN 2/2** (43 s, 57 s); `events.appended 11 / processed 17` both runs (the (α) class, intact, did not break the merge); merge 3.7–6.3 s vs 35–42 ms |
 | same re-benchmark — note-create n=20 | OFF ×3 / ON ×2 | ON series **2/2 complete** (214 s, 237 s): createToView p50 **4 154 / 3 879 ms** vs OFF **1 185 / 1 133 / 1 145** (3.4–3.7×), p95 6.6–10.5 s vs 1.24–1.34; per-note cost still monotone 1 → 13 s; `lease.lost` 0 in 6/6 ON runs; `processed == appended` chat/note; §4 ratio chat 2.05/2.14, lunch 2.11/2.15, note 3.07/3.20 — a hair over the ≤2/≤3 TRIGGER by the honest-deadline cycle-count mechanism (total commits 2.1–3.1× BELOW OFF; OW37); **verdict SLOWER (attributed); flip gate NOT MET; the design pass's baseline. Owner caveat: measure server settle time next (OW38)** |
+| **STAGE-C W4 ACCEPTANCE** (2026-08-20, train tip code `44bb76b05` = fix tip + the sender-echo instrument; built binaries posture-probed per run, fresh store, OFF₁→ON→OFF₂ brackets + extra ON reps with trailing OFF, loads 1.4–4.8, `No default model available` per run; [report](../history/plans/server-execution-v2/stage-c/w4-acceptance-report.md), raw under `stage-c/w4-raw/`) — chat series n=20 @2 s | OFF ×3 / ON ×2 | **SERVER SETTLE (the acceptance metric): all-inputs coverage p50 18 / 15 ms** (value-only 19/16, n=39/38; growth-to-landing p50 487/314 ms, n=25/26; p95 229/214; event-append p50 15/11) — **sub-second bar PASS**; arrival median **520 / 421 ms** vs OFF 217/253/223 (trio tip: 7 397–9 734 — the several-second sends GONE); lockdown 3–4 ms, message 5 ms (were 2.6–4.1 s); `wavesBudgetExhausted` 79/33 over 191/168 waves (was 777/739); `settleAdvances` 53/54 quiescence-only; sender echo (NEW instrument) ON p50 264/166 ms vs OFF 108–114 — **not ms-class either arm, ON 1.5–2.4× OFF (bar 3 FAIL as worded; attributed to the client (e) term — Alice actionRuns 2 818/2 725 vs ~950 OFF)**; flickers 0 |
+| same W4 — lunch (3 ON reps) | OFF ×3 / ON ×3 | **3/3 GREEN** at totals 3.8/4.0/4.3 s (OFF 3.0–3.1): joins **254/254/254 ms**, merge 396/331/305 ms (was 3.7–6.3 s), **every swatch wall 1 ms**; settle all-inputs p50 **17/20/17 ms**, growth p50 258–520 ms — **sub-second bar PASS**; events 11/12, 11/12, 11/11 with `lt1LeftoversPurged` 1,1,0 (the (α) machinery; the re-benchmark's pre-(α) 11/17 shape gone); **{1:16} multiplicity in all three stores**; flickers host 1/1/0 (nonzero = real, a FLOOR per the F4 bias note; ms-class — the owner's pre-judged-acceptable class); join echoes ON ≤ OFF (41–63 vs 63–88 ms), veto echo 2–8× OFF in 2/3 (max 181 ms) |
+| same W4 — note-create n=20 | OFF ×3 / ON ×2 (+1 labeled instrumented pair) | createToView p50 ON **991 / 829 ms** — **BELOW OFF (1 193/1 100/1 178)** and **FLAT**: first→last-10 medians 797→1 194 / 779→1 174 vs OFF 376–495→1 204–1 253 (same plateau; the monotone 1→13 s witness GONE — ON max 2.1 s); per-note client `scheduler/run` flat 64–147 ms ON vs 40–112 OFF (instrumented pair); totals p50 ON 2 623–2 869 vs OFF 3 087–3 748; settle value-only p50 21/17 ms; `undemandedNarrowingRuns` 57/53 (the flag-5 shape, unchanged); both ON reps rc=1 on the PRE-EXISTING `splitDefinitions` console-gate error (re-benchmark precedent at `b54bf5215`; attributed, series complete and valid); **`lease.lost` 0 in 7/7 ON runs; NO `walkRuns` key in any run's stats; OFF witness HELD** (no `servingLoop` key OFF; lunch stores 398×3 byte-equal to the recorded shape; chat 608/612/612 the recorded family; note 971/989/971 vs 989×3 — one byte-equal, the −18 variant repeating); OW37 re-read: raw 1.97–2.98, **advance-subtracted 1.55–2.22** (chat c1 2.16 a hair over ≤2 at the high-load rep; note ≤3 effectful met; commits still 2.1–4.7× below OFF); **acceptance readout 6 of 7 bars PASS** (the sender-echo bar the one FAIL, attributed client-side); the confidence verdict is the coordinator's |
