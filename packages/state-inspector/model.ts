@@ -55,8 +55,13 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
-import type { EntityDocument, ReconstructOptions } from "./reconstruct.ts";
+import { reconstructDocument, reconstructOutcome } from "./reconstruct.ts";
+import type {
+  AbsenceStatus,
+  EntityDocument,
+  ReconstructOptions,
+  ReconstructOutcome,
+} from "./reconstruct.ts";
 
 export type EntityKind =
   | "piece" // a running pattern instance (result cell + lineage meta)
@@ -65,7 +70,39 @@ export type EntityKind =
   | "schema" // a JSONSchema stored as a cell value
   | "owned-cell" // a cell owned by a piece (carries a `result` back-link)
   | "free-cell" // a standalone cell, owned by no piece
-  | "unknown";
+  | "deleted" // a tombstone: the visible head row is a `delete`
+  | "unknown"; // present but unreadable, or a shape nothing above recognizes
+
+/** How an entity that carries no document reads: its kind, and its label. */
+export interface AbsentEntity {
+  kind: EntityKind;
+  label: string;
+}
+
+/**
+ * Name an entity by WHY it has no document. `deleted` is its own kind because a
+ * tombstone is an ordinary thing to find and says what happened; the rest are
+ * `unknown`, which therefore means the entity is there and cannot be read. A
+ * tombstone's original shape is genuinely gone at HEAD — recovering "this was a
+ * piece" takes a reconstruction at the seq before the delete.
+ */
+export function absentEntity(status: AbsenceStatus): AbsentEntity {
+  return { kind: ABSENT_KIND[status], label: ABSENT_LABEL[status] };
+}
+
+const ABSENT_KIND: Record<AbsenceStatus, EntityKind> = {
+  deleted: "deleted",
+  empty: "unknown",
+  absent: "unknown",
+  undecodable: "unknown",
+};
+
+const ABSENT_LABEL: Record<AbsenceStatus, string> = {
+  deleted: "(deleted)",
+  empty: "(no data)",
+  absent: "(absent)",
+  undecodable: "(undecodable)",
+};
 
 // LEGACY-PROCESS-CELL: `"legacy"` collapses out when the process-cell era is
 // retired, leaving `"modern" | "n/a"` (see top-of-file retirement note).
@@ -435,6 +472,8 @@ export function modelFromDocument(
   };
 }
 
+// Unreadable entities sort above tombstones: corruption is worth looking at,
+// and a deletion is the ordinary end of an entity's life.
 const KIND_ORDER: Record<EntityKind, number> = {
   piece: 0,
   module: 1,
@@ -443,6 +482,7 @@ const KIND_ORDER: Record<EntityKind, number> = {
   "owned-cell": 4,
   "free-cell": 5,
   unknown: 6,
+  deleted: 7,
 };
 
 /**
@@ -466,18 +506,13 @@ export function listEntityModels(
     )
     .all<{ id: string; revisions: number }>(branch, scope, limit);
 
-  // Single reconstruction pass: cache docs + build the module index inline.
-  const docs = new Map<string, EntityDocument | undefined>();
+  // Single reconstruction pass: cache outcomes + build the module index inline.
+  const outcomes = new Map<string, ReconstructOutcome>();
   const moduleIndex = new Map<string, ModuleEntry>();
   for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    docs.set(r.id, doc);
-    const v = doc?.value;
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    outcomes.set(r.id, outcome);
+    const v = outcome.status === "present" ? outcome.document.value : undefined;
     if (isModuleValue(v)) {
       const existing = moduleIndex.get(v.identity);
       if (!existing || v.kind === "source") {
@@ -491,15 +526,16 @@ export function listEntityModels(
   }
 
   const out: EntityModel[] = rows.map((r): EntityModel => {
-    const doc = docs.get(r.id);
-    if (doc === undefined) {
+    const outcome = outcomes.get(r.id)!;
+    if (outcome.status !== "present") {
+      const { kind, label } = absentEntity(outcome.status);
       return {
         id: r.id,
         scope,
-        kind: "unknown",
+        kind,
         regime: "n/a",
         owned: false,
-        label: "(undecodable)",
+        label,
         paths: [],
         valueShape: "absent",
         lineage: {},
@@ -507,9 +543,13 @@ export function listEntityModels(
         links: 0,
       };
     }
-    const m = modelFromDocument(doc, { id: r.id, scope, moduleIndex });
+    const m = modelFromDocument(outcome.document, {
+      id: r.id,
+      scope,
+      moduleIndex,
+    });
     m.revisions = r.revisions;
-    m.links = countLinks(doc.value);
+    m.links = countLinks(outcome.document.value);
     return m;
   });
 
@@ -569,8 +609,11 @@ export function describePiece(
 ): PieceModel | { error: string } {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const doc = reconstructDocument(space, { id, branch, scope });
-  if (doc === undefined) return { error: "entity absent" };
+  const outcome = reconstructOutcome(space, { id, branch, scope });
+  if (outcome.status !== "present") {
+    return { error: `entity ${absentEntity(outcome.status).label}` };
+  }
+  const doc = outcome.document;
   const c = classifyDocument(doc);
   if (c.kind !== "piece") return { error: `not a piece (kind=${c.kind})` };
 
@@ -606,28 +649,27 @@ export function describePiece(
 
   let input: PieceModel["input"];
   if (c.lineage.argument) {
-    const adoc = reconstructDocument(space, {
+    const a = reconstructOutcome(space, {
       id: c.lineage.argument,
       branch,
       scope,
     });
     input = {
       id: c.lineage.argument,
-      summary: adoc ? summarize(adoc.value) : "(absent)",
+      summary: a.status === "present"
+        ? summarize(a.document.value)
+        : absentEntity(a.status).label,
     };
   }
 
   const ownedCells: PieceCellRef[] = (c.lineage.internal ?? []).map(
     (cid): PieceCellRef => {
-      const cdoc = reconstructDocument(space, { id: cid, branch, scope });
-      if (cdoc === undefined) {
-        return {
-          id: cid,
-          kind: "unknown",
-          label: "(absent)",
-          summary: "(absent)",
-        };
+      const c = reconstructOutcome(space, { id: cid, branch, scope });
+      if (c.status !== "present") {
+        const { kind, label } = absentEntity(c.status);
+        return { id: cid, kind, label, summary: label };
       }
+      const cdoc = c.document;
       const cc = classifyDocument(cdoc);
       return {
         id: cid,

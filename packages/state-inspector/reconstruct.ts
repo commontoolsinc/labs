@@ -234,39 +234,87 @@ function reconstructWithinBranch(
 }
 
 /**
+ * The result of reconstructing an entity, naming WHY there is no document when
+ * there is none. Four unrelated situations leave an entity without a document
+ * at a (branch, seq), and a reader told only "no document" cannot tell a routine
+ * deletion from a corrupt payload. `reconstructDocument` collapses them back to
+ * `undefined` for callers that do not care; the ones that report entities to a
+ * human read this instead.
+ */
+export type ReconstructOutcome =
+  | { status: "present"; document: EntityDocument }
+  /** The visible head row is a `delete` — the entity was removed. */
+  | { status: "deleted" }
+  /** The visible head row is a `set` that stored no data. */
+  | { status: "empty" }
+  /** No revision row is visible at this (branch, scope, seq). */
+  | { status: "absent" }
+  /** The stored payload did not decode. `error` is the original throw. */
+  | { status: "undecodable"; error: unknown };
+
+/** The `status` values that carry no document. */
+export type AbsenceStatus = Exclude<ReconstructOutcome["status"], "present">;
+
+/**
  * Reconstruct an entity document at a (branch, seq) by replicating the engine's
  * read path (`read()` → `readRowForBranch` → `reconstructPatchedDocument` in
  * `packages/memory/v2`), proven identical by `reconstruct-parity.test.ts` which
  * drives the real engine. Branch inheritance resolves the visible ROW (not a
  * merged log); patched reconstruction stays within the resolved branch.
+ *
+ * A decode failure is returned as `undecodable` rather than thrown, so that one
+ * corrupt entity does not abort a walk over a whole space.
  */
-export function reconstructDocument(
+export function reconstructOutcome(
   space: SpaceDb,
   opts: ReconstructOptions,
-): EntityDocument | undefined {
+): ReconstructOutcome {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
   const atSeq = opts.atSeq ?? MAX_SEQ;
 
   const resolved = resolveBranchRow(space, branch, scope, opts.id, atSeq);
-  if (!resolved) return undefined;
+  if (!resolved) return { status: "absent" };
 
   const { row, branch: rb } = resolved;
-  if (row.op === "set") {
-    return (row.data ? decodeStored(row.data) : undefined) as
-      | EntityDocument
-      | undefined;
+  if (row.op === "delete") return { status: "deleted" };
+  try {
+    if (row.op === "set") {
+      if (!row.data) return { status: "empty" };
+      return {
+        status: "present",
+        document: decodeStored(row.data) as EntityDocument,
+      };
+    }
+    // patch: reconstruct within the branch that owns the resolved row.
+    return {
+      status: "present",
+      document: reconstructWithinBranch(
+        space,
+        rb,
+        scope,
+        opts.id,
+        row.seq,
+        row.op_index,
+      ) as EntityDocument,
+    };
+  } catch (error) {
+    return { status: "undecodable", error };
   }
-  if (row.op === "delete") return undefined;
-  // patch: reconstruct within the branch that owns the resolved row.
-  return reconstructWithinBranch(
-    space,
-    rb,
-    scope,
-    opts.id,
-    row.seq,
-    row.op_index,
-  ) as EntityDocument;
+}
+
+/**
+ * The document an entity holds at a (branch, seq), or `undefined` when it holds
+ * none. Throws the decode error for a payload that does not decode. Callers that
+ * distinguish a tombstone from corruption call {@link reconstructOutcome}.
+ */
+export function reconstructDocument(
+  space: SpaceDb,
+  opts: ReconstructOptions,
+): EntityDocument | undefined {
+  const outcome = reconstructOutcome(space, opts);
+  if (outcome.status === "undecodable") throw outcome.error;
+  return outcome.status === "present" ? outcome.document : undefined;
 }
 
 export interface ValueAtResult {

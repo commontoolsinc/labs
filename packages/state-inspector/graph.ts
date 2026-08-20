@@ -16,9 +16,10 @@
 
 import type { SpaceDb } from "./db.ts";
 import { collectLinks } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
-import type { EntityDocument } from "./reconstruct.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
+import type { EntityDocument, ReconstructOutcome } from "./reconstruct.ts";
 import {
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
@@ -97,15 +98,13 @@ export function buildSpaceGraph(
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
+  const outcomes = new Map<string, ReconstructOutcome>();
   const moduleIndex = new Map<string, ModuleEntry>();
   for (const r of rows) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    if (!doc) continue;
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    outcomes.set(r.id, outcome);
+    if (outcome.status !== "present") continue;
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -129,11 +128,18 @@ export function buildSpaceGraph(
   const ensureStub = (entityId: string, space?: string): string => {
     const key = space ? `${space}/${entityId}` : entityId;
     if (!nodes.has(key)) {
+      // A local target absent from `nodes` has no readable document; say which
+      // of the reasons it is, so an edge into a tombstone reads differently
+      // from an edge into a corrupt entity.
+      const local = space ? undefined : outcomes.get(entityId);
+      const absent = local && local.status !== "present"
+        ? absentEntity(local.status)
+        : undefined;
       nodes.set(key, {
         id: key,
         entityId,
-        kind: "unknown",
-        label: space ? "(external)" : "(absent)",
+        kind: absent?.kind ?? "unknown",
+        label: space ? "(external)" : absent?.label ?? "(absent)",
         present: false,
         space,
       });
@@ -141,15 +147,25 @@ export function buildSpaceGraph(
     return key;
   };
 
-  for (const [id, doc] of docs) {
-    const m = modelFromDocument(doc, { id, scope, moduleIndex });
-    nodes.set(id, {
-      id,
-      entityId: id,
-      kind: m.kind,
-      label: m.label,
-      present: true,
-    });
+  for (const [id, outcome] of outcomes) {
+    if (outcome.status === "present") {
+      const m = modelFromDocument(outcome.document, { id, scope, moduleIndex });
+      nodes.set(id, {
+        id,
+        entityId: id,
+        kind: m.kind,
+        label: m.label,
+        present: true,
+      });
+      continue;
+    }
+    // An entity that is here but unreadable gets a node of its own even when
+    // nothing links to it — corruption a structural view drops is corruption
+    // nobody finds. A tombstone has no structure to draw, so it appears only
+    // where an edge already points at it (`ensureStub`).
+    if (outcome.status === "deleted" || outcome.status === "absent") continue;
+    const { kind, label } = absentEntity(outcome.status);
+    nodes.set(id, { id, entityId: id, kind, label, present: true });
   }
 
   for (const [id, doc] of docs) {
@@ -290,6 +306,7 @@ const DOT_FILL: Record<string, string> = {
   schema: "#ddd6fe",
   "owned-cell": "#d1fae5",
   "free-cell": "#e5e7eb",
+  deleted: "#e4e4e7",
   unknown: "#f3f4f6",
 };
 

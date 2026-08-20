@@ -2,7 +2,11 @@
  * Hermetic test for the unified entity model + encoded commit decoding. Seeds a
  * modern piece (patternIdentity → module, argument, internal manifest), an
  * owned cell, a stream, and a free cell, then checks classification + lineage.
- * Side-effect free.
+ *
+ * It also seeds one entity for each way an entity ends up carrying no document
+ * — a tombstone, a payload that does not decode, and a `set` that stored no
+ * data — because all three reconstruct to nothing and a listing that reports
+ * them alike cannot answer "show me what is broken". Side-effect free.
  */
 
 import { assert, assertEquals } from "@std/assert";
@@ -112,6 +116,42 @@ function seed(path: string) {
   commit.run(6, session, 6, "{}");
   rev.run("of:free", 6, JSON.stringify({ value: "none" }), 6);
 
+  // The three ways an entity carries no document, plus a fourth entity that
+  // decodes fine into a path-set nothing recognizes.
+  const op = db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, 0, ?, ?, ?)`,
+  );
+  commit.run(7, session, 7, "{}");
+  op.run("of:tombstoned", 7, "set", JSON.stringify({ value: { a: 1 } }), 7);
+  commit.run(8, session, 8, "{}");
+  op.run("of:tombstoned", 8, "delete", null, 8);
+  commit.run(9, session, 9, "{}");
+  op.run("of:corrupt", 9, "set", "{not json at all", 9);
+  commit.run(10, session, 10, "{}");
+  op.run("of:nodata", 10, "set", null, 10);
+  commit.run(11, session, 11, "{}");
+  op.run("of:oddshape", 11, "set", JSON.stringify({ cfc: {}, slug: "x" }), 11);
+
+  // A second piece whose owned cells are a tombstone and a corrupt entity, so
+  // `describePiece` has both to tell apart.
+  commit.run(12, session, 12, "{}");
+  op.run(
+    "of:piece2",
+    12,
+    "set",
+    JSON.stringify({
+      value: { $NAME: "Second" },
+      argument: link("of:tombstoned"),
+      internal: [
+        { partialCause: "a", link: link("of:tombstoned") },
+        { partialCause: "b", link: link("of:corrupt") },
+      ],
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+    }),
+    12,
+  );
+
   db.close();
 }
 
@@ -182,6 +222,53 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
       await t.step("describePiece rejects non-pieces", () => {
         const r = describePiece(space, "of:free");
         assert("error" in r);
+      });
+
+      await t.step("an entity with no document says why it has none", () => {
+        const byId = Object.fromEntries(
+          listEntityModels(space).map((e) => [e.id, e]),
+        );
+
+        // A deletion is an ordinary end, and is its own kind — so `--kind
+        // deleted` asks for tombstones and `--kind unknown` no longer answers.
+        assertEquals(byId["of:tombstoned"].kind, "deleted");
+        assertEquals(byId["of:tombstoned"].label, "(deleted)");
+
+        // The rest are `unknown`, which now means the entity is here and
+        // cannot be read. Their labels keep the causes apart.
+        assertEquals(byId["of:corrupt"].kind, "unknown");
+        assertEquals(byId["of:corrupt"].label, "(undecodable)");
+        assertEquals(byId["of:nodata"].kind, "unknown");
+        assertEquals(byId["of:nodata"].label, "(no data)");
+        assertEquals(byId["of:oddshape"].kind, "unknown");
+        assertEquals(byId["of:oddshape"].label, "{cfc,slug}");
+
+        // The tombstone's revision count still includes the delete op, so the
+        // count alone never separated it from a corrupt entity.
+        assertEquals(byId["of:tombstoned"].revisions, 2);
+      });
+
+      await t.step(
+        "a piece's absent owned cells keep their causes apart",
+        () => {
+          const piece = describePiece(space, "of:piece2");
+          assert(!("error" in piece));
+          if ("error" in piece) return;
+          assertEquals(piece.input?.summary, "(deleted)");
+          const byId = Object.fromEntries(
+            piece.ownedCells.map((c) => [c.id, c]),
+          );
+          assertEquals(byId["of:tombstoned"].kind, "deleted");
+          assertEquals(byId["of:tombstoned"].label, "(deleted)");
+          assertEquals(byId["of:corrupt"].kind, "unknown");
+          assertEquals(byId["of:corrupt"].label, "(undecodable)");
+        },
+      );
+
+      await t.step("describePiece names a tombstoned entity as deleted", () => {
+        const r = describePiece(space, "of:tombstoned");
+        assert("error" in r);
+        assertEquals(r.error, "entity (deleted)");
       });
     } finally {
       space.close();

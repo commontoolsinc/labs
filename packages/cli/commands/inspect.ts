@@ -964,7 +964,8 @@ export const inspect = new Command()
   )
   .option(
     "--kind <kind:string>",
-    "Filter: piece | module | stream | schema | owned-cell | free-cell | unknown.",
+    "Filter: piece | module | stream | schema | owned-cell | free-cell | " +
+      "deleted | unknown.",
   )
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--limit <n:number>", "Max entities to reconstruct.", {
