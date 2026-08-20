@@ -46,6 +46,20 @@ await commonfabric.readArgumentCell({ path: ["name"] })
 Always check the actual stored value before assuming a write failed — see
 [browser-stale-ui](gotchas/browser-stale-ui.md).
 
+### A handler looks like a no-op and the console shows nothing
+
+Scheduler and CFC errors log to the pattern runtime's **worker** console, which
+the page console — and therefore `agent-browser` — does not surface by
+default. Call
+
+```javascript
+// Shown at module scope.
+commonfabric.forwardWorkerConsole(true);
+```
+
+first, then reproduce. Without it, a handler failing inside the worker looks
+identical to a handler that never ran.
+
 ### A sub-pattern's cell reads as `undefined` at the id you have
 
 `instantiatePatternNode` (`packages/runner/src/runner.ts`) binds a sub-pattern

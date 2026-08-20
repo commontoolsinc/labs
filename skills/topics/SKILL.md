@@ -48,6 +48,13 @@ set or copy them into agent mutations.
 
 ## Reading Topics
 
+Bounded reads are a measured necessity, not a style preference: an unprojected
+board read transfers the whole board and filters client-side, and every listing
+appends a read-set commit to the space that scales with everything the read
+observed. Against a remote board that is megabytes of upload per survey and tens
+of seconds of wall clock, and it grows the space's database as a side effect.
+Survey through `index` and project with `--select`; expand one Topic at a time.
+
 The current pattern exports `index` — a compact discovery result whose rows ARE
 the Topics, declared through scalar summaries, so one read surveys the whole
 board without expanding any Topic:
@@ -165,6 +172,12 @@ deno task cf call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
 deno task cf get --url "$TOPICS_BOARD_URL" index --step --select @,title
 ```
+
+Redeploying a board's pattern (`setsrc`) is gated on schema compatibility: a
+newly required field with no `Default<>` hard-blocks the deploy with
+`newly required … field has no default`. Rehearse any board pattern update
+against a writable copy first — `docs/development/space-clone-rehearsal.md` is
+the procedure.
 
 `addTopic` returns the topic it created, so a board running this source hands
 back the new topic on the call itself, and the follow-up read is only a

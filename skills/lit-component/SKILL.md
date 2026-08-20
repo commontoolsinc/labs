@@ -133,6 +133,18 @@ file's guarded define is a safe no-op in that case — it only registers when th
 component module didn't (and prevents duplicate-registration errors during hot
 module replacement). Keep both.
 
+### Never setAttribute in the constructor
+
+The custom-element spec forbids setting attributes during construction — the
+browser throws
+`Failed to execute 'createElement' on 'Document': The result
+must not have attributes`
+and the component silently fails to render. Set host attributes (`role`,
+`exportparts`, ARIA defaults) in `connectedCallback` **before** the
+`super.connectedCallback()` call, so they exist when Lit's first render runs. A
+Deno test that needs those attributes triggers the lifecycle with
+`element.updated(new Map())` rather than relying on constructor-time state.
+
 ## Theme Integration
 
 Most components should use `var(--cf-theme-*)` CSS variables with fallbacks

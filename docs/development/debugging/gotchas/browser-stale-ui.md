@@ -33,6 +33,15 @@ mutation style. Don't.
    missing `$` binding — see [reactivity-issues](../reactivity-issues.md))
    instead of changing how the handler writes.
 
+## A Different Staleness: the Worker Bundle Survives a Service-Worker Clear
+
+If what looks stale is *code* rather than data — a redeployed pattern or a
+rebuilt runtime that the page seems not to pick up — note that the pattern
+runtime's web worker outlives a service-worker clear plus reload. Clearing the
+service worker refreshes what the page fetches, not the worker already
+running. To load a fresh worker bundle, close the browser session entirely
+(`agent-browser close`) and reopen; a reload is not enough.
+
 ## See Also
 
 - [console-commands](../console-commands.md) — `readCell`, `subscribeToCell`, agent-browser recipes
