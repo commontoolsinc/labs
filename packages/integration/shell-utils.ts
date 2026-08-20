@@ -274,6 +274,10 @@ export class ShellIntegration {
     this.checkIsOk();
     const page = await this.#browser!.newPage(url);
     this.#attachPage(page);
+    // Astral navigates to `url` inside its own `newPage`, before this wrapper
+    // exists for an after-navigation hook to run on, so the wait that
+    // navigation would have run happens here.
+    if (url !== undefined) await waitForShellReady(page);
     return page;
   }
 

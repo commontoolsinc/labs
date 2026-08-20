@@ -291,7 +291,13 @@ export class Page extends EventTarget {
   }
 
   private async runAfterNavigationHooks(): Promise<void> {
-    for (const hook of [...this.afterNavigation]) await hook();
+    // Over a snapshot, so a hook registered by a hook waits for the next
+    // navigation. Each is re-checked against the live list, so a hook whose
+    // remover ran while an earlier hook was awaiting does not run afterwards.
+    for (const hook of [...this.afterNavigation]) {
+      if (!this.afterNavigation.includes(hook)) continue;
+      await hook();
+    }
   }
 
   async setViewportSize(

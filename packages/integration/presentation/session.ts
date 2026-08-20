@@ -106,7 +106,7 @@ export class PresentationSession {
 
   async start(page: Page): Promise<void> {
     const state = this.#byPage.get(page);
-    if (!state || state.started) return;
+    if (!state || state.started || state.stopped) return;
     await presentationInteractions(page)?.prepareDocument();
     await state.recorder.start();
     state.started = true;
