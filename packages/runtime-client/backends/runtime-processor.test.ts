@@ -2948,6 +2948,19 @@ describe("assertFabricLoggerFlags", () => {
     expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
   });
 
+  it("refuses a flag named with a key no fabric record carries", () => {
+    // `__proto__` and `constructor` are refused as fabric keys deliberately,
+    // and `1-fabric-values.md` specifies it. An IPC payload is a `FabricValue`
+    // per se -- the envelope as much as the metadata, a record of fabric values
+    // being one itself -- so a flag named one of them cannot cross, and saying
+    // so is the point rather than a limitation to route around.
+    const flags = { runner: { constructor: { "id:1": { a: 1 } } } };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      /not being a `FabricValue`/,
+    );
+  });
+
   it("throws, rendering what it refused", () => {
     // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
     // shape that would otherwise cross as something the far side cannot read.
