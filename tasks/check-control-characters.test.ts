@@ -10,9 +10,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert } from "@std/assert";
 import { join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+import { fromFileUrl } from "@std/path/from-file-url";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 import {
+  blobContents,
   controlViolations,
   isGovernedPath,
   main,
@@ -298,11 +301,48 @@ describe("check-control-characters", () => {
       await expect(scan(root)).rejects.toThrow("was not fully read");
     });
 
+    it("throws when git cannot read the objects it was given", async () => {
+      // Not reachable through `scan` once `ls-files` has succeeded, and the
+      // gate's trustworthiness rests on it: a read git declined must not come
+      // back as an empty tree.
+      const root = await Deno.makeTempDir({ prefix: "check-control-no-git-" });
+      await expect(
+        blobContents(root, ["0000000000000000000000000000000000000000"]),
+      ).rejects.toThrow("git cat-file failed");
+    });
+
     it("throws when git cannot list the tree", async () => {
       // A directory that is not a repository. Reporting nothing here would be
       // a gate that silently passes over everything it was meant to read.
       const root = await Deno.makeTempDir({ prefix: "check-control-not-git-" });
       await expect(scan(root)).rejects.toThrow("git ls-files failed");
+    });
+  });
+
+  describe("as a command", () => {
+    const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url));
+
+    it("exits 0 over this repository and says what it read", async () => {
+      // The only end-to-end exercise of the entry point: the permissions the
+      // shebang and the task grant, and no more.
+      const output = await runDenoCommandWithTemporaryLock({
+        root: REPO_ROOT,
+        args: (lockPath) => [
+          "run",
+          "--config",
+          join(REPO_ROOT, "deno.jsonc"),
+          "--lock",
+          lockPath,
+          "--allow-read",
+          "--allow-run=git",
+          join(REPO_ROOT, "tasks/check-control-characters.ts"),
+        ],
+      });
+      const stderr = new TextDecoder().decode(output.stderr);
+      expect(output.code, `exited non-zero:\n${stderr}`).toBe(0);
+      expect(new TextDecoder().decode(output.stdout)).toContain(
+        "No control codepoints",
+      );
     });
   });
 });

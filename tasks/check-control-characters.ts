@@ -227,11 +227,16 @@ export function parseBatchBlobs(
 /**
  * The stored bytes of each blob, in the order asked for.
  *
+ * Exported for the same reason the parses are: the failure path — git
+ * declining to read the tree at all — is part of what makes this gate
+ * trustworthy, and is not reachable through `scan` once `ls-files` has
+ * already succeeded.
+ *
  * One `cat-file --batch` for the whole tree rather than a process per file:
  * the repository tracks thousands of governed files, and the difference is
  * between a gate that runs in a second and one nobody wants in CI.
  */
-async function blobContents(
+export async function blobContents(
   root: string,
   ids: readonly string[],
 ): Promise<Uint8Array[]> {
