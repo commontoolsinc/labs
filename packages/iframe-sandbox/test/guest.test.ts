@@ -1,6 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+
 import { connectGuestContext, reportGuestError } from "../src/guest.ts";
 import {
   GUEST_PORT_HANDOFF,
@@ -23,15 +28,21 @@ function handOffPort(): MessagePort {
   return channel.port1;
 }
 
-// Resolves with the next `count` messages the host end receives.
+// Resolves with the next `count` messages the host end receives, decoded as
+// the host decodes them.
 function received(port: MessagePort, count: number): Promise<GuestMessage[]> {
   const messages: GuestMessage[] = [];
   return new Promise((resolve) => {
     port.onmessage = (event: MessageEvent) => {
-      messages.push(event.data as GuestMessage);
+      messages.push(fabricFromRealmValue(event.data) as GuestMessage);
       if (messages.length === count) resolve(messages);
     };
   });
+}
+
+// Sends `message` the way the host sends one.
+function fromHost(port: MessagePort, message: unknown): void {
+  port.postMessage(realmFromFabricValue(message as never));
 }
 
 // Lets whatever the ports have queued be delivered.
@@ -79,7 +90,7 @@ describe("guest", () => {
       );
       try {
         const host = handOffPort();
-        host.postMessage({
+        fromHost(host, {
           type: HostMessageType.Update,
           data: ["counted", 9n],
         });
@@ -97,16 +108,21 @@ describe("guest", () => {
       );
       try {
         const host = handOffPort();
+        // The first is not an encoding at all -- the shape the protocol used
+        // to put on the wire -- and the rest decode to something an update is
+        // not.
+        host.postMessage({ type: HostMessageType.Update, data: ["plain", 1] });
         for (
           const bad of [
             undefined,
+            "not a message at all",
             { type: "something-else" },
             { type: HostMessageType.Update },
             { type: HostMessageType.Update, data: ["solo"] },
             { type: HostMessageType.Update, data: [7, "non-string key"] },
           ]
         ) {
-          host.postMessage(bad);
+          fromHost(host, bad);
         }
         await settled();
         expect(seen).toEqual([]);
@@ -137,7 +153,7 @@ describe("guest", () => {
       const host = handOffPort();
       guest.disconnect();
 
-      host.postMessage({ type: HostMessageType.Update, data: ["late", 1] });
+      fromHost(host, { type: HostMessageType.Update, data: ["late", 1] });
       await settled();
       expect(seen).toEqual([]);
     });
