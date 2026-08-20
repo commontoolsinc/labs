@@ -29,7 +29,13 @@ follow-ups `9199ed344` (import dedup / identity threading / lint),
 catch-up merge `a8523edbe` (`origin/main` @ `0eaf16f4c`, 5 commits
 landed post-PR — one conflict, scheduler/run.ts imports: main's
 measure-naming kept, the persistent-observation import dropped with
-the deleted subsystem; runner 1 259/7 163 + memory 552 re-run green).
+the deleted subsystem; runner 1 259/7 163 + memory 552 re-run green);
+catch-up merge `c0dc05ca1` (`origin/main` @ `ea2f97e63`, #6090
+data-files + #6093 — one conflict, compile-and-run.test.ts, both
+sides' appended tests kept); catch-up merge `c6c26c864`
+(`origin/main` @ `61da797e6`, 5 commits — clean; two of them
+reconcile restores, see §6). The owner-ordered merge-drop audit and
+its restores are §6.
 
 ## 1. The merge — conflict ledger
 
@@ -390,3 +396,143 @@ OW38 (ii)). This PR's CI run is the stack's FIRST-EVER CI execution
   `.test.tsx` files the CI task's `*.test.ts` glob never runs; 7 of
   them fail at import (`commonfabric` export shape) on main's side too
   — not a lane, not a regression.
+
+## 6. Merge-drop audit (owner-caught, 2026-08-20)
+
+The owner found `completeSchedulerScopeSummary` gone from ALL code on
+the merged tree (only vintage sqlite fixtures still carried the
+string) and ordered a restore plus a full audit of everything the
+merge dropped from main's side. This section is that audit's record:
+the corrected ledger classification, the casualty list, the sweep
+method (rerunnable after any future catch-up), and one attribution
+correction made mid-audit.
+
+### 6.1 The over-reach, named
+
+§1's classification "the persistent-scheduler-observation subsystem
+(deleted by stage C.2) stays deleted — main's mechanical edits to its
+files are dropped, its env flag/type entries removed" over-reached on
+exactly one surface: the `completeSchedulerScopeSummary` certificate.
+Stage C.1 (`a6a9d705e`) had deleted it train-side on the rationale
+that "the certificate fed only the persistentSchedulerState machinery"
+— and C.1 REWROTE main's emission tests to pin the deletion, which is
+why every suite stayed green through the loss. But main carried the
+certificate at the merge tip (`bbcc7a348`:
+`packages/runner/src/builder/module.ts` 3 hits,
+`ts-transformers .../lift-applied-strategy.ts` 4 hits — verified) as a
+live, documented contract (builder option, transformer-proven emission
+across 110 goldens, runner-side concrete-certificate construction),
+not merely as observation-subsystem plumbing. The merge carried C.1's
+deletion forward and silently reverted main's surface. Precedent for
+the class: `f80cc359c` (the old C2 arc's merge lost the same markers
+from two goldens).
+
+**Restored in `a951be524`** as a composition with the train's tree
+(121 files): ts-transformers emission + gating + main's
+pipeline-regressions tests + all 110 goldens; the builder option
+(module.ts / types.ts); the
+`collectStatic{RedirectWrite,Read}TargetsWithCompleteness` helpers and
+certificate construction in runner.ts (reverse-applying C.1's diff —
+it applied cleanly onto the train's rewritten block); the
+`TelemetryAnnotations.completeSchedulerScopeSummary` field
+(scheduler/types.ts, hand-placed — HEAD's interface became a type
+alias); the three certificate paragraphs of
+`ts_transformers_current_behavior_spec.md` (whose C.1 deletion note
+"server-execution v2 stage C.1." also tripped the spec-sync
+stage-count regex — a latent red in the ts-transformers lane, fixed by
+the restore). Red-first: main's restored pipeline-regressions failed 2
+tests on the unrestored tree; a NEW runner-side pin
+(`packages/runner/test/scheduler-scope-summary.test.ts` — main had no
+test for the runner half) failed `certified.length` 0 vs 1, exactly
+the ignore-the-option mutation, then went green. String parity with
+main: every code file matches except `scheduler/run.ts` (main's 1 hit
+there feeds `buildSchedulerActionObservation` — the C.2-deleted flow;
+class B below, stays gone).
+
+**NOT restored** (class B, consumption inside the deleted subsystem):
+scheduler/run.ts's observation feed, facade.ts's adoption-candidate
+arm (C.1's −94; HEAD's facade has no adoption machinery at all), and
+everything `completeActionScopeSummary` (memory/v2 engine, the
+observation test files). On the merged tree the restored certificate
+is produced but has no runtime consumer until the serving loop lands —
+that is main's own posture for the annotation minus the observation
+feed, and the owner's ruling is that main's surface survives the
+merge regardless.
+
+### 6.2 The audit method (rerunnable)
+
+Ground truth first, then four mechanical sweeps over
+`git diff origin/main HEAD -- packages/ tasks/`, then the
+merge-message claims:
+
+1. **Legitimate-deletion set**: `git diff 30fdbb92f 45cca4167
+   --name-status --diff-filter=D` (tree-to-tree — a `git log
+   --name-only` walk MISSES merge-commit diffs and undercounted by
+   half) plus PR #5367's file list.
+2. **Whole-file sweep**: files present on main, absent on HEAD, minus
+   set 1. Result: 22 absent, 18 in the C.2 set, 4 explained below.
+3. **Symbol sweep**: every `export
+   const/function/class/type/interface` identifier main added since
+   the base (408 at `8a69129dd`, re-run at `61da797e6`), one-pass
+   word-grepped over the tree. Result: **0 missing**.
+4. **Test-name sweep**: every `Deno.test`/`it`/`describe` string main
+   added (1 364). Result: 0 missing after the restores/catch-up (the
+   16 hits mid-audit were all one cluster, §6.3).
+5. **Env/flag sweep**: main-added `CF_*`/`CT_*` identifiers (33): 0
+   missing (several live in `.sh`/`.md` — sweep all file types).
+6. **Line sweep**: main-added distinctive lines (≥25 chars, non-comment)
+   per file, thresholded: 0 files flagged.
+7. **Claims re-check**: #5800's declared-set exclusion present in
+   `memory/v2/engine.ts` (3 × `json_each(:named_local_seqs)`); its
+   three #5800 tests present in `v2-sparse-pending-dependencies`; the
+   differential suite's declared-set sparse mutation present; #5818
+   `trackSidecarLaunch` 5 uses; `contentAddressedSchemas` present.
+
+Classification: **A** = superseded by a named train mechanism (e.g.
+traverse-schema tests' `TEST_SCOPE_IDENTITY` threading; the
+`materializerWriteInputPaths` doc cross-reference repointed to
+`scheduler-v2/README.md` §4.3 because `persistent-scheduler-state.md`
+is C.2-deleted). **B** = the C.2 subsystem (18 whole files + the
+in-file consumption sites above). **C** = casualty, restored. **D** =
+unclear, flag for the owner. Final counts: **C = 1**
+(`completeSchedulerScopeSummary`), **D = 0**; everything else A or B.
+
+### 6.3 The attribution correction (read before trusting §6's drafts)
+
+Mid-audit, the sweeps flagged two more "casualties" and commits
+`21ed6d933` (#6023 shell-page probe) and `f2f2b6c1a` (#6071 str
+builtin) restored them with messages attributing the loss to merge
+`820da28a2`. **That attribution is wrong.** Both PRs landed on main
+the same afternoon (13:52 / 14:00) — AFTER the second catch-up's
+target `ea2f97e63` (13:29) — and a sibling session's `git fetch` (the
+labs worktrees share one object store) moved `origin/main` mid-audit,
+so the audit's diffs silently ran against a ref containing commits no
+merge on this branch had ever seen. Neither commit is an ancestor of
+`bbcc7a348`. The restored CONTENT is byte-identical to main's, so
+catch-up merge `c6c26c864` reconciled both to a no-op; the integration
+merge's real casualty count is ONE. The guard for future audits:
+before calling anything a merge drop, run `git merge-base
+--is-ancestor <commit> <merge-time-main-tip>` — and pin the audited
+ref by SHA at audit start, not by the symbolic name `origin/main`.
+
+### 6.4 Verification on the restored tree
+
+Suites (all foreground, runner split in two shards): runner
+1 262/7 182 with ONE failure — `executor-effect-channel.test.ts` "the
+served intent (T2 hops 1–4)…" timing out on "the intent to land in
+alice's session instance". Attributed PRE-EXISTING per the ritual: the
+restores cannot reach the surface (no `str`, no marker; the no-marker
+runner path is hunk-identical), and the same step failed identically
+on the pre-restore tree `c0dc05ca1` in a detached worktree (1/11 pre
+vs 3/11 post across interleaved runs; 20 s poll, stuck-sync shape; the
+file's own history already records a "pre-existing flake" in its
+receipt-race pin). It is a train-side race worth its own follow-up,
+not this audit's regression. Otherwise: ts-transformers 1 160, memory
+552, toolshed 142, runtime-client 65, piece 37 (vintages compatible
+with the restored certificate), spec-model 23, skip-list 17,
+iframe-sandbox 2+46, state-inspector 100, shell-failure-reports 15
+steps, str-builtin 7 steps, compile-and-run 3. Repo-wide fmt clean
+(4 931 files), check-docs 559 blocks, history index 134 entries. Quick
+ON gates 1× each (env-flag arm, fresh store via the integration
+runner's random port offset): lunch-poll-vote GREEN,
+cfc-group-chat-demo-two-browsers GREEN.
