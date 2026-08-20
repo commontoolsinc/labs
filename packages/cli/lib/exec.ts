@@ -27,6 +27,7 @@ import {
   type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  withExpandedInputSchema,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -375,12 +376,17 @@ export async function executeMountedCallableFile(
         ? {}
         : { selection: options.selection }),
     },
-    renderHelp: (commandSpec, parsed) =>
-      parsed.showHelpJson
-        ? renderExecHelpJson(commandSpec)
-        : renderExecHelp(filePath, commandSpec, {
+    // The page (usage line, flag list) derives from the expanded schema:
+    // a served root reference carries the fields, and this renderer has no
+    // declared-document overlay to recover them any other way.
+    renderHelp: (commandSpec, parsed) => {
+      const spec = withExpandedInputSchema(commandSpec);
+      return parsed.showHelpJson
+        ? renderExecHelpJson(spec)
+        : renderExecHelp(filePath, spec, {
           invocationStyle,
-        }),
+        });
+    },
   });
 
   // Auto-step: trigger reactive recomputation after handler execution.

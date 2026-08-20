@@ -792,7 +792,9 @@ export async function resolveExecInvocation(
   };
 }
 
-function withExpandedInputSchema(spec: ExecCommandSpec): ExecCommandSpec {
+export function withExpandedInputSchema(
+  spec: ExecCommandSpec,
+): ExecCommandSpec {
   const expanded = expandSchemaReference(spec.inputSchema);
   return expanded === spec.inputSchema
     ? spec
