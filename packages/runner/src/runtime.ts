@@ -2293,10 +2293,13 @@ export class Runtime {
    * which is an allow-list: a stale basis (server conflict or the local
    * inconsistency guard), a liveness failure the memory client heals on its own
    * (a transport failure, an undecodable frame), a discarded attempt
-   * (`tx.abort()` or a CFC pre-storage refusal), or an authorization denial the
-   * server itself marked `retriable`. Every other rejection — an ACL/protocol
-   * refusal, an authorization denial, a precondition failure, a commit-rule
-   * violation, a `SessionError` (nothing on this path remounts the session, so
+   * (`tx.abort()`, or a prepared CFC transaction whose inputs drifted before
+   * the verdict), or an authorization denial the server itself marked
+   * `retriable`. Every other rejection — an ACL/protocol refusal, an
+   * authorization denial, a precondition failure, a commit-rule violation, a
+   * CFC boundary refusal (`CfcCommitRefusalError`, a deterministic verdict on
+   * the transaction's own reads and writes), a `SessionError` (nothing on this
+   * path remounts the session, so
    * every attempt reuses the handle the server just refused) — is returned on
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.

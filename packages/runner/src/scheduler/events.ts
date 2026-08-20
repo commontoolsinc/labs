@@ -1790,8 +1790,9 @@ type CommitDisposition =
  *  - permanent: a commit-time precondition failure (receipt-exists,
  *    origin-committed). Re-running can never succeed and would double-handle the
  *    event, so it is never retried.
- *  - terminal: a deterministic server-side refusal of the committed data (a CFC
- *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *  - terminal: a deterministic refusal of the committed data on its own merits
+ *    (`isTerminalRejection`) — the server's CFC row-label commit rule, or the
+ *    client's CFC boundary refusing before storage; never retried —
  *    re-running recomputes the identical refused write, and the doomed re-runs'
  *    speculative rev bumps would starve concurrent siblings. Surfaced as a
  *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.
