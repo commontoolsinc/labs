@@ -785,24 +785,39 @@ export async function resolveExecInvocation(
 }
 
 function withExpandedInputSchema(spec: ExecCommandSpec): ExecCommandSpec {
-  const schema = spec.inputSchema;
-  if (!isSchemaObject(schema)) return spec;
+  const expanded = expandSchemaReference(spec.inputSchema);
+  return expanded === spec.inputSchema
+    ? spec
+    : { ...spec, inputSchema: expanded };
+}
+
+/**
+ * A schema stored as a content-addressed reference, recomposed for a human
+ * or a parser that needs its structure; anything else — an unresolvable
+ * reference included — is returned as it is.
+ */
+function expandSchemaReference(schema: JSONSchema | true): JSONSchema | true;
+function expandSchemaReference(
+  schema: JSONSchema | true | undefined,
+): JSONSchema | true | undefined;
+function expandSchemaReference(
+  schema: JSONSchema | true | undefined,
+): JSONSchema | true | undefined {
+  if (schema === undefined || schema === true || !isSchemaObject(schema)) {
+    return schema;
+  }
   const ref = (schema as { $ref?: unknown }).$ref;
   if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
-    return spec;
+    return schema;
   }
   try {
     const recomposed = recomposeSchema(ref, lookupSchemaDocument);
     const { $ref: _expanded, ...siblings } = schema as Record<string, unknown>;
-    return {
-      ...spec,
-      inputSchema: isSchemaObject(recomposed)
-        ? { ...recomposed, ...siblings } as JSONSchema
-        : recomposed,
-    };
+    return isSchemaObject(recomposed)
+      ? { ...recomposed, ...siblings } as JSONSchema
+      : recomposed;
   } catch {
-    // An unresolvable reference parses as it would have anyway.
-    return spec;
+    return schema;
   }
 }
 
@@ -1032,8 +1047,8 @@ function outputSectionLines(spec: ExecCommandSpec): string[] {
     "",
     "Output:",
     ...(spec.callableKind === "handler"
-      ? invocationResultLines(spec.outputSchemaSummary)
-      : outputPropertyLines(spec.outputSchemaSummary)),
+      ? invocationResultLines(expandSchemaReference(spec.outputSchemaSummary)!)
+      : outputPropertyLines(expandSchemaReference(spec.outputSchemaSummary)!)),
   ];
 }
 
@@ -1238,7 +1253,7 @@ export function renderExecHelpJson(spec: ExecCommandSpec): string {
     inputSchema: spec.inputSchema,
   };
   if (spec.outputSchemaSummary !== undefined) {
-    value.outputSchema = spec.outputSchemaSummary;
+    value.outputSchema = expandSchemaReference(spec.outputSchemaSummary);
   }
   return JSON.stringify(value, null, 2);
 }
@@ -1283,6 +1298,8 @@ function schemaShapeString(schema: JSONSchema): string {
   if (isSchemaLessHandlerInput(schema)) {
     return "void";
   }
+  // A page shows the reconstructed document, never a cid reference.
+  schema = expandSchemaReference(schema) as JSONSchema;
   // Same TS-like rendering the runner uses for LLM context; CLI help only adds
   // the "void" spelling for schema-less handler inputs above. The formatter
   // resolves $refs against options.defs, not the schema's own $defs, so
