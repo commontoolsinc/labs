@@ -464,14 +464,17 @@ Deno.test("runTests reports a failure when every member is disabled", async () =
 // Tasks that chain commands, or that route through a runner, are outside the
 // rule and stay governed by the comment on the set itself.
 Deno.test("every member running one plain deno test is junit-capable", async () => {
-  const members = await readWorkspaceMembers();
+  // Paths resolve from this file, not the working directory: the tasks
+  // package's own tests run with that package as the working directory.
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
   const missing: string[] = [];
   for (const member of members) {
     let task: string | undefined;
     for (const manifest of ["deno.jsonc", "deno.json"]) {
       try {
         const parsed = parseJsonc(
-          await Deno.readTextFile(`${member}/${manifest}`),
+          await Deno.readTextFile(new URL(`${member}/${manifest}`, rootUrl)),
         ) as { tasks?: Record<string, string | { command?: string }> };
         // A task is either the command string or an object carrying it.
         const entry = parsed?.tasks?.test;
