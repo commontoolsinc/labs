@@ -2947,7 +2947,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
   assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);
 });
 
-Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {
+Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by default", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -2971,9 +2971,9 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
                 id: "call-host-tool",
                 type: "function",
                 function: {
-                  name: "bash-no-sandbox",
+                  name: "browser",
                   arguments: JSON.stringify({
-                    command: "agent-browser --help",
+                    action: "snapshot",
                   }),
                 },
               }],
@@ -3023,13 +3023,13 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
       "describe_handle",
     ],
   );
-  assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
+  assertEquals(denied.detail, "browser is not allowed in this run");
   assertEquals(result.runState.toolOutputs, []);
-  assertEquals(result.runState.policyEvents[0]?.toolId, "bash-no-sandbox");
+  assertEquals(result.runState.policyEvents[0]?.toolId, "browser");
   assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
 });
 
-Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized browser subagent profile", async () => {
+Deno.test("CfHarnessPromptLoop gives the browser tool only to the authorized browser subagent profile", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -3127,7 +3127,7 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   assertEquals(
     chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
     [
-      "bash-no-sandbox",
+      "browser",
       "read_file",
       "view_image",
       "read_skill_resource",
@@ -3136,25 +3136,25 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   );
   assertEquals(
     chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-      "Host execution tools available: bash-no-sandbox",
+      "Host execution tools available: browser",
     ),
     true,
   );
   assertEquals(
     chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-      "Do not use agent-browser eval",
+      "attaches to this run's Browser Access lease",
     ),
     true,
   );
   assertEquals(output.subagent.manifest.profile, "browser");
   assertEquals(output.subagent.manifest.allowedToolIds, [
-    "bash-no-sandbox",
+    "browser",
     "read_file",
     "view_image",
     "read_skill_resource",
     "run_skill_script",
   ]);
-  assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+  assertEquals(output.subagent.manifest.hostToolIds, ["browser"]);
   assertEquals(output.subagent.manifest.skillNames, ["agent-browser"]);
   assertEquals(output.subagent.manifest.allowedSkillScripts, [
     { skill: "agent-browser", path: "scripts/form-automation.sh" },
@@ -3349,7 +3349,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
     assertEquals(
       chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
       [
-        "bash-no-sandbox",
+        "browser",
         "read_file",
         "view_image",
         "read_skill_resource",
@@ -3444,7 +3444,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
   }
 });
 
-Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for browser subagents", async () => {
+Deno.test("CfHarnessPromptLoop briefs browser subagents on the lease without exposing its endpoint", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
@@ -3531,14 +3531,6 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
     chatViewOfRequest(requestBodies[1]).messages[0].content;
   assertStringIncludes(
     childSystemPrompt,
-    "Browser Access lease: lease-browser-1",
-  );
-  assertStringIncludes(
-    childSystemPrompt,
-    "Browser Access CDP endpoint: http://127.0.0.1:9222",
-  );
-  assertStringIncludes(
-    childSystemPrompt,
     "Browser Access profile mode: transient",
   );
   assertStringIncludes(
@@ -3549,10 +3541,11 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
     childSystemPrompt,
     "temporary no-login profile",
   );
-  assertStringIncludes(
-    childSystemPrompt,
-    "Use agent-browser --cdp http://127.0.0.1:9222 for page commands.",
-  );
+  // The lease's identifiers stay harness-side: the browser tool attaches the
+  // endpoint itself, so neither the lease id nor the CDP endpoint appears in
+  // anything the child model reads.
+  assertEquals(childSystemPrompt.includes("lease-browser-1"), false);
+  assertEquals(childSystemPrompt.includes("http://127.0.0.1:9222"), false);
 });
 
 Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch subagent profile", async () => {
@@ -3762,10 +3755,11 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
                   id: "call-agent-browser-text",
                   type: "function",
                   function: {
-                    name: "bash-no-sandbox",
+                    name: "browser",
                     arguments: JSON.stringify({
-                      command:
-                        "agent-browser --cdp http://host.docker.internal:9362 get text body",
+                      action: "get",
+                      kind: "text",
+                      target: "body",
                     }),
                   },
                 }],
@@ -3820,7 +3814,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     assertEquals(
       chatViewOfRequest(requestBodies[1]).tools.map((name) => name),
       [
-        "bash-no-sandbox",
+        "browser",
         "read_file",
         "view_image",
         "read_skill_resource",
@@ -3829,7 +3823,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(
       chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
-        "Browser profile host commands are restricted to agent-browser",
+        "attaches to this run's Browser Access lease",
       ),
       true,
     );
@@ -3893,7 +3887,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     };
     assertEquals(output.subagent.status, "completed");
     assertEquals(output.subagent.manifest.profile, "browser");
-    assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+    assertEquals(output.subagent.manifest.hostToolIds, ["browser"]);
     assertEquals(
       output.subagent.structuredReturn.schemaDigest,
       output.subagent.manifest.inputSummary.returnSchemaDigest,
@@ -3922,10 +3916,10 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     assertEquals(rawReturn.value.evidence, browserObservation);
     const hostToolOutput = JSON.parse(
       await Deno.readTextFile(
-        `${output.subagent.runState.artifactRoot}/tool-outputs/run-browser-structured-return.subagent.1_bash-no-sandbox_1-bash-no-sandbox.json`,
+        `${output.subagent.runState.artifactRoot}/tool-outputs/run-browser-structured-return.subagent.1_browser_1-browser.json`,
       ),
-    ) as { stdout: string };
-    assertEquals(hostToolOutput.stdout, browserObservation);
+    ) as { output: string };
+    assertEquals(hostToolOutput.output, browserObservation);
     assertEquals(artifactStore.toolOutputs[0]?.toolId, "delegate_task");
   } finally {
     await Deno.remove(baseDir, { recursive: true });

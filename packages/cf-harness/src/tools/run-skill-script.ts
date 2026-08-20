@@ -18,7 +18,7 @@ import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
 } from "../skills/scripts.ts";
-import { normalizeCdpOrigin } from "./browser-host-command-policy.ts";
+import { normalizeCdpOrigin } from "../contracts/browser-access.ts";
 import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
