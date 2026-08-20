@@ -6,7 +6,8 @@ denial — must reach a caller waiting on storage sync as a real, typed error
 rather than a silent absent read or an endless wait. Getting there spans three
 layers: the memory protocol classifies the failure, the memory client acts on
 that classification during reconnect, the runner storage layer records it per
-space, and the CLI surfaces it. This document describes how the pieces fit.
+space, and the callers that reach a particular space surface it. This document
+describes how the pieces fit.
 
 ## The classification: recoverable versus permanent
 
@@ -90,6 +91,15 @@ profile yet" absent read.
 The `newPiece` 60-second bound is unrelated and remains. That hang is a scheduler
 `idle()` park in `getResult(piece).pull()` waiting for a pattern to quiesce — a
 different mechanism this signal does not cover.
+
+## Connecting a controller: one check for every client that opens a space
+
+`PiecesController.initialize` builds a client runtime over a deployed API and
+returns a controller for one space. It opens that space's session, reads
+`storageManager.authorizationError(space)`, and throws what it finds, so a
+caller reaching a space this way does not write the check itself. The FUSE
+mount, the agent harness's Fabric session, and the integration suites'
+controllers all connect through it.
 
 ## Scope and trade-offs
 
