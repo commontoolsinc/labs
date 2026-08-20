@@ -187,8 +187,8 @@ lazy `compartment.importNow` inside `execute`.
   and read back by [`schedulerImplementationFingerprint`][c12]. It is a content
   hash, not a source location: `.src` is served lazily from the debug-only
   [`authored-debug-source`][c16] map, through accessors
-  [`annotateFunctionDebugMetadata`][c11] installs, and is never consulted for
-  identity.
+  [`defineAuthoredDebugAccessors`][c16] installs during builder construction,
+  and is never consulted for identity.
 
 ## Model
 
@@ -868,9 +868,11 @@ This spec supplies the stable implementation identity that
 - SES lockdown and source-map registration: [`ensureSESInitialized`][c10],
   [`SESRuntime.loadSourceMapLazy`][c10]; the error-mapping entry point the
   harness invokes pattern functions through is [`SESRuntime.exec`][c10].
-- Debug-only source annotation: [`annotateFunctionDebugMetadata`][c11], over
-  the [`recordAuthoredDebugSource`][c16] /
-  [`defineAuthoredDebugAccessors`][c16] map.
+- Debug-only source annotation: the [`recordAuthoredDebugSource`][c16] /
+  [`defineAuthoredDebugAccessors`][c16] map. Function-backed node and handler
+  implementations install their accessors through
+  [`annotateFunctionDebugMetadata`][c11]; pattern factories call
+  `defineAuthoredDebugAccessors` directly.
 - Scheduler fingerprints: [`schedulerImplementationFingerprint`][c12] and
   [`schedulerRuntimeFingerprint`][c12].
 - Hash primitive: [`hashStringOf`][c13] (and [`hashOf`][c13]).

@@ -726,15 +726,13 @@ function unwrapHardenedCallbackExpression(
  * reached indirectly.
  *
  * Callback-ness is SEMANTIC — the checker's call signatures — never a
- * whitelist of spellings. Four review rounds each found the spelling the
- * previous round's syntax list missed (inline arrow, const reference,
- * function declaration, property access); asking the type ends the family,
- * because a schema is never callable and a callback always is, however it
- * is written. Two backstops cover the type information going missing
- * rather than a spelling: the syntactic resolver catches a local
- * `any`-typed callback (no call signatures to ask), and the declaration
- * fallback catches an IMPORTED one — the resolver cannot cross modules,
- * but the aliased symbol's declaration still says what the value is.
+ * whitelist of spellings. Inline arrows, const references, function
+ * declarations, and property accesses can all denote callbacks, so asking the
+ * type covers the family. Two backstops cover missing type information rather
+ * than a spelling: the syntactic resolver catches a local `any`-typed callback
+ * (no call signatures to ask), and the declaration fallback catches an
+ * imported one — the resolver cannot cross modules, but the aliased symbol's
+ * declaration still says what the value is.
  */
 export function isCallbackReference(
   expression: ts.Expression | undefined,
