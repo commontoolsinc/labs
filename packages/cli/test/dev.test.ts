@@ -138,16 +138,26 @@ describe("cli check", () => {
     expect(code).toBe(0);
   });
 
-  it("names --datafile when a pattern reads a file that is not attached", async () => {
+  it("evaluates a pattern that reads a data file it names itself", async () => {
+    const { code, stdout, stderr } = await cf(
+      "check --root fixtures fixtures/reads-data-file.tsx --pattern-json",
+    );
+    checkStderr(stderr);
+    // No `--datafile`: the `dataFile()` call is the declaration, so the same
+    // bytes reach the pattern as when the flag names them.
+    expect(JSON.parse(stdout.join("\n"))).toEqual(["Oslo", "Lima"]);
+    expect(code).toBe(0);
+  });
+
+  it("refuses a data file the pattern names with nothing behind it", async () => {
     const { code, stderr } = await cf(
-      "check --root fixtures fixtures/reads-data-file.tsx",
+      "check --root fixtures fixtures/reads-absent-data-file.tsx",
     );
-    // The refusal has to name the flag that fixes it, since the pattern
-    // compiles and type-checks either way.
-    expect(stripAnsi(stderr.join("\n"))).toContain(
-      'No attached data file "/data/cities.json"',
-    );
-    expect(stripAnsi(stderr.join("\n"))).toContain("--datafile");
+    // The program cannot be assembled as its source describes it, so this
+    // fails at the build, naming the module that asked and the path it wanted.
+    const text = stripAnsi(stderr.join("\n"));
+    expect(text).toContain("/reads-absent-data-file.tsx");
+    expect(text).toContain('"/data/absent.json"');
     expect(code).not.toBe(0);
   });
 

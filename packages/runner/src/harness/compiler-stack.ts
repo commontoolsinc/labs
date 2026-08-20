@@ -27,8 +27,9 @@ export {
   transformCfDirective,
 } from "@commonfabric/ts-transformers";
 export {
+  collectDataFileNames,
   collectImportSpecifiers,
   getTypeScriptEnvironmentTypes,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-export { resolveProgram } from "@commonfabric/js-compiler/typescript";
+export { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";

@@ -141,6 +141,11 @@ you begin and what you can trust:
   by key prefix, which is what the statistics cannot do: a logger records
   against its full joined path and nothing shorter, so the count at the level
   where it starts multiplying exists in no stored row.
+- **Some keys name the occurrence too.** A key is a place in the code, so
+  `scheduler/run/action` is the same key for every action that runs. Where the
+  emitter can say which one, it attaches that to the measure rather than the key
+  — putting it in the key would multiply the statistics by every value it takes
+  — and `attribute-measures.ts --detail` groups by it.
 - **Intervals recover the caller.** A key that runs everywhere is recorded
   against itself whoever reached it, so no aggregate can say who is responsible.
   Spans nest, so the span open when another began is the one that called it:
@@ -156,6 +161,23 @@ who calls the _heavy_ instances, whose callers are routinely not the typical
 ones. `docs/development/debugging/profiling.md` carries that ladder. A chain
 that reaches uninstrumented ground has produced a result rather than a dead end:
 it names where to wrap next.
+
+A chain that reaches uninstrumented ground has not run out of data. The harness
+phases that attribution treats as transparent still locate those spans in the
+run, and whatever finished immediately before them is a caller nobody wrapped —
+`attribute-measures.ts --roots` reads both out of the capture you already have,
+and names where the next span would attribute the most.
+
+A measure is an elapsed duration, so summing measures gives cumulative elapsed
+span time and never CPU — the sum already contains whatever was waited through,
+and a nested span counts the same interval again inside its parent. Only the
+sampling profile attributes CPU. Wall time needs the other arithmetic again:
+spans must be unioned rather than summed, because concurrent ones overlap and a
+parent's elapsed time is not the total of its children's. What the union leaves
+uncovered is time something was open and nothing instrumented was running —
+waiting, in whatever form — and `skills/perf-investigation/scripts/wall-time.ts`
+is what reports it. Absence looks the same whether it is a round trip or
+unwrapped compute, so that view says where to look rather than what it found.
 
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a

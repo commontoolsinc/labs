@@ -1,33 +1,29 @@
 /**
  * The guest side of the `common-iframe-sandbox` boundary.
  *
- * A guest runs in its own realm and reaches the host's key/value context by
- * `postMessage()`. This module is the client for that: it builds the messages
- * `./ipc.ts` describes, encodes and decodes the values in them, and hands the
- * guest a `FabricValue` for a `FabricValue` the host read.
+ * A guest runs in its own realm and reaches the host's key/value context over
+ * a `MessagePort` the host hands it once its document has loaded. This module
+ * is the client for that: it takes the port when it arrives, builds the
+ * messages `./ipc.ts` describes, and hands the guest each value the host sends.
  *
  * The API is deliberately minimal -- it covers the operations the protocol
  * has, plus the teardown of its own listener.
  */
 
 import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-
-import {
+  GUEST_PORT_HANDOFF,
   type GuestError,
   type GuestMessage,
   GuestMessageType,
-  isHostMessage,
+  type HostMessage,
+  HostMessageType,
 } from "./ipc.ts";
 
 /**
  * Called with each value the host sends: the answer to a {@link
  * GuestContext.read}, and each update on a subscribed key.
  */
-export type UpdateHandler = (key: string, value: FabricValue) => void;
+export type UpdateHandler = (key: string, value: unknown) => void;
 
 /**
  * A guest's handle on the host's key/value context.
@@ -41,7 +37,7 @@ export type GuestContext = {
   read(key: string): void;
 
   /** Write `value` to `key`. */
-  write(key: string, value: FabricValue): void;
+  write(key: string, value: unknown): void;
 
   /**
    * Subscribe to each of `keys`. A change to one reaches the update handler;
@@ -52,70 +48,101 @@ export type GuestContext = {
   /** Unsubscribe from each of `keys`. */
   unsubscribe(...keys: string[]): void;
 
-  /** Stop listening for host messages. */
+  /** Stop listening for the host's messages. */
   disconnect(): void;
 };
 
 /**
  * Connects to the host, calling `onUpdate` with each value it sends.
+ *
+ * A guest may call the result's operations at once. The port arrives after the
+ * document has loaded, and what is said before it does is sent when it comes,
+ * in the order it was said.
  */
 export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
-  const toHost = (message: GuestMessage): void => {
-    globalThis.parent.postMessage(realmFromFabricValue(message), "*");
+  let port: MessagePort | undefined;
+  const unsent: GuestMessage[] = [];
+
+  const send = (message: GuestMessage): void => {
+    if (port) {
+      port.postMessage(message);
+    } else {
+      unsent.push(message);
+    }
   };
 
-  // A guest window receives whatever anyone able to reach it posts, so an
-  // arriving message is a claim rather than a fact. What is not an encoding,
-  // and what does not decode to a message this protocol writes, is left alone.
-  const onMessage = (event: MessageEvent): void => {
-    let decoded: FabricValue;
-    try {
-      decoded = fabricFromRealmValue(event.data);
-    } catch {
+  // The port's far end is the host, so what arrives on it is not the open
+  // question a window message is. It is still checked before being taken
+  // apart: a shape this does not recognize is one this guest has no reading
+  // of, and guessing at it would put an unnamed key in front of `onUpdate`.
+  const onPortMessage = (event: MessageEvent): void => {
+    const message = event.data as HostMessage | undefined;
+    if (
+      message?.type !== HostMessageType.Update ||
+      !Array.isArray(message.data) || message.data.length !== 2 ||
+      typeof message.data[0] !== "string"
+    ) {
       return;
     }
-    if (!isHostMessage(decoded)) {
-      return;
-    }
-    const [key, value] = decoded.data;
+    const [key, value] = message.data;
     onUpdate(key, value);
   };
 
-  globalThis.addEventListener("message", onMessage);
+  // A guest window receives whatever anyone able to reach it posts, so the
+  // handoff is recognized by what it says and taken only once. A second one
+  // would replace a live port with one the host is not listening on.
+  const onHandoff = (event: MessageEvent): void => {
+    if (port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0]) {
+      return;
+    }
+    port = event.ports[0];
+    port.onmessage = onPortMessage;
+    port.start();
+    for (const message of unsent) {
+      port.postMessage(message);
+    }
+    unsent.length = 0;
+  };
+
+  globalThis.addEventListener("message", onHandoff);
 
   return {
     read(key: string): void {
-      toHost({ type: GuestMessageType.Read, data: key });
+      send({ type: GuestMessageType.Read, data: key });
     },
 
-    write(key: string, value: FabricValue): void {
-      toHost({ type: GuestMessageType.Write, data: [key, value] });
+    write(key: string, value: unknown): void {
+      send({ type: GuestMessageType.Write, data: [key, value] });
     },
 
     subscribe(...keys: string[]): void {
-      toHost({ type: GuestMessageType.Subscribe, data: keys });
+      send({ type: GuestMessageType.Subscribe, data: keys });
     },
 
     unsubscribe(...keys: string[]): void {
-      toHost({ type: GuestMessageType.Unsubscribe, data: keys });
+      send({ type: GuestMessageType.Unsubscribe, data: keys });
     },
 
     disconnect(): void {
-      globalThis.removeEventListener("message", onMessage);
+      globalThis.removeEventListener("message", onHandoff);
+      port?.close();
+      port = undefined;
     },
   };
 }
 
 /**
- * Reports an error to the host, which dispatches it as a `common-iframe-error`
- * event on the element.
+ * Raises an alarm the host dispatches as a `common-iframe-error` event on the
+ * element.
  *
- * Standalone rather than a {@link GuestContext} method, an error reporter
- * being a thing a guest installs ahead of whatever else it does.
+ * This goes to the guest's parent rather than over the port, so it reaches the
+ * host from a guest that has no working port -- a document whose scripts a
+ * policy blocked, or one that failed before the handoff. It is the one thing
+ * that route carries, and it is one-way: a guest cannot be answered on it.
  */
 export function reportGuestError(error: GuestError): void {
   globalThis.parent.postMessage(
-    realmFromFabricValue({ type: GuestMessageType.Error, data: error }),
+    { type: GuestMessageType.Error, data: error },
     "*",
   );
 }

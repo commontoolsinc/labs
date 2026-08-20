@@ -124,7 +124,7 @@ async function main() {
         id,
         graph,
         mainSpecifier,
-        program.files,
+        program,
       );
       const pattern = (exports as Record<string, unknown>)?.default as
         | PatternContract

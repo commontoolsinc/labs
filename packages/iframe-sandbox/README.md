@@ -48,30 +48,41 @@ Guest content reaches the context through
 import { connectGuestContext } from "@commonfabric/iframe-sandbox/guest";
 
 const guest = connectGuestContext((key, value) => {
-  // `value` is the `FabricValue` the host read for `key`.
+  // `value` is what the host read for `key`.
 });
 
 guest.subscribe("counter");
-guest.write("counter", 1n);
+guest.write("counter", 1);
 ```
 
-`reportGuestError(error)` is the other half of the client, sending an error the
-host dispatches as a `common-iframe-error` event on the element. It stands apart
-from `connectGuestContext()` because an error reporter is a thing a guest
-installs ahead of whatever else it does.
+The host and the guest hold the two ends of a `MessagePort`, and every message
+of this protocol crosses on it. A guest may call these operations at once: the
+port arrives once the document has loaded, and what is said before it does is
+sent when it comes, in the order it was said.
 
-Each message crosses in either direction as a single `codec-realm` encoding —
-the whole message, not the value inside it — which carries the whole
-`FabricValue` domain: a `FabricBytes` arrives as a `FabricBytes` rather than as
-the bare object structured cloning would leave. Both realms run the same
-`@commonfabric/data-model`, which is what makes an encoding written in one
-decodable in the other. What stays plain is the addressing the outer frame
-routes on, which it reads and so cannot have encoded.
-
-`read()` does not return the value: the host answers a read the same way it
+`read()` does not return the value. The host answers a read the same way it
 announces a subscribed key's change, so both arrive at the handler.
 
+### Raising an alarm without a port
+
+`reportGuestError(error)` reaches the host by the guest's parent rather than by
+the port, so it works from a guest that has no working port — a document whose
+scripts a policy blocked, or one that failed before the handoff. The host
+dispatches it as a `common-iframe-error` event on the element.
+
+That route carries nothing else. It is one-way, and a guest cannot be answered
+on it; anything a guest means to say about the context goes over the port.
+
 ## How it works
+
+Three realms are involved, all in the browser: the **host** page holding the
+element, the **outer frame** it renders, and the **guest** in the inner frame.
+The outer frame carries the CSP and loads documents. It routes nothing of this
+protocol — the host hands each freshly loaded guest one end of a `MessagePort`,
+and the two talk directly.
+
+The one thing the outer frame passes along is whatever the guest posts to it,
+which it forwards without reading, that being the alarm route described above.
 
 `common-iframe-sandbox` is a [Lit] element that manages rendering content in an
 iframe, using [CSP]. Due to
@@ -89,8 +100,11 @@ frame that propagates to the inner (untrusted) frame across browsers.
 
 ## Missing Functionality
 
-- Audit the IPC communication (`postMessage()`) with origin-bounds and ensure
-  other frames can't spoof messages.
+- Audit the remaining `postMessage()` communication with origin-bounds and
+  ensure other frames can't spoof messages. This covers the host's exchange with
+  the outer frame and the alarm route out of a guest; the key/value traffic
+  between host and guest is not among it, a port being reachable only by whoever
+  holds an end.
 - Abort on unsupported browsers.
 - Further testing.
 

@@ -36,7 +36,7 @@ const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
 const HOST_WINDOW = window.parent;
 const INNER_WINDOW = iframe.contentWindow;
-let FRAME_ID = null;
+let documentAsked = false;
 
 iframe.addEventListener("load", onInnerLoad);
 window.addEventListener("message", onMessage);
@@ -45,80 +45,55 @@ window.addEventListener("error", onOuterError);
 toHost({ type: "ready" });
 
 function onMessage(e) {
-  // The inner frame's payload is passed through without being read. It is a
-  // \`codec-realm\` encoding, whose shape is the format's business and not
-  // this frame's, and the host is what decodes and vets it.
+  // Anything the guest posts here is forwarded without being read. It has a
+  // port for everything the key/value protocol says, so this route carries
+  // only a guest reporting that it could not use that port.
   if (e.source === INNER_WINDOW) {
-    assertInitialized();
-    toHost({
-      id: FRAME_ID,
-      type: "passthrough",
-      data: e.data,
-    });
+    toHost({ type: "guest-error", data: e.data });
     return;
   }
 
-  // What this frame routes on, it reads.
-  if (!e.data || typeof e.data.type !== "string") {
+  if (e.source !== HOST_WINDOW || e.origin !== HOST_ORIGIN) {
     return;
   }
 
-  if (e.source === HOST_WINDOW && e.origin === HOST_ORIGIN) {
-    // Handle initialization, receiving the frame ID.
-    if (FRAME_ID == null && e.data.type === "init") {
-      FRAME_ID = e.data.id;
-      return;
-    }
-
-    if (FRAME_ID == null || FRAME_ID !== e.data.id) {
-      return;
-    }
-
-    switch (e.data.type) {
-      case "init": {
-        // There shouldn't be a second "init" command.
-        return;
-      }
-      case "load-document": {
-        iframe.srcdoc = e.data.data;
-        return;
-      }
-      case "passthrough": {
-        toInner(e.data.data);
-        return;
-      }
-    }
+  if (e.data && e.data.type === "load-document") {
+    documentAsked = true;
+    iframe.srcdoc = e.data.data;
   }
 }
 
 function onInnerLoad(e) {
-  // The iframe can fire its load event before
-  // loading the srcdoc contents in some browsers.
-  // Ignore, and wait for initialization to occur.
-  if (FRAME_ID == null) {
+  // The frame fires this for the empty document it starts on, before there is
+  // a guest at all. Reporting that one would announce a load the host never
+  // asked for and offer a port to nothing, so the first document the host asks
+  // for is where this starts counting.
+  if (!documentAsked) {
     return;
   }
-  toHost({ type: "load", id: FRAME_ID });
+  // The host takes this as its cue to hand the new document a port: a fresh
+  // document is a fresh realm, and the port the previous one held died with
+  // it.
+  toHost({ type: "load" });
 }
 
 function onOuterError({ message, filename, lineno, colno, error }) {
-  // Not all browsers can directly send the \`ErrorEvent\` object.
-  toHost({ type: "error", id: FRAME_ID, data: { message, filename, lineno, colno, error }})
-}
-
-function assertInitialized() {
-  if (FRAME_ID == null) {
-    throw new Error("Expected frame to be assigned an id.");
-  }
+  // Not all browsers can directly send the \`ErrorEvent\` object, and the one
+  // named \`error\` does not survive the crossing with its class, so what goes
+  // is what reads back.
+  toHost({ type: "outer-error", data: {
+    message,
+    filename,
+    lineno,
+    colno,
+    error: error && error.stack ? error.stack : String(error),
+  }})
 }
 
 function toHost(data) {
   HOST_WINDOW.postMessage(data, HOST_ORIGIN);
 }
 
-function toInner(data) {
-  INNER_WINDOW.postMessage(data, "*");
-}
 	<\/script>
 <\/body>
 <\/html>

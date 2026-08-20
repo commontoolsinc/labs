@@ -152,6 +152,47 @@ describe("resolveLocalProgram", () => {
     }
   });
 
+  it("carries the data files the resolve step attached", async () => {
+    const root = await tree({ "main.tsx": "export default 1;\n" });
+    try {
+      const program = await resolveLocalProgram(async (resolver) => {
+        const main = await resolver.main();
+        return {
+          main: main.name,
+          files: [main, { name: "/data/cities.json", contents: "[]\n" }],
+          dataFiles: ["/data/cities.json"],
+        };
+      }, { main: join(root, "main.tsx"), root });
+      assertEquals(program.dataFiles, ["/data/cities.json"]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("adds a given path to what the resolve step attached", async () => {
+    const root = await tree({
+      "main.tsx": "export default 1;\n",
+      "data/notes.txt": "note\n",
+    });
+    try {
+      const program = await resolveLocalProgram(async (resolver) => {
+        const main = await resolver.main();
+        return {
+          main: main.name,
+          files: [main, { name: "/data/cities.json", contents: "[]\n" }],
+          dataFiles: ["/data/cities.json"],
+        };
+      }, {
+        main: join(root, "main.tsx"),
+        root,
+        dataFilePaths: [join(root, "data/notes.txt")],
+      });
+      assertEquals(program.dataFiles, ["/data/cities.json", "/data/notes.txt"]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("carries the named export through", async () => {
     const root = await tree({ "main.tsx": "export const view = 1;\n" });
     try {

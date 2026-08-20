@@ -28,7 +28,7 @@ import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { isCell } from "../cell.ts";
 import { h } from "./h.ts";
-import { createNodeFactory, lift } from "./module.ts";
+import { createNodeFactory } from "./module.ts";
 import type {
   Cell as CellType,
   FactoryInput,
@@ -481,27 +481,26 @@ export function wish<T = unknown>(
   })(param);
 }
 
+let strFactory:
+  | NodeFactory<{ strings: string[]; values: unknown[] }, string>
+  | undefined;
+
 // Example:
 // str`Hello, ${name}!`
 //
-// TODO(seefeld): This should be a built-in module
 export function str(
   strings: TemplateStringsArray,
   ...values: unknown[]
 ): Reactive<string> {
-  const interpolatedString = ({
-    strings,
-    values,
-  }: {
-    strings: TemplateStringsArray;
-    values: unknown[];
-  }) =>
-    strings.reduce(
-      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      "",
-    );
+  strFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "str",
+  });
 
-  return lift(interpolatedString)({ strings, values });
+  // Spread the template strings into a plain array: a `TemplateStringsArray`
+  // carries a `raw` property that the binding walk does not preserve, and the
+  // interpolation reads only the indexed chunks.
+  return strFactory({ strings: [...strings], values }) as Reactive<string>;
 }
 
 /**

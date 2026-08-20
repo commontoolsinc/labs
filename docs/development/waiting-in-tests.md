@@ -996,6 +996,30 @@ MutationObserver hub would have nothing to pulse on and the wait would fall back
 to the coarse 500-millisecond in-page backstop. That polls more slowly than the
 50-millisecond loop it would replace.
 
+So the poll stays, and what it reports when it gives up is what has to carry the
+diagnosis. On its own, a `waitFor` timeout says only that a predicate did not
+come true, with a stack that points at `waitFor` and nothing about the page.
+`waitForState` catches that and adds a block naming the view it was awaiting,
+the identity it was awaiting where one was given, the last state it managed to
+read, and what the page held at the moment it gave up: the document's URL,
+title, and HTTP status, whether the shell's `x-root-view` element is in it,
+whether `globalThis.app` is there and which view it holds, and the tail of
+console messages `Page.applyConsoleFormatter` retains in the page. The page half
+of that is `readShellPageProbe` in
+`packages/integration/shell-page-probe.ts`; `describeStateWaitFailure` in
+`shell-utils.ts` assembles the whole block, and a test may call it directly to
+report a wait of its own the same way.
+
+`ShellIntegration.goto()` checks one of those facts before it starts waiting at
+all. The shell's entry document carries an `x-root-view` element, so a document
+without one is not the shell, and every wait that follows reads state through
+`globalThis.app`, which such a document never defines. `assertShellDocument`
+fails the navigation there and then, naming the document that arrived. The case
+this catches is a server answering with something other than the shell — for
+instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
+its own fetch to the shell dev server fails. Without the check, every test in
+the run waits out the full minute and reports nothing that names the cause.
+
 ### A human-in-the-loop flow that no CI lane runs
 
 `packages/patterns/google/core/integration/google-calendar-importer.test.ts`

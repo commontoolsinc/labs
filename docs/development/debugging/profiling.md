@@ -204,11 +204,57 @@ Reaching uninstrumented ground is a result, not a dead end. A large root share
 says those spans ran outside every wrapped region, and the next move is to wrap
 one level above the thing you were chasing and run again — which is step 2 of
 this list with a better vantage point. Say so explicitly rather than reporting
-the attributable fraction as though it were the whole. The level where a count stops being
+the attributable fraction as though it were the whole.
+
+The same capture usually says where to put that span:
+
+```bash
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=traverse --roots --ignore=tx/read
+```
+
+Two views, from data already in hand. The first drops the transparency that
+attribution applies to the harness phases — for a span nothing else encloses,
+they are the only thing that locates it, and they say *when* in the run it
+happened. The second names what finished most recently before each one, which
+is a caller nobody wrapped: it ran, returned, and the work followed it.
+
+A name concentrated in both is where a span would attribute the most. The two
+disagreeing is worth more than either alone, because they answer different
+questions. And `--ignore` matters more than it looks: a key emitted constantly
+is always the nearest thing to have ended, so it crowds the second view without
+handing off to anything — dropping it is what lets the real predecessor show. The level where a count stops being
 proportional to the work and starts being proportional to the work squared is
 the level that introduced the multiplication — that is the caller to fix, and it
 is frequently not the
 function the profile ranked first.
+
+## 4b. Ask where the elapsed time went, which is a different question
+
+Everything above sums spans. Every measure is an elapsed start-to-end duration,
+so that sum is cumulative elapsed span time — useful, and not CPU: it already
+contains whatever a span waited through, and a nested span counts the same
+interval again inside its parent, so the total can exceed the run itself. CPU
+attribution is what step 3's sampling profile is for.
+
+Wall time asks about coverage instead — the union of the intervals beneath a
+span against that span's own duration:
+
+```bash
+deno run --allow-read skills/perf-investigation/scripts/wall-time.ts /tmp/measures.json
+```
+
+What is left over is time the span was open and nothing instrumented was
+running. That is the shape of waiting: for a server, a timer, a lock, or work
+nobody has wrapped. It is invisible to every view that sums, because summing
+attributes only what ran.
+
+Two things the output cannot tell you, and one it can. It cannot distinguish a
+blocking round trip from uninstrumented compute — both are simply absence — and
+a gap is not automatically a problem. What it can say is where the absence is
+and how much is at stake. A stretch that keeps following the same span is the
+one to chase: that span handed off to something nobody wrapped, and wrapping
+what follows is what turns the question into an answer.
 
 ## 5. Isolate, then pin it with a benchmark
 

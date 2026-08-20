@@ -504,6 +504,18 @@ let _timingMeasureCapReported = false;
 let _timingMeasureSequence = 0;
 
 /**
+ * Whether the next span would actually reach the timeline.
+ *
+ * Emission being on is not the same as a measure being emitted: once the cap is
+ * reached nothing more is written, and a caller that pays to build a detail
+ * should stop paying at the same moment — which is precisely the longest run,
+ * where it would otherwise cost the most.
+ */
+export function willEmitTimingMeasure(): boolean {
+  return _emitTimingMeasures && _timingMeasuresEmitted < _timingMeasureCap;
+}
+
+/**
  * What marks a measure as this logger's.
  *
  * The performance timeline is shared with whatever else the host instruments,
@@ -512,6 +524,54 @@ let _timingMeasureSequence = 0;
  * human scanning a timeline can tell logger spans from application ones.
  */
 export const TIMING_MEASURE_PREFIX = "cf:";
+
+/**
+ * What separates a span's key from the detail naming that one instance.
+ *
+ * A detail identifies which of many spans on a key this one was — which action
+ * ran, which document was read — and it belongs to the emitted measure alone.
+ * Putting it in the key instead would multiply the statistics by every value it
+ * takes, which is the cost the keys are deliberately shaped to avoid: a key is
+ * a place in the code, not an occurrence.
+ */
+export const TIMING_MEASURE_DETAIL = "|";
+
+/**
+ * Make a key or a detail safe to put in a measure name.
+ *
+ * Reversibly, because both are arbitrary strings a caller chose: substituting
+ * the separators away would map `a|b` and `a/b` onto one name, and two actions
+ * that differ only there would then report as one row. Percent-encoding is the
+ * cheapest thing that survives a round trip, and `%` goes first so decoding
+ * cannot mistake an encoded byte for one the caller wrote.
+ */
+export function encodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%", "%25")
+    .replaceAll(TIMING_MEASURE_DETAIL, "%7C")
+    .replaceAll("#", "%23");
+}
+
+/** The inverse of {@link encodeMeasureField}. */
+export function decodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%23", "#")
+    .replaceAll("%7C", TIMING_MEASURE_DETAIL)
+    .replaceAll("%25", "%");
+}
+
+/** The detail carried by an emitted measure, if it has one. */
+export function detailOfMeasure(name: string): string | undefined {
+  const body = name.startsWith(TIMING_MEASURE_PREFIX)
+    ? name.slice(TIMING_MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(TIMING_MEASURE_DETAIL);
+  return bar === -1
+    ? undefined
+    : decodeMeasureField(withoutSequence.slice(bar + 1));
+}
 
 function getEnvMeasuresEnabled(): boolean {
   if (isDeno()) {
@@ -1001,6 +1061,35 @@ export class Logger {
   }
 
   /**
+   * Ends a timer as `timeEnd()` does, and names this one span on the timeline.
+   *
+   * The detail reaches the emitted measure and nothing else: the statistics
+   * stay keyed by the path alone, so a caller can identify an occurrence
+   * without multiplying the rows by every value the detail takes.
+   */
+  timeEndDetailed(
+    detail: string | (() => string),
+    ...keys: string[]
+  ): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this.#activeTimers.get(keyPath);
+    if (startTime === undefined) return undefined;
+    this.#activeTimers.delete(keyPath);
+    const elapsed = performance.now() - startTime;
+    // Resolved only when it will be used. A caller whose detail costs anything
+    // to produce passes a function, and pays nothing on the ordinary path
+    // where emission is off — which is every production run — nor once the cap
+    // has stopped emission partway through one.
+    const resolved = !willEmitTimingMeasure()
+      ? undefined
+      : typeof detail === "function"
+      ? detail()
+      : detail;
+    this.#recordTime(elapsed, keys, startTime, resolved);
+    return elapsed;
+  }
+
+  /**
    * Records a timing measurement directly. Useful for measuring IPC latency,
    * or any other case where the timestamps are already in hand.
    *
@@ -1214,7 +1303,12 @@ export class Logger {
    * Records timing against the full key path only, with no rollup to the
    * shorter paths.
    */
-  #recordTime(elapsed: number, keys: string[], startTime?: number): void {
+  #recordTime(
+    elapsed: number,
+    keys: string[],
+    startTime?: number,
+    detail?: string,
+  ): void {
     const path = keys.join("/");
     let store = this.#timingsByKey.get(path);
     if (!store) {
@@ -1226,7 +1320,7 @@ export class Logger {
     }
     store.record(elapsed);
     if (_emitTimingMeasures && startTime !== undefined) {
-      this.#emitMeasure(path, startTime, elapsed);
+      this.#emitMeasure(path, startTime, elapsed, detail);
     }
   }
 
@@ -1241,7 +1335,12 @@ export class Logger {
    * there is nothing to gain from marking the boundaries and looking them up
    * again — the mark-based spelling costs several times as much.
    */
-  #emitMeasure(path: string, startTime: number, elapsed: number): void {
+  #emitMeasure(
+    path: string,
+    startTime: number,
+    elapsed: number,
+    detail?: string,
+  ): void {
     if (_timingMeasuresEmitted >= _timingMeasureCap) {
       if (!_timingMeasureCapReported) {
         _timingMeasureCapReported = true;
@@ -1254,8 +1353,16 @@ export class Logger {
       return;
     }
     try {
+      // Both fields are encoded, not just the detail: a key is a caller's
+      // string as much as a detail is, and one containing a separator would
+      // otherwise be parsed back as a key and a detail that were never there.
+      const named = detail === undefined
+        ? encodeMeasureField(path)
+        : `${encodeMeasureField(path)}${TIMING_MEASURE_DETAIL}${
+          encodeMeasureField(detail)
+        }`;
       performance.measure(
-        `${TIMING_MEASURE_PREFIX}${path}#${++_timingMeasureSequence}`,
+        `${TIMING_MEASURE_PREFIX}${named}#${++_timingMeasureSequence}`,
         {
           start: startTime,
           end: startTime + elapsed,
