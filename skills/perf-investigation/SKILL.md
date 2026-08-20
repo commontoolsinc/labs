@@ -150,6 +150,13 @@ you begin and what you can trust:
   problem, many asking for a little is a frequency one, and they are fixed at
   opposite ends of the stack.
 
+Ask the next question rather than reporting the first table. Who calls it,
+frequency or width, is the unit cost flat, and — the one most easily skipped —
+who calls the _heavy_ instances, whose callers are routinely not the typical
+ones. `docs/development/debugging/profiling.md` carries that ladder. A chain
+that reaches uninstrumented ground has produced a result rather than a dead end:
+it names where to wrap next.
+
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
 hypothesis. Confirm it correlates — that it moves with the real measurement

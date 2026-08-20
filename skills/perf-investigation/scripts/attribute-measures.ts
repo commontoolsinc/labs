@@ -14,6 +14,9 @@
  *   # many reads each traverse issues
  *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --via=traverse
  *
+ *   # and who calls the heavy ones specifically — usually not the same answer
+ *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --via=traverse --heavy=1000
+ *
  *   # the most common full call chains
  *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --chains
  *
@@ -38,6 +41,7 @@ function flag(name: string): string | undefined {
 const path = Deno.args.find((arg) => !arg.startsWith("--"));
 const target = flag("key");
 const via = flag("via");
+const heavy = Number(flag("heavy") ?? "0");
 const wantChains = Deno.args.includes("--chains");
 
 if (!target) {
@@ -108,6 +112,44 @@ if (wantChains) {
     if (children > row.max) row.max = children;
     byCaller.set(caller, row);
   }
+  // How lopsided the distribution is. A handful of parents holding most of the
+  // children is the single most useful thing this can say: it means the fix is
+  // aimed at those instances rather than at the call site in general.
+  const counts = [...perParent.values()].sort((a, b) => b - a);
+  const viaTotal = spans.filter((sp) => sp.key === via).length;
+  const childTotal = counts.reduce((a, b) => a + b, 0);
+  if (childTotal > 0) {
+    const buckets: [string, number, number][] = [
+      ["1000+", 1000, Infinity],
+      ["300-999", 300, 1000],
+      ["100-299", 100, 300],
+      ["10-99", 10, 100],
+      ["1-9", 1, 10],
+    ];
+    console.log(`\nhow ${target} is spread across ${via} spans:`);
+    console.log(`  ${target} each      ${via}     ${target}    share`);
+    let covered = 0;
+    for (const [label, lo, hi] of buckets) {
+      const inB = counts.filter((c) => c >= lo && c < hi);
+      if (inB.length === 0) continue;
+      const sum = inB.reduce((a, b) => a + b, 0);
+      covered += inB.length;
+      console.log(
+        `  ${label.padEnd(12)} ${String(inB.length).padStart(9)} ${
+          String(sum).padStart(9)
+        } ${((sum / childTotal * 100).toFixed(1) + "%").padStart(8)}`,
+      );
+    }
+    const idle = viaTotal - covered;
+    if (idle > 0) {
+      console.log(
+        `  ${"none".padEnd(12)} ${String(idle).padStart(9)} ${
+          "0".padStart(9)
+        } ${"0.0%".padStart(8)}`,
+      );
+    }
+  }
+
   console.log(`\nvia ${via} — one row per caller of ${via}:`);
   console.log(
     `  ${via}    ${target}   per ${via}    max      ms  caller`,
@@ -125,6 +167,35 @@ if (wantChains) {
         row.ms.toFixed(0).padStart(7)
       }  ${caller}`,
     );
+  }
+  if (heavy > 0) {
+    // The callers of the heavy instances specifically, which are usually not
+    // the callers of the call site in general.
+    const chains = new Map<string, { n: number; children: number }>();
+    for (const [parent, children] of perParent) {
+      if (children < heavy) continue;
+      const chain = collapseRepeats(ancestors(spans, parent)).slice(0, 4);
+      const sig = chain.length ? chain.join("  <  ") : ROOT;
+      const row = chains.get(sig) ?? { n: 0, children: 0 };
+      row.n++;
+      row.children += children;
+      chains.set(sig, row);
+    }
+    console.log(
+      `\ncallers of ${via} spans with ${heavy}+ ${target} ` +
+        `(${[...chains.values()].reduce((a, b) => a + b.n, 0)} of them):`,
+    );
+    for (
+      const [sig, row] of [...chains].sort((a, b) =>
+        b[1].children - a[1].children
+      )
+    ) {
+      console.log(
+        `  ${String(row.n).padStart(5)} ${via}  ${
+          String(row.children).padStart(8)
+        } ${target}   ${sig}`,
+      );
+    }
   }
 } else {
   const byCaller = new Map<string, { n: number; ms: number }>();

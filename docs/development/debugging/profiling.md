@@ -167,11 +167,35 @@ deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
   /tmp/measures.json --key=tx/read --chains     # the full chains
 ```
 
-Read the `--via` table for the ratio rather than the totals, because the two
-shapes it separates have different fixes: many parent spans doing a little each
-is a frequency problem, and few parent spans doing a great deal each is a width
-problem. A large root share is not a gap in the data — it says those spans ran
-outside every instrumented region, which is the next thing to wrap. The level where a count stops being
+### Keep asking until the shape stops changing
+
+Each answer here suggests the next question, and the investigation is not
+finished when one of them returns a number — it is finished when the shape stops
+changing. Drive it yourself rather than stopping at the first table:
+
+1. **What dominates?** Aggregate. If one key is most of the spans, it is the
+   subject.
+2. **Who calls it?** Attribute. A key that runs everywhere names no caller in
+   its own row.
+3. **Frequency or width?** Read `--via` for the ratio, not the totals. Many
+   callers doing a little each is a frequency problem, fixed by calling less.
+   Few doing a great deal each is a width problem, fixed by making one call ask
+   for less — and those live at opposite ends of the stack.
+4. **Is the unit cost flat?** Compare time per child across the buckets. Flat
+   means volume and nothing else; rising with size means a second defect inside
+   the heavy calls, and it is worth separating before either is fixed.
+5. **Who calls the heavy ones?** `--heavy=N`. This is the question most easily
+   skipped, and its answer is routinely different from step 2's — a call site
+   can be dominated by a handful of instances whose callers are nothing like the
+   typical one.
+6. **Repeat on whatever step 5 named**, until either a pattern repeats across
+   the heavy instances or the chain reaches uninstrumented ground.
+
+Reaching uninstrumented ground is a result, not a dead end. A large root share
+says those spans ran outside every wrapped region, and the next move is to wrap
+one level above the thing you were chasing and run again — which is step 2 of
+this list with a better vantage point. Say so explicitly rather than reporting
+the attributable fraction as though it were the whole. The level where a count stops being
 proportional to the work and starts being proportional to the work squared is
 the level that introduced the multiplication — that is the caller to fix, and it
 is frequently not the
