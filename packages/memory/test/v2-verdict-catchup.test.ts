@@ -341,12 +341,14 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
   assertEquals(verdict.ok?.seq, 2);
 
   // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
-  // state — unlike a stubbed flushSessions, which never consumes it.
-  const original = server.syncSessionForConnection.bind(server);
+  // state — at the CONNECTION delivery layer, below the evaluation
+  // boundary (an evaluation failure is logged and its frame skipped
+  // rather than requeued; this pin is about transport-class failures).
+  const original = committer.refreshDirty.bind(committer);
   let calls = 0;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     calls += 1;
     if (calls === 1) {
       return Promise.reject(new Error("synthetic fan-out failure"));
@@ -599,17 +601,20 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-requeue-origin",
   });
-  const { server, space, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
   // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
-  // write would. The requeue merge must not let the newer origin win:
-  // provenance survives only when both batches agree.
-  const original = server.syncSessionForConnection.bind(server);
+  // write would. The failure is at the CONNECTION delivery layer (below
+  // the evaluation boundary), so the requeue merge runs, and it must not
+  // let the newer origin win: provenance survives only when both batches
+  // agree.
+  const original = committer.refreshDirty.bind(committer);
   let failed = false;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     if (!failed) {
       failed = true;
       server.markSpaceDirty(space, ["space of:doc:b"], {
