@@ -14,7 +14,8 @@ Reconciler: the land-off integration agent, 2026-08-20. Worktree
 owner's approval: ONE integration branch, **merge `origin/main` INTO the
 train** (never rebase — the arc's recorded SHAs stay valid), a
 first-class interaction review of main's tx-boundary work against the
-train's scheduler metadata, full verification, ONE integration PR. The
+train's scheduler metadata, full verification, ONE integration PR — opened as
+[#6096](https://github.com/commontoolsinc/labs/pull/6096). The
 flag (`EXPERIMENTAL_SERVER_EXECUTION`) stays OFF everywhere:
 `SERVER_EXECUTION_DEFAULT_ENABLED = false` on the merged tree — the
 train lands dark.
