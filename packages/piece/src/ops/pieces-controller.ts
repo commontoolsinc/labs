@@ -14,6 +14,7 @@ import {
   type Session,
 } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { setLLMUrl } from "@commonfabric/llm";
 import {
   applyPieceSourceTransition,
   type Cell,
@@ -275,7 +276,7 @@ export class PiecesController<T = unknown> {
    * and its replica down with it.
    *
    * A pattern that navigates to a piece has that piece recorded in the
-   * space's registry.
+   * space's registry, and one that reaches the LLM reaches this deployment's.
    */
   static async initialize(
     {
@@ -315,6 +316,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
+    setLLMUrl(api.toString());
     // Holds the controller built below, which the navigate callback reads and
     // the runtime takes at construction. A pattern navigates only from a
     // running piece, and the controller is what starts one.
