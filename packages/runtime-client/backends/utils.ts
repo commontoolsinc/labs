@@ -100,10 +100,17 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
  * shape is the declaration's -- `getLoggerFlagsBreakdown()` reports records to
  * the leaf -- and what the declaration leaves open is the leaves themselves,
  * `Logger` taking a `Record<string, unknown>` and constraining it no further.
- * So the whole question is whether the breakdown is a `FabricValue`.
+ * So the leaves are what this asks about.
  *
- * A breakdown that is not one throws rather than travelling with the offending
- * metadata dropped. Dropping it would leave the payload reporting a flag whose
+ * The records above them are addressing rather than payload: a logger's name,
+ * a flag's name, and the id it was raised for. Those are keys, and a
+ * `FabricValue` refuses `constructor` and `__proto__` as keys, so asking the
+ * question of the whole breakdown at once would refuse a flag for what it is
+ * called. A flag's id reaches here from a pattern's own function name, so that
+ * is a live shape rather than a contrived one.
+ *
+ * Metadata that does not vet throws rather than travelling with the offending
+ * value dropped. Dropping it would leave the payload reporting a flag whose
  * metadata had silently gone, which is the loss "Death before confusion!"
  * rules out.
  *
@@ -114,12 +121,20 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
 export function assertFabricLoggerFlags(
   breakdown: LoggerFlagsBreakdown,
 ): asserts breakdown is LoggerFlagsData {
-  if (isValidFabricValue(breakdown)) return;
+  for (const [logger, flags] of Object.entries(breakdown)) {
+    for (const [flag, byId] of Object.entries(flags)) {
+      for (const [id, metadata] of Object.entries(byId)) {
+        // A flag raised without metadata, which is what `null` means here.
+        if ((metadata === null) || isValidFabricValue(metadata)) continue;
 
-  throw new Error(
-    "Cannot send logger flags on this connection, not being a " +
-      `\`FabricValue\`: ${backtickQuote(toCompactDebugString(breakdown))}`,
-  );
+        throw new Error(
+          "Cannot send logger flag metadata on this connection, not being a " +
+            `\`FabricValue\`: \`${logger}\` \`${flag}\` \`${id}\` is ` +
+            backtickQuote(toCompactDebugString(metadata)),
+        );
+      }
+    }
+  }
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {

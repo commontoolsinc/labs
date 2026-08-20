@@ -2948,6 +2948,18 @@ describe("assertFabricLoggerFlags", () => {
     expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
   });
 
+  it("accepts a flag named or keyed with a reserved property name", () => {
+    // A `FabricValue` refuses `constructor` and `__proto__` as keys, and a
+    // flag's id arrives from a pattern's own function name, so asking the
+    // question of the whole breakdown would refuse a flag for what it is
+    // called. Only the metadata is the payload.
+    const flags = {
+      runner: { constructor: { constructor: { a: 1 } } },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
+  });
+
   it("throws, rendering what it refused", () => {
     // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
     // shape that would otherwise cross as something the far side cannot read.
@@ -2961,7 +2973,7 @@ describe("assertFabricLoggerFlags", () => {
     // flag's own id rather than the whole string, so a change to how a `Date`
     // renders does not read as this breaking.
     expect(() => assertFabricLoggerFlags(flags)).toThrow(
-      /Cannot send logger flags on this connection, not being a `FabricValue`/,
+      /Cannot send logger flag metadata on this connection/,
     );
     expect(() => assertFabricLoggerFlags(flags)).toThrow(/action:bad/);
   });
