@@ -172,18 +172,26 @@ if (wantDetail) {
       let label = "(nothing before)";
       for (let j = lo - 1; j >= 0; j--) {
         const candidate = spans[ends[j]];
-        // Only spans nothing encloses, and never the target itself. A child of
-        // whatever ran previously is almost always the nearest thing to have
-        // ended, and it says nothing: it belongs to that work rather than
-        // handing off to this. The previous top-level span is the handoff.
-        if (candidate.parent !== -1 || candidate.key === target) continue;
-        if (ignored.has(candidate.key)) continue;
+        // Top level in the same sense the root count uses — no *instrumented*
+        // caller — rather than no parent at all. A span whose only parent is a
+        // transparent harness phase is top level for this purpose, and reading
+        // the raw parent here would have discarded exactly the handoffs worth
+        // finding, since a rootless target usually sits inside such a phase.
+        if (candidate.key === target || ignored.has(candidate.key)) continue;
+        if (callerOf(spans, ends[j]) !== undefined) continue;
         label = candidate.key;
         break;
       }
       before.set(label, (before.get(label) ?? 0) + 1);
     }
-    console.log("\nwhat finished most recently before each began:");
+    console.log(
+      `\nwhat finished most recently before each began` +
+        `${
+          ignored.size === 0
+            ? " (ignoring nothing)"
+            : ` (ignoring ${[...ignored].join(", ")})`
+        }:`,
+    );
     for (
       const [key, n] of [...before].sort((a, b) => b[1] - a[1]).slice(0, 12)
     ) {
