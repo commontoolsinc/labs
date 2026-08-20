@@ -1,7 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
+  acceptsJUnitPath,
   assertTaskTestsIncluded,
   initializeDb,
+  junitCapableMembers,
+  memberTestTask,
   parseDisabledPackageList,
   readWorkspaceMembers,
   runTests,
@@ -452,5 +455,112 @@ Deno.test("runTests reports a failure when every member is disabled", async () =
     assertEquals(await ranPackages(dir, ["a", "b"]), []);
   } finally {
     await Deno.remove(dir, { recursive: true });
+  }
+});
+
+// The runner reads each member's manifest to decide whether an appended
+// --junit-path reaches its `deno test` whole, so an ordinary new package is
+// covered without being named anywhere.
+Deno.test("acceptsJUnitPath reads an ordinary test task", () => {
+  assertEquals(acceptsJUnitPath("./packages/x", "deno test"), true);
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "ENV=test deno test --no-check -A"),
+    true,
+  );
+  assertEquals(acceptsJUnitPath("./packages/x", undefined), false);
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "echo 'No tests defined.'"),
+    false,
+  );
+});
+
+Deno.test("acceptsJUnitPath refuses a task whose flag would land elsewhere", () => {
+  // The appended flag reaches only the last command of a chain, which is
+  // how a benchmark once received a --junit-path meant for the tests.
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test test/ && deno run -A perf.ts"),
+    false,
+  );
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test a/ ; deno test b/"),
+    false,
+  );
+  assertEquals(
+    acceptsJUnitPath("./packages/x", "deno test > results.txt"),
+    false,
+  );
+});
+
+Deno.test("acceptsJUnitPath takes a runner only when it is known to forward", () => {
+  const runner = "deno run -A test/run-tests.ts";
+  assertEquals(acceptsJUnitPath("./packages/piece", runner), true);
+  assertEquals(acceptsJUnitPath("./tasks", runner), true);
+  assertEquals(acceptsJUnitPath("./packages/cli", runner), false);
+  assertEquals(acceptsJUnitPath("./packages/dashboard", runner), false);
+});
+
+Deno.test("memberTestTask accepts a directory path as well as a URL", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-root-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    // A plain path is the natural thing to pass, and reading through it
+    // must find the manifest rather than quietly reporting none.
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+    assertEquals(
+      await memberTestTask("./packages/probe", new URL(`file://${dir}/`)),
+      "deno test",
+    );
+    // Without the trailing slash a member resolves beside the directory
+    // rather than inside it, which reads as a member with no manifest.
+    assertEquals(
+      await memberTestTask("./packages/probe", new URL(`file://${dir}`)),
+      "deno test",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("memberTestTask reads deno.json ahead of deno.jsonc", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-manifest-order-" });
+  try {
+    await Deno.mkdir(`${dir}/packages/probe`, { recursive: true });
+    // Deno resolves deno.json first, so that is the task that governs.
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.json`,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    await Deno.writeTextFile(
+      `${dir}/packages/probe/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "echo 'No tests defined.'" } }),
+    );
+    assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("the workspace's capable members are read from their manifests", async () => {
+  const rootUrl = new URL("../", import.meta.url);
+  const members = await readWorkspaceMembers(new URL("deno.jsonc", rootUrl));
+  const capable = await junitCapableMembers(members, rootUrl);
+
+  // An ordinary package, a flag-forwarding runner, and a member whose task
+  // ends in a `deno test`, all of which take the flag.
+  for (
+    const member of ["./packages/navigation", "./tasks", "./packages/runner"]
+  ) {
+    assertEquals(capable.has(member), true, `${member} should take the flag`);
+  }
+  // A chained task, a runner that runs several test commands, and a
+  // browser harness, none of which do.
+  for (
+    const member of ["./packages/api", "./packages/cli", "./packages/dashboard"]
+  ) {
+    assertEquals(capable.has(member), false, `${member} should not`);
   }
 });

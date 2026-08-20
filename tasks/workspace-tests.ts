@@ -191,44 +191,97 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
   tasks: { total: 3, envVar: "TASK_TEST_SHARD" },
 };
 
-// Members whose `deno task test` runs exactly one `deno test` (directly, or
-// through a runner that forwards trailing flags to one), so an appended
-// --junit-path lands on it whole. The runner threads the flag to these and
-// ingests the XML into the spool as unit-kind records when recording is on.
-// The exceptions and why they stay out: api, patterns, and ui run two test
-// commands in one task line, so the flag reaches only the second; cli's
-// run-tests.ts runs three deno test invocations per slice, which would each
-// overwrite the file; static, content-hash, data-model, memory, pure-json,
-// spec-model, and state-inspector route `test` through a task graph that
-// appends arguments nowhere; identity, iframe-sandbox, and dashboard run
-// browser harnesses that record through the deno-web-test reporter instead;
-// home-schemas, generated-patterns, and patterns/auth have no tests.
-const JUNIT_CAPABLE_MEMBERS = new Set([
+// A member's test task takes an appended `--junit-path` whole when it runs
+// exactly one `deno test`. That is read from the task itself, so a package
+// that lands with an ordinary test task is covered without being listed
+// anywhere. Two shapes are not readable from the task line, and both are
+// named below.
+//
+// A task carrying a shell metacharacter puts the appended flag somewhere
+// other than the test command: `api` chains a type-performance benchmark
+// after its tests, and `patterns` and `ui` run two test commands each, so
+// the flag would reach only the last one.
+//
+// A task that runs a script cannot show what the script does with the
+// flags it is handed. The members listed here route through a runner that
+// forwards them to one `deno test`. The runners that do not appear here
+// keep their leaves out: `cli` runs three `deno test` invocations per
+// slice, which would each overwrite the file, and `dashboard`, `identity`,
+// and `iframe-sandbox` drive browser harnesses that record through the
+// deno-web-test reporter instead.
+const FLAG_FORWARDING_RUNNERS = new Set([
   "./packages/agents-host",
-  "./packages/background-piece-service",
-  "./packages/cf-harness",
-  "./packages/connectors/agents",
-  "./packages/deno-web-test",
-  "./packages/felt",
-  "./packages/fuse",
-  "./packages/html",
-  "./packages/integration",
-  "./packages/js-compiler",
-  "./packages/leb128",
-  "./packages/lib-shell",
-  "./packages/llm",
   "./packages/piece",
-  "./packages/runner",
-  "./packages/runtime-client",
-  "./packages/schema-generator",
-  "./packages/shell",
-  "./packages/test-support",
-  "./packages/toolshed",
-  "./packages/ts-transformers",
-  "./packages/utils",
-  "./scripts",
   "./tasks",
 ]);
+
+/**
+ * A directory, given as a path or a URL, as a URL that member paths
+ * resolve against. The trailing slash is what makes a member resolve
+ * inside the directory rather than beside it.
+ */
+function directoryUrl(root: string | URL): URL {
+  const url = root instanceof URL
+    ? new URL(root.href)
+    : path.toFileUrl(path.resolve(root));
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  return url;
+}
+
+/**
+ * The `test` task a member's manifest defines, when it defines one.
+ * `deno.json` is read first because Deno resolves it first, so a member
+ * carrying both is read the way its own tooling reads it.
+ */
+export async function memberTestTask(
+  member: string,
+  root: string | URL = Deno.cwd(),
+): Promise<string | undefined> {
+  const rootUrl = directoryUrl(root);
+  for (const manifest of ["deno.json", "deno.jsonc"]) {
+    let text: string;
+    try {
+      text = await Deno.readTextFile(new URL(`${member}/${manifest}`, rootUrl));
+    } catch {
+      continue;
+    }
+    const tasks = (parseJsonc(text) as {
+      tasks?: Record<string, string | { command?: string }>;
+    })?.tasks;
+    const task = tasks?.test;
+    const command = typeof task === "string" ? task : task?.command;
+    if (command !== undefined) return command;
+  }
+  return undefined;
+}
+
+/**
+ * Whether an appended `--junit-path` reaches this member's `deno test`
+ * whole, so the runner can thread the flag and ingest the XML it writes.
+ */
+export function acceptsJUnitPath(
+  member: string,
+  task: string | undefined,
+): boolean {
+  if (FLAG_FORWARDING_RUNNERS.has(member)) return true;
+  if (task === undefined) return false;
+  if (/[&;|<>]/.test(task)) return false;
+  return /(^|\s)deno test(\s|$)/.test(task);
+}
+
+/** The members whose leaves take the flag, read from their manifests. */
+export async function junitCapableMembers(
+  members: readonly string[],
+  root: string | URL = Deno.cwd(),
+): Promise<Set<string>> {
+  const capable = new Set<string>();
+  for (const member of members) {
+    if (acceptsJUnitPath(member, await memberTestTask(member, root))) {
+      capable.add(member);
+    }
+  }
+  return capable;
+}
 
 // The identity scope of a unit: the package name with any internal slice
 // label stripped, so the records of "cli (3/10)" and "cli (7/10)" join.
@@ -351,6 +404,14 @@ export async function runTests(
   const fragment = spoolDir !== undefined && junitRoot !== undefined
     ? FragmentWriter.open(spoolDir)
     : undefined;
+  // Read once here rather than per unit: an internally sharded package
+  // appears as several units that share one manifest.
+  const capable = junitRoot !== undefined
+    ? await junitCapableMembers(
+      units.map((unit) => unit.memberPath),
+      new URL(`file://${path.resolve(workspaceCwd)}/`),
+    )
+    : new Set<string>();
 
   const results: PackageResult[] = [];
   let nextUnit = 0;
@@ -361,10 +422,9 @@ export async function runTests(
       const unit = units[nextUnit++];
       console.log(`Testing ${unit.packageName}...`);
       const packagePath = path.resolve(workspaceCwd, unit.memberPath);
-      const junitPath =
-        junitRoot !== undefined && JUNIT_CAPABLE_MEMBERS.has(unit.memberPath)
-          ? path.join(junitRoot, `${unitSlug(unit.packageName)}.xml`)
-          : undefined;
+      const junitPath = junitRoot !== undefined && capable.has(unit.memberPath)
+        ? path.join(junitRoot, `${unitSlug(unit.packageName)}.xml`)
+        : undefined;
       const result = await testPackage(
         unit.memberPath,
         unit.packageName,
