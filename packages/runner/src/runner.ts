@@ -5128,21 +5128,34 @@ export class Runner {
   }
 
   /**
+   * The module's content-addressed `$implRef` — the defining module's content
+   * identity plus the registered artifact's export/`__cfReg` symbol — when it
+   * is structurally whole. A ref missing either half addresses nothing, so it
+   * reads the same as no ref at all, and every caller treats it that way.
+   */
+  private contentAddressedImplRef(
+    module: Module,
+  ): { identity: string; symbol: string } | undefined {
+    const ref = (module as { $implRef?: { identity: string; symbol: string } })
+      .$implRef;
+    return ref && typeof ref.identity === "string" &&
+        typeof ref.symbol === "string"
+      ? ref
+      : undefined;
+  }
+
+  /**
    * Resolve a module's implementation through its content-addressed
-   * `$implRef` (the defining module's content identity + the registered
-   * artifact's export/`__cfReg` symbol). Returns undefined on a miss (no ref,
-   * never registered, or rolled out of the bounded index) — callers fall back
-   * to the legacy ref or the stringified source.
+   * `$implRef`. Returns undefined when the module carries no usable ref or the
+   * ref names an implementation this runtime never registered; the caller then
+   * falls through to the module's live implementation, and failing that to the
+   * stringified source.
    */
   private resolveByImplRef(
     module: Module,
   ): ((...args: any[]) => any) | undefined {
-    const ref = (module as { $implRef?: { identity: string; symbol: string } })
-      .$implRef;
-    if (
-      !ref || typeof ref.identity !== "string" ||
-      typeof ref.symbol !== "string"
-    ) {
+    const ref = this.contentAddressedImplRef(module);
+    if (!ref) {
       return undefined;
     }
     const artifact = this.runtime.patternManager.artifactFromIdentitySync(
@@ -6561,8 +6574,7 @@ export class Runner {
   private getFallbackJavaScriptImplementation(
     module: Module,
   ): (...args: any[]) => any {
-    const implRef =
-      (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
+    const implRef = this.contentAddressedImplRef(module);
     if (implRef) {
       // The module carries a content-addressed `$implRef` — it was expected to
       // resolve through the verified registry — yet resolution fell through to
