@@ -59,9 +59,10 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
  *   lines versus baseline across the changed, gated coverage groups, and
  *   `groups`, the per-group baseline-versus-this-PR breakdown. When the gate
- *   passed only because the debt was accepted, `overridden` is set. The poster
- *   rebuilds an existing comment into a collapsed summary of where the PR left
- *   coverage; it does nothing when there is no existing comment to update.
+ *   passed only because the debt was accepted, `overridden` is set and `files`
+ *   names what the acceptance is standing in for. The poster rebuilds an
+ *   existing comment into a collapsed summary of where the PR left coverage; it
+ *   does nothing when there is no existing comment to update.
  */
 export interface CoverageCommentPayload {
   prNumber: number;
@@ -77,6 +78,9 @@ export interface CoverageCommentPayload {
    * changed group's debt was accepted with a per-group acceptance or the reset
    * marker, not because the new code is covered. */
   overridden?: boolean;
+  /** Present when `overridden` is set: the files holding the uncovered lines
+   * the acceptance covers for. */
+  files?: CoverageSuggestionFileLines[];
 }
 
 /**
@@ -901,6 +905,22 @@ function uncoveredLineCount(count: number): string {
 }
 
 /**
+ * The Markdown bullet list naming each file and how many of the lines it adds
+ * no test executes. Both coverage comments render it, in the same words, so a
+ * reader who has seen one recognizes the other.
+ */
+function uncoveredFileList(
+  files: CoverageSuggestionFileLines[],
+  omitted: number,
+): string[] {
+  const lines = files.map((file) =>
+    `- \`${file.relativePath}\` — ${uncoveredLineCount(file.uncoveredCount)}`
+  );
+  if (omitted > 0) lines.push(`- _…and ${omitted} more file(s)._`);
+  return lines;
+}
+
+/**
  * Render the disclosure `<summary>`, leading with the detective emoji. The
  * regression comment wraps the line in an `<h3>` so it stands out while the
  * details are open; the resolved comment uses `<strong>`, a quieter weight that
@@ -1025,16 +1045,7 @@ export function buildCoverageDebtSuggestionComment(
   out.push("### Files with new uncovered lines");
   out.push("");
   if (files.length > 0) {
-    for (const file of files) {
-      out.push(
-        `- \`${file.relativePath}\` — ${
-          uncoveredLineCount(file.uncoveredCount)
-        }`,
-      );
-    }
-    if (omitted > 0) {
-      out.push(`- _…and ${omitted} more file(s)._`);
-    }
+    out.push(...uncoveredFileList(files, omitted));
   } else {
     out.push(
       "Could not tie the regression to specific files from the diff (the " +
@@ -1253,11 +1264,19 @@ function coverageChangeText(baseline: number, current: number): string {
  * `overridden` is set the gate passed only because the debt was accepted with an
  * override or the reset marker, so the summary says the metric was overridden
  * rather than implying the new code is covered.
+ *
+ * `files` names where those uncovered lines are, and is rendered only under an
+ * override. This comment replaces an earlier regression body in place, and that
+ * body is the only place the attribution was ever written down: without it here,
+ * accepting the debt erases the answer to "which file" from the pull request.
+ * The other two resolutions have no such answer to keep — the debt was covered
+ * rather than accepted.
  */
 export function buildCoverageResolvedComment(
   improvedLines: number,
   groups: CoverageResolvedGroup[],
   overridden = false,
+  files: CoverageSuggestionFileLines[] = [],
 ): string {
   const summary = overridden
     ? "Code coverage debt accepted with an override."
@@ -1299,6 +1318,15 @@ export function buildCoverageResolvedComment(
         "uncovered lines.",
     );
   }
+
+  const limited = limitSuggestionFiles(files);
+  if (overridden && limited.files.length > 0) {
+    out.push("");
+    out.push("### Files with new uncovered lines");
+    out.push("");
+    out.push(...uncoveredFileList(limited.files, limited.omitted));
+  }
+
   out.push("");
   out.push("</details>");
 
