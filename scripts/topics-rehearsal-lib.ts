@@ -1,7 +1,8 @@
 /**
- * Shared plumbing for the Topics content export/restore pair
- * (`topics-export.ts`, `topics-restore.ts`). Both scripts shell out to the
- * `cf` CLI rather than importing runtime internals, so they track the CLI's
+ * Shared plumbing for the Topics rehearsal scripts — the content
+ * export/restore pair (`topics-export.ts`, `topics-restore.ts`) and the
+ * migration driver (`topics-migrate.ts`). All three shell out to the `cf`
+ * CLI rather than importing runtime internals, so they track the CLI's
  * contract — the surface the rehearsal runbook already teaches — instead of
  * private APIs.
  */
@@ -65,6 +66,102 @@ export async function cfApply(
       `cf piece apply ${addr.join(" ")} exited ${code}\n${err.trim()}`,
     );
   }
+}
+
+/**
+ * Run `cf` with the operator's terminal attached and return its exit code
+ * without throwing.
+ *
+ * A migration step is minutes of work per piece, so its output belongs on
+ * the operator's screen as it happens rather than in a buffer the caller
+ * prints afterwards. The exit code comes back instead of an exception
+ * because the caller classifies the failure — a compatibility refusal and an
+ * unreachable server are different events and stop the run differently.
+ */
+export async function cfInherit(args: string[]): Promise<number> {
+  const command = new Deno.Command("deno", {
+    args: ["task", "--quiet", "cf", ...args],
+    cwd: repoRoot,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await command.output();
+  return code;
+}
+
+/** One row of the migration manifest: a piece and the pattern identity it
+ * carried when the manifest was taken. */
+export interface ManifestRow {
+  id: string;
+  identity: string;
+  filename: string;
+}
+
+/**
+ * Parse the migration manifest the rehearsal runbook produces — one
+ * tab-separated `id, pattern identity, pattern filename` row per piece in
+ * the space.
+ *
+ * A row whose identity column reads `unresolved` is kept rather than
+ * dropped: the runbook's count check is what decides whether the manifest
+ * describes the space, and silently discarding rows here would make a
+ * manifest that failed to resolve look like a smaller space.
+ */
+export function parseManifest(text: string): ManifestRow[] {
+  const rows: ManifestRow[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    const [id, identity, filename] = line.split("\t");
+    if (id === undefined || identity === undefined) {
+      throw new Error(`manifest row is not id/identity tab-separated: ${line}`);
+    }
+    rows.push({ id, identity, filename: filename ?? "-" });
+  }
+  return rows;
+}
+
+/** What the migration driver decided about one piece before touching it. */
+export type MigrationDisposition = "pending" | "moved" | "missing";
+
+/** One piece's place in the plan: what the manifest recorded, what the store
+ * says now, and which of the three that makes it. */
+export interface PlannedPiece {
+  id: string;
+  recorded: string;
+  current: string | undefined;
+  disposition: MigrationDisposition;
+}
+
+/**
+ * Decide what remains to be migrated, from recorded state rather than from a
+ * candidate.
+ *
+ * The question this answers is "has this piece moved off the identity the
+ * manifest recorded for it?" — not "is this piece already running the source
+ * I am about to apply?" The second needs the candidate compiled and still
+ * would not see the source transition, revision history, or repository
+ * metadata that `setPattern` owns; the first is decidable from the store
+ * alone, which is what makes an interrupted migration resumable by
+ * re-invocation. It is the check the rehearsal runbook prescribes under
+ * "Driving the migration".
+ *
+ * A piece the store no longer describes is `missing` rather than an error:
+ * the run stops on it, but naming which piece vanished is more useful than
+ * a throw from inside a loop.
+ */
+export function planMigration(
+  rows: readonly ManifestRow[],
+  currentIdentity: (id: string) => string | undefined,
+): PlannedPiece[] {
+  return rows.map((row) => {
+    const current = currentIdentity(row.id);
+    const disposition: MigrationDisposition = current === undefined
+      ? "missing"
+      : current === row.identity
+      ? "pending"
+      : "moved";
+    return { id: row.id, recorded: row.identity, current, disposition };
+  });
 }
 
 /** The authored scalar fields of a topic's argument document. Everything a
