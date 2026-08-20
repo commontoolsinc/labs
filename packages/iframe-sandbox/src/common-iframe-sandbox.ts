@@ -53,9 +53,10 @@ export class CommonIframeSandboxElement extends LitElement {
   private subscriptions: Map<string, Receipt> = new Map();
 
   /**
-   * Handles the outer frame reporting itself ready, which it does once per
-   * document it loads into that frame. Loads `src` if there is one to load;
-   * otherwise the next assignment to `src` does it.
+   * Handles the outer frame reporting itself ready, which it does once, on its
+   * own load. The guest documents that follow are each announced by their own
+   * load rather than by this. Loads `src` if there is one; otherwise the next
+   * assignment to `src` does it.
    */
   private onOuterReady() {
     if (this.initialized) {
@@ -69,9 +70,8 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * Gives the newly loaded guest one end of a fresh channel and takes the
-   * other. Each document is its own realm, so each gets its own port; a
-   * previous one is already closed by the time this runs, `loadInnerDoc()`
-   * having closed it as it asked for the replacement.
+   * other. Each document is its own realm, so each gets a port of its own, and
+   * no earlier one is left open behind it.
    */
   private openGuestPort() {
     this.closeGuestPort();
