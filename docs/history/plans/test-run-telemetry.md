@@ -2,7 +2,8 @@
 status: historical
 created: 2026-08-17
 archived: 2026-08-19
-reason: "Executed plan; every test run is recorded, the store is applied, and the contract lives in specs/test-records.md."
+reason: "Executed plan; every test run is recorded and the store is applied."
+superseded-by: docs/specs/test-records.md
 ---
 
 # Tracking every test run
