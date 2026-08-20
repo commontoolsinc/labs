@@ -35,13 +35,36 @@ export interface Span {
 /** Emitted entries carry this, so clearing can be selective. */
 export const MEASURE_PREFIX = "cf:";
 
-/** `cf:cell/get/user-data#4127` names the span `cell/get/user-data`. */
+/** Separates a key from the detail naming one occurrence of it. */
+export const MEASURE_DETAIL = "|";
+
+/**
+ * `cf:cell/get/user-data#4127` names the span `cell/get/user-data`, and
+ * `cf:scheduler/run/action|topics/main#88` names `scheduler/run/action`.
+ *
+ * The detail is deliberately not part of the key: a key is a place in the code
+ * and grouping by it is the whole point, so an occurrence's identity is
+ * stripped here and read separately by anything that wants it.
+ */
 export function keyOf(name: string): string {
   const body = name.startsWith(MEASURE_PREFIX)
     ? name.slice(MEASURE_PREFIX.length)
     : name;
   const hash = body.lastIndexOf("#");
-  return hash === -1 ? body : body.slice(0, hash);
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(MEASURE_DETAIL);
+  return bar === -1 ? withoutSequence : withoutSequence.slice(0, bar);
+}
+
+/** Which occurrence this span was, where the emitter named one. */
+export function detailOf(name: string): string | undefined {
+  const body = name.startsWith(MEASURE_PREFIX)
+    ? name.slice(MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(MEASURE_DETAIL);
+  return bar === -1 ? undefined : withoutSequence.slice(bar + 1);
 }
 
 /**

@@ -48,14 +48,20 @@ interface Bucket {
   children: Map<string, Bucket>;
 }
 
-/** `cf:cell/get/user-data#4127` names the span `cell/get/user-data`. */
+/**
+ * `cf:cell/get/user-data#4127` names the span `cell/get/user-data`, and a
+ * `|detail` after the key names one occurrence of it, which this view groups
+ * away — see `attribute-measures.ts --detail` for reading it.
+ */
 const MEASURE_PREFIX = "cf:";
 function keyOf(name: string): string {
   const body = name.startsWith(MEASURE_PREFIX)
     ? name.slice(MEASURE_PREFIX.length)
     : name;
   const hash = body.lastIndexOf("#");
-  return hash === -1 ? body : body.slice(0, hash);
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf("|");
+  return bar === -1 ? withoutSequence : withoutSequence.slice(0, bar);
 }
 
 function emptyBucket(path: string, depth: number): Bucket {

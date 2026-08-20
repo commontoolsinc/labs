@@ -17,6 +17,9 @@
  *   # and who calls the heavy ones specifically — usually not the same answer
  *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --via=traverse --heavy=1000
  *
+ *   # which occurrences a key's spans were, where the emitter named them
+ *   deno run --allow-read attribute-measures.ts measures.json --key=scheduler/run/action --detail
+ *
  *   # the most common full call chains
  *   deno run --allow-read attribute-measures.ts measures.json --key=tx/read --chains
  *
@@ -30,7 +33,10 @@ import {
   buildForest,
   callerOf,
   collapseRepeats,
+  detailOf,
+  keyOf,
   loadMeasures,
+  type MeasureEntry,
 } from "./measure-forest.ts";
 
 function flag(name: string): string | undefined {
@@ -43,6 +49,7 @@ const target = flag("key");
 const via = flag("via");
 const heavy = Number(flag("heavy") ?? "0");
 const wantChains = Deno.args.includes("--chains");
+const wantDetail = Deno.args.includes("--detail");
 
 if (!target) {
   console.error(
@@ -52,7 +59,8 @@ if (!target) {
   Deno.exit(1);
 }
 
-const spans = buildForest(await loadMeasures(path));
+const entries = await loadMeasures(path);
+const spans = buildForest(entries);
 const hits: number[] = [];
 for (let i = 0; i < spans.length; i++) {
   if (spans[i].key === target) hits.push(i);
@@ -73,7 +81,43 @@ console.log(`${target}: ${hits.length} spans, ${totalMs.toFixed(0)}ms total`);
 
 const ROOT = "(root — no instrumented span above)";
 
-if (wantChains) {
+if (wantDetail) {
+  // Read from the entries rather than the forest: a detail names an occurrence
+  // and the forest keeps only what containment needs, which is the key.
+  const byDetail = new Map<string, { n: number; ms: number }>();
+  let unnamed = 0;
+  for (const entry of entries as MeasureEntry[]) {
+    if (keyOf(entry.name) !== target) continue;
+    const detail = detailOf(entry.name);
+    if (detail === undefined) {
+      unnamed++;
+      continue;
+    }
+    const row = byDetail.get(detail) ?? { n: 0, ms: 0 };
+    row.n++;
+    row.ms += entry.duration;
+    byDetail.set(detail, row);
+  }
+  if (byDetail.size === 0) {
+    console.log(
+      `\nNo span of ${target} carries a detail. Only some keys name their ` +
+        `occurrences — \`scheduler/run/action\` names the action that ran.`,
+    );
+  } else {
+    console.log(`\n  spans       ms   ms each  which occurrence`);
+    for (
+      const [detail, row] of [...byDetail].sort((a, b) => b[1].ms - a[1].ms)
+        .slice(0, 25)
+    ) {
+      console.log(
+        `${String(row.n).padStart(7)} ${row.ms.toFixed(0).padStart(8)} ${
+          (row.ms / row.n).toFixed(2).padStart(9)
+        }  ${detail}`,
+      );
+    }
+    if (unnamed > 0) console.log(`\n${unnamed} span(s) carried no detail.`);
+  }
+} else if (wantChains) {
   const chains = new Map<string, number>();
   for (const i of hits) {
     // Aggregate on the whole chain; truncating first would merge callers that

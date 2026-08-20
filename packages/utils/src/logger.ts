@@ -513,6 +513,28 @@ let _timingMeasureSequence = 0;
  */
 export const TIMING_MEASURE_PREFIX = "cf:";
 
+/**
+ * What separates a span's key from the detail naming that one instance.
+ *
+ * A detail identifies which of many spans on a key this one was — which action
+ * ran, which document was read — and it belongs to the emitted measure alone.
+ * Putting it in the key instead would multiply the statistics by every value it
+ * takes, which is the cost the keys are deliberately shaped to avoid: a key is
+ * a place in the code, not an occurrence.
+ */
+export const TIMING_MEASURE_DETAIL = "|";
+
+/** The detail carried by an emitted measure, if it has one. */
+export function detailOfMeasure(name: string): string | undefined {
+  const body = name.startsWith(TIMING_MEASURE_PREFIX)
+    ? name.slice(TIMING_MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(TIMING_MEASURE_DETAIL);
+  return bar === -1 ? undefined : withoutSequence.slice(bar + 1);
+}
+
 function getEnvMeasuresEnabled(): boolean {
   if (isDeno()) {
     try {
@@ -1001,6 +1023,23 @@ export class Logger {
   }
 
   /**
+   * Ends a timer as `timeEnd()` does, and names this one span on the timeline.
+   *
+   * The detail reaches the emitted measure and nothing else: the statistics
+   * stay keyed by the path alone, so a caller can identify an occurrence
+   * without multiplying the rows by every value the detail takes.
+   */
+  timeEndDetailed(detail: string, ...keys: string[]): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this.#activeTimers.get(keyPath);
+    if (startTime === undefined) return undefined;
+    this.#activeTimers.delete(keyPath);
+    const elapsed = performance.now() - startTime;
+    this.#recordTime(elapsed, keys, startTime, detail);
+    return elapsed;
+  }
+
+  /**
    * Records a timing measurement directly. Useful for measuring IPC latency,
    * or any other case where the timestamps are already in hand.
    *
@@ -1214,7 +1253,12 @@ export class Logger {
    * Records timing against the full key path only, with no rollup to the
    * shorter paths.
    */
-  #recordTime(elapsed: number, keys: string[], startTime?: number): void {
+  #recordTime(
+    elapsed: number,
+    keys: string[],
+    startTime?: number,
+    detail?: string,
+  ): void {
     const path = keys.join("/");
     let store = this.#timingsByKey.get(path);
     if (!store) {
@@ -1226,7 +1270,7 @@ export class Logger {
     }
     store.record(elapsed);
     if (_emitTimingMeasures && startTime !== undefined) {
-      this.#emitMeasure(path, startTime, elapsed);
+      this.#emitMeasure(path, startTime, elapsed, detail);
     }
   }
 
@@ -1241,7 +1285,12 @@ export class Logger {
    * there is nothing to gain from marking the boundaries and looking them up
    * again — the mark-based spelling costs several times as much.
    */
-  #emitMeasure(path: string, startTime: number, elapsed: number): void {
+  #emitMeasure(
+    path: string,
+    startTime: number,
+    elapsed: number,
+    detail?: string,
+  ): void {
     if (_timingMeasuresEmitted >= _timingMeasureCap) {
       if (!_timingMeasureCapReported) {
         _timingMeasureCapReported = true;
@@ -1254,8 +1303,16 @@ export class Logger {
       return;
     }
     try {
+      // The separators are structure, so a detail carrying one would make the
+      // name unparseable; they are replaced rather than the detail refused,
+      // because losing a span is a worse answer than renaming it.
+      const named = detail
+        ? `${path}${TIMING_MEASURE_DETAIL}${
+          detail.replaceAll(TIMING_MEASURE_DETAIL, "/").replaceAll("#", "_")
+        }`
+        : path;
       performance.measure(
-        `${TIMING_MEASURE_PREFIX}${path}#${++_timingMeasureSequence}`,
+        `${TIMING_MEASURE_PREFIX}${named}#${++_timingMeasureSequence}`,
         {
           start: startTime,
           end: startTime + elapsed,

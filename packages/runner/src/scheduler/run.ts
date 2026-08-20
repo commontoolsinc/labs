@@ -27,7 +27,10 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
-import { toActionRunTraceAddress } from "./diagnostics.ts";
+import {
+  getSchedulerActionTelemetryInfo,
+  toActionRunTraceAddress,
+} from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
@@ -47,6 +50,23 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+/**
+ * Which action a `scheduler/run/action` span belongs to.
+ *
+ * The key stays `scheduler/run/action` for every one of them, because a key
+ * names a place in the code and the statistics are keyed by it — naming the
+ * action there would multiply the rows by every action the runtime has ever
+ * run. The timeline is where an occurrence can be identified, so this rides
+ * along on the emitted measure instead, and only when emission is on.
+ *
+ * The module or pattern name is what a reader recognizes; the action id is the
+ * fallback for an action that carries neither.
+ */
+function actionMeasureDetail(action: Action, actionId: string): string {
+  const info = getSchedulerActionTelemetryInfo(action);
+  return info?.moduleName ?? info?.patternName ?? actionId;
+}
+
 export type ActionInvocationResult =
   | { ok: true; result: any }
   | { ok: false; error: unknown };
@@ -61,6 +81,8 @@ export function invokeReactiveAction(state: {
   readonly tx: IExtendedStorageTransaction;
   readonly actionStartTime: number;
 }): Promise<ActionInvocationResult> {
+  // Outside the `try`, because the failure paths below name the action too.
+  const measureDetail = actionMeasureDetail(args.action, args.actionId);
   try {
     // Track executing action for parent-child relationship tracking.
     state.setExecutingAction(args.action, args.actionId);
@@ -69,7 +91,7 @@ export function invokeReactiveAction(state: {
       state.runtime.harness.invoke(() => args.action(args.tx)),
     )
       .then((actionResult) => {
-        logger.timeEnd("scheduler", "run", "action");
+        logger.timeEndDetailed(measureDetail, "scheduler", "run", "action");
         state.clearExecutingAction();
         logger.debug("schedule-action-timing", () => {
           const duration = ((performance.now() - args.actionStartTime) / 1000)
@@ -81,12 +103,12 @@ export function invokeReactiveAction(state: {
         return { ok: true as const, result: actionResult };
       })
       .catch((error) => {
-        logger.timeEnd("scheduler", "run", "action");
+        logger.timeEndDetailed(measureDetail, "scheduler", "run", "action");
         state.clearExecutingAction();
         return { ok: false as const, error };
       });
   } catch (error) {
-    logger.timeEnd("scheduler", "run", "action");
+    logger.timeEndDetailed(measureDetail, "scheduler", "run", "action");
     state.clearExecutingAction();
     return Promise.resolve({ ok: false as const, error });
   }

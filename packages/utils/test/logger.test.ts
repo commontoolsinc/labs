@@ -14,6 +14,7 @@ import {
 } from "../src/logger.ts";
 import {
   clearTimingMeasures,
+  detailOfMeasure,
   getTimingMeasuresState,
   parseTimingMeasureCap,
   resetTimingMeasureBudget,
@@ -2174,6 +2175,60 @@ describe("logger", () => {
         performance.measure = realMeasure;
         performance.clearMeasures = realClear;
       }
+    });
+
+    it("names one span on the timeline without touching the statistics", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail");
+      logger.timeStart("scheduler", "run", "action");
+      logger.timeEndDetailed("topics/main", "scheduler", "run", "action");
+      logger.timeStart("scheduler", "run", "action");
+      logger.timeEndDetailed("topics/topic", "scheduler", "run", "action");
+
+      // One row, because a key is a place in the code — naming the occurrence
+      // in the key instead would multiply the statistics by every action the
+      // runtime has ever run, which is the cost this split exists to avoid.
+      expect(logger.getTimeStats("scheduler", "run", "action")?.count).toBe(2);
+
+      const details = performance.getEntriesByType("measure")
+        .filter((entry) =>
+          entry.name.startsWith(`${TIMING_MEASURE_PREFIX}scheduler/run/action`)
+        )
+        .map((entry) => detailOfMeasure(entry.name));
+      expect(details.sort()).toEqual(["topics/main", "topics/topic"]);
+    });
+
+    it("keeps a detail from making a name unparseable", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail-hostile");
+      logger.timeStart("phase", "twelve");
+      // The separators are structure. A detail carrying one is renamed rather
+      // than refused: losing the span would be the worse answer.
+      logger.timeEndDetailed("a|b#c", "phase", "twelve");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/twelve`)
+      );
+      expect(entry).toBeDefined();
+      expect(detailOfMeasure(entry!.name)).toBe("a/b_c");
+    });
+
+    it("reports no detail for a span that was not named", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-no-detail");
+      logger.timeStart("phase", "thirteen");
+      logger.timeEnd("phase", "thirteen");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/thirteen#`)
+      );
+      expect(entry).toBeDefined();
+      expect(detailOfMeasure(entry!.name)).toBeUndefined();
+
+      // Ending a timer that was never started reports nothing rather than
+      // inventing a span, exactly as the undetailed `timeEnd` does.
+      expect(logger.timeEndDetailed("x", "phase", "never-started"))
+        .toBeUndefined();
     });
   });
 });
