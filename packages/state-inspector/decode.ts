@@ -205,10 +205,10 @@ interface AnnotationLeave {
 type AnnotationFrame = AnnotationVisit | AnnotationLeave;
 
 /**
- * Largest schema, in bytes of JSON, written into annotated output as itself. A
- * link's schema is unbounded and routinely dwarfs the value carrying it —
- * kilobytes of `$defs` hanging off one array element — so a larger one is
- * summarized by `elideSchema()` instead. The bound is on rendered size rather
+ * Largest schema, in bytes of stored JSON, written into annotated output as
+ * itself. A link's schema is unbounded and routinely dwarfs the value carrying
+ * it — kilobytes of `$defs` hanging off one array element — so a larger one is
+ * summarized by `elideSchema()` instead. The bound is on stored size rather
  * than on depth, because a schema is metadata about the link rather than part
  * of the value's own shape, and so is not what a caller's `maxDepth` is
  * budgeting.
@@ -218,9 +218,29 @@ const MAX_INLINE_SCHEMA_BYTES = 200;
 const utf8 = new TextEncoder();
 
 /**
+ * Byte length of `value` as JSON. Falls back to measuring the annotated form
+ * for the values `JSON.stringify()` refuses — a `bigint` anywhere in the
+ * value, or a cycle — so that a schema holding one is still measurable rather
+ * than fatal.
+ *
+ * The measurement is of the value as stored, which a `FabricSpecialObject`
+ * under-reports: it stringifies to `{}` whatever it holds. Such a schema can
+ * therefore be written out inline while rendering a little longer than the
+ * bound. Nothing downstream reads the count as an allocation size.
+ */
+function jsonByteLength(value: Json): number {
+  try {
+    return utf8.encode(JSON.stringify(value)).length;
+  } catch {
+    const rendered = JSON.stringify(annotate(value, Number.POSITIVE_INFINITY));
+    return utf8.encode(rendered).length;
+  }
+}
+
+/**
  * Stand-in for a schema too large to write out as itself: its top-level keys,
- * the size in bytes of its rendered JSON, and a truncated hash of the stored
- * schema. Equal digests mean the two links almost certainly agree, which is
+ * its size in bytes as stored, and a truncated hash of it. Equal digests mean
+ * the two links almost certainly agree, which is
  * what makes a summary enough to answer whether one link's schema is stale
  * against another's; a truncated hash bounds that at "almost".
  *
@@ -258,11 +278,15 @@ function elideSchema(schema: Json, bytes: number): Json {
  * this rendering, so it stays the thing to compare two schemas by.
  */
 function renderLinkSchema(schema: Json, maxDepth: number): Json {
-  const rendered = annotate(schema, Number.POSITIVE_INFINITY);
-  if (!Number.isFinite(maxDepth)) return rendered;
-  const bytes = utf8.encode(JSON.stringify(rendered)).length;
+  if (!Number.isFinite(maxDepth)) {
+    return annotate(schema, Number.POSITIVE_INFINITY);
+  }
+  // Measured before rendering, so that a schema headed for a summary is never
+  // walked into a copy that only gets discarded. A space's worth of links each
+  // carrying kilobytes of `$defs` is the case that makes the difference.
+  const bytes = jsonByteLength(schema);
   return bytes <= MAX_INLINE_SCHEMA_BYTES
-    ? rendered
+    ? annotate(schema, Number.POSITIVE_INFINITY)
     : elideSchema(schema, bytes);
 }
 

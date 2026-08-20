@@ -102,8 +102,36 @@ describe("link-schema", () => {
         "properties",
         "required",
       ]);
-      expect(rendered.$elidedSchema.bytes).toBeGreaterThan(200);
+      expect(rendered.$elidedSchema.bytes).toBe(
+        new TextEncoder().encode(JSON.stringify(schema)).length,
+      );
       expect(typeof rendered.$elidedSchema.digest).toBe("string");
+    });
+
+    it("returns a summary sized by the stored schema rather than by its rendering", () => {
+      // A sigil renders longer than it is stored, so a summary measuring the
+      // rendering reports a size the store does not hold.
+      const schema = {
+        const: { "/": "of:target" },
+        description: "x".repeat(300),
+      };
+      const rendered = annotatedLink(sigilLink(schema)).schema as {
+        $elidedSchema: { bytes: number };
+      };
+      expect(rendered.$elidedSchema.bytes).toBe(
+        new TextEncoder().encode(JSON.stringify(schema)).length,
+      );
+    });
+
+    it("returns a summary of a schema `JSON.stringify()` refuses", () => {
+      // A `bigint` in a schema is not serializable, so the size that decides
+      // the summary comes from the annotated form instead of the stored one.
+      const schema = { const: 1n, description: "x".repeat(300) };
+      const rendered = annotatedLink(sigilLink(schema)).schema as {
+        $elidedSchema: { keys: string[]; bytes: number };
+      };
+      expect(rendered.$elidedSchema.keys).toEqual(["const", "description"]);
+      expect(rendered.$elidedSchema.bytes).toBeGreaterThan(300);
     });
 
     it("returns a large schema in full at infinite `maxDepth`", () => {
