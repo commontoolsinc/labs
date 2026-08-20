@@ -151,6 +151,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "anchored — does not survive on purpose; the current-day vote views " +
       "additionally empty because the pinned vintage is replayed long after " +
       "its capture day, while the stored votes survive whole.",
+    record: "docs/history/lunch-poll-identity-break.md",
   },
   {
     // The card half of the same decision: it published the viewer's name as
@@ -161,6 +162,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     reason: "Lunch-poll identity moved from display names to profile cells. " +
       "The card's published viewer-name identity is removed, and a name-keyed " +
       "vintage's capture user derives as not-joined under profile comparison.",
+    record: "docs/history/lunch-poll-identity-break.md",
   },
 ];
 

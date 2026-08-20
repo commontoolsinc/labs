@@ -9,10 +9,10 @@ once.
 > against `rapids`: a fresh `cf piece new`, a `setsrc` over a populated piece,
 > the smoke test, the state copy, and the reset handlers. The visit history and
 > its per-visit vote snapshots live in a plain **`PerSpace<HistoryEntry[]>`
-> array** (`visits`), each entry embedding its own vote snapshot.
-> Joins are profile-gated: an identity with no resolvable `#profile`
-> CANNOT join, and the gate answers loudly (`joinMessage`) rather than
-> silently no-opping — the smoke test below reads that verdict.
+> array** (`visits`), each entry embedding its own vote snapshot. Joins are
+> profile-gated: an identity with no resolvable `#profile` CANNOT join, and the
+> gate answers loudly (`joinMessage`) rather than silently no-opping — the smoke
+> test below reads that verdict.
 
 ## Where the data lives (mental model)
 
@@ -283,10 +283,10 @@ deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 > argument document itself is not validated that way, which is what step 2
 > resolves and what the loop above uses.
 
-> **Why the host seat is left behind.** `host` points at a participant's
-> profile cell, so copying it carries a link into the SOURCE piece exactly as
-> `visits` does. Leave it empty and the first person to join the copy becomes
-> host, or copy the roster and use **Become host**.
+> **Why the host seat is left behind.** `host` points at a participant's profile
+> cell, so copying it carries a link into the SOURCE piece exactly as `visits`
+> does. Leave it empty and the first person to join the copy becomes host, or
+> copy the roster and use **Become host**.
 
 > **Why `visits` needs the edit.** Each entry's `loggedBy`, and each embedded
 > vote's `voterLink`, is a live `Cell<User>` link into the **source** piece's
