@@ -20,7 +20,12 @@
  * `apiUrl` to target a running toolshed instead.
  */
 
-import { Identity } from "@commonfabric/identity";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
@@ -81,7 +86,7 @@ export interface MultiRuntimeHarnessOptions {
    */
   dataFilePaths?: readonly string[];
   /** Optional initial pattern input for the bootstrap-created piece. */
-  input?: Record<string, unknown>;
+  input?: Record<string, FabricValue>;
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
@@ -101,7 +106,7 @@ class WorkerClient {
   #nextId = 1;
   #pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    { resolve: (value: FabricValue) => void; reject: (error: Error) => void }
   >();
   readonly label: string;
 
@@ -120,7 +125,13 @@ class WorkerClient {
           new Error(`[${this.label}] ${event.data.error}`),
         );
       } else {
-        pending.resolve(event.data.ok);
+        try {
+          pending.resolve(fabricFromRealmValue(event.data.ok));
+        } catch (error) {
+          pending.reject(
+            new Error(`[${this.label}] undecodable answer`, { cause: error }),
+          );
+        }
       }
     };
     this.#worker.onerror = (event) => {
@@ -132,10 +143,27 @@ class WorkerClient {
     };
   }
 
-  call(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  /**
+   * Calls `cmd` in the worker realm, answering with what it returns.
+   *
+   * `args` and the answer each cross as one `codec-realm` encoding, so both
+   * carry the whole `FabricValue` domain. `rawIdentity` rides beside the
+   * encoded args and reaches the command as an ordinary argument, for the
+   * reason {@link WorkerRequest} gives.
+   */
+  call(
+    cmd: string,
+    args: Record<string, FabricValue> = {},
+    rawIdentity?: KeyPairRaw,
+  ): Promise<FabricValue> {
     const id = this.#nextId++;
-    const request: WorkerRequest = { id, cmd, args };
-    return new Promise((resolve, reject) => {
+    const request: WorkerRequest = {
+      id,
+      cmd,
+      args: realmFromFabricValue(args),
+      ...(rawIdentity !== undefined ? { rawIdentity } : {}),
+    };
+    return new Promise<FabricValue>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
@@ -185,7 +213,7 @@ export class MultiRuntimeSession {
    */
   async send(
     handler: string,
-    event: unknown = {},
+    event: FabricValue = {},
     trustedUi?: TrustedUiDescriptor,
     opts: { idle?: boolean } = {},
   ): Promise<void> {
@@ -206,7 +234,7 @@ export class MultiRuntimeSession {
    */
   async set(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("set", {
@@ -224,7 +252,7 @@ export class MultiRuntimeSession {
    */
   async push(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("push", {
@@ -235,14 +263,14 @@ export class MultiRuntimeSession {
   }
 
   /** Read a value from the piece result, pulling fresh state first. */
-  async read(path: (string | number)[] = []): Promise<unknown> {
+  async read(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("read", { path });
   }
 
   /** Read the RAW stored value at `path` (links resolved to the target cell,
    *  no result-schema shaping) — for state the declared schema does not
    *  carry, e.g. a query result's `requestHash`. */
-  async readRaw(path: (string | number)[] = []): Promise<unknown> {
+  async readRaw(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("readRaw", { path });
   }
 
@@ -268,12 +296,12 @@ export class MultiRuntimeSession {
       id: string;
       space: string;
       path?: (string | number)[];
-      scope?: unknown;
+      scope?: FabricValue;
     },
-  ): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  ): Promise<{ ok: boolean; value?: FabricValue; error?: string }> {
     return await this.#client.call("rawRead", address) as {
       ok: boolean;
-      value?: unknown;
+      value?: FabricValue;
       error?: string;
     };
   }
@@ -362,14 +390,13 @@ export class MultiRuntimeHarness {
           );
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
-          rawIdentity: identity.serialize(),
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
-        });
+        }, identity.serialize());
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
         );
@@ -382,11 +409,10 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
-        rawIdentity: sessions[0].identity.serialize(),
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
-      });
+      }, sessions[0].identity.serialize());
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
         rootPath: options.rootPath,

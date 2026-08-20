@@ -6,6 +6,12 @@
  * main thread orchestrates via a tiny request/response protocol.
  */
 
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "@commonfabric/runner";
 import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import {
@@ -24,28 +30,54 @@ import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-export interface WorkerRequest {
+/**
+ * A request to a worker realm.
+ *
+ * `args` crosses as one `codec-realm` encoding, that being the format written
+ * for a realm boundary, so a command's arguments carry the whole `FabricValue`
+ * domain rather than whatever structured cloning preserves of them. `id` and
+ * `cmd` are addressing and travel as themselves.
+ */
+export type WorkerRequest = {
   id: number;
   cmd: string;
-  args: Record<string, unknown>;
-}
+  args: RealmEncodedValue;
+  /**
+   * `init`'s key material, which rides beside the encoded args rather than
+   * within them, and reaches the handler as an ordinary `rawIdentity`
+   * argument.
+   *
+   * TODO(danfuzz): move this into `args`. A `KeyPairRaw` is not a
+   * `FabricValue` -- one arm is a pair of bare `Uint8Array`s and the other a
+   * pair of `CryptoKey`s -- so the encoder refuses one. The
+   * `InsecureCryptoKeyPair` marker in `@commonfabric/identity`'s
+   * `interface.ts` is the first arm; the second wants a fabric class for a
+   * key pair.
+   */
+  rawIdentity?: KeyPairRaw;
+};
 
+/**
+ * A response from a worker realm. `ok` is the command's answer as one
+ * `codec-realm` encoding, for the reason {@link WorkerRequest} gives; a
+ * command that fails answers with text instead.
+ */
 export type WorkerResponse =
-  | { id: number; ok: unknown }
+  | { id: number; ok: RealmEncodedValue }
   | { id: number; error: string };
 
-export interface TrustedUiDescriptor {
+export type TrustedUiDescriptor = {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
   surface: string;
   /** `data-ui-action` of the control inside the surface. */
   action: string;
-}
+};
 
-export interface RuntimeDiagnosticsSnapshot {
+export type RuntimeDiagnosticsSnapshot = {
   graph: SchedulerGraphSnapshot;
-  settleStatsHistory: unknown[];
-  actionRunTrace: unknown[];
-}
+  settleStatsHistory: FabricValue[];
+  actionRunTrace: FabricValue[];
+};
 
 let cc: PiecesController | undefined;
 let piece: PieceController | undefined;
@@ -81,25 +113,6 @@ async function attachPiece(next: PieceController): Promise<void> {
   resultSinkCancel?.();
   // Keep the result graph subscribed so server pushes reach this runtime.
   resultSinkCancel = result().sink(() => {});
-}
-
-/**
- * Make `value` postMessage-safe: keep JSON data, drop functions/cells,
- * stringify bigints (JSON.stringify throws on them).
- */
-function sanitizeForTransfer(value: unknown): unknown {
-  // TODO(danfuzz): most of what reaches here is a `FabricValue` read from a
-  // cell, and this narrows it to the JSON-compatible subset -- a
-  // `FabricPrimitive` becomes `{}`, a `bigint` becomes its own decimal text.
-  // A test that asserted on either would be asserting on the damage. The
-  // crossing is `postMessage`, so `codec-realm` carries the whole domain, and
-  // the harness decodes on the other side.
-  if (value === undefined) return undefined;
-  return JSON.parse(JSON.stringify(value, (_key, entry) => {
-    if (typeof entry === "function") return undefined;
-    if (typeof entry === "bigint") return entry.toString();
-    return entry;
-  }));
 }
 
 // Test-only network shaping: wrap this realm's WebSocket so every frame (both
@@ -218,7 +231,7 @@ async function maybeAttachOtelBridge(identity: Identity): Promise<void> {
 
 const handlers: Record<
   string,
-  (args: Record<string, unknown>) => Promise<unknown>
+  (args: Record<string, unknown>) => Promise<FabricValue>
 > = {
   async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
@@ -337,12 +350,12 @@ const handlers: Record<
       error?: { name?: string; message?: string };
     };
     if (doIdle !== false) await idle();
-    return sanitizeForTransfer({
+    return {
       ok: !res?.error,
       error: res?.error
         ? { name: res.error.name, message: res.error.message }
         : undefined,
-    });
+    };
   },
 
   // Faithful mirror of RuntimeProcessor.handleCellPush / CellHandle.push: a
@@ -366,12 +379,12 @@ const handlers: Record<
       error?: { name?: string; message?: string };
     };
     if (doIdle !== false) await idle();
-    return sanitizeForTransfer({
+    return {
       ok: !res?.error,
       error: res?.error
         ? { name: res.error.name, message: res.error.message }
         : undefined,
-    });
+    };
   },
 
   async read({ path }) {
@@ -381,7 +394,7 @@ const handlers: Record<
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    return sanitizeForTransfer(cell.get());
+    return cell.get();
   },
 
   /**
@@ -397,7 +410,7 @@ const handlers: Record<
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    return sanitizeForTransfer(cell.resolveAsCell().getRaw());
+    return cell.resolveAsCell().getRaw();
   },
 
   /**
@@ -414,12 +427,12 @@ const handlers: Record<
     }
     const resolved = cell.resolveAsCell();
     const link = resolved.getAsNormalizedFullLink();
-    return sanitizeForTransfer({
+    return {
       id: link.id,
       space: link.space,
       scope: link.scope,
       path: link.path,
-    });
+    };
   },
 
   // Raw replica read: a storage-transaction read at an explicit address,
@@ -435,13 +448,16 @@ const handlers: Record<
       type: "application/json",
       path: (path ?? []) as string[],
       ...(scope !== undefined ? { scope: scope as never } : {}),
-    } as never) as { ok?: { value?: unknown }; error?: { message?: string } };
+    } as never) as {
+      ok?: { value?: FabricValue };
+      error?: { message?: string };
+    };
     await tx.commit();
-    return sanitizeForTransfer({
+    return {
       ok: res.error === undefined,
       value: res.ok?.value,
       error: res.error?.message,
-    });
+    };
   },
 
   async idle() {
@@ -461,18 +477,19 @@ const handlers: Record<
   async diagnostics() {
     await idle();
     const scheduler = controller().runtime.scheduler;
-    return sanitizeForTransfer(
-      {
-        graph: scheduler.getGraphSnapshot(),
-        settleStatsHistory: scheduler.getSettleStatsHistory(),
-        actionRunTrace: scheduler.getActionRunTrace(),
-      } satisfies RuntimeDiagnosticsSnapshot,
-    );
+    return {
+      graph: scheduler.getGraphSnapshot(),
+      settleStatsHistory: scheduler.getSettleStatsHistory(),
+      actionRunTrace: scheduler.getActionRunTrace(),
+    } satisfies RuntimeDiagnosticsSnapshot;
   },
 
   async loggerCounts() {
     await idle();
-    return getLoggerCountsBreakdown();
+    // `LoggerBreakdown` is an index signature intersected with `total`, and
+    // `LogCounts` beneath it is an interface, so neither is assignable to
+    // `FabricPlainObject` however plain the counts are.
+    return getLoggerCountsBreakdown() as unknown as FabricValue;
   },
 
   async dispose() {
@@ -488,22 +505,44 @@ const handlers: Record<
 };
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
-  const { id, cmd, args } = event.data;
-  const handler = handlers[cmd];
+  const { id, cmd, args, rawIdentity } = event.data;
   const respond = (response: WorkerResponse) =>
     (self as unknown as Worker).postMessage(response);
+  const fail = (error: unknown) =>
+    respond({
+      id,
+      error: error instanceof Error
+        ? `${error.message}\n${error.stack ?? ""}`
+        : String(error),
+    });
+
+  const handler = handlers[cmd];
   if (!handler) {
     respond({ id, error: `unknown command "${cmd}"` });
     return;
   }
-  handler(args).then(
-    (ok) => respond({ id, ok }),
-    (error: unknown) =>
-      respond({
-        id,
-        error: error instanceof Error
-          ? `${error.message}\n${error.stack ?? ""}`
-          : String(error),
-      }),
+
+  // Every step from here is answered rather than thrown. A decode refuses a
+  // payload it cannot read and an encode refuses an answer outside the
+  // `FabricValue` domain, and either one thrown out of this listener would
+  // leave the caller waiting on a response that is never coming.
+  let decoded: Record<string, unknown>;
+  try {
+    decoded = fabricFromRealmValue(args) as Record<string, unknown>;
+    if (rawIdentity !== undefined) decoded = { ...decoded, rawIdentity };
+  } catch (error) {
+    fail(error);
+    return;
+  }
+
+  handler(decoded).then(
+    (ok) => {
+      try {
+        respond({ id, ok: realmFromFabricValue(ok) });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    fail,
   );
 };
