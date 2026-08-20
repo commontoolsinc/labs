@@ -73,7 +73,9 @@ describe("browser", () => {
       expect(errorOf({ action: "get", kind: "title", target: "h1" }))
         .toBe("get title does not take a target");
       expect(errorOf({ action: "get", kind: "text" }))
-        .toBe("get text requires a target");
+        .toBe(
+          "get text requires a target: a CSS selector such as body, or an @ref from a snapshot",
+        );
       expect(errorOf({ action: "get" }))
         .toBe("get requires kind title, url, or text");
       expect(errorOf({ action: "get", kind: "html" }))
