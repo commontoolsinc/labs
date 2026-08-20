@@ -50,7 +50,6 @@ import {
   useDeferredCancelOwnership,
 } from "./cancel.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
-import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,

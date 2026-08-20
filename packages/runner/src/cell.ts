@@ -76,7 +76,6 @@ import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,

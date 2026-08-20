@@ -34,7 +34,6 @@ import {
   internalVerifierRead,
   machineryRead,
 } from "./storage/reactivity-log.ts";
-import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
