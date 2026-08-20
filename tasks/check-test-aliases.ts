@@ -2,12 +2,12 @@
 /**
  * Guards tasks/test-identity-aliases.jsonl, the append-only file that
  * bridges test-identity renames for readers of the test-run record store
- * (docs/plans/test-run-telemetry.md). Each line maps an old identity — or
- * a whole scope, for package renames — to its replacement, with the date
- * of the rename; readers resolve aliases transitively and apply one only
- * to records older than its date. The parsing and resolution live in
- * @commonfabric/test-support/records; this gate holds the file itself to
- * history's rules.
+ * (docs/history/plans/test-run-telemetry.md). Each line maps an old
+ * identity — or a whole scope, for package renames — to its replacement,
+ * with the date of the rename; readers resolve aliases transitively and
+ * apply one only to records older than its date. The parsing and
+ * resolution live in @commonfabric/test-support/records; this gate holds
+ * the file itself to history's rules.
  *
  * The file is history, so existing lines are never edited or removed (the
  * committed content must be a prefix of the new content), every line must

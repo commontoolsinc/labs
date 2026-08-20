@@ -984,7 +984,7 @@ global, and a `waitForCondition` predicate runs in the page, so it could call
 
 First, the predicate is serialized into the page and closes over nothing from the
 test module, so everything it needs has to be inlined. `waitForState` compares
-views through `isAppViewEqual` from `@commonfabric/shell/shared`, and it compares
+views through `isAppViewEqual` from `@commonfabric/navigation`, and it compares
 identities by DID — which the serialized state does not carry. `serialize()`
 writes the identity out as a raw key pair, and `deserialize()` recovers the DID by
 importing that private key through `Identity.fromRaw`. An in-page predicate can
@@ -995,6 +995,50 @@ Second, an `AppState` transition does not reliably mutate the DOM, so the
 MutationObserver hub would have nothing to pulse on and the wait would fall back
 to the coarse 500-millisecond in-page backstop. That polls more slowly than the
 50-millisecond loop it would replace.
+
+So the poll stays, and what it reports when it gives up is what has to carry the
+diagnosis. On its own, a `waitFor` timeout says only that a predicate did not
+come true, with a stack that points at `waitFor` and nothing about the page.
+`waitForState` catches that and adds a block naming the view it was awaiting,
+the identity it was awaiting where one was given, the last state it managed to
+read, and what the page held at the moment it gave up: the document's URL,
+title, and HTTP status, whether the shell's `x-root-view` element is in it,
+whether `globalThis.app` is there and which view it holds, and the tail of
+console messages `Page.applyConsoleFormatter` retains in the page. The page half
+of that is `readShellPageProbe` in
+`packages/integration/shell-page-probe.ts`; `describeStateWaitFailure` in
+`shell-utils.ts` assembles the whole block, and a test may call it directly to
+report a wait of its own the same way.
+
+`ShellIntegration.goto()` checks one of those facts before it starts waiting at
+all. The shell's entry document carries an `x-root-view` element, so a document
+without one is not the shell, and every wait that follows reads state through
+`globalThis.app`, which such a document never defines. `assertShellDocument`
+fails the navigation there and then, naming the document that arrived. The case
+this catches is a server answering with something other than the shell — for
+instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
+its own fetch to the shell dev server fails. Without the check, every test in
+the run waits out the full minute and reports nothing that names the cause.
+
+`login()` reports the same block, for the same reason. It waits on
+`waitForCondition` for the shell to publish `globalThis.app`, and a document
+that is not the shell never publishes it, so that wait reaches the
+stuck-condition net five minutes later saying only that it did. The runtime
+handshake after it names which of its two stages ran out and nothing about the
+page it ran against. Both are wrapped, so any login failure names the identity
+being logged in as and what the page held. `readAndDescribeShellPage` is the
+whole of what a report needs from a page — it reads the probe, renders it, and
+reports a page it could not read at all rather than replacing the failure being
+reported with a second one. Reach for it, rather than pairing the read and the
+render, when adding page context to an error of your own.
+
+The first line of each of these messages comes from `describeThrown` in
+`packages/integration/describe-thrown.ts`, because a failure inside the page
+does not arrive as an `Error`. The browser protocol reports an uncaught page
+exception as a detail record, and stringifying one yields `[object Object]`.
+`describeThrown` takes an `Error`'s message, the first line of a page
+exception's description, and for anything else points at the cause, which the
+thrower attaches and Deno prints below the message.
 
 ### A human-in-the-loop flow that no CI lane runs
 

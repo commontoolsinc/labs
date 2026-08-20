@@ -1,4 +1,5 @@
 export type {
+  BuilderSourceSiteOptions,
   DiagnosticSeverity,
   PatternCoverageKind,
   PatternCoverageOptions,
@@ -17,7 +18,12 @@ export {
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";
-export type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
+export type {
+  BuilderSourceSite,
+  BuilderSourceSitesV1,
+  CfcPolicyCompilerManifestV1,
+} from "./core/runtime-contract.ts";
+export { isBuilderSourceSitesV1 } from "./core/runtime-contract.ts";
 export {
   CFC_CANONICAL_ALIAS_NAMES,
   type CfcCanonicalAliasName,

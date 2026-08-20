@@ -106,6 +106,13 @@ export function createRef(
     // cell, recognized through the cell-rep / sigil chokepoint predicates rather
     // than the raw `{ "/": ... }` shape.
     //
+    // A link is hashed as it stands, schema and all. This walk takes what it
+    // is given: a caller deriving an id has to hand over a preimage that is
+    // causal, and reducing one here would only hide the difference between a
+    // caller that did and one that did not. `causalFormOfBinding()` does the
+    // reducing for a node's cause, at the seam that knows which links a bound
+    // tree holds and why they carry a schema at all.
+    //
     // TODO(danfuzz): the other data-model special-object type, `FabricInstance`
     // (a container that holds other values), is not handled here. Unlike a
     // primitive it *does* need descending into — but by its actual contents,

@@ -1325,6 +1325,15 @@ function describeError(error: unknown): string {
 export interface MaterializeOutcome {
   /** The setup-commit rejection, if the candidate could not be applied. */
   error?: string;
+  /**
+   * Set when the refusal is that the candidate module does not define the
+   * recorded symbol. A field rather than a message shape, because `error` is
+   * prose: `describeError` strings arbitrary setup failures through it, so a
+   * caller that classified this refusal by matching the message would accept
+   * any error whose text happened to carry the phrase. The verdict travels
+   * beside the message instead of inside it.
+   */
+  missingArtifact?: true;
   /** The root's value after a successful materialize. */
   value?: Record<string, unknown>;
   /**
@@ -1448,6 +1457,7 @@ export async function materializeOnCell(
       error:
         `today's ${program.main} defines no "${symbol}"; the stored root ` +
         `names an artifact this version does not have`,
+      missingArtifact: true,
       resultSchema: entryPattern.resultSchema,
       argumentSchema: entryPattern.argumentSchema,
       identity: entryRef.identity,

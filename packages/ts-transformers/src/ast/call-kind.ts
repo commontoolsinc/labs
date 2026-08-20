@@ -36,6 +36,7 @@ import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { getCallArgumentPosition } from "./call-arguments.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
@@ -718,6 +719,48 @@ function unwrapHardenedCallbackExpression(
   return expression.arguments[0];
 }
 
+/**
+ * Whether `expression` names a callback. Recognizes the schema-first `handler`
+ * form, keeps the trailing-options check from spread-replacing a callback with
+ * the injected result options, and anchors a builder artifact whose callback is
+ * reached indirectly.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Inline arrows, const references, function
+ * declarations, and property accesses can all denote callbacks, so asking the
+ * type covers the family. Two backstops cover missing type information rather
+ * than a spelling: the syntactic resolver catches a local `any`-typed callback
+ * (no call signatures to ask), and the declaration fallback catches an
+ * imported one — the resolver cannot cross modules, but the aliased symbol's
+ * declaration still says what the value is.
+ */
+export function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
+}
+
 export function isWildcardTraversalCall(
   call: ts.CallExpression,
   checker?: ts.TypeChecker,
@@ -858,14 +901,16 @@ const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
  * Three things must hold, and each rules out a shape that would otherwise slip
  * through method-name matching alone: the callback is argument zero, so a
  * comparator or an `initialValue` in another position does not qualify; the
- * resolved signature is declared on `Array`/`ReadonlyArray`, so a `map` of some
- * other type does not qualify; and the receiver is a plain array that no
- * reactive lowering owns, so the reactive collection operators keep their own
- * structural treatment.
+ * resolved owner symbol includes the configured default-library
+ * `Array`/`ReadonlyArray` declaration, so a same-named source or ambient type
+ * and a `map` of some other type do not qualify; and the receiver is a plain
+ * array that no reactive lowering owns, so the reactive collection operators
+ * keep their own structural treatment.
  */
 export function isCollectingPlainArrayMethodCallback(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
 ): boolean {
   const position = getCallArgumentPosition(callback);
   if (!position || position.index !== 0) {
@@ -883,8 +928,18 @@ export function isCollectingPlainArrayMethodCallback(
     return false;
   }
 
-  const owner = findOwnerName(declaration);
-  if (!owner || !ARRAY_OWNER_NAMES.has(owner)) {
+  const owner = findOwnerDeclaration(declaration);
+  if (!owner?.name || !ARRAY_OWNER_NAMES.has(owner.name.text)) {
+    return false;
+  }
+
+  const ownerSymbol = checker.getSymbolAtLocation(owner.name);
+  if (
+    !ownerSymbol ||
+    !(ownerSymbol.declarations ?? []).some((candidate) =>
+      isSourceFileDefaultLibrary(candidate.getSourceFile())
+    )
+  ) {
     return false;
   }
 
@@ -1522,26 +1577,22 @@ function isMultiApplicationChain(outerCall: ts.CallExpression): boolean {
   return ts.isCallExpression(innerCalleeCallee);
 }
 
+/**
+ * Peels the non-semantic wrappers that can stand between a call site and the
+ * expression it is really about — parentheses, `as T`, `<T>x`, `satisfies T`,
+ * and `!`. Classification asks what an expression *is*, and none of these
+ * change that, so all of them come off before any node-kind test runs.
+ *
+ * Delegates to the shared {@link unwrapExpression} so the wrapper list has a
+ * single definition and a wrapper spelling cannot be handled in one resolver
+ * and missed in another. It takes that helper's full wrapper set, including
+ * PartiallyEmittedExpression: the pipeline runs over authored source through
+ * `ts.transform`, never as part of TypeScript's emit, so a partially emitted
+ * node cannot reach classification and there is nothing here for a narrower
+ * set to protect.
+ */
 function stripWrappers(expression: ts.Expression): ts.Expression {
-  let current: ts.Expression = expression;
-
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    break;
-  }
-
-  return current;
+  return unwrapExpression(expression);
 }
 
 function stripInitializerAccess(expression: ts.Expression): ts.Expression {
@@ -2298,7 +2349,14 @@ function isMethodDeclarationOwnedBy(
   return !!owner && ownerNames.has(owner);
 }
 
-function findOwnerName(node: ts.Node): string | undefined {
+/** Finds the nearest named type declaration containing `node`. */
+function findOwnerDeclaration(
+  node: ts.Node,
+):
+  | ts.InterfaceDeclaration
+  | ts.ClassDeclaration
+  | ts.TypeAliasDeclaration
+  | undefined {
   let current: ts.Node | undefined = node.parent;
   while (current) {
     if (
@@ -2306,12 +2364,16 @@ function findOwnerName(node: ts.Node): string | undefined {
       ts.isClassDeclaration(current) ||
       ts.isTypeAliasDeclaration(current)
     ) {
-      if (current.name) return current.name.text;
+      return current;
     }
     if (ts.isSourceFile(current)) break;
     current = current.parent;
   }
   return undefined;
+}
+
+function findOwnerName(node: ts.Node): string | undefined {
+  return findOwnerDeclaration(node)?.name?.text;
 }
 
 function hasIdentifierName(

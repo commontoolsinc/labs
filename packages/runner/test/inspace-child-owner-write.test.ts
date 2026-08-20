@@ -10,13 +10,13 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // SCOPE (CT-1754): this guards the verified-binding regression only — an
 // inSpace child's owner-protected list, written by a NON-exported mode-bound
-// handler from a fresh session, was rejected because the warm/cached re-load
-// left `fn.src` non-canonical so the writer identity downgraded to
-// `unsupported`. Both sessions here share ONE compiled PROGRAM, so they share
-// one `moduleIdentity` and this does NOT reproduce the separate two-compile-
-// context moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain
-// stable") that still blocks card-add in the real profile-create → piece-view
-// flow (CT-1740). That divergence needs a faithful two-context harness.
+// handler from a fresh session, must retain its binding authority through the
+// warm/cached reload. Both sessions here share ONE compiled PROGRAM, so they
+// share one `moduleIdentity` and this does NOT reproduce the separate
+// two-compile-context moduleIdentity *merge-conflict* ("writeAuthorizedBy must
+// remain stable") that still blocks card-add in the real profile-create →
+// piece-view flow (CT-1740). That divergence needs a faithful two-context
+// harness.
 const signer = await Identity.fromPassphrase("inspace-child-owner-write");
 const spaceA = signer.did(); // "home" — runs the parent, creates the child
 const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
@@ -36,14 +36,11 @@ const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
 //
 // Standalone (single-context) the write commits fine. The real flow creates
 // the child via `child.inSpace(spaceB)(...)` from the parent, and a FRESH
-// session loads the child from its own space via the warm/cached module path —
-// where `graph.moduleSourceMaps` is empty, so the per-module `//# sourceURL`
-// source frame never registered and `fn.src` resolved to the raw
-// `${evalId}.js:line:col` bundle coordinate instead of the canonical
-// `cf:module/<id>/main.tsx:..` form. That made the function's canonical-source
-// check disagree with its recorded provenance identity, downgrading the writer
-// identity to `unsupported`, and CFC rejected the commit with
-// "writeAuthorizedBy requires a trusted verified binding identity at /".
+// session loads the child from its own space via the warm/cached module path.
+// The assertion below pins the durable security contract: the non-exported
+// handler's content-addressed provenance and `__cfBindVerifiedBinding` authority
+// survive that source-free reload. Debug source metadata is deliberately
+// irrelevant to the decision.
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [

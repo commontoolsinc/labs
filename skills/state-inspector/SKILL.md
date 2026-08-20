@@ -115,6 +115,22 @@ Confusing an approximation for truth is the failure mode that matters here:
   legitimately differ. The scan labels `cross-space-linked` (real replica →
   drift bug) vs `no-cross-space-link` (likely independent instance). Don't cry
   wolf on the latter.
+- **A `schema` under `$link` is what the link stores; a `$schemaSummary` beside
+  it describes a schema too large to print.** A link's schema is a JSON Schema,
+  so `true` and `false` are values it can really hold — `true` selects every
+  value, declaring no constraint at all, where a schema with properties in it
+  pins a shape at that link. Never read one as the other. The summary is
+  `{ keys, bytes, digest }` and is a SIBLING of `schema`, never a value under
+  it, because a link can store a schema of any shape and a summary in the
+  `schema` slot could be a schema some link really holds. The two never both
+  appear: a `schema` key means that is the stored schema, a `$schemaSummary` key
+  means it was too large to print, and neither means the link stores no schema.
+  Different digests prove two schemas differ; equal ones make agreement
+  overwhelmingly likely without proving it, since the hash is truncated — reach
+  for `--full-depth` when you need certainty or the text itself. An absent
+  `digest` could not be computed, so two summaries that both lack one say
+  nothing about whether they agree; an absent `keys` means the stored schema was
+  not an object and so had none.
 
 ## Which question → which command
 

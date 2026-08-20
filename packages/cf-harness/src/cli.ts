@@ -474,8 +474,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern);
-                                run_pattern additionally requires the three --fabric-* session flags
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug);
+                                run_pattern and assign_slug additionally require the three --fabric-* session flags
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -517,9 +517,9 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
-  --fabric-api-url <url>        Deployed Fabric API URL for the run_pattern tool
-  --fabric-identity <path>      PKCS#8 identity keyfile for the run_pattern fabric session
-  --fabric-space <space>        Target space (name or did:key) for the run_pattern tool;
+  --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug)
+  --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
+  --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
                                 all three --fabric-* session flags go together
   --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
                                 session's runtime (raise-only; distinct from
@@ -604,6 +604,7 @@ const CLI_PARENT_TOOL_IDS = [
   "delegate_task",
   "describe_handle",
   "run_pattern",
+  "assign_slug",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -1683,15 +1684,15 @@ export const parseCfHarnessCliArgs = async (
       "--fabric-cfc-enforcement-mode and --fabric-cfc-flow-labels configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
-  // An allowlisted `run_pattern` with no session to run it against is a
-  // configuration contradiction, surfaced here rather than as a tool that is
-  // silently absent from the run.
-  if (
-    allowedToolIds?.includes("run_pattern") === true &&
-    fabricSession === undefined
-  ) {
+  // An allowlisted fabric-session tool with no session to run it against is
+  // a configuration contradiction, surfaced here rather than as a tool that
+  // is silently absent from the run.
+  const sessionTool = (["run_pattern", "assign_slug"] as const).find(
+    (toolId) => allowedToolIds?.includes(toolId) === true,
+  );
+  if (sessionTool !== undefined && fabricSession === undefined) {
     throw new Error(
-      "--allow-tool run_pattern requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+      `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
     );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;

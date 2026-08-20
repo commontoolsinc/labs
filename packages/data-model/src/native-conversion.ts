@@ -30,7 +30,8 @@ import {
 } from "@commonfabric/utils/arrays";
 
 import {
-  type FabricOrConvertibleNativeValue,
+  type FabricConvertibleValue,
+  type FabricNativeObject,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -42,7 +43,7 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
@@ -163,16 +164,19 @@ export function shallowCleanPlainObject(
 }
 
 /**
- * Returns `true` if the value is a native JS object type that the fabric
- * system knows how to wrap. These are the "wild-west" instances that get
- * converted into `FabricNativeWrapper` subclasses, `FabricPrimitive` types,
- * or `FabricInstance` types by the conversion layer.
+ * Returns `true` if the value is a `FabricNativeObject`: one of the
+ * "wild-west" native JS instances that the conversion layer wraps into a
+ * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
  *
  * Arrays, plain objects, and system-defined special primitives are recognized
- * by `tagFromNativeValue()` but are _not_ convertible native instances -- they
- * have their own handling paths in the conversion layer.
+ * by `tagFromNativeValue()` but are _not_ `FabricNativeObject`s -- they have
+ * their own handling paths in the conversion layer.
+ *
+ * This function is a TypeScript type guard for `FabricNativeObject`.
  */
-export function isConvertibleNativeInstance(value: object): boolean {
+export function isValidFabricNativeObject(
+  value: unknown,
+): value is FabricNativeObject {
   switch (tagFromNativeValue(value)) {
     case NATIVE_TAGS.Error:
     case NATIVE_TAGS.Map:
@@ -401,7 +405,7 @@ const PROCESSING = Symbol("PROCESSING");
  *
  * @param value - The value to convert. Declared `unknown` for caller
  *   convenience, but the call _throws_ unless it is in fact a
- *   `FabricOrConvertibleNativeValue`; `isFabricCompatible()` reports in
+ *   `FabricConvertibleValue`; `isValidFabricConvertibleValue()` reports in
  *   advance whether it is.
  * @param freeze - When `true` (default), deep-freezes the result tree.
  *   When `false`, wrapping and validation still occur but the result is
@@ -413,7 +417,7 @@ export function fabricFromNativeValue(
 ): FabricValue {
   // Identity optimization: if the value is already a deep-frozen
   // `FabricValue`, return it without copying.
-  if (freeze && isDeepFrozenFabricValue(value)) {
+  if (freeze && isValidDeepFrozenFabricValue(value)) {
     return value;
   }
   return fabricFromNativeValueInternal(
@@ -584,27 +588,27 @@ function rebuildFabricErrorDeep(
  * is, if the value is a `FabricValue`, a `FabricNativeObject`, or a deep tree
  * thereof.
  *
- * The distinction from `isFabricValueLayer()`:
- * - `isFabricValueLayer(x)`: "is x already a `FabricValue`?" but only a shallow
- *   check.
- * - `isFabricCompatible(x)`: "could x be converted to a `FabricValue` via
- *   `fabricFromNativeValue()`?"
+ * The distinction from `isValidFabricValueLayer()`:
+ * - `isValidFabricValueLayer(x)`: "is x already a `FabricValue`?" but only a
+ *   shallow check.
+ * - `isValidFabricConvertibleValue(x)`: "could x be converted to a
+ *   `FabricValue` via `fabricFromNativeValue()`?"
  *
- * `isFabricCompatible()` additionally accepts `FabricNativeObject` types. It
- * checks recursively, so all nested values in arrays and objects must also be
- * fabric-compatible or convertible.
+ * `isValidFabricConvertibleValue()` additionally accepts `FabricNativeObject`
+ * types. It checks recursively, so all nested values in arrays and objects must
+ * also be fabric-convertible.
  *
  * This function is a TypeScript type guard for
- * `FabricOrConvertibleNativeValue`, which names the recursive shape described
+ * `FabricConvertibleValue`, which names the recursive shape described
  * above.
  */
-export function isFabricCompatible(
+export function isValidFabricConvertibleValue(
   value: unknown,
-): value is FabricOrConvertibleNativeValue {
-  return isFabricCompatibleInternal(value, new Set());
+): value is FabricConvertibleValue {
+  return isValidFabricConvertibleValueInternal(value, new Set());
 }
 
-function isFabricCompatibleInternal(
+function isValidFabricConvertibleValueInternal(
   value: unknown,
   seen: Set<object>,
 ): boolean {
@@ -621,7 +625,7 @@ function isFabricCompatibleInternal(
     }
 
     case "symbol": {
-      // Registry-interned symbols are fabric-compatible; unique ones are not.
+      // Registry-interned symbols are fabric-convertible; unique ones are not.
       return Symbol.keyFor(value) !== undefined;
     }
 
@@ -636,7 +640,7 @@ function isFabricCompatibleInternal(
 
       // `FabricNativeObject` types would be wrapped by
       // `fabricFromNativeValue()`.
-      if (isConvertibleNativeInstance(value)) {
+      if (isValidFabricNativeObject(value)) {
         return true;
       }
 
@@ -653,7 +657,9 @@ function isFabricCompatibleInternal(
         }
         // Check all elements recursively.
         for (let i = 0; i < value.length; i++) {
-          if (i in value && !isFabricCompatibleInternal(value[i], seen)) {
+          if (
+            i in value && !isValidFabricConvertibleValueInternal(value[i], seen)
+          ) {
             seen.delete(value);
             return false;
           }
@@ -662,7 +668,7 @@ function isFabricCompatibleInternal(
         return true;
       }
 
-      // Class instances are not fabric-compatible.
+      // Class instances are not fabric-convertible.
       if (isInstance(value)) {
         seen.delete(value);
         return false;
@@ -679,7 +685,7 @@ function isFabricCompatibleInternal(
         return false;
       }
       for (const val of Object.values(value)) {
-        if (!isFabricCompatibleInternal(val, seen)) {
+        if (!isValidFabricConvertibleValueInternal(val, seen)) {
           seen.delete(value);
           return false;
         }
@@ -706,7 +712,7 @@ function isFabricCompatibleInternal(
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
-): FabricOrConvertibleNativeValue {
+): FabricConvertibleValue {
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }
@@ -724,7 +730,7 @@ export function nativeFromFabricValue(
   }
 
   if (Array.isArray(value)) {
-    const result: FabricOrConvertibleNativeValue[] = [];
+    const result: FabricConvertibleValue[] = [];
     for (let i = 0; i < value.length; i++) {
       if (!(i in value)) {
         result.length = i + 1;
@@ -739,7 +745,7 @@ export function nativeFromFabricValue(
     return result;
   }
 
-  const result: Record<string, FabricOrConvertibleNativeValue> = {};
+  const result: Record<string, FabricConvertibleValue> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!isUnsafeObjectKey(key)) {
       result[key] = nativeFromFabricValue(val, frozen);

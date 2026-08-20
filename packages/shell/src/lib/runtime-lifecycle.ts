@@ -1,4 +1,4 @@
-import type { AppState } from "../../shared/mod.ts";
+import type { AppState } from "./app-state.ts";
 
 /**
  * One runtime per (identity, host): only those changes recreate it. A

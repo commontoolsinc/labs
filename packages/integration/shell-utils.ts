@@ -16,19 +16,23 @@ import {
   type PresentationParticipant,
 } from "@commonfabric/integration";
 import {
-  AppState,
   AppView,
   appViewToUrlPath,
-  deserialize,
   isAppViewEqual,
-} from "@commonfabric/shell/shared";
+} from "@commonfabric/navigation";
+import { AppState, deserialize } from "@commonfabric/shell/app-state";
 
+import { describeThrown } from "./describe-thrown.ts";
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
 import { getPresentationSession } from "./presentation/session.ts";
-import { waitFor } from "./utils.ts";
+import {
+  assertShellDocument,
+  readAndDescribeShellPage,
+} from "./shell-page-probe.ts";
+import { waitFor, waitForCondition } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 
@@ -48,6 +52,33 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       "Could not serialize identity. Requires 'noble' implementation.",
     );
   }
+
+  // Everything from here on runs against the page, and every way it can fail
+  // says nothing about the page it failed against. The wait below is for the
+  // shell to publish itself, which a document that is not the shell never
+  // does, so it runs to the stuck-condition net reporting only that five
+  // minutes passed. The runtime handshake that follows reports which of its
+  // two stages ran out, and no more than that.
+  try {
+    await loginToPublishedApp(page, transferrableId, identity.did());
+  } catch (error) {
+    throw new Error(
+      `Logging in as ${identity.did()} failed: ${
+        describeThrown(error)
+      }\n${await readAndDescribeShellPage(page)}`,
+      { cause: error },
+    );
+  }
+}
+
+// The page half of `login`: wait for the shell to publish itself, then hand it
+// the identity and wait for the runtime to come up under it.
+async function loginToPublishedApp(
+  page: Page,
+  transferrableId: TransferrableInsecureCryptoKeyPair,
+  nextDID: string,
+): Promise<void> {
+  await waitForCondition(page, () => globalThis.app !== undefined);
 
   await page!.evaluate<
     Promise<void>,
@@ -99,9 +130,41 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       });
     },
     {
-      args: [transferrableId, identity.did()],
+      args: [transferrableId, nextDID],
     },
   );
+}
+
+// How an `AppState` reads in a failure message. The identity is named by its
+// DID, which the serialized state a page probe reads does not carry.
+function describeAppState(state: AppState | undefined): string {
+  if (!state) return "none (the page never yielded a state)";
+  const identity = state.identity ? state.identity.did() : "none";
+  return `view ${JSON.stringify(state.view)}, identity ${identity}`;
+}
+
+/**
+ * The indented detail block a failed {@link ShellIntegration.waitForState}
+ * reports: what the wait was for, the last state it managed to read, and what
+ * `page` holds now.
+ *
+ * The two states answer different questions. `lastState` is what the wait saw,
+ * decoded in the test process, so it names the identity by DID. The page probe
+ * is read at failure time and covers the case the wait itself cannot describe:
+ * a document that is not the shell, where no state was ever there to read.
+ */
+export async function describeStateWaitFailure(
+  page: Page,
+  params: { view: AppView; identity?: Identity },
+  lastState: AppState | undefined,
+): Promise<string> {
+  const lines = [`  awaited view: ${JSON.stringify(params.view)}`];
+  if (params.identity) {
+    lines.push(`  awaited identity: ${params.identity.did()}`);
+  }
+  lines.push(`  last state read: ${describeAppState(lastState)}`);
+  lines.push(await readAndDescribeShellPage(page));
+  return lines.join("\n");
 }
 
 export interface ShellIntegrationConfig {
@@ -226,14 +289,35 @@ export class ShellIntegration {
 
     this.checkIsOk();
 
-    await waitFor(async () => {
-      return stateMatches(await this.state(), params);
-    });
+    // The last state the poll below managed to read. A failure reports it, so
+    // the message says what the wait actually saw rather than only that it
+    // never saw what it wanted.
+    let lastState: AppState | undefined;
+    try {
+      await waitFor(async () => {
+        lastState = await this.state();
+        return stateMatches(lastState, params);
+      });
+    } catch (error) {
+      const summary = describeThrown(error);
+      const detail = await describeStateWaitFailure(
+        this.page(),
+        params,
+        lastState,
+      );
+      throw new Error(
+        `Waiting for the shell's app state failed: ${summary}\n${detail}`,
+        { cause: error },
+      );
+    }
     const state = await this.state();
     // Unlikely to occur, but recheck state once more to ensure
     // the state returned explicitly matches requirement.
     if (!state || !(stateMatches(state, params))) {
-      throw new Error("State changed after matching requirements.");
+      throw new Error(
+        "The shell's app state changed after it matched what was awaited.\n" +
+          await describeStateWaitFailure(this.page(), params, state),
+      );
     }
     return state;
   }
@@ -260,6 +344,11 @@ export class ShellIntegration {
     const page = this.page();
     await page.goto(url);
     await page.applyConsoleFormatter();
+    // Everything below reads the page through `globalThis.app`, which only the
+    // shell defines. Check the shell is what loaded before any of it, so a
+    // server that answered with something else is reported here rather than as
+    // a state wait that runs to its bound with nothing to say.
+    await assertShellDocument(page, url);
     // The worker runtime reads this when it is constructed, at login, so it has
     // to be set after the page has an origin to store it against and before the
     // login below.

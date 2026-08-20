@@ -4,8 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { lift } from "../src/builder/module.ts";
+import { moduleToEncodableForm } from "../src/builder/to-encodable-form.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 import { trustModule } from "./support/trusted-builder.ts";
@@ -93,9 +95,8 @@ describe("content-addressed action identity", () => {
     // The non-exported `bump` handler registers via the transformer's
     // `__cfReg` hoist; its symbol is the hoist/binding name.
     expect(typeof provenance!.symbol).toBe("string");
-    // (`fn.src` is no longer asserted here: it is lazy/debug-only and off by
-    // default, and identity no longer depends on it — provenance is the source
-    // of truth above.)
+    // `fn.src` is intentionally not part of this assertion: it is lazy,
+    // debug-only sidecar data, and provenance is the identity source of truth.
   });
 
   it("re-lifting a hardened registered implementation keeps its identity (no wrapper fork)", async () => {
@@ -209,6 +210,106 @@ describe("content-addressed action identity", () => {
     r.key("setName").send({ name: "resolved-after-eviction" });
     await runtime!.idle();
     expect(r.key("name").get()).toBe("resolved-after-eviction");
+  });
+
+  // Reads the ERROR tally rather than the level-blind total: the severity is
+  // the behavior under test, since the pattern-test harness fails on error
+  // output and not on debug or warn.
+  const errorCount = (loggerName: string, messageKey: string): number =>
+    (getLoggerCountsBreakdown()[loggerName]?.[messageKey] as
+      | { error?: number }
+      | undefined)?.error ?? 0;
+
+  it("counts serializing a function implementation that carries neither provenance nor an entry ref", () => {
+    const before = errorCount("builder.serialize-shape", "noref-body-write");
+    const anonymous = (x: number) => x + 1;
+    const encodable = moduleToEncodableForm(
+      { type: "javascript", implementation: anonymous } as Module,
+    ) as Record<string, unknown>;
+    // The body-only wire shape: stringified implementation, no `$implRef`.
+    expect(typeof encodable.implementation).toBe("string");
+    expect("$implRef" in encodable).toBe(false);
+    expect(errorCount("builder.serialize-shape", "noref-body-write")).toBe(
+      before + 1,
+    );
+  });
+
+  it("counts and still executes a module that reaches the fallback with no $implRef", async () => {
+    const pattern = await setup();
+    const module = handlerModuleOf(pattern);
+    // Rebuild the handler module as the body-only wire shape: stringified
+    // source, no `$implRef`. The handler body only touches its parameters, so
+    // the bare-SES stringified-source fallback can execute it.
+    const source = Function.prototype.toString.call(module.implementation);
+    const encodable = (module as Module & { toEncodableForm: () => unknown })
+      .toEncodableForm() as Record<string, unknown>;
+    const { $implRef: _dropped, ...rest } = encodable;
+    const refless = { ...rest, implementation: source };
+
+    const nodes = pattern.nodes.map((node) =>
+      (node.module as Module).type === "javascript" &&
+        (node.module as Module).wrapper === "handler"
+        ? { ...node, module: refless as unknown as Module }
+        : node
+    );
+    const rehydrated = { ...pattern, nodes } as unknown as Pattern;
+    const before = errorCount("runner", "unverified-source-fallback");
+    const tx = runtime!.edit();
+    const resultCell = runtime!.getCell<{ name: string }>(
+      signer.did(),
+      "refless-fallback-resolution",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const r = runtime!.run(tx, rehydrated, {}, resultCell) as any;
+    await tx.commit();
+    await r.pull();
+    r.key("setName").send({ name: "resolved-through-fallback" });
+    await runtime!.idle();
+    expect(r.key("name").get()).toBe("resolved-through-fallback");
+    expect(errorCount("runner", "unverified-source-fallback")).toBe(
+      before + 1,
+    );
+  });
+
+  it("counts a module whose $implRef is missing its parts as ref-less", async () => {
+    const pattern = await setup();
+    const module = handlerModuleOf(pattern);
+    const source = Function.prototype.toString.call(module.implementation);
+    const encodable = (module as Module & { toEncodableForm: () => unknown })
+      .toEncodableForm() as Record<string, unknown>;
+    // A ref carrying neither identity nor symbol addresses nothing, so it has
+    // to read as ref-less rather than as a resolution that merely missed.
+    const malformed = {
+      ...encodable,
+      $implRef: {},
+      implementation: source,
+    };
+
+    const nodes = pattern.nodes.map((node) =>
+      (node.module as Module).type === "javascript" &&
+        (node.module as Module).wrapper === "handler"
+        ? { ...node, module: malformed as unknown as Module }
+        : node
+    );
+    const rehydrated = { ...pattern, nodes } as unknown as Pattern;
+    const before = errorCount("runner", "unverified-source-fallback");
+    const tx = runtime!.edit();
+    const resultCell = runtime!.getCell<{ name: string }>(
+      signer.did(),
+      "malformed-implref-resolution",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const r = runtime!.run(tx, rehydrated, {}, resultCell) as any;
+    await tx.commit();
+    await r.pull();
+    r.key("setName").send({ name: "resolved-through-fallback" });
+    await runtime!.idle();
+    expect(r.key("name").get()).toBe("resolved-through-fallback");
+    expect(errorCount("runner", "unverified-source-fallback")).toBe(before + 1);
   });
 
   it("minting a builder artifact inside a running action fails loudly", async () => {

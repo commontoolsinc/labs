@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { getLogger } from "@commonfabric/utils/logger";
 import { RuntimeConnection } from "./connection.ts";
 import { EventEmitter } from "./emitter.ts";
@@ -483,7 +488,9 @@ describe("FakeTransport", () => {
     // it. A double that passed the sender's object through would model
     // something no real transport does.
     const transport = new FakeTransport();
-    const body = new Uint8Array([1, 2, 3]);
+    const body = realmFromFabricValue(
+      new FabricBytes(new Uint8Array([1, 2, 3])),
+    );
     const message: IPCClientMessage = {
       msgId: 1,
       data: {
@@ -504,9 +511,13 @@ describe("FakeTransport", () => {
       throw new Error("Expected the upload request to have been captured.");
     }
     expect(captured.data.body).not.toBe(body);
-    // Mutate and re-read, rather than compare identity alone: a shallow copy
-    // differs by identity while still sharing the array.
-    body[0] = 0xff;
-    expect(captured.data.body[0]).toBe(1);
+    // Decode both trees rather than compare identity alone: a shallow copy
+    // differs by identity while still sharing the buffer beneath. A decode
+    // takes its buffer over, so the sender's tree still decoding after the
+    // captured one did is what says the two do not share one.
+    expect((fabricFromRealmValue(captured.data.body) as FabricBytes).slice())
+      .toEqual(new Uint8Array([1, 2, 3]));
+    expect((fabricFromRealmValue(body) as FabricBytes).slice())
+      .toEqual(new Uint8Array([1, 2, 3]));
   });
 });

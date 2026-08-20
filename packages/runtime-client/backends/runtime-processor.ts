@@ -1,4 +1,7 @@
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromRealmValue,
+  newDefaultJsonCodecEngine,
+} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -177,6 +180,7 @@ import {
   postRuntimeError,
 } from "./runtime-error.ts";
 import {
+  assertFabricLoggerFlags,
   createCellRef,
   createPageRef,
   getCell,
@@ -185,6 +189,23 @@ import {
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodecEngine();
+
+/** Each registered logger's enabled state and level. */
+function loggerMetadata(): LoggerMetadata {
+  const global = globalThis as unknown as {
+    commonfabric?: { logger?: Record<string, Logger> };
+  };
+  const result: LoggerMetadata = {};
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
+      result[name] = {
+        enabled: !logger.disabled,
+        level: (logger.level ?? "info") as LogLevel,
+      };
+    }
+  }
+  return result;
+}
 
 function spaceAclResponse(
   runtime: Runtime,
@@ -1567,26 +1588,11 @@ export class RuntimeProcessor {
 
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
-    const metadata = this.#getLoggerMetadata();
+    const metadata = loggerMetadata();
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
+    assertFabricLoggerFlags(flags);
     return { counts, metadata, timing, flags };
-  }
-
-  #getLoggerMetadata(): LoggerMetadata {
-    const global = globalThis as unknown as {
-      commonfabric?: { logger?: Record<string, Logger> };
-    };
-    const result: LoggerMetadata = {};
-    if (global.commonfabric?.logger) {
-      for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
-        result[name] = {
-          enabled: !logger.disabled,
-          level: (logger.level ?? "info") as LogLevel,
-        };
-      }
-    }
-    return result;
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {
@@ -1652,14 +1658,20 @@ export class RuntimeProcessor {
       // module, so the symbol only selects a representative artifact). A
       // source-free by-identity reload carries no program — omit it (same
       // graceful degradation as the prior meta-cell read's try/catch).
-      const files = this.runtime.patternManager.getPatternFilesBySync(
+      const program = this.runtime.patternManager.getPatternProgramBySync(
         ref.identity,
         ref.symbol,
       );
-      if (files) {
+      if (program) {
         patterns.push({
           identity: ref.identity,
-          files: files.map((f) => ({ name: f.name, contents: f.contents })),
+          files: program.files.map((f) => ({
+            name: f.name,
+            contents: f.contents,
+          })),
+          ...(program.dataFiles === undefined
+            ? {}
+            : { dataFiles: program.dataFiles }),
         });
       }
     }
@@ -1687,11 +1699,14 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // The `true` below cedes `request.body` to the `FabricBytes` rather than
-    // having it copied. That is legitimate because a handler owns the values
-    // its request carries, per `BaseRequest`, so nothing else can be reading
-    // this array.
-    const bytes = new FabricBytes(request.body, true);
+    // `request.body` is ceded to the decode rather than copied for it. That is
+    // legitimate because a handler owns the values its request carries, per
+    // `BaseRequest`, so nothing else can be reading this tree. What comes back
+    // is a `FabricValue`, of which only the one arm is a blob's bytes.
+    const bytes = fabricFromRealmValue(request.body);
+    if (!(bytes instanceof FabricBytes)) {
+      throw new Error("uploadBlob requires bytes as its body");
+    }
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({

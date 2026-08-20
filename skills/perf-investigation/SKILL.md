@@ -5,9 +5,12 @@ description: Investigate Common Fabric slowness end to end — measure it, attri
 
 # Performance Investigation
 
-For why we spend this time at all, and what we consider worth speeding up, read
-`docs/development/PERFORMANCE_PROGRAM.md`. This skill is the other half: how the
-investigation is actually run here, and what the answers have historically been.
+Two neighbours carry the halves this does not.
+`docs/development/PERFORMANCE_PROGRAM.md` is why we spend this time at all and
+what we consider worth speeding up. `docs/development/debugging/profiling.md` is
+the walkthrough — the steps in order, with the commands. This skill is the map
+they are read against: what each instrument reaches, what it is blind to, and
+what the answers here have historically turned out to be.
 
 ## A slow pattern is an instrument, not the defect
 
@@ -106,14 +109,112 @@ reading. A perf harness is otherwise throwaway — built for one investigation,
 driven by knobs nobody else needs, and not committed — so duplicating the parts
 that differ costs less than a seam every future scenario has to be bent through.
 
+## Narrowing, until a phase becomes a source
+
+A phase is a place to look, never an answer. "The seed phase costs four minutes"
+is where an investigation starts being useful, and stopping there produces a fix
+aimed at a symptom. Keep going until you can name the thing doing the work — a
+function, a read, a derivation that re-runs — and say whether it is expensive or
+merely frequent.
+
+`docs/development/debugging/profiling.md` has the steps and the commands. Two
+things about them are worth knowing before you start, because they decide where
+you begin and what you can trust:
+
+- **The timings already exist.** A logger constructed with `enabled: false` is
+  quiet, not inert: `timeStart`, `timeEnd` and `time` record into per-key
+  statistics without consulting that flag, and the counts behind the logging
+  methods increment before it is checked. Read what is accumulating before
+  instrumenting anything.
+- **Marks only help in the process that emits them.** `cf test` runs in a Deno
+  process with no browser; a worker CPU profile comes from a different process
+  over CDP. Bracketing a phase is what gives a profile its interval, but the
+  bracket has to be on the same side of that boundary as the samples.
+- **Every recorded span can put itself on the timeline.** `CF_TIMING_MEASURES=1`
+  — or `cf test --timing-measures-out <file>` — makes each logger time span emit
+  a `performance.measure` as well as recording into the statistics, across the
+  whole stack rather than only what someone wrapped by hand. It is off by
+  default because the volume is for a tool, not a person: a topics pattern test
+  emits over 800,000 spans, and a human opening a timeline wants the phases
+  someone named rather than every span the runtime recorded.
+  `skills/perf-investigation/scripts/aggregate-measures.ts` rolls the result up
+  by key prefix, which is what the statistics cannot do: a logger records
+  against its full joined path and nothing shorter, so the count at the level
+  where it starts multiplying exists in no stored row.
+- **Some keys name the occurrence too.** A key is a place in the code, so
+  `scheduler/run/action` is the same key for every action that runs. Where the
+  emitter can say which one, it attaches that to the measure rather than the key
+  — putting it in the key would multiply the statistics by every value it takes
+  — and `attribute-measures.ts --detail` groups by it.
+- **Intervals recover the caller.** A key that runs everywhere is recorded
+  against itself whoever reached it, so no aggregate can say who is responsible.
+  Spans nest, so the span open when another began is the one that called it:
+  `skills/perf-investigation/scripts/attribute-measures.ts` rebuilds that tree
+  and answers who, how deep, and how many each caller asked for. Read its ratio
+  rather than its totals — few callers asking for a great deal each is a width
+  problem, many asking for a little is a frequency one, and they are fixed at
+  opposite ends of the stack.
+
+Ask the next question rather than reporting the first table. Who calls it,
+frequency or width, is the unit cost flat, and — the one most easily skipped —
+who calls the _heavy_ instances, whose callers are routinely not the typical
+ones. `docs/development/debugging/profiling.md` carries that ladder. A chain
+that reaches uninstrumented ground has produced a result rather than a dead end:
+it names where to wrap next.
+
+A chain that reaches uninstrumented ground has not run out of data. The harness
+phases that attribution treats as transparent still locate those spans in the
+run, and whatever finished immediately before them is a caller nobody wrapped —
+`attribute-measures.ts --roots` reads both out of the capture you already have,
+and names where the next span would attribute the most.
+
+A measure is an elapsed duration, so summing measures gives cumulative elapsed
+span time and never CPU — the sum already contains whatever was waited through,
+and a nested span counts the same interval again inside its parent. Only the
+sampling profile attributes CPU. Wall time needs the other arithmetic again:
+spans must be unioned rather than summed, because concurrent ones overlap and a
+parent's elapsed time is not the total of its children's. What the union leaves
+uncovered is time something was open and nothing instrumented was running —
+waiting, in whatever form — and `skills/perf-investigation/scripts/wall-time.ts`
+is what reports it. Absence looks the same whether it is a round trip or
+unwrapped compute, so that view says where to look rather than what it found.
+
+**You are done narrowing when you can write a benchmark.** A source you
+understand can be provoked directly; one you cannot provoke is still a
+hypothesis. Confirm it correlates — that it moves with the real measurement
+rather than merely being fast — and keep it, because that is what defends the
+fix afterwards.
+
 ## Count against average
 
-Every logger row carries `count`, `average`, `p95`, `max`, and `total`, and the
-first two are the whole diagnosis: a row whose `total` grew because `count` grew
-is a different bug from one whose `average` grew, and they have disjoint fixes.
-Read them before forming a theory. Rows are ranked by `total` and truncated, so
-a row that measures set sizes rather than milliseconds will sort above real
-timings and evict them — read those by name instead of widening the summary.
+Every logger row carries a count and a set of durations — the `cf test` stats
+print `n`, `total`, `avg` and `p95`, and the browser summary adds `p50` and
+`max` — and the count against the average is the whole diagnosis: a row whose
+`total` grew because `count` grew is a different bug from one whose `average`
+grew, and they have disjoint fixes. Read them before forming a theory. Rows are
+ranked by `total` and truncated, so a row that measures set sizes rather than
+milliseconds will sort above real timings and evict them — read those by name
+instead of widening the summary.
+
+## Two ways to be slow, at every level
+
+A call costs what it costs and happens as often as it happens, so every finding
+has two fixes available: make the work cheaper, or ask for it less. They are not
+alternatives to choose between up front — which one is available is a fact about
+the code you have not read yet, and investigations that assume one skip the
+larger win about half the time.
+
+Both live at every level of the stack, and neither level is the natural home of
+this work. A leaf at the edge — resolving a link, walking a schema, hashing a
+value — can often be made cheaper for every caller at once, which is the widest
+possible fix and the one that closes a footgun rather than an instance. The
+caller can often stop asking: hoist the read, declare a narrower one, split a
+derivation so the half that cannot have changed does not re-run. A pattern
+usually surfaces the second; the first is usually a runtime change, and is the
+reason this work does not end at the pattern.
+
+Look for both before choosing. The cheapest real fix is frequently the one at
+the other end of the stack from where the symptom appeared.
 
 ## Where cost comes from in this runtime
 

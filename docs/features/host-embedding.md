@@ -29,7 +29,7 @@ weeks later.
 | - | --- | --- | --- | --- | --- |
 | 1 | Wish targets + result semantics | API | `runner` | yes | `test/wish.test.ts` — `host embedding contract: profile wish targets` |
 | 2 | `runtimeContext` / `spaceContext` | API | `ui` | yes | `src/v2/runtime-context.test.ts` |
-| 3 | Navigation events | API | `shell`, `lib-shell` | `cf-navigate` yes; `cf-open-external` yes (with CT-1830); others available, not bound | `test/navigate-contract.test.ts` |
+| 3 | Navigation events | API | `navigation`, `lib-shell` | `cf-navigate` yes; `cf-open-external` yes; others available, not bound | `test/navigate-contract.test.ts` |
 | 3a | Piece menu | API + component | `ui` | available, not bound | `src/v2/components/cf-render/cf-render.test.ts` — `CFRender piece context menu`; `src/v2/components/cf-piece-menu/cf-piece-menu.test.ts` |
 | 4 | `getCfcLabel` egress check | API | `ui` (label shape in `runner`) | yes | `src/v2/core/cfc-label.test.ts` — `cfcLabelViewIsPublic (egress check)` |
 | 5 | Guarded-define idiom | API | `ui` | yes | `src/v2/components/host-embedding-guarded-define.test.ts` |
@@ -111,7 +111,7 @@ DOM). A host embeds by listening for:
   ```ts
   import type { DID } from "@commonfabric/identity";
 
-  // Condensed from packages/shell/shared/app/view.ts
+  // Condensed from packages/navigation/src/view.ts
   export type AppView =
     | { builtin: "home" }
     | { spaceName: string; pieceId?: string; pieceSlug?: string; mode?: "embed" }
@@ -123,18 +123,17 @@ DOM). A host embeds by listening for:
   bind it today.
 - **`cf-update-page-title`** — detail is the title `string`. Available;
   Loom does not bind it today.
-- **`cf-open-external`** — *lands with CT-1830 (branch
-  `ct-1830-cf-open-external`); described as specified, not implemented
-  in this change.* A cancellable event carrying the same view target as
-  `cf-navigate`, replacing the direct `globalThis.open` on
-  modifier-clicks (today a guaranteed 404 tab on a non-shell origin).
-  `preventDefault()` ⇒ the host handles the new tab; default ⇒ shell
-  URL + `globalThis.open`.
+- **`cf-open-external`** — a cancellable event carrying the same view
+  target as `cf-navigate`, dispatched on a modifier-click ("open in new
+  tab"). A host that calls `preventDefault()` owns the new tab and can
+  apply its own URL scheme. Left uncancelled, the default builds a
+  fabric URL and calls `globalThis.open`, which on a non-shell origin is
+  a 404 tab — so a host that mounts these components binds this one.
 
-**Test.** `packages/shell/test/navigate-contract.test.ts` (event names
-and detail shapes); the pattern-side shape is also guarded by
-`packages/shell/test/runtime-navigation.test.ts`. `cf-open-external` is
-untested here by design — it lands and is tested with CT-1830.
+**Test.** `packages/navigation/test/navigate-contract.test.ts` (event
+names and detail shapes) and `packages/navigation/test/navigate.test.ts`
+(the `cf-open-external` cancellation contract); the pattern-side shape is
+also guarded by `packages/shell/test/runtime-navigation.test.ts`.
 
 ---
 
@@ -367,8 +366,8 @@ asserts against the real pattern sources that the pin writer carries no
 ## Summary for embedders
 
 Provide `runtimeContext` + `spaceContext`. Mount a wrapper pattern that
-wishes `#profile`. Listen for `cf-navigate` (both shapes) on
-`globalThis`, and (with CT-1830) `cf-open-external`. Deep-import the
+wishes `#profile`. Listen for `cf-navigate` (both shapes) and
+`cf-open-external` on `globalThis`. Deep-import the
 guarded-define components into one bundle. If you persist profile data
 outside the runtime, gate it on `getCfcLabel` failing closed on
 non-public labels. Pin through `addPiece` (owner-gated,

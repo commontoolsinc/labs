@@ -31,7 +31,7 @@ const ActionWindowStorage = (isDeno()
  * The window rides `AsyncLocalStorage`, so an ASYNC action's continuations
  * stay covered past its awaits (Codex/cubic P1 on the E5 PR). Module
  * evaluation that interleaves while an action is suspended must stay legal:
- * engine evaluation pushes a frame carrying `sourceLocationContext` and is
+ * engine evaluation pushes a frame marked `moduleEvaluation` and is
  * fully synchronous (no microtask can interleave inside it), so "a module-
  * eval frame is on top" precisely identifies the transformer's module-scope
  * mints — including under the non-Deno fallback store, whose window
@@ -50,13 +50,13 @@ export function runInActionExecution<R>(fn: () => R): R {
 /**
  * Throw when called inside a running action: builder artifacts must be
  * defined at module level. Called by the lift/handler mint sites. Mints under
- * a module-evaluation frame (`sourceLocationContext`) are the transformer's
+ * a module-evaluation frame (`Frame.moduleEvaluation`) are the transformer's
  * legal module-scope output and pass.
  */
 export function assertNotInActionExecution(kind: string): void {
   if (
     actionWindow.getStore() === true &&
-    getTopFrame()?.sourceLocationContext === undefined
+    getTopFrame()?.moduleEvaluation !== true
   ) {
     throw new Error(
       `Cannot create a ${kind} inside a running action: define the ${kind} ` +

@@ -88,20 +88,29 @@ export function readDataFileSource(
       `Data file "${dataPath}" must be within root directory "${fsRoot}".`,
     );
   }
-  const bytes = Deno.readFileSync(realDataPath);
-  let contents: string;
+  return {
+    name: groundedSourceName(relativeDataPath),
+    contents: decodeDataFile(Deno.readFileSync(realDataPath), dataPath),
+  };
+}
+
+/**
+ * Decode a data file's bytes as the text a source package stores.
+ *
+ * A source package holds text, so the bytes are decoded as UTF-8 strictly: a
+ * file that is not valid UTF-8 is reported by `name` rather than stored with
+ * replacement characters in place of the bytes that were read. `ignoreBOM`
+ * keeps a leading byte order mark in the result instead of consuming it, since
+ * a data file is stored byte for byte and dropping the mark would deploy
+ * something other than the authored file.
+ */
+export function decodeDataFile(bytes: Uint8Array, name: string): string {
   try {
-    // `ignoreBOM` keeps a leading byte order mark in `contents` instead of
-    // consuming it. A data file is stored byte-for-byte, so dropping the mark
-    // would deploy something other than the authored file.
-    contents = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
       .decode(bytes);
   } catch {
-    throw new Error(
-      `Data file "${dataPath}" is not valid UTF-8 text.`,
-    );
+    throw new Error(`Data file "${name}" is not valid UTF-8 text.`);
   }
-  return { name: groundedSourceName(relativeDataPath), contents };
 }
 
 // Resolve a program using the file system.
@@ -137,9 +146,46 @@ export class FileSystemProgramResolver implements ProgramResolver {
   }
 
   resolveSource(specifier: string): Promise<Source | undefined> {
-    if (!specifier || specifier[0] !== "/") {
-      return Promise.resolve(undefined);
+    const realPath = this.#groundedRealPath(specifier, "Import");
+    if (realPath === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      name: specifier,
+      contents: this.#readFile(realPath),
+    });
+  }
+
+  // Async so that a refusal — an escaping name, bytes that are not text —
+  // arrives as a rejection. A method that returns a promise and also throws
+  // where it is called cannot be handled one way.
+  async resolveDataFile(name: string): Promise<Source | undefined> {
+    requireDeno("FileSystemProgramResolver");
+    let realPath: string | undefined;
+    try {
+      realPath = this.#groundedRealPath(name, "Data file");
+    } catch (error) {
+      // A name with nothing behind it is the caller's to report, against the
+      // module that read it. An escape is refused here, as it is for a module.
+      if (error instanceof Deno.errors.NotFound) return undefined;
+      throw error;
     }
+    if (realPath === undefined) return undefined;
+    return {
+      name,
+      contents: decodeDataFile(await Deno.readFile(realPath), name),
+    };
+  }
+
+  /**
+   * The real path a grounded specifier names, or undefined when the specifier
+   * is not grounded against the root at all.
+   *
+   * A path that leaves the root is refused twice over: once as written, and
+   * again after symbolic links are followed, so a link inside the root cannot
+   * name a file outside it. `kind` names the thing being resolved in that
+   * refusal, since a module and a data file both arrive here.
+   */
+  #groundedRealPath(specifier: string, kind: string): string | undefined {
+    if (!specifier || specifier[0] !== "/") return undefined;
     const absPath = normalize(
       join(
         this.fsRoot,
@@ -148,19 +194,16 @@ export class FileSystemProgramResolver implements ProgramResolver {
     );
     if (isOutsideRoot(relative(this.fsRoot, absPath))) {
       throw new Error(
-        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
       );
     }
     const realPath = this.#realPath(absPath);
     if (isOutsideRoot(relative(this.realFsRoot, realPath))) {
       throw new Error(
-        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
       );
     }
-    return Promise.resolve({
-      name: specifier,
-      contents: this.#readFile(realPath),
-    });
+    return realPath;
   }
 
   #realPath(path: string): string {
@@ -206,6 +249,27 @@ export class HttpProgramResolver implements ProgramResolver {
     const url = new URL(this.#mainUrl);
     url.pathname = normalize(specifier);
     return this.#fetch(url);
+  }
+
+  async resolveDataFile(name: string): Promise<Source | undefined> {
+    if (!name || name[0] !== "/") return undefined;
+    const url = new URL(this.#mainUrl);
+    url.pathname = normalize(name);
+    const res = await this.#fetchImpl(url);
+    // Absent is the caller's to report, against the module that read the name.
+    // Anything else — unauthorized, forbidden, a server fault — is not absence,
+    // and saying the file is missing would send the reader after the wrong
+    // thing.
+    if (res.status === 404) return undefined;
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch data file ${url}: ${res.status} ${res.statusText}`,
+      );
+    }
+    return {
+      name,
+      contents: decodeDataFile(new Uint8Array(await res.arrayBuffer()), name),
+    };
   }
 
   async #fetch(url: URL): Promise<Source> {

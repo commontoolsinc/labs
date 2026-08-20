@@ -1,5 +1,8 @@
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+
 import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
 import {
+  assert,
   assertDeepEquals,
   assertEquals,
   cleanupFixtures,
@@ -12,55 +15,37 @@ import {
 
 setIframeTestHandler();
 
-const API_SHIM = `<script>
-window.onUpdate = function(key, value){};
-window.addEventListener('message', e => {
-  if (e.data.type === "update") {
-    window.onUpdate(...e.data.data);
-  }
-});
-window.read = (key) => {
-  window.parent.postMessage({
-    type: 'read',
-    data: key, 
-  }, '*');
-};
-window.write = (key, value) => {
-  window.parent.postMessage({
-    type: 'write',
-    data: [key, value],
-  }, '*');
-};
-window.subscribe = (key) => {
-  window.parent.postMessage({
-    type: 'subscribe',
-    data: key,
-  }, '*');
-};
-window.unsubscribe = (key) => {
-  window.parent.postMessage({
-    type: 'unsubscribe',
-    data: key,
-  }, '*');
-};
-</script>
+// Each guest document is one module script: this prolog, the test's own body,
+// and `GUEST_EPILOG`. The prolog names the guest API's operations as the body
+// uses them, so a body reads as the guest code it is.
+const GUEST_PROLOG = `<script type="module">
+import { connectGuestContext } from "/guest.js";
+import { realmFromFabricValue as encodeForHost } from "/codec.js";
+
+let onUpdate = (key, value) => {};
+const guest = connectGuestContext((key, value) => onUpdate(key, value));
+const read = (key) => guest.read(key);
+const write = (key, value) => guest.write(key, value);
+const subscribe = (key) => guest.subscribe(key);
+const unsubscribe = (key) => guest.unsubscribe(key);
 `;
+
+const GUEST_EPILOG = `
+</script>`;
 
 Deno.test("read and writes", async () => {
   cleanupFixtures();
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body = `
-${API_SHIM}
-<script>
+    const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "a" && value === 1) {
     write(key, value + 1); 
   }
 };
 read('a');
-</script>`;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 
     await waitForContextValue(context, iframe, "a", (value) => value === 2);
@@ -78,9 +63,7 @@ Deno.test("subscribes", async () => {
     // can be used to mark a point in the update stream. It reports arrivals
     // under its own key to leave `updates` holding only what the test asserts
     // on.
-    const body = `
-${API_SHIM}
-<script>
+    const body = `${GUEST_PROLOG}
 const updates = [];
 onUpdate = (key, value) => {
   if (key === "barrier") {
@@ -97,7 +80,7 @@ onUpdate = (key, value) => {
 subscribe("a");
 subscribe("barrier");
 write("ready", true);
-</script>`;
+${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(
       context,
@@ -147,22 +130,18 @@ Deno.test("handles multiple iframes", async () => {
     const context1 = new ContextShim({ a: 1 });
     const context2 = new ContextShim({ b: 100 });
 
-    const body1 = `
-${API_SHIM}
-<script>
+    const body1 = `${GUEST_PROLOG}
 write("b", 1);
-</script>`;
+${GUEST_EPILOG}`;
 
-    const body2 = `
-${API_SHIM}
-<script>
+    const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b" && value === 100) {
     write("a", 200); 
   }
 };
 read("b");
-</script>`;
+${GUEST_EPILOG}`;
     const iframe1 = await render(body1, context1);
     const iframe2 = await render(body2, context2);
     // Each frame writes one key: iframe1 writes "b" into context1, and iframe2
@@ -184,16 +163,12 @@ Deno.test("handles loading new documents", async () => {
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body1 = `
-${API_SHIM}
-<script>
+    const body1 = `${GUEST_PROLOG}
 write("b", 1);
-</script>`;
-    const body2 = `
-${API_SHIM}
-<script>
+${GUEST_EPILOG}`;
+    const body2 = `${GUEST_PROLOG}
 write("c", 1);
-</script>`;
+${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(context, iframe, "b", (value) => value === 1);
     // @ts-ignore This is a lit property.
@@ -209,15 +184,11 @@ Deno.test("cancels subscriptions between documents", async () => {
   try {
     const context = new ContextShim({ a: 1 });
 
-    const body1 = `
-${API_SHIM}
-<script>
+    const body1 = `${GUEST_PROLOG}
 subscribe("a");
 write("ready1", true);
-</script>`;
-    const body2 = `
-${API_SHIM}
-<script>
+${GUEST_EPILOG}`;
+    const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b") {
     write("got-b-update", true);
@@ -228,7 +199,7 @@ onUpdate = (key, value) => {
 };
 subscribe("b");
 write("ready2", true);
-</script>`;
+${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(
       context,
@@ -256,6 +227,221 @@ write("ready2", true);
       (value) => value === true,
     );
     assertEquals(context.get(iframe, "got-a-update"), undefined);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("what a guest posts outside its port raises an alarm, not a write", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const errors: string[] = [];
+    const onError = (event: Event) =>
+      errors.push((event as CustomEvent).detail.description);
+    document.addEventListener("common-iframe-error", onError);
+
+    // The first post is a protocol message sent the way a guest reaches its
+    // parent rather than over its port. Nothing routes it there any more, so
+    // it cannot become a write; it is an alarm whose contents are not an
+    // error, and it is dropped. The second is the alarm a guest with no
+    // working port has, which is the whole reason that route still exists.
+    // The third is an ordinary write, and it lands last.
+    const body = `${GUEST_PROLOG}
+parent.postMessage({ type: "write", data: ["relayed", 1] }, "*");
+parent.postMessage({ type: "error", data: {
+  description: "raised without a port",
+  source: "", lineno: 0, colno: 0, stacktrace: "",
+} }, "*");
+write("after", 1);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+
+    try {
+      await waitForContextValue(
+        context,
+        iframe,
+        "after",
+        (value) => value === 1,
+      );
+      assertEquals(context.get(iframe, "relayed"), undefined);
+      assertDeepEquals(errors, ["raised without a port"]);
+    } finally {
+      document.removeEventListener("common-iframe-error", onError);
+    }
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("a reattached element loads its document into the frame it gets", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = `${GUEST_PROLOG}
+write("ran", 1);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Detaching destroys the frame the element rendered, and reattaching gets
+    // it a new one -- which reports itself ready, as the first one did. The
+    // teardown lands on a later task than the removal, so the two have to be
+    // told apart by a turn of the event loop rather than by adjacency.
+    const parent = iframe.parentElement!;
+    context.set(iframe, "ran", undefined);
+    parent.remove();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    document.body.appendChild(parent);
+
+    // The guest in the new frame runs the same document, so its write is what
+    // says the element found its way back rather than going quietly mute.
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("a second ready from the frame already in hand is refused", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = `${GUEST_PROLOG}
+write("ran", 1);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Reached into rather than driven, because the outer frame reports itself
+    // ready once and nothing outside it can send that message: the element
+    // takes it only from the window it rendered. So the refusal is asserted
+    // where it is made.
+    const inner = iframe as unknown as {
+      iframeRef: { value?: HTMLIFrameElement };
+      onOuterReady: (source: Window) => void;
+      readyWindow?: Window;
+    };
+    const reporting = inner.iframeRef.value!.contentWindow!;
+    assertEquals(inner.readyWindow, reporting);
+
+    let refusal = "";
+    try {
+      inner.onOuterReady(reporting);
+    } catch (error) {
+      refusal = String(error);
+    }
+    assert(refusal.includes("Already initialized"));
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("an element that gets a frame and has no source says nothing is loaded", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim();
+    const body = `${GUEST_PROLOG}
+write("ran", 1);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+    await waitForContextValue(context, iframe, "ran", (value) => value === 1);
+
+    // Driven rather than staged, for the reason the refusal test gives: a
+    // frame reports itself ready once, and the report cannot be sent from
+    // anywhere else. A window this element has not seen stands for the frame a
+    // reattach would bring.
+    const inner = iframe as unknown as {
+      onOuterReady: (source: Window) => void;
+      loadState: string;
+    };
+    // @ts-ignore This is a lit property.
+    iframe.src = "";
+    inner.onOuterReady({} as Window);
+    assertEquals(inner.loadState, "");
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("a subscription is cancelled against the context that issued it", async () => {
+  cleanupFixtures();
+  try {
+    const first = new ContextShim({ watched: 1 });
+    const body = `${GUEST_PROLOG}
+subscribe("watched");
+write("ready", true);
+${GUEST_EPILOG}`;
+    const iframe = await render(body, first);
+    await waitForContextValue(
+      first,
+      iframe,
+      "ready",
+      (value) => value === true,
+    );
+    assertEquals(first.callbacks.length, 1);
+
+    // A receipt is only good to the context that issued it, and `context` is a
+    // property a consumer may reassign. Swapping it here and then asking for a
+    // new document is what separates cancelling against the context the
+    // subscription was taken out against from cancelling against whichever one
+    // happens to be current.
+    const second = new ContextShim();
+    // @ts-ignore This is a lit property.
+    iframe.context = second;
+    // @ts-ignore This is a lit property.
+    iframe.src = `${GUEST_PROLOG}
+write("second-ran", true);
+${GUEST_EPILOG}`;
+
+    await waitForContextValue(
+      second,
+      iframe,
+      "second-ran",
+      (value) => value === true,
+    );
+    assertEquals(first.callbacks.length, 0);
+  } finally {
+    cleanupFixtures();
+  }
+});
+
+Deno.test("carries a value structured cloning would flatten", async () => {
+  cleanupFixtures();
+  try {
+    const context = new ContextShim({
+      payload: new FabricBytes(new Uint8Array([1, 2, 3])),
+    });
+
+    // The guest reports the bytes it can read out of what arrived, and echoes
+    // the value back. Reading them takes a live `FabricBytes`, which is what
+    // separates a value that crossed whole from one structured cloning
+    // stripped to a bare object; the echo asks the same of the other
+    // direction. The report names the flattened case rather than throwing on
+    // it, so that case fails an assertion instead of going silent.
+    const body = `${GUEST_PROLOG}
+onUpdate = (key, value) => {
+  if (key !== "payload") return;
+  write("bytes-seen", typeof value?.slice === "function"
+    ? [...value.slice()]
+    : "not a FabricBytes");
+  write("echo", value);
+};
+read("payload");
+${GUEST_EPILOG}`;
+    const iframe = await render(body, context);
+
+    // `echo` is written last and writes arrive in order, so waiting on its
+    // arrival puts both reports in hand. Waiting on arrival rather than on the
+    // class leaves a value that crossed flattened to fail an assertion below
+    // rather than never satisfy the wait.
+    await waitForContextValue(
+      context,
+      iframe,
+      "echo",
+      (value) => value !== undefined,
+    );
+    assertDeepEquals(context.get(iframe, "bytes-seen"), [1, 2, 3]);
+    assert(context.get(iframe, "echo") instanceof FabricBytes);
   } finally {
     cleanupFixtures();
   }

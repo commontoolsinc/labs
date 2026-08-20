@@ -1,11 +1,12 @@
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { defer } from "@commonfabric/utils/defer";
 
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
 
-type Callback = (key: string, value: unknown) => void;
+type Callback = (key: string, value: FabricValue) => void;
 interface Context {
-  [name: string]: unknown;
+  [name: string]: FabricValue;
 }
 
 export class ContextShim {
@@ -20,7 +21,7 @@ export class ContextShim {
     this.receiptIds = 0;
     this.observers = [];
   }
-  set(_element: CommonIframeSandboxElement, key: string, value: unknown) {
+  set(_element: CommonIframeSandboxElement, key: string, value: FabricValue) {
     this.data[key] = value;
     for (let i = 0; i < this.callbacks.length; i++) {
       const [_, callback_key, callback] = this.callbacks[i];
@@ -49,7 +50,7 @@ export class ContextShim {
     };
   }
 
-  get(_element: CommonIframeSandboxElement, key: string): unknown {
+  get(_element: CommonIframeSandboxElement, key: string): FabricValue {
     return this.data[key];
   }
 

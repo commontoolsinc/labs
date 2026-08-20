@@ -1,4 +1,11 @@
 import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+  isValidFabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
   Cell,
   JSONSchema,
   KeepAsCell,
@@ -12,12 +19,26 @@ import {
   redactCaveatSourcesForDisplay,
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
-import { isSigilLink, linkRefFrom } from "@commonfabric/runner/shared";
+import {
+  isSigilLink,
+  linkRefFrom,
+  refuseFabricInstance,
+} from "@commonfabric/runner/shared";
+import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "../protocol/mod.ts";
-import { CellRef, PageRef } from "../protocol/types.ts";
+import { CellRef, type LoggerFlagsData, PageRef } from "../protocol/types.ts";
 
-export function mapCellRefsToSigilLinks(value: unknown): any {
+/**
+ * Converts a value arriving over the connection into the form the worker
+ * writes: every `CellRef` in it becomes a `SigilLink`, and every raw
+ * `SigilLink` loses its label view.
+ *
+ * A cell's value is a `FabricValue`, as are a `CellRef` and a `SigilLink`, so
+ * the conversion moves within that type. The result holds no `CellRef`.
+ */
+export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
   if (
     typeof value === "string" || typeof value === "number" ||
     typeof value === "boolean"
@@ -34,14 +55,71 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     // via toJSON). Its label view is a main-thread display artifact like a
     // ref's (inv-12 Stage 0) — drop it so it never becomes a link-write
     // policy input.
-    return stripSigilCfcLabelViews(value);
+    //
+    // `stripSigilCfcLabelViews()` reports `unknown`, being general over what it
+    // walks. Narrowed here by what it does: it removes a property from each
+    // link payload it finds, so given a link it returns one.
+    return stripSigilCfcLabelViews(value) as SigilLink;
+  } else if (value instanceof FabricPrimitive) {
+    // Atomic, so there is nothing under it to map. It goes _before_ the record
+    // branch: one is also a record, and that branch rebuilds from enumerable
+    // own properties a fabric class does not have, which would put `{}` here in
+    // place of the value.
+    return value;
+  } else if (value instanceof FabricInstance) {
+    // A `FabricInstance` is refused. Its codec contents can carry a link, and
+    // those contents are not reachable by property name -- so the record
+    // branch below would rebuild one from enumerable own properties it does
+    // not have, yielding `{}` and losing whatever it holds, and passing it
+    // through whole would leave any link inside it unmapped.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: no flag gates it. The two callers pass a value that
+    // arrived by structured cloning, which strips a fabric class, so one
+    // cannot reach them as an instance at all; what would reach this is a
+    // direct caller, and there is none. `CellHandle.serialize()` in
+    // `../cell-handle.ts` refuses a `FabricSpecialObject` earlier still.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    refuseFabricInstance(value, "when mapping cell refs to sigil links");
   } else if (typeof value === "object" && value) {
-    return Object.entries(value).reduce((acc: Record<string, any>, [k, v]) => {
-      acc[k] = mapCellRefsToSigilLinks(v);
-      return acc;
-    }, {});
+    return Object.entries(value).reduce(
+      (acc: Record<string, FabricValue>, [k, v]) => {
+        acc[k] = mapCellRefsToSigilLinks(v);
+        return acc;
+      },
+      {},
+    );
   }
   return value;
+}
+
+/**
+ * Asserts that a logger flag breakdown is carriable on the connection. Its
+ * shape is the declaration's -- `getLoggerFlagsBreakdown()` reports records to
+ * the leaf -- and what the declaration leaves open is the leaves themselves,
+ * `Logger` taking a `Record<string, unknown>` and constraining it no further.
+ * So the whole question is whether the breakdown is a `FabricValue`.
+ *
+ * A breakdown that is not one throws rather than travelling with the offending
+ * metadata dropped. Dropping it would leave the payload reporting a flag whose
+ * metadata had silently gone, which is the loss "Death before confusion!"
+ * rules out.
+ *
+ * Nothing reaches the throw today, de facto rather than by construction: no
+ * flag gates it, and every producer that raises a flag with metadata passes
+ * fabric data -- one of them a cell's own raw value.
+ */
+export function assertFabricLoggerFlags(
+  breakdown: LoggerFlagsBreakdown,
+): asserts breakdown is LoggerFlagsData {
+  if (isValidFabricValue(breakdown)) return;
+
+  throw new Error(
+    "Cannot send logger flags on this connection, not being a " +
+      `\`FabricValue\`: ${backtickQuote(toCompactDebugString(breakdown))}`,
+  );
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {

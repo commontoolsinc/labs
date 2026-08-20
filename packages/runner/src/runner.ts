@@ -77,6 +77,7 @@ import {
 } from "./link-utils.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import {
+  causalFormOfBinding,
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
@@ -167,11 +168,6 @@ export { validateAndCheckReactives } from "./sandbox/result-normalization.ts";
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
   enabled: true,
-  level: "warn",
-  logCountEvery: 0,
-});
-const sourceLocationLogger = getLogger("runner.source-location", {
-  enabled: false,
   level: "warn",
   logCountEvery: 0,
 });
@@ -5113,38 +5109,41 @@ export class Runner {
       liveTrusted ??
       this.getFallbackJavaScriptImplementation(module);
 
-    const namedFn = fn as {
-      src?: string;
-      name?: string;
-      sourceLocationSample?: Record<string, unknown>;
-    };
+    const namedFn = fn as { src?: string; name?: string };
     const name = namedFn.src || fn.name;
-    if (name && namedFn.sourceLocationSample) {
-      sourceLocationLogger.flag("sample", name, true, {
-        name,
-        ...namedFn.sourceLocationSample,
-      });
-    }
 
     return { fn, name };
   }
 
   /**
+   * The module's content-addressed `$implRef` — the defining module's content
+   * identity plus the registered artifact's export/`__cfReg` symbol — when it
+   * is structurally whole. A ref missing either half addresses nothing, so it
+   * reads the same as no ref at all, and every caller treats it that way.
+   */
+  private contentAddressedImplRef(
+    module: Module,
+  ): { identity: string; symbol: string } | undefined {
+    const ref = (module as { $implRef?: { identity: string; symbol: string } })
+      .$implRef;
+    return ref && typeof ref.identity === "string" &&
+        typeof ref.symbol === "string"
+      ? ref
+      : undefined;
+  }
+
+  /**
    * Resolve a module's implementation through its content-addressed
-   * `$implRef` (the defining module's content identity + the registered
-   * artifact's export/`__cfReg` symbol). Returns undefined on a miss (no ref,
-   * never registered, or rolled out of the bounded index) — callers fall back
-   * to the legacy ref or the stringified source.
+   * `$implRef`. Returns undefined when the module carries no usable ref or the
+   * ref names an implementation this runtime never registered; the caller then
+   * falls through to the module's live implementation, and failing that to the
+   * stringified source.
    */
   private resolveByImplRef(
     module: Module,
   ): ((...args: any[]) => any) | undefined {
-    const ref = (module as { $implRef?: { identity: string; symbol: string } })
-      .$implRef;
-    if (
-      !ref || typeof ref.identity !== "string" ||
-      typeof ref.symbol !== "string"
-    ) {
+    const ref = this.contentAddressedImplRef(module);
+    if (!ref) {
       return undefined;
     }
     const artifact = this.runtime.patternManager.artifactFromIdentitySync(
@@ -5158,11 +5157,15 @@ export class Runner {
         return implementation as (...args: any[]) => any;
       }
     }
-    // Eviction insurance: the artifact index is FIFO-bounded and can roll a
-    // running pattern's module out mid-session, and a post-flip graph has no
-    // legacy ref (and no body when the writer proved resolvability). The
-    // engine's content-addressed implementation index is strong for the
-    // session, so the `$implRef` keeps resolving.
+    // Second-chance resolution through the engine's content-addressed
+    // implementation index, which is strong for the whole session. The
+    // artifact index consulted above is also session-lifetime and never
+    // evicted — the pattern manager's bounded FIFO covers only the
+    // module-namespace reuse cache — so this arm exists for the cases where
+    // the two indexes genuinely diverge: a module verified-evaluated by the
+    // engine without passing through the pattern manager's registration
+    // (a standalone-Engine compile), and a post-flip graph that carries no
+    // legacy ref and no body.
     return this.runtime.harness.getVerifiedImplementation?.(
       ref.identity,
       ref.symbol,
@@ -5832,6 +5835,12 @@ export class Runner {
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
+    // What names this node, as opposed to what it reads through: the bound
+    // inputs with every link reduced to the cell it names. Hoisted out of the
+    // handler because the bindings are fixed for the node, so the reduction
+    // runs once rather than per event.
+    const causalInputs = causalFormOfBinding(inputs) as Record<string, any>;
+
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
 
@@ -5860,7 +5869,7 @@ export class Runner {
       // collide on the receipt. The fallback covers non-dispatch invocations
       // (tests calling the handler directly).
       const cause = {
-        ...(inputs as Record<string, any>),
+        ...causalInputs,
         $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
@@ -6144,12 +6153,18 @@ export class Runner {
     };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
+    // See the handler's counterpart above: what names the node, reduced once
+    // here rather than on every action invocation.
+    const resultFor = {
+      inputs: causalFormOfBinding(inputs),
+      outputs: causalFormOfBinding(outputs),
+      fn: fnSource,
+    };
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
-      const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
         { implementation: fn },
@@ -6363,12 +6378,11 @@ export class Runner {
 
     // Identity stamping is UNCONDITIONAL — the single identity channel (the
     // scheduler reads only these stamps; there is no fallback derivation).
-    // The debug NAME below depends on `name` (fn.src / fn.name — absent for
-    // anonymous arrows when the eager source annotation is off), but identity
-    // must not: gating the stamps on `name` silently re-opened the per-symbol
+    // The debug NAME below may come from sidecar-backed `fn.src`, authored
+    // `fn.name`, or a fallback function name, but identity must not depend on
+    // any of them: gating the stamps on `name` silently re-opened the per-symbol
     // multi-instance collision (N instances of one lift sharing one id, so one
-    // actionStats entry and one durable observation) whenever annotation was
-    // off — the production default.
+    // actionStats entry and one durable observation) whenever no name existed.
     //
     // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
     // not `module.implementation`: an `$implRef`-resolved module (reloaded from
@@ -6547,8 +6561,7 @@ export class Runner {
   private getFallbackJavaScriptImplementation(
     module: Module,
   ): (...args: any[]) => any {
-    const implRef =
-      (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
+    const implRef = this.contentAddressedImplRef(module);
     if (implRef) {
       // The module carries a content-addressed `$implRef` — it was expected to
       // resolve through the verified registry — yet resolution fell through to
@@ -6559,6 +6572,27 @@ export class Runner {
         "Verified function resolution missed; running SES-recompiled," +
         " CFC-unverified fallback",
         { $implRef: implRef },
+      ]);
+    } else {
+      // No `$implRef` at all: the module carries neither provenance nor a
+      // verified entry ref, so the bare-SES re-evaluation below is the only
+      // resolution left. Module-scope references do not exist under that
+      // evaluator, so when a module that needs them lands here, helpers fail
+      // at call time with no upstream signal — this counter is the tell.
+      // Counts increment even while the logger is disabled, so a live
+      // worker's logger ledger always exposes how often unverified source is
+      // executing.
+      logger.error("unverified-source-fallback", () => [
+        "Module reached resolution with no $implRef; running SES-recompiled," +
+        " CFC-unverified fallback from stringified source",
+        {
+          preview: typeof module.implementation === "function"
+            ? Function.prototype.toString.call(module.implementation).slice(
+              0,
+              80,
+            )
+            : String(module.implementation).slice(0, 80),
+        },
       ]);
     }
     if (typeof module.implementation === "function") {

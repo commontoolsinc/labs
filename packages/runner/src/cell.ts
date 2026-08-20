@@ -7,9 +7,9 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   cloneIfNecessary,
+  type FabricConvertibleValue,
   fabricFromNativeValue,
   FabricInstance,
-  type FabricOrConvertibleNativeValue,
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
@@ -3435,14 +3435,14 @@ export function frameAnchorIds(
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
- * `FabricOrConvertibleNativeValue` is an arm rather than something restated, so
+ * `FabricConvertibleValue` is an arm rather than something restated, so
  * this stays true of whatever that comes to admit. The container arms are here
  * as well, and they are not redundant with it: theirs hold only what is already
  * fabric or convertible, where a cell may sit at any depth in what a pattern
  * produced. Replacing a nested one is the whole of what this conversion is for.
  */
 export type CellLinkInput =
-  | FabricOrConvertibleNativeValue
+  | FabricConvertibleValue
   | readonly CellLinkInput[]
   | { readonly [key: string]: CellLinkInput }
   | Cell<any>;

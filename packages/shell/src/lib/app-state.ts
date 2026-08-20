@@ -5,7 +5,7 @@ import {
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
 } from "@commonfabric/identity";
-import { AppView } from "./view.ts";
+import { AppView } from "@commonfabric/navigation";
 
 // Primary application state.
 export interface AppState {
@@ -50,8 +50,8 @@ export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
 // `Navigation` reads and writes the view through this, and the shell publishes
 // its root element on `globalThis.app` under this type so integration tests
 // can drive the page from outside. `XRootView` implements it. Declaring it
-// here keeps these shared sources, which the `ui` package compiles too, clear
-// of the root element's import graph.
+// here keeps `Navigation` and the integration-test harness clear of the root
+// element's import graph.
 export interface ShellApp {
   state(): AppState;
   serialize(): AppStateSerialized;
@@ -98,9 +98,7 @@ export function createAppState(
 export function clone(state: AppState): AppState {
   return Object.assign({}, state, {
     config: Object.assign({}, state.config),
-    view: typeof state.view === "object"
-      ? Object.assign({}, state.view)
-      : state.view,
+    view: Object.assign({}, state.view),
   });
 }
 

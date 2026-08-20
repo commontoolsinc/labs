@@ -141,10 +141,15 @@ logger row and a worker CPU profile answer different questions, and the causes
 this runtime has actually produced. It is live documentation — as those answers
 change, it changes with them.
 
+[`debugging/profiling.md`](debugging/profiling.md) is the walkthrough that goes
+with it: read the timings already being collected, find the phase, bracket it so
+a CPU profile can be read for exactly that window, split until a call explosion
+has an origin, and pin the result with a benchmark that correlates.
+
 The server side is the half still undocumented: attaching to a running
 toolshed's Deno process, and recording OTEL traces against a collector. Whoever
-profiles the server first should write those steps down the same way, under
-`docs/development/debugging/`, so that path stops being tribal knowledge too.
+profiles the server first should write those steps into that same document, so
+that path stops being tribal knowledge too.
 
 ### Making the Loop Fast
 

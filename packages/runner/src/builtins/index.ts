@@ -18,6 +18,7 @@ import {
 import { filter } from "./filter.ts";
 import { flatMap } from "./flatmap.ts";
 import { IF_ELSE_ARGUMENT_SCHEMA, ifElse } from "./if-else.ts";
+import { str, STR_ARGUMENT_SCHEMA } from "./str.ts";
 import { inspectConfLabel } from "./inspect-conf-label.ts";
 import { llmDialog } from "./llm-dialog.ts";
 import { generateObject, generateText, llm } from "./llm.ts";
@@ -65,6 +66,10 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef(
     "ifElse",
     raw(ifElse, { argumentSchema: IF_ELSE_ARGUMENT_SCHEMA }),
+  );
+  moduleRegistry.addModuleByRef(
+    "str",
+    raw(str, { argumentSchema: STR_ARGUMENT_SCHEMA }),
   );
   moduleRegistry.addModuleByRef("when", raw(when));
   moduleRegistry.addModuleByRef("unless", raw(unless));

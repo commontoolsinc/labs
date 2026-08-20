@@ -1,4 +1,5 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
@@ -43,6 +44,13 @@ export type CellAliasResolver = (
   path: readonly PropertyKey[],
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
+
+// Surfaces the body-only module write (see `moduleToEncodableForm`). It has
+// its own name so write-time diagnostics can be silenced or raised without
+// touching everything the `runner` logger carries.
+const serializeShapeLogger = getLogger("builder.serialize-shape", {
+  logCountEvery: 0,
+});
 
 /**
  * The refusal a `FabricInstance` gets from the binding walks. Nothing reaches
@@ -133,9 +141,9 @@ export function withAliasBindings(
   // for the same reason a non-inert plain object is refused there: `.map()`
   // rebuilds by index, so it drops a named or symbol-keyed property and
   // EVALUATES an accessor-backed index into a data property, and -- since
-  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass
-  // instance still carrying its live prototype. The first two produce an array
-  // that satisfies `isFabricValue()` while meaning something else; the last
+  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass instance
+  // still carrying its live prototype. The first two produce an array that
+  // satisfies `isValidFabricValue()` while meaning something else; the last
   // produces one that does not satisfy it at all.
   if (isInertArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
@@ -176,7 +184,7 @@ export function withAliasBindings(
   // `for...in` rebuild silently drops a symbol key and a non-enumerable
   // property, EVALUATES an accessor into a data property, and reparents a
   // null-prototype object -- each producing a plain object that satisfies
-  // `isFabricValue()` while meaning something else. Nothing downstream can
+  // `isValidFabricValue()` while meaning something else. Nothing downstream can
   // catch it, because what it produces is genuinely valid.
   if (
     isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
@@ -326,6 +334,23 @@ export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
     const implRefValue = (provenance?.symbol
       ? { identity: provenance.identity, symbol: provenance.symbol }
       : undefined) ?? entryRefValue;
+    if (module.type === "javascript" && implRefValue === undefined) {
+      // This module serializes body-only with no `$implRef` — a shape a
+      // reader can resolve only through the bare-SES stringified-source
+      // fallback, where module-scope references do not exist. Surfacing it
+      // here catches the shape as it is written, which is the only signal for
+      // graphs serialized inline rather than persisted by pattern reference.
+      serializeShapeLogger.error("noref-body-write", () => [
+        "Serializing a function implementation with neither provenance nor a" +
+        " verified entry ref (body-only, no $implRef)",
+        {
+          preview: Function.prototype.toString.call(implementation).slice(
+            0,
+            80,
+          ),
+        },
+      ]);
+    }
     const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);

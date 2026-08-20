@@ -469,6 +469,242 @@ function getEnvFloor(): LogLevel | undefined {
 _globalLevelFloor = getEnvFloor();
 
 /**
+ * Whether every recorded time span also emits a `performance.measure`.
+ *
+ * Off unless asked for, because these are for a tool rather than for a person.
+ * A run emits hundreds of thousands of them — a topics pattern test produces
+ * over 800,000 — and a human opening the timeline wants to see the handful of
+ * phases someone named, not every span the runtime recorded. Emission is turned
+ * on for the length of an investigation and read by something that aggregates.
+ *
+ * The cost is real but secondary: a measure runs about three and a half times
+ * what recording the span into the statistics does, which is worth knowing for
+ * a hot path and is not what decides the default.
+ *
+ * Turned on, every span already carried by a logger becomes an entry on the
+ * timeline of the process that ran it — which is the whole point, because a
+ * sampling profile knows nothing about phases and marks only reach the profile
+ * taken in their own process.
+ */
+let _emitTimingMeasures = false;
+
+/**
+ * How many measures may be emitted before emission stops.
+ *
+ * Entries are retained until something clears them, so an unbounded run would
+ * grow the buffer without limit and eventually distort the measurement it was
+ * turned on to take. Emission stops at the cap and says so once, rather than
+ * silently continuing to grow or silently dropping.
+ */
+let _timingMeasureCap = 200_000;
+let _timingMeasuresEmitted = 0;
+let _timingMeasureCapReported = false;
+
+/** A monotonic suffix, so two spans on one key stay distinguishable. */
+let _timingMeasureSequence = 0;
+
+/**
+ * Whether the next span would actually reach the timeline.
+ *
+ * Emission being on is not the same as a measure being emitted: once the cap is
+ * reached nothing more is written, and a caller that pays to build a detail
+ * should stop paying at the same moment — which is precisely the longest run,
+ * where it would otherwise cost the most.
+ */
+export function willEmitTimingMeasure(): boolean {
+  return _emitTimingMeasures && _timingMeasuresEmitted < _timingMeasureCap;
+}
+
+/**
+ * What marks a measure as this logger's.
+ *
+ * The performance timeline is shared with whatever else the host instruments,
+ * so emitted entries carry a prefix for two reasons: clearing can then remove
+ * only what this emitted rather than destroying a page's own measures, and a
+ * human scanning a timeline can tell logger spans from application ones.
+ */
+export const TIMING_MEASURE_PREFIX = "cf:";
+
+/**
+ * What separates a span's key from the detail naming that one instance.
+ *
+ * A detail identifies which of many spans on a key this one was — which action
+ * ran, which document was read — and it belongs to the emitted measure alone.
+ * Putting it in the key instead would multiply the statistics by every value it
+ * takes, which is the cost the keys are deliberately shaped to avoid: a key is
+ * a place in the code, not an occurrence.
+ */
+export const TIMING_MEASURE_DETAIL = "|";
+
+/**
+ * Make a key or a detail safe to put in a measure name.
+ *
+ * Reversibly, because both are arbitrary strings a caller chose: substituting
+ * the separators away would map `a|b` and `a/b` onto one name, and two actions
+ * that differ only there would then report as one row. Percent-encoding is the
+ * cheapest thing that survives a round trip, and `%` goes first so decoding
+ * cannot mistake an encoded byte for one the caller wrote.
+ */
+export function encodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%", "%25")
+    .replaceAll(TIMING_MEASURE_DETAIL, "%7C")
+    .replaceAll("#", "%23");
+}
+
+/** The inverse of {@link encodeMeasureField}. */
+export function decodeMeasureField(value: string): string {
+  return value
+    .replaceAll("%23", "#")
+    .replaceAll("%7C", TIMING_MEASURE_DETAIL)
+    .replaceAll("%25", "%");
+}
+
+/** The detail carried by an emitted measure, if it has one. */
+export function detailOfMeasure(name: string): string | undefined {
+  const body = name.startsWith(TIMING_MEASURE_PREFIX)
+    ? name.slice(TIMING_MEASURE_PREFIX.length)
+    : name;
+  const hash = body.lastIndexOf("#");
+  const withoutSequence = hash === -1 ? body : body.slice(0, hash);
+  const bar = withoutSequence.indexOf(TIMING_MEASURE_DETAIL);
+  return bar === -1
+    ? undefined
+    : decodeMeasureField(withoutSequence.slice(bar + 1));
+}
+
+function getEnvMeasuresEnabled(): boolean {
+  if (isDeno()) {
+    try {
+      const raw = Deno.env.get("CF_TIMING_MEASURES");
+      return raw !== undefined && raw !== "" && raw !== "0";
+    } catch { /* ignore permission errors */ }
+  }
+  return false;
+}
+
+/**
+ * The cap named by `CF_TIMING_MEASURES_CAP`, when it names a positive integer.
+ *
+ * Separate from the on/off variable because a run that hits the cap stops
+ * emitting partway through, which leaves an early-run prefix rather than a
+ * sample — and a reader who does not know that will attribute a whole run from
+ * its setup. Raising it has to be reachable from wherever emission is.
+ */
+/**
+ * What `CF_TIMING_MEASURES_CAP` means, separated from reading it.
+ *
+ * Separate because the decision is the part with a rule in it — anything that
+ * does not name a positive integer is ignored rather than applied, since a cap
+ * of zero or `NaN` would disable the guard from outside the process. Reading an
+ * environment variable needs a permission this package's test suite
+ * deliberately does not grant, and the rule should be testable without one.
+ */
+export function parseTimingMeasureCap(
+  raw: string | undefined,
+): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function getEnvMeasureCap(): number | undefined {
+  if (isDeno()) {
+    try {
+      return parseTimingMeasureCap(Deno.env.get("CF_TIMING_MEASURES_CAP"));
+    } catch { /* ignore permission errors */ }
+  }
+  return undefined;
+}
+
+_emitTimingMeasures = getEnvMeasuresEnabled();
+_timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
+
+/**
+ * Turn `performance.measure` emission on or off for every logger.
+ *
+ * The environment variable `CF_TIMING_MEASURES` sets the initial value in Deno;
+ * this is how a browser or worker, which has no environment to read, asks for
+ * the same thing. Passing a `cap` resets the budget along with it.
+ */
+export function setTimingMeasuresEnabled(
+  enabled: boolean,
+  options?: { cap?: number },
+): void {
+  // Validated before anything is assigned, so a rejected call leaves the
+  // switch exactly as it found it rather than half-applied.
+  if (
+    options?.cap !== undefined && (!Number.isInteger(options.cap) ||
+      options.cap <= 0)
+  ) {
+    // A cap of `NaN`, `Infinity`, or zero would disable the guard rather than
+    // configure it, and the guard is the only thing bounding retention.
+    throw new RangeError(
+      `Timing measure cap must be a positive integer: ${options.cap}`,
+    );
+  }
+  _emitTimingMeasures = enabled;
+  if (options?.cap !== undefined) {
+    _timingMeasureCap = options.cap;
+  } else {
+    // Coalesced rather than branched: an environment that names no usable cap
+    // leaves the current one alone, and there is nothing here that only some
+    // runs execute.
+    _timingMeasureCap = getEnvMeasureCap() ?? _timingMeasureCap;
+  }
+  // The budget deliberately survives this. It counts entries that are still on
+  // the timeline, so returning it without draining them would let a caller
+  // toggling emission retain another whole cap's worth — the growth the cap
+  // exists to bound. `clearTimingMeasures()` is what gives it back.
+}
+
+/** Whether measure emission is currently on, and what it has spent. */
+export function getTimingMeasuresState(): {
+  enabled: boolean;
+  emitted: number;
+  cap: number;
+} {
+  return {
+    enabled: _emitTimingMeasures,
+    emitted: _timingMeasuresEmitted,
+    cap: _timingMeasureCap,
+  };
+}
+
+/**
+ * Drop every emitted measure and give the budget back.
+ *
+ * A consumer that has read the entries should call this: the entries are the
+ * only copy, so draining is what keeps a long run from growing without bound.
+ */
+export function clearTimingMeasures(): void {
+  try {
+    // By name rather than wholesale: the timeline belongs to the host, and a
+    // page or worker that instruments itself would otherwise lose its own
+    // measures to a call that claims only to drain this feature's.
+    for (const entry of performance.getEntriesByType("measure")) {
+      if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
+        performance.clearMeasures(entry.name);
+      }
+    }
+  } catch { /* not every host implements it */ }
+  resetTimingMeasureBudget();
+}
+
+/**
+ * Give the budget back without touching the timeline.
+ *
+ * Something other than this feature may clear the timeline — a test runner
+ * resetting between files does — and the count of what has been emitted has to
+ * follow, or emission stays stopped against a cap it no longer owes anything
+ * to.
+ */
+export function resetTimingMeasureBudget(): void {
+  _timingMeasuresEmitted = 0;
+  _timingMeasureCapReported = false;
+}
+
+/**
  * Indicates whether a message at the given level should be logged. Respects
  * the global floor when set — the effective threshold is the more restrictive
  * of (floor, per-logger level).
@@ -820,7 +1056,36 @@ export class Logger {
 
     const endTime = performance.now();
     const elapsed = endTime - startTime;
-    this.#recordTime(elapsed, keys);
+    this.#recordTime(elapsed, keys, startTime);
+    return elapsed;
+  }
+
+  /**
+   * Ends a timer as `timeEnd()` does, and names this one span on the timeline.
+   *
+   * The detail reaches the emitted measure and nothing else: the statistics
+   * stay keyed by the path alone, so a caller can identify an occurrence
+   * without multiplying the rows by every value the detail takes.
+   */
+  timeEndDetailed(
+    detail: string | (() => string),
+    ...keys: string[]
+  ): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this.#activeTimers.get(keyPath);
+    if (startTime === undefined) return undefined;
+    this.#activeTimers.delete(keyPath);
+    const elapsed = performance.now() - startTime;
+    // Resolved only when it will be used. A caller whose detail costs anything
+    // to produce passes a function, and pays nothing on the ordinary path
+    // where emission is off — which is every production run — nor once the cap
+    // has stopped emission partway through one.
+    const resolved = !willEmitTimingMeasure()
+      ? undefined
+      : typeof detail === "function"
+      ? detail()
+      : detail;
+    this.#recordTime(elapsed, keys, startTime, resolved);
     return elapsed;
   }
 
@@ -856,7 +1121,7 @@ export class Logger {
 
     const elapsed = endTime - startTime;
     if (keys.length > 0) {
-      this.#recordTime(elapsed, keys);
+      this.#recordTime(elapsed, keys, startTime);
     }
     return elapsed;
   }
@@ -1038,7 +1303,12 @@ export class Logger {
    * Records timing against the full key path only, with no rollup to the
    * shorter paths.
    */
-  #recordTime(elapsed: number, keys: string[]): void {
+  #recordTime(
+    elapsed: number,
+    keys: string[],
+    startTime?: number,
+    detail?: string,
+  ): void {
     const path = keys.join("/");
     let store = this.#timingsByKey.get(path);
     if (!store) {
@@ -1049,6 +1319,59 @@ export class Logger {
       this.#timingsByKey.set(path, store);
     }
     store.record(elapsed);
+    if (_emitTimingMeasures && startTime !== undefined) {
+      this.#emitMeasure(path, startTime, elapsed, detail);
+    }
+  }
+
+  /**
+   * Put this span on the timeline as well as into the statistics.
+   *
+   * Named `<path>#<n>`, because two spans on one key are two different events
+   * and a shared name would leave a reader unable to tell them apart. The
+   * suffix is what an aggregating consumer strips to recover the key.
+   *
+   * The timestamp form is deliberate: the caller already holds the start, so
+   * there is nothing to gain from marking the boundaries and looking them up
+   * again — the mark-based spelling costs several times as much.
+   */
+  #emitMeasure(
+    path: string,
+    startTime: number,
+    elapsed: number,
+    detail?: string,
+  ): void {
+    if (_timingMeasuresEmitted >= _timingMeasureCap) {
+      if (!_timingMeasureCapReported) {
+        _timingMeasureCapReported = true;
+        console.warn(
+          `[logger] timing measures stopped at the cap of ` +
+            `${_timingMeasureCap}; call clearTimingMeasures() after reading ` +
+            `them, or raise the cap with setTimingMeasuresEnabled().`,
+        );
+      }
+      return;
+    }
+    try {
+      // Both fields are encoded, not just the detail: a key is a caller's
+      // string as much as a detail is, and one containing a separator would
+      // otherwise be parsed back as a key and a detail that were never there.
+      const named = detail === undefined
+        ? encodeMeasureField(path)
+        : `${encodeMeasureField(path)}${TIMING_MEASURE_DETAIL}${
+          encodeMeasureField(detail)
+        }`;
+      performance.measure(
+        `${TIMING_MEASURE_PREFIX}${named}#${++_timingMeasureSequence}`,
+        {
+          start: startTime,
+          end: startTime + elapsed,
+        },
+      );
+      _timingMeasuresEmitted++;
+    } catch {
+      // Instrumentation never fails the thing it is measuring.
+    }
   }
 
   /** Returns the total count of all log calls, over all four levels. */

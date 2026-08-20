@@ -306,12 +306,12 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // `cloneIfNecessary()`.
   //
   // `cloneIfNecessary()` decides its own identity fast path with
-  // `isDeepFrozenFabricValue()`, which conjoins the frozen-ness question with
-  // a membership walk of every node in the value. That walk is uncached, so
-  // the first read of a stored document runs it in full, and for a list it
+  // `isValidDeepFrozenFabricValue()`, which conjoins the frozen-ness question
+  // with a membership walk of every node in the value. That walk is uncached,
+  // so the first read of a stored document runs it in full, and for a list it
   // costs several times what the rest of the read does. Membership is settled
-  // before a value reaches the replica: the write paths below hand every
-  // value to `cloneIfNecessary()`, which either accepts it as a deep-frozen
+  // before a value reaches the replica: the write paths below hand every value
+  // to `cloneIfNecessary()`, which either accepts it as a deep-frozen
   // `FabricValue` or rebuilds it as one.
   return (isDeepFrozen(value) ? value : cloneIfNecessary(value)) as T;
 };

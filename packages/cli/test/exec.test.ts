@@ -777,6 +777,196 @@ describe("parseExecArgs edge cases", () => {
       .toEqual({ fooBar: 5 });
   });
 
+  it("reads a $ref's siblings the way the payload door resolves them", () => {
+    // 2020-12 lets a `$ref` carry siblings, and the runtime's own
+    // `resolveCfcSchemaRefs` merges the ref site over its target. Jumping
+    // straight to the target instead would name `query` here — a flag the
+    // validator refuses as an additional property — while hiding `limit`,
+    // the one it accepts. Which fields exist is the validator's answer to
+    // give; this door's job is to report the same one.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      properties: { limit: { type: "number" } },
+      additionalProperties: false,
+      $defs: {
+        AddEvent: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--limit", "5"]).input).toEqual({ limit: 5 });
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/<event> takes "--limit"/);
+  });
+
+  it("falls back to the single-value vocabulary for an unresolvable $ref", () => {
+    // A dangling ref describes nothing, so there is no fields position to
+    // read and the scalar flags are all that remain — where such a schema
+    // sat before any of this resolved.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/Missing",
+      asCell: ["stream"],
+      $defs: {},
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--value", "Milk"]).input).toBe("Milk");
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/This verb takes a single value/);
+  });
+
+  it("derives flags from fields behind a top-level $ref", () => {
+    // The shape a stream's event is routinely written in. Its fields sit in
+    // the definition, and a caller should not have to know that to name them.
+    const refSchema = (
+      properties: Record<string, JSONSchema>,
+      required: string[],
+    ): JSONSchema => ({
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      $defs: { AddEvent: { type: "object", properties, required } },
+    } as JSONSchema);
+
+    const one = makeSpec(
+      "handler",
+      refSchema({ query: { type: "string" } }, ["query"]),
+    );
+    expect(parseExecArgs(one, ["--query", "Milk"]).input)
+      .toEqual({ query: "Milk" });
+    // The field has a name, so that name is the flag. `--value` belongs to a
+    // verb whose event IS a single value, and this one's is an object.
+    expect(() => parseExecArgs(one, ["--value", "Milk"]))
+      .toThrow(/"--value" at <event> is not a field this verb declares/);
+
+    const two = makeSpec(
+      "handler",
+      refSchema(
+        { query: { type: "string" }, limit: { type: "number" } },
+        ["query"],
+      ),
+    );
+    expect(parseExecArgs(two, ["--query", "Milk", "--limit", "5"]).input)
+      .toEqual({ query: "Milk", limit: 5 });
+    expect(() => parseExecArgs(two, ["--value", "Milk"]))
+      .toThrow(/<event> takes "--query", "--limit"/);
+    expect(() => parseExecArgs(two, ["--quer", "Milk"]))
+      .toThrow(/Did you mean "--query"\?/);
+
+    // The page reports the resolved event rather than calling it void, and
+    // names the flags the parser accepts.
+    const help = renderExecHelp("/tmp/x.handler", one);
+    expect(help).toContain("query: string");
+    expect(help).toContain("--query <string>");
+    expect(help).not.toContain("Input type:\n  void");
+  });
+
+  it("spells a boolean without a placeholder, and a boolean value with one", () => {
+    // A boolean FIELD is named bare in Usage, because writing the flag is
+    // already the whole of saying true — a placeholder there would invite a
+    // value the parser does not take in that position.
+    const field = makeSpec("handler", {
+      type: "object",
+      properties: { done: { type: "boolean" } },
+      required: ["done"],
+    });
+    const fieldHelp = renderExecHelp("/tmp/x.handler", field);
+    expect(fieldHelp).toContain("[invoke] --done\n");
+    expect(fieldHelp).not.toContain("--done <boolean>");
+
+    // A verb whose whole event IS a boolean has no field to name, so the
+    // value rides `--value` and the placeholder says which value it takes.
+    const whole = makeSpec("tool", { type: "boolean" });
+    const wholeHelp = renderExecHelp("/tmp/x.tool", whole);
+    expect(wholeHelp).toContain("--value <boolean>");
+  });
+
+  it("keeps a defaulted field optional on the help page too", () => {
+    // The page and the parser must answer required-ness the same way. Labelling
+    // `--mode` required while the last line says a bare invoke works, and while
+    // the parser accepts one, is the page contradicting itself and the caller.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/RefreshEvent",
+      asCell: ["stream"],
+      $defs: {
+        RefreshEvent: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      },
+    } as unknown as JSONSchema);
+
+    const help = renderExecHelp("/tmp/x.handler", spec);
+    expect(help).toContain('--mode <string>  Optional. Default: "fast".');
+    // Usage names what a call must carry, and this one need carry nothing.
+    expect(help).not.toContain("[invoke] --mode");
+    expect(help).toContain("Invoke alone will call the handler");
+    expect(parseExecArgs(spec, []).input).toEqual({});
+  });
+
+  it("leaves a verb schema-less when its $ref lands on no fields", () => {
+    // Only where the ref reaches a fields position is there anything to derive.
+    // A ref to a scalar, to a position naming nothing, or one that does not
+    // resolve leaves the verb invoking bare, as it did before it was followed.
+    const streamOf = (defs: Record<string, unknown>) => ({
+      $ref: "#/$defs/Target",
+      asCell: ["stream"],
+      $defs: defs,
+    } as unknown as JSONSchema);
+
+    for (
+      const inputSchema of [
+        streamOf({ Target: {} }),
+        streamOf({ Target: { type: "string" } }),
+        streamOf({}),
+      ]
+    ) {
+      expect(parseExecArgs(makeSpec("handler", inputSchema), []).input)
+        .toBeUndefined();
+    }
+
+    // The stream marker is still what makes a bare position schema-less, and
+    // following the ref must not take it out of the question. A $ref to a
+    // scalar with no marker is a single-value verb, and owes its caller the
+    // flags and the input type that go with one.
+    const scalarTool = makeSpec("tool", {
+      $ref: "#/$defs/Target",
+      $defs: { Target: { type: "string" } },
+    } as unknown as JSONSchema);
+    expect(parseExecArgs(scalarTool, ["--value", "Milk"]).input).toBe("Milk");
+    const help = renderExecHelp("/tmp/x.tool", scalarTool);
+    expect(help).toContain("--value");
+    expect(help).toContain("Input type:\n  string");
+    expect(help).not.toContain("Input type:\n  void");
+  });
+
+  it("counts a defaulted field as supplied rather than owed", () => {
+    // The payload gate relaxes `required` for a field carrying a default, so
+    // demanding it at the flag door would refuse a call the runtime fills in.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        mode: { type: "string", default: "fast" },
+        note: { type: "string" },
+      },
+      required: ["mode"],
+    });
+    expect(parseExecArgs(spec, []).input).toEqual({});
+    expect(parseExecArgs(spec, ["--note", "hi"]).input).toEqual({ note: "hi" });
+
+    // A required field with no default is still owed.
+    const owed = makeSpec("handler", {
+      type: "object",
+      properties: { mode: { type: "string" } },
+      required: ["mode"],
+    });
+    expect(() => parseExecArgs(owed, ["invoke"]))
+      .toThrow(/Missing required flag --mode/);
+  });
+
   it("handles each non-object input mode and its errors", () => {
     const booleanSpec = makeSpec("tool", { type: "boolean" });
     const stringSpec = makeSpec("tool", { type: "string" });
@@ -2970,13 +3160,10 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  // Characterized first (pre-D5, observed passing on unmodified code with
-  // the dispatch assertion): a mounted handler invoked with nothing at all
-  // dispatched `undefined` when its event schema sat behind a top-level
-  // local $ref the arg parser derives no flags from. The gate now normalizes
-  // absence to `{}` against the resolved object schema and refuses when
-  // `required` survives relaxation — nothing dispatches, so an invocation id
-  // would never have been spent.
+  // A mounted handler whose event schema sits behind a top-level local $ref
+  // is refused at the flag door, which reads the definition's fields and can
+  // name the type the caller must supply. Nothing dispatches, so an
+  // invocation id is never spent.
   it("refuses an absent payload for a mounted handler that cannot run without one", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -3015,7 +3202,7 @@ describe("mounted callable resolution and execution", () => {
         },
       ),
     ).rejects.toThrow(
-      /Invalid input for "add": no payload was supplied.*query.*send a payload/,
+      /Handler requires input\. Expected type: \{\s*query: string\s*\}/,
     );
 
     expect(harness.tracker.handlerWrites).toEqual([]);

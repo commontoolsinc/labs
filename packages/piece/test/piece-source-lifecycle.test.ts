@@ -37,6 +37,30 @@ function versionProgram(version: string): RuntimeProgram {
   };
 }
 
+// A pattern that reads a data file, with the file attached and classified as
+// data. What the source state and a revision say about it is what a writer
+// built on either would need to put the package back the way it came.
+function dataFileProgram(): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "import { dataFile, NAME, pattern } from 'commonfabric';",
+          "export default pattern(() => ({",
+          "  [NAME]: 'Reads a data file',",
+          "  cities: JSON.parse(dataFile('/data/cities.json')).cities,",
+          "}));",
+          "",
+        ].join("\n"),
+      },
+      { name: "/data/cities.json", contents: '{ "cities": ["Oslo"] }\n' },
+    ],
+    dataFiles: ["/data/cities.json"],
+  };
+}
+
 function incompatibleProgram(): RuntimeProgram {
   return {
     main: "/main.tsx",
@@ -269,6 +293,25 @@ describe("piece source lifecycle", () => {
       readPieceSourceRevision(runtime, piece.getCell(), "missing-revision"),
     ).rejects.toThrow("source revision missing-revision was not found");
     expect(await piece.result.get(["version"])).toBe("local");
+  });
+
+  it("says which of a piece's source files carry data", async () => {
+    const program = dataFileProgram();
+    const piece = await pieces.create(program, { input: {} });
+    const sourceState = await readPieceSourceState(runtime, piece.getCell());
+    expect(sourceState.files.map((file) => file.name).sort()).toEqual([
+      "/data/cities.json",
+      "/main.tsx",
+    ]);
+    // Without this the two entries are indistinguishable, and rebuilding the
+    // package from them compiles the JSON as TypeScript.
+    expect(sourceState.dataFiles).toEqual(["/data/cities.json"]);
+    const revisionSource = await readPieceSourceRevision(
+      runtime,
+      piece.getCell(),
+      sourceState.history[0].revisionId,
+    );
+    expect(revisionSource.dataFiles).toEqual(["/data/cities.json"]);
   });
 
   it("rejects malformed actions and actions that do not apply", async () => {

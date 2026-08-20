@@ -1,11 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import {
-  lookupSchemaDocument,
-  parseExternalSchemaRef,
-  recomposeSchema,
-  schemaToTypeString,
-} from "@commonfabric/runner";
+import { schemaToTypeString } from "@commonfabric/runner";
 import {
   isObjectNotArray,
   type ReadonlyRecord,
@@ -16,6 +11,8 @@ import { cliCommand } from "./cli-name.ts";
 import {
   declaredEventFields,
   eventSchemaJudgesRootFields,
+  requiredEventFieldsOwed,
+  verbRunsWithoutPayload,
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
@@ -108,10 +105,6 @@ function objectProperties(
   schema: JSONSchema,
 ): Record<string, JSONSchema> | null {
   return declaredEventFields(schema)?.properties ?? null;
-}
-
-function requiredFlags(schema: JSONSchema): Set<string> {
-  return declaredEventFields(schema)?.required ?? new Set();
 }
 
 function schemaType(schema: JSONSchema): string | undefined {
@@ -338,14 +331,6 @@ function parseObjectInput(
     const flagName = flagNameForKey(key);
     descriptors.set(flagName, { key, flagName, schema: propertySchema });
   }
-  // A verb with exactly one declared field is also callable through the
-  // single-value spelling: `--value X` addresses that field, so the same
-  // call works whether or not the caller's tooling derived the field list
-  // (a served root reference parses in single-value mode, where `--value`
-  // is the only spelling there is).
-  if (descriptors.size === 1 && !descriptors.has("value")) {
-    descriptors.set("value", descriptors.values().next().value!);
-  }
 
   const input: Record<string, unknown> = {};
   let directJsonInput: unknown;
@@ -499,8 +484,13 @@ function parseObjectInput(
 
   // Only enforce required fields for schema-derived flags.
   // JSON input validation is deferred to the runner.
+  //
+  // What is enforced is what the caller is OWED to supply, not what the
+  // schema marks required: a field carrying a default is answered by the
+  // pattern, and demanding it here refuses a call the runtime would have
+  // filled in and dispatched.
   if (!usedJson) {
-    for (const key of requiredFlags(schema)) {
+    for (const key of requiredEventFieldsOwed(schema)) {
       if (!(key in input)) {
         throw new Error(`Missing required flag --${flagNameForKey(key)}`);
       }
@@ -637,6 +627,24 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
   if (schema.type !== undefined || schema.properties !== undefined) {
     return false;
   }
+  // A `$ref` beside the stream marker describes the event — in the definition
+  // rather than at the root, which is where a pattern routinely puts it. The
+  // root looks bare either way, so reading it alone called such a verb
+  // schema-less and rendered its page as `void`: no input type, no flags, and
+  // no sign that the fields the parser accepts exist at all.
+  //
+  // What settles it is where the ref LANDS, not that one is written. A ref
+  // reaching a fields position describes an event, and only that answers
+  // here. Every other ref — to a scalar, to a position naming nothing, or one
+  // that does not resolve — carries no fields to derive and is left to the
+  // marker check below, which is the classification it had before any ref was
+  // followed. Answering for those directly would take the marker out of the
+  // question: a `$ref` to a scalar with no stream marker is a single-value
+  // verb, and calling it schema-less costs it both `--value` and its input
+  // type on the page.
+  if (typeof schema.$ref === "string" && objectProperties(schema) !== null) {
+    return false;
+  }
   return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
 }
 
@@ -770,12 +778,6 @@ export async function resolveExecInvocation(
   rawArgs: string[],
   deps: ExecInputResolverDeps = {},
 ): Promise<ResolvedExecInvocation> {
-  // The parse reads the input schema's structure (its properties become the
-  // verb's flags), so a schema served as a content-addressed reference
-  // expands here, locally to this invocation — the caller's spec object is
-  // untouched, and the help path applies its own expansion with the
-  // author's `$defs` names.
-  spec = withExpandedInputSchema(spec);
   const implicit = await resolveImplicitPipedHandlerInput(spec, rawArgs, deps);
   if (implicit) {
     return implicit;
@@ -790,45 +792,6 @@ export async function resolveExecInvocation(
     parsed,
     input: await resolveParsedExecInput(spec, parsed, deps),
   };
-}
-
-export function withExpandedInputSchema(
-  spec: ExecCommandSpec,
-): ExecCommandSpec {
-  const expanded = expandSchemaReference(spec.inputSchema);
-  return expanded === spec.inputSchema
-    ? spec
-    : { ...spec, inputSchema: expanded };
-}
-
-/**
- * A schema stored as a content-addressed reference, recomposed for a human
- * or a parser that needs its structure; anything else — an unresolvable
- * reference included — is returned as it is.
- */
-function expandSchemaReference(schema: JSONSchema | true): JSONSchema | true;
-function expandSchemaReference(
-  schema: JSONSchema | true | undefined,
-): JSONSchema | true | undefined;
-function expandSchemaReference(
-  schema: JSONSchema | true | undefined,
-): JSONSchema | true | undefined {
-  if (schema === undefined || schema === true || !isSchemaObject(schema)) {
-    return schema;
-  }
-  const ref = schema.$ref;
-  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
-    return schema;
-  }
-  try {
-    const recomposed = recomposeSchema(ref, lookupSchemaDocument);
-    const { $ref: _expanded, ...siblings } = schema as Record<string, unknown>;
-    return isSchemaObject(recomposed)
-      ? { ...recomposed, ...siblings } as JSONSchema
-      : recomposed;
-  } catch {
-    return schema;
-  }
 }
 
 function schemaDescription(schema: JSONSchema): string | undefined {
@@ -904,7 +867,7 @@ function specificFlagLines(schema: JSONSchema): string[] {
     ];
   }
 
-  const required = requiredFlags(schema);
+  const required = requiredEventFieldsOwed(schema);
   const descriptors = Object.entries(properties).map(
     ([key, propertySchema]) => {
       const flagName = flagNameForKey(key);
@@ -1057,8 +1020,8 @@ function outputSectionLines(spec: ExecCommandSpec): string[] {
     "",
     "Output:",
     ...(spec.callableKind === "handler"
-      ? invocationResultLines(expandSchemaReference(spec.outputSchemaSummary)!)
-      : outputPropertyLines(expandSchemaReference(spec.outputSchemaSummary)!)),
+      ? invocationResultLines(spec.outputSchemaSummary)
+      : outputPropertyLines(spec.outputSchemaSummary)),
   ];
 }
 
@@ -1098,7 +1061,7 @@ function usageLine(
     return `${prefix} ${verb} --value ${valuePlaceholder(spec.inputSchema)}`;
   }
 
-  const required = requiredFlags(spec.inputSchema);
+  const required = requiredEventFieldsOwed(spec.inputSchema);
   const requiredUsages = Object.entries(properties)
     .filter(([key]) => required.has(key))
     .map(([key, propertySchema]) =>
@@ -1144,8 +1107,7 @@ function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
   if (isSchemaLessHandlerInput(schema)) {
     return true;
   }
-  const properties = objectProperties(schema);
-  return properties !== null && requiredFlags(schema).size === 0;
+  return verbRunsWithoutPayload(schema);
 }
 
 export function parseExecArgs(
@@ -1263,7 +1225,7 @@ export function renderExecHelpJson(spec: ExecCommandSpec): string {
     inputSchema: spec.inputSchema,
   };
   if (spec.outputSchemaSummary !== undefined) {
-    value.outputSchema = expandSchemaReference(spec.outputSchemaSummary);
+    value.outputSchema = spec.outputSchemaSummary;
   }
   return JSON.stringify(value, null, 2);
 }
@@ -1308,8 +1270,6 @@ function schemaShapeString(schema: JSONSchema): string {
   if (isSchemaLessHandlerInput(schema)) {
     return "void";
   }
-  // A page shows the reconstructed document, never a cid reference.
-  schema = expandSchemaReference(schema) as JSONSchema;
   // Same TS-like rendering the runner uses for LLM context; CLI help only adds
   // the "void" spelling for schema-less handler inputs above. The formatter
   // resolves $refs against options.defs, not the schema's own $defs, so

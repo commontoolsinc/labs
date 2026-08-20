@@ -1776,6 +1776,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         evidence: { "@link": "opaque:child-run-1#/evidence" },
       },
       linkedStringCount: 1,
+      sealedPaths: [["evidence"]],
     });
   });
 
@@ -1812,6 +1813,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         pair: ["label", { "@link": "opaque:child-run-1#/pair/1" }],
       },
       linkedStringCount: 1,
+      sealedPaths: [["pair", 1]],
     });
   });
 
@@ -1843,6 +1845,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         pair: [5, { "@link": "opaque:child-run-1#/pair/1" }],
       },
       linkedStringCount: 1,
+      sealedPaths: [["pair", 1]],
     });
   });
 
@@ -1882,6 +1885,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
         evidence: { "@link": "opaque:child-run-1#/raw" },
       },
       linkedStringCount: 0,
+      sealedPaths: [],
     });
   });
 
@@ -1906,7 +1910,11 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       schema,
       value: { label: "two" },
       opaqueHandleId: "run-1",
-    })).toEqual({ value: { label: "two" }, linkedStringCount: 0 });
+    })).toEqual({
+      value: { label: "two" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
 
     // A string no branch names is not inert text, so it goes over as a link.
     expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
@@ -1921,6 +1929,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({
       value: { label: { "@link": "opaque:run-1#/label" } },
       linkedStringCount: 1,
+      sealedPaths: [["label"]],
     });
   });
 
@@ -1943,14 +1952,40 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       schema,
       value: { tag: "beta" },
       opaqueHandleId: "run-1",
-    })).toEqual({ value: { tag: "beta" }, linkedStringCount: 0 });
+    })).toEqual({
+      value: { tag: "beta" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
 
     // The number branch of the same union is inert on its own terms.
     expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
       schema,
       value: { tag: 7 },
       opaqueHandleId: "run-1",
-    })).toEqual({ value: { tag: 7 }, linkedStringCount: 0 });
+    })).toEqual({ value: { tag: 7 }, linkedStringCount: 0, sealedPaths: [] });
+  });
+
+  it("seals a very large array without overflowing the argument limit", () => {
+    // 150k sealed siblings under one parent: a spread-append of the child's
+    // sealed paths passes each as a call argument and throws RangeError.
+    const size = 150_000;
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: {
+        type: "object",
+        properties: {
+          notes: { type: "array", items: { type: "string" } },
+        },
+        required: ["notes"],
+        additionalProperties: false,
+      },
+      value: { notes: Array.from({ length: size }, (_, i) => `note ${i}`) },
+      opaqueHandleId: "run-1",
+    });
+    expect(sanitized.linkedStringCount).toBe(size);
+    expect(sanitized.sealedPaths.length).toBe(size);
+    expect(sanitized.sealedPaths[0]).toEqual(["notes", 0]);
+    expect(sanitized.sealedPaths[size - 1]).toEqual(["notes", size - 1]);
   });
 
   it("preserves an opaque link an allOf or oneOf branch declares", () => {
@@ -1974,6 +2009,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({
       value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
       linkedStringCount: 0,
+      sealedPaths: [],
     });
 
     const oneOfSchema = {
@@ -1991,6 +2027,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({
       value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
       linkedStringCount: 0,
+      sealedPaths: [],
     });
   });
 
@@ -2009,7 +2046,11 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       value: { total: 42, $NAME: "Doubler", $UI: { tag: "div" } },
       opaqueHandleId: "run-1",
       reservedKeys: ["$NAME", "$UI"],
-    })).toEqual({ value: { total: 42 }, linkedStringCount: 0 });
+    })).toEqual({
+      value: { total: 42 },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
 
     // A name NOT on the reserved list is refused by the same closed-object
     // rule the reserved names are excused from.
@@ -2033,6 +2074,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({
       value: { "@link": "opaque:run-1" },
       linkedStringCount: 0,
+      sealedPaths: [[]],
     });
   });
 
@@ -2069,6 +2111,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       // the modeled number beside it survives.
       value: { total: 42, nested: { "@link": "opaque:run-1#/nested" } },
       linkedStringCount: 0,
+      sealedPaths: [["nested"]],
     });
 
     // Where the nested object is CLOSED, the same unmodeled key is a
@@ -2114,7 +2157,11 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       schema,
       value: { node: { leaf: 1 } },
       opaqueHandleId: "run-1",
-    })).toEqual({ value: { node: { leaf: 1 } }, linkedStringCount: 0 });
+    })).toEqual({
+      value: { node: { leaf: 1 } },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
   });
 
   it("measures a reserved key the schema does model, and measures it raw", () => {
@@ -2152,6 +2199,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     })).toEqual({
       value: { count: 42, $NAME: "allowed" },
       linkedStringCount: 0,
+      sealedPaths: [],
     });
   });
 
@@ -2180,6 +2228,10 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       schema,
       value: { id: 1, note: "ok" },
       opaqueHandleId: "run-1",
-    })).toEqual({ value: { id: 1, note: "ok" }, linkedStringCount: 0 });
+    })).toEqual({
+      value: { id: 1, note: "ok" },
+      linkedStringCount: 0,
+      sealedPaths: [],
+    });
   });
 });

@@ -284,6 +284,18 @@ async function main() {
     console.error(`\n${reportFailures(replay.failures)}`);
   }
 
+  if (replay.capturesSuperseded.length > 0) {
+    const targets = [...new Set(replay.capturesSuperseded)].sort();
+    console.log(
+      `\nHeld ${targets.length} derived sub-pattern target(s) back, each ` +
+        `with the rule that held it: a hoist is derivation the updated ` +
+        `source re-runs and re-supplies (root contracts still gate):`,
+    );
+    for (const target of targets) {
+      console.log(`  ${target}`);
+    }
+  }
+
   if (replay.dropsApplied.size > 0) {
     console.log(
       `\nHeld ${replay.dropsApplied.size} path(s) back from their vintage, ` +

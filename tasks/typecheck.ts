@@ -45,6 +45,7 @@ const DIRS = [
   "packages/lib-shell",
   "packages/llm",
   "packages/memory",
+  "packages/navigation",
   "packages/patterns/auth",
   "packages/patterns/battleship",
   "packages/patterns/budget-tracker",

@@ -2,21 +2,23 @@
 // to record events that can be subscribed to in other
 // contexts to visualize or log events inside the runtime.
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 import { IMemoryChange } from "./storage/interface.ts";
 
 /**
  * Statistics tracked for each action's execution performance.
  */
-export interface ActionStats {
+export type ActionStats = {
   runCount: number;
   totalTime: number;
   averageTime: number;
   lastRunTime: number;
   lastRunTimestamp: number; // When the action last ran (performance.now())
-}
+};
 
 // Types for scheduler graph visualization
-export interface SchedulerGraphNode {
+export type SchedulerGraphNode = {
   id: string; // actionId or "input:space/entity" for inputs
   type: "effect" | "computation" | "input" | "inactive"; // inactive = has stats but no longer registered
   stats?: ActionStats;
@@ -45,29 +47,29 @@ export interface SchedulerGraphNode {
   // retirement). `identity` is a module content hash; `symbol` distinguishes
   // co-located patterns of one module (the export vs hoisted sub-patterns).
   patternIdentity?: { identity: string; symbol: string };
-}
+};
 
-export interface SchedulerGraphEdge {
+export type SchedulerGraphEdge = {
   from: string; // actionId of source
   to: string; // actionId of target
   cells: string[]; // Cell IDs creating this dependency
   edgeType?: "data" | "parent"; // data = dependency, parent = parent-child relationship
-}
+};
 
-export interface SchedulerGraphSnapshot {
+export type SchedulerGraphSnapshot = {
   nodes: SchedulerGraphNode[];
   edges: SchedulerGraphEdge[];
   timestamp: number;
-}
+};
 
-export interface SchedulerActionInfo {
+export type SchedulerActionInfo = {
   patternName?: string;
   moduleName?: string;
   reads?: string[];
   writes?: string[];
-}
+};
 
-export interface SchedulerEventPreflightStats {
+export type SchedulerEventPreflightStats = {
   visitCount: number;
   dirtyInputCount: number;
   resultTrueCount: number;
@@ -82,9 +84,9 @@ export interface SchedulerEventPreflightStats {
   hotActions?: SchedulerEventPreflightActionSummary[];
   hotFanoutActions?: SchedulerEventPreflightActionSummary[];
   rootDirectWriters?: SchedulerEventPreflightActionSummary[];
-}
+};
 
-export interface SchedulerEventPreflightActionSummary {
+export type SchedulerEventPreflightActionSummary = {
   actionId: string;
   actionType: "effect" | "computation" | "unknown";
   visitCount: number;
@@ -97,7 +99,7 @@ export interface SchedulerEventPreflightActionSummary {
   readCount: number;
   shallowReadCount: number;
   writeCount: number;
-}
+};
 
 // ============================================================
 // Diagnosis types for non-settling / non-idempotent detection
@@ -107,35 +109,35 @@ export interface SchedulerEventPreflightActionSummary {
  * Report for a single action detected as non-idempotent.
  * Same inputs (reads) produced different outputs (writes) across runs.
  */
-export interface NonIdempotentReport {
+export type NonIdempotentReport = {
   actionId: string;
   actionInfo?: SchedulerActionInfo;
   runs: {
     timestamp: number;
-    reads: Record<string, unknown>;
-    writes: Record<string, unknown>;
+    reads: Record<string, FabricValue>;
+    writes: Record<string, FabricValue>;
   }[];
   differingWriteKeys: string[];
-}
+};
 
 /**
  * A cycle found in the causal chain of action triggers.
  * e.g. A writes cell X -> triggers B, B writes cell Y -> triggers A.
  */
-export interface CycleReport {
+export type CycleReport = {
   cycle: { actionId: string; writesCell: string }[];
   timestamp: number;
-}
+};
 
 /**
  * Aggregated result from a diagnosis run.
  */
-export interface SchedulerDiagnosisResult {
+export type SchedulerDiagnosisResult = {
   nonIdempotent: NonIdempotentReport[];
   cycles: CycleReport[];
   duration: number;
   busyTime: number;
-}
+};
 
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {

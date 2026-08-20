@@ -54,6 +54,16 @@ passes, not first. By the time it fires, expression-site lowering during
 `key()`-substitution prologue it generates is downstream of the analyzer-driven
 decisions about wrapping.
 
+This document focuses on reactive collection calls that `ClosureTransformer`
+rewrites. An ordinary eager `Array.map()` or `ReadonlyArray.map()` call remains
+plain JavaScript, but a callback in a pattern body can still carry pattern-owned
+value sites that stage 13 lowers. That permission is narrower than the
+`plain-array-value` callback boundary: `isCollectingPlainArrayMethodCallback`
+admits only argument zero of a `map` whose owner symbol includes the configured
+TypeScript default-library `Array`/`ReadonlyArray` declaration. Same-named
+source and ambient types do not qualify, and neither do result-interpreting
+methods such as `filter`, `find`, `sort`, `flatMap`, or `reduce`.
+
 ## What `ClosureTransformer` does for `.map`s
 
 `ClosureTransformer` walks the source tree and delegates each visited expression
@@ -191,6 +201,7 @@ See `src/core/mod.ts` for the full registry contract.
 | Per-callback closure transform                             | `src/closures/strategies/array-method-transform.ts`                                          |
 | Element binding analysis (identifier vs destructured)      | `src/closures/strategies/array-method-utils.ts`                                              |
 | Synthesized pattern callback's typed shape                 | `src/closures/utils/schema-factory.ts`                                                       |
+| Plain-array `map` callback value-site permission           | `src/policy/callback-boundary.ts` + `src/ast/call-kind.ts`                                   |
 | `ClosureTransformer` per-callback expression-site lowering | `src/transformers/expression-site-lowering.ts` (`rewriteArrayMethodCallbackExpressionSites`) |
 | The defer-to-late-lowering gate                            | `src/transformers/expression-site-lowering.ts` (`shouldDeferToLateInPlaceLowering`)          |
 | Dataflow analyzer identifier + property-access branches    | `src/ast/dataflow.ts` (around lines 700-900)                                                 |

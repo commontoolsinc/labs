@@ -66,6 +66,49 @@ describe("PatternManager.compileAndRegisterModules", () => {
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeUndefined();
   });
 
+  it("refuses an authored builder-artifact export in the hoist namespace", async () => {
+    // `__cfPattern_<n>` spellings are how everything downstream tells a
+    // transformer-derived hoist from an authored artifact — the vintage gate
+    // holds hoist refusals back on it. An authored artifact under the name
+    // would wear the wrong provenance, so registration fails the load.
+    const squatter: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import { NAME, pattern } from "commonfabric";\n` +
+            `export const __cfPattern_1 = pattern(() => ({ shout: "s" }));\n` +
+            `export default pattern(() => ({ [NAME]: "squatter" }));\n`,
+        },
+      ],
+    };
+    await expect(
+      runtime.patternManager.compileAndRegisterModules(squatter),
+    ).rejects.toThrow("compiler's own hoist namespace");
+  });
+
+  it("accepts a plain value under a hoist-shaped export name", async () => {
+    // Only an artifact is indexable, so only an artifact can wear the wrong
+    // provenance; a constant under the name is inert to every consumer of
+    // the artifact index.
+    const inert: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import { NAME, pattern } from "commonfabric";\n` +
+            `export const __cfPattern_1 = 41;\n` +
+            `export default pattern(() => ({ [NAME]: "inert" }));\n`,
+        },
+      ],
+    };
+    const result = await runtime.patternManager.compileAndRegisterModules(
+      inert,
+    );
+    const entry = result.main!["default"] as object;
+    expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeDefined();
+  });
+
   // The cf-test harness injects a process-wide module byte cache
   // (`RuntimeOptions.moduleByteCache`) so repeated pattern compiles across
   // runtimes skip the transform-and-emit step. Pin that seam here: a fresh

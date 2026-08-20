@@ -707,11 +707,13 @@ pattern-owned sites outright; the compute-owned boundaries (`computed`,
 
 `plain-array-value` carries them only for the callback role that can hold
 them, which `isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`)
-decides. It admits a callback that is argument zero of an
-`Array`/`ReadonlyArray` method named in `COLLECTING_ARRAY_METHOD_NAMES` —
-today `map` alone — over a plain receiver no reactive lowering owns. `map`
-stores each result without reading it, so a result that is a cell stays a
-cell. Every other callback-taking array method reads the result as it runs:
+decides. It admits a callback that is argument zero of the configured
+default-library `Array`/`ReadonlyArray` type and names a method in
+`COLLECTING_ARRAY_METHOD_NAMES` — today `map` alone — over a plain receiver no
+reactive lowering owns. A source or ambient type merely named `Array` or
+`ReadonlyArray` is not a standard array. `map` stores each result without
+reading it, so a result that is a cell stays a cell. Every other callback-taking
+array method reads the result as it runs:
 `filter`, `find`, `some`, and `every` as a boolean, `sort` as a number,
 `flatMap` as an array test, `reduce` as the next accumulator. A cell reaching
 any of those is an object, which is truthy, not a number, and not an array, so
@@ -1513,6 +1515,18 @@ suffixes (`__cfLift_1`, `__cfPattern_1`, …), **not** `factory.createUniqueName
 would make every hoisted identifier share the same `.text` and break the
 identity-by-text lookups later stages rely on.
 
+`__cfPattern_<n>` is a **reserved namespace**, and the runner enforces it:
+registering an evaluated module (`PatternManager.registerEvaluatedModules`)
+refuses a module that EXPORTS a builder artifact under one of these names.
+Hoists reach the artifact index through `__cfReg` (§11.4) rather than through
+exports, so the reservation costs a compiled module nothing — and it is what
+lets a consumer of the index read provenance from the spelling. The
+pattern-update gates depend on exactly that: a recorded instantiation named
+`__cfPattern_<n>` is derivation the updated source re-runs, and is held to a
+different rule than an authored artifact
+(`docs/specs/pattern-update-testing.md`). Only artifacts are refused; a plain
+value under such a name is inert, since nothing but an artifact is indexable.
+
 ### 11.4 `__cfReg` content-addressed registration
 
 After visiting the whole file, the stage appends **one** trailing call:
@@ -1583,6 +1597,70 @@ builder call AND callback recovers to its distinctive authored snippet
 for transform-time source annotation (A′, CT-1870), and the same fallback
 family §16.2's coverage spans use. Rationale, per-site table, and the probe
 rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
+
+### 11.6 Builder source-site sidecar
+
+The hoisting stage consumes that lineage to produce `BuilderSourceSitesV1`, a
+versioned, debug-only compiler artifact that travels **beside** emitted
+JavaScript. It never injects metadata calls or helper implementations into the
+module body. Its wire shape is:
+
+```ts
+interface BuilderSourceSitesV1 {
+  formatVersion: 1;
+  sites: Record<string, {
+    line: number; // authored, 1-based
+    col: number; // authored, 0-based
+    bindingName?: string;
+  }>;
+}
+```
+
+`sites` is keyed by the symbol the verified-evaluation provenance walk uses:
+generated hoist names (`__cfLift_1`, `__cfHandler_1`, `__cfPattern_1`),
+non-exported authored `__cfReg` names, every namespace export alias, or
+`default`. A same-file callback declaration supplies its function position;
+inline functions use their own position; a callback reference whose declaration
+cannot be recovered falls back to the builder call. `bindingName`, when
+recoverable from authored syntax, is the authored declaration name rather than
+the generated hoist name.
+
+The compiler caller must opt in with `builderSourceSites.mapSite`, translating
+compiler-input positions into authored coordinates before they are recorded.
+When the input already is authored source, the caller supplies an explicit
+identity mapping. Without a mapper no sidecar is produced; this fails closed
+instead of quietly labeling helper-prelude-shifted coordinates as authored.
+The runner's mapper removes its injected helper prelude, so cached artifacts
+already contain authored coordinates and a source-free warm load needs neither
+source text nor a source map to serve them.
+
+The JavaScript compiler exposes the sidecar through
+`CompiledTypeScriptModule.builderSourceSites`. Runner module artifacts persist
+it with module bytes through the in-memory and cell-backed caches; invalid or
+unknown sidecar data is discarded as debug-data loss without affecting module
+execution. After verified evaluation, `Engine.recordModuleProvenance` joins the
+module identity, runtime symbol, and source path into
+`cf:module/<identity>/<path>:<line>:<col>` and records it in the separate
+debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
+accessors read that map, resolving a derived factory (`asScope` / `inSpace`)
+through to the root the walk recorded. Verified provenance, authorization,
+scheduling, and artifact hardening do not read it.
+
+The join happens after a module evaluates, because only the namespace walk
+knows which symbol a function was bound to. A diagnostic raised *during* module
+evaluation therefore has no authored position available and must name its
+subject some other way — the closure-capture diagnostic falls back to the
+callback body preview, which is stamped at mint time.
+
+Because this metadata is out of band, every new compiler-artifact transport or
+cache must deliberately carry and validate it. Omitting that plumbing is safe
+for execution and authority but silently loses debug source fidelity; transport
+parity is therefore a maintenance invariant of this design.
+
+This is deliberately separate from the trusted-binding annotation in §17.3.
+`__cfBindVerifiedBinding` remains a rare authority-bearing helper emitted only
+for `WriteAuthorizedBy` trusted bindings; ordinary transformed patterns do not
+carry a repeated source-metadata helper implementation.
 
 ## 12. Schema Generation
 
@@ -3117,9 +3195,8 @@ lists).
   diagnosed at stage 13 (§6.8).
 - The hardening wrapper preserves evaluation semantics (`return fn`), so
   wrapped initializers remain direct-function-classifiable to the verifier,
-  and `Function.prototype.toString`-based `fn.src` resolution (see the
-  module-loading doc) still finds the authored body text inside the wrapper
-  argument.
+  while debug `fn.src` is resolved independently through the compiler sidecar
+  (§11.6).
 
 
 ## 18. Diagnostics Message Transformation (Optional Consumer Layer)

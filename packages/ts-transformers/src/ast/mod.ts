@@ -29,6 +29,7 @@ export {
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,
+  isCallbackReference,
   isConsumedByTerminalChainCall,
   isPatternBuilderCall,
   isReactiveOriginCall,
@@ -81,6 +82,7 @@ export {
   isSyntheticNode,
   preserveLineage,
   preserveSourceMapRange,
+  recoverAuthoredPosition,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

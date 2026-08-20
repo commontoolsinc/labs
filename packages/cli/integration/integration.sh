@@ -768,15 +768,14 @@ run_piece_call_retry() {
   # --- 6. An absent payload the verb cannot run without is refused, id intact.
   # The mirror of scenario 5 for the second-most-likely agent mistake:
   # forgetting the payload rather than misspelling a field. `recordNote`'s
-  # event schema sits behind a top-level local $ref, so the CLI derives no
-  # flags from it and an explicit `invoke` with no payload parses to an
-  # absent (undefined) event. Before the absent-payload gate (verb contract
-  # D5) this dispatched: the handler ran with no event, recorded
-  # "(no event)", and the receipt spent the invocation id — the corrected
-  # same-id retry then reported deduplicated with the correction never
-  # applied. Now the gate normalizes absence to {} against the resolved
-  # object schema and refuses because `required` survives relaxation, so
-  # nothing dispatches and the same id still buys the corrected call.
+  # event schema sits behind a top-level local $ref, and the CLI reads the
+  # definition's fields through it, so an explicit `invoke` carrying none is
+  # refused by name — `note` is required and nothing supplies it.
+  # What this scenario pins is not which door refuses but what the refusal
+  # costs: nothing dispatches, so the invocation id is never spent and the
+  # corrected same-id retry below still applies. A dispatch here would run
+  # the handler with no event and burn the id, leaving the retry
+  # deduplicated against an outcome the caller never wanted.
   RETRY_PIECE_6=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_6=$(new_invocation_id)
   set +e
@@ -787,17 +786,9 @@ run_piece_call_retry() {
   if [ "$ABSENT_STATUS" -eq 0 ]; then
     error "An absent payload against a required-fields verb should fail, got: $ABSENT_OUT"
   fi
-  # Two refusal layers are accepted while their reconciliation is decided:
-  # the verb-level validator ("no payload was supplied") answers when the
-  # served schema's root is a reference the flag parser does not resolve,
-  # and the flag parser ("Missing required flag") answers when the root
-  # states its fields — under content-addressed schemas the same authored
-  # schema can serve either way. Both refuse BEFORE dispatch, which is what
-  # this scenario guards: the assertions below prove the id was not spent.
   case "$ABSENT_OUT" in
-    *'Invalid input for "recordNote"'*'no payload was supplied'*) ;;
     *'Missing required flag --note'*) ;;
-    *) error "An absent-payload refusal should refuse before dispatch, got: $ABSENT_OUT" ;;
+    *) error "An absent-payload refusal should name the missing field, got: $ABSENT_OUT" ;;
   esac
   assert_message_count "$RETRY_PIECE_6" 0 \
     "A refused absent-payload call must not record a message"
@@ -1273,6 +1264,32 @@ run_piece_data_files() {
   UPDATED=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
   assert_json_eq "$UPDATED" '["Oslo", "Lima", "Accra"]' \
     "Pattern should read the updated data file, got: $UPDATED"
+
+  # A data file the source does not read by name cannot be worked out from a
+  # recovered checkout: it is written to disk like any other file, with nothing
+  # recording that it was data. `getsrc` has to say so, or the next `setsrc`
+  # drops it from the revision without a word.
+  local extra_dir="$WORK_DIR/datafiles-extra"
+  mkdir -p "$extra_dir"
+  printf 'not read by the pattern\n' > "$SCRIPT_DIR/pattern/data/notes.txt"
+  EXTRA_PIECE_ID=$(cf piece new $SPACE_ARGS \
+    --root "$SCRIPT_DIR/pattern" \
+    --datafile "$SCRIPT_DIR/pattern/data/notes.txt" \
+    "$data_pattern")
+  cf piece getsrc $SPACE_ARGS --piece $EXTRA_PIECE_ID "$extra_dir" \
+    >"$WORK_DIR/getsrc-extra.out"
+  rm -f "$SCRIPT_DIR/pattern/data/notes.txt"
+  if [ ! -f "$extra_dir/data/notes.txt" ]; then
+    error "An unread data file should still come back with the source."
+  fi
+  # The pattern reads cities.json by name, so that one is re-derived and must
+  # not be listed; notes.txt is the one a later setsrc cannot recover.
+  if ! grep -q -- "--datafile ./data/notes.txt" "$WORK_DIR/getsrc-extra.out"; then
+    error "getsrc did not name the data file its source cannot re-derive."
+  fi
+  if grep -q -- "--datafile ./data/cities.json" "$WORK_DIR/getsrc-extra.out"; then
+    error "getsrc named a data file the recovered source reads by name."
+  fi
 
   echo "Successfully ran CLI data-file integration tests for ${API_URL}."
 }

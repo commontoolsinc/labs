@@ -119,9 +119,9 @@ export class SESRuntime extends EventTarget {
    * parsing) can translate bundle coordinates back to original sources.
    * `provider` runs (once) on the first lookup that needs `filename`. The ESM
    * boot path registers its composed bundle/per-module maps this way —
-   * composition is a per-segment VLQ transcode over every module, and its only
-   * consumers (error mapping, debug `fn.src` resolution) are on-demand, so
-   * boots that never look up a frame never pay it (CT-1819).
+   * composition is a per-segment VLQ transcode over every module, and error
+   * mapping is on-demand, so boots that never look up a frame never pay it
+   * (CT-1819).
    */
   loadSourceMapLazy(
     filename: string,

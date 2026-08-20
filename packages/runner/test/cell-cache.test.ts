@@ -1002,6 +1002,83 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       .toBeUndefined();
   });
 
+  it("round-trips builder source sites and drops malformed debug metadata", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const sidecar = {
+      formatVersion: 1 as const,
+      sites: {
+        default: { line: 4, col: 15 },
+        named: { line: 7, col: 2, bindingName: "named" },
+      },
+    };
+    modules[0] = { ...modules[0]!, builderSourceSites: sidecar };
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const load = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded.get(entryIdentity)?.builderSourceSites;
+    };
+
+    const inspectTx = runtime.edit();
+    const stored = runtime.getCell(
+      spaceA,
+      compiledDocKey(RTVER, entryIdentity),
+      compiledDocWriteSchema(),
+      inspectTx,
+    ).get() as Record<string, unknown>;
+    expect(typeof stored.builderSourceSitesJson).toBe("string");
+    expect(stored.builderSourceSites).toBeUndefined();
+    inspectTx.abort?.();
+    expect(await load()).toEqual(sidecar);
+
+    const replace = async (value: Record<string, unknown>) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        const next = { ...(cell.get() as Record<string, unknown>) };
+        delete next.builderSourceSitesJson;
+        delete next.builderSourceSites;
+        cell.set({ ...next, ...value });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    await replace({
+      builderSourceSitesJson: JSON.stringify({
+        ...sidecar,
+        sites: { named: { line: 0, col: 2 } },
+      }),
+    });
+    expect(await load()).toBeUndefined();
+
+    await replace({ builderSourceSites: sidecar });
+    expect(await load()).toBeUndefined();
+  });
+
   it("persists and cold-loads verified policy manifests without module evaluation", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const artifact = buildCfcPolicyArtifactManifest({

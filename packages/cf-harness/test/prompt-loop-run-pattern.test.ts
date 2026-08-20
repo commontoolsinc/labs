@@ -231,7 +231,7 @@ describe("prompt-loop run_pattern model boundary", () => {
     }
   });
 
-  it("shows the model a registered piece's slug and URL while keeping the piece id out of the tool message", async () => {
+  it("shows the model a named piece's slug and URL while keeping the piece id out of the tool message", async () => {
     const signer = await Identity.fromPassphrase("run-pattern registration");
     const storageManager = StorageManager.emulate({ as: signer });
     const spaceName = `run-pattern-register-${crypto.randomUUID()}`;
@@ -276,10 +276,11 @@ describe("prompt-loop run_pattern model boundary", () => {
         ");",
       ].join("\n");
       let calls = 0;
-      const fetchFn: typeof fetch = () => {
+      const fetchFn: typeof fetch = (_input, init) => {
         calls += 1;
-        const payload = calls === 1
-          ? {
+        let payload;
+        if (calls === 1) {
+          payload = {
             choices: [{
               index: 0,
               message: {
@@ -293,19 +294,45 @@ describe("prompt-loop run_pattern model boundary", () => {
                     arguments: JSON.stringify({
                       sourceText: doublingSource,
                       inputs: { n: 3 },
-                      register: { slug: "doubling-report" },
                     }),
                   },
                 }],
               },
             }],
-          }
-          : {
+          };
+        } else if (calls === 2) {
+          // The model lifts the result token out of the tool message it was
+          // just shown and names the piece with it, the way a live agent
+          // chains the two tools.
+          const token = String(init?.body ?? "").match(/cfh:a:[a-z2-9]+/)?.[0];
+          payload = {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-2",
+                  type: "function",
+                  function: {
+                    name: "assign_slug",
+                    arguments: JSON.stringify({
+                      token,
+                      slug: "doubling-report",
+                    }),
+                  },
+                }],
+              },
+            }],
+          };
+        } else {
+          payload = {
             choices: [{
               index: 0,
               message: { role: "assistant", content: "Done." },
             }],
           };
+        }
         return Promise.resolve(
           new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
             status: 200,
@@ -326,9 +353,11 @@ describe("prompt-loop run_pattern model boundary", () => {
 
       const result = await loop.runPrompt({ prompt: "Publish the pattern." });
 
-      const toolMessage = result.transcript.find(
+      const toolMessages = result.transcript.filter(
         (message) => message.role === "tool",
       );
+      // The second tool message is assign_slug's.
+      const toolMessage = toolMessages[1];
       expect(toolMessage?.content).toContain("doubling-report");
       expect(toolMessage?.content).toContain(
         `http://toolshed.test/${spaceName}/doubling-report`,
@@ -343,6 +372,69 @@ describe("prompt-loop run_pattern model boundary", () => {
       await fabricRuntime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("keeps a bare fabric identifier in an assign_slug error out of the model-facing tool message", async () => {
+    const did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+    let calls = 0;
+    const fetchFn: typeof fetch = () => {
+      calls += 1;
+      const payload = calls === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-1",
+                type: "function",
+                function: {
+                  name: "assign_slug",
+                  arguments: JSON.stringify({
+                    token: "/of:fid1:abc",
+                    slug: "doubling-report",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Done." },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "assign-slug-scrub",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () =>
+          Promise.reject(new Error(`authorization denied for ${did}`)),
+      }),
+      fetchFn,
+    });
+
+    const result = await loop.runPrompt({ prompt: "Name the piece." });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain(
+      "could not establish the fabric session",
+    );
+    expect(toolMessage?.content).not.toContain(did);
+    expect(toolMessage?.content).toContain("[fabric-id]");
   });
 
   it("keeps bare fabric identifiers in compile diagnostics out of the model-facing tool message while the artifact keeps the raw text", async () => {

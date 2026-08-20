@@ -16,6 +16,7 @@ import {
 import { Module, Pattern } from "./builder/types.ts";
 import { readStoredCfcMetadata } from "./cfc/metadata.ts";
 import type { CfcMetadata } from "./cfc/types.ts";
+import { ColdLoadNegativeMemo } from "./cold-load-negative-memo.ts";
 import {
   buildSourceDocs,
   COMPILED_INTEGRITY_ATOM,
@@ -36,6 +37,10 @@ import {
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
 import { interleaveCompileYield } from "./harness/compile-interleave.ts";
+import {
+  deterministicCompileError,
+  isDeterministicCompileFailure,
+} from "./harness/compile-failure.ts";
 import { compilerStack } from "./harness/deferred-compiler-stack.ts";
 import type {
   CacheableModule,
@@ -71,6 +76,58 @@ const logger = getLogger("pattern-manager");
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
+
+/**
+ * The compiler's hoist namespace. `builder-call-hoisting` mints
+ * `__cfPattern_<n>` (n counting from 1) for the anonymous sub-patterns it
+ * derives, and registers them through `__cfReg` — never as exports.
+ * Registration refuses an AUTHORED builder-artifact export under these names,
+ * which is what lets everything downstream that must tell a derived hoist
+ * from an authored artifact — the pattern-update gates among them — read
+ * provenance from the spelling alone: a `__cfPattern_<n>` in the artifact
+ * index can only be the transformer's.
+ *
+ * What is PROHIBITED here is deliberately wider than what the compiler
+ * MINTS, and wider than what a consumer recognizes as a hoist (the gate's
+ * `isDerivedHoistSymbol` matches `_1` upward, since that is what actually
+ * gets emitted). `_0` and `_01` are minted by nothing, so reserving them
+ * costs authors nothing real — and leaving them authorable would leave the
+ * confusable spellings, the ones a reader cannot tell from a hoist at a
+ * glance, as the only ones anybody could take. A prohibition may safely
+ * exceed the convention it protects; a recognizer may not.
+ */
+const RESERVED_HOIST_EXPORT = /^__cfPattern_\d+$/;
+
+/**
+ * Throw if any module in an evaluated bundle exports a builder artifact in
+ * the reserved hoist namespace.
+ *
+ * A whole-bundle pre-pass rather than a check inside the registration loop,
+ * so a refused bundle registers nothing at all: a module rejected after its
+ * neighbors were indexed would leave the session holding half a bundle.
+ * Only artifacts are checked — `indexArtifact` admits nothing else, so a
+ * plain value under such a name can never be resolved as a hoist.
+ */
+function assertNoReservedHoistExports(
+  exportsByIdentity: ReadonlyMap<string, Record<string, unknown>>,
+): void {
+  for (const [identity, exports] of exportsByIdentity) {
+    for (const exportName of Object.keys(exports)) {
+      if (
+        RESERVED_HOIST_EXPORT.test(exportName) &&
+        isTrustedBuilderArtifact(exports[exportName])
+      ) {
+        throw new Error(
+          `module ${identity} exports the builder artifact ` +
+            `"${exportName}": the __cfPattern_<n> names are the compiler's ` +
+            `own hoist namespace, and an authored artifact under one reads ` +
+            `as a derived hoist wherever provenance matters — export it ` +
+            `under another name`,
+        );
+      }
+    }
+  }
+}
 
 /** Whether copying source bytes would discard a meaningful stored CFC label. */
 export function sourceCfcMetadataProhibitsCrossSpaceCopy(
@@ -269,6 +326,12 @@ export class PatternManager {
     string,
     Promise<Pattern | undefined>
   >();
+  // Session-local negative memo for compile failures that are deterministic
+  // over a fully loaded, Merkle-verified source closure. Verification failure,
+  // absent/incomplete storage, resolution, and evaluation remain retryable.
+  // Keyed by `${space}\0${entryIdentity}` and runtimeVersion so a version bump
+  // re-opens the attempt. Bounded FIFO to cap memory.
+  #coldLoadNegativeMemo = new ColdLoadNegativeMemo();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -358,7 +421,7 @@ export class PatternManager {
    * module-scope entry ref). The only surviving job of the old
    * `registerPattern`: source-bearing tests/builtins that construct a Pattern in
    * hand can associate its source so `getPatternProgram` (and thus
-   * `getPatternFilesBySync`) returns it. No-op when the pattern already carries a
+   * `getPatternProgramBySync`) returns it. No-op when the pattern already carries a
    * program. Walks to the derivation root so a copy inherits the association.
    */
   associatePatternProgram(
@@ -565,6 +628,9 @@ export class PatternManager {
         ...(compiled?.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: [...compiled.patternCoverageSpans] }
           : {}),
+        ...(compiled?.builderSourceSites !== undefined
+          ? { builderSourceSites: compiled.builderSourceSites }
+          : {}),
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
@@ -683,8 +749,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     return this.patternFromEvaluation(result, program);
   }
@@ -757,8 +822,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     this.registerEvaluatedModules(result);
     return result;
@@ -825,8 +889,7 @@ export class PatternManager {
         id,
         graph,
         mainSpecifier,
-        program.files,
-        program.dataFiles,
+        program,
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     }
@@ -917,6 +980,9 @@ export class PatternManager {
                 ...(doc.patternCoverageSpans === undefined
                   ? {}
                   : { patternCoverageSpans: [...doc.patternCoverageSpans] }),
+                ...(doc.builderSourceSites === undefined
+                  ? {}
+                  : { builderSourceSites: doc.builderSourceSites }),
                 ...(doc.policyManifests === undefined
                   ? {}
                   : { policyManifests: doc.policyManifests }),
@@ -996,8 +1062,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     logger.time(evalStart, "compile-cache", "evaluate");
 
@@ -1109,6 +1174,9 @@ export class PatternManager {
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
+        ...(doc.builderSourceSites !== undefined
+          ? { builderSourceSites: doc.builderSourceSites }
+          : {}),
         // Identity and cache-retention edges do not resolve module records.
         imports: doc.imports
           .filter((i) =>
@@ -1195,8 +1263,21 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Check before single-flight: follower retries re-enter from the top and
+    // should observe a deterministic failure recorded by the leader. Sitting
+    // ahead of the compiled-closure read is sound because the runtime version
+    // fingerprints all compile-shaping code (`compiler-fingerprint.deno.ts`),
+    // so no same-version peer can publish a compiled closure for bytes this
+    // session cannot compile itself.
     const key = `${space}\0${entryIdentity}`;
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: this.patternCoverageFor() !== undefined },
+    );
+    if (this.#coldLoadNegativeMemo.suppresses(key, runtimeVersion)) {
+      return undefined;
+    }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.loadPatternByIdentityFromStorage(
@@ -1301,6 +1382,9 @@ export class PatternManager {
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
+        ...(doc.builderSourceSites !== undefined
+          ? { builderSourceSites: doc.builderSourceSites }
+          : {}),
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
@@ -1343,6 +1427,26 @@ export class PatternManager {
         cacheOpts,
       );
     }
+  }
+
+  /** Record one deterministic compile failure for this session/version. */
+  private memoizeColdLoadFailure(
+    space: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+    reason: string,
+  ): void {
+    this.#coldLoadNegativeMemo.add(
+      `${space}\0${entryIdentity}`,
+      runtimeVersion,
+    );
+    logger.error("load-pattern-by-identity-negative-memo", () => [
+      `entry=${entryIdentity}`,
+      `space=${space}`,
+      `runtimeVersion=${runtimeVersion}`,
+      `reason=${reason}`,
+      "further loads are suppressed for this runtime session/version",
+    ]);
   }
 
   /**
@@ -1402,7 +1506,7 @@ export class PatternManager {
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw new Error(
+        throw deterministicCompileError(
           `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
         );
       }
@@ -1418,6 +1522,9 @@ export class PatternManager {
           // The spans naming the lines this body's coverage probes stand for.
           ...(module.patternCoverageSpans !== undefined
             ? { patternCoverageSpans: module.patternCoverageSpans }
+            : {}),
+          ...(module.builderSourceSites !== undefined
+            ? { builderSourceSites: module.builderSourceSites }
             : {}),
           imports: module.imports,
         }),
@@ -1460,6 +1567,23 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
+      // Only engine/local failures explicitly classified after source-closure
+      // verification are memoized. Resolution and evaluation errors carry no
+      // marker and are retried on the next call.
+      // Coverage compilation calls into the runtime-supplied collector while
+      // the compiler is running. A collector failure is not a pure function of
+      // source bytes, so coverage-enabled attempts deliberately fail open.
+      if (
+        patternCoverage === undefined &&
+        isDeterministicCompileFailure(error)
+      ) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          String(error),
+        );
+      }
       return undefined;
     }
   }
@@ -1528,6 +1652,7 @@ export class PatternManager {
   registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
+      assertNoReservedHoistExports(byId);
       for (const [identity, exports] of byId) {
         // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
         // by-identity reload (a separate concern from artifact addressing).
@@ -1640,22 +1765,24 @@ export class PatternManager {
   }
 
   /**
-   * Best-effort authored source files for a live pattern by its content
+   * Best-effort authored program for a live pattern by its content
    * `{ identity, symbol }` — the source-viewing debug surface
-   * (`getPatternSources`). Returns undefined when the pattern is not live in
-   * this session or carries no program (e.g. a source-free by-identity
-   * reload); callers degrade gracefully (omit the pattern). Source-bearing
-   * cross-session recovery is the source-doc closure's job, not this.
+   * (`getPatternSources`). Returns the program rather than its files, so a
+   * caller can tell which entries carry data. Returns undefined when the
+   * pattern is not live in this session or carries no program (e.g. a
+   * source-free by-identity reload); callers degrade gracefully (omit the
+   * pattern). Source-bearing cross-session recovery is the source-doc
+   * closure's job, not this.
    */
-  getPatternFilesBySync(
+  getPatternProgramBySync(
     identity: string,
     symbol: string,
-  ): { name: string; contents: string }[] | undefined {
+  ): RuntimeProgram | undefined {
     const pattern = this.artifactFromIdentitySync(identity, symbol) as
       | Pattern
       | undefined;
     if (!pattern) return undefined;
-    return getPatternProgram(pattern)?.files;
+    return getPatternProgram(pattern);
   }
 
   /**

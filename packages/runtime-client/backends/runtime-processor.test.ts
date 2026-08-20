@@ -3,12 +3,17 @@ import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -32,6 +37,7 @@ import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
+  type GetPatternSourcesRequest,
   RequestType,
 } from "../protocol/mod.ts";
 import {
@@ -42,6 +48,7 @@ import {
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import {
+  assertFabricLoggerFlags,
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
@@ -1600,9 +1607,11 @@ describe("RuntimeProcessor blob upload IPC", () => {
       },
     } as unknown as RuntimeProcessor;
 
-    // Freshly allocated, as the transport's clone delivers it: the handler owns
+    // Freshly encoded, as the transport's clone delivers it: the handler owns
     // its request's payload. Kept here so the test can check what became of it.
-    const payload = new Uint8Array([1, 2, 3]);
+    const payload = realmFromFabricValue(
+      new FabricBytes(new Uint8Array([1, 2, 3])),
+    );
 
     try {
       await expect(
@@ -1623,8 +1632,9 @@ describe("RuntimeProcessor blob upload IPC", () => {
 
     // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
     // does, which is what makes the transport's ownership guarantee load-
-    // bearing rather than decorative. A detached array reports zero length.
-    expect(payload.length).toBe(0);
+    // bearing rather than decorative. A spent tree is what a second decode
+    // reports.
+    expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
 
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2838,6 +2848,149 @@ describe("runtime-client CellRef conversion", () => {
     expect(payload.id).toBe("of:cfc-raw-link");
     expect("cfcLabelView" in payload).toBe(false);
   });
+
+  it("hands back a `FabricPrimitive` whole, nested or not", () => {
+    // A fabric class keeps its state in private fields and has no enumerable
+    // own properties, so the record branch would rebuild one as `{}`. A
+    // primitive is atomic and holds no link, so passing it through is the
+    // whole answer.
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+    expect(mapCellRefsToSigilLinks(bytes)).toBe(bytes);
+    expect(mapCellRefsToSigilLinks({ b: bytes })).toEqual({ b: bytes });
+    expect(mapCellRefsToSigilLinks([bytes])).toEqual([bytes]);
+    // Identity through a container too: the walk rebuilds the container, and
+    // what it puts back has to be the value rather than a copy of it.
+    expect(
+      (mapCellRefsToSigilLinks({ b: bytes }) as { b: unknown }).b,
+    ).toBe(bytes);
+  });
+
+  it("refuses a `FabricInstance`, naming the class and the situation", () => {
+    // A tripwire, not a limitation to route around: an instance's codec
+    // contents can hold a link that this walk cannot reach, so refusing beats
+    // the `{}` the record branch would otherwise produce.
+    const error = FabricError.fromNativeError(new Error("boom"));
+    const message =
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when mapping " +
+      "cell refs to sigil links.";
+
+    expect(() => mapCellRefsToSigilLinks(error)).toThrow(message);
+    // Nested too, the walk reaching it through the container rebuild.
+    expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
+    expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
+});
+
+describe("RuntimeProcessor.getLoggerCounts", () => {
+  // The handler reads process-global logger state, so each case raises its own
+  // flag and clears it again rather than leaving one for the next.
+  function withFlag(metadata: Record<string, unknown>, body: () => void): void {
+    const logger = getLogger("getLoggerCounts-test");
+    logger.flag("probe", "id:1", true, metadata);
+    try {
+      body();
+    } finally {
+      logger.resetFlags();
+    }
+  }
+
+  it("carries a raised flag's metadata through to the response", () => {
+    // No `this` is read, so the handler runs against a bare receiver.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ a: 1 }, () => {
+      const response = RuntimeProcessor.prototype.getLoggerCounts.call(
+        processor,
+        { type: RequestType.GetLoggerCounts },
+      );
+
+      expect(Object.keys(response).sort()).toEqual([
+        "counts",
+        "flags",
+        "metadata",
+        "timing",
+      ]);
+      expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
+        a: 1,
+      });
+    });
+  });
+
+  it("refuses to answer at all when a flag holds unsendable metadata", () => {
+    // The assertion is wired into the handler, not merely available beside it:
+    // a `Date` raised anywhere in the process stops this read.
+    const processor = {} as unknown as RuntimeProcessor;
+
+    withFlag({ when: new Date(0) }, () => {
+      expect(() =>
+        RuntimeProcessor.prototype.getLoggerCounts.call(
+          processor,
+          { type: RequestType.GetLoggerCounts },
+        )
+      ).toThrow(/not being a `FabricValue`/);
+    });
+  });
+});
+
+describe("assertFabricLoggerFlags", () => {
+  it("accepts metadata that vets, and a flag raised without any", () => {
+    // A `Logger` takes `Record<string, unknown>` and constrains it no further,
+    // so what it holds is established here or not at all.
+    const flags = {
+      runner: {
+        "action invalid input": {
+          "action:ok": { a: 1, b: ["x", null] },
+          "action:bare": null,
+        },
+      },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
+  });
+
+  it("refuses a flag named with a key no fabric record carries", () => {
+    // `__proto__` and `constructor` are refused as fabric keys deliberately,
+    // and `1-fabric-values.md` specifies it. An IPC payload is a `FabricValue`
+    // per se -- the envelope as much as the metadata, a record of fabric values
+    // being one itself -- so a flag named one of them cannot cross, and saying
+    // so is the point rather than a limitation to route around.
+    const flags = { runner: { constructor: { "id:1": { a: 1 } } } };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      /not being a `FabricValue`/,
+    );
+  });
+
+  it("throws, rendering what it refused", () => {
+    // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
+    // shape that would otherwise cross as something the far side cannot read.
+    const flags = {
+      runner: {
+        "action invalid input": { "action:bad": { when: new Date(0) } },
+      },
+    };
+
+    // The rendering is what says which flag is at fault. Asserted through the
+    // flag's own id rather than the whole string, so a change to how a `Date`
+    // renders does not read as this breaking.
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      /Cannot send logger flags on this connection, not being a `FabricValue`/,
+    );
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(/action:bad/);
+  });
+
+  it("throws rather than dropping the metadata and reporting the flag", () => {
+    // The disposition itself, asserted: dropping the metadata would leave the
+    // payload reporting a flag whose contents had silently gone, which is the
+    // loss "Death before confusion!" rules out.
+    const flags = {
+      runner: { sample: { "id:1": { fn: () => 0 } } },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow();
+    expect(flags.runner.sample["id:1"]).not.toBe(null);
+  });
 });
 
 describe("RuntimeProcessor VDom event label-view ingress", () => {
@@ -3562,5 +3715,70 @@ describe("RuntimeProcessor.handleNotification", () => {
     expect(warnings.length).toBe(1);
     expect(events).toEqual([]);
     expect(acks).toEqual([]);
+  });
+});
+
+describe("runtime-client pattern source view", () => {
+  // `getPatternSources` reads two things: which patterns the graph is running,
+  // and each one's program. Everything else on the runtime is beside the point
+  // here, so the processor is those two answers and nothing more.
+  const processorOver = (
+    programs: Record<string, unknown>,
+  ): RuntimeProcessor =>
+    ({
+      runtime: {
+        scheduler: {
+          getGraphSnapshot: () => ({
+            nodes: Object.keys(programs).map((identity) => ({
+              patternIdentity: { identity, symbol: "default" },
+            })),
+          }),
+        },
+        patternManager: {
+          getPatternProgramBySync: (identity: string) => programs[identity],
+        },
+      },
+    }) as unknown as RuntimeProcessor;
+
+  const sourcesOf = (processor: RuntimeProcessor) =>
+    RuntimeProcessor.prototype.getPatternSources.call(processor, {
+      type: RequestType.GetPatternSources,
+    } as GetPatternSourcesRequest);
+
+  it("says which of a running pattern's files carry data", () => {
+    const { patterns } = sourcesOf(processorOver({
+      "cf:module/abc": {
+        main: "/main.tsx",
+        files: [
+          { name: "/main.tsx", contents: "export default 1;" },
+          { name: "/data/cities.json", contents: "[]" },
+        ],
+        dataFiles: ["/data/cities.json"],
+      },
+    }));
+    expect(patterns.length).toBe(1);
+    expect(patterns[0].files.map((file) => file.name)).toEqual([
+      "/main.tsx",
+      "/data/cities.json",
+    ]);
+    // Without this the view cannot tell the lookup table from the module.
+    expect(patterns[0].dataFiles).toEqual(["/data/cities.json"]);
+  });
+
+  it("omits the list for a pattern that carries no data", () => {
+    const { patterns } = sourcesOf(processorOver({
+      "cf:module/abc": {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      },
+    }));
+    expect(patterns[0].dataFiles).toBe(undefined);
+  });
+
+  it("omits a pattern whose program was never kept", () => {
+    const { patterns } = sourcesOf(
+      processorOver({ "cf:module/abc": undefined }),
+    );
+    expect(patterns).toEqual([]);
   });
 });

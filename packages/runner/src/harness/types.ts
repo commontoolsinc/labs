@@ -1,5 +1,8 @@
 import type { Program } from "@commonfabric/js-compiler";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
 import type { MemorySpace } from "../runtime.ts";
 import type { HoistRegistrationSink } from "../sandbox/module-record-compiler.ts";
 
@@ -11,12 +14,6 @@ export type RuntimeProgram = Program & {
   mainExport?: string;
   /** Source entry points retained and compiled without being executed. */
   sourceRoots?: string[];
-  /**
-   * Names of entries in `files` that carry data rather than code. A data file
-   * travels with the source package and binds to the entry module's identity,
-   * and is never transformed, compiled, or executed.
-   */
-  dataFiles?: string[];
 };
 
 export interface TypeScriptHarnessProcessOptions {
@@ -91,6 +88,8 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: PatternCoverageSpan[];
+  /** Debug-only authored sites, keyed by runtime artifact symbol. */
+  builderSourceSites?: BuilderSourceSitesV1;
   /** Compiler-issued policy manifests, transported separately from JS exports. */
   policyManifests?: readonly unknown[];
 }

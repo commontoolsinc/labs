@@ -41,8 +41,7 @@ export const getCompilerOptions = (): CompilerOptions => {
     // explicitly via checker.declarationCheck() instead.
     declaration: false,
     // Enable source map generation. The mappings are load-bearing: stack-frame
-    // mapping and CFC verified-source / fn.src resolution map compiled
-    // positions back to canonical `cf:module/<id>` coordinates through them.
+    // mapping uses them to recover authored positions from compiled code.
     sourceMap: true,
     // Do not embed the authored source in the map. `sourcesContent` has no
     // reader: the only code that touches it (composeBundleSourceMap) copies it
@@ -88,8 +87,11 @@ export const getCompilerOptions = (): CompilerOptions => {
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
-    // we are running outside of node. Ensure this lib matches `target`.
-    lib: [TARGET_TYPE_LIB, "dom", "jsx"],
+    // we are running outside of node. The Compiler API needs the actual file
+    // names to register these virtual files as default libraries; extensionless
+    // names load, but `Program.isSourceFileDefaultLibrary()` rejects them.
+    // Ensure the target lib matches `target`.
+    lib: [`${TARGET_TYPE_LIB}.d.ts`, "dom.d.ts", "jsx.d.ts"],
     // Dynamic import/requires and `<reference` pragmas
     // should not be respected.
     noResolve: true,

@@ -21,6 +21,7 @@ import type { SpaceDb } from "./db.ts";
 import {
   annotate,
   type DecodedLink,
+  decodedLinkOf,
   parseSigilLink,
   summarize,
 } from "./decode.ts";
@@ -196,29 +197,28 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
  * A stream / owned cell carries no schema of its own — its DECLARED schema (a
  * stream's event payload, a cell's value type) is attached where it is NAMED in
  * its owner piece, under the key `<key>`. Two sources, link-first:
- *   1. the inline `schema` on the LINK itself (`value[key]."/"."link@N".schema`)
- *      — present even when the result schema omits the handler (e.g. addFavorite),
+ *   1. the inline `schema` on the LINK itself, in either at-rest form — present
+ *      even when the result schema omits the handler (e.g. addFavorite),
  *   2. else the owner's `schema.properties[<key>]`, following a `$ref` into `$defs`.
  */
 function declaredSchemaFor(
   ownerDoc: EntityDocument | undefined,
   key: string,
 ): { schema: unknown; keys?: string[]; via: string } | undefined {
-  // 1. inline schema carried on the naming link.
-  const linkRaw = isObjectNotArray(ownerDoc?.value)
+  // 1. inline schema carried on the naming link, in either at-rest form.
+  const naming = isObjectNotArray(ownerDoc?.value)
     ? (ownerDoc!.value as Record<string, unknown>)[key]
     : undefined;
-  if (isObjectNotArray(linkRaw) && isObjectNotArray(linkRaw["/"])) {
-    const slash = linkRaw["/"] as Record<string, unknown>;
-    const linkKey = Object.keys(slash).find((k) => k.startsWith("link@"));
-    const inner = linkKey ? slash[linkKey] : undefined;
-    if (isObjectNotArray(inner) && isObjectNotArray(inner.schema)) {
-      return {
-        schema: annotate(inner.schema),
-        keys: Object.keys(inner.schema),
-        via: "link",
-      };
-    }
+  const linkSchema = decodedLinkOf(naming)?.schema;
+  if (linkSchema !== undefined) {
+    return {
+      schema: annotate(linkSchema),
+      // A boolean schema has no keys to list, and `true` in particular is the
+      // one that constrains nothing — reporting it is the point, since the
+      // owner's declaration would otherwise stand in for it.
+      keys: isObjectNotArray(linkSchema) ? Object.keys(linkSchema) : undefined,
+      via: "link",
+    };
   }
   // 2. fallback: owner's result-schema property ($ref into $defs).
   // NOTE: this is a deliberately NARROW resolver — a single top-level
@@ -248,7 +248,7 @@ function declaredSchemaFor(
   return undefined;
 }
 
-/** Collect every sigil link in a value, with its JSON path. */
+/** Collect every link in a value, in either at-rest form, with its JSON path. */
 function linksWithPaths(
   v: unknown,
   base: string[] = [],
@@ -256,7 +256,7 @@ function linksWithPaths(
   depth = 10,
 ): { link: DecodedLink; at: string }[] {
   if (depth < 0) return out;
-  const link = parseSigilLink(v);
+  const link = decodedLinkOf(v);
   if (link) {
     out.push({ link, at: base.join("/") });
     return out;
@@ -507,7 +507,7 @@ export function buildAllDetails(
       c.kind === "piece" && c.regime === "modern" && isObjectNotArray(doc.value)
     ) {
       for (const [key, val] of Object.entries(doc.value)) {
-        const tid = parseSigilLink(val)?.id;
+        const tid = decodedLinkOf(val)?.id;
         if (tid && !nameOf.has(tid)) nameOf.set(tid, { owner: id, key });
       }
     }

@@ -84,6 +84,7 @@ import {
   durationTag,
   escapeHtml,
   friendlyError,
+  type GitHubDownload,
   github,
   githubDownload,
   humanSpan,
@@ -143,7 +144,7 @@ const BENCHMARK_FETCH_CONCURRENCY = 8;
 
 interface BenchmarkGitHub {
   json<T>(path: string, token: string): Promise<T>;
-  download(path: string, token: string): Promise<Response>;
+  download(path: string, token: string): Promise<GitHubDownload>;
 }
 
 const ordinaryBenchmarkGitHub: BenchmarkGitHub = {
@@ -497,7 +498,7 @@ async function fetchZip(
     token,
   );
   if (!res.ok) throw new Error(`artifact ${artifactId}: HTTP ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  return res.body;
 }
 
 // The benchmarks.yml runs on main, newest first, paging back until past the

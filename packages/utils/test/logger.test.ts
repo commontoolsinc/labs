@@ -12,6 +12,15 @@ import {
   resetAllTimingStats,
   setGlobalLogFloor,
 } from "../src/logger.ts";
+import {
+  clearTimingMeasures,
+  detailOfMeasure,
+  getTimingMeasuresState,
+  parseTimingMeasureCap,
+  resetTimingMeasureBudget,
+  setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
+} from "../src/logger.ts";
 
 describe("logger", () => {
   beforeEach(() => {
@@ -1933,6 +1942,364 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1);
       expect(logger.counts.warn).toBe(1);
       expect(logger.counts.error).toBe(1);
+    });
+  });
+
+  describe("timing measures", () => {
+    afterEach(() => {
+      // The cap deliberately survives toggling emission, so a test that set a
+      // small one would otherwise silently throttle every test after it.
+      setTimingMeasuresEnabled(false, { cap: 1_000 });
+      clearTimingMeasures();
+    });
+
+    const measureNames = () =>
+      performance.getEntriesByType("measure").map((entry) => entry.name);
+
+    it("records a span without emitting a measure until asked", () => {
+      clearTimingMeasures();
+      const logger = getLogger("measure-off");
+      logger.timeStart("phase", "one");
+      logger.timeEnd("phase", "one");
+
+      expect(
+        measureNames().some((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/one#`)
+        ),
+      ).toBe(
+        false,
+      );
+      // The statistics are recorded either way — that is the whole point of
+      // emission being separable from measurement.
+      expect(logger.getTimeStats("phase", "one")?.count).toBe(1);
+    });
+
+    it("emits one measure per span, keyed by the joined path", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-on");
+      logger.timeStart("phase", "two");
+      logger.timeEnd("phase", "two");
+
+      const mine = measureNames().filter((n) =>
+        n.startsWith(`${TIMING_MEASURE_PREFIX}phase/two#`)
+      );
+      expect(mine.length).toBe(1);
+    });
+
+    it("gives two spans on one key distinguishable names", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-twice");
+      for (let i = 0; i < 2; i++) {
+        logger.timeStart("phase", "three");
+        logger.timeEnd("phase", "three");
+      }
+
+      const mine = measureNames().filter((n) =>
+        n.startsWith(`${TIMING_MEASURE_PREFIX}phase/three#`)
+      );
+      expect(mine.length).toBe(2);
+      expect(new Set(mine).size).toBe(2);
+    });
+
+    it("measures the span it recorded, not the moment it was emitted", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-span");
+      const started = performance.now();
+      logger.timeStart("phase", "four");
+      logger.timeEnd("phase", "four");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/four#`)
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.startTime).toBeGreaterThanOrEqual(started);
+      const recorded = logger.getTimeStats("phase", "four")!;
+      expect(Math.abs(entry!.duration - recorded.totalTime)).toBeLessThan(1);
+    });
+
+    it("stops emitting at the cap rather than growing without bound", () => {
+      setTimingMeasuresEnabled(true, { cap: 3 });
+      const logger = getLogger("measure-cap");
+      for (let i = 0; i < 10; i++) {
+        logger.timeStart("phase", "five");
+        logger.timeEnd("phase", "five");
+      }
+
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/five#`)
+        ).length,
+      )
+        .toBe(3);
+      expect(getTimingMeasuresState().emitted).toBe(3);
+      // Every span still reached the statistics; only emission stopped.
+      expect(logger.getTimeStats("phase", "five")?.count).toBe(10);
+    });
+
+    it("gives the budget back when the entries are drained", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-drain");
+      logger.timeStart("phase", "six");
+      logger.timeEnd("phase", "six");
+      expect(getTimingMeasuresState().emitted).toBe(1);
+
+      clearTimingMeasures();
+      expect(getTimingMeasuresState().emitted).toBe(0);
+      expect(
+        measureNames().some((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/six#`)
+        ),
+      ).toBe(
+        false,
+      );
+    });
+
+    it("leaves measures it did not emit alone", () => {
+      setTimingMeasuresEnabled(true);
+      performance.measure("someone-elses-measure", {
+        start: performance.now(),
+        end: performance.now(),
+      });
+      const logger = getLogger("measure-foreign");
+      logger.timeStart("phase", "seven");
+      logger.timeEnd("phase", "seven");
+
+      clearTimingMeasures();
+      // The host's timeline is shared; draining this feature must not take a
+      // page's own instrumentation with it.
+      expect(measureNames()).toContain("someone-elses-measure");
+      expect(
+        measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+      ).toBe(false);
+      performance.clearMeasures("someone-elses-measure");
+    });
+
+    it("emits again after something else clears the timeline", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-external-clear");
+      for (let i = 0; i < 5; i++) {
+        logger.timeStart("phase", "eight");
+        logger.timeEnd("phase", "eight");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(2);
+
+      // A test runner resetting between files does exactly this, and the
+      // budget has to follow or later files emit nothing at all.
+      performance.clearMeasures();
+      resetTimingMeasureBudget();
+      logger.timeStart("phase", "eight");
+      logger.timeEnd("phase", "eight");
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/eight#`)
+        ).length,
+      ).toBe(1);
+    });
+
+    it("refuses a cap that would disable the guard rather than set it", () => {
+      // NaN and Infinity both make the `emitted >= cap` test never fire, and
+      // the cap is the only thing bounding retention — so these are refused
+      // rather than quietly accepted.
+      for (const bad of [Number.NaN, Infinity, 0, -1, 1.5]) {
+        expect(() => setTimingMeasuresEnabled(true, { cap: bad })).toThrow(
+          RangeError,
+        );
+      }
+      setTimingMeasuresEnabled(true, { cap: 5 });
+      expect(getTimingMeasuresState().cap).toBe(5);
+    });
+
+    it("keeps the budget across a toggle, since the entries are still there", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-toggle");
+      for (let i = 0; i < 2; i++) {
+        logger.timeStart("phase", "nine");
+        logger.timeEnd("phase", "nine");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(2);
+
+      // Turning it off and on again must not hand back a budget the retained
+      // entries are still spending, or a toggling caller grows without bound.
+      setTimingMeasuresEnabled(false);
+      setTimingMeasuresEnabled(true);
+      expect(getTimingMeasuresState().emitted).toBe(2);
+      logger.timeStart("phase", "nine");
+      logger.timeEnd("phase", "nine");
+      expect(
+        measureNames().filter((n) =>
+          n.startsWith(`${TIMING_MEASURE_PREFIX}phase/nine#`)
+        ).length,
+      ).toBe(2);
+    });
+
+    it("reads a cap out of an environment value, or refuses it", () => {
+      expect(parseTimingMeasureCap("4242")).toBe(4242);
+      // Anything that does not name a positive integer is ignored rather than
+      // applied: a zero or NaN cap would disable the guard from outside the
+      // process, which is the one thing the environment must not be able to do.
+      for (const bad of ["", undefined, "0", "-1", "1.5", "not-a-number"]) {
+        expect(parseTimingMeasureCap(bad)).toBeUndefined();
+      }
+    });
+
+    it("keeps working when the host's performance API refuses", () => {
+      // Instrumentation must never fail the thing it is measuring, and not
+      // every host implements every part of the timeline. Both seams swallow
+      // it: the span is still recorded into the statistics, and draining still
+      // returns the budget.
+      const realMeasure = performance.measure;
+      const realClear = performance.clearMeasures;
+      const boom = () => {
+        throw new Error("no performance API here");
+      };
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-hostile-host");
+      try {
+        // A real entry first, so the drain below has something to reach for —
+        // otherwise it finds nothing to clear and never calls the seam under
+        // test.
+        logger.timeStart("phase", "ten");
+        logger.timeEnd("phase", "ten");
+        expect(getTimingMeasuresState().emitted).toBe(1);
+
+        (performance as { clearMeasures: unknown }).clearMeasures = boom;
+        expect(() => clearTimingMeasures()).not.toThrow();
+        expect(getTimingMeasuresState().emitted).toBe(0);
+
+        (performance as { measure: unknown }).measure = boom;
+        expect(() => {
+          logger.timeStart("phase", "eleven");
+          logger.timeEnd("phase", "eleven");
+        }).not.toThrow();
+        // The statistics still hold it: only the timeline entry was lost.
+        expect(logger.getTimeStats("phase", "eleven")?.count).toBe(1);
+      } finally {
+        performance.measure = realMeasure;
+        performance.clearMeasures = realClear;
+      }
+    });
+
+    it("names one span on the timeline without touching the statistics", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail");
+      logger.timeStart("scheduler", "run", "action");
+      logger.timeEndDetailed("topics/main", "scheduler", "run", "action");
+      logger.timeStart("scheduler", "run", "action");
+      logger.timeEndDetailed("topics/topic", "scheduler", "run", "action");
+
+      // One row, because a key is a place in the code — naming the occurrence
+      // in the key instead would multiply the statistics by every action the
+      // runtime has ever run, which is the cost this split exists to avoid.
+      expect(logger.getTimeStats("scheduler", "run", "action")?.count).toBe(2);
+
+      const details = performance.getEntriesByType("measure")
+        .filter((entry) =>
+          entry.name.startsWith(`${TIMING_MEASURE_PREFIX}scheduler/run/action`)
+        )
+        .map((entry) => detailOfMeasure(entry.name));
+      expect(details.sort()).toEqual(["topics/main", "topics/topic"]);
+    });
+
+    it("carries a detail containing separators through unchanged", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail-hostile");
+      logger.timeStart("phase", "twelve");
+      logger.timeEndDetailed("a|b#c%d", "phase", "twelve");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/twelve`)
+      );
+      expect(entry).toBeDefined();
+      // Reversibly, not by substitution: two details differing only in which
+      // separator they contain must not come back as the same string, or two
+      // distinct actions report as one row.
+      expect(detailOfMeasure(entry!.name)).toBe("a|b#c%d");
+    });
+
+    it("keeps details that differ only by a separator distinct", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-detail-collide");
+      for (const detail of ["a|b", "a/b", "a#b", "a_b"]) {
+        logger.timeStart("phase", "collide");
+        logger.timeEndDetailed(detail, "phase", "collide");
+      }
+      const seen = performance.getEntriesByType("measure")
+        .filter((e) =>
+          e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/collide`)
+        )
+        .map((e) => detailOfMeasure(e.name));
+      expect(new Set(seen).size).toBe(4);
+    });
+
+    it("does not build a detail that will not be emitted", () => {
+      setTimingMeasuresEnabled(false);
+      const logger = getLogger("measure-detail-lazy");
+      let built = 0;
+      logger.timeStart("phase", "lazy");
+      logger.timeEndDetailed(
+        () => {
+          built++;
+          return "expensive";
+        },
+        "phase",
+        "lazy",
+      );
+      // Emission is off on every production run, and a caller whose detail
+      // costs anything to produce must not pay for it there.
+      expect(built).toBe(0);
+      expect(logger.getTimeStats("phase", "lazy")?.count).toBe(1);
+
+      setTimingMeasuresEnabled(true);
+      logger.timeStart("phase", "lazy");
+      logger.timeEndDetailed(
+        () => {
+          built++;
+          return "expensive";
+        },
+        "phase",
+        "lazy",
+      );
+      expect(built).toBe(1);
+    });
+
+    it("stops building details once the cap has stopped emission", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-detail-capped");
+      let built = 0;
+      for (let i = 0; i < 6; i++) {
+        logger.timeStart("phase", "capped");
+        logger.timeEndDetailed(
+          () => {
+            built++;
+            return `run-${i}`;
+          },
+          "phase",
+          "capped",
+        );
+      }
+      // Emission being on is not the same as a measure being written: past the
+      // cap nothing reaches the timeline, so nothing should be built for it —
+      // and that is the longest run, where it would cost the most.
+      expect(built).toBe(2);
+      expect(logger.getTimeStats("phase", "capped")?.count).toBe(6);
+    });
+
+    it("reports no detail for a span that was not named", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-no-detail");
+      logger.timeStart("phase", "thirteen");
+      logger.timeEnd("phase", "thirteen");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith(`${TIMING_MEASURE_PREFIX}phase/thirteen#`)
+      );
+      expect(entry).toBeDefined();
+      expect(detailOfMeasure(entry!.name)).toBeUndefined();
+
+      // Ending a timer that was never started reports nothing rather than
+      // inventing a span, exactly as the undetailed `timeEnd` does.
+      expect(logger.timeEndDetailed("x", "phase", "never-started"))
+        .toBeUndefined();
     });
   });
 });

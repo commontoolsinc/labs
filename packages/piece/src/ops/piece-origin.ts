@@ -69,6 +69,8 @@ export interface PieceSourceState {
   entry?: string;
   /** The authored source files of the current pattern, when readable. */
   files: { name: string; contents: string }[];
+  /** Names among `files` that carry data rather than code. */
+  dataFiles?: string[];
   /** Ordered, append-only source and origin states accepted by the piece. */
   history: PieceSourceRevisionState[];
   currentRevisionId?: string;
@@ -415,6 +417,7 @@ export async function readPieceSourceState(
     if (program !== undefined) {
       state.entry = program.main;
       state.files = sortSourceFiles(program.files, program.main);
+      if (program.dataFiles !== undefined) state.dataFiles = program.dataFiles;
     }
   }
   return state;
@@ -423,6 +426,8 @@ export async function readPieceSourceState(
 export interface PieceSourceRevisionSource {
   pattern: { identity: string; symbol: string };
   files: { name: string; contents: string }[];
+  /** Names among `files` that carry data rather than code. */
+  dataFiles?: string[];
 }
 
 /** Read the retained authored files for one recorded source revision. */
@@ -448,6 +453,9 @@ export async function readPieceSourceRevision(
     files: program === undefined
       ? []
       : sortSourceFiles(program.files, program.main),
+    ...(program?.dataFiles === undefined
+      ? {}
+      : { dataFiles: program.dataFiles }),
   };
 }
 

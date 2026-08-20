@@ -23,7 +23,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricSet", () => {
@@ -82,7 +82,7 @@ describe("FabricSet", () => {
       it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
         const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
         Object.freeze(fs);
-        expect(() => isDeepFrozenFabricValue(fs)).toThrow(
+        expect(() => isValidDeepFrozenFabricValue(fs)).toThrow(
           "`FabricSet`: not yet implemented",
         );
       });

@@ -141,6 +141,12 @@ function setWorkerConsoleBridge(enabled: boolean): void {
 }
 
 self.addEventListener("message", async (event: MessageEvent) => {
+  // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
+  // which is less than the payload type describes; decoding with `codec-realm`
+  // is what would make the two agree. The payload type carries the matching
+  // marker -- `IPCClientRequest` in `../../protocol/types.ts` -- as does the
+  // sending end, `WebWorkerRuntimeTransport.send()` in
+  // `../../client/transports/web-worker/transport-web-worker.ts`.
   const message = event.data;
 
   // One-way notifications carry no msgId and get no response. Drop them once

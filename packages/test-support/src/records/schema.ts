@@ -2,7 +2,7 @@
  * The test-run record schema: the identity of a test, the record of one
  * execution, and the context line that heads every uploaded object. The
  * design, including the field discipline that keeps every value public
- * material, is docs/plans/test-run-telemetry.md.
+ * material, is docs/history/plans/test-run-telemetry.md.
  */
 
 /** Schema version carried by every context line and object path. */

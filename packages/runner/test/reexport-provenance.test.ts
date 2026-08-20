@@ -13,16 +13,14 @@ import type { Module, Pattern } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 
 /**
- * Regression for the re-export provenance hazard (Codex review of PR C, fixed
- * with the source-identity guard in `Engine.recordModuleProvenance`):
+ * Regression for the re-export provenance hazard (Codex review of PR C):
  *
  * A re-exporting module (`export { setName } from "./handlers"`) surfaces the
  * defining module's function under the RE-EXPORTER's identity. Provenance is
- * first-write-wins and CFC fails closed on an identity/`fn.src` mismatch, so
- * letting the re-exporter (potentially visited first) stamp its own identity
- * would make a genuinely-verified handler resolve as `unsupported`. The guard
- * records provenance only when the function's canonical `fn.src` names the
- * recording module, so only the defining module's registration sticks.
+ * first-write-wins, so letting the re-exporter (potentially visited first)
+ * stamp its own identity would give a genuinely-verified handler the wrong
+ * authority. The defining module is recorded independently during evaluation;
+ * the provenance walk accepts only that identity. Debug `fn.src` is not read.
  */
 
 const signer = await Identity.fromPassphrase("reexport-provenance");

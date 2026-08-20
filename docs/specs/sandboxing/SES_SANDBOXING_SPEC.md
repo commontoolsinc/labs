@@ -1444,8 +1444,7 @@ once per error — `materializeHostVisibleStack`, then `parseStack`, then a
 per-module maps are registered under the same module path that mapped frames
 carry as their source, so re-parsing an already-mapped stack would look the
 now-authored coordinates up again and corrupt them. `Engine` re-exports
-`parseStack` / `mapPosition`, and the scheduler's diagnostics share the same
-marker helpers.
+`parseStack`, and the scheduler's diagnostics share the same marker helpers.
 
 §8.4.1 describes the interface shape that surface already satisfies. The
 `ErrorMappingOptions` / `MappedError` / execution-wrapper designs in §8.4.2–§8.4.3

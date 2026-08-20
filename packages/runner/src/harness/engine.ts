@@ -1,6 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
-  MappedPosition,
   Program,
   ProgramResolver,
   Source,
@@ -14,7 +13,11 @@ import {
   identitySourceMap,
 } from "@commonfabric/js-compiler/source-map";
 import type { StaticCache } from "@commonfabric/static";
-import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
+import type {
+  BuilderSourceSiteOptions,
+  BuilderSourceSitesV1,
+  PatternCoverageOptions,
+} from "@commonfabric/ts-transformers";
 import {
   findFirstContentLineIndex,
   PATTERN_COVERAGE_GLOBAL,
@@ -49,7 +52,6 @@ import { freezeSandboxValue } from "../sandbox/hardening.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
-  cachedModuleSourceNames,
   type CompiledModuleGraph,
   compileSourcesToRecords,
   computeFabricModuleIdentities,
@@ -64,9 +66,14 @@ import {
 } from "../sandbox/module-record-verifier.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
+  deterministicCompileError,
+  markDeterministicCompileFailure,
+} from "./compile-failure.ts";
+import {
   COMPILE_INTERLEAVES_EVENT_LOOP,
   interleaveCompileYield,
 } from "./compile-interleave.ts";
+import { recordAuthoredDebugSource } from "./authored-debug-source.ts";
 import { Console } from "./console.ts";
 import {
   compilerStack,
@@ -92,6 +99,7 @@ import {
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
+import { attachDeclaredDataFiles } from "./declared-data-files.ts";
 import {
   getDefiningModule,
   readBindingIdentity,
@@ -99,6 +107,22 @@ import {
 } from "./verified-provenance.ts";
 
 const logger = getLogger("engine");
+
+/**
+ * Run one pure compile step, classifying only its synchronous failures.
+ *
+ * Every call site sits after an `await`, so caller stack depth is drained.
+ * Within a runtime session the engine stack limit is fixed, so an overflow
+ * will recur for the same compile inputs and is safe to classify as
+ * deterministic. Keep new call sites behind an `await`.
+ */
+function deterministicCompileStep<T>(step: () => T): T {
+  try {
+    return step();
+  } catch (error) {
+    throw markDeterministicCompileFailure(error);
+  }
+}
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -164,6 +188,12 @@ class RootedProgramResolver implements ProgramResolver {
       throw new Error(`Source root "${this.root}" could not be resolved.`);
     }
     return source;
+  }
+
+  resolveDataFile(name: string): Promise<Source | undefined> {
+    return this.inner.resolveDataFile
+      ? this.inner.resolveDataFile(name)
+      : this.inner.resolveSource(name);
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {
@@ -285,15 +315,6 @@ export class Engine extends EventTarget {
   private ctRuntime: Runtime;
   private sesRuntime: SESRuntime | undefined;
   private nextEvalId = 0;
-  // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
-  // populated at evaluate() time. Used to translate an action's bundle-relative
-  // source location into a stable implementation identity.
-  private moduleHashByPrefixedSource = new Map<string, string>();
-  // Canonical content-addressed source per prefixed source path, i.e.
-  // `/<programHash>/<authoredPath>` -> `cf:module/<moduleHash>/<authoredPath>`.
-  // Used to rewrite a function's `src` into a reload-stable identity that does
-  // not depend on which bundle/entry-point compiled the module.
-  private canonicalSourceByPrefixed = new Map<string, string>();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
   private readonly patternCoverageByGraph = new WeakMap<
@@ -334,8 +355,26 @@ export class Engine extends EventTarget {
     return { ...runtimeInternals, ...compilerInternals };
   }
 
-  // Resolve a `ProgramResolver` into a `Program`.
+  /**
+   * Resolve a `ProgramResolver` into a program: the entry, the closure its
+   * imports reach, and the data files its source declares by reading them.
+   *
+   * This is how a program is assembled from a source of truth — a directory, a
+   * web address, the fabric — so it is where a declaration in the source is
+   * acted on. Re-resolving a program the engine already holds goes through
+   * {@link resolveModules}, which follows imports and nothing else.
+   */
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
+    return await attachDeclaredDataFiles(
+      await this.resolveModules(program),
+      program,
+    );
+  }
+
+  /** Resolve the module closure an entry's imports reach. */
+  private async resolveModules(
+    program: ProgramResolver,
+  ): Promise<RuntimeProgram> {
     const { compiler } = await this.getCompilerInternals();
     logger.timeStart("resolve");
     try {
@@ -351,11 +390,11 @@ export class Engine extends EventTarget {
     resolver: ProgramResolver,
     sourceRoots: readonly string[],
   ): Promise<RuntimeProgram> {
-    const programs = [await this.resolve(resolver)];
+    const programs = [await this.resolveModules(resolver)];
     for (const root of new Set(sourceRoots)) {
       if (root === programs[0].main) continue;
       programs.push(
-        await this.resolve(new RootedProgramResolver(resolver, root)),
+        await this.resolveModules(new RootedProgramResolver(resolver, root)),
       );
     }
 
@@ -458,21 +497,25 @@ export class Engine extends EventTarget {
         program.files.map((f) => [f.name, f.contents]),
       );
       const authoredDataFiles = new Set(program.dataFiles ?? []);
+      const authoredCompileSources = [
+        ...program.files.filter((file) => !authoredDataFiles.has(file.name)),
+        ...resolvedFiles.filter((file) =>
+          file.name.startsWith(FABRIC_MOUNT_ROOT)
+        ),
+      ];
       const patternCoverage = patternCoverageOptionsForCompile(
         options.patternCoverage,
         {
           id,
           mounts,
-          sourceFiles: [
-            ...program.files.filter((file) =>
-              !authoredDataFiles.has(file.name)
-            ),
-            ...resolvedFiles.filter((file) =>
-              file.name.startsWith(FABRIC_MOUNT_ROOT)
-            ),
-          ],
+          sourceFiles: authoredCompileSources,
         },
       );
+      const builderSourceSites = builderSourceSiteOptionsForCompile({
+        id,
+        mounts,
+        sourceFiles: authoredCompileSources,
+      });
       const pristineSourceFiles = [
         ...pristineModuleSources(
           persistableSourceFiles(resolvedFiles),
@@ -530,8 +573,12 @@ export class Engine extends EventTarget {
 
       const precompiledBodies = new Map<string, string>();
       // Carry per-module source maps so the ESM loader can compose a per-load
-      // bundle map (CFC verified-source / fn.src coordinate resolution).
+      // bundle map for authored error-stack coordinates.
       const precompiledSourceMaps = new Map<string, SourceMap>();
+      const precompiledBuilderSourceSites = new Map<
+        string,
+        BuilderSourceSitesV1
+      >();
       const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
 
       if (fullHit) {
@@ -543,6 +590,12 @@ export class Engine extends EventTarget {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (artifact.builderSourceSites !== undefined) {
+            precompiledBuilderSourceSites.set(
+              file.name,
+              artifact.builderSourceSites,
             );
           }
           if (artifact.policyManifests !== undefined) {
@@ -581,6 +634,7 @@ export class Engine extends EventTarget {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
               patternCoverage,
+              builderSourceSites,
               moduleIdentities: identityByPath,
               // Writer identities record authored paths: unmap the engine's
               // per-load `/<id>` prefix (and mount paths) before spelling.
@@ -590,6 +644,7 @@ export class Engine extends EventTarget {
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
+              getBuilderSourceSites: () => pipeline.getBuilderSourceSites(),
               getPolicyManifests: () => pipeline.getPolicyManifests(),
             };
           },
@@ -613,6 +668,9 @@ export class Engine extends EventTarget {
         for (const [name, out] of modules) {
           precompiledBodies.set(name, out.js);
           if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+          if (out.builderSourceSites) {
+            precompiledBuilderSourceSites.set(name, out.builderSourceSites);
+          }
           if (out.policyManifests) {
             precompiledPolicyManifests.set(name, out.policyManifests);
           }
@@ -631,6 +689,7 @@ export class Engine extends EventTarget {
       const graph = compileSourcesToRecords(moduleFiles, {
         precompiledBodies,
         precompiledSourceMaps,
+        precompiledBuilderSourceSites,
         runtimeModules: runtimeModulesOption,
         specifierAliases,
         // Carried onto the graph under their stored (prefix-free) names, the
@@ -791,6 +850,12 @@ export class Engine extends EventTarget {
           js: isData ? file.contents : (emittedBody ?? ""),
           ...(isData ? { isData: true } : {}),
           ...(sourceMap === undefined ? {} : { sourceMap }),
+          ...(emittedBody === undefined ||
+              precompiledBuilderSourceSites.get(file.name) === undefined
+            ? {}
+            : {
+              builderSourceSites: precompiledBuilderSourceSites.get(file.name),
+            }),
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
@@ -990,13 +1055,16 @@ export class Engine extends EventTarget {
     // stored bytes are exactly what their identities were computed over, so
     // the identity check below still holds, and the successful compile
     // writes back under the current runtimeVersion (self-heal on load).
-    const injectedInput = transformInjectHelperModule({
-      main: entryFilename,
-      files: codeFiles,
-      ...(options.sourceRoots === undefined
-        ? {}
-        : { sourceRoots: [...options.sourceRoots] }),
-    }, { tolerateStoredLegacyEnvelope: true });
+    // This pretransform is pure compute over the verified stored bytes.
+    const injectedInput = deterministicCompileStep(() =>
+      transformInjectHelperModule({
+        main: entryFilename,
+        files: codeFiles,
+        ...(options.sourceRoots === undefined
+          ? {}
+          : { sourceRoots: [...options.sourceRoots] }),
+      }, { tolerateStoredLegacyEnvelope: true })
+    );
     const sourceRoots = canonicalSourceRoots(
       entryFilename,
       injectedInput.sourceRoots,
@@ -1013,6 +1081,8 @@ export class Engine extends EventTarget {
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
+    // Resolution may perform storage/network I/O for fabric mounts. Its
+    // failures are intentionally left unmarked and therefore retryable.
     const resolvedProgram = await this.resolveWithSourceRoots(
       resolver,
       sourceRoots,
@@ -1024,7 +1094,9 @@ export class Engine extends EventTarget {
     // compilation (authored entry modules were injected before resolve above).
     const resolvedForCompile = {
       ...resolvedProgram,
-      files: injectMountSources(resolvedProgramFiles),
+      files: deterministicCompileStep(() =>
+        injectMountSources(resolvedProgramFiles)
+      ),
     };
     const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
@@ -1070,34 +1142,43 @@ export class Engine extends EventTarget {
         sourceFiles: pristineSourceFiles,
       },
     );
-
-    const emitted = compiler.compileToModules(resolvedForCompile, {
-      runtimeModules: Engine.runtimeModuleNames(),
-      specifierAliases,
-      // These bytes are durable stored source nobody can re-author;
-      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
-      // not brick the reload (CT-1916).
-      storedSource: true,
-      beforeTransformers: (program) => {
-        const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)({
-          patternCoverage,
-          moduleIdentities: identityByPath,
-          // Names on this path are already stored-shaped (no `/<id>` prefix);
-          // only mount paths need unmapping to authored spellings.
-          canonicalWriterIdentityFile: (name) =>
-            storedFilenameFor(name, undefined, mounts),
-        });
-        return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-          getPolicyManifests: () => pipeline.getPolicyManifests(),
-        };
-      },
+    const builderSourceSites = builderSourceSiteOptionsForCompile({
+      id: undefined,
+      mounts,
+      sourceFiles: pristineSourceFiles,
     });
+
+    const emitted = deterministicCompileStep(() =>
+      compiler.compileToModules(resolvedForCompile, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        specifierAliases,
+        // These bytes are durable stored source nobody can re-author;
+        // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+        // not brick the reload (CT-1916).
+        storedSource: true,
+        beforeTransformers: (program) => {
+          const pipeline = new (compilerStack()
+            .CommonFabricTransformerPipeline)({
+            patternCoverage,
+            builderSourceSites,
+            moduleIdentities: identityByPath,
+            // Names on this path are already stored-shaped (no `/<id>`
+            // prefix); only mount paths need unmapping to authored spellings.
+            canonicalWriterIdentityFile: (name) =>
+              storedFilenameFor(name, undefined, mounts),
+          });
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+            getBuilderSourceSites: () => pipeline.getBuilderSourceSites(),
+            getPolicyManifests: () => pipeline.getPolicyManifests(),
+          };
+        },
+      })
+    );
     for (const file of moduleFiles) {
       if (!emitted.has(file.name)) {
-        throw new Error(
+        throw deterministicCompileError(
           `Recompile from source produced no body for '${file.name}'`,
         );
       }
@@ -1158,6 +1239,9 @@ export class Engine extends EventTarget {
         js: isData ? file.contents : (out?.js ?? ""),
         ...(isData ? { isData: true } : {}),
         ...(out?.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(out?.builderSourceSites === undefined
+          ? {}
+          : { builderSourceSites: out.builderSourceSites }),
         ...(patternCoverageSpans === undefined ? {} : { patternCoverageSpans }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
@@ -1195,13 +1279,7 @@ export class Engine extends EventTarget {
       program,
       options,
     );
-    return this.evaluateRecordGraph(
-      id,
-      graph,
-      mainSpecifier,
-      program.files,
-      program.dataFiles,
-    );
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program);
   }
 
   /**
@@ -1217,33 +1295,17 @@ export class Engine extends EventTarget {
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,
-    files: Source[],
-    dataFiles?: readonly string[],
+    program: Pick<RuntimeProgram, "files" | "dataFiles">,
   ): EvaluateResult {
     const prefix = `/${id}`;
-    // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
-    // sources are available for the verified set below. Derive them from the
-    // graph's RESOLVED per-module identities (the same content-addressed
-    // `cf:module/<identity>` the cache + source-free reload use), NOT by
-    // re-hashing the raw `files` — those disagree (the resolved set folds the
-    // injected modules into each module's Merkle hash), which would make a
-    // function's `fn.src` (hence its content-addressed identity) differ between
-    // this source-based compile and a source-free by-identity reload, breaking
-    // by-identity resolution (`getVerifiedImplementation`) for resumed
-    // callables (CT-1623).
-    this.registerModuleHashesFromGraph(id, graph);
-
     return this.evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: id,
-      // Already registered above (idempotent); keep as a no-op so evaluateGraph
-      // doesn't recompute the hashes a second time.
-      registerHashes: () => {},
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
-      filesForExports: files,
-      ...(dataFiles === undefined
+      filesForExports: program.files,
+      ...(program.dataFiles === undefined
         ? {}
-        : { dataFilesForExports: [...dataFiles] }),
+        : { dataFilesForExports: [...program.dataFiles] }),
     });
   }
 
@@ -1264,7 +1326,6 @@ export class Engine extends EventTarget {
     mainSpecifier: string,
     ctx: {
       evalIdPrefix: string;
-      registerHashes(): void;
       fileNameForPath(path: string): string;
       filesForExports: Source[];
       dataFilesForExports?: string[];
@@ -1278,13 +1339,6 @@ export class Engine extends EventTarget {
       // (PR E2): identity flows through the content-addressed provenance
       // recorded below.
       const evalId = `${ctx.evalIdPrefix}:esm:${this.nextEvalId++}`;
-      // Register per-module content hashes — this wires the scheduler's
-      // content-addressed implementation hash. Source-location resolution (the
-      // `indexOf`-into-`script` fallback plus the per-module source maps
-      // registered below) resolves `fn.src` to the canonical
-      // `cf:module/<hash>/<path>` form these hashes key on. Covered by
-      // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
-      ctx.registerHashes();
 
       const patternCoverage = this.patternCoverageByGraph.get(graph);
       const globals = createModuleCompartmentGlobals({
@@ -1293,48 +1347,21 @@ export class Engine extends EventTarget {
           ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
           : {}),
       });
-      // Concatenated module bodies give the source-location frame a `script`
-      // for fn.src `indexOf` resolution. (Insertion order need not match the
-      // import-execution order; resolveLocationFromFunctionSource falls back to
-      // a from-zero scan, and any mis-attribution degrades fail-closed at the
-      // CFC identity layer — see the fn.src note in the design doc.)
-      const script = [...graph.compiledBodies.values()].join("\n");
-      // Register a composed bundle source map for `${evalId}.js` so that
-      // `fn.src` coordinates (resolved against `script`) map back to the
-      // original authored sources — without this the ESM loader yields raw
-      // bundle coordinates and the CFC provenance src check fails closed.
+      // Register a composed bundle source map for `${evalId}.js` so that a
+      // stack coordinate from this evaluation maps back to authored source.
+      // Its consumers are error mapping for throws escaping module evaluation
+      // or invocation, plus scheduler action diagnostics.
       // Full module path per specifier.
       const sourceNameBySpecifier = new Map<string, string>();
       for (const [name, specifier] of graph.specifierByPath) {
         sourceNameBySpecifier.set(specifier, name);
       }
-      // On the warm/cached record load (`buildRecordsFromCompiled`) no authored
-      // per-module map is retained, so fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without a registered bundle map the
-      // ESM loader leaves `fn.src` as the raw `${evalId}.js:line:col` bundle
-      // coordinate, which the engine's name → canonical table cannot resolve, so
-      // identity downgrades to `unsupported` and CFC verified-source identity
-      // fails closed (the inSpace-child owner-protected write regression,
-      // CT-1754). The identity map preserves coordinates verbatim and only
-      // re-labels the bundle frame with the canonical source name, so the
-      // EXISTING verified-binding check passes for legitimately compiled modules
-      // without weakening it.
       // Composition + registration are DEFERRED (CT-1819): composing these
       // maps is a per-segment VLQ transcode over every module (~16-22ms per
-      // cold boot post-#4455/#4460), while their only consumers are
-      // on-demand \u2014 error mapping (`parseStack`/`mapThrownError`) and debug
-      // `fn.src` resolution (`mapPosition`; eager only when
-      // EXPERIMENTAL_EAGER_SOURCE_ANNOTATION is on, i.e. dev shells, which
-      // then materialize these providers during boot and keep today's
-      // behavior). Identity no longer needs the maps at boot: scheduler and
-      // CFC verified-source are provenance-rooted (#4436/#4458). The
-      // CT-1754 fail-closed notes below explain why the REGISTRATION must
-      // exist at all \u2014 they are satisfied by lazy materialization, since the
-      // fail-closed check only runs when `fn.src` is resolved, which is
-      // itself what materializes the map. Providers capture per-module LINE
-      // COUNTS and raw maps, never compiled bodies, so the closures retain
-      // KBs, not the bundle text; each is one-shot and dropped after first
-      // use.
+      // cold boot post-#4455/#4460), while error mapping only asks for one
+      // after a throw. Providers capture per-module line counts and raw maps,
+      // never compiled bodies, so the closures retain KBs, not bundle text;
+      // each is one-shot and dropped after first use.
       const lineCountBySpecifier = new Map<string, number>();
       for (const [specifier, body] of graph.compiledBodies) {
         lineCountBySpecifier.set(
@@ -1366,26 +1393,16 @@ export class Engine extends EventTarget {
           ),
       );
       // ALSO register each module's map under its eval `//# sourceURL` (its
-      // sanitized source name). The browser surfaces the per-module eval frame
-      // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
-      // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
-      // `${evalId}.js` covers only wins when the stack frame is absent, e.g.
-      // under Deno's tamed SES stacks). The frame is keyed on the per-module
-      // sourceURL with eval-relative line numbers, so register the per-module
-      // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      // sanitized source name). Browsers surface the per-module eval frame in
+      // `new Error().stack` rather than the bundle frame, so it needs a map of
+      // its own. Those coordinates are eval-relative, hence the factory-wrapper
+      // line shift (`(function (...) {\n` = +1).
       //
       // When no authored map exists for a module (the warm/cached record load \u2014
       // `buildRecordsFromCompiled` populates `moduleSourceMaps` only for cached
       // bodies that retained one), fall back to an IDENTITY map keyed on the
-      // module's per-module source `name`. Without this the eval frame stays a
-      // raw `${evalId}.js:line:col` bundle coordinate that the engine's
-      // per-module name \u2192 canonical table cannot canonicalize, so `fn.src`
-      // never reaches `cf:module/<id>/<path>` and CFC verified-source identity
-      // downgrades to `unsupported` \u2014 the inSpace-child owner-protected write
-      // regression (CT-1754). The identity map preserves coordinates verbatim;
-      // it only re-labels the bundle frame with the module's canonical source
-      // name, so the EXISTING verified-binding check passes for legitimately
-      // compiled modules without weakening it.
+      // module's per-module source `name`, so the frame is still re-labeled with
+      // the module source name instead of a raw bundle coordinate.
       for (const [name, specifier] of graph.specifierByPath) {
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const bodyLineCount = lineCountBySpecifier.get(specifier) ?? 1;
@@ -1402,11 +1419,7 @@ export class Engine extends EventTarget {
 
       const frame = pushFrame({
         runtime: this.ctRuntime,
-        sourceLocationContext: {
-          script,
-          filename: `${evalId}.js`,
-          nextSearchOffset: 0,
-        },
+        moduleEvaluation: true,
       });
 
       let loaded: ReturnType<typeof loadModuleGraph>;
@@ -1491,6 +1504,8 @@ export class Engine extends EventTarget {
       this.recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
+        graph.builderSourceSitesByIdentity,
+        sourcePathByIdentity,
       );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
@@ -1520,6 +1535,11 @@ export class Engine extends EventTarget {
   private recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
+    builderSourceSitesByIdentity: ReadonlyMap<
+      string,
+      BuilderSourceSitesV1
+    >,
+    sourcePathByIdentity: ReadonlyMap<string, string>,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -1549,6 +1569,23 @@ export class Engine extends EventTarget {
         symbol,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
+      const sites = builderSourceSitesByIdentity.get(identity)?.sites;
+      const site = sites !== undefined && Object.hasOwn(sites, symbol)
+        ? sites[symbol]
+        : undefined;
+      const sourcePath = sourcePathByIdentity.get(identity);
+      if (site !== undefined && sourcePath !== undefined) {
+        const normalizedPath = authoredDebugSourcePath(sourcePath);
+        const path = normalizedPath.startsWith("/")
+          ? normalizedPath
+          : `/${normalizedPath}`;
+        recordAuthoredDebugSource(implementation, {
+          src: `cf:module/${identity}${path}:${site.line}:${site.col}`,
+          ...(site.bindingName === undefined
+            ? {}
+            : { bindingName: site.bindingName }),
+        });
+      }
       // The strong content-addressed implementation index — the resolution
       // (and eviction-insurance) backing for serialized `$implRef`s; see
       // `ExecutableRegistry.registerVerifiedImplementation`.
@@ -1698,26 +1735,6 @@ export class Engine extends EventTarget {
 
     return this.evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,
-      // Register the KNOWN identities (keyed by normalized filename = the record
-      // sourceURL) instead of recomputing from source — we have no source here,
-      // and the identities are authoritative. Also populate the canonical
-      // source map so `fn.src` resolves to `cf:module/<identity>/<path>`.
-      registerHashes: () => {
-        // Keyed by the same (collision-disambiguated) source names the record
-        // graph uses for sourceURLs, so stack-resolved fn.src coordinates land
-        // on the right module even when an importer and its fabric dependency
-        // share a filename. The canonical value keeps the AUTHORED filename —
-        // unchanged continuity with the source-compile path.
-        const sourceNames = cachedModuleSourceNames(modules);
-        for (const m of modules) {
-          const name = sourceNames.get(m.identity)!;
-          this.moduleHashByPrefixedSource.set(name, m.identity);
-          this.canonicalSourceByPrefixed.set(
-            name,
-            `cf:module/${m.identity}${m.filename}`,
-          );
-        }
-      },
       fileNameForPath: (path) => path, // already normalized
       filesForExports: options.sourceFiles ?? [],
       ...(options.dataFiles === undefined
@@ -1756,66 +1773,6 @@ export class Engine extends EventTarget {
     options: UnsafeHostTrustOptions,
   ): void {
     this.executableRegistry.trustHostValue(value, options);
-  }
-
-  /**
-   * Record the content-addressed identity of every module in a load, keyed by
-   * its prefixed source path (`/<id>/file.tsx`) so it can be matched against
-   * the source-map `source` that appears in an action's source location. Takes
-   * the RESOLVED per-module identities straight from the compiled graph
-   * (`cf:module/<identity>` in `graph.specifierByPath`) instead of re-hashing
-   * the raw program files.
-   *
-   * The two must agree: the cache key, the record-graph specifiers, and the
-   * source-free by-identity reload (`evaluateCachedModules`) all use the
-   * resolved identity (which folds the injected/resolved modules into each
-   * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
-   * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
-   * content-addressed identity — would differ between this source-based compile
-   * and a source-free reload, and `getVerifiedImplementation` would miss when a
-   * resumed piece invokes a callable (CT-1623). Keying matches the source map's
-   * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
-   * specifier path), and the canonical value matches the source-free form.
-   */
-  private registerModuleHashesFromGraph(
-    id: string,
-    graph: CompiledModuleGraph,
-  ): void {
-    const prefix = `/${id}`;
-    for (const [name, specifier] of graph.specifierByPath) {
-      if (!specifier.startsWith("cf:module/")) continue;
-      const identity = specifier.slice("cf:module/".length);
-      const authoredPath = name.startsWith(`${prefix}/`)
-        ? name.slice(prefix.length)
-        : name;
-      this.moduleHashByPrefixedSource.set(name, identity);
-      this.canonicalSourceByPrefixed.set(
-        name,
-        `cf:module/${identity}${authoredPath}`,
-      );
-    }
-  }
-
-  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`,
-  // as returned by the source map) into the reload-stable canonical source
-  // `cf:module/<moduleHash>/<authoredPath>`. Returns undefined for unmapped
-  // (built-in / non-program) sources so callers can fall back to the raw value.
-  canonicalModuleSource(source: string): string | undefined {
-    return this.canonicalSourceByPrefixed.get(source) ??
-      (source.startsWith("/")
-        ? undefined
-        : this.canonicalSourceByPrefixed.get(`/${source}`));
-  }
-
-  // Map a single position to its original source location.
-  // Returns null if no source map is loaded for the filename.
-  mapPosition(
-    filename: string,
-    line: number,
-    column: number,
-  ): MappedPosition | null {
-    if (!this.runtimeInternals) return null;
-    return this.runtimeInternals.runtime.mapPosition(filename, line, column);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
@@ -1868,8 +1825,6 @@ export class Engine extends EventTarget {
     this.compilerInternals = undefined;
     this.nextEvalId = 0;
     this.executableRegistry.clear();
-    this.moduleHashByPrefixedSource.clear();
-    this.canonicalSourceByPrefixed.clear();
   }
 
   private getSESRuntime(): SESRuntime {
@@ -2061,6 +2016,53 @@ export function helperInjectionLineOffset(contents: string): number {
   if (findFirstContentLineIndex(contents.split("\n")) === null) return 0;
   if (sourceDisablesCfTransform(contents)) return 0;
   return -1;
+}
+
+/**
+ * Normalizes transformer source sites from helper-injected compiler inputs to
+ * authored coordinates before the sidecar leaves the compile boundary.
+ */
+function builderSourceSiteOptionsForCompile(params: {
+  id: string | undefined;
+  mounts: readonly FabricMount[];
+  sourceFiles: readonly Source[];
+}): BuilderSourceSiteOptions {
+  const sourceInfo = new Map(
+    params.sourceFiles.map((file) => [
+      coverageFilenameFor(file.name, params.id, params.mounts),
+      {
+        lineOffset: helperInjectionLineOffset(file.contents),
+        lineCount: lineCountOf(file.contents),
+      },
+    ]),
+  );
+  return {
+    mapSite: (sourceFileName, site) => {
+      const fileName = coverageFilenameFor(
+        sourceFileName,
+        params.id,
+        params.mounts,
+      );
+      const info = sourceInfo.get(fileName);
+      if (info === undefined) return undefined;
+      const line = site.line + info.lineOffset;
+      if (line < 1 || line > info.lineCount) return undefined;
+      return { ...site, line };
+    },
+  };
+}
+
+/**
+ * Removes the loader's collision-disambiguation/mount prefix from a debug
+ * source path. Both hot fabric paths (`/~cf/<entry-id>/main.tsx`) and cached
+ * collision paths (`/~cf/<module-id>/main.tsx`) then report the persisted
+ * authored filename (`/main.tsx`).
+ */
+function authoredDebugSourcePath(path: string): string {
+  if (!path.startsWith(FABRIC_MOUNT_ROOT)) return path;
+  const identityAndPath = path.slice(FABRIC_MOUNT_ROOT.length);
+  const pathStart = identityAndPath.indexOf("/");
+  return pathStart < 0 ? path : identityAndPath.slice(pathStart);
 }
 
 // Pattern coverage runs after helper injection. This maps spans back to the

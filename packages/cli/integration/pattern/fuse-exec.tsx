@@ -71,12 +71,13 @@ const recordMessage = handler(
   },
 );
 
-// The event schema sits behind a top-level local $ref, deliberately: the
-// deployed stream schema then has no top-level `properties`, so a bare
-// `cf piece call <piece> recordNote` parses to an absent (`undefined`)
-// payload instead of schema-derived flags — the deployed shape the
-// absent-payload gate (verb contract D5) exists for. `recordMessage` keeps
-// the inline form so the fixture carries one verb of each shape.
+// The event schema sits behind a top-level local $ref, deliberately: it is
+// the shape a pattern routinely deploys, and the deployed stream schema then
+// carries no top-level `properties` of its own. What a caller sees through
+// that indirection — the flags, the required-ness, the refusal when a
+// payload is missing — is what the integration scenario exercises.
+// `recordMessage` keeps the inline form so the fixture carries one verb of
+// each shape and the two can be compared.
 const recordNote = handler(
   {
     $ref: "#/$defs/RecordNoteEvent",

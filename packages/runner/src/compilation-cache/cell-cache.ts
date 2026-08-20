@@ -1,7 +1,11 @@
 import { normalize } from "@std/path/posix";
 
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type {
+  BuilderSourceSitesV1,
+  PatternCoverageSpan,
+} from "@commonfabric/ts-transformers";
+import { isBuilderSourceSitesV1 } from "@commonfabric/ts-transformers/runtime-contract";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -119,7 +123,7 @@ export interface SourceDoc extends ModuleDocBase {
  */
 export interface CompiledDoc extends ModuleDocBase {
   readonly kind: "compiled" | "data";
-  /** Per-module source map, if any (registered for fn.src / CFC resolution). */
+  /** Per-module source map, if any (registered for authored error stacks). */
   readonly sourceMap?: unknown;
   /**
    * Precomputed record surface (Fix B): the direct export names, `export *`
@@ -131,6 +135,8 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
   readonly policyManifests?: readonly unknown[];
+  /** Debug-only authored builder sites, keyed by runtime artifact symbol. */
+  readonly builderSourceSites?: BuilderSourceSitesV1;
   /**
    * Authored-line spans for the coverage probes the transformer baked into
    * `code`, keyed by `(fileName, id)`. Present only on documents written by a
@@ -1107,6 +1113,7 @@ const compiledDocProperties = {
   starTargetSpecs: { type: "array", items: { type: "string" } },
   importSpecs: { type: "array", items: { type: "string" } },
   patternCoverageSpansJson: { type: "string" },
+  builderSourceSitesJson: { type: "string" },
   policyManifests: {
     type: "array",
     items: { type: "object", additionalProperties: true },
@@ -1147,6 +1154,7 @@ export const COMPILED_DOC_SCHEMA = {
         starTargetSpecs: { type: "array", items: { type: "string" } },
         importSpecs: { type: "array", items: { type: "string" } },
         patternCoverageSpansJson: { type: "string" },
+        builderSourceSitesJson: { type: "string" },
         policyManifests: {
           type: "array",
           items: { type: "object", additionalProperties: true },
@@ -1193,6 +1201,7 @@ interface StoredCompiledDoc {
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
   patternCoverageSpansJson?: string;
+  builderSourceSitesJson?: string;
   policyManifests?: readonly unknown[];
   delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
@@ -1242,6 +1251,20 @@ function storedCoverageSpans(
     });
   }
   return out;
+}
+
+/** Parses and validates a debug-only builder-source-site sidecar. */
+function storedBuilderSourceSites(
+  stored: unknown,
+): BuilderSourceSitesV1 | undefined {
+  if (typeof stored !== "string") return undefined;
+  let sidecar: unknown;
+  try {
+    sidecar = JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
+  return isBuilderSourceSitesV1(sidecar) ? sidecar : undefined;
 }
 
 /** Whether a cell's persisted CFC label carries `atom` at `path`. */
@@ -1424,6 +1447,9 @@ export function writeCompiledDocs(
           patternCoverageSpansJson: JSON.stringify(
             module.patternCoverageSpans,
           ),
+        }),
+        ...(module.builderSourceSites === undefined ? {} : {
+          builderSourceSitesJson: JSON.stringify(module.builderSourceSites),
         }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         ...(delegatedModuleIdentities.length > 0
@@ -1685,6 +1711,9 @@ export async function loadCompiledClosure(
     const coverageSpans = storedCoverageSpans(
       doc.patternCoverageSpansJson,
     );
+    const builderSourceSites = storedBuilderSourceSites(
+      doc.builderSourceSitesJson,
+    );
 
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
@@ -1722,6 +1751,7 @@ export async function loadCompiledClosure(
       ...(coverageSpans === undefined
         ? {}
         : { patternCoverageSpans: coverageSpans }),
+      ...(builderSourceSites === undefined ? {} : { builderSourceSites }),
       ...(doc.policyManifests !== undefined
         ? { policyManifests: doc.policyManifests }
         : {}),

@@ -20,6 +20,10 @@ export class TestServer {
         serveDir(req, {
           fsRoot: this.manifest.serverDir,
           quiet: true,
+          // A realm the test page creates -- a sandboxed iframe -- has an
+          // opaque origin, and a module script is fetched in CORS mode, so
+          // reaching a `bundle` entry from one takes this.
+          enableCors: true,
         }),
     );
     if (!this.server) throw new Error("Server creation failed");

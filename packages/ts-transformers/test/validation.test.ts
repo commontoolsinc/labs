@@ -3556,6 +3556,39 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "still errors inside a source-defined `Array.map()` callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      class Array<T> {
+        constructor(readonly value: T) {}
+
+        map(callback: (value: T) => unknown): T[] {
+          return callback(this.value) ? [this.value] : [];
+        }
+      }
+
+      const VALUES = new Array("a");
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const selected = VALUES.map((value) => {
+          const matches = value === t;
+          return matches;
+        });
+        return { selected };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
     "allows a parenthesized method call over a .get() binding",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";

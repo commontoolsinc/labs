@@ -1,0 +1,9 @@
+{
+  "name": "deno-web-test-bundle-project",
+  "tasks": {
+    "test": "<@see deno-web-test/test/utils.ts#runDenoWebTest>"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1.0.11"
+  }
+}
