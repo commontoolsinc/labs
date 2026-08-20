@@ -68,7 +68,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["emoji"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const reaction = __cf_pattern_input.key("element");
     const msg = __cf_pattern_input.key("params", "msg");

@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b", "c"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → lift(...)({ a, b, c })

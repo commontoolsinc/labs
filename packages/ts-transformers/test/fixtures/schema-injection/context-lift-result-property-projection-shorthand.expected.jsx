@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["summary"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: context-lift-result-property-projection-shorthand
 // Verifies: shorthand object returns preserve the projected computed() result type
 //   return { difference } → result schema difference: number

@@ -74,7 +74,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     result: {
         tasks: {
@@ -132,7 +132,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-property-access-map
 // Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => result.tasks.map(fn)) → lift(({ result }) => result.tasks.map(fn))({ result: { tasks: result.key("tasks") } })

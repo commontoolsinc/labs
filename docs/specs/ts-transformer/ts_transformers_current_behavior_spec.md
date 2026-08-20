@@ -957,10 +957,10 @@ canonical lift-applied form:
 
 - `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
 - no-input computed-origin calls are schema-injected as
-  `__cfHelpers.lift(fn, false)()`
+  `__cfHelpers.lift(fn, false, undefined, { completeSchedulerScopeSummary: true })()`
   after closure analysis has proven that the empty input contains no captures
   (function first; `false` preserves computed's no-argument runtime semantics,
-  and the no-input form has no result schema)
+  and `undefined` keeps the options object in lift's fourth parameter)
 - **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
   single result type param, while `lift<T, R>` takes input `T` first, so
   forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
@@ -1097,9 +1097,13 @@ Behavior:
   - `materializerWriteInputPaths` is emitted when the first parameter's
     capability summary has one or more write paths. Each path is an array of
     static string segments. The write metadata remains present even when the
-    parameter's write exhaustiveness is unverifiable.
-  - the object is omitted when there are no write paths
-    (`closures/strategies/lift-applied-strategy.ts`;
+    overall scope is not provably complete.
+  - `completeSchedulerScopeSummary: true` is emitted only when the function is
+    non-recursive, has no unreadable cell arguments, and every parameter has no
+    wildcard, unverified cell use, passthrough, opaque capability, or opaque
+    paths. A proven-empty summary qualifies.
+  - the object may contain either field or both, and is omitted when neither
+    condition holds (`closures/strategies/lift-applied-strategy.ts`;
     `test/pipeline-regressions.test.ts`).
 - during §10 schema injection, argument/result schemas are inserted after the
   callback and before those options, producing
@@ -1415,10 +1419,10 @@ computation's input schema:
   Identity-only cell leaves receive the same opaque/comparable wrappers, while
   mixed summaries still retain and shrink their ordinary read/write paths
   (`transformers/type-shrinking.ts`; `test/type-shrinking.test.ts`).
-- Identity-only roots are passthrough, so identity/comparable tracking can
-  preserve a satisfiable input schema. (The scheduler-completeness
-  assertion this bullet once described was deleted with the certificate
-  surface — server-execution v2 stage C.1.)
+- Scheduler completeness is separate from path retention: identity-only roots
+  are passthrough, and `hasCompleteSchedulerScopeSummary` rejects passthrough or
+  wildcard summaries. Thus identity/comparable tracking can preserve a
+  satisfiable input schema without asserting a complete scheduler scope.
 
 #### 10.7.2 Imported capability contracts
 

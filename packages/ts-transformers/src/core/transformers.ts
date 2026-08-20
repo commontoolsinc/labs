@@ -46,8 +46,9 @@ export type CapabilityParamSummary = {
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
    * cell-like receivers, and by `set`/`send` calls carrying an onCommit
-   * callback. A consumer asserting write exhaustiveness must treat this
-   * like `wildcard` and fail closed. Detection is per
+   * callback. Consumers asserting write exhaustiveness
+   * (`completeSchedulerScopeSummary`) must treat this like `wildcard` and
+   * fail closed. Detection is per
    * method-call dispatch: extracted method references
    * (`const f = cell.send; f(x)`) are outside the contract.
    */

@@ -60,7 +60,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state", "personName"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         removePersonConfirmTarget: string | null;
@@ -89,7 +89,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state", "personName"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         spots: {
@@ -146,7 +146,7 @@ const __cfLift_3 = __cfHelpers.lift<{
         },
         required: ["label", "value"]
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_4 = __cfHelpers.lift<{
     activeSpotOpts: {
         length: number;

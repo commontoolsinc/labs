@@ -26,7 +26,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["limit"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return <span>{item.key("name")}</span>;
@@ -83,7 +83,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: authored-ifelse-jsx-branches
 // Verifies: authored ifElse in JSX lowers both conditions and reactive branches correctly
 //   ifElse(limit > 0, items.map(...), <span>Hidden</span>) → derived condition + pattern-lowered map branch

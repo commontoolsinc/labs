@@ -12,7 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const config = __cfHelpers.__cf_data({ bar: "module-level" });
-const __cfLift_1 = __cfHelpers.lift(() => ({ bar: 1 }), false);
+const __cfLift_1 = __cfHelpers.lift(() => ({ bar: 1 }), false, undefined, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift(() => {
     const condition = 1 > 0;
     if (condition) {
@@ -20,7 +20,7 @@ const __cfLift_2 = __cfHelpers.lift(() => {
         return config.key("bar");
     }
     return config.bar;
-}, false);
+}, false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
 //   the module-level `config.bar` to be rewritten to `config.key("bar")`.

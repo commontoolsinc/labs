@@ -32,7 +32,7 @@ const deriveInput: Writable<{
     foo: string;
     bar: string;
 }> = __cfHelpers.__cf_data({} as never);
-const __cfLift_1 = __cfHelpers.lift(() => deriveInput.key("foo").get(), false);
+const __cfLift_1 = __cfHelpers.lift(() => deriveInput.key("foo").get(), false, undefined, { completeSchedulerScopeSummary: true });
 const computedObserved = __cfHelpers.__cf_data(__cfLift_1().for("computedObserved", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

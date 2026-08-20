@@ -124,29 +124,67 @@ function getCapabilityAnalysis(
   };
 }
 
+/**
+ * The capability analysis is the existing conservative completeness seam for
+ * source-authored lifts.  A marker is emitted only when that analysis can
+ * account for every cell-bearing parameter use.  In particular, an empty
+ * summary is meaningful proof for a source-backed zero-input computation; it
+ * is not inferred later from an empty runtime observation.
+ */
+function hasCompleteSchedulerScopeSummary(
+  summary: FunctionCapabilitySummary,
+): boolean {
+  if (
+    summary.recursive ||
+    (summary.unreadableCellArguments?.length ?? 0) > 0
+  ) {
+    return false;
+  }
+  return summary.params.every((param) =>
+    !param.wildcard &&
+    !param.hasUnverifiedCellUse &&
+    !param.passthrough &&
+    param.capability !== "opaque" &&
+    (param.opaquePaths?.length ?? 0) === 0
+  );
+}
+
 function createDeriveSchedulerOptions(
   inputParamSummary: CapabilityParamSummary | undefined,
+  completeSchedulerScopeSummary: boolean,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression | undefined {
   const writePaths = inputParamSummary?.writePaths ?? [];
-  if (writePaths.length === 0) {
+  if (writePaths.length === 0 && !completeSchedulerScopeSummary) {
     return undefined;
   }
 
   return factory.createObjectLiteralExpression(
     [
-      factory.createPropertyAssignment(
-        "materializerWriteInputPaths",
-        factory.createArrayLiteralExpression(
-          writePaths.map((path) =>
+      ...(writePaths.length > 0
+        ? [
+          factory.createPropertyAssignment(
+            "materializerWriteInputPaths",
             factory.createArrayLiteralExpression(
-              path.map((segment) => factory.createStringLiteral(segment)),
+              writePaths.map((path) =>
+                factory.createArrayLiteralExpression(
+                  path.map((segment) => factory.createStringLiteral(segment)),
+                  false,
+                )
+              ),
               false,
-            )
+            ),
           ),
-          false,
-        ),
-      ),
+        ]
+        : []),
+      ...(completeSchedulerScopeSummary
+        ? [
+          factory.createPropertyAssignment(
+            "completeSchedulerScopeSummary",
+            factory.createTrue(),
+          ),
+        ]
+        : []),
     ],
     false,
   );
@@ -569,6 +607,7 @@ export function transformLiftAppliedCall(
   }
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,
+    hasCompleteSchedulerScopeSummary(capabilityAnalysis.summary),
     factory,
   );
 

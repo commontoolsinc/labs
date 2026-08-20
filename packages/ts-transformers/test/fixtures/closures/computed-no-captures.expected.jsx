@@ -11,7 +11,7 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(() => 42, false);
+const __cfLift_1 = __cfHelpers.lift(() => 42, false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-no-captures
 // Verifies: computed(() => expr) with no external captures is transformed to
 // lift(false, fn)() with no input object.
