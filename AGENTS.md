@@ -240,6 +240,10 @@ Each of these gates fails CI on its own, and none of them run as part of
   that no entry covers
 - `deno task check-conflict-markers` — an unresolved merge-conflict marker left
   in a file, which `docs/` has no other mechanical gate against
+- `deno task check-control-characters` — a literal control codepoint below 0x20,
+  other than newline, in tracked source. Written as an escape (`\x00`, `\t`) the
+  string is identical; written as the byte, a single NUL makes the whole file
+  read as binary, so `grep` skips it silently
 - `deno task check-skill-facts` — a path or import cited by a skill, an
   `AGENTS.md`, or a rule that stopped resolving
 - `deno task check-verb-session-sync` — a `cf` command or act reference in

@@ -120,6 +120,12 @@ jobs:
           deno task run-recorded gate repo check-conflict-markers --
           deno task check-conflict-markers
 
+      - name: 🩹 Check for literal control characters in source
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-control-characters --
+          deno task check-control-characters
+
       - name: 🚧 Guard the verb-session walkthrough against its demo
         timeout-minutes: *work-timeout
         run: >-
