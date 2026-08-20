@@ -630,6 +630,21 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(0);
     });
 
+    it("reports `total` as a data property", () => {
+      const logger = getLogger("count-inert-test");
+      captureConsole("log", () => logger.info("test-key", "test"));
+
+      // A caller may carry the snapshot across a realm boundary, and an
+      // accessor is live code rather than the inert data such a crossing
+      // takes.
+      expect(Object.getOwnPropertyDescriptor(logger.counts, "total")).toEqual({
+        value: 1,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    });
+
     it("increments the count for the level logged at", () => {
       const logger = getLogger("count-test");
       logger.level = "debug"; // Enable all levels
@@ -1265,6 +1280,24 @@ describe("logger", () => {
 
       expect(byKey["data-fetch"]!.info).toBe(1);
       expect(byKey["data-fetch"]!.total).toBe(1);
+    });
+
+    it("reports each key's `total` as a data property", () => {
+      const logger = getLogger("key-inert-test");
+
+      captureConsole("log", () => {
+        logger.info("key-1", "Message 1");
+        logger.info("key-1", "Message 2");
+      });
+
+      expect(
+        Object.getOwnPropertyDescriptor(logger.countsByKey["key-1"]!, "total"),
+      ).toEqual({
+        value: 2,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
     });
 
     it("keeps one key's count clear of another's", () => {
