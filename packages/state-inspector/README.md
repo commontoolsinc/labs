@@ -74,7 +74,10 @@ failure mode it guards against:
   to read inline is replaced by a `$elidedSchema` summary — top-level keys, byte
   count, and a digest that separates two schemas of the same shape — which is
   not a schema and is not mistakable for one. `--full-depth` writes every schema
-  out in full. No `schema` key at all means the link stores none.
+  out in full — annotated like any other value, so a sigil-shaped literal under
+  `const` / `default` / `enum` reads back as `$link` / `$ref`; the digest hashes
+  the stored schema, so that is what to compare two links by. No `schema` key at
+  all means the link stores none.
 
 ## Fidelity — reconstruction is the engine's, not a fork
 

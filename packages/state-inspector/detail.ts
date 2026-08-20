@@ -210,10 +210,13 @@ function declaredSchemaFor(
     ? (ownerDoc!.value as Record<string, unknown>)[key]
     : undefined;
   const linkSchema = decodedLinkOf(naming)?.schema;
-  if (isObjectNotArray(linkSchema)) {
+  if (linkSchema !== undefined) {
     return {
       schema: annotate(linkSchema),
-      keys: Object.keys(linkSchema),
+      // A boolean schema has no keys to list, and `true` in particular is the
+      // one that constrains nothing — reporting it is the point, since the
+      // owner's declaration would otherwise stand in for it.
+      keys: isObjectNotArray(linkSchema) ? Object.keys(linkSchema) : undefined,
       via: "link",
     };
   }
@@ -245,7 +248,7 @@ function declaredSchemaFor(
   return undefined;
 }
 
-/** Collect every sigil link in a value, with its JSON path. */
+/** Collect every link in a value, in either at-rest form, with its JSON path. */
 function linksWithPaths(
   v: unknown,
   base: string[] = [],
@@ -253,7 +256,7 @@ function linksWithPaths(
   depth = 10,
 ): { link: DecodedLink; at: string }[] {
   if (depth < 0) return out;
-  const link = parseSigilLink(v);
+  const link = decodedLinkOf(v);
   if (link) {
     out.push({ link, at: base.join("/") });
     return out;
@@ -504,7 +507,7 @@ export function buildAllDetails(
       c.kind === "piece" && c.regime === "modern" && isObjectNotArray(doc.value)
     ) {
       for (const [key, val] of Object.entries(doc.value)) {
-        const tid = parseSigilLink(val)?.id;
+        const tid = decodedLinkOf(val)?.id;
         if (tid && !nameOf.has(tid)) nameOf.set(tid, { owner: id, key });
       }
     }

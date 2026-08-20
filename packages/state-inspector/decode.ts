@@ -247,6 +247,15 @@ function elideSchema(schema: Json, bytes: number): Json {
  * read or when `maxDepth` is infinite, and as an `elideSchema()` summary
  * otherwise. Never synthesizes a schema — a rendered `true` means `true` was
  * what the link stored.
+ *
+ * "As itself" is the annotated form, not the stored bytes. A schema is walked
+ * like any other value, so a sigil-shaped literal inside one — under `const`,
+ * `default`, or `enum` — reads back as `{ $link }` or `{ $ref }` the way it
+ * would anywhere else in the output. That keeps the rendering JSON-safe, which
+ * the stored form is not: a `bigint` in a schema breaks `JSON.stringify()`
+ * outright, and a `FabricLink` in one flattens to `{}` and disappears. The
+ * digest in an `elideSchema()` summary hashes the stored schema rather than
+ * this rendering, so it stays the thing to compare two schemas by.
  */
 function renderLinkSchema(schema: Json, maxDepth: number): Json {
   const rendered = annotate(schema, Number.POSITIVE_INFINITY);

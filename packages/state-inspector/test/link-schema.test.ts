@@ -141,6 +141,26 @@ describe("link-schema", () => {
       const link = new FabricLink({ id: "of:x", path: [], schema });
       expect(annotatedLink(link).schema).toEqual(schema);
     });
+
+    it("returns a schema's own `$ref` untouched", () => {
+      const schema = { $ref: "#/$defs/TopicLinkKind" };
+      expect(annotatedLink(sigilLink(schema)).schema).toEqual(schema);
+    });
+
+    it("returns a sigil-shaped literal inside a schema in annotated form", () => {
+      // A schema is walked like any other value, which is what keeps the
+      // rendering JSON-safe where the stored form is not.
+      const schema = { const: { "/": "of:target" } };
+      expect(annotatedLink(sigilLink(schema)).schema).toEqual({
+        const: { $ref: "of:target" },
+      });
+    });
+
+    it("returns a schema holding a `bigint`, which the stored form cannot be serialized from", () => {
+      const rendered = annotatedLink(sigilLink({ const: 1n })).schema;
+      expect(rendered).toEqual({ const: { $bigint: "1" } });
+      expect(() => JSON.stringify(rendered)).not.toThrow();
+    });
   });
 
   describe("summarizeLink()", () => {
