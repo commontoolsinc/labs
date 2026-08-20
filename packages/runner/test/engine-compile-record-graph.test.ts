@@ -122,7 +122,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe(21);
   });
@@ -275,7 +275,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(main?.default).toBe("Open");
   });
@@ -313,7 +313,7 @@ describe("Engine.compileToRecordGraph()", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
 
     // The compiled body wired up the gated ambient intrinsics, not the real

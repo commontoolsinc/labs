@@ -50,7 +50,7 @@ describe("Engine implementation identity", () => {
     const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
       program,
     );
-    engine.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+    engine.evaluateRecordGraph(id, graph, mainSpecifier, program);
     const moduleIdentity = engine.canonicalModuleSource(`/${id}${modulePath}`);
     return { id, moduleIdentity };
   }
@@ -146,7 +146,7 @@ describe("Engine implementation identity", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const findWriterIdentity = (
       value: unknown,

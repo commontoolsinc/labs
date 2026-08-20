@@ -1730,10 +1730,10 @@ describe("piece pull materialization", () => {
     const sourceController = new PieceController(pieces, source);
     const targetController = new PieceController(pieces, target);
 
-    expect(await sourceController.getPatternSourceFiles()).toEqual(
+    expect((await sourceController.getPatternSourceProgram())?.files).toEqual(
       sourceProgram.files,
     );
-    expect(await targetController.getPatternSourceFiles()).toBeUndefined();
+    expect(await targetController.getPatternSourceProgram()).toBeUndefined();
 
     await pieces.link(
       sourceController.id,

@@ -1694,14 +1694,20 @@ export class RuntimeProcessor {
       // module, so the symbol only selects a representative artifact). A
       // source-free by-identity reload carries no program — omit it (same
       // graceful degradation as the prior meta-cell read's try/catch).
-      const files = this.runtime.patternManager.getPatternFilesBySync(
+      const program = this.runtime.patternManager.getPatternProgramBySync(
         ref.identity,
         ref.symbol,
       );
-      if (files) {
+      if (program) {
         patterns.push({
           identity: ref.identity,
-          files: files.map((f) => ({ name: f.name, contents: f.contents })),
+          files: program.files.map((f) => ({
+            name: f.name,
+            contents: f.contents,
+          })),
+          ...(program.dataFiles === undefined
+            ? {}
+            : { dataFiles: program.dataFiles }),
         });
       }
     }

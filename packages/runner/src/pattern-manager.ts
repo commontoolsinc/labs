@@ -421,7 +421,7 @@ export class PatternManager {
    * module-scope entry ref). The only surviving job of the old
    * `registerPattern`: source-bearing tests/builtins that construct a Pattern in
    * hand can associate its source so `getPatternProgram` (and thus
-   * `getPatternFilesBySync`) returns it. No-op when the pattern already carries a
+   * `getPatternProgramBySync`) returns it. No-op when the pattern already carries a
    * program. Walks to the derivation root so a copy inherits the association.
    */
   associatePatternProgram(
@@ -746,8 +746,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     return this.patternFromEvaluation(result, program);
   }
@@ -820,8 +819,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     this.registerEvaluatedModules(result);
     return result;
@@ -888,8 +886,7 @@ export class PatternManager {
         id,
         graph,
         mainSpecifier,
-        program.files,
-        program.dataFiles,
+        program,
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     }
@@ -1059,8 +1056,7 @@ export class PatternManager {
       id,
       graph,
       mainSpecifier,
-      program.files,
-      program.dataFiles,
+      program,
     );
     logger.time(evalStart, "compile-cache", "evaluate");
 
@@ -1754,22 +1750,24 @@ export class PatternManager {
   }
 
   /**
-   * Best-effort authored source files for a live pattern by its content
+   * Best-effort authored program for a live pattern by its content
    * `{ identity, symbol }` — the source-viewing debug surface
-   * (`getPatternSources`). Returns undefined when the pattern is not live in
-   * this session or carries no program (e.g. a source-free by-identity
-   * reload); callers degrade gracefully (omit the pattern). Source-bearing
-   * cross-session recovery is the source-doc closure's job, not this.
+   * (`getPatternSources`). Returns the program rather than its files, so a
+   * caller can tell which entries carry data. Returns undefined when the
+   * pattern is not live in this session or carries no program (e.g. a
+   * source-free by-identity reload); callers degrade gracefully (omit the
+   * pattern). Source-bearing cross-session recovery is the source-doc
+   * closure's job, not this.
    */
-  getPatternFilesBySync(
+  getPatternProgramBySync(
     identity: string,
     symbol: string,
-  ): { name: string; contents: string }[] | undefined {
+  ): RuntimeProgram | undefined {
     const pattern = this.artifactFromIdentitySync(identity, symbol) as
       | Pattern
       | undefined;
     if (!pattern) return undefined;
-    return getPatternProgram(pattern)?.files;
+    return getPatternProgram(pattern);
   }
 
   /**

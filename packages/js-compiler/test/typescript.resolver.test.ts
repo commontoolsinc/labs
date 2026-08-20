@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { resolveProgram } from "../typescript/resolver.ts";
+import {
+  collectDataFileNames,
+  resolveProgram,
+} from "../typescript/resolver.ts";
 import { TARGET } from "../typescript/options.ts";
 import { InMemoryProgram } from "../program.ts";
 
@@ -82,6 +85,213 @@ describe("typescript/resolver.ts", () => {
         },
       );
       expect(program.files.length).toBe(2);
+    });
+  });
+
+  describe("collectDataFileNames", () => {
+    const names = (contents: string) =>
+      collectDataFileNames({ name: "/main.tsx", contents }, TARGET);
+
+    it("reads the path a dataFile call names", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("/data/cities.json");\n',
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("reads every path a module names", () => {
+      expect(names(
+        'import { dataFile, pattern } from "commonfabric";\n' +
+          "export default pattern(() => ({\n" +
+          '  a: dataFile("/a.json"),\n' +
+          '  b: dataFile("/b.txt"),\n' +
+          "}));\n",
+      )).toEqual(["/a.json", "/b.txt"]);
+    });
+
+    it("follows the binding through a renaming import", () => {
+      expect(names(
+        'import { dataFile as read } from "commonfabric";\n' +
+          'export default () => read("/data/cities.json");\n',
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("follows the binding through a namespace import", () => {
+      expect(names(
+        'import * as cf from "commonfabric";\n' +
+          'export default () => cf.dataFile("/data/cities.json");\n',
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("ignores a dataFile that is not the runtime's", () => {
+      expect(names(
+        'import { dataFile } from "./local-helpers.ts";\n' +
+          'export default () => dataFile("/data/cities.json");\n',
+      )).toEqual([]);
+    });
+
+    it("ignores a type-only import, which binds no value", () => {
+      expect(names(
+        'import type { dataFile } from "commonfabric";\n' +
+          "export default () => 1;\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a path the source does not state", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default (name: string) => dataFile(name);\n",
+      )).toEqual([]);
+    });
+
+    it("reads a call nested inside other code", () => {
+      expect(names(
+        'import { dataFile, pattern } from "commonfabric";\n' +
+          "export default pattern(() => {\n" +
+          '  const parsed = JSON.parse(dataFile("/data/cities.json"));\n' +
+          "  return { count: parsed.length };\n" +
+          "});\n",
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("ignores an inline type-only specifier, which binds no value", () => {
+      expect(names(
+        'import { pattern, type dataFile } from "commonfabric";\n' +
+          "export default pattern(() => ({}));\n",
+      )).toEqual([]);
+    });
+
+    it("ignores an import that binds no names at all", () => {
+      expect(names(
+        'import "commonfabric";\n' +
+          'export default () => dataFile("/data/cities.json");\n',
+      )).toEqual([]);
+    });
+
+    it("ignores a call through a parameter of the same name", () => {
+      // The inner `dataFile` is the parameter, not the import, so the file it
+      // names is not one this module reads.
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "function helper(dataFile: (s: string) => string) {\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "}\n" +
+          'export default () => [helper((s) => s), dataFile("/real.json")];\n',
+      )).toEqual(["/real.json"]);
+    });
+
+    it("ignores a call through a local of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  const dataFile = (s: string) => s;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through a destructured binding of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default (input: { dataFile: (s: string) => string }) => {\n" +
+          "  const { dataFile } = input;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through a shadowed namespace alias", () => {
+      expect(names(
+        'import * as cf from "commonfabric";\n' +
+          "export default (cf: { dataFile: (s: string) => string }) =>\n" +
+          '  cf.dataFile("/shadowed.json");\n',
+      )).toEqual([]);
+    });
+
+    it("reads a call whose scope shadows some other name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  const other = 1;\n" +
+          '  return [other, dataFile("/data/cities.json")];\n' +
+          "};\n",
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("ignores a call under a catch binding of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  try {\n" +
+          "    return 1;\n" +
+          "  } catch (dataFile) {\n" +
+          '    return dataFile("/shadowed.json");\n' +
+          "  }\n" +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a loop variable of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  for (let dataFile = 0; dataFile < 1; dataFile++) {\n" +
+          '    console.log(dataFile("/shadowed.json"));\n' +
+          "  }\n" +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a function declared with the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  function dataFile(s: string) {\n" +
+          "    return s;\n" +
+          "  }\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call under a class declared with the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default () => {\n" +
+          "  class dataFile {}\n" +
+          '  return [dataFile, dataFile("/shadowed.json")];\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call inside a function expression of the same name", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default function dataFile(s: string) {\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "}\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a call through an array-destructured binding", () => {
+      expect(names(
+        'import { dataFile } from "commonfabric";\n' +
+          "export default (input: ((s: string) => string)[]) => {\n" +
+          "  const [dataFile] = input;\n" +
+          '  return dataFile("/shadowed.json");\n' +
+          "};\n",
+      )).toEqual([]);
+    });
+
+    it("ignores a default import, which does not bind the reader", () => {
+      expect(names(
+        'import cf from "commonfabric";\n' +
+          'export default () => cf.dataFile("/data/cities.json");\n',
+      )).toEqual([]);
+    });
+
+    it("finds nothing in a module that never imports it", () => {
+      expect(names("export const x = 1;\n")).toEqual([]);
     });
   });
 });

@@ -271,3 +271,175 @@ describe("HttpProgramResolver", () => {
     });
   });
 });
+
+describe("FileSystemProgramResolver.resolveDataFile", () => {
+  // Writes the named files into a fresh temp tree and returns its root. The
+  // caller removes the tree.
+  async function tree(files: Record<string, string>): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: "resolve-data-file-" });
+    for (const [name, contents] of Object.entries(files)) {
+      const full = path.join(root, name);
+      await Deno.mkdir(path.join(full, ".."), { recursive: true });
+      await Deno.writeTextFile(full, contents);
+    }
+    return root;
+  }
+
+  it("reads the file the name grounds to", async () => {
+    const root = await tree({
+      "main.tsx": "export default 1;\n",
+      "data/cities.json": '["Oslo"]\n',
+    });
+    try {
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "main.tsx"),
+        root,
+      );
+      const source = await resolver.resolveDataFile("/data/cities.json");
+      expect(source).toEqual({
+        name: "/data/cities.json",
+        contents: '["Oslo"]\n',
+      });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("keeps a byte order mark that reading a module would consume", async () => {
+    const root = await tree({ "main.tsx": "export default 1;\n" });
+    try {
+      await Deno.writeFile(
+        path.join(root, "marked.txt"),
+        new Uint8Array([0xef, 0xbb, 0xbf, 0x68, 0x69]),
+      );
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "main.tsx"),
+        root,
+      );
+      const source = await resolver.resolveDataFile("/marked.txt");
+      expect(source?.contents).toBe("\uFEFFhi");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("refuses bytes that are not UTF-8 rather than storing replacements", async () => {
+    const root = await tree({ "main.tsx": "export default 1;\n" });
+    try {
+      await Deno.writeFile(
+        path.join(root, "bad.bin"),
+        new Uint8Array([0xff, 0xfe, 0x00]),
+      );
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "main.tsx"),
+        root,
+      );
+      await expect(resolver.resolveDataFile("/bad.bin")).rejects.toThrow(
+        "is not valid UTF-8 text",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("returns undefined for a name with no file behind it", async () => {
+    const root = await tree({ "main.tsx": "export default 1;\n" });
+    try {
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "main.tsx"),
+        root,
+      );
+      expect(await resolver.resolveDataFile("/data/absent.json")).toBe(
+        undefined,
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("returns undefined for a name that is not grounded", async () => {
+    const root = await tree({ "main.tsx": "export default 1;\n" });
+    try {
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "main.tsx"),
+        root,
+      );
+      expect(await resolver.resolveDataFile("data/cities.json")).toBe(
+        undefined,
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("refuses a name that climbs out of the root", async () => {
+    const root = await tree({ "inner/main.tsx": "export default 1;\n" });
+    try {
+      await Deno.writeTextFile(path.join(root, "outside.json"), "[]\n");
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "inner", "main.tsx"),
+        path.join(root, "inner"),
+      );
+      await expect(resolver.resolveDataFile("/../outside.json")).rejects
+        .toThrow("outside of root directory");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("refuses a link inside the root that names a file outside it", async () => {
+    const root = await tree({ "inner/main.tsx": "export default 1;\n" });
+    try {
+      await Deno.writeTextFile(path.join(root, "outside.json"), "[]\n");
+      await Deno.symlink(
+        path.join(root, "outside.json"),
+        path.join(root, "inner", "linked.json"),
+      );
+      const resolver = new FileSystemProgramResolver(
+        path.join(root, "inner", "main.tsx"),
+        path.join(root, "inner"),
+      );
+      // The written path stays inside the root; only following the link shows
+      // that it does not.
+      await expect(resolver.resolveDataFile("/linked.json")).rejects.toThrow(
+        "outside of root directory",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("HttpProgramResolver.resolveDataFile", () => {
+  const at = (url: string | URL, body: string, status = 200) =>
+    new HttpProgramResolver(
+      url,
+      () => Promise.resolve(new Response(body, { status })),
+    );
+
+  it("fetches the file the name grounds to", async () => {
+    const resolver = at("https://example.com/main.tsx", '["Oslo"]');
+    expect(await resolver.resolveDataFile("/data/cities.json")).toEqual({
+      name: "/data/cities.json",
+      contents: '["Oslo"]',
+    });
+  });
+
+  it("returns undefined when the fetch does not find it", async () => {
+    const resolver = at("https://example.com/main.tsx", "nope", 404);
+    expect(await resolver.resolveDataFile("/data/absent.json")).toBe(undefined);
+  });
+
+  it("returns undefined for a name that is not grounded", async () => {
+    const resolver = at("https://example.com/main.tsx", "[]");
+    expect(await resolver.resolveDataFile("data/cities.json")).toBe(undefined);
+  });
+
+  it("reports a refusal as a refusal, not as a missing file", async () => {
+    for (const status of [401, 403, 500]) {
+      const resolver = at("https://example.com/main.tsx", "no", status);
+      await expect(resolver.resolveDataFile("/data/cities.json")).rejects
+        .toThrow(`${status}`);
+    }
+  });
+});

@@ -73,7 +73,7 @@ engine.evaluateRecordGraph(
   compiled.id,
   compiled.graph,
   compiled.mainSpecifier,
-  program.files,
+  program,
 );
 const evalMs = performance.now() - evalStart;
 // One macrotask turn so the probe can observe the evaluate stretch.
