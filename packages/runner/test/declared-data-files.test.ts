@@ -1,7 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { beforeAll, describe, it } from "@std/testing/bdd";
 import type { ProgramResolver, Source } from "@commonfabric/js-compiler";
 import { attachDeclaredDataFiles } from "../src/harness/declared-data-files.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const READS_CITIES = 'import { dataFile } from "commonfabric";\n' +
@@ -46,6 +47,13 @@ const program = (contents: string): RuntimeProgram => ({
 });
 
 describe("attachDeclaredDataFiles", () => {
+  // Reading a `dataFile()` call out of a module is the compiler stack's work,
+  // and every flow that parses awaits it before starting. Here that flow is
+  // the suite.
+  beforeAll(async () => {
+    await ensureCompilerStack();
+  });
+
   it("attaches the file the source declares", async () => {
     const resolver = withDataReader({}, { "/data/cities.json": '["Oslo"]\n' });
     const result = await attachDeclaredDataFiles(

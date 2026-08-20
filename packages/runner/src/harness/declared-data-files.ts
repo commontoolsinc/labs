@@ -1,10 +1,6 @@
-import {
-  collectDataFileNames,
-  type ProgramResolver,
-  type Source,
-} from "@commonfabric/js-compiler";
-import { TARGET } from "@commonfabric/js-compiler/typescript";
+import type { ProgramResolver, Source } from "@commonfabric/js-compiler";
 import type { RuntimeProgram } from "./types.ts";
+import { compilerStack } from "./deferred-compiler-stack.ts";
 
 /**
  * Attach the data files a program's own source declares.
@@ -21,6 +17,9 @@ import type { RuntimeProgram } from "./types.ts";
  * a web address, or from anywhere else reaches its data the way it reaches its
  * source.
  *
+ * Parsing is the compiler stack's work, so the caller must have awaited
+ * `ensureCompilerStack()` — `Engine.resolve` has, by the time it gets here.
+ *
  * A declared name the resolver cannot produce is an error. The program cannot
  * be assembled as its source describes it, and saying so here names both the
  * module that asked and the name it asked for, while the pattern that would
@@ -30,6 +29,7 @@ export async function attachDeclaredDataFiles(
   program: RuntimeProgram,
   resolver: ProgramResolver,
 ): Promise<RuntimeProgram> {
+  const { collectDataFileNames, TARGET } = compilerStack();
   const declaredBy = new Map<string, string>();
   for (const file of program.files) {
     for (const name of collectDataFileNames(file, TARGET)) {
