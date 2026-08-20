@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-08-17
+archived: 2026-08-19
+reason: "Executed plan; every test run is recorded and the store is applied."
+superseded-by: docs/specs/test-records.md
+---
+
 # Tracking every test run
 
 This document designs a system that records, for every test of every kind in
@@ -845,10 +853,10 @@ activation and the follow-through that needs live data.
    durations, as designed), per-fixture `pattern-vintage` records, and
    named steps in the CLI integration sections.
 7. **Adoption** —
-   [the guide](../development/test-records-adoption.md) is written;
-   [`test-records.md`](../development/test-records.md) documents operating
+   [the guide](../../development/test-records-adoption.md) is written;
+   [`test-records.md`](../../development/test-records.md) documents operating
    the system in this repository, and the normative contract lives in
-   [the spec](../specs/test-records.md), which is what remains live when
+   [the spec](../../specs/test-records.md), which is what remains live when
    this plan is eventually archived.
 8. **Analysis** — the alias file and its gate, the collision, high-churn,
    and over-60-seconds reports (`tasks/test-records-report.ts`, whose
@@ -951,7 +959,7 @@ source moved into the managed-folder path.
   The intended eventual use — running only the fraction of tests that
   fail most often — fits the write path as built, but the selector's own
   rules are not designed here beyond the constraints
-  [the spec](../specs/test-records.md) states: an identity with no fresh
+  [the spec](../../specs/test-records.md) states: an identity with no fresh
   records must run (records exist only for tests that ran, so a selector
   that never revisits the unselected starves its own data), a renamed
   test is unknown until its alias line lands, and baselines come from

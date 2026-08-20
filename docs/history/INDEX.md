@@ -64,6 +64,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.
 - [AUTOSAVE-PLAN.md](packages/ui/src/v2/components/cf-file-download/AUTOSAVE-PLAN.md) — cf-file-download auto-save.
 - [2026-07-23-pathless-piece-read.md](plans/2026-07-23-pathless-piece-read.md) — why a path-less `cf piece get` returned `undefined` while every child path read fine, and the partial-object projection at the piece read boundary that fixed it, July 2026.
+- [test-run-telemetry.md](plans/test-run-telemetry.md) — the design of the test-run record system: the refactor-stable identity triple, the record and context line formats, the spool-then-one-upload path, the publicly readable append-only store with per-person and relay writers, and the eight stages that built it, August 2026.
 
 ## Shipped or superseded designs and decision records
 
