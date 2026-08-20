@@ -850,12 +850,21 @@ trusted builder reaches through a reference the module verifier cannot follow:
 - **Error** `builder-callback:indirect-reference`
   (`src/transformers/indirect-builder-callback-validation.ts`) — the argument
   the verifier treats as the callback is function-bearing, but resolves to
-  neither a function written at the call nor a plain identifier bound to a
-  function in the same module. A property access
-  (`handler(event, state, callbacks.save)`) and an imported binding are the
-  two shapes that reach it. The message names how the callback was reached
-  and points the author at binding the function in this module or writing it
-  at the call.
+  neither a function written at the call nor a name bound to a function this
+  module emits. A property access (`handler(event, state, callbacks.save)`)
+  and an imported binding are the two shapes that reach it most often. The
+  message names how the callback was reached and points the author at binding
+  the function in this module or writing it at the call.
+
+Resolution follows a name through this module's own declarations, so a chain
+of aliases ending at a local function resolves exactly as the verifier's
+binding walk resolves it. Two shapes that read as functions are not ones the
+verifier admits, and are reported: a **generator**, which is not
+direct-callback syntax to `tryParseDirectFunction` (it accepts `async`, never
+`function*`), and a declaration with **no body** — ambient, or an overload
+signature — which is erased before emit, leaving the compiled module with a
+name bound to nothing. An overloaded function resolves through its
+implementation.
 
 The rule belongs to `verifyTrustedBuilderCall`
 (`runner/src/sandbox/compiled-bundle-verifier.ts`, normative per §17.6), which
