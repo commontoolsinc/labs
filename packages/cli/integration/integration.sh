@@ -1265,6 +1265,32 @@ run_piece_data_files() {
   assert_json_eq "$UPDATED" '["Oslo", "Lima", "Accra"]' \
     "Pattern should read the updated data file, got: $UPDATED"
 
+  # A data file the source does not read by name cannot be worked out from a
+  # recovered checkout: it is written to disk like any other file, with nothing
+  # recording that it was data. `getsrc` has to say so, or the next `setsrc`
+  # drops it from the revision without a word.
+  local extra_dir="$WORK_DIR/datafiles-extra"
+  mkdir -p "$extra_dir"
+  printf 'not read by the pattern\n' > "$SCRIPT_DIR/pattern/data/notes.txt"
+  EXTRA_PIECE_ID=$(cf piece new $SPACE_ARGS \
+    --root "$SCRIPT_DIR/pattern" \
+    --datafile "$SCRIPT_DIR/pattern/data/notes.txt" \
+    "$data_pattern")
+  cf piece getsrc $SPACE_ARGS --piece $EXTRA_PIECE_ID "$extra_dir" \
+    >"$WORK_DIR/getsrc-extra.out"
+  rm -f "$SCRIPT_DIR/pattern/data/notes.txt"
+  if [ ! -f "$extra_dir/data/notes.txt" ]; then
+    error "An unread data file should still come back with the source."
+  fi
+  # The pattern reads cities.json by name, so that one is re-derived and must
+  # not be listed; notes.txt is the one a later setsrc cannot recover.
+  if ! grep -q -- "--datafile ./data/notes.txt" "$WORK_DIR/getsrc-extra.out"; then
+    error "getsrc did not name the data file its source cannot re-derive."
+  fi
+  if grep -q -- "--datafile ./data/cities.json" "$WORK_DIR/getsrc-extra.out"; then
+    error "getsrc named a data file the recovered source reads by name."
+  fi
+
   echo "Successfully ran CLI data-file integration tests for ${API_URL}."
 }
 

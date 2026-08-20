@@ -96,6 +96,7 @@ import {
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
+import { attachDeclaredDataFiles } from "./declared-data-files.ts";
 import {
   getDefiningModule,
   readBindingIdentity,
@@ -184,6 +185,12 @@ class RootedProgramResolver implements ProgramResolver {
       throw new Error(`Source root "${this.root}" could not be resolved.`);
     }
     return source;
+  }
+
+  resolveDataFile(name: string): Promise<Source | undefined> {
+    return this.inner.resolveDataFile
+      ? this.inner.resolveDataFile(name)
+      : this.inner.resolveSource(name);
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {
@@ -354,8 +361,26 @@ export class Engine extends EventTarget {
     return { ...runtimeInternals, ...compilerInternals };
   }
 
-  // Resolve a `ProgramResolver` into a `Program`.
+  /**
+   * Resolve a `ProgramResolver` into a program: the entry, the closure its
+   * imports reach, and the data files its source declares by reading them.
+   *
+   * This is how a program is assembled from a source of truth — a directory, a
+   * web address, the fabric — so it is where a declaration in the source is
+   * acted on. Re-resolving a program the engine already holds goes through
+   * {@link resolveModules}, which follows imports and nothing else.
+   */
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
+    return await attachDeclaredDataFiles(
+      await this.resolveModules(program),
+      program,
+    );
+  }
+
+  /** Resolve the module closure an entry's imports reach. */
+  private async resolveModules(
+    program: ProgramResolver,
+  ): Promise<RuntimeProgram> {
     const { compiler } = await this.getCompilerInternals();
     logger.timeStart("resolve");
     try {
@@ -371,11 +396,11 @@ export class Engine extends EventTarget {
     resolver: ProgramResolver,
     sourceRoots: readonly string[],
   ): Promise<RuntimeProgram> {
-    const programs = [await this.resolve(resolver)];
+    const programs = [await this.resolveModules(resolver)];
     for (const root of new Set(sourceRoots)) {
       if (root === programs[0].main) continue;
       programs.push(
-        await this.resolve(new RootedProgramResolver(resolver, root)),
+        await this.resolveModules(new RootedProgramResolver(resolver, root)),
       );
     }
 
@@ -1224,13 +1249,7 @@ export class Engine extends EventTarget {
       program,
       options,
     );
-    return this.evaluateRecordGraph(
-      id,
-      graph,
-      mainSpecifier,
-      program.files,
-      program.dataFiles,
-    );
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program);
   }
 
   /**
@@ -1246,8 +1265,7 @@ export class Engine extends EventTarget {
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,
-    files: Source[],
-    dataFiles?: readonly string[],
+    program: Pick<RuntimeProgram, "files" | "dataFiles">,
   ): EvaluateResult {
     const prefix = `/${id}`;
     // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
@@ -1269,10 +1287,10 @@ export class Engine extends EventTarget {
       registerHashes: () => {},
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
-      filesForExports: files,
-      ...(dataFiles === undefined
+      filesForExports: program.files,
+      ...(program.dataFiles === undefined
         ? {}
-        : { dataFilesForExports: [...dataFiles] }),
+        : { dataFilesForExports: [...program.dataFiles] }),
     });
   }
 

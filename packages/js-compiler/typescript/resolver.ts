@@ -115,6 +115,163 @@ export function collectImportSpecifiers(
   return getImports(source, target, { includeImportTypeNodes: true });
 }
 
+/** The module an authored pattern takes the runtime's own names from. */
+const FABRIC_MODULE = "commonfabric";
+
+/** The runtime function that reads a data file stored with the program. */
+const DATA_FILE_READER = "dataFile";
+
+/**
+ * Returns the data-file names `source` declares, as the paths its `dataFile()`
+ * calls name.
+ *
+ * A pattern declares the code it depends on by importing it and the data it
+ * depends on by reading it, so this is the data-side counterpart of the import
+ * scan: both read a declaration out of the source rather than take one from a
+ * caller.
+ *
+ * Only a call to the runtime's own `dataFile` counts, and only where the
+ * argument is a string literal. The binding is followed through a renaming
+ * import and through a namespace import, so `df("/x.json")` and
+ * `cf.dataFile("/x.json")` are the same declaration as the plain call. A
+ * type-only import binds no value and so declares nothing. A computed path
+ * cannot be read from the source at all, and stays the caller's to name.
+ */
+export function collectDataFileNames(
+  source: Source,
+  target: ts.ScriptTarget,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    source.name,
+    source.contents,
+    target,
+    true,
+  );
+  const direct = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!ts.isStringLiteral(specifier) || specifier.text !== FABRIC_MODULE) {
+      continue;
+    }
+    const clause = statement.importClause;
+    if (clause === undefined || clause.isTypeOnly) continue;
+    const bindings = clause.namedBindings;
+    if (bindings === undefined) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+      continue;
+    }
+    for (const element of bindings.elements) {
+      if (element.isTypeOnly) continue;
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (imported === DATA_FILE_READER) direct.add(element.name.text);
+    }
+  }
+  if (direct.size === 0 && namespaces.size === 0) return [];
+
+  const names: string[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const read = ts.isIdentifier(callee) && direct.has(callee.text)
+        ? callee
+        : ts.isPropertyAccessExpression(callee) &&
+            ts.isIdentifier(callee.expression) &&
+            namespaces.has(callee.expression.text) &&
+            callee.name.text === DATA_FILE_READER
+        ? callee.expression
+        : undefined;
+      const argument = node.arguments[0];
+      if (
+        read !== undefined && argument !== undefined &&
+        ts.isStringLiteral(argument) && !isShadowed(read)
+      ) {
+        names.push(argument.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return names;
+}
+
+/**
+ * Whether `use` names something other than the module's own import: a binding
+ * of the same name declared in a scope between the two.
+ *
+ * The walk goes outward from the use until it reaches a scope that binds the
+ * name, so an inner declaration wins over the import exactly as it does when
+ * the code runs. Reaching the file without finding one means the import is
+ * what the name refers to.
+ */
+function isShadowed(use: ts.Identifier): boolean {
+  const name = use.text;
+  let node: ts.Node = use.parent;
+  while (!ts.isSourceFile(node)) {
+    if (bindsName(node, name)) return true;
+    node = node.parent;
+  }
+  return false;
+}
+
+/** Whether `scope` declares `name` directly, not counting nested scopes. */
+function bindsName(scope: ts.Node, name: string): boolean {
+  if (ts.isFunctionLike(scope)) {
+    if (scope.parameters.some((p) => patternBinds(p.name, name))) return true;
+  }
+  if (
+    (ts.isFunctionExpression(scope) || ts.isClassExpression(scope) ||
+      ts.isClassDeclaration(scope) || ts.isFunctionDeclaration(scope)) &&
+    scope.name?.text === name
+  ) {
+    return true;
+  }
+  if (ts.isCatchClause(scope)) {
+    const declared = scope.variableDeclaration?.name;
+    if (declared !== undefined && patternBinds(declared, name)) return true;
+  }
+  if (
+    ts.isForStatement(scope) || ts.isForOfStatement(scope) ||
+    ts.isForInStatement(scope)
+  ) {
+    const initializer = scope.initializer;
+    if (
+      initializer !== undefined &&
+      ts.isVariableDeclarationList(initializer) &&
+      initializer.declarations.some((d) => patternBinds(d.name, name))
+    ) {
+      return true;
+    }
+  }
+  const statements = ts.isBlock(scope) || ts.isModuleBlock(scope)
+    ? scope.statements
+    : undefined;
+  if (statements === undefined) return false;
+  return statements.some((statement) => {
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations.some((d) =>
+        patternBinds(d.name, name)
+      );
+    }
+    if (
+      ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)
+    ) {
+      return statement.name?.text === name;
+    }
+    return false;
+  });
+}
+
+/** Whether a binding name — plain, or destructured — binds `name`. */
+function patternBinds(binding: ts.BindingName, name: string): boolean {
+  if (ts.isIdentifier(binding)) return binding.text === name;
+  return binding.elements.some((element) =>
+    ts.isBindingElement(element) && patternBinds(element.name, name)
+  );
+}
+
 function getImports(
   source: Source,
   target: ts.ScriptTarget,

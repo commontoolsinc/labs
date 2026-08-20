@@ -3931,7 +3931,8 @@ Deno.test("CellBridge reports pattern metadata subscription failures", async () 
     getCell: () => immediateRootCell,
     getPatternRef: () => Promise.resolve(undefined),
     getPatternMeta: () => Promise.resolve({}),
-    getPatternSourceFiles: () => Promise.resolve([]),
+    getPatternSourceProgram: () =>
+      Promise.resolve({ main: "/main.tsx", files: [] }),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -3972,7 +3973,8 @@ Deno.test("CellBridge reports pattern metadata setup failures", async () => {
     },
     getPatternRef: () => Promise.resolve(undefined),
     getPatternMeta: () => Promise.resolve({}),
-    getPatternSourceFiles: () => Promise.resolve([]),
+    getPatternSourceProgram: () =>
+      Promise.resolve({ main: "/main.tsx", files: [] }),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -4122,10 +4124,13 @@ Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes w
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const piece = {
     id: "of:source-piece",
-    getPatternSourceFiles: () =>
-      Promise.resolve([
-        { name: "/src/has:colon.tsx", contents: "export default 1;" },
-      ]),
+    getPatternSourceProgram: () =>
+      Promise.resolve({
+        main: "/src/has:colon.tsx",
+        files: [
+          { name: "/src/has:colon.tsx", contents: "export default 1;" },
+        ],
+      }),
   };
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
@@ -4206,10 +4211,13 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
         source: { ref: `cf:pattern:${"C".repeat(43)}` },
       });
     },
-    getPatternSourceFiles: () =>
-      Promise.resolve([
-        { name: "/src/main.ts", contents: "export default 1;" },
-      ]),
+    getPatternSourceProgram: () =>
+      Promise.resolve({
+        main: "/src/main.ts",
+        files: [
+          { name: "/src/main.ts", contents: "export default 1;" },
+        ],
+      }),
   };
   state.pieceControllers.set("notes", piece as never);
   state.pieceInos.set("notes", pieceIno);

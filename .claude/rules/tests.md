@@ -103,11 +103,16 @@ A pattern calling `dataFile()` needs its data files attached to the program the
 test compiles, or it fails at the read. It compiles and type-checks either way,
 so nothing earlier reports the omission.
 
-Attach them where the test builds its program: `--datafile` on `cf test`, the
-`dataFiles` field of a `generated-patterns` scenario, or `dataFilePaths` on the
-`resolveLocalProgram` call a browser integration test makes. A browser test
-needs nothing beyond that — the data reaches the browser through the space,
-inside the compiled pattern, not from the filesystem. Forgetting shows up as
+A file the pattern names in a `dataFile()` call is attached by whichever
+command builds the program, so a test that stores the file under the program
+root at the path the call names needs to say nothing further. A file the source
+cannot name — one read by a computed path — is added where the test builds its
+program: `--datafile` on `cf test`, the `dataFiles` field of a
+`generated-patterns` scenario, or `dataFilePaths` on the `resolveLocalProgram`
+call a browser integration test makes. A browser test needs nothing beyond that
+— the data reaches the browser through the space, inside the compiled pattern,
+not from the filesystem. A name with no file behind it fails the build, saying
+which module read it; an unattached file the source could not name shows up as
 `No attached data file "<path>"` when the pattern runs, and the message lists
 what is attached. That one function is the only sanctioned way to build a
 program from local files, and

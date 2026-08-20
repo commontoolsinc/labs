@@ -12,6 +12,9 @@ import type { RuntimeProgram } from "./types.ts";
  * `main` is the entry module. `testPaths` name additional entry points whose
  * source closures are retained and compiled without being executed.
  * `dataFilePaths` name files stored with the program and never read as code.
+ * A file the source names in a `dataFile()` call is attached without being
+ * listed here; the option is for a path the source cannot state, and for one
+ * a caller wants attached to a program that does not read it.
  *
  * `root` grounds every authored name, and so decides the paths `dataFile()`
  * addresses a data file by. Omitted, it is the common directory containing the
@@ -75,12 +78,16 @@ export async function resolveLocalProgram(
     }
   }
 
+  const declared = new Set(
+    [mainProgram, ...testPrograms].flatMap((p) => p.dataFiles ?? []),
+  );
   const program: RuntimeProgram = {
     main: mainProgram.main,
     files: [...files.values()],
     ...(testPrograms.length === 0
       ? {}
       : { sourceRoots: testPrograms.map((test) => test.main) }),
+    ...(declared.size === 0 ? {} : { dataFiles: [...declared] }),
   };
   const withData = attachDataFiles(program, dataPaths, root);
   if (options.mainExport) withData.mainExport = options.mainExport;
@@ -104,7 +111,7 @@ export function attachDataFiles(
 ): RuntimeProgram {
   if (!dataFilePaths?.length) return program;
   const files = [...program.files];
-  const dataFiles: string[] = [];
+  const dataFiles: string[] = [...(program.dataFiles ?? [])];
   for (const path of dataFilePaths) {
     const source = readDataFileSource(path, rootPath);
     if (dataFiles.includes(source.name)) continue;
