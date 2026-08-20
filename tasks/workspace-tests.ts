@@ -215,15 +215,17 @@ const FLAG_FORWARDING_RUNNERS = new Set([
   "./tasks",
 ]);
 
-/** A directory, given as a path or a URL, as a URL that resolves against. */
+/**
+ * A directory, given as a path or a URL, as a URL that member paths
+ * resolve against. The trailing slash is what makes a member resolve
+ * inside the directory rather than beside it.
+ */
 function directoryUrl(root: string | URL): URL {
-  if (root instanceof URL) return root;
-  const resolved = path.resolve(root);
-  return path.toFileUrl(
-    resolved.endsWith(path.SEPARATOR)
-      ? resolved
-      : `${resolved}${path.SEPARATOR}`,
-  );
+  const url = root instanceof URL
+    ? new URL(root.href)
+    : path.toFileUrl(path.resolve(root));
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  return url;
 }
 
 /**
