@@ -17,7 +17,7 @@ import {
   collectExternalSchemaRefHashes,
   parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
-import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
+import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
@@ -50,9 +50,10 @@ describe("schema-doc-writer", () => {
   });
 
   afterEach(async () => {
-    // The ambient flag is realm-sticky; later test files must see it off,
-    // and the sync schema table (disabled by the flag) must come back.
-    setContentAddressedSchemasConfig(false);
+    // The ambient flag is realm-sticky; later test files must see its
+    // default, and the sync schema table (disabled by the flag-on Runtime
+    // construction above) must come back to its own.
+    resetContentAddressedSchemasConfig();
     resetSyncSchemaTableConfig();
     await writer.dispose();
     await writerStorage.close();

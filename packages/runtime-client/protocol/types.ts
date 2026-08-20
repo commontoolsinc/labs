@@ -190,7 +190,7 @@ export interface InitializationData {
     systemPatternAutoUpdate?: boolean;
     // Link writers emit cid: schema-document references, with each closure
     // materialized in the carrying transaction (content-addressed schemas
-    // Phase 1). Default off.
+    // Phase 1). Default on; an explicit false is the rollback override.
     contentAddressedSchemas?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.

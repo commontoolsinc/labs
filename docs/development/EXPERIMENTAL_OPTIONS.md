@@ -29,7 +29,7 @@ was last checked against the code.
 | Flag                                                                        | Toggle via                                                                                                                                      | Default today                                                                        | Originally added by                                   | Planned end state                                                                                                                                                                                                                 | Status                                                                          |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`modernCellRep`](#moderncellrep)                                           | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental`                                                                            | off                                                                                  | Dan Bornstein (#3818)                                 | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default                                                     |
-| [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
+| [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | on                                                                                   | Robin McCollum (PR #5833)                             | finish the spec's Phase 3 (retire transport schema compression for link positions), then delete flag                                                                                                                              | implemented, on by default                                                      |
 | [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
@@ -151,15 +151,16 @@ value is ignored with a warning rather than coerced. See
   construction) rather than running both — a reference-bearing link never
   needs frame compression, and the table's negotiation simply stops being
   offered by that process.
-- **Current default and planned end state.** Off by default, everywhere,
-  during the reader-soak window: every client learns to read references
-  before any client writes one, so the flag flips on (env for servers and
-  CLI, build define for the shell) only once the deployed fleet is all
-  readers. Graduate to on once the writer path has soaked (old inline
-  links keep reading forever and age out through pattern
-  re-instantiation). Phases 1 and 2 both ship behind this flag; what
-  remains after graduation is the spec's Phase 3 (retiring transport
-  schema compression for link positions).
+- **Current default and planned end state.** On by default, everywhere.
+  An explicit `false` (env for servers and CLI, build define for the
+  shell) is the rollback override: it stops emission without un-writing
+  anything, and old inline links keep reading forever, aging out through
+  pattern re-instantiation. Phases 1 and 2 both ship behind this flag;
+  what remains is the spec's Phase 3 (retiring transport schema
+  compression for link positions), then deleting the flag.
+- **Status on 2026-08-19.** Phases 1 and 2 implemented (#5878, #6011), on
+  by default. The flag-off behaviors stay pinned by runner tests that pass
+  `false` explicitly, which is also the rollback override.
 
 ### `persistentSchedulerState`
 
@@ -776,14 +777,19 @@ the per-epic implementation notes).
   advertise the capability keep receiving the historical fully-expanded
   `SessionSync` shape.
 - **Interaction with `contentAddressedSchemas`.** A process with that
-  flag on disables this table outright — content-addressed references
-  dedupe the same link-schema positions at rest, so the two mechanisms
-  never run together (see that flag's entry).
-- **Current default and planned end state.** On by default. It is negotiated, so
-  it degrades safely against older peers. The end state is to retire the
+  flag on — its default — disables this table outright: content-addressed
+  references dedupe the same link-schema positions at rest, so the two
+  mechanisms never run together (see that flag's entry).
+- **Current default and planned end state.** On by default at the memory
+  layer, but any process that constructs a Runtime with
+  `contentAddressedSchemas` on (its default) stops offering the table, so
+  it runs only where that flag is rolled back. It is negotiated, so it
+  degrades safely against older peers. The end state is to retire the
   negotiation and the expanded form once every peer in the fleet speaks the
-  compact form.
-- **Status on 2026-07-08.** Implemented and on by default.
+  compact form — the content-addressed-schemas spec's Phase 3 covers the
+  link-position half of that retirement.
+- **Status on 2026-08-19.** Implemented; on at the memory layer, disabled
+  in any default-configured Runtime process by `contentAddressedSchemas`.
 - **Path to removal.** Confirm no peer still needs the expanded payload, then
   delete the negotiation and the expanded-form encoder and always send the
   compact form.

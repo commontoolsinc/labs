@@ -11,8 +11,8 @@ document's hash is well-founded.
 
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
-has landed, and Phases 1 and 2 are landing together behind the
-`contentAddressedSchemas` flag (off by default): links and `$alias`
+has landed, and Phases 1 and 2 ship together behind the
+`contentAddressedSchemas` flag (on by default): links and `$alias`
 bindings stamp references with commits materializing each closure into
 the destination space, and a selector normalizes for the wire — the
 reference form only when its whole closure is confirmed persisted in
@@ -503,8 +503,8 @@ any document-level caching.
 ## Migration
 
 Experimental flag (`contentAddressedSchemas`, registered in
-`docs/development/EXPERIMENTAL_OPTIONS.md` when implementation starts),
-phased on the op-migration playbook:
+`docs/development/EXPERIMENTAL_OPTIONS.md`), phased on the op-migration
+playbook:
 
 - **Phase 0 — resolution infrastructure.** Session schema registry;
   `resolveSchemaRefs` learns `cid:` refs; verification at registration;
