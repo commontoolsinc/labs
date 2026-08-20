@@ -30,6 +30,7 @@ import {
 import { getPresentationSession } from "./presentation/session.ts";
 import {
   assertShellDocument,
+  isShellDocument,
   readAndDescribeShellPage,
 } from "./shell-page-probe.ts";
 import { waitFor, waitForCondition } from "./utils.ts";
@@ -44,9 +45,31 @@ import "../shell/src/globals.ts";
  * opening the browser key store. That module body runs on past the document's
  * `load` event, so a navigation that resolves on `load` hands back a page whose
  * shell is still booting, for the couple of milliseconds the key store takes.
+ *
+ * A document that is not the shell never publishes the handle, and returns
+ * here without a wait. `goto` reports such a document through
+ * `assertShellDocument`, naming the URL it asked for, as soon as the
+ * navigation this belongs to returns.
  */
 export async function waitForShellReady(page: Page): Promise<void> {
-  await waitForCondition(page, () => globalThis.app !== undefined);
+  if (!await isShellDocument(page)) return;
+  try {
+    await waitForCondition(page, () => globalThis.app !== undefined);
+  } catch (cause) {
+    throw new Error(await describeShellReadyFailure(page), { cause });
+  }
+}
+
+/**
+ * Render what `page` held when the shell it carries never published itself on
+ * `globalThis.app`: the shell's own document loaded, and its bootstrap did not
+ * run to the end. The console tail in the block is where a bootstrap that
+ * threw says so.
+ */
+export async function describeShellReadyFailure(page: Page): Promise<string> {
+  return `The shell never published itself on globalThis.app.\n${await readAndDescribeShellPage(
+    page,
+  )}`;
 }
 
 // Pass the key over the boundary. When the state is returned,
@@ -67,11 +90,8 @@ export async function login(page: Page, identity: Identity): Promise<void> {
   }
 
   // Everything from here on runs against the page, and every way it can fail
-  // says nothing about the page it failed against. The wait below is for the
-  // shell to publish itself, which a document that is not the shell never
-  // does, so it runs to the stuck-condition net reporting only that five
-  // minutes passed. The runtime handshake that follows reports which of its
-  // two stages ran out, and no more than that.
+  // says nothing about the page it failed against. The runtime handshake below
+  // reports which of its two stages ran out, and no more than that.
   try {
     await loginToPublishedApp(page, transferrableId, identity.did());
   } catch (error) {
