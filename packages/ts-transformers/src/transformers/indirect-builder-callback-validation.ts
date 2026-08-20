@@ -121,13 +121,18 @@ function callbackArgument(
 }
 
 /**
- * Whether the callback resolves to a function this module declares.
+ * Whether the callback resolves to a function this module declares AND emits.
  *
  * Follows a name through this module's own declarations the way the verifier
- * follows it through the compiled module's bindings: a function declaration
- * ends the walk, and a variable initializer continues it, so a chain of
- * aliases ending at a local function resolves. A name declared elsewhere does
- * not, because the verifier reads one module at a time.
+ * follows it through the compiled module's bindings: an implementation-bearing
+ * function declaration ends the walk, and a variable initializer continues it,
+ * so a chain of aliases ending at a local function resolves.
+ *
+ * Two shapes look like functions here and are not ones the verifier admits. A
+ * generator is not direct-callback syntax to it (`tryParseDirectFunction`
+ * accepts `async`, never `function*`). And a declaration with no body —
+ * ambient, or an overload signature — is erased before emit, leaving the
+ * compiled module with a name bound to nothing.
  */
 function resolvesToSameModuleFunction(
   argument: ts.Expression,
@@ -139,28 +144,41 @@ function resolvesToSameModuleFunction(
   if (seen.has(target)) return false;
   seen.add(target);
 
-  if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
+  if (ts.isArrowFunction(target)) {
     return target.getSourceFile().fileName === sourceFile.fileName;
+  }
+  if (ts.isFunctionExpression(target)) {
+    return target.asteriskToken === undefined &&
+      target.getSourceFile().fileName === sourceFile.fileName;
   }
   if (!ts.isIdentifier(target)) return false;
 
-  const symbol = checker.getSymbolAtLocation(target);
-  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  if (
-    declaration === undefined ||
-    declaration.getSourceFile().fileName !== sourceFile.fileName
-  ) {
-    return false;
-  }
-  if (ts.isFunctionDeclaration(declaration)) return true;
-  return ts.isVariableDeclaration(declaration) &&
-    declaration.initializer !== undefined &&
+  const declarations = (checker.getSymbolAtLocation(target)?.declarations ?? [])
+    .filter((declaration) =>
+      declaration.getSourceFile().fileName === sourceFile.fileName
+    );
+  if (declarations.some(isEmittedFunctionDeclaration)) return true;
+  // A name whose only function declarations are erased at emit resolves to
+  // nothing, so it must not fall through to the initializer walk below.
+  if (declarations.some(ts.isFunctionDeclaration)) return false;
+
+  const variable = declarations.find(ts.isVariableDeclaration);
+  return variable?.initializer !== undefined &&
     resolvesToSameModuleFunction(
-      declaration.initializer,
+      variable.initializer,
       sourceFile,
       checker,
       seen,
     );
+}
+
+/** A function declaration that survives to emit as a direct callback. */
+function isEmittedFunctionDeclaration(
+  declaration: ts.Declaration,
+): declaration is ts.FunctionDeclaration {
+  return ts.isFunctionDeclaration(declaration) &&
+    declaration.body !== undefined &&
+    declaration.asteriskToken === undefined;
 }
 
 /** How the callback is reached, for the diagnostic's first clause. */
