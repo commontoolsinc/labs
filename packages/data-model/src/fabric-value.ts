@@ -10,9 +10,9 @@
 // base class.
 export {
   type FabricArray,
+  type FabricConvertibleValue,
   FabricInstance,
   type FabricNativeObject,
-  type FabricOrConvertibleNativeValue,
   type FabricPlainObject,
   FabricPrimitive,
   FabricSpecialObject,
@@ -40,13 +40,14 @@ export {
 export {
   isFabricObjectOrArray,
   isFabricPlainObject,
-  isFabricValue,
-  isFabricValueLayer,
+  isValidFabricPlainObject,
+  isValidFabricValue,
+  isValidFabricValueLayer,
 } from "./type-check.ts";
 
 export {
   fabricFromNativeValue,
-  isFabricCompatible,
+  isValidFabricConvertibleValue,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,

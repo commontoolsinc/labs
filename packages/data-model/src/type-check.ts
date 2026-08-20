@@ -37,7 +37,7 @@ import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
-export function isFabricValueLayer(
+export function isValidFabricValueLayer(
   value: unknown,
 ): value is FabricValueLayer {
   switch (typeof value) {
@@ -106,17 +106,17 @@ export function isFabricValueLayer(
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
- * question, see `isDeepFrozenFabricValue()`. A fabric instance is a member by
- * type (it is a `FabricSpecialObject`); this does not recurse into its private
- * interior, whose contents are `FabricValue`s by the instance's construction
- * contract and are reachable only via frozen-semantic protocols that a
- * membership check must not invoke.
+ * question, see `isValidDeepFrozenFabricValue()`. A fabric instance is a member
+ * by type (it is a `FabricSpecialObject`); this does not recurse into its
+ * private interior, whose contents are `FabricValue`s by the instance's
+ * construction contract and are reachable only via frozen-semantic protocols
+ * that a membership check must not invoke.
  *
- * Contrast the shallow, single-level sibling `isFabricValueLayer()` and
- * `isFabricCompatible()` (which additionally accepts native values
+ * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
+ * `isValidFabricConvertibleValue()` (which additionally accepts native values
  * *convertible* to fabric form).
  */
-export function isFabricValue(value: unknown): value is FabricValue {
+export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
   // allocating the cycle-tracking set or the recursion closure below.
   if (typeof value === "function") {
@@ -124,7 +124,7 @@ export function isFabricValue(value: unknown): value is FabricValue {
   } else if (typeof value === "symbol") {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, matching
-    // `isFabricValueLayer()`.
+    // `isValidFabricValueLayer()`.
     return Symbol.keyFor(value) !== undefined;
   } else if (value === null || typeof value !== "object") {
     // A non-function, non-symbol primitive -- a direct `FabricValue` member.
@@ -192,6 +192,22 @@ export function isFabricValue(value: unknown): value is FabricValue {
 }
 
 /**
+ * Indicates whether the value is a `FabricPlainObject`: both a `FabricValue`
+ * (`isValidFabricValue()`) and a plain object, meaning its prototype is
+ * `Object.prototype` and its every property value is a `FabricValue` in turn.
+ *
+ * This is a *membership* check asked of an `unknown`, which makes it strictly
+ * narrower at runtime than the narrowing `isFabricPlainObject()`: that one is
+ * asked of a value already typed as a `FabricValue`, and accepts a
+ * null-prototype object, which membership refuses.
+ */
+export function isValidFabricPlainObject(
+  value: unknown,
+): value is FabricPlainObject {
+  return isValidFabricValue(value) && isFabricPlainObject(value);
+}
+
+/**
  * Indicates whether a fabric value is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object"
@@ -226,9 +242,11 @@ export function isFabricObjectOrArray(
  * value the type already says is a `FabricValue`, and a null-prototype object
  * answers yes as readily as any other record. That makes it deliberately looser
  * than membership: a `FabricPlainObject` is `Object.prototype`-rooted, so
- * `isFabricValue()` refuses the null-prototype object this accepts. The
+ * `isValidFabricValue()` refuses the null-prototype object this accepts. The
  * looseness costs nothing, the input being out of contract either way, and it
  * keeps callers holding un-validated values from losing a reader they can use.
+ * For the membership question asked of an `unknown`, see
+ * `isValidFabricPlainObject()`.
  */
 export function isFabricPlainObject(
   value: FabricValue,

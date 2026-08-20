@@ -24,7 +24,7 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricMap", () => {
@@ -94,7 +94,7 @@ describe("FabricMap", () => {
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
         Object.freeze(fm);
-        expect(() => isDeepFrozenFabricValue(fm)).toThrow(
+        expect(() => isValidDeepFrozenFabricValue(fm)).toThrow(
           "`FabricMap`: not yet implemented",
         );
       });

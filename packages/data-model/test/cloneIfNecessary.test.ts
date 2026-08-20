@@ -24,10 +24,10 @@ import { expect } from "@std/expect";
 import {
   cloneIfNecessary,
   type CloneOptions,
-  isFabricValue,
+  isValidFabricValue,
 } from "@/fabric-value.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { isDeepFrozen, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -375,12 +375,14 @@ describe("cloneIfNecessary()", () => {
       expect(result.child.v).toBe(42);
     });
 
-    it("produces a value `isFabricValue()` accepts", () => {
+    it("produces a value `isValidFabricValue()` accepts", () => {
       // The point of canonicalizing: what comes out is a member of the type,
       // where the input was not.
       const value = nullProto({ a: 1 });
-      expect(isFabricValue(value)).toBe(false);
-      expect(isFabricValue(cloneIfNecessary(value as FabricValue))).toBe(true);
+      expect(isValidFabricValue(value)).toBe(false);
+      expect(isValidFabricValue(cloneIfNecessary(value as FabricValue))).toBe(
+        true,
+      );
     });
   });
 
@@ -434,7 +436,7 @@ describe("cloneIfNecessary()", () => {
 
     it("does not report a frozen subclass instance as deep-frozen", () => {
       // This is what turns off the identity optimization below.
-      expect(isDeepFrozenFabricValue(frozenSmuggler()))
+      expect(isValidDeepFrozenFabricValue(frozenSmuggler()))
         .toBe(false);
     });
 
@@ -530,8 +532,8 @@ describe("cloneIfNecessary()", () => {
    * Other distinctions (whether the subclass is a `FabricPrimitive`, whether
    * the deep-freeze protocol is implemented as a real impl vs. a stub) are
    * detected at test time -- the former via `instanceof FabricPrimitive` on the
-   * factory output, the latter via `try/catch` around `isDeepFrozenFabricValue`
-   * in the predicate.
+   * factory output, the latter via `try/catch` around
+   * `isValidDeepFrozenFabricValue` in the predicate.
    */
   type SubclassCase = {
     readonly name: string;
@@ -616,7 +618,7 @@ describe("cloneIfNecessary()", () => {
    *   2. For `FabricInstance`, `canReturnAsIs` short-circuits the call when
    *      the requested frozenness matches the input's frozenness AND
    *      `force: false`. In `deep: true` mode that check uses
-   *      `isDeepFrozenFabricValue`, which invokes `[IS_DEEP_FROZEN]` on
+   *      `isValidDeepFrozenFabricValue`, which invokes `[IS_DEEP_FROZEN]` on
    *      `FabricInstance` arms -- a subclass with a throwing stub for that
    *      member throws if the probe descends that far.
    *   3. Otherwise `cloneIfNecessary` falls through to `shallowClone(frozen)`
@@ -638,14 +640,15 @@ describe("cloneIfNecessary()", () => {
     if (!force) {
       let canReturnAsIs: boolean;
       if (deep) {
-        // The check is `frozen && isDeepFrozenFabricValue(v)`. The latter may
-        // call `[IS_DEEP_FROZEN]` on a `FabricInstance` arm -- if a subclass's
-        // implementation is a throwing stub, the probe throws and propagates.
+        // The check is `frozen && isValidDeepFrozenFabricValue(v)`. The latter
+        // may call `[IS_DEEP_FROZEN]` on a `FabricInstance` arm -- if a
+        // subclass's implementation is a throwing stub, the probe throws and
+        // propagates.
         if (!frozen) {
           canReturnAsIs = false;
         } else {
           try {
-            canReturnAsIs = isDeepFrozenFabricValue(value);
+            canReturnAsIs = isValidDeepFrozenFabricValue(value);
           } catch {
             return { kind: "throws" };
           }
@@ -745,7 +748,7 @@ describe("cloneIfNecessary()", () => {
                   identityExpected = false;
                 } else if (vec.opts.deep) {
                   identityExpected = vec.opts.frozen &&
-                    isDeepFrozenFabricValue(
+                    isValidDeepFrozenFabricValue(
                       value,
                     );
                 } else {

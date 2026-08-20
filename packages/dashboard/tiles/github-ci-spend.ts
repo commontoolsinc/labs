@@ -1,12 +1,31 @@
 /**
- * Reports month-to-date GitHub Actions cost and projects it to a full-month
- * total. The 45-day daily-spend chart labels the line with month-to-date spend.
+ * Reports month-to-date GitHub cost and projects it to a full-month total. The
+ * 45-day daily-spend chart labels the line with month-to-date spend.
  *
- * GitHub's enhanced billing report supplies daily net Actions spend. It
- * reports a day or two after it ends, and a settled day with no row is a day
- * Actions spent nothing. That reading holds only while the report is still
- * writing rows, so a report whose newest row is too far back is unavailable
- * rather than a run of $0 days.
+ * GitHub's enhanced billing report supplies daily net spend, one row per
+ * product, SKU, repository and day. Every one of those rows counts here, so
+ * the tile carries the organization's whole GitHub bill as a single figure:
+ * Actions and its storage, Packages, Codespaces, Git LFS, models, sandboxes,
+ * and the seat licenses GitHub meters — Copilot, Advanced Security, and
+ * Enterprise Cloud. A product the organization does not use has no row and
+ * adds nothing.
+ *
+ * A subscription GitHub bills outside that report does not reach the API at
+ * all, and is absent from this figure. The package README records which spend
+ * that is, under "What the GitHub figure covers".
+ *
+ * A day reaches the report a day or two after it ends, and a settled day with
+ * no row is a day that spent nothing. That reading holds only while the report
+ * is still writing rows, so a report whose newest row is too far back is
+ * unavailable rather than a run of $0 days.
+ *
+ * The headline covers every product, while the budget the tile's color comes
+ * from covers only the products someone has budgeted. Those two are held apart
+ * rather than compared across: a product with no budget of its own is taken to
+ * be spending within one, so it adds to the figure without coloring it. The
+ * budget printed beside the headline stands in for those products at their own
+ * projection, so the two figures on the tile cover the same products and the
+ * headline sits at or under the budget exactly when the tile is green.
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
@@ -29,6 +48,8 @@ interface UsageItem {
 }
 
 interface Budget {
+  budget_type?: string;
+  budget_scope?: string;
   budget_product_sku?: string;
   budget_amount?: number;
 }
@@ -50,6 +71,12 @@ interface GitHubDollarSpend extends DailySpend {
   kind: "dollars";
   budget: number;
   /**
+   * The projected month-end spend of the products the organization has
+   * budgeted, which is the figure the budget is a ceiling for. The headline
+   * covers every product; this covers the ones the budget speaks to.
+   */
+  projectedBudgeted: number;
+  /**
    * The calendar months whose usage report was read, as "YYYY-MM". A month
    * that could not be read is absent, and its days are unknown rather than $0.
    */
@@ -65,16 +92,13 @@ interface GitHubMinuteSpend {
 
 type GitHubSpend = GitHubDollarSpend | GitHubMinuteSpend;
 
-const actionsOf = (report: { usageItems?: UsageItem[] }): UsageItem[] =>
-  (report.usageItems ?? []).filter((item) =>
-    String(item.product).toLowerCase() === "actions"
-  );
-
 const usagePath = (org: string, year: number, month: number) =>
   `organizations/${org}/settings/billing/usage?year=${year}&month=${month}`;
 
 const monthKey = (year: number, month0: number) =>
   `${year}-${String(month0 + 1).padStart(2, "0")}`;
+
+const LABEL = "github spend";
 
 export const GITHUB_LAG_DAYS = 2;
 // How far back a source's newest row may sit before the tile stops reading the
@@ -106,14 +130,24 @@ function addDaily(
   target.set(day, (target.get(day) ?? 0) + amount);
 }
 
+/**
+ * Adds the report's rows to the whole-organization series, and the rows whose
+ * product carries a budget to the budgeted series beside it.
+ */
 function addGitHubDays(
   target: Map<string, number>,
+  budgetedTarget: Map<string, number>,
+  budgetedProducts: ReadonlySet<string>,
   items: UsageItem[],
 ): void {
   for (const item of items) {
     const day = dayKey(item.date);
     if (!day) continue;
-    addDaily(target, day, Number(item.netAmount) || 0);
+    const amount = Number(item.netAmount) || 0;
+    addDaily(target, day, amount);
+    if (budgetedProducts.has(String(item.product).toLowerCase())) {
+      addDaily(budgetedTarget, day, amount);
+    }
   }
 }
 
@@ -143,6 +177,51 @@ function requireCurrentReport(
   }
 }
 
+interface OrgBudget {
+  /** The product budgets added up, or NaN when none is set. */
+  total: number;
+  /** The products those budgets cover, lowercased. */
+  products: Set<string>;
+}
+
+const NO_BUDGET: OrgBudget = { total: NaN, products: new Set() };
+
+/**
+ * What the organization has budgeted across GitHub: its product budgets added
+ * up, and which products they speak for. A product budget caps one product's
+ * whole spend, so the products' budgets add up without overlapping. A
+ * single-SKU budget sits inside its own product's budget, and a bundle budget
+ * covers the AI credit SKUs of the products beside it, so adding either would
+ * count the same spend twice. A budget scoped to a repository or a user caps
+ * part of the organization's spend rather than adding to it. An organization
+ * with no product budget is uncompared, as NaN.
+ *
+ * Which products the budgets cover matters as much as the total, because the
+ * ceiling is held against those products' spend alone.
+ */
+function readBudgets(budgets: Budget[]): OrgBudget {
+  // Keyed by product, so a product the endpoint names more than once sets one
+  // ceiling rather than a multiple of it.
+  const byProduct = new Map<string, number>();
+  for (const entry of budgets) {
+    if (String(entry.budget_type).toLowerCase() !== "productpricing") continue;
+    if (String(entry.budget_scope).toLowerCase() !== "organization") continue;
+    const product = entry.budget_product_sku;
+    if (typeof product !== "string" || product === "") continue;
+    // An amount that is absent, null, or a string is not a ceiling. Reading it
+    // through Number() would turn each of those into a $0 budget, which every
+    // amount of spend overruns.
+    const amount = entry.budget_amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount)) continue;
+    const key = product.toLowerCase();
+    byProduct.set(key, Math.max(byProduct.get(key) ?? amount, amount));
+  }
+  if (byProduct.size === 0) return NO_BUDGET;
+  let total = 0;
+  for (const amount of byProduct.values()) total += amount;
+  return { total, products: new Set(byProduct.keys()) };
+}
+
 async function githubDollarSpend(
   token: string,
   org: string,
@@ -151,6 +230,18 @@ async function githubDollarSpend(
   const year = now.getUTCFullYear();
   const month0 = now.getUTCMonth();
   const dayOfMonth = now.getUTCDate();
+  // Read first, because which products carry a budget decides how the report's
+  // rows are split as they are read.
+  let budgets = NO_BUDGET;
+  try {
+    const response = await github<{ budgets?: Budget[] }>(
+      `organizations/${org}/settings/billing/budgets`,
+      token,
+    );
+    budgets = readBudgets(response.budgets ?? []);
+  } catch {
+    // An unset GitHub budget leaves the spend projection uncompared.
+  }
   const report = await github<{ usageItems?: UsageItem[] }>(
     usagePath(org, year, month0 + 1),
     token,
@@ -161,29 +252,44 @@ async function githubDollarSpend(
 
   // One billing pipeline writes the report, a row at a time, for every product
   // the org used on a day. Its newest row, whatever product that row belongs
-  // to, is how far the pipeline has been written. Actions alone would say less:
-  // it can be quiet for days while the rest of the org keeps billing, and a
-  // quiet week and a stopped report look the same in its rows.
+  // to, is how far the pipeline has been written.
   let reportedThrough: string | undefined;
-  const noteReport = (items: UsageItem[] | undefined): void => {
-    for (const entry of items ?? []) {
+  const noteReport = (items: UsageItem[]): void => {
+    for (const entry of items) {
       const day = dayKey(entry.date);
       if (day && (reportedThrough === undefined || day > reportedThrough)) {
         reportedThrough = day;
       }
     }
   };
-  noteReport(report.usageItems);
 
-  const current = actionsOf(report);
+  const current = report.usageItems;
+  noteReport(current);
   const mtd = current.reduce(
     (sum, item) => sum + (Number(item.netAmount) || 0),
     0,
   );
+  // The budgeted products' share of that total, counted from the rows rather
+  // than from the days, so a row whose date is unreadable weighs on the
+  // comparison as it already weighs on the headline. It has no day to chart,
+  // so it stays out of the series below.
+  const budgetedMtd = current.reduce(
+    (sum, item) =>
+      budgets.products.has(String(item.product).toLowerCase())
+        ? sum + (Number(item.netAmount) || 0)
+        : sum,
+    0,
+  );
   const byDay = new Map<string, number>();
-  addGitHubDays(byDay, current);
+  // The same days over the budgeted products alone. A product with no budget
+  // of its own is taken to be spending within one, so it is left out of the
+  // figure the ceiling is compared with, and the light turns on what the
+  // organization actually set a limit for.
+  const budgetedByDay = new Map<string, number>();
+  addGitHubDays(byDay, budgetedByDay, budgets.products, current);
   const months = new Set<string>([monthKey(year, month0)]);
   let priorMonthDaily: number[] = [];
+  let priorMonthBudgetedDaily: number[] = [];
   let immediatePrior = true;
   let remaining = SPEND_HISTORY_DAYS - dayOfMonth;
   let previousYear = year;
@@ -201,20 +307,24 @@ async function githubDollarSpend(
       );
       if (Array.isArray(previous.usageItems)) {
         noteReport(previous.usageItems);
-        const previousItems = actionsOf(previous);
-        addGitHubDays(byDay, previousItems);
+        addGitHubDays(
+          byDay,
+          budgetedByDay,
+          budgets.products,
+          previous.usageItems,
+        );
         months.add(monthKey(previousYear, previousMonth));
         if (immediatePrior) {
-          const previousSeries = calendarMonth(
-            byDay,
-            previousYear,
-            previousMonth,
-          );
-          priorMonthDaily = settled(
-            previousSeries,
-            previousSeries.length + dayOfMonth,
-            GITHUB_LAG_DAYS,
-          );
+          const settleMonth = (days: Map<string, number>) => {
+            const series = calendarMonth(days, previousYear, previousMonth);
+            return settled(
+              series,
+              series.length + dayOfMonth,
+              GITHUB_LAG_DAYS,
+            );
+          };
+          priorMonthDaily = settleMonth(byDay);
+          priorMonthBudgetedDaily = settleMonth(budgetedByDay);
         }
       }
     } catch {
@@ -226,22 +336,6 @@ async function githubDollarSpend(
     immediatePrior = false;
   }
   requireCurrentReport("GitHub billing report", reportedThrough, now);
-
-  let budget = NaN;
-  try {
-    const response = await github<{ budgets?: Budget[] }>(
-      `organizations/${org}/settings/billing/budgets`,
-      token,
-    );
-    const actions = (response.budgets ?? []).find((entry) =>
-      String(entry.budget_product_sku).toLowerCase() === "actions"
-    );
-    if (actions && Number.isFinite(Number(actions.budget_amount))) {
-      budget = Number(actions.budget_amount);
-    }
-  } catch {
-    // An unset GitHub budget leaves the spend projection uncompared.
-  }
 
   return {
     kind: "dollars",
@@ -255,7 +349,16 @@ async function githubDollarSpend(
         priorMonthDaily,
       },
     ),
-    budget,
+    projectedBudgeted: summarizeDailySpend(
+      budgetedByDay,
+      now,
+      {
+        lagDays: GITHUB_LAG_DAYS,
+        measuredMtd: budgetedMtd,
+        priorMonthDaily: priorMonthBudgetedDaily,
+      },
+    ).projected,
+    budget: budgets.total,
     months,
   };
 }
@@ -301,7 +404,7 @@ function minutesView(
     ? "warn"
     : "good";
   return {
-    label: "ci spend",
+    label: LABEL,
     status,
     value: `${spend.paid} paid min`,
     sub: `${spend.used} / ${spend.included} min · MTD`,
@@ -313,7 +416,7 @@ function minutesView(
 function unavailableMessage(error: unknown): string {
   if (error instanceof GitHubUsageShapeError) return error.message;
   if (error instanceof StalledReportError) return error.message;
-  if (!(error instanceof Error)) return "CI spend unavailable";
+  if (!(error instanceof Error)) return "GitHub spend unavailable";
   return friendlyError(error.message);
 }
 
@@ -321,7 +424,7 @@ export const githubCiSpend: Tile = {
   id: "github-ci-spend",
   intervalMs: 3_600_000,
   async collect(ctx): Promise<TileView> {
-    const label = "ci spend";
+    const label = LABEL;
     const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
     if (!token) {
       return {
@@ -343,7 +446,10 @@ export const githubCiSpend: Tile = {
       if (spend.kind === "minutes") return minutesView(org, spend);
 
       const budget = spend.budget;
-      const status = budgetStatus(spend.projected, budget);
+      // Against the budgeted products' projection, not the headline's. The
+      // headline covers products the budget never spoke for, and holding those
+      // against it would turn the light on spend nobody set a limit for.
+      const status = budgetStatus(spend.projectedBudgeted, budget);
       const chart = spendChart(
         [{
           spend,
@@ -356,8 +462,16 @@ export const githubCiSpend: Tile = {
         status,
       );
       const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;
-      const budgetLabel = Number.isFinite(budget)
-        ? ` • Budget ${usd(budget)}`
+      // The ceiling shown beside the headline covers the products the headline
+      // covers: the budgets that exist, plus each unbudgeted product's own
+      // projection standing in for the budget nobody set for it. Showing the
+      // configured total alone would put a headline carrying unbudgeted spend
+      // above its own budget while the tile stayed green. Adding the difference
+      // between the two projections keeps the pair reading the same way the
+      // color does — at or under the ceiling exactly when the tile is green.
+      const shownBudget = budget + (spend.projected - spend.projectedBudgeted);
+      const budgetLabel = Number.isFinite(shownBudget)
+        ? ` • Budget ${usd(shownBudget)}`
         : "";
       const legend =
         `<p class="sub">${GITHUB_SWATCH} GitHub${amount}${budgetLabel}</p>`;

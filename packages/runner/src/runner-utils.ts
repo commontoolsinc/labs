@@ -1,7 +1,7 @@
 import {
   type FabricValue,
   isFabricPlainObject,
-  isFabricValue,
+  isValidFabricPlainObject,
   shallowMutableClone,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -685,8 +685,7 @@ function mergeSchemaDefaultsInternal(
     if (defaults === undefined && !traversesPresentObject) return value;
     if (
       defaults !== undefined &&
-      (!(isFabricValue(defaults) && isFabricPlainObject(defaults)) ||
-        isCellLink(defaults))
+      (!isValidFabricPlainObject(defaults) || isCellLink(defaults))
     ) {
       return valuePresent ? value : defaults;
     }

@@ -74,6 +74,7 @@ import {
 } from "./link-utils.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import {
+  causalFormOfBinding,
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
@@ -5829,6 +5830,12 @@ export class Runner {
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
+    // What names this node, as opposed to what it reads through: the bound
+    // inputs with every link reduced to the cell it names. Hoisted out of the
+    // handler because the bindings are fixed for the node, so the reduction
+    // runs once rather than per event.
+    const causalInputs = causalFormOfBinding(inputs) as Record<string, any>;
+
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
 
@@ -5857,7 +5864,7 @@ export class Runner {
       // collide on the receipt. The fallback covers non-dispatch invocations
       // (tests calling the handler directly).
       const cause = {
-        ...(inputs as Record<string, any>),
+        ...causalInputs,
         $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
@@ -6141,12 +6148,18 @@ export class Runner {
     };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
+    // See the handler's counterpart above: what names the node, reduced once
+    // here rather than on every action invocation.
+    const resultFor = {
+      inputs: causalFormOfBinding(inputs),
+      outputs: causalFormOfBinding(outputs),
+      fn: fnSource,
+    };
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
-      const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
         { implementation: fn },
