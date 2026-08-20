@@ -32,8 +32,11 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
  * Extensions this governs: the languages the repository AUTHORS.
  *
  * Scoped by extension rather than applied to every tracked file because the
- * tree also carries fixtures and recordings that are text by accident, where
- * a control byte may be the data itself rather than a mistake.
+ * tree also carries text that is not authored code, where a control byte
+ * may be the data itself rather than a mistake: a `.txt` hashing fixture
+ * whose CRLF endings are its whole point, a `.tldr` drawing, and the prose
+ * under `docs/history/`, which is a frozen record that may not be edited to
+ * satisfy a rule about today's source.
  */
 const SOURCE_EXTENSIONS: readonly string[] = [
   ".ts",
@@ -43,6 +46,14 @@ const SOURCE_EXTENSIONS: readonly string[] = [
   ".mjs",
   ".json",
   ".jsonc",
+  ".sh",
+  ".yml",
+  ".yaml",
+  ".html",
+  ".css",
+  ".py",
+  ".toml",
+  ".cfg",
 ];
 
 /**
@@ -105,10 +116,38 @@ export function controlViolations(contents: string): Omit<
   })).sort((a, b) => a.line - b.line);
 }
 
-/** Lists the repo-relative paths of every tracked file. */
-async function trackedFiles(root: string): Promise<string[]> {
+/**
+ * `git ls-files -sz` output as `[blob id, path]` pairs.
+ *
+ * Each record is `<mode> <object> <stage>\t<path>`, NUL-separated. Split out
+ * from the command so the parse is provable without a repository, including
+ * the shapes it must decline rather than guess at.
+ */
+export function parseIndexRecords(output: string): [string, string][] {
+  const blobs: [string, string][] = [];
+  for (const record of output.split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("\t");
+    if (tab === -1) continue;
+    const id = record.slice(0, tab).split(" ")[1];
+    blobs.push([id, record.slice(tab + 1)]);
+  }
+  return blobs;
+}
+
+/**
+ * The blob id and path of every tracked file, read from the INDEX.
+ *
+ * Ids rather than paths because the content this judges is the content git
+ * stores, not the bytes a checkout materialized. Those differ: with
+ * `core.autocrlf=true` git writes a stored LF blob into the working tree as
+ * CRLF, so scanning the working tree would report a carriage return in source
+ * nobody wrote one in — a verdict that depends on the reader's git config
+ * rather than on the repository.
+ */
+async function trackedBlobs(root: string): Promise<[string, string][]> {
   const { success, stdout, stderr } = await new Deno.Command("git", {
-    args: ["ls-files", "-z"],
+    args: ["ls-files", "-sz"],
     cwd: root,
     stdout: "piped",
     stderr: "piped",
@@ -120,32 +159,93 @@ async function trackedFiles(root: string): Promise<string[]> {
     );
   }
 
-  return new TextDecoder().decode(stdout).split("\0").filter((p) => p !== "");
+  return parseIndexRecords(new TextDecoder().decode(stdout));
 }
 
-/** Scans every governed tracked file. */
-export async function scan(root: string): Promise<ControlViolation[]> {
-  const violations: ControlViolation[] = [];
+/**
+ * `git cat-file --batch` output as one byte range per blob.
+ *
+ * Each record is `<id> blob <size>\n`, then exactly `<size>` bytes, then a
+ * newline. The size comes from the header rather than from scanning for a
+ * delimiter, because the content may hold any byte — including the newline
+ * that ends its own record. A header that does not carry a size stops the
+ * parse rather than being guessed at: continuing would slice the following
+ * blobs at the wrong offsets and report violations against the wrong files.
+ */
+export function parseBatchBlobs(
+  output: Uint8Array,
+  count: number,
+): Uint8Array[] {
+  const contents: Uint8Array[] = [];
+  let at = 0;
+  while (at < output.length && contents.length < count) {
+    let lineEnd = at;
+    while (lineEnd < output.length && output[lineEnd] !== 0x0a) lineEnd++;
+    const header = new TextDecoder().decode(output.subarray(at, lineEnd));
+    const size = Number(header.split(" ")[2]);
+    if (!Number.isInteger(size)) break;
+    const start = lineEnd + 1;
+    contents.push(output.subarray(start, start + size));
+    at = start + size + 1;
+  }
+  return contents;
+}
 
-  for (const file of await trackedFiles(root)) {
-    if (!isGovernedPath(file)) continue;
-    let contents: string;
+/**
+ * The stored bytes of each blob, in the order asked for.
+ *
+ * One `cat-file --batch` for the whole tree rather than a process per file:
+ * the repository tracks thousands of governed files, and the difference is
+ * between a gate that runs in a second and one nobody wants in CI.
+ */
+async function blobContents(
+  root: string,
+  ids: readonly string[],
+): Promise<Uint8Array[]> {
+  if (ids.length === 0) return [];
+  const command = new Deno.Command("git", {
+    args: ["cat-file", "--batch"],
+    cwd: root,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "null",
+  }).spawn();
+
+  // Start draining stdout BEFORE writing the ids. git writes as it reads, and
+  // the whole tree's contents far exceed a pipe buffer, so a writer that held
+  // the output unread until it finished would deadlock against a git that
+  // cannot accept more input until someone consumes what it has already
+  // produced.
+  const output = command.output();
+  const writer = command.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(ids.join("\n") + "\n"));
+  await writer.close();
+
+  const { success, stdout } = await output;
+  if (!success) throw new Error("git cat-file failed");
+
+  return parseBatchBlobs(stdout, ids.length);
+}
+
+/** Scans every governed tracked file, as git stores it. */
+export async function scan(root: string): Promise<ControlViolation[]> {
+  const governed = (await trackedBlobs(root))
+    .filter(([, path]) => isGovernedPath(path));
+  const contents = await blobContents(root, governed.map(([id]) => id));
+
+  const violations: ControlViolation[] = [];
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let i = 0; i < governed.length && i < contents.length; i++) {
+    const file = governed[i][1];
+    let text: string;
     try {
-      contents = await Deno.readTextFile(`${root}/${file}`);
-    } catch (error) {
-      // A tracked path can be absent from the working tree (a sparse
-      // checkout, a submodule), and a governed extension can still hold bytes
-      // that are not UTF-8. Neither is this check's business; anything else
-      // is.
-      if (
-        error instanceof TypeError || error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.IsADirectory
-      ) {
-        continue;
-      }
-      throw error;
+      text = decoder.decode(contents[i]);
+    } catch {
+      // A governed extension can still hold bytes that are not UTF-8. A file
+      // this cannot read is one it cannot judge, not a violation.
+      continue;
     }
-    for (const found of controlViolations(contents)) {
+    for (const found of controlViolations(text)) {
       violations.push({ file, ...found });
     }
   }
