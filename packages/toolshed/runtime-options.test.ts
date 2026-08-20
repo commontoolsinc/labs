@@ -1,5 +1,6 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import type { RuntimeOptions } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -35,10 +36,15 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   );
   assertStrictEquals(options.storageManager, storageManager);
   assertEquals(options.experimental?.modernCellRep, true);
-  // Unset flags stay unset (tri-state fidelity), not coerced. serverExecution
-  // doubles as the posture declaration, so an option-build coercion here
-  // would silently pick an arm.
-  assertEquals(options.experimental?.serverExecution, undefined);
+  // Unset flags stay unset (tri-state fidelity), not coerced.
+  assertEquals(options.experimental?.lazyMaterialization, undefined);
+  // EXCEPT the posture: the deployed-topology preset resolves an unset
+  // serverExecution to the first-party default, so this server-side
+  // process always runs a declared arm.
+  assertEquals(
+    options.experimental?.serverExecution,
+    SERVER_EXECUTION_DEFAULT_ENABLED,
+  );
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
 });
 
