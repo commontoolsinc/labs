@@ -1,3 +1,8 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
@@ -153,15 +158,23 @@ export class CommonIframeSandboxElement extends LitElement {
           type: IPC.IPCHostMessageType.Passthrough,
           data: {
             type: IPC.HostMessageType.Update,
-            data: [key, value],
+            data: [key, realmFromFabricValue(value)],
           },
         });
         return;
       }
 
       case IPC.GuestMessageType.Write: {
-        const [key, value] = message.data;
-        IframeHandler.write(this, this.context, key, value);
+        const [key, encoded] = message.data;
+        // The encoded tree is ceded to the decode, which is legitimate because
+        // it arrived by `postMessage()`: it is this frame's own clone, and
+        // nothing else can be reading it.
+        IframeHandler.write(
+          this,
+          this.context,
+          key,
+          fabricFromRealmValue(encoded),
+        );
         return;
       }
 
@@ -233,13 +246,13 @@ export class CommonIframeSandboxElement extends LitElement {
     });
   }
 
-  private notifySubscribers(key: string, value: unknown) {
+  private notifySubscribers(key: string, value: FabricValue) {
     const response: IPC.IPCHostMessage = {
       id: this.frameId,
       type: IPC.IPCHostMessageType.Passthrough,
       data: {
         type: IPC.HostMessageType.Update,
-        data: [key, value],
+        data: [key, realmFromFabricValue(value)],
       },
     };
     this.toGuest(response);

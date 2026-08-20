@@ -1,5 +1,7 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+
 // Diagram of the IPC messages between the Host
 // environment, and the intermediary guest iframe.
 //
@@ -117,17 +119,13 @@ export enum HostMessageType {
 
 /**
  * A message the host passes through to the guest. `data` is a key and the
- * value read for it.
- *
- * TODO(danfuzz): the value is a `FabricValue` -- it comes from a cell, by way
- * of the registered `IframeContextHandler` -- and crosses to the guest by
- * `postMessage()` as itself, so structured clone strips a `FabricPrimitive`
- * to `{}` on the way. `codec-realm` encodes for exactly this crossing;
+ * value read for it, `codec-realm`-encoded: the value is a `FabricValue`, and
+ * that format is what carries the whole domain across a realm boundary.
  * `GuestMessage`'s `Write` arm is the same value going the other way.
  */
 export type HostMessage = {
   type: HostMessageType.Update;
-  data: [string, unknown];
+  data: [string, RealmEncodedValue];
 };
 
 export enum GuestMessageType {
@@ -143,12 +141,9 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe; data: string | string[] }
   | { type: GuestMessageType.Unsubscribe; data: string | string[] }
   | { type: GuestMessageType.Read; data: string }
-  // TODO(danfuzz): the `Write` value is the inbound half of the gap marked on
-  // `HostMessage`, and closed by the same mechanism. It is the weaker half:
-  // the guest is untrusted, so what arrives is whatever it sent, and an
-  // encoded form gives the host a decode that refuses rather than a value it
-  // has to vet by hand.
-  | { type: GuestMessageType.Write; data: [string, unknown] };
+  // The guest is untrusted, so what arrives is whatever it sent. The host
+  // decodes it, and a decode refuses what it does not recognize.
+  | { type: GuestMessageType.Write; data: [string, RealmEncodedValue] };
 
 export function isGuestMessage(message: unknown): message is GuestMessage {
   if (

@@ -1,3 +1,5 @@
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 
 // This is typically an `Action` (possibly a new or old implementation),
@@ -10,29 +12,26 @@ export type Context = unknown;
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 //
-// TODO(danfuzz): every `unknown` below that stands for a cell's value -- the
-// `read()` result, `write()`'s `value`, and the `callback` argument -- is a
-// `FabricValue`, and typing it so is what would let this seam carry the whole
-// domain, `codec-realm` being the mechanism. The values cross to the guest as
-// themselves; see the markers on `HostMessage` and `GuestMessage` in
-// `./ipc.ts` for what that costs.
+// Each value below is a cell's value, so a `FabricValue`. The element encodes
+// one on its way to the guest and decodes one on its way back; see
+// `HostMessage` and `GuestMessage` in `./ipc.ts` for the form it crosses in.
 export interface IframeContextHandler {
   read(
     element: CommonIframeSandboxElement,
     context: Context,
     key: string,
-  ): unknown;
+  ): FabricValue;
   write(
     element: CommonIframeSandboxElement,
     context: Context,
     key: string,
-    value: unknown,
+    value: FabricValue,
   ): void;
   subscribe(
     element: CommonIframeSandboxElement,
     context: Context,
     key: string,
-    callback: (key: string, value: unknown) => void,
+    callback: (key: string, value: FabricValue) => void,
     doNotSendMyDataBack: boolean,
   ): Receipt;
   unsubscribe(

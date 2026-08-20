@@ -38,6 +38,32 @@ via `setIframeContextHandler(handler)`. The handler is called with the `context`
 provided to the iframe, and the handler determines how values are stored and
 retrieved. See [context.ts](/common-iframe-sandbox/src/context.ts).
 
+## The guest side
+
+Guest content reaches the context through
+[guest.ts](/common-iframe-sandbox/src/guest.ts), exported as
+`@commonfabric/iframe-sandbox/guest`:
+
+```js
+import { connectGuestContext } from "@commonfabric/iframe-sandbox/guest";
+
+const guest = connectGuestContext((key, value) => {
+  // `value` is the `FabricValue` the host read for `key`.
+});
+
+guest.subscribe("counter");
+guest.write("counter", 1n);
+```
+
+A value crosses in either direction as a `codec-realm` encoding, which carries
+the whole `FabricValue` domain — a `FabricBytes` arrives as a `FabricBytes`
+rather than as the bare object structured cloning would leave. Both realms run
+the same `@commonfabric/data-model`, which is what makes an encoding written in
+one decodable in the other.
+
+`read()` does not return the value: the host answers a read the same way it
+announces a subscribed key's change, so both arrive at the handler.
+
 ## How it works
 
 `common-iframe-sandbox` is a [Lit] element that manages rendering content in an
