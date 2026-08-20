@@ -228,7 +228,5 @@ export {
   CFHelpers,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
   transformCfDirective,
 } from "./cf-helpers.ts";

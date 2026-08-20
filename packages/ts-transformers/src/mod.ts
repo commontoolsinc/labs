@@ -12,8 +12,6 @@ export {
   injectCfHelpers,
   isLegacyInjectedEnvelope,
   PATTERN_COVERAGE_GLOBAL,
-  sourceDisablesCfTransform,
-  sourceHasIgnoredDisableDirective,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";

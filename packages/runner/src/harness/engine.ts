@@ -18,7 +18,6 @@ import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
 import {
   findFirstContentLineIndex,
   PATTERN_COVERAGE_GLOBAL,
-  sourceDisablesCfTransform,
 } from "@commonfabric/ts-transformers/runtime-contract";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -2096,17 +2095,15 @@ function injectMountSources(files: readonly Source[]): Source[] {
 // import ahead of the first content line and appends an `h` shim after the last
 // (packages/ts-transformers/src/core/cf-helpers.ts); only the leading import
 // moves the authored lines, so an injected file shifts by exactly one line.
-// Three kinds of file reach the compiler unchanged and keep their authored
+// Two kinds of file reach the compiler unchanged and keep their authored
 // lines: a stored legacy envelope, whose authored bytes already carry the
 // helper import (tolerated only on the storage-fed paths — `checkCFHelperVar`
-// rejects those bytes on every authoring path); a file with no content line to
-// inject ahead of; and a file that disables the transform, whose directive line
-// is blanked in place rather than removed.
+// rejects those bytes on every authoring path), and a file with no content
+// line to inject ahead of.
 export function helperInjectionLineOffset(contents: string): number {
   const { isLegacyInjectedEnvelope } = compilerStack();
   if (isLegacyInjectedEnvelope(contents)) return 0;
   if (findFirstContentLineIndex(contents.split("\n")) === null) return 0;
-  if (sourceDisablesCfTransform(contents)) return 0;
   return -1;
 }
 
