@@ -196,6 +196,7 @@ export {
   CHIP_UI,
   type FactoryInput,
   type Frame,
+  FRAMEWORK_RESULT_KEYS,
   FS,
   type FsProjection,
   type HandlerFactory,
@@ -275,6 +276,7 @@ export {
   cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
+  pieceRegistryKeyForRoot,
   resolveCellPath,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";
@@ -286,6 +288,7 @@ export {
   isSlugAddress,
   slugCause,
   slugIdForSpace,
+  slugIndexIdForSpace,
   validateSlug,
 } from "./slugs.ts";
 export {

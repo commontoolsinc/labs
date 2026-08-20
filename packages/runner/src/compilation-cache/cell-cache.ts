@@ -1,31 +1,34 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { normalize } from "@std/path/posix";
+
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
-import { normalize } from "@std/path/posix";
-import { computeModuleHashes } from "../harness/module-identity.ts";
-import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
-import {
-  deriveModuleRecordFields,
-  SOURCE_ROOT_SPECIFIER,
-} from "../sandbox/module-record-compiler.ts";
-import type { CacheableModule } from "../harness/types.ts";
-import type { MemorySpace, Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { snapshotQueryResult } from "../query-result-proxy.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
+import { computeModuleHashes } from "../harness/module-identity.ts";
+import type { CacheableModule } from "../harness/types.ts";
+import { snapshotQueryResult } from "../query-result-proxy.ts";
+import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "../sandbox/fabric-import-specifier.ts";
 import {
+  DATA_FILE_SPECIFIER,
+  deriveModuleRecordFields,
+  SOURCE_ROOT_SPECIFIER,
+} from "../sandbox/module-record-compiler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
   COMPILE_CACHE_RUNTIME_VERSION,
   SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
 } from "./compile-cache-version.ts";
-import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -104,9 +107,18 @@ export interface SourceDoc extends ModuleDocBase {
   readonly annotations?: Record<string, unknown>;
 }
 
-/** A compiled-set document (`compileCache:<runtimeVersion>/<identity>`). */
+/**
+ * A compiled-set document (`compileCache:<runtimeVersion>/<identity>`).
+ *
+ * `kind` separates the two things this set holds. A `"compiled"` document's
+ * `code` is an emitted module body, built into a record and executed. A
+ * `"data"` document's `code` is the verbatim bytes of an attached data file:
+ * the compiled set carries them so a warm load has everything the pattern
+ * needs without reading the source set, and nothing ever parses, verifies, or
+ * executes them.
+ */
 export interface CompiledDoc extends ModuleDocBase {
-  readonly kind: "compiled";
+  readonly kind: "compiled" | "data";
   /** Per-module source map, if any (registered for fn.src / CFC resolution). */
   readonly sourceMap?: unknown;
   /**
@@ -357,8 +369,9 @@ export function compiledDocKey(
  * warm closure would always be incomplete. These links carry no authored
  * specifier, so they are ignored by the Merkle identity recompute (which
  * resolves a module's edges from its own source, not its stored links).
- * Explicit source-package roots use {@link SOURCE_ROOT_SPECIFIER} instead and
- * participate in the entry module's identity.
+ * Explicit source-package roots use {@link SOURCE_ROOT_SPECIFIER} and attached
+ * data files use {@link DATA_FILE_SPECIFIER} instead; both participate in the
+ * entry module's identity.
  */
 export const ROOT_LINK_SPECIFIER = "cf:cache-root/";
 
@@ -534,6 +547,23 @@ export function verifySourceDocs(
     }
   }
 
+  // Data documents, collected across the whole closure by IDENTITY. Reaching
+  // the verdict "this is data" must not depend on which document a view happens
+  // to be rooted at, since a data document rooted in its own view names nothing
+  // itself. Identity rather than filename is what makes that safe: one closure
+  // may legally hold several generations of a filename, so a filename set would
+  // condemn a code module that merely shares a name with data elsewhere.
+  // A forged data edge buys nothing: it changes the identity of the document
+  // carrying it, and hashing a real module as a leaf changes that module's
+  // identity too, so both diverge from their keys here.
+  const dataIdentities = new Set<string>();
+  for (const doc of docsByIdentity.values()) {
+    for (const imp of doc.imports) {
+      if (!imp.specifier.startsWith(DATA_FILE_SPECIFIER)) continue;
+      if (docsByIdentity.has(imp.identity)) dataIdentities.add(imp.identity);
+    }
+  }
+
   // identity → whether its recomputed hash matches its key. A verdict reached
   // inside one view holds in every view (entry-point independence), so each
   // document is hashed at most once.
@@ -576,18 +606,28 @@ export function verifySourceDocs(
     >();
     for (const id of viewIds) {
       const doc = docsByIdentity.get(id)!;
-      const sourceRoots = doc.imports
-        .filter((imp) => imp.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+      const packageEdges = doc.imports
+        .filter((imp) =>
+          imp.specifier.startsWith(SOURCE_ROOT_SPECIFIER) ||
+          imp.specifier.startsWith(DATA_FILE_SPECIFIER)
+        )
         .flatMap((imp) => {
           const target = docsByIdentity.get(imp.identity);
           return target === undefined
             ? []
             : [{ specifier: imp.specifier, target: target.filename }];
         });
-      if (sourceRoots.length > 0) {
-        additionalInternalDeps.set(doc.filename, sourceRoots);
+      if (packageEdges.length > 0) {
+        additionalInternalDeps.set(doc.filename, packageEdges);
       }
     }
+    // Within one view, filenames are unique by construction, so mapping the
+    // view's data identities to their filenames is unambiguous here.
+    const viewDataFiles = new Set(
+      viewIds
+        .filter((id) => dataIdentities.has(id))
+        .map((id) => docsByIdentity.get(id)!.filename),
+    );
     const recomputed = computeModuleHashes(
       { main: rootDoc.filename, files },
       {
@@ -595,6 +635,7 @@ export function verifySourceDocs(
         ...(additionalInternalDeps.size === 0
           ? {}
           : { additionalInternalDeps }),
+        ...(viewDataFiles.size === 0 ? {} : { dataFiles: viewDataFiles }),
       },
     );
     for (const id of viewIds) {
@@ -1143,7 +1184,7 @@ export function compiledDocWriteSchema(): JSONSchema {
 }
 
 interface StoredCompiledDoc {
-  kind: "compiled";
+  kind: "compiled" | "data";
   identity: string;
   code: string;
   filename: string;
@@ -1344,8 +1385,12 @@ export function writeCompiledDocs(
         tx,
       );
       // Fix B: derive the record surface from the compiled body once, here, so
-      // the boot-time record build reads it instead of re-parsing per load.
-      const derived = deriveModuleRecordFields(module.js);
+      // the boot-time record build reads it instead of re-parsing per load. A
+      // data entry has no record surface and its bytes are not JavaScript, so
+      // it is never handed to the extractor.
+      const derived = module.isData
+        ? undefined
+        : deriveModuleRecordFields(module.js);
       const delegatedModuleIdentities = validDelegatedModuleIdentities(
         module.identity,
         [...(effectiveModuleDelegations.get(module.identity) ?? [])],
@@ -1363,13 +1408,15 @@ export function writeCompiledDocs(
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
       cell.set({
-        kind: "compiled",
+        kind: module.isData ? "data" : "compiled",
         identity: module.identity,
         code: module.js,
         filename: module.filename,
-        exportNames: derived.exportNames,
-        starTargetSpecs: derived.starTargetSpecs,
-        importSpecs: derived.importSpecs,
+        ...(derived === undefined ? {} : {
+          exportNames: derived.exportNames,
+          starTargetSpecs: derived.starTargetSpecs,
+          importSpecs: derived.importSpecs,
+        }),
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
@@ -1656,7 +1703,10 @@ export async function loadCompiledClosure(
       if (!visited.has(child.identity)) queue.push({ doc: child });
     }
     out.set(doc.identity, {
-      kind: "compiled",
+      // A stored `kind` the writer did not produce is read as compiled, the
+      // conservative reading: a data entry is only ever treated as data when
+      // the document says so.
+      kind: doc.kind === "data" ? "data" : "compiled",
       code: doc.code,
       filename: doc.filename,
       ...(doc.sourceMap !== undefined ? { sourceMap: doc.sourceMap } : {}),

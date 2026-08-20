@@ -5,6 +5,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -13,7 +14,10 @@ interface CheckboxDemoInput {
   trackedEnabled: Writable<boolean | Default<false>>;
 }
 
-export interface CheckboxDemoOutput extends CheckboxDemoInput {}
+export interface CheckboxDemoOutput extends CheckboxDemoInput {
+  [NAME]: string;
+  [UI]: VNode;
+}
 
 // Handler for checkbox changes - only needed when you want additional logic
 // Defined at module scope as required by the pattern system

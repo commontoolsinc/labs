@@ -233,6 +233,10 @@ export async function runMultiUserTestPattern(
           apiUrl: server.url.href,
           testPath,
           root: options.root,
+          // Each participant compiles the pattern in its own worker, so the
+          // attachment has to cross that boundary: a participant reading a data
+          // file otherwise fails for want of a closure the parent had.
+          dataFilePaths: options.dataFilePaths,
           patternCoverageDir: options.patternCoverageDir,
           continuousUI: options.continuousUI,
           participant: spec.name,
@@ -337,6 +341,18 @@ export async function runMultiUserTestPattern(
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ◇ render (${
+                  Math.round(performance.now() - stepStart)
+                }ms)`,
+              );
+            }
+            continue;
+          }
+          if (step.kind === "settle") {
+            const stepStart = performance.now();
+            await participant.worker.call("settleStep", {}, stepTimeout);
+            if (options.verbose) {
+              console.log(
+                `  [${participant.spec.name}] ⋯ settle (${
                   Math.round(performance.now() - stepStart)
                 }ms)`,
               );

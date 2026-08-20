@@ -1,20 +1,23 @@
-// Pins the main-thread↔worker IPC hop of the CellSet race: a CellUpdate
-// carrying a concurrent value ("blue") is in flight to the main thread when
-// the client blind-sets "green". The worker↔server hop of the same race (the
-// replica rebasing the pending write under the incoming sync) is pinned by
-// packages/runner/test/memory-v2-sync-under-pending.test.ts; here the worker
-// side runs in-process and the test controls IPC delivery order.
-//
-// What must hold on this hop:
-//  1. `set()` applies optimistically and fires the handle's callbacks before
-//     any IPC round trip.
-//  2. The in-flight stale CellUpdate(blue) is applied blindly when it arrives
-//     (there is deliberately no versioning/suppression on this hop) — the
-//     transient flash is accepted behavior.
-//  3. The worker's own commit of green re-fires the subscription sink — the
-//     "we don't echo back to the sender" suppression exists only on the
-//     server↔worker hop — so a CellUpdate(green) follows blue in channel
-//     order and the handle converges to green.
+/**
+ * Pins the main-thread↔worker IPC hop of the CellSet race: a CellUpdate
+ * carrying a concurrent value ("blue") is in flight to the main thread when
+ * the client blind-sets "green". The worker↔server hop of the same race (the
+ * replica rebasing the pending write under the incoming sync) is pinned by
+ * packages/runner/test/memory-v2-sync-under-pending.test.ts; here the worker
+ * side runs in-process and the test controls IPC delivery order.
+ *
+ * What must hold on this hop:
+ *  1. `set()` applies optimistically and fires the handle's callbacks before
+ *     any IPC round trip.
+ *  2. The in-flight stale CellUpdate(blue) is applied blindly when it arrives
+ *     (there is deliberately no versioning/suppression on this hop) — the
+ *     transient flash is accepted behavior.
+ *  3. The worker's own commit of green re-fires the subscription sink — the
+ *     "we don't echo back to the sender" suppression exists only on the
+ *     server↔worker hop — so a CellUpdate(green) follows blue in channel
+ *     order and the handle converges to green.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

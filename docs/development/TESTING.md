@@ -17,10 +17,15 @@ deno task test
 
 ### Browser tests in agent sandboxes
 
-On macOS, an agent must request unsandboxed execution before its first attempt
-to run a command that can launch a browser. Headless Chrome still registers
-with AppKit and needs access to Launch Services and WindowServer. The macOS
-agent sandbox can deny that access and make Chrome abort during startup.
+Headless Chrome registers with AppKit and needs Launch Services and
+WindowServer, which the macOS agent sandbox can deny, aborting Chrome during
+startup. That abort is an artifact of the sandbox rather than a test result,
+and the same sandbox reproduces it. So a browser command runs outside the
+sandbox: when the harness reports the session as already unsandboxed, run the
+command; when it reports otherwise, request unsandboxed execution instead of
+trying it there first. Read that from the harness's own report of the session,
+not from an escalation option being available — a harness may offer one to a
+session that has no sandbox to escape.
 
 The following repository commands and test paths launch a browser:
 
@@ -41,15 +46,13 @@ can be a type-only import or support a fake browser. When it is not clear
 whether a focused test starts a browser, inspect its suite setup and launch
 call path before running it.
 
-Use the agent environment's narrowly scoped escalation mechanism for the test
-command. Do not run the command in the sandbox first to see whether it fails.
 Deno's `-A` flag changes Deno's permission checks but does not escape the outer
 agent sandbox. Chrome's `--no-sandbox` flag disables a different protection;
 do not add it as a workaround.
 
-If a browser command was accidentally run inside the agent sandbox, disregard
-its browser-startup failure and rerun it outside the sandbox before
-interpreting the test result.
+If a browser command did run inside the agent sandbox, disregard its
+browser-startup failure and rerun it outside the sandbox before interpreting
+the test result.
 
 ### Tests that start Deno
 
@@ -223,8 +226,31 @@ If a test, browser capture, or FFmpeg encode fails, the command exits nonzero
 and retains its manifest and available intermediate streams under the printed
 run directory.
 
+## Patterns that read data files
+
+A pattern calling `dataFile()` reads a file attached to the program under test.
+Every kind of test attaches them where it builds that program: `cf test` takes
+repeatable `--datafile` paths, a `generated-patterns` scenario names them in
+`dataFiles` grounded by `dataRoot`, and a browser integration test passes
+`dataFilePaths` to `resolveLocalProgram`.
+
+A browser integration test needs nothing further: the data travels to the
+browser inside the compiled pattern the space holds, so there is no file to
+serve and no browser-side plumbing to arrange.
+
+The attachment is easy to leave out and reports nothing when it is: the pattern
+compiles and type-checks without it, and fails only when it reads, with
+`No attached data file "<path>"` naming what is attached instead. That is why
+`resolveLocalProgram` is the one operation for building a program from local
+files, and why `deno task check-local-program` refuses a
+`FileSystemProgramResolver` built anywhere else.
+
 ## Related documentation
 
+- [test-records.md](test-records.md) — the record of every test execution:
+  every suite here reports one record per test to a public store, and that
+  document covers what gets recorded, opting a workstation in, and reading
+  the data.
 - [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
   is shaped: where it lives and what it is called, the single top-level
   `describe()` and the blocks nested under it, how an `it()` description is

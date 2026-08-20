@@ -1,12 +1,14 @@
-import { assets } from "./assets.ts";
-import { decode } from "@commonfabric/utils/encoding";
-import { isDeno } from "@commonfabric/utils/env";
+import { join } from "@std/path/posix/join";
 // Use `posix` path utils specifically so that the path lib
 // does not check `Deno?.build.os` for Windows, which will
 // be true in the `deno-web-test` environment as `Deno.test`
 // is shimmed, causing a fail to access `os` from `undefined`.
 import { toFileUrl } from "@std/path/posix/to-file-url";
-import { join } from "@std/path/posix/join";
+
+import { decode } from "@commonfabric/utils/encoding";
+import { isDeno } from "@commonfabric/utils/env";
+
+import { assets } from "./assets.ts";
 import { generateETag } from "./etag.ts";
 
 const FS_URL = (import.meta.dirname && isDeno())

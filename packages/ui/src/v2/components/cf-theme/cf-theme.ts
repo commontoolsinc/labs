@@ -1,6 +1,8 @@
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { provide } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { provide } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
@@ -9,7 +11,6 @@ import {
   defaultTheme,
   mergeWithDefaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export function unwrapThemeCellValues(
   value: unknown,

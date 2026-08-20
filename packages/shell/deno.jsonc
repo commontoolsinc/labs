@@ -12,7 +12,7 @@
     "test": "deno test --no-check --allow-net=127.0.0.1 --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
   },
   "exports": {
-    "./shared": "./shared/mod.ts"
+    "./app-state": "./src/lib/app-state.ts"
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md

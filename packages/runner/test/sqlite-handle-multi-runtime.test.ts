@@ -17,18 +17,20 @@
 // when a doc can exist server-side but not in the reading runtime's heap; the
 // single-StorageManager emulate() setup would mask it).
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import type { SqliteTableSchemas } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import { createCell } from "../src/cell.ts";
+import { isSigilLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
-import { isSigilLink } from "../src/link-utils.ts";
 
 // Fresh identity per RUN: the server derives the on-disk cell-db file from the
 // (causal) db id, so a fixed passphrase would reuse a stale $TMPDIR db across

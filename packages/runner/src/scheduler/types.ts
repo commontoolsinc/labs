@@ -12,7 +12,7 @@ import type {
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 
-export interface TelemetryAnnotations {
+export type TelemetryAnnotations = {
   pattern: Pattern;
   module: Module;
   reads: NormalizedFullLink[];
@@ -20,9 +20,9 @@ export interface TelemetryAnnotations {
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
   schedulerObservationIdentity?: SchedulerObservationIdentity;
-}
+};
 
-export interface SchedulerObservationIdentity {
+export type SchedulerObservationIdentity = {
   ownerSpace?: MemorySpace;
   branch?: string;
   pieceId: string;
@@ -45,7 +45,7 @@ export interface SchedulerObservationIdentity {
    * mechanism; protocol.md §2's S1: "there is no third source of run
    * identity"). */
   demandRootIds?: readonly string[];
-}
+};
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
 export type AnnotatedAction = Action & TelemetryAnnotations;
@@ -113,30 +113,30 @@ export type SpaceScopeURIAndType =
   `${MemorySpace}/${ScopeKey}/${URI}/${MediaType}`;
 
 /** Per-iteration stats captured during the settle loop. */
-export interface SettleIterationStats {
+export type SettleIterationStats = {
   workSetSize: number;
   orderSize: number;
   actionsRun: number;
   /** Action IDs in the work set (truncated to top entries) */
   actions: { id: string; type: "effect" | "computation" }[];
   durationMs: number;
-}
+};
 
 /** Stats for the entire settle loop of one execute() call. */
-export interface SettleStats {
+export type SettleStats = {
   iterations: SettleIterationStats[];
   totalDurationMs: number;
   settledEarly: boolean;
   initialSeedCount: number;
-}
+};
 
 /** One recorded settle stats entry from execute() history. */
-export interface SettleStatsHistoryEntry {
+export type SettleStatsHistoryEntry = {
   recordedAt: number;
   stats: SettleStats;
-}
+};
 
-export interface ActionRunTraceEntry {
+export type ActionRunTraceEntry = {
   recordedAt: number;
   actionId: string;
   actionType: "effect" | "computation";
@@ -148,13 +148,13 @@ export interface ActionRunTraceEntry {
    * run was stamped with (`space` for the probe, `user:…`/`session:…`
    * otherwise); absent on every other run. */
   instanceKey?: string;
-}
+};
 
-export interface ActionRunTraceAddress {
+export type ActionRunTraceAddress = {
   space: MemorySpace;
   entityId: URI;
   path: string[];
-}
+};
 
 export type TriggerTraceValueKind =
   | "undefined"
@@ -166,13 +166,13 @@ export type TriggerTraceValueKind =
   | "object"
   | "other";
 
-export interface TriggerTraceValueSummary {
+export type TriggerTraceValueSummary = {
   kind: TriggerTraceValueKind;
   size?: number;
   preview?: string | number | boolean | null;
-}
+};
 
-export interface TriggerTraceActionRecord {
+export type TriggerTraceActionRecord = {
   actionId: string;
   actionType: "effect" | "computation";
   mode: "pull";
@@ -185,9 +185,9 @@ export interface TriggerTraceActionRecord {
   pendingAfter: boolean;
   dirtyBefore: boolean;
   dirtyAfter: boolean;
-}
+};
 
-export interface TriggerTraceEntry {
+export type TriggerTraceEntry = {
   recordedAt: number;
   notificationType: string;
   changeIndex: number;
@@ -200,7 +200,7 @@ export interface TriggerTraceEntry {
   before: TriggerTraceValueSummary;
   after: TriggerTraceValueSummary;
   triggered: TriggerTraceActionRecord[];
-}
+};
 
 /** The `reason.message` of the seal-destination refusal an LT1
  * in-process copy receives when it seals OUTSIDE its appending wave
@@ -266,6 +266,15 @@ export type QueuedEvent = {
    * deferred-vs-dropped (the drain's cold-view deferral), and a
    * client echo must keep today's dropped shape. */
   readonly parentEventId?: string;
+  /**
+   * Whether `id` was supplied by the caller rather than minted at enqueue. A
+   * caller-supplied id is a durable delivery id: the handling's receipt
+   * address derives from it, so the entry is excluded from the backlog-cap
+   * last-wins merge in both directions — never collapsed away, and never
+   * chosen as a collapse survivor whose payload a later send rewrites
+   * (spec §7.6, the backlog-cap exclusions).
+   */
+  readonly callerSuppliedId?: boolean;
   /**
    * Monotonic stamp minted at first enqueue and carried unchanged across
    * requeues (backoff, name-resolution). Commits are not awaited, so several

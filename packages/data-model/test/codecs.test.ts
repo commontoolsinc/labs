@@ -22,14 +22,13 @@ import {
   jsonFromFabricValue,
   plainObjectFromJson,
 } from "@/codecs.ts";
-import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
+import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 
-/** Mock runtime for deserialization calls. */
-class MockRuntime extends BaseReconstructionContext {
+/** Mock runtime for decode calls. */
+class MockRuntime extends BaseLiveEnvironment {
   constructor() {
     super(true);
   }
@@ -46,12 +45,12 @@ function roundTrip(value: FabricValue): FabricValue {
 }
 
 /**
- * Asserts that encoding a value produces the expected JSON wire format,
+ * Asserts that encoding a value produces the expected JSON encoded form,
  * compared as parsed structure, after stripping the modern encoding prefix.
  */
-function expectWireFormat(value: FabricValue, expected: unknown): void {
+function expectEncodedFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromFabricValue(value);
-  expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
+  expect(JsonCodecEngine.seemsLikeEncoded(json)).toBe(true);
   expect(
     JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(json)),
   ).toEqual(expected);
@@ -82,11 +81,11 @@ describe("codecs", () => {
   });
 
   it("`jsonFromFabricValue()` encodes `undefined` to tagged JSON", () => {
-    expectWireFormat(undefined, { "/Undefined@1": null });
+    expectEncodedFormat(undefined, { "/Undefined@1": null });
   });
 
   it("`jsonFromFabricValue()` encodes `bigint` to tagged JSON", () => {
-    expectWireFormat(42n, { "/BigInt@1": "Kg" });
+    expectEncodedFormat(42n, { "/BigInt@1": "Kg" });
   });
 
   it("`fabricFromJsonValue()` decodes tagged `undefined`", () => {
@@ -243,7 +242,7 @@ describe("codecs", () => {
       expect(fabricFromJsonValue("fvj1:42")).toBe(42);
     });
 
-    it("decodes tagged values that don't need cell reconstruction", () => {
+    it("decodes tagged values that don't need cell decoding", () => {
       expect(fabricFromJsonValue('fvj1:{"\/Undefined@1":null}')).toBe(
         undefined,
       );

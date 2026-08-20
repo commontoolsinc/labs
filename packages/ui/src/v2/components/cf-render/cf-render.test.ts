@@ -1,9 +1,15 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { defer } from "@commonfabric/utils/defer";
-import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { defer } from "@commonfabric/utils/defer";
+
 import { providePieceBoundary } from "../../../../../html/src/main/space-context.ts";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import {
+  createMockElement,
+  installMockDocument,
+} from "../../test-utils/mock-document.ts";
 import {
   CFRender,
   hasVariantValue,
@@ -108,29 +114,71 @@ describe("CFRender render concurrency", () => {
   });
 
   it("cleans up an error render when its cell is cleared", async () => {
-    const element = new CFRender();
-    const container = { innerHTML: "" } as HTMLDivElement;
-    const internals = element as unknown as {
-      _cleanup?: () => void;
-      _containerRef: { value?: HTMLDivElement };
-      _handleRenderError(error: unknown): void;
-      _renderCell(): Promise<void>;
-    };
-    internals._containerRef = { value: container };
-    element.cell = {
-      runtime: () => ({ signal: { aborted: false } }),
-    } as unknown as CellHandle;
+    const mockDocument = installMockDocument();
+    try {
+      const element = new CFRender();
+      const container = createMockElement("div");
+      const internals = element as unknown as {
+        _cleanup?: () => void;
+        _containerRef: { value?: HTMLDivElement };
+        _handleRenderError(error: unknown): void;
+        _renderCell(): Promise<void>;
+      };
+      internals._containerRef = {
+        value: container as unknown as HTMLDivElement,
+      };
+      element.cell = {
+        runtime: () => ({ signal: { aborted: false } }),
+      } as unknown as CellHandle;
 
-    captureConsoleError(() => {
-      internals._handleRenderError(new Error("boom"));
-    });
-    expect(container.innerHTML).toContain("Error rendering content: boom");
+      captureConsoleError(() => {
+        internals._handleRenderError(new Error("boom"));
+      });
+      expect(container.children.map((child) => child.textContent)).toEqual([
+        "Error rendering content: boom",
+      ]);
 
-    element.cell = undefined;
-    await internals._renderCell();
+      element.cell = undefined;
+      await internals._renderCell();
 
-    expect(container.innerHTML).toBe("");
-    expect(internals._cleanup).toBeUndefined();
+      expect(container.children).toEqual([]);
+      expect(internals._cleanup).toBeUndefined();
+    } finally {
+      mockDocument.restore();
+    }
+  });
+
+  it("renders a failure message as text rather than as markup", () => {
+    const mockDocument = installMockDocument();
+    try {
+      const element = new CFRender();
+      const container = createMockElement("div");
+      const internals = element as unknown as {
+        _containerRef: { value?: HTMLDivElement };
+        _handleRenderError(error: unknown): void;
+      };
+      internals._containerRef = {
+        value: container as unknown as HTMLDivElement,
+      };
+      element.cell = {
+        runtime: () => ({ signal: { aborted: false } }),
+      } as unknown as CellHandle;
+
+      captureConsoleError(() => {
+        internals._handleRenderError(
+          new Error('<img src="x" onerror="alert(1)">'),
+        );
+      });
+
+      // The message reaches the page whole, as the text of one element, so
+      // markup in it describes nothing for the browser to build.
+      expect(container.children.length).toBe(1);
+      expect(container.children[0].textContent).toBe(
+        'Error rendering content: <img src="x" onerror="alert(1)">',
+      );
+    } finally {
+      mockDocument.restore();
+    }
   });
 
   it("accepts a retarget delivered before subscribe returns", async () => {

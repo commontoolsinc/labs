@@ -1,8 +1,3 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { EntityKind } from "../entity-kind.ts";
-import type { PatternBuilder } from "./pattern.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-
 import type {
   ActionFunction,
   AsCell,
@@ -23,6 +18,7 @@ import type {
   CfSqliteHelpers,
   CompileAndRunFunction,
   ComputedFunction,
+  DataFileFunction,
   EntityRefToStringFunction,
   EqualsFunction,
   FabricExecValue,
@@ -67,15 +63,41 @@ import type {
   WhenFunction,
   WishFunction,
 } from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
 import { toSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+import type {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
+import type {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
+import type {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
+import type {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { ImplementationIdentity } from "../cfc/types.ts";
-import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
+import type { EntityKind } from "../entity-kind.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { type Runtime } from "../runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type Runtime } from "../runtime.ts";
+import type { PatternBuilder } from "./pattern.ts";
+import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 
 // Define runtime constants here - actual runtime values
 
@@ -93,6 +115,23 @@ export const FS = "$FS";
 // The reserved key a test pattern addresses its test steps under; the test
 // runner reads `[TESTS]` off the pattern output.
 export const TESTS = "$TESTS";
+
+/**
+ * Every reserved key the framework puts on a pattern result: the type marker,
+ * the display name, the rendering variants, the filesystem view, and the test
+ * steps. Their spellings belong to the framework rather than to anything the
+ * pattern computed, which is what lets a reader that describes only the
+ * computed fields excuse them by name instead of failing on them.
+ */
+export const FRAMEWORK_RESULT_KEYS = [
+  TYPE,
+  NAME,
+  UI,
+  TILE_UI,
+  CHIP_UI,
+  FS,
+  TESTS,
+] as const;
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
@@ -130,6 +169,7 @@ export type {
   FsProjection,
   Handler,
   HandlerFactory,
+  HandlerState,
   HKT,
   ICell,
   IDerivable,
@@ -197,7 +237,8 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isObjectOrArray(value) && "$stream" in value && value.$stream === true;
+  return isObjectNotArray(value) && "$stream" in value &&
+    value.$stream === true;
 }
 
 declare module "@commonfabric/api" {
@@ -214,7 +255,6 @@ declare module "@commonfabric/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
-    writableProxy?: boolean;
     propagateInputIfc?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
@@ -391,6 +431,7 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  dataFile: DataFileFunction;
   sqliteDatabase: SqliteDatabaseFunction;
   sqliteQuery: SqliteQueryFunction;
   table: SqliteTableFunction;
@@ -446,35 +487,23 @@ export interface BuilderFunctionsAndConstants {
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
   // Fabric value classes, in the order they are declared in api/index.ts.
-  FabricSpecialObject:
-    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
-  FabricInstance:
-    typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
-  FabricPrimitive:
-    typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
-  FabricEpochNsec:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
-  FabricEpochDays:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
-  FabricHash:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
-  FabricLink:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
-  FabricBytes:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
-  FabricRegExp:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
-  FabricError:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
+  FabricSpecialObject: typeof FabricSpecialObject;
+  FabricInstance: typeof FabricInstance;
+  FabricPrimitive: typeof FabricPrimitive;
+  FabricEpochNsec: typeof FabricEpochNsec;
+  FabricEpochDay: typeof FabricEpochDay;
+  FabricHash: typeof FabricHash;
+  FabricLink: typeof FabricLink;
+  FabricBytes: typeof FabricBytes;
+  FabricRegExp: typeof FabricRegExp;
+  FabricError: typeof FabricError;
 
   // Debug stringifiers
-  toCompactDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
-  toIndentedDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
+  toCompactDebugString: typeof toCompactDebugString;
+  toIndentedDebugString: typeof toIndentedDebugString;
 
   // Value comparison
-  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
+  valueEqual: typeof valueEqual;
 }
 
 // Runtime interface needed by createCell

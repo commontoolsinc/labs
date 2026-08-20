@@ -1,6 +1,8 @@
-import type { URI } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/api";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+
+import type { URI } from "./interface.ts";
 import {
   Assertion,
   Fact,
@@ -10,7 +12,6 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.

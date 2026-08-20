@@ -16,8 +16,9 @@ describe("NodeRegistry", () => {
 
       it("returns the record from `get()` after removal", () => {
         // The record is deliberately kept so a re-registration recovers the
-        // ordinal and parent. `get()` therefore answers for a node that is no
-        // longer scheduled, and cannot stand in for a registration check.
+        // ordinal and parent. `get()` therefore returns a record for a node
+        // that is no longer scheduled, and cannot stand in for a registration
+        // check.
         const nodes = new NodeRegistry();
         const action: Action = function removed() {};
         nodes.register(action, "computation");

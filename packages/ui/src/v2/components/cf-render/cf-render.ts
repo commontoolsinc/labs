@@ -1,8 +1,6 @@
-import { css, html, PropertyValues } from "lit";
-import { createRef, type Ref, ref } from "lit/directives/ref.js";
-import { state } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
 import { getPieceBoundary, render } from "@commonfabric/html/client";
+import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   CHIP_UI,
@@ -10,11 +8,16 @@ import {
   TILE_UI,
   type VNode,
 } from "@commonfabric/runtime-client";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
-import type { DID } from "@commonfabric/identity";
+import { css, html, PropertyValues } from "lit";
+import { state } from "lit/decorators.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-loader/index.ts";
 import "../cf-cell-link/index.ts";
 import "../cf-piece-menu/index.ts";
+
 import {
   closePieceMenuFor,
   openPieceMenu,
@@ -713,12 +716,17 @@ export class CFRender extends BaseElement {
 
     const container = this._containerRef.value;
     if (container) {
-      container.innerHTML =
-        `<div style="color: var(--cf-theme-color-error, var(--cf-colors-error, #ff6057))">Error rendering content: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }</div>`;
+      // The message can carry anything a failing pattern put in it, so it goes
+      // in as text rather than as markup.
+      const message = document.createElement("div");
+      message.style.color =
+        "var(--cf-theme-color-error, var(--cf-colors-error, #ff6057))";
+      message.textContent = `Error rendering content: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`;
+      container.replaceChildren(message);
       this._cleanup = () => {
-        container.innerHTML = "";
+        container.replaceChildren();
       };
     }
   }

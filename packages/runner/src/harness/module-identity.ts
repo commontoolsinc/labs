@@ -1,7 +1,8 @@
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { Program } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+
 import { compilerStack } from "./deferred-compiler-stack.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Per-module content-addressed identity.
@@ -63,6 +64,12 @@ export interface ModuleIdentityOptions {
     string,
     readonly { specifier: string; target: string }[]
   >;
+  /**
+   * Paths carrying data rather than code. A data file hashes as a leaf over its
+   * own bytes and path: it is never scanned for imports, and never the target of
+   * another module's import edge.
+   */
+  dataFiles?: ReadonlySet<string>;
 }
 
 interface ModuleNode {
@@ -87,18 +94,31 @@ export interface ModuleImportEdges {
  * internal (program-file) and external (bare/runtime) deps. Shared by the
  * identity hash and the content-addressed cache's import links so they agree on
  * what counts as an internal edge. Self-imports are dropped.
+ *
+ * `options.dataFiles` names the program's data files. Their bytes are not
+ * TypeScript, so they are not parsed and carry no edges, and an import that
+ * would land on one resolves to nothing instead — such a specifier is reported
+ * as external, and fails to resolve at compile time.
  */
 export function resolveModuleImports(
   program: Program,
+  options: { dataFiles?: ReadonlySet<string> } = {},
 ): Map<string, ModuleImportEdges> {
   // Deferred compiler stack: import scanning parses with the TS parser, so
   // every flow reaching this must have awaited ensureCompilerStack().
   const { collectImportSpecifiers, ts } = compilerStack();
-  const fileNames = new Set(program.files.map((f) => f.name));
+  const dataFiles = options.dataFiles ?? new Set<string>();
+  const fileNames = new Set(
+    program.files.map((f) => f.name).filter((name) => !dataFiles.has(name)),
+  );
   const edges = new Map<string, ModuleImportEdges>();
   for (const file of program.files) {
     const internalDeps: { specifier: string; target: string }[] = [];
     const externalDeps: string[] = [];
+    if (dataFiles.has(file.name)) {
+      edges.set(file.name, { internalDeps, externalDeps });
+      continue;
+    }
     for (
       const specifier of collectImportSpecifiers(
         file,
@@ -128,7 +148,10 @@ export function computeModuleHashes(
   options: ModuleIdentityOptions = {},
 ): Map<string, string> {
   const runtimeFingerprint = options.runtimeFingerprint ?? "";
-  const edges = resolveModuleImports(program);
+  const edges = resolveModuleImports(
+    program,
+    options.dataFiles === undefined ? {} : { dataFiles: options.dataFiles },
+  );
   const nodes = new Map<string, ModuleNode>();
 
   for (const file of program.files) {
@@ -144,9 +167,13 @@ export function computeModuleHashes(
         );
       }
     }
+    // A data file's bytes are the payload the runtime hands to a pattern, so
+    // line endings are content rather than formatting: two data files differing
+    // only in them are different files and must not share an identity.
+    const isData = options.dataFiles?.has(file.name) === true;
     nodes.set(file.name, {
       path: file.name,
-      src: normalizeSource(file.contents),
+      src: isData ? file.contents : normalizeSource(file.contents),
       internalDeps: [...internalDeps, ...additionalInternalDeps],
       externalDeps,
     });
@@ -222,7 +249,8 @@ export function findInternalTarget(
 
 function normalizeSource(contents: string): string {
   // Identity is over authored source; the only normalization is line endings,
-  // so a CRLF/LF difference does not change a module's hash.
+  // so a CRLF/LF difference does not change a module's hash. Data files are
+  // excluded from this: their bytes are content, not source text.
   return contents.replace(/\r\n/g, "\n");
 }
 

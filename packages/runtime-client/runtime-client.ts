@@ -5,7 +5,12 @@
  * for interacting with cells across the worker boundary.
  */
 
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { DID, Identity } from "@commonfabric/identity";
+import { Program } from "@commonfabric/js-compiler/interface";
+import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
   ActionRunTraceEntry,
   JSONSchema,
@@ -19,8 +24,18 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import { Program } from "@commonfabric/js-compiler/interface";
+
 import { CellHandle } from "./cell-handle.ts";
+import {
+  InitializedRuntimeConnection,
+  type PendingRequestDiagnostic,
+  type RequestTimelineEntry,
+  RuntimeConnection,
+  type SubscriptionDiagnostics,
+} from "./client/connection.ts";
+import { EventEmitter } from "./client/emitter.ts";
+import { RuntimeTransport } from "./client/transport.ts";
+import { PageHandle } from "./page-handle.ts";
 import {
   type CellRef,
   ConsoleNotification,
@@ -45,18 +60,6 @@ import {
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
-import { NameSchema } from "@commonfabric/runner/schemas";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { RuntimeTransport } from "./client/transport.ts";
-import { EventEmitter } from "./client/emitter.ts";
-import {
-  InitializedRuntimeConnection,
-  type PendingRequestDiagnostic,
-  type RequestTimelineEntry,
-  RuntimeConnection,
-  type SubscriptionDiagnostics,
-} from "./client/connection.ts";
-import { PageHandle } from "./page-handle.ts";
 
 export interface RuntimeClientOptions
   extends Omit<InitializationData, "apiUrl" | "identity" | "spaceIdentity"> {
@@ -736,8 +739,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Uploads a blob to the given space. `body` is not consumed -- it crosses to
-   * the runtime as a clone -- so the caller may keep using its array.
+   * Uploads a blob to the given space. `body` is copied into the immutable
+   * value that crosses, so the caller may keep using its array.
    */
   async uploadBlob(options: {
     space: DID;
@@ -749,7 +752,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: options.body,
+      body: realmFromFabricValue(new FabricBytes(options.body)),
       suffix: options.suffix,
     });
   }

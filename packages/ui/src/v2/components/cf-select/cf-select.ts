@@ -1,8 +1,12 @@
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
+import { createCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -10,9 +14,6 @@ import {
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { createCellController } from "../../core/cell-controller.ts";
-import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CFSelect – Dropdown/select component that accepts an array of generic JS objects

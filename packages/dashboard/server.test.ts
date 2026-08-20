@@ -1,8 +1,11 @@
-// Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
-// the page. Importing server.ts neither serves nor collects, so nothing here
-// binds a port or reaches a source; the tiles are stand-ins with a canned
-// collect(), registered under the ids the real registry uses so their views
-// reach the page.
+/**
+ * Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
+ * the page. Importing server.ts neither serves nor collects, so nothing here
+ * binds a port or reaches a source; the tiles are stand-ins with a canned
+ * collect(), registered under the ids the real registry uses so their views
+ * reach the page.
+ */
+
 import {
   assert,
   assertEquals,
@@ -31,6 +34,7 @@ import {
 } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
+import { github } from "./lib.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
 import { dashboardCacheFile } from "./history-files.ts";
@@ -116,7 +120,7 @@ function updateFromEvent(event: string): TestUpdate {
 function tileHtml(label: string, html = page()): string {
   const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
-  assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
+  assertEquals(hit.length, 1, `expected exactly one tile labeled "${label}"`);
   return hit[0];
 }
 
@@ -355,6 +359,9 @@ Deno.test("the ticker leaves a tile alone until its interval has elapsed", async
 
 Deno.test("an update still running after one minute stays gray until it completes", async () => {
   const realNow = Date.now;
+  const realError = console.error;
+  const errors: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
   const startedAt = realNow() + 10_000;
   let now = startedAt;
   Date.now = () => now;
@@ -408,6 +415,10 @@ Deno.test("an update still running after one minute stays gray until it complete
     assertStringIncludes(stale, "refresh still pending");
     assertStringIncludes(stale, "last chart");
     assertEquals(messages.length, 1, "the stale transition is published");
+    assertEquals(errors, [
+      "dashboard refresh still pending: tiles model-spend (60000 ms); " +
+      "active run sources none; active GitHub operations none",
+    ]);
 
     now += 15_000;
     await tick([tile]);
@@ -439,6 +450,71 @@ Deno.test("an update still running after one minute stays gray until it complete
       await collection;
     } finally {
       Date.now = realNow;
+      console.error = realError;
+    }
+  }
+});
+
+Deno.test("a stale source log names its active GitHub operation", async () => {
+  const realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  const realWarn = console.warn;
+  const realToken = Deno.env.get("GH_TOKEN");
+  let now = realNow();
+  Date.now = () => now;
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  console.error = (...parts: unknown[]) => errors.push(parts.map(String).join(" "));
+  console.warn = (...parts: unknown[]) => warnings.push(parts.map(String).join(" "));
+  const response = deferred<Response>();
+  const requested = deferred<void>();
+  globalThis.fetch = () => {
+    requested.resolve();
+    return response.promise;
+  };
+  Deno.env.set("GH_TOKEN", "test-token");
+  const source = { repo: "test/github-diagnostic", workflow: "ci.yml" };
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    async runsFor() {
+      const body = await github<{ workflow_runs: Run[] }>(
+        "repos/test/github-diagnostic/actions/runs?branch=main",
+      );
+      return body.workflow_runs;
+    },
+    env: () => undefined,
+  };
+  const tile = sourceTile("github-diagnostic", "GitHub diagnostic", [source]);
+  let refresh: Promise<void> | undefined;
+  try {
+    refresh = tick([tile], sourceCtx);
+    await requested.promise;
+    now += 60_000;
+    await tick([tile], sourceCtx);
+    assertEquals(errors.length, 1);
+    assertStringIncludes(errors[0], "tiles github-diagnostic (60000 ms)");
+    assertStringIncludes(errors[0], "active run sources test/github-diagnostic ci.yml");
+    assertStringIncludes(
+      errors[0],
+      "repos/test/github-diagnostic/actions/runs?branch=main (requesting GitHub, 60000 ms)",
+    );
+  } finally {
+    response.resolve(Response.json({ workflow_runs: [] }));
+    try {
+      await refresh;
+      assertEquals(warnings.length, 1);
+      assertStringIncludes(
+        warnings[0],
+        "for repos/test/github-diagnostic/actions/runs?branch=main completed slowly after 60000 ms",
+      );
+    } finally {
+      Date.now = realNow;
+      globalThis.fetch = realFetch;
+      console.error = realError;
+      console.warn = realWarn;
+      if (realToken === undefined) Deno.env.delete("GH_TOKEN");
+      else Deno.env.set("GH_TOKEN", realToken);
     }
   }
 });
@@ -1051,6 +1127,37 @@ Deno.test("a failed run source keeps its last good snapshot", async () => {
   assertStringIncludes(stale, "stale-source source unreachable");
 });
 
+Deno.test("a run source that reads backwards in time keeps its last good snapshot", async () => {
+  const source = { repo: "test/backwards-source", workflow: "ci.yml" };
+  // sourceRun times a run from its id, so run 5000 is weeks behind run 3. A
+  // fetch answering with the older one read a stale view of the workflow.
+  let stale = false;
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    runsFor: () =>
+      Promise.resolve([sourceRun(stale ? 5000 : 3, stale ? "weeks-old run" : "current run")]),
+    env: () => undefined,
+  };
+  const tile = sourceTile("labs-ci", "backwards source", [source]);
+
+  await tick([tile], sourceCtx);
+  assertStringIncludes(tileHtml("backwards source"), "current run");
+
+  stale = true;
+  await tick([tile], sourceCtx);
+  const held = tileHtml("backwards source");
+  assert(held.startsWith(`unknown" data-tile-id="labs-ci">`));
+  assertStringIncludes(held, "current run");
+  assert(!held.includes("weeks-old run"), held);
+  assertStringIncludes(held, "backwards-source");
+
+  stale = false;
+  await tick([tile], sourceCtx);
+  const recovered = tileHtml("backwards source");
+  assert(recovered.startsWith(`good" data-tile-id="labs-ci">`));
+  assertStringIncludes(recovered, "current run");
+});
+
 Deno.test("a tile can publish cached data while its collection is still running", async () => {
   const messages: string[] = [];
   const client = {
@@ -1433,7 +1540,7 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   let collections = 0;
   const log = console.log;
   console.log = (m: string) => logged.push(m);
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   try {
     timer = start(((opts: Deno.ServeTcpOptions, handler: unknown) => {
       served.push({ opts, handler });
@@ -1463,7 +1570,7 @@ Deno.test("start: the work it schedules on its clock both heartbeats and collect
   const log = console.log;
   console.log = () => {};
   let collections = 0;
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   let onTick = () => Promise.resolve();
   try {
     ({ timer, onTick } = start(

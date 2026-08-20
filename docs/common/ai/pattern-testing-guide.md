@@ -44,6 +44,13 @@ Avoid tests for:
 deno task cf test <pattern>.test.tsx
 ```
 
+Imports resolve from the nearest ancestor directory whose `deno.json(c)`
+declares a package name (`packages/patterns` for this repository's patterns),
+so imports that span the package — shared helpers, `cfc/` modules — work
+without a flag. A failure naming an import that "escapes the program root"
+means the file imports from above that root; pass `--root` naming a common
+ancestor. CI runs these tests with `--root packages/patterns`.
+
 If `cf test` fails, treat that as repair work. Preserve the failing command and
 relevant output, isolate the smallest failing action/assertion when useful, fix
 either the implementation or an invalid test contract, and rerun the test. A
@@ -95,10 +102,9 @@ export default pattern(() => {
 
 ## Key Points
 
-- write new assertions with `assert()` rather than `computed()`; a step accepts
-  either, and most test patterns in the repository use `assert()` for their
-  assertions, but a failed `assert()` reports its operands and a failed
-  `computed()` cannot
+- write assertions with `assert()`; a step's `assertion` accepts only the
+  record `assert()` produces, so a bare `computed()` boolean is a compile
+  error, and a failed `assert()` reports its operands while a bare value cannot
 - trigger actions with `.send()` when the output exposes streams
 - use direct property access for assertions rather than `.get()` unless the API
   truly requires writable access
@@ -120,8 +126,9 @@ An `assert()` failure names the operands and the values they held:
 
 Read it before reaching for other tools. It tells you which side was wrong and
 by how much, which is usually enough to locate the bug — no deploy, no
-inspection of the running piece. A `computed()` assertion cannot report this,
-because its comparison ran inside the closure and only the boolean survived:
+inspection of the running piece. Without the operands the record carries, only
+the verdict survives — the comparison ran inside the closure and the boolean is
+all that is left:
 
 ```
 ✗ assertion_2 (after action_1)
@@ -252,7 +259,7 @@ against one shared space on an in-process storage server.
 
 ```tsx
 // Shown for illustration only.
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, assert, multiUserTest, pattern } from "commonfabric";
 import Chat, { type ChatOutput } from "./pattern.tsx";
 
 interface Setup {
@@ -266,7 +273,7 @@ export const setup = pattern(() => ({ chat: Chat({}) }));
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const save = action(() => setup.chat.saveProfile.send());
-  const sees_bob = computed(() => /* ... */);
+  const sees_bob = assert(() => /* ... */);
   return {
     [TESTS]: [
       { action: save },
@@ -310,7 +317,7 @@ Key points:
   (`trimmedName(name.get())`, `cell.get() ?? EMPTY_LIST` with a module-level
   constant).
 - Read another runtime's arrays with INLINE literal indexing in the assertion
-  computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
+  body (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
   indexing, and module-level helper calls over the array resolve in the
   runtime that wrote it but NOT cross-runtime before a local write.
 - A participant cannot read their own never-written `PerUser` array (e.g. an
@@ -331,8 +338,8 @@ with `Math.random()` (allowed inside a handler, coarsened to one-second
 resolution for the clock), keep the assertions deterministic:
 
 - prefer asserting that a value was set, changed, or has the expected shape
-- avoid calling `Date.now()` or `Math.random()` inside a test `computed()`
-  assertion — those built-ins throw a `TimeCapabilityError` in a computed
+- avoid calling `Date.now()` or `Math.random()` inside a test `assert()`
+  assertion — those built-ins throw a `TimeCapabilityError` in a computation
 - if you need an exact value, capture it in the action under test and assert
   against the captured result rather than recomputing it in the assertion
 

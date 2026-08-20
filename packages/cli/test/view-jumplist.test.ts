@@ -4,6 +4,7 @@
  * chosen one. A read-only diff (its files do not resolve on disk) is enough —
  * the list is derived from the diff text itself.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
@@ -88,7 +89,7 @@ const SHOW = [
   "",
 ].join("\n");
 
-Deno.test("jumplist: i lists the diff's files, dirs summarised", () => {
+Deno.test("jumplist: i lists the diff's files, dirs summarized", () => {
   const s = diffSession(TWO_FILES);
   press(s, "i");
   assertEquals(entryText(s), [
@@ -98,6 +99,45 @@ Deno.test("jumplist: i lists the diff's files, dirs summarised", () => {
   assertEquals(s.view().inputLine, "jump to: ");
   assertEquals(s.view().overlay?.title, "Jump to file or commit");
   assertEquals(s.view().overlay?.selectedLine, 0);
+});
+
+Deno.test("jumplist: new and deleted files color their applicable counts", () => {
+  const s = diffSession(
+    [
+      "diff --git a/new.ts b/new.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/new.ts",
+      "@@ -0,0 +1,2 @@",
+      "+a",
+      "+b",
+      "diff --git a/gone.ts b/gone.ts",
+      "deleted file mode 100644",
+      "--- a/gone.ts",
+      "+++ /dev/null",
+      "@@ -1,2 +0,0 @@",
+      "-a",
+      "-b",
+      "",
+    ].join("\n"),
+  );
+  press(s, "i");
+
+  const lines = s.view().overlay!.lines;
+  assertEquals(lines.map((line) => line.text), [
+    "   ▸ new.ts  +2 (new)",
+    "   ▸ gone.ts  −2 (deleted)",
+  ]);
+  assertEquals(lines[0].spans.at(-1), {
+    col: 13,
+    text: "+2 (new)",
+    cls: "diffAdd",
+  });
+  assertEquals(lines[1].spans.at(-1), {
+    col: 14,
+    text: "−2 (deleted)",
+    cls: "diffDel",
+  });
 });
 
 Deno.test("jumplist: a git show lists the commit message before its files", () => {

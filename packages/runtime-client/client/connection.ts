@@ -2,6 +2,7 @@ import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 import {
+  CellRef,
   CellUpdateNotification,
   ClientNotificationType,
   CommandRequest,
@@ -25,8 +26,10 @@ import {
   NotificationType,
   PendingWritesNotification,
   RequestType,
+  SerializedDomEvent,
   TelemetryNotification,
   VDomBatchNotification,
+  VDomMountResponse,
 } from "../protocol/mod.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
@@ -127,13 +130,13 @@ export interface VDomConnection {
   readonly signal: AbortSignal;
   mount(
     mountId: number,
-    cellRef: import("../protocol/mod.ts").CellRef,
-  ): Promise<import("../protocol/mod.ts").VDomMountResponse>;
+    cellRef: CellRef,
+  ): Promise<VDomMountResponse>;
   unmount(mountId: number): Promise<void>;
   sendEvent(
     mountId: number,
     handlerId: number,
-    event: import("../protocol/mod.ts").SerializedDomEvent,
+    event: SerializedDomEvent,
     nodeId: number,
   ): void;
   ackBatch(mountId: number, batchId: number): void;
@@ -679,8 +682,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
   async #mountVDom(
     mountId: number,
-    cellRef: import("../protocol/mod.ts").CellRef,
-  ): Promise<import("../protocol/mod.ts").VDomMountResponse> {
+    cellRef: CellRef,
+  ): Promise<VDomMountResponse> {
     const response = await this.request<RequestType.VDomMount>({
       type: RequestType.VDomMount,
       mountId,

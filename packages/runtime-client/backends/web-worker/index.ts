@@ -4,9 +4,14 @@
  *
  * Imports from `@commonfabric/runner` may be used freely in this directory.
  */
+
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
+import { getLogger } from "@commonfabric/utils/logger";
+import { unrefTimer } from "@commonfabric/utils/sleep";
+
+import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
@@ -15,9 +20,6 @@ import {
   RuntimeErrorCode,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { unrefTimer } from "@commonfabric/utils/sleep";
-import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -139,6 +141,12 @@ function setWorkerConsoleBridge(enabled: boolean): void {
 }
 
 self.addEventListener("message", async (event: MessageEvent) => {
+  // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
+  // which is less than the payload type describes; decoding with `codec-realm`
+  // is what would make the two agree. The payload type carries the matching
+  // marker -- `IPCClientRequest` in `../../protocol/types.ts` -- as does the
+  // sending end, `WebWorkerRuntimeTransport.send()` in
+  // `../../client/transports/web-worker/transport-web-worker.ts`.
   const message = event.data;
 
   // One-way notifications carry no msgId and get no response. Drop them once

@@ -25,7 +25,12 @@ const PROGRAM = {
       'import { action, cell, pattern, Stream } from "commonfabric";',
       "",
       "interface AddEvent { title: string; }",
-      "interface AddResult { title: string; total: number; }",
+      "interface AddResult {",
+      "  /** The title as filed. */",
+      "  title: string;",
+      "  /** How many items the list now holds. */",
+      "  total: number;",
+      "}",
       "interface RenameEvent { title: string; }",
       "",
       "interface Out {",
@@ -137,12 +142,14 @@ describe("cf piece call --help against a live piece", () => {
     const { helpText } = await callVerb("add", ["--help"]);
 
     // Both fields of `AddResult`, each with the placeholder its type renders
-    // as, named at the position a caller collects them from.
+    // as, named at the position a caller collects them from — and each
+    // carrying its own doc comment, compiled by the real pipeline rather
+    // than planted on a hand-built schema.
     expect(outputSection(helpText)).toBe(
       [
         "  The invocation's `result`:",
-        "    title <string>",
-        "    total <number>",
+        "    title <string>  The title as filed.",
+        "    total <number>  How many items the list now holds.",
       ].join("\n"),
     );
   });
@@ -186,7 +193,7 @@ describe("cf piece call --help against a live piece", () => {
 
     expect(patternLoads).toBe(1);
     expect(outputSection(helpText)).toBeUndefined();
-    expect(helpText).toContain("cf piece call ... add --help");
+    expect(helpText).toContain("cf call ... add --help");
     expect(helpText).toContain("--title <string>");
   });
 

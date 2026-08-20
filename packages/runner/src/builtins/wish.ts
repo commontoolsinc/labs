@@ -1,18 +1,23 @@
-import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
   type WishState,
   type WishTag,
 } from "@commonfabric/api";
-import { h } from "@commonfabric/html";
+import {
+  deepFrozenCloneAndInternSchema,
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { type Cell } from "../cell.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { type Action, type ReactivityLog } from "../scheduler.ts";
-import { type Runtime, spaceCellSchema } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { extractHashtags } from "@commonfabric/utils/hashtags";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { h } from "../builder/h.ts";
 import {
   type CellScope,
   type JSONSchema,
@@ -20,24 +25,20 @@ import {
   type Pattern,
   UI,
 } from "../builder/types.ts";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { extractHashtags } from "@commonfabric/utils/hashtags";
+import { type Cell } from "../cell.ts";
 import { getPatternEnvironment } from "../env.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 import {
   createSigilLinkFromParsedLink,
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import { setRunnableName } from "../runner-utils.ts";
-import { isCellScope, narrowestScope } from "../scope.ts";
-import { scopedCell } from "./scope-policy.ts";
 import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
+import { setRunnableName } from "../runner-utils.ts";
+import { type Runtime, spaceCellSchema } from "../runtime.ts";
+import { type Action, type ReactivityLog } from "../scheduler.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -1996,6 +1997,23 @@ export function wish(
     sendResult(tx, scoped);
   }
 
+  /**
+   * Counts a sidecar pattern's deferred launch — the fetch, and the run that
+   * follows it — as outstanding scheduler work.
+   *
+   * A wish emits a sidecar's surface into the view before the pattern behind it
+   * exists: the `[UI]` it sends is a `cf-render` bound to a result cell that
+   * only the launch fills. Between the send and the landing the scheduler has
+   * nothing to run, so without this the runtime reports itself idle while a
+   * surface the page is about to grow is still on its way. Anything read off
+   * the layout in that window is read off a page that has not finished
+   * arriving — a click point most of all, since content appearing above a
+   * control moves it out from under the point the click was aimed at.
+   */
+  function trackSidecarLaunch(launch: Promise<unknown>): void {
+    runtime.scheduler.trackBackgroundTask(launch);
+  }
+
   function launchSuggestionPattern(
     ctx: WishContext,
     input: {
@@ -2042,7 +2060,7 @@ export function wish(
       // demander; this speculative run references its cell only.
     } else if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
-      void suggestionPatternCache.fetch(
+      const launch = suggestionPatternCache.fetch(
         runtime,
         undefined,
         runtime.servingPosture ? parentCell.space : undefined,
@@ -2059,6 +2077,7 @@ export function wish(
           }
         },
       );
+      trackSidecarLaunch(launch);
     } else {
       if (!cancelled && slot.resultCell) {
         runtime.runner.run(
@@ -2082,10 +2101,10 @@ export function wish(
   // Renders an error message into a pattern result cell in its own committed
   // transaction. Used when a deferred system-pattern run fails after the
   // originating wish transaction has already gone.
-  function commitPatternErrorUI(
+  async function commitPatternErrorUI(
     resultCell: Cell<any>,
     message: string,
-  ): void {
+  ): Promise<void> {
     const errorTx = runtime.edit();
     // Async error surfacing after the originating wish tx is gone — no
     // scheduler run stamps it; bookkeeping per serving-loop.md §3d.
@@ -2095,18 +2114,27 @@ export function wish(
     });
     resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
     runtime.prepareTxForCommit(errorTx);
-    errorTx.commit();
+    const { error } = await errorTx.commit();
+    // The account of the failure failed to land, so the surface stays blank
+    // and this is the only place the reason exists. Writing it again would
+    // meet whatever refused it the first time.
+    if (error) {
+      console.error(
+        `Can't report "${message}" in the surface it belongs to`,
+        error,
+      );
+    }
   }
 
   // Run a just-fetched sidecar pattern (profile create / picker) into its result
   // cell on its own committed transaction, surfacing any commit failure as an
   // error UI in that cell. Shared by launchProfileCreatePattern and
   // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
-  function runSidecarInOwnTx(
+  async function runSidecarInOwnTx(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
-  ): void {
+  ): Promise<void> {
     try {
       const runTx = runtime.edit();
       // Sidecar run from a cache-fetch continuation — no scheduler run
@@ -2123,15 +2151,12 @@ export function wish(
         sidecarRunOptions,
       );
       runtime.prepareTxForCommit(runTx);
-      runTx.commit().then(({ error }) => {
-        if (error) {
-          commitPatternErrorUI(resultCell, toCompactDebugString(error));
-        }
-      }).catch((error) => {
-        commitPatternErrorUI(resultCell, errorMessage(error));
-      });
+      const { error } = await runTx.commit();
+      if (error) {
+        await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+      }
     } catch (error) {
-      commitPatternErrorUI(resultCell, errorMessage(error));
+      await commitPatternErrorUI(resultCell, errorMessage(error));
     }
   }
 
@@ -2208,7 +2233,7 @@ export function wish(
       // demander and flips its ready cell; this speculative run only
       // references the served cells (read above for the re-run trigger).
     } else if (!cachedProfileCreatePattern) {
-      void profileCreatePatternCache.fetch(runtime, () => {
+      const launch = profileCreatePatternCache.fetch(runtime, () => {
         // The pattern arrived: re-arm EVERY demander's create surface —
         // the fetch is node-shared (memoized), so the ready signal must
         // reach every slot registered while it was in flight, not only
@@ -2230,7 +2255,7 @@ export function wish(
             readySlot.readyCell!.withTx(readyTx).set(true);
           }
           runtime.prepareTxForCommit(readyTx);
-          readyTx.commit();
+          trackSidecarLaunch(readyTx.commit());
         }
       }, runtime.servingPosture ? parentCell.space : undefined).then(
         (pattern) => {
@@ -2243,6 +2268,7 @@ export function wish(
           }
         },
       );
+      trackSidecarLaunch(launch);
     } else if (!cancelled && slot.resultCell) {
       runtime.runner.run(
         tx,
@@ -2346,7 +2372,7 @@ export function wish(
       // The SpaceServer instantiates the picker for this demander; this
       // speculative run references its cell only.
     } else if (!cachedProfilePickerPattern) {
-      void profilePickerPatternCache.fetch(
+      const launch = profilePickerPatternCache.fetch(
         runtime,
         undefined,
         runtime.servingPosture ? parentCell.space : undefined,
@@ -2382,6 +2408,7 @@ export function wish(
           );
         }
       });
+      trackSidecarLaunch(launch);
     } else if (!cancelled && slot.resultCell) {
       runtime.runner.run(
         tx,

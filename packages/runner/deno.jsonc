@@ -8,7 +8,7 @@
     // by type-checking the package directory as one program.
     // --allow-run=git,deno: window-retention-release.test.ts re-invokes deno
     // for a helper that needs --expose-gc and the real clock.
-    "test": "ENV=test deno test --no-check --preload=test/clock-preload.ts --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git,deno test/**/*.test.ts",
+    "test": "ENV=test deno test --no-check --preload=test/clock-preload.ts --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git,deno test/**/*.test.ts test/**/*.test.tsx",
     "bench": {
       "description": "Run Cell benchmarks for performance analysis",
       "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/*.bench.ts"
@@ -23,6 +23,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./shared": "./src/shared.ts",
     "./entity-kind": "./src/entity-kind.ts",
     "./fabric-url": "./src/fabric-url.ts",
@@ -33,6 +35,7 @@
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
+    "./local-program.deno": "./src/harness/local-program.deno.ts",
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",
     "./cfc": "./src/cfc/mod.ts",
     "./cfc/label-view-core": "./src/cfc/label-view-core.ts",
@@ -41,6 +44,7 @@
     "./executor/stats": "./src/executor/stats.ts",
     "./executor/watermark": "./src/executor/watermark.ts",
     "./cfc/migration-reason": "./src/cfc/migration-reason.ts",
-    "./cfc/schema-sanitization": "./src/cfc/schema-sanitization.ts"
+    "./cfc/schema-sanitization": "./src/cfc/schema-sanitization.ts",
+    "./cfc/schema-refs": "./src/cfc/schema-refs.ts"
   }
 }

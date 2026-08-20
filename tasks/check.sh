@@ -14,8 +14,12 @@ baseDir="${cmdDir%/*}" # Parent of `cmdDir`, repo root in this case.
 cd "${baseDir}"
 
 # The exact Deno version for this repository is pinned in mise.toml, which mise
-# installs (see README.md). Versions inside the range below are accepted, with
-# a warning when the version differs from the pin.
+# installs (see README.md). A run under any other version stops before
+# checking: different Deno versions carry different TypeScript compilers,
+# which can return different verdicts on one tree, and an off-pin verdict is
+# not the verdict this check exists to report. DENO_CHECK_VERSION_LENIENT=1
+# accepts an off-pin version inside the range below; the mismatch is then
+# reported again after the diagnostics, where it is the last thing on screen.
 # tasks/check-deno-pins.ts verifies that the range contains the pin.
 DENO_VERSION_MIN="2.8.0"
 DENO_VERSION_MAX="2.10.0"
@@ -62,102 +66,27 @@ if (( $(version_num "${DENO_VERSION}") < $(version_num "${DENO_VERSION_MIN}") ||
 fi
 
 if [[ "${DENO_VERSION}" != "${DENO_VERSION_PINNED}" ]]; then
-  echo "WARNING: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
-  echo "WARNING: To use the pinned version, install mise <https://mise.jdx.dev/> and run 'mise install'."
-fi
-
-# Collect all paths to check. Glob patterns will be expanded by bash.
-#
-# This list is the single type-checking point for the paths it names: the CI
-# test jobs and the package test tasks that cover these paths run
-# `deno test --no-check` and rely on this script (via the Check job's
-# "Type check codebase" step) for type safety. Before adding --no-check to a
-# test invocation, make sure every file it loads is under a path listed here.
-# Removing a path from this list removes its type checking entirely.
-FILES_TO_CHECK=()
-
-# Directory paths (no glob expansion needed)
-DIRS=(
-  "packages/api"
-  "packages/background-piece-service"
-  "packages/cli/commands"
-  "packages/cli/lib"
-  "packages/cli/support"
-  "packages/cli/test"
-  "packages/deno-web-test"
-  "packages/html"
-  "packages/identity"
-  "packages/iframe-sandbox"
-  "packages/integration"
-  "packages/js-compiler"
-  "packages/llm"
-  "packages/memory"
-  "packages/patterns/battleship"
-  "packages/patterns/budget-tracker"
-  "packages/patterns/contacts"
-  "packages/patterns/examples"
-  "packages/patterns/gideon-tests"
-  "packages/patterns/google/core/integration"
-  "packages/patterns/google/core/util"
-  "packages/patterns/integration"
-  "packages/patterns/notes"
-  "packages/patterns/record"
-  "packages/patterns/scrabble"
-  "packages/patterns/system"
-  "packages/patterns/test"
-  "packages/patterns/weekly-calendar"
-  "packages/piece"
-  "packages/runner"
-  "packages/runtime-client"
-  "packages/shell"
-  "packages/static/scripts"
-  "packages/static/test"
-  "packages/toolshed"
-  "packages/ts-transformers/src"
-  "packages/utils"
-)
-
-FILES_TO_CHECK+=("${DIRS[@]}")
-
-# Glob patterns - bash expands these with nullglob set
-FILES_TO_CHECK+=(tasks/*.ts)
-FILES_TO_CHECK+=(scripts/*.ts)
-FILES_TO_CHECK+=(packages/ui/src/v2/components/*[!outliner]/*.ts*)
-FILES_TO_CHECK+=(packages/cli/*.ts)
-FILES_TO_CHECK+=(packages/static/*.ts)
-FILES_TO_CHECK+=(packages/patterns/*.ts)
-FILES_TO_CHECK+=(packages/patterns/*.tsx)
-
-while IFS= read -r testFile; do
-  FILES_TO_CHECK+=("${testFile}")
-done < <(find packages/ts-transformers/test -type f -name '*.test.ts' -print)
-
-# Google patterns (previously checked individually to avoid OOM, now included
-# with increased heap limit)
-FILES_TO_CHECK+=(packages/patterns/google/core/*.ts)
-FILES_TO_CHECK+=(packages/patterns/google/core/*.tsx)
-FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.ts)
-FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.tsx)
-FILES_TO_CHECK+=(packages/patterns/google/extractors/*.ts)
-FILES_TO_CHECK+=(packages/patterns/google/extractors/*.tsx)
-FILES_TO_CHECK+=(packages/patterns/google/WIP/*.ts)
-FILES_TO_CHECK+=(packages/patterns/google/WIP/*.tsx)
-
-if (( ${#FILES_TO_CHECK[@]} == 0 )); then
-    # This can happen if the repo ends up in a very weird state, but it _can_
-    # happen!
-    echo 1>&2 "${cmdName}:" 'No files to check?! (Project is in an odd state.)'
+  if [[ "${DENO_CHECK_VERSION_LENIENT:-}" == '' ]]; then
+    echo "ERROR: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
+    echo "ERROR: An off-pin toolchain can pass code the pin refuses, and refuse code the pin passes."
+    echo "ERROR: Install the pin with mise <https://mise.jdx.dev/> and 'mise install', then run"
+    echo "ERROR: 'mise exec -- deno task check'; or set DENO_CHECK_VERSION_LENIENT=1 to accept"
+    echo "ERROR: an off-pin verdict."
     exit 1
+  fi
+  echo "WARNING: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
+  echo "WARNING: DENO_CHECK_VERSION_LENIENT is set, so the check runs anyway."
+  # Repeated when the run ends, pass or fail: the lines above scroll away
+  # behind one Check line per module, and the verdict's provenance belongs
+  # next to the verdict.
+  version_mismatch_reminder() {
+    echo "WARNING: This check ran under Deno ${DENO_VERSION}, not the pinned ${DENO_VERSION_PINNED}."
+  }
+  trap version_mismatch_reminder EXIT
 fi
 
-echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
-
-reloadArg=()
-if [[ "${DENO_CHECK_RELOAD:-}" != '' ]]; then
-    echo 'Reloading Deno dependencies before checking...'
-    reloadArg=(--reload)
-fi
-
-DENO_V8_FLAGS="--max-old-space-size=8192" deno check "${reloadArg[@]}" "${FILES_TO_CHECK[@]}"
-
-echo "Type check complete."
+# The checked path list and the per-package invocations live in
+# tasks/typecheck.ts; this script owns only the version gate above. Each
+# package group is its own timed, recorded typecheck-kind test.
+deno run --allow-read --allow-write --allow-env --allow-run \
+  tasks/typecheck.ts "$@"

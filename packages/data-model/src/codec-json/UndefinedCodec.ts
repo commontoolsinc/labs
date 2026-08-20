@@ -1,15 +1,15 @@
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
  * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.
  * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
- * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
+ * matching is by `canEncode()`. See `1-fabric-values.md` Section 1.3.
  */
-export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
+export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue, null> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Undefined, undefined);
@@ -21,21 +21,21 @@ export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
-  encode(_value: FabricValue): JsonCodecValue {
+  encode(_value: FabricValue): null {
     return null;
   }
 
   /** @inheritDoc */
+  canDecode(state: JsonCodecValue): state is null {
+    return state === null;
+  }
+
+  /** @inheritDoc */
   decode(
-    typeTag: string,
-    state: JsonCodecValue,
-    _context: ReconstructionContext,
+    _typeTag: string,
+    _state: null,
+    _env: LiveEnvironment,
   ): FabricValue {
-    if (state !== null) {
-      throw new Error(
-        `\`${typeTag}\`: expected \`null\` state, got \`${typeof state}\``,
-      );
-    }
     return undefined;
   }
 }

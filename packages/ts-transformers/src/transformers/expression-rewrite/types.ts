@@ -1,7 +1,10 @@
 import ts from "typescript";
 
-import type { DataFlowAnalysis, NormalizedDataFlow } from "../../ast/mod.ts";
-import type { ReactiveContextKind } from "../../ast/mod.ts";
+import type {
+  DataFlowAnalysis,
+  NormalizedDataFlow,
+  ReactiveContextKind,
+} from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import type { ExpressionContainerKind } from "../expression-site-types.ts";
 

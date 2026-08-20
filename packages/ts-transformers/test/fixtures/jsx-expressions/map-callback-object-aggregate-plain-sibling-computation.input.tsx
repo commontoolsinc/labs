@@ -4,6 +4,7 @@
  * If a local object aggregate mixes reactive and plain fields, later
  * computations over the plain field should stay plain.
  */
+
 import {
   Default,
   pattern,

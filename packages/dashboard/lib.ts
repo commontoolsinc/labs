@@ -31,6 +31,214 @@ function githubToken(path: string, token?: string): string {
   return t;
 }
 
+type GitHubOperationStage =
+  | "waiting for performance-request capacity"
+  | "requesting GitHub"
+  | "recording performance-request use"
+  | "reading GitHub response";
+
+interface ActiveGitHubOperation {
+  id: number;
+  path: string;
+  startedAt: number;
+  stage: GitHubOperationStage;
+}
+
+export interface GitHubOperationInProgress {
+  id: number;
+  path: string;
+  elapsedMs: number;
+  stage: GitHubOperationStage;
+}
+
+const activeGitHubOperations = new Map<number, ActiveGitHubOperation>();
+let nextGitHubOperationId = 1;
+const SLOW_GITHUB_OPERATION_MS = 10_000;
+const GITHUB_ERROR_BODY_BYTES = 4_096;
+const GITHUB_LOG_DETAIL_CHARS = 300;
+
+export interface GitHubRequestOptions {
+  // These expected HTTP responses stay quiet while transport failures still log.
+  ignoreStatuses?: readonly number[];
+}
+
+export interface GitHubDownload {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly body: Uint8Array<ArrayBuffer>;
+}
+
+export function githubOperationsInProgress(
+  now = Date.now(),
+): GitHubOperationInProgress[] {
+  return [...activeGitHubOperations.values()].map((operation) => ({
+    id: operation.id,
+    path: operation.path,
+    elapsedMs: Math.max(0, now - operation.startedAt),
+    stage: operation.stage,
+  }));
+}
+
+function boundedLogDetail(detail: string): string | undefined {
+  const prefix = detail.slice(0, GITHUB_LOG_DETAIL_CHARS * 4);
+  const withoutControls = [...prefix].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
+  }).join("");
+  const compact = withoutControls.replace(/\s+/g, " ").trim();
+  return compact ? compact.slice(0, GITHUB_LOG_DETAIL_CHARS) : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  const detail = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
+  return boundedLogDetail(detail) ?? "unknown error";
+}
+
+function githubResponseContext(response: Response): string {
+  const parts = [`HTTP ${response.status}`];
+  const header = (name: string): string | undefined => {
+    const value = response.headers.get(name);
+    return value === null ? undefined : boundedLogDetail(value);
+  };
+  const requestId = header("x-github-request-id");
+  if (requestId) parts.push(`request ${requestId}`);
+  const remaining = header("x-ratelimit-remaining");
+  const limit = header("x-ratelimit-limit");
+  if (remaining || limit) {
+    parts.push(`rate limit ${remaining ?? "?"} remaining of ${limit ?? "?"}`);
+  }
+  const reset = header("x-ratelimit-reset");
+  if (reset) parts.push(`rate limit resets at ${reset}`);
+  const retryAfter = header("retry-after");
+  if (retryAfter) parts.push(`retry after ${retryAfter}`);
+  return parts.join(", ");
+}
+
+function githubErrorBody(body: string): string | undefined {
+  let detail = body;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (
+      value !== null && typeof value === "object" && "message" in value &&
+      typeof value.message === "string"
+    ) {
+      detail = value.message;
+    }
+  } catch {
+    // A plain-text GitHub error body is already the useful detail.
+  }
+  return boundedLogDetail(detail);
+}
+
+function finishGitHubOperation(
+  operation: ActiveGitHubOperation,
+  response: Response | undefined,
+  failed: boolean,
+): void {
+  const elapsedMs = Math.max(0, Date.now() - operation.startedAt);
+  activeGitHubOperations.delete(operation.id);
+  if (!failed && response?.ok && elapsedMs >= SLOW_GITHUB_OPERATION_MS) {
+    console.warn(
+      `GitHub API operation ${operation.id} for ${operation.path} completed slowly after ` +
+        `${elapsedMs} ms: ${githubResponseContext(response)}`,
+    );
+  }
+}
+
+function logGitHubOperationFailure(
+  operation: ActiveGitHubOperation,
+  error: unknown,
+): void {
+  console.error(
+    `GitHub API operation ${operation.id} for ${operation.path} failed after ` +
+      `${Math.max(0, Date.now() - operation.startedAt)} ms ` +
+      `while ${operation.stage}: ${errorMessage(error)}`,
+  );
+}
+
+function logGitHubErrorResponseFailure(
+  response: Response,
+  operation: ActiveGitHubOperation,
+  action: string,
+  error: unknown,
+): void {
+  console.error(
+    "GitHub API operation " + operation.id + " for " + operation.path +
+      " could not " + action + " the error response from " +
+      githubResponseContext(response) + ": " + errorMessage(error),
+  );
+}
+
+function discardGitHubErrorResponseBody(
+  response: Response,
+  operation: ActiveGitHubOperation,
+): void {
+  if (!response.body) return;
+  try {
+    void response.body.cancel().catch((error) => {
+      logGitHubErrorResponseFailure(response, operation, "discard", error);
+    });
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "discard", error);
+  }
+}
+
+async function githubErrorResponseBody(
+  response: Response,
+  operation: ActiveGitHubOperation,
+): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const detail = (): string => {
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return new TextDecoder().decode(bytes);
+  };
+  if (!response.body) return "";
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "read", error);
+    return "";
+  }
+  const cancel = async (): Promise<void> => {
+    try {
+      await reader.cancel();
+    } catch (error) {
+      logGitHubErrorResponseFailure(response, operation, "stop reading", error);
+    }
+  };
+  try {
+    while (length < GITHUB_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) return detail();
+      const remaining = GITHUB_ERROR_BODY_BYTES - length;
+      const kept = value.slice(0, remaining);
+      chunks.push(kept);
+      length += kept.length;
+    }
+    await cancel();
+    return detail();
+  } catch (error) {
+    logGitHubErrorResponseFailure(response, operation, "read", error);
+    return detail();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+interface GitHubResponseResult {
+  response: Response;
+  operation: ActiveGitHubOperation;
+}
+
 function githubRequest(path: string, token: string, withTimeout: boolean): Promise<Response> {
   const init: RequestInit = {
     headers: {
@@ -48,10 +256,14 @@ function githubRequest(path: string, token: string, withTimeout: boolean): Promi
 
 async function githubPrimaryRateLimit(
   token: string,
+  operation: ActiveGitHubOperation,
 ): Promise<GitHubPrimaryRateLimit> {
   const response = await githubRequest("rate_limit", token, false);
   if (!response.ok) {
-    throw new Error(`GitHub API rate_limit failed: HTTP ${response.status}`);
+    discardGitHubErrorResponseBody(response, operation);
+    throw new Error(
+      `GitHub API rate_limit failed: ${githubResponseContext(response)}`,
+    );
   }
   const value = await response.json() as {
     resources?: { core?: GitHubPrimaryRateLimit };
@@ -67,73 +279,190 @@ async function githubResponse(
   token: string,
   performance: boolean,
   withTimeout: boolean,
-): Promise<Response> {
-  const reservation = performance
-    ? await performanceGitHubRateLimit.reserve(
-      token,
-      () => githubPrimaryRateLimit(token),
-    )
-    : null;
+): Promise<GitHubResponseResult> {
+  const normalizedPath = path.replace(/^\//, "");
+  const operation: ActiveGitHubOperation = {
+    id: nextGitHubOperationId++,
+    path: normalizedPath,
+    startedAt: Date.now(),
+    stage: performance
+      ? "waiting for performance-request capacity"
+      : "requesting GitHub",
+  };
+  activeGitHubOperations.set(operation.id, operation);
+  let reservation: Awaited<ReturnType<typeof performanceGitHubRateLimit.reserve>> | null = null;
   let response: Response | undefined;
+  let failed = false;
+  let operationError: unknown;
   try {
+    if (performance) {
+      reservation = await performanceGitHubRateLimit.reserve(
+        token,
+        () => githubPrimaryRateLimit(token, operation),
+      );
+      operation.stage = "requesting GitHub";
+    }
     response = await githubRequest(path, token, withTimeout);
-    return response;
-  } finally {
-    if (reservation) await reservation.complete(response);
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    logGitHubOperationFailure(operation, error);
   }
+  try {
+    if (reservation) {
+      operation.stage = "recording performance-request use";
+      await reservation.complete(response);
+    }
+  } catch (error) {
+    failed = true;
+    operationError = error;
+    logGitHubOperationFailure(operation, error);
+  }
+  if (failed) {
+    finishGitHubOperation(operation, response, true);
+    throw operationError;
+  }
+  operation.stage = "reading GitHub response";
+  return { response: response!, operation };
 }
 
 async function githubJson<T>(
   path: string,
   token: string,
   performance: boolean,
+  options: GitHubRequestOptions,
 ): Promise<T> {
-  const res = await githubResponse(path, token, performance, true);
+  const { response: res, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    true,
+  );
   if (!res.ok) {
+    const reportHttpError = !options.ignoreStatuses?.includes(res.status);
+    const body = await githubErrorResponseBody(
+      res,
+      operation,
+    );
     let rateLimited = false;
     if (res.status === 403) {
-      const message = await res.text();
       rateLimited = res.headers.get("x-ratelimit-remaining") === "0" ||
-        res.headers.has("retry-after") || /rate.?limit/i.test(message);
+        res.headers.has("retry-after") || /rate.?limit/i.test(body);
     }
     const detail = rateLimited ? " (rate-limited)" : "";
+    const responseDetail = githubErrorBody(body);
+    if (reportHttpError) {
+      console.error(
+        `GitHub API operation ${operation.id} for ${operation.path} returned ` +
+          `${githubResponseContext(res)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms` +
+          `${responseDetail ? `: ${responseDetail}` : ""}`,
+      );
+    }
+    finishGitHubOperation(operation, res, true);
     throw new Error(
       `GitHub API ${path} failed: HTTP ${res.status}${detail}`,
     );
   }
-  return await res.json() as T;
+  try {
+    const value = await res.json() as T;
+    finishGitHubOperation(operation, res, false);
+    return value;
+  } catch (error) {
+    console.error(
+      `GitHub API operation ${operation.id} for ${operation.path} could not read valid JSON ` +
+        `from ${githubResponseContext(res)} after ` +
+        `${Math.max(0, Date.now() - operation.startedAt)} ms: ${errorMessage(error)}`,
+    );
+    finishGitHubOperation(operation, res, true);
+    throw error;
+  }
 }
 
 export async function github<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, false);
+  return await githubJson<T>(path, t, false, options);
 }
 
 export async function githubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, false, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    false,
+    options,
+  );
 }
 
 export async function performanceGithub<T = unknown>(
   path: string,
   token?: string,
+  options: GitHubRequestOptions = {},
 ): Promise<T> {
   const t = githubToken(path, token);
-  return await githubJson<T>(path, t, true);
+  return await githubJson<T>(path, t, true, options);
 }
 
 export async function performanceGithubDownload(
   path: string,
   token?: string,
-): Promise<Response> {
+  options: GitHubRequestOptions = {},
+): Promise<GitHubDownload> {
   const t = githubToken(path, token);
-  return await githubResponse(path, t, true, false);
+  return await githubDownloadResponse(
+    path,
+    t,
+    true,
+    options,
+  );
+}
+
+async function githubDownloadResponse(
+  path: string,
+  token: string,
+  performance: boolean,
+  options: GitHubRequestOptions,
+): Promise<GitHubDownload> {
+  const { response, operation } = await githubResponse(
+    path,
+    token,
+    performance,
+    false,
+  );
+  if (!response.ok) {
+    const reportHttpError = !options.ignoreStatuses?.includes(response.status);
+    discardGitHubErrorResponseBody(response, operation);
+    if (reportHttpError) {
+      console.error(
+        `GitHub API operation ${operation.id} for download ${operation.path} returned ` +
+          `${githubResponseContext(response)} after ` +
+          `${Math.max(0, Date.now() - operation.startedAt)} ms`,
+      );
+    }
+    finishGitHubOperation(operation, response, true);
+    return { ok: false, status: response.status, body: new Uint8Array() };
+  }
+  if (!response.body) {
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body: new Uint8Array() };
+  }
+  try {
+    const body = new Uint8Array(await response.arrayBuffer());
+    finishGitHubOperation(operation, response, false);
+    return { ok: true, status: response.status, body };
+  } catch (error) {
+    logGitHubOperationFailure(operation, error);
+    finishGitHubOperation(operation, response, true);
+    throw error;
+  }
 }
 
 // Cache an async result for ttlMs; a rejection is not cached (so it retries).
@@ -153,7 +482,7 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
 }
 
 // good/warn/bad/unknown -> the dot color class the renderer uses.
-export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "grey" };
+export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "gray" };
 
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
@@ -231,9 +560,9 @@ export function usd(n: number): string {
 
 // A completed run's dot color: only genuine failures are red.
 export function concDot(conclusion: string | null, attempt: number): string {
-  if (conclusion === "success") return attempt > 1 ? "grey" : "green";
+  if (conclusion === "success") return attempt > 1 ? "gray" : "green";
   if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "startup_failure") return "red";
-  return "grey";
+  return "gray";
 }
 
 // A lighter tint of a "#rrggbb" color, blended toward white. Sparklines mark the

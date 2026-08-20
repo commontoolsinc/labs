@@ -237,6 +237,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -244,6 +246,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
       });
     });
 

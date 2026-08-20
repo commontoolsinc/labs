@@ -1,12 +1,13 @@
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { resolveLink } from "../link-resolution.ts";
+import { parseLink } from "../link-utils.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { resolveLink } from "../link-resolution.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
-import { parseLink } from "../link-utils.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 /**
  * Argument schema for ifElse. The action value-reads ONLY `condition`; the

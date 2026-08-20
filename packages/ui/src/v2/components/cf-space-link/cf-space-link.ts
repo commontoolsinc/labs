@@ -1,9 +1,12 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-chip/index.ts";
+
 import type { DID } from "@commonfabric/identity";
-import { navigate } from "@commonfabric/shell/shared";
+import { navigate } from "@commonfabric/navigation";
 
 /**
  * CFSpaceLink - Renders a space as a clickable pill that navigates to the space

@@ -1,3 +1,4 @@
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -5,22 +6,23 @@ import {
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import type { EntityKind } from "./entity-kind.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isObjectNotArray,
   isObjectOrArray,
   isPlainObject,
 } from "@commonfabric/utils/types";
-import { BoundedKeyMap } from "@commonfabric/utils/cache";
-import { PatternManager } from "./pattern-manager.ts";
-import { rendererVDOMSchema } from "./schemas.ts";
-import { forEachSubschema } from "./schema-walk.ts";
+
+import {
+  patternFromFrame,
+  popFrame,
+  pushFrameFromCause,
+} from "./builder/pattern.ts";
 import {
   type CellScope,
   type FabricExecValue,
@@ -38,19 +40,17 @@ import {
   UI,
 } from "./builder/types.ts";
 import {
-  patternFromFrame,
-  popFrame,
-  pushFrameFromCause,
-} from "./builder/pattern.ts";
+  type AddCancel,
+  type Cancel,
+  type DeferredCancelOwnership,
+  useCancelGroup,
+  useDeferredCancelOwnership,
+} from "./cancel.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
-import { type Action } from "./scheduler.ts";
-import { RetryImmediately } from "./scheduler/retry-immediately.ts";
-import {
-  findAllWriteRedirectCells,
-  opaqueArgumentKeys,
-  unwrapOneLevelAndBindToDoc,
-} from "./pattern-binding.ts";
+import type { EntityKind } from "./entity-kind.ts";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
@@ -68,17 +68,12 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { sendValueToBinding } from "./pattern-binding.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import {
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-import { waveRunContextOf } from "./executor/wave.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
   navigateEventContextFromRunInfo,
@@ -92,28 +87,70 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
+import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
+import {
+  causalFormOfBinding,
+  findAllWriteRedirectCells,
+  opaqueArgumentKeys,
+  sendValueToBinding,
+  unwrapOneLevelAndBindToDoc,
+} from "./pattern-binding.ts";
+import { PatternManager } from "./pattern-manager.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
-import { waveSettlementOf } from "./executor/wave.ts";
+import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
+import { RetryImmediately } from "./scheduler/retry-immediately.ts";
+import { isSchemaMismatchError } from "./schema-view.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { rendererVDOMSchema } from "./schemas.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
-import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
-import { isSchemaMismatchError } from "./schema-view.ts";
-import {
-  isConflictRejection,
-  isStorageTransactionInconsistent,
-} from "./storage/rejection.ts";
-import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
   machineryRead,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "./storage/rejection.ts";
+
 import "./builtins/index.ts";
-import { isCellScope, narrowestScope } from "./scope.ts";
+
+import { runInActionExecution } from "./builder/action-context.ts";
+import {
+  getArtifactEntryRef,
+  getPatternProgram,
+  getPatternSourcePath,
+  isTrustedBuilderArtifact,
+  resolveOriginal,
+} from "./builder/pattern-metadata.ts";
+import {
+  resolveBuiltinImplementationIdentity,
+  resolvePolicyFacingImplementationIdentity,
+} from "./cfc/implementation-identity.ts";
+import {
+  localRefTarget,
+  relaxDefaultedRequired,
+  validateSchemaValue,
+} from "./cfc/schema-sanitization.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type ImplementationIdentity,
+} from "./cfc/types.ts";
+import {
+  prepareSourceClosureVerification,
+  readVerifiedSourceClosure,
+} from "./compilation-cache/cell-cache.ts";
+import { createRef } from "./create-ref.ts";
+import { diffAndUpdate } from "./data-updating.ts";
+import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
+import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
@@ -123,36 +160,8 @@ import {
   setRunnableName,
 } from "./runner-utils.ts";
 import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
-import {
-  resolveBuiltinImplementationIdentity,
-  resolvePolicyFacingImplementationIdentity,
-} from "./cfc/implementation-identity.ts";
-import {
-  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
-  type ImplementationIdentity,
-} from "./cfc/types.ts";
-import {
-  localRefTarget,
-  relaxDefaultedRequired,
-  validateSchemaValue,
-} from "./cfc/schema-sanitization.ts";
-import { runInActionExecution } from "./builder/action-context.ts";
-import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import {
-  getArtifactEntryRef,
-  getPatternProgram,
-  getPatternSourcePath,
-  isTrustedBuilderArtifact,
-  resolveOriginal,
-} from "./builder/pattern-metadata.ts";
-import { diffAndUpdate } from "./data-updating.ts";
-import { setResultCell } from "./result-utils.ts";
+import { isCellScope, narrowestScope } from "./scope.ts";
 import { SigilLink } from "./sigil-types.ts";
-import {
-  prepareSourceClosureVerification,
-  readVerifiedSourceClosure,
-} from "./compilation-cache/cell-cache.ts";
-import { createRef } from "./create-ref.ts";
 import { toURI } from "./uri-utils.ts";
 export {
   extractDefaultValues,
@@ -1313,8 +1322,31 @@ export class Runner {
     MemorySpace[]
   >();
 
+  /** The subscriber registered below, kept so disposal can hand it back.
+   * `subscribe` returns nothing, so the ARGUMENT is the only handle there
+   * will ever be — building one inline leaves it unreachable. */
+  readonly #storageSubscription: IStorageSubscription;
+
   constructor(readonly runtime: Runtime) {
-    this.runtime.storageManager.subscribe(this.createStorageSubscription());
+    this.#storageSubscription = this.createStorageSubscription();
+    this.runtime.storageManager.subscribe(this.#storageSubscription);
+  }
+
+  /**
+   * Unregister from storage notifications.
+   *
+   * A storage manager outliving this runner keeps every subscriber it was
+   * given, and each one holds its runner reachable — so a process reusing one
+   * manager across runtimes (`Runtime.dispose({ closeStorage: false })`, which
+   * exists for exactly that) accumulates them. The subscription cannot retire
+   * itself either: its `next` returns `{ done: false }` unconditionally, and
+   * `{ done: true }` is the only self-cancelling answer the contract has.
+   *
+   * `unsubscribe` is optional on the capability, so a manager that does not
+   * implement it is left as it was rather than crashing a disposal.
+   */
+  dispose(): void {
+    this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
   }
 
   /**
@@ -2033,7 +2065,7 @@ export class Runner {
       });
       // Same condition as the durable stamp, deliberately: an observer that
       // saw instantiations the store does not label would report update
-      // targets that cannot be found again, and one that missed a labelled
+      // targets that cannot be found again, and one that missed a labeled
       // root would under-report. That includes the KEYLESS case —
       // `entryRefForPattern` always yields a ref, minting a `keyless:<hash>`
       // session pointer when there is no content-addressed one, and that
@@ -2858,7 +2890,9 @@ export class Runner {
     // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
     // for the nested pieces that never pass through it.
     //
-    // Gated on the systemPatternAutoUpdate experimental flag. On EXACTLY that
+    // The repair is not gated by `systemPatternAutoUpdate`: that flag governs
+    // updates which move the durable identity pointer, while this setup replays
+    // the pattern the pointer already names. On exactly that
     // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
     // materializes the missing internal cells but leaves the existing argument
     // — the piece's data — untouched; no roll-forward, no user-data rewrite),
@@ -2878,7 +2912,6 @@ export class Runner {
         if (
           useTx !== undefined ||
           ref === undefined ||
-          !this.runtime.experimental.systemPatternAutoUpdate ||
           !isMissingStreamMarkerFailure(instantiateError) ||
           // The root/default pattern is the PieceController's to repair (it has
           // the richer roll-forward + clear-error path); defer to it there.
@@ -5321,13 +5354,13 @@ export class Runner {
     module: Module,
     inputsCell: Cell<any>,
     tx: IExtendedStorageTransaction,
-    options: { bindTxToSchema?: boolean; writableProxy?: boolean } = {},
+    options: { bindTxToSchema?: boolean } = {},
   ): { argument: any; isValidArgument: boolean } {
     const argument = module.argumentSchema !== undefined
       ? options.bindTxToSchema
         ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
         : inputsCell.asSchema(module.argumentSchema).get()
-      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+      : inputsCell.getAsQueryResult([], tx);
 
     return {
       argument,
@@ -5944,6 +5977,12 @@ export class Runner {
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
+    // What names this node, as opposed to what it reads through: the bound
+    // inputs with every link reduced to the cell it names. Hoisted out of the
+    // handler because the bindings are fixed for the node, so the reduction
+    // runs once rather than per event.
+    const causalInputs = causalFormOfBinding(inputs) as Record<string, any>;
+
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
 
@@ -5972,7 +6011,7 @@ export class Runner {
       // collide on the receipt. The fallback covers non-dispatch invocations
       // (tests calling the handler directly).
       const cause = {
-        ...(inputs as Record<string, any>),
+        ...causalInputs,
         $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
@@ -6002,15 +6041,7 @@ export class Runner {
         logger.timeStart("stream", "readInputs");
         const { argument, isValidArgument } = (() => {
           try {
-            return this.readJavaScriptArgument(
-              module,
-              inputsCell,
-              tx,
-              {
-                writableProxy:
-                  (module as { writableProxy?: boolean }).writableProxy,
-              },
-            );
+            return this.readJavaScriptArgument(module, inputsCell, tx);
           } finally {
             logger.timeEnd("stream", "readInputs");
           }
@@ -6280,12 +6311,18 @@ export class Runner {
     };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
+    // See the handler's counterpart above: what names the node, reduced once
+    // here rather than on every action invocation.
+    const resultFor = {
+      inputs: causalFormOfBinding(inputs),
+      outputs: causalFormOfBinding(outputs),
+      fn: fnSource,
+    };
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
-      const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
         { implementation: fn },

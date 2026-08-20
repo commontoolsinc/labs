@@ -7,10 +7,11 @@
  * time budget, so a performance change moves the per-operation times without
  * materially changing the run's wall-clock time.
  *
- * Each processor has its own coloured line, and the headline shows the largest
- * established trend. Orange means at least one processor trends up. Green
- * means every established processor stays flat or falls. Red means the most
- * recent run failed, or finished successfully without readable benchmark data.
+ * Each processor has its own colored line, and the headline shows the largest
+ * established trend among processors measured in the last twelve hours.
+ * Orange means at least one of those processors trends up. Green means every
+ * eligible established processor stays flat or falls. Red means the most recent
+ * run failed, or finished successfully without readable benchmark data.
  * A tile in the failed state drops its benchmark count and window span and
  * names the failure in their place: how long ago the benchmarks last worked,
  * and how many runs have failed since. A run under way puts a "running" badge
@@ -32,7 +33,7 @@
  *
  * A red run is read like any other: `deno bench` exits non-zero when one
  * benchmark throws, having written a complete report of the rest, so a run's
- * colour says nothing about whether it measured anything. What decides that is
+ * color says nothing about whether it measured anything. What decides that is
  * the artifact, which has to parse, name a processor, and carry benchmarks the
  * tile trends. The failed state reads the workflow-run list and the latest
  * run's cached result, so it is unaffected by which runs the trend samples, and
@@ -54,7 +55,7 @@
  * shortest-view time bucket. It unzips each artifact in the process and reads
  * every benchmark's timings and processor identity. Results for a run attempt
  * are immutable and persisted, so later collections fetch only new runs and
- * attempts. The drill-down overlays one coloured line per processor for each
+ * attempts. The drill-down overlays one colored line per processor for each
  * benchmark. The CI duration and Gantt views also live behind /bench, and this
  * tile's collection keeps their history warm.
  */
@@ -83,6 +84,7 @@ import {
   durationTag,
   escapeHtml,
   friendlyError,
+  type GitHubDownload,
   github,
   githubDownload,
   humanSpan,
@@ -92,6 +94,7 @@ import {
   SPARK_FADE,
 } from "../lib.ts";
 import {
+  BENCH_HEADLINE_MAX_AGE_HOURS,
   BENCH_TREND_BUCKET_MS,
   BENCH_TREND_MAX_AGE_DAYS,
   BENCH_TREND_MIN_RUNS,
@@ -141,7 +144,7 @@ const BENCHMARK_FETCH_CONCURRENCY = 8;
 
 interface BenchmarkGitHub {
   json<T>(path: string, token: string): Promise<T>;
-  download(path: string, token: string): Promise<Response>;
+  download(path: string, token: string): Promise<GitHubDownload>;
 }
 
 const ordinaryBenchmarkGitHub: BenchmarkGitHub = {
@@ -495,7 +498,7 @@ async function fetchZip(
     token,
   );
   if (!res.ok) throw new Error(`artifact ${artifactId}: HTTP ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  return res.body;
 }
 
 // The benchmarks.yml runs on main, newest first, paging back until past the
@@ -708,7 +711,7 @@ async function markBenchmarkRefreshed(
 }
 
 // Every completed run in the window, thinned to one per collection bucket. A
-// run's colour does not decide whether it measured anything: `deno bench` exits
+// run's color does not decide whether it measured anything: `deno bench` exits
 // non-zero when any one benchmark throws, having already written a complete
 // report of the rest, and the workflow uploads that report either way. Over one
 // recent 45-day stretch, 26 of the 30 red runs carried an artifact
@@ -785,7 +788,7 @@ const errorMessage = (error: unknown): string =>
 // user-facing timings that tail is what a person actually notices. Reading it
 // from these runs would need the stalls told apart from the tail the code
 // produces, which the current sample counts do not allow: on the busiest
-// processor, `p99` puts 11% of neighbouring run pairs more than a quarter
+// processor, `p99` puts 11% of neighboring run pairs more than a quarter
 // apart with no change behind them, against 2% for the 75th percentile. The
 // drill-down plots the whole ladder from `min` to `max` in the meantime.
 function sharedBenchmarkRatio(
@@ -921,6 +924,15 @@ interface BenchmarkCpuIndex {
   windowCount: number;
   windowPoints: { at: number; index: number }[];
   trend: ReturnType<typeof benchmarkTrend>;
+}
+
+export function benchmarkHeadlineCandidates<
+  T extends { points: { at: number }[] },
+>(indices: T[], now: number): T[] {
+  const cutoff = now - BENCH_HEADLINE_MAX_AGE_HOURS * 60 * 60_000;
+  return indices.filter((series) =>
+    series.points.some((point) => point.at >= cutoff && point.at <= now)
+  );
 }
 
 type CpuBenchmarkRun = CachedBenchmarkRun & { cpu: string };
@@ -1080,11 +1092,12 @@ const RUNNING_BADGE =
 // Each processor has its own index and line. Every index starts at one and
 // changes only between runs on that processor. Hardware changes therefore
 // never become benchmark changes. The headline shows the largest established
-// trend. Orange means any processor trends up. Red means the most recent run
-// failed or produced no readable data. The line under the headline then dates
-// the outage instead of counting the benchmarks measured. `offline` names a
-// fetch failure. The tile then keeps its last-known trends gray, or shows a
-// gray dash when no history is cached.
+// trend among processors measured in the last twelve hours. Orange means any
+// eligible processor trends up. Red means the most recent run failed or
+// produced no readable data. The line under the headline then dates the outage
+// instead of counting the benchmarks measured. `offline` names a fetch failure.
+// The tile then keeps its last-known trends gray, or shows a gray dash when no
+// history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
@@ -1095,7 +1108,7 @@ function benchmarkIndexView(
   const latestCompleted = latestCompletedRun(runs);
   const failedCi = latestCompleted !== undefined && runFailed(latestCompleted);
   // A run under way is a header badge, and leaves the verdict to the runs that
-  // have finished. The badge is what says the tile's colour may be about to move.
+  // have finished. The badge is what says the tile's color may be about to move.
   const aside = runInFlight(runs) ? RUNNING_BADGE : undefined;
   // A run that finished green on CI but whose artifact resolved to no readable
   // benchmark data is as good as failed: it ran and produced nothing usable. Only
@@ -1111,7 +1124,7 @@ function benchmarkIndexView(
     ? benchmarkFailureLabel(runs, now)
     : "no benchmark data";
   // The runs with processor identities and readable artifacts in the window,
-  // oldest -> newest. The artifact decides, not the run's colour.
+  // oldest -> newest. The artifact decides, not the run's color.
   const cached = (benchmarkStore.refreshedRuns() ?? benchmarkStore.list(cutoff))
     .filter((run): run is CpuBenchmarkRun =>
       run.at >= cutoff && run.cpu !== undefined && productMetricCount(run) > 0
@@ -1138,12 +1151,32 @@ function benchmarkIndexView(
       aside,
     );
   }
-  const established = indices.filter((series) => series.trend.label !== "new");
-  const headline = (established.length ? established : indices).reduce((
+  const headlineCandidates = benchmarkHeadlineCandidates(indices, now);
+  if (!headlineCandidates.length && !offline) {
+    if (failed) {
+      return {
+        ...benchmarkDrill,
+        label: "benchmarks",
+        status: "bad",
+        value: "—",
+        sub: failSub,
+        aside,
+      };
+    }
+    return benchmarkUnavailable("no recent benchmark data", aside);
+  }
+  const displayCandidates = headlineCandidates.length
+    ? headlineCandidates
+    : indices;
+  const established = displayCandidates.filter((series) =>
+    series.trend.label !== "new"
+  );
+  const headlinePool = established.length ? established : displayCandidates;
+  const headline = headlinePool.reduce((
     worst,
     series,
   ) => series.trend.pct > worst.trend.pct ? series : worst);
-  const rising = indices.some((series) =>
+  const rising = headlineCandidates.some((series) =>
     series.trend.status === "warn" || series.trend.status === "bad"
   );
   // An offline collection keeps the trend but grays it: the run list it would need
@@ -2034,7 +2067,7 @@ export function benchPage(
 
   const rangeContent = `<div id="range-content">
     ${progressHtml}${refreshNotice}
-    <p class="legend">Per-op time across a run's samples — p0 = the fastest, p100 = the slowest, mean = the arithmetic mean. Lower is faster. Each CPU has its own coloured line. The value, trend, and row colour use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
+    <p class="legend">Per-op time across a run's samples — p0 = the fastest, p100 = the slowest, mean = the arithmetic mean. Lower is faster. Each CPU has its own colored line. The value, trend, and row color use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
     ${body}
     ${cpuLegend}
     <p class="note">Successful main runs come from the <a href="https://github.com/${REPO}/actions/workflows/${WORKFLOW}" target="_blank" rel="noopener">${WORKFLOW} runs ↗</a> (deno bench artifacts). Collection keeps enough samples for the shortest window, and charts reduce longer windows to about ${CI_HISTORY_POINT_TARGET} evenly spaced points.</p>

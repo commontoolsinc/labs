@@ -1,13 +1,15 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
+  isObjectNotArray,
   isObjectOrArray,
   isReadonlyObjectOrArray,
 } from "@commonfabric/utils/types";
+
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
@@ -71,7 +73,7 @@ type WriterIdentityClaim = {
 };
 
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
-  isObjectOrArray(value) && isObjectOrArray(value.__ctWriterIdentityOf);
+  isObjectNotArray(value) && isObjectNotArray(value.__ctWriterIdentityOf);
 
 // The per-input provenance fields a verified write may have stamped onto a
 // writer-identity claim. New claims carry only the content-addressed

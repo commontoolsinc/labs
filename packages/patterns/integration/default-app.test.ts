@@ -1,12 +1,14 @@
 import {
+  attachWorkerProfiler,
   awaitViewSettled,
-  CdpWorkerProfiler,
+  type CdpWorkerProfiler,
   env,
   Page,
   type ProbeApi,
-  renderProfileReport,
+  startWorkerProfile,
   waitFor,
   waitForCondition,
+  writeWorkerProfile,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
@@ -314,15 +316,7 @@ describe("default-app flow test", () => {
     let cpuProfiler: CdpWorkerProfiler | undefined;
     if (CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES > 0) {
       console.log("Connect CDP worker profiler...");
-      try {
-        cpuProfiler = await CdpWorkerProfiler.connect(shell.wsEndpoint());
-        await cpuProfiler.waitForWorker("worker-runtime");
-      } catch (error) {
-        // Profiling is best-effort instrumentation; never fail the test.
-        console.warn("Worker CPU profiler setup failed, disabling:", error);
-        cpuProfiler?.close();
-        cpuProfiler = undefined;
-      }
+      cpuProfiler = await attachWorkerProfiler(shell.wsEndpoint());
     }
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
@@ -382,15 +376,10 @@ describe("default-app flow test", () => {
         noteIndex <= 1 + CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES;
       if (profileThisNote) {
         console.log(`Start worker CPU profile (note ${noteIndex})...`);
-        try {
-          await cpuProfiler!.start("worker-runtime");
-        } catch (error) {
-          console.warn(
-            `Worker CPU profile start failed (note ${noteIndex}):`,
-            error,
-          );
-          profileThisNote = false;
-        }
+        profileThisNote = await startWorkerProfile(
+          cpuProfiler!,
+          `note ${noteIndex}`,
+        );
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
@@ -538,26 +527,11 @@ describe("default-app flow test", () => {
       );
 
       if (profileThisNote) {
-        try {
-          const profile = await cpuProfiler!.stop();
-          const outPrefix = `${CPUPROFILE_DIR}/default-app-note-${noteIndex}`;
-          await Deno.writeTextFile(
-            `${outPrefix}.cpuprofile`,
-            JSON.stringify(profile),
-          );
-          const report = renderProfileReport(
-            profile,
-            `note-create iteration ${noteIndex}`,
-          );
-          await Deno.writeTextFile(`${outPrefix}.report.txt`, report);
-          console.log(`Worker CPU profile written: ${outPrefix}.cpuprofile`);
-        } catch (error) {
-          // Profiling is best-effort instrumentation; don't fail the test.
-          console.warn(
-            `Worker CPU profile capture failed (note ${noteIndex}):`,
-            error,
-          );
-        }
+        await writeWorkerProfile(cpuProfiler!, {
+          pathPrefix: `${CPUPROFILE_DIR}/default-app-note-${noteIndex}`,
+          label: `note-create iteration ${noteIndex}`,
+          context: `note ${noteIndex}`,
+        });
       }
 
       if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {

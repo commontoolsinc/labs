@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema } from "@commonfabric/runner";
 import {
+  acceptedBreakKey,
   type Baseline,
   baselineFileName,
   checkPattern,
@@ -11,8 +12,10 @@ import {
   encodeBaseline,
   type Finding,
   findRetired,
+  incompatibilityPaths,
   parseArgs,
   parseShard,
+  partitionAcceptedBreaks,
   type PatternContract,
   readBaselines,
   shouldRecord,
@@ -369,6 +372,113 @@ describe("baseline store", () => {
       );
       expect(labels[0].startsWith("20260101")).toBe(true);
     });
+  });
+});
+
+describe("incompatibilityPaths", () => {
+  it("reads the path off each issue line", () => {
+    expect(incompatibilityPaths(
+      "Pattern schemas are not backward compatible:\n" +
+        "- argument.topics[]: defaults changed below a constraint\n" +
+        "- result.crossrefs: existing result field was removed",
+    )).toEqual(["argument.topics[]", "result.crossrefs"]);
+  });
+
+  it("returns an unparseable issue line whole, so it matches no accepted path", () => {
+    expect(incompatibilityPaths("- previous argument has an invalid schema"))
+      .toEqual(["previous argument has an invalid schema"]);
+  });
+
+  it("returns nothing for a detail with no issue lines", () => {
+    expect(incompatibilityPaths("something else entirely")).toEqual([]);
+  });
+});
+
+describe("partitionAcceptedBreaks", () => {
+  const incompatible = (
+    pattern: string,
+    baseline: string,
+    ...issues: string[]
+  ): Finding => ({
+    kind: "incompatible",
+    pattern,
+    baseline,
+    detail: `Pattern schemas are not backward compatible:\n${
+      issues.map((issue) => `- ${issue}`).join("\n")
+    }`,
+  });
+  const REMOVED = "result.crossrefs: existing result field was removed";
+  const UNRELATED = "argument.seed: existing argument field was removed";
+  const accepted = new Map<string, ReadonlySet<string>>([
+    [acceptedBreakKey("a.tsx", "old"), new Set(["result.crossrefs"])],
+  ]);
+
+  it("forgives a finding blaming only paths the entry names", () => {
+    const finding = incompatible("a.tsx", "old", REMOVED);
+    const { standing, forgiven } = partitionAcceptedBreaks(
+      [finding],
+      accepted,
+    );
+    expect(standing).toEqual([]);
+    expect(forgiven).toEqual([finding]);
+  });
+
+  it("keeps a finding that also blames a path the entry does not name", () => {
+    // One finding carries every issue found against that baseline. Forgiving by
+    // pair alone would suppress an unintended break landing beside the accepted
+    // one, and `--update` would record the broken contract as the new baseline.
+    const finding = incompatible("a.tsx", "old", REMOVED, UNRELATED);
+    const { standing, forgiven } = partitionAcceptedBreaks(
+      [finding],
+      accepted,
+    );
+    expect(standing).toEqual([finding]);
+    expect(forgiven).toEqual([]);
+  });
+
+  it("keeps a finding whose detail names no path at all", () => {
+    // Fails closed: an unrecognised message shape is not forgiven on the
+    // strength of a format assumption.
+    const finding: Finding = {
+      kind: "incompatible",
+      pattern: "a.tsx",
+      baseline: "old",
+      detail: "something this parser cannot read",
+    };
+    const { standing } = partitionAcceptedBreaks([finding], accepted);
+    expect(standing).toEqual([finding]);
+  });
+
+  it("keeps a finding against a baseline the entry does not name", () => {
+    // The bound that stops an acceptance becoming an off switch over time: the
+    // contract recorded once the break ships is a baseline no entry names, so
+    // the next change to the same pattern is gated against it.
+    const finding = incompatible("a.tsx", "recorded-after-the-break", REMOVED);
+    const { standing, forgiven } = partitionAcceptedBreaks(
+      [finding],
+      accepted,
+    );
+    expect(standing).toEqual([finding]);
+    expect(forgiven).toEqual([]);
+  });
+
+  it("keeps a finding for a pattern the list does not name", () => {
+    const finding = incompatible("b.tsx", "old", REMOVED);
+    const { standing } = partitionAcceptedBreaks([finding], accepted);
+    expect(standing).toEqual([finding]);
+  });
+
+  it("keeps every finding that is not an incompatibility", () => {
+    // An acceptance says the break was decided; it says nothing about a
+    // contract that is unrecorded, invalid, or outlived by its baselines.
+    const others: Finding[] = [
+      { kind: "missing-baseline", pattern: "a.tsx", hash: "h" },
+      { kind: "invalid-schema", pattern: "a.tsx", role: "result", detail: "x" },
+      { kind: "retired", pattern: "a.tsx", baselines: ["old"] },
+    ];
+    const { standing, forgiven } = partitionAcceptedBreaks(others, accepted);
+    expect(standing).toEqual(others);
+    expect(forgiven).toEqual([]);
   });
 });
 

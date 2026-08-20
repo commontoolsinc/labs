@@ -1,5 +1,9 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import {
   type CellScope,
   type JSONSchema,
@@ -9,6 +13,8 @@ import {
 import { type MemorySpace } from "./cell.ts";
 import {
   type AliasBinding,
+  type CellLinkRefPayload,
+  LINK_ADDRESS_KEYS,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
@@ -148,7 +154,7 @@ export function isPrimitiveCellLink(
 }
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
-  if (!isObjectOrArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   const { path, id, space, scope } = value;
   return Array.isArray(path) &&
     (typeof id === "string" || id === undefined) &&
@@ -169,7 +175,7 @@ export function isNormalizedLink(value: any): value is NormalizedLink {
  */
 export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
     (value.scope === "space" || value.scope === "user" ||
@@ -204,8 +210,8 @@ export function isWriteRedirectLink(
  * to point to an actual cell. In data they are plain values.
  */
 export function isAliasBinding(value: any): value is AliasBinding {
-  return isObjectOrArray(value) && "$alias" in value &&
-    isObjectOrArray(value.$alias) &&
+  return isObjectNotArray(value) && "$alias" in value &&
+    isObjectNotArray(value.$alias) &&
     Array.isArray(value.$alias.path) &&
     (value.$alias.partialCause !== undefined ||
       value.$alias.cell === "result" || value.$alias.cell === "argument");
@@ -301,6 +307,56 @@ export function areNormalizedLinksSameIgnoringScope(
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
     arrayEqual(link1.path, link2.path);
+}
+
+/**
+ * The same link reduced to the cell it names: its {@link LINK_ADDRESS_KEYS}
+ * members and nothing else.
+ *
+ * A link's identity is its address, which is what
+ * {@link areNormalizedLinksSame} compares. What a payload carries beyond the
+ * address describes how the value there is read or labeled -- `schema` is the
+ * reading lens, cfc's `cfcLabelView` a flow-control side channel its own
+ * module calls no part of addressing identity -- so anything deriving from a
+ * link's identity has to leave all of it out. `causalFormOfBinding()` is the
+ * caller that does, reducing a node's bound inputs on the way into its cause.
+ *
+ * Kept as a list of what to KEEP rather than what to drop, so the next member
+ * somebody hangs off a payload stays out of derived ids until someone decides
+ * it belongs in an address. That is the direction that fails safely here: a
+ * new addressing member has to be taught to `NormalizedLink` and
+ * {@link areNormalizedLinksSame} anyway and cannot arrive unnoticed, while
+ * metadata riding along on a link demonstrably can.
+ *
+ * A link already down to its address is returned as it stands, so a caller
+ * pays an allocation only where there is something to drop.
+ */
+export function sigilLinkAddressOnly(link: SigilLink): SigilLink {
+  const payload = linkRefPayload(link);
+
+  // A payload that is not a record carries no members to read. `isLinkRef()`
+  // vets the envelope rather than what sits inside it, so `{"/": {"link@1":
+  // null}}` reaches here as a link; it is data nothing addresses, and it
+  // passes through as it stands rather than throwing on the `in` below.
+  if (!isObjectNotArray(payload)) return link;
+
+  // `in`, not `!== undefined`: a hash is over the members a value HAS, so a
+  // key spelled `schema: undefined` is a member like any other and would
+  // otherwise reach the digest as one.
+  const keys = Object.keys(payload);
+  if (
+    keys.every((key) => (LINK_ADDRESS_KEYS as readonly string[]).includes(key))
+  ) {
+    return link;
+  }
+
+  return linkRefFrom(
+    Object.fromEntries(
+      LINK_ADDRESS_KEYS
+        .filter((key) => key in payload)
+        .map((key) => [key, payload[key]]),
+    ) as CellLinkRefPayload,
+  );
 }
 
 /**

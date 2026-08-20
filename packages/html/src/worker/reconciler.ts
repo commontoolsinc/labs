@@ -19,6 +19,7 @@
  * Nothing does that yet; this note is the marker.
  */
 
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   areLinksSame,
   type Cancel,
@@ -36,11 +37,31 @@ import {
   useCancelGroup,
 } from "@commonfabric/runner";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
-import type { CfcAtom } from "@commonfabric/api/cfc";
+import {
+  atomsOutsideCeiling,
+  CFC_LABEL_READ_FAILED_ATOM,
+  type CfcLabelView,
+  cfcLabelViewForCell,
+  clauseAlternatives,
+  markRendererTrustedEvent,
+  type RenderConfidentialityResolver,
+  spaceAtomIdsInConfidentiality,
+  type SpaceMembershipProvider,
+} from "@commonfabric/runner/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import {
+  getBindingPropName,
+  getEventType,
+  isBindingProp,
+  isEventHandler,
+  isEventProp,
+} from "../render-utils.ts";
+import type { VDomOp } from "../vdom-ops.ts";
+import { generateChildKeys } from "./keying.ts";
 import type {
   ChildNodeState,
   NodeState,
@@ -58,26 +79,6 @@ import {
   normalizeRenderConfidentialityCeiling,
   normalizeRenderDeclassificationPolicy,
 } from "./types.ts";
-import {
-  atomsOutsideCeiling,
-  CFC_LABEL_READ_FAILED_ATOM,
-  type CfcLabelView,
-  cfcLabelViewForCell,
-  clauseAlternatives,
-  markRendererTrustedEvent,
-  type RenderConfidentialityResolver,
-  spaceAtomIdsInConfidentiality,
-  type SpaceMembershipProvider,
-} from "@commonfabric/runner/cfc";
-import type { VDomOp } from "../vdom-ops.ts";
-import { generateChildKeys } from "./keying.ts";
-import {
-  getBindingPropName,
-  getEventType,
-  isBindingProp,
-  isEventHandler,
-  isEventProp,
-} from "../render-utils.ts";
 
 /** Sentinel key in propSubscriptions for the Cell<Props> subscription itself. */
 const CELL_PROPS_KEY = "__cellProps__";
@@ -3157,6 +3158,12 @@ export class WorkerReconciler {
    */
   // deno-lint-ignore no-explicit-any
   private transformPropValue(key: string, value: unknown): any {
+    // TODO(danfuzz): what this returns is not in fact cloneable without loss.
+    // `convertCellsToLinks()` below preserves a `FabricPrimitive` by identity,
+    // and structured clone strips one to `{}` between here and the applicator,
+    // silently. Encoding with `codec-realm` is what makes the doc comment
+    // above true; see the marker on `SetPropOp` in `../vdom-ops.ts`.
+    //
     // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a
     // fabric-valued `style` prop is routed into the `Object.entries` walk of
     // `styleObjectToCssString` — yielding an empty CSS string, silently —

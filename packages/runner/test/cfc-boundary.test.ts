@@ -1,26 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import * as V2Storage from "../src/storage/v2.ts";
-import { raw } from "../src/module.ts";
+
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { createCell } from "../src/cell.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
 } from "../src/cfc/metadata.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
-import {
-  getDerivedInternalCellLink,
-  getMetaLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../src/link-utils.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -32,12 +25,21 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { ignoreReadForScheduling } from "../src/scheduler.ts";
-import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import {
+  getDerivedInternalCellLink,
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
+import { raw } from "../src/module.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
@@ -1054,6 +1056,146 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         kind: "custom",
         name: "schema",
         value: "x",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("invalidates prepared state on a dereference the transaction had not performed", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-new-dereference",
+        path: [],
+      }, { count: 1 });
+
+      tx.prepareCfc();
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-new-dereference",
+          scope: "space",
+          path: ["slot"],
+        },
+        target: {
+          space: signer.did(),
+          id: "of:cfc-new-target",
+          scope: "space",
+          path: [],
+        },
+        kind: "value",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("holds prepared state when a recorded dereference repeats", async () => {
+    // The digest binds the dereference SET, so a repeat leaves it untouched
+    // and the commit recheck would accept. Invalidating here would reject a
+    // transaction on the strength of a re-read alone.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-repeat-dereference",
+        path: [],
+      }, { count: 1 });
+
+      const hop = {
+        source: {
+          space: signer.did(),
+          id: "of:cfc-repeat-dereference",
+          scope: "space" as const,
+          // Recorded raw; the repeat below arrives already canonicalized, and
+          // the two are the same dereference.
+          path: ["value", "slot"],
+        },
+        target: {
+          space: signer.did(),
+          id: "of:cfc-repeat-target",
+          scope: "space" as const,
+          path: [],
+        },
+        kind: "value" as const,
+      };
+      tx.recordCfcDereferenceTrace(hop);
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+      tx.recordCfcDereferenceTrace({
+        ...hop,
+        source: { ...hop.source, path: ["slot"] },
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("invalidates prepared state on a dereference under a payload field named `value`", async () => {
+    // `["value","value","slot"]` is the payload path `value.slot`, a
+    // different dereference from `["value","slot"]`'s payload `slot`. Reading
+    // the second must still invalidate, or the guard would mistake it for a
+    // repeat of the first and hold a decision the digest no longer covers.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-payload-value-field",
+        path: [],
+      }, { count: 1 });
+
+      const target = {
+        space: signer.did(),
+        id: "of:cfc-payload-value-target",
+        scope: "space" as const,
+        path: [],
+      };
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "slot"],
+        },
+        target,
+        kind: "value",
+      });
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "value", "slot"],
+        },
+        target,
+        kind: "value",
       });
 
       expect(tx.getCfcState().prepare.status).toBe("invalidated");
@@ -3343,7 +3485,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("persists cfc metadata for nested entity documents created from labelled collection items", async () => {
+  it("persists cfc metadata for nested entity documents created from labeled collection items", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();

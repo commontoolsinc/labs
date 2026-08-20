@@ -1,17 +1,18 @@
-import { describe, expect, it } from "./scheduler-test-utils.ts";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
 import { Runtime } from "../src/runtime.ts";
-import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
+import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import {
   markInvalid,
+  processStorageNotification,
   type StorageNotificationState,
 } from "../src/scheduler/invalidation.ts";
-import { processStorageNotification } from "../src/scheduler/invalidation.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
-import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
+import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
 import type { Action } from "../src/scheduler/types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -20,7 +21,7 @@ import type {
   IStorageTransaction,
   StorageNotification,
 } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import { describe, expect, it } from "./scheduler-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("scheduler-cfc-trigger-reads");
 const space = signer.did() as MemorySpace;

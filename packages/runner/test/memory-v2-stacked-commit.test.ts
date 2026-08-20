@@ -4,13 +4,15 @@ import {
   assertExists,
   assertStrictEquals,
 } from "@std/assert";
+
+import type { FabricValue } from "@commonfabric/api";
+import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   type CommitPrecondition,
@@ -20,17 +22,20 @@ import {
   type SessionSync,
   type SqliteOperation,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-} from "@commonfabric/utils/logger";
 import type {
   ClientCommit,
   ConfirmedRead,
   Operation,
   PendingRead,
 } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
+
+import { applyPatch } from "../../memory/v2/patch.ts";
 import {
   resetServerExecutionConfig,
   setServerExecutionConfig,
@@ -40,14 +45,12 @@ import {
   parsePointer,
   pathsOverlap,
 } from "../../memory/v2/path.ts";
-import { applyPatch } from "../../memory/v2/patch.ts";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
   IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import { setConflictAdmissionMode } from "../src/storage/v2.ts";
+import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import {
   NotificationRecorder,
   ScriptedSessionTransport,
@@ -60,7 +63,7 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const testReconstructionContext = new EmptyReconstructionContext(
+const testLiveEnvironment = new NullLiveEnvironment(
   true,
   "no cell reconstruction in stacked commit transport",
 );
@@ -74,6 +77,10 @@ type DocKey = keyof typeof DOCS;
 
 type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
+  sink(
+    uri: URI,
+    callback: (value: EntityDocument | undefined) => void,
+  ): () => void;
 };
 
 type RootValue = FabricValue;
@@ -425,7 +432,7 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
   protected override decode(payload: string): ScriptedTransportMessage {
     return fabricFromJsonValue(
       payload,
-      testReconstructionContext,
+      testLiveEnvironment,
     ) as ScriptedTransportMessage;
   }
   protected override encode(message: unknown): string {
@@ -591,6 +598,15 @@ const createHarness = (
     memoryHost: new URL(`memory://runner-v2-stacked-${crypto.randomUUID()}`),
   }, sessionFactory);
   const notifications = new NotificationRecorder();
+  // Every push marker the replica emits, in order. A commit refused at a
+  // pre-send checkpoint still opens and closes a span, so these are what
+  // prove the refusal stays countable on the surface the storm was found on.
+  const telemetryMarkers: RuntimeTelemetryMarker[] = [];
+  storageManager.setTelemetry({
+    submit: (marker: RuntimeTelemetryMarker) => {
+      telemetryMarkers.push(marker);
+    },
+  });
   const provider = storageManager.open(space) as TestProvider;
   storageManager.subscribe(notifications);
 
@@ -681,6 +697,7 @@ const createHarness = (
     provider,
     replica,
     notifications,
+    telemetryMarkers,
     dispatch,
     pushSync: (options: PushSyncOptions) => transport.pushSync(options),
     close: async () => {
@@ -3835,6 +3852,274 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
       ),
     ]);
     assertEquals(raced, "ready");
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a commit minted during the read repair is not sent against the rejected layer", async () => {
+  const harness = await createHarness();
+  // Debug level so the refusal's own lazy log closure runs: the count is how
+  // the checkpoint is observed in production, alongside its push span.
+  const storageLogger = getLogger("storage.v2");
+  const previousLevel = storageLogger.level;
+  storageLogger.level = "debug";
+  const deadDependencyBaseline = getLoggerCountsBreakdown()["storage.v2"]
+    ?.["commit-dead-dependency"]?.debug ?? 0;
+  try {
+    // Both sides at seq 1: A = v1, and the runner watches A so a pushed
+    // repair frame has a subscriber.
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    // A foreign winner lands server-side; its fan-out is not delivered.
+    harness.model.injectRemote({
+      label: "winner",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+
+    // A document sink over A, so the rejection's revert has to reach sink
+    // subscribers as well as the notification stream.
+    const sinkValues: (RootValue | undefined)[] = [];
+    const cancelSink = harness.provider.sink(DOCS.A, (document) => {
+      sinkValues.push(document?.value as RootValue | undefined);
+    });
+
+    // The loser: reads A at the stale confirmed basis, writes A, and is
+    // rejected with a retryable conflict. Its verdict arrives at once, but
+    // finalizeRejection holds the drop until the repair frame's marker — so
+    // its optimistic layer stands on A for the whole window below.
+    const conflictBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["commit-conflict"]?.debug ?? 0;
+    const loser = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(loser.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+    // "commit-conflict" is counted synchronously in pushCommit's catch, so
+    // once the count moves the verdict has reached the runner and the repair
+    // wait is the only thing keeping the layer alive.
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]
+          ?.debug ?? 0) > conflictBaseline,
+      "the conflict rejection to reach the runner",
+    );
+
+    // Inside the window a fresh commit reads A. Its read view sits on the
+    // loser's layer, so buildReads names that layer — a layer the server can
+    // only answer with "pending dependency not resolved".
+    const follower = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("follower"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    let followerSettled = false;
+    const followerResult = follower.promise.then((result) => {
+      followerSettled = true;
+      return result;
+    });
+    assertEquals(
+      harness.replica.buildReads(
+        sourceFromReads([{ id: DOCS.A }]),
+        follower.localSeq + 1,
+      ).pending.map((read) => read.localSeq),
+      [loser.localSeq],
+    );
+
+    // Drain every queued verdict and let reactive work reach a fixpoint: if
+    // the send were going to happen it would have happened by here. Nothing
+    // beyond the seed and the loser ever reached the wire.
+    await harness.transport.drainVerdicts();
+    await clock.settle();
+    assertEquals(harness.model.transactLocalSeqs, [1, loser.localSeq]);
+    // …and the follower is held rather than spun: its rejection waits for the
+    // loser's drop, so a retry cannot start against the same dead layer.
+    assertEquals(followerSettled, false);
+
+    // Release: the catch-up carrying the winner plus the marker covering the
+    // rejected commit. The loser drops, and the follower settles behind it.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: loser.localSeq,
+    });
+    await assertConflict(loser.promise, "stale confirmed read");
+    await assertConflict(
+      followerResult,
+      `pending dependency rejected: localSeq=${loser.localSeq}`,
+    );
+
+    // The follower never reached the server, and both optimistic layers are
+    // gone: A holds the winner, D is back to nothing.
+    assertEquals(
+      harness.model.transactLocalSeqs.includes(follower.localSeq),
+      false,
+    );
+    assertEquals(harness.model.applied.has(follower.localSeq), false);
+    expectVisible(harness, { A: valueFor("v2winner"), D: undefined });
+
+    // The revert reached the sink, and left it on the repaired value rather
+    // than on the optimistic one the loser wrote.
+    cancelSink();
+    assertEquals(sinkValues.at(-1), valueFor("v2winner"));
+
+    // The refusal is counted…
+    assertEquals(
+      (getLoggerCountsBreakdown()["storage.v2"]?.["commit-dead-dependency"]
+        ?.debug ?? 0) - deadDependencyBaseline,
+      1,
+    );
+    // …and traced. A commit that never dialed a session still opens and
+    // closes a push span, carrying the join keys every other push span
+    // carries, so the suppressed population stays countable where the
+    // errored `memory.transact` spans were counted.
+    const followerOpId = `push:${space}:${follower.localSeq}`;
+    assertEquals(
+      harness.telemetryMarkers.filter((marker) =>
+        "id" in marker && marker.id === followerOpId
+      ),
+      [
+        {
+          type: "storage.push.start",
+          id: followerOpId,
+          operation: "transact",
+          localSeq: follower.localSeq,
+          spaceDid: space,
+        },
+        {
+          type: "storage.push.error",
+          id: followerOpId,
+          error: "ConflictError",
+        },
+      ],
+    );
+  } finally {
+    storageLogger.level = previousLevel;
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a commit sitting on two rejected layers waits for both repairs", async () => {
+  const harness = await createHarness();
+  try {
+    // A and B each seeded and watched, each then overtaken by a foreign
+    // winner the runner has not seen.
+    await seedAccepted(harness, DOCS.A, valueFor("a1"));
+    await seedAccepted(harness, DOCS.B, valueFor("b1"));
+    assertEquals(
+      await harness.replica.pull([
+        [{ id: DOCS.A, type: DOCUMENT_MIME }, undefined],
+        [{ id: DOCS.B, type: DOCUMENT_MIME }, undefined],
+      ]),
+      { ok: {} },
+    );
+    harness.model.injectRemote({
+      label: "winner-a",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("a2winner") }],
+    });
+    const winnerSeqA = harness.model.confirmed.get(DOCS.A)!.seq;
+    harness.model.injectRemote({
+      label: "winner-b",
+      operations: [{ op: "set", id: DOCS.B, value: valueFor("b2winner") }],
+    });
+    const winnerSeqB = harness.model.confirmed.get(DOCS.B)!.seq;
+
+    // Two unrelated losers, one per document. Their repairs are independent,
+    // so the markers releasing them can arrive far apart.
+    const conflictBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["commit-conflict"]?.debug ?? 0;
+    const loserA = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("a1mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(loserA.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeqA,
+    });
+    const loserB = beginSet(
+      harness,
+      DOCS.B,
+      valueFor("b1mine"),
+      sourceFromReads([{ id: DOCS.B, seq: 2 }]),
+    );
+    harness.model.setOutcome(loserB.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeqB,
+    });
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]
+          ?.debug ?? 0) >= conflictBaseline + 2,
+      "both conflict rejections to reach the runner",
+    );
+    let loserASettled = false;
+    void loserA.promise.then(() => {
+      loserASettled = true;
+    });
+
+    // One commit reading both documents, so it sits on both dead layers.
+    const rider = beginSet(
+      harness,
+      DOCS.C,
+      valueFor("rider"),
+      sourceFromReads([{ id: DOCS.A }, { id: DOCS.B }]),
+    );
+    let riderSettled = false;
+    const riderResult = rider.promise.then((result) => {
+      riderSettled = true;
+      return result;
+    });
+    await harness.transport.drainVerdicts();
+    await clock.settle();
+    assertEquals(
+      harness.model.transactLocalSeqs,
+      [1, 2, loserA.localSeq, loserB.localSeq],
+    );
+
+    // A's repair lands. Its layer drops, but B's is still standing, so a
+    // retry now would read straight back through it. The rider must hold.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeqA, value: valueFor("a2winner") }],
+      caughtUpLocalSeq: loserA.localSeq,
+    });
+    await clock.settle();
+    assertEquals(loserASettled, true);
+    assertEquals(riderSettled, false);
+
+    // B's repair lands too, and only now does the rider settle.
+    harness.pushSync({
+      upserts: [{ id: DOCS.B, seq: winnerSeqB, value: valueFor("b2winner") }],
+      caughtUpLocalSeq: loserB.localSeq,
+    });
+    await assertConflict(loserB.promise, "stale confirmed read");
+    await assertConflict(
+      riderResult,
+      `pending dependency rejected: localSeq=${loserA.localSeq},${loserB.localSeq}`,
+    );
+    assertEquals(
+      harness.model.transactLocalSeqs.includes(rider.localSeq),
+      false,
+    );
+    expectVisible(harness, {
+      A: valueFor("a2winner"),
+      B: valueFor("b2winner"),
+      C: undefined,
+    });
   } finally {
     await harness.close();
   }

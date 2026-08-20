@@ -242,6 +242,20 @@ Remaining fallback behavior is intentionally narrow:
   classify as builders in type-only environments
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
+- a **synthetic** property call spelled `mapWithPattern` /
+  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  symbol** classifies as the array-method family by spelling alone. The
+  closure stage emits these calls against receivers whose static type is
+  still the plain array type (a site-lifted collection local, for example),
+  so the method never resolves and the emitted spelling is the only
+  remaining evidence of the family — this is what keeps post-closure stages
+  from wrapping an already-rewritten call in a second lift. The
+  synthetic-node requirement scopes that testimony to calls the transformer
+  actually produced: an **authored** `*WithPattern` spelling keeps its
+  author's semantics whether its method resolves (their own declaration) or
+  not (an untyped receiver classifies as no call kind). Authored spellings
+  of every family that fail symbol resolution still require a reactive
+  receiver to classify
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -311,6 +325,43 @@ gone.
 
 Same-named local helpers are not treated as reactive origins unless the call
 itself resolves through the Common Fabric provenance rules in §5.
+
+### 6.3a The event parameter serves the authored contract
+
+A verb's event parameter (handler/action first parameter) with an AUTHORED
+type — an explicit parameter annotation, or the builder call's own event
+type argument, which the action strategy now carries into the lowered
+`handler` call — is applied in `contract` mode
+(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored
+TypeNode serves VERBATIM in structure — objects, unions, intersections,
+arrays, and primitives alike, `$defs` identities and prose intact — and
+`overlayContractCapabilities` (`type-shrinking.ts`) rewrites only
+capability-bearing positions: a cell-like wrapper takes the capability the
+body's usage earns (writable where it writes, read-only where it reads,
+comparable where it only compares, OPAQUE where it never touches the
+position), and an identity-only comparison of a plain-declared position adds
+the comparable marker the runtime materializes it through. A named reference
+whose subtree holds no cell-like position passes through untouched; one
+expands only when a capability inside it must change, and a self-referential
+type ends that expansion at the cycle with the node kept as authored — the
+accepted residual, since a literal cannot spell its own recursion. Observed
+paths still validate against the authored type via `validateShrinkCoverage`.
+
+A SYNTHETIC event node — JSX handler events among them — has no authored
+structure to serve and keeps the `full` usage shrink, as does a handler with
+no event type information at all: for those, the usage summary is the only
+contract there is. Reactive reads (`lift`, lift-applied, computed) stay in
+`full` mode always: there, shrinking is subscription semantics. The ruling
+this implements is
+[the verb input contract](../../history/plans/verb-input-contract.md); the
+`handler-schema/contract-authored-event`,
+`contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
+pin the shapes.
+
+The type-driven shrink also guards its descent on (type, requested-paths): a
+pair already on the path falls back to the named type reference — no
+structural fallback — which schema generation resolves through `$defs`
+exactly as it does for an authored node.
 
 ### 6.4 Schema shrink validation
 
@@ -434,12 +485,18 @@ Diagnostics emitted in all modes:
   - a `.get()` read in restricted reactive context with no lowerable
     expression site to carry it: a statement-position read (`count.get();`),
     a read inside a reactive array-method callback
-    (`rows.map((row) => row.cell.get())`), a read inside a plain
-    (non-reactive) array-method callback
-    (`["-", "+"].map((sep) => rows.get().join(sep))`, which is not an eligible
-    pattern-owned wrapper site), or a read whose receiver is not a
-    `Cell`/`Writable`/`Stream` (`items.get()` on a plain pattern input, which
-    also draws `opaque-get:invalid-call`)
+    (`rows.map((row) => row.cell.get())`, whose callback becomes a sub-pattern
+    over per-element cells rather than pattern-body code), or a read whose
+    receiver is not a `Cell`/`Writable`/`Stream` (`items.get()` on a plain
+    pattern input, which also draws `opaque-get:invalid-call`)
+  - a read inside a plain (non-reactive) array `map` callback
+    (`["-", "+"].map((sep) => rows.get().join(sep))`) is accepted. That
+    callback runs eagerly during pattern build and `map` collects what it
+    returns without reading it, so its value sites are pattern-owned wrapper
+    sites like the pattern body's own, and each iteration's site lowers to its
+    own lift-applied computation. The result-interpreting array callbacks
+    (`filter`, `find`, `some`, `every`, `sort`, `flatMap`, `reduce`) keep the
+    diagnostic
   - a cell read that DOES sit at a lowerable site is not rejected: the site is
     auto-wrapped into a lift-applied computation. That covers the read itself
     (`const v = count.get()`, `{ value: count.get() }`,
@@ -450,7 +507,9 @@ Diagnostics emitted in all modes:
     spelling of the read (`layout["get"]()`) do not change the decision, and
     neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
     lower like their non-optional spellings, per the 2026-07-23
-    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    optionality-orthogonality resolution. The bare/parenthesized spelling
+    pairs across site kinds are pinned by the `test/validation.test.ts`
+    "Paren-Invariance Twins" battery. Each lift's input schema shrinks to
     what its body reads (`test/validation.test.ts:3179`; goldens
     `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
     `with-reactive`). This is the ratified has-a-lowerable-site rule —
@@ -458,6 +517,13 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
+  - the allowed-callback determination reads the callback's call-argument
+    position through parentheses, so `toSorted(((a, b) => ...))` classifies
+    like `toSorted((a, b) => ...)` — target-language spec §5.7
+    paren-invariance (`test/validation.test.ts` "allows a parenthesized
+    inline callback argument"); parentheses grant nothing outside argument
+    position ("still errors on a parenthesized arrow function in pattern
+    body")
   - class expression or declaration in pattern context unless inside compute
     wrappers; the whole class is flagged once with a class-specific message
 - **Error** `pattern-context:object-member`
@@ -484,6 +550,9 @@ Diagnostics emitted in all modes:
   - in standalone functions (except inline first arg to `patternTool`):
     `computed(...)`, `lift(...)`, or reactive collection methods on reactive
     receivers
+  - what counts as a standalone definition is read through transparent
+    parentheses: `const helper = (() => ...)` is validated (and context-
+    classified) like its bare spelling
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable
@@ -497,13 +566,33 @@ Diagnostics emitted in all modes:
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
   - optional property / element access that appears outside a supported
-    lowerable expression site
+    lowerable expression site — including inside a lowered array-method
+    callback (`map`/`filter`/`flatMap`) and inside a callback whose owning
+    call has no lowerable site
+  - a plain array `map` callback supplies such a site for the reactive values
+    it closes over, so `weekDates?.[colIdx] === todayDate` bound inside
+    `COLUMN_INDICES.map((colIdx) => …)` lowers rather than erroring; an
+    optional access on the callback's own plain parameter
+    (`["a", "bb"].map((s) => s?.length ?? 0)`) has nothing reactive to lift
+    and still errors, and so does one in a callback whose result the method
+    reads (`rows.get().filter((r) => r?.flag)`)
+  - an optional access inside an inline callback argument is carried by the
+    callback's owning call when that call is outside the lowered array-method
+    families and itself sits at a lowerable expression site: the site's lift
+    absorbs the callback, so the access runs on resolved values
+    (`rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`);
+    parentheses around the inline callback change neither the carrier nor
+    the callback allowance (`test/validation.test.ts` "allows optional
+    access inside a parenthesized inline comparator" pins the spelling at
+    zero diagnostics)
   - optional calls do not receive this diagnostic merely because they are
     optional: their underlying call root is classified by the same policy as a
     non-optional call
   - at supported expression sites, receiver optionality (`value?.method()`),
     invocation optionality (`value.method?.()`), and combined chains lower as
     whole calls with JavaScript short-circuit and receiver semantics intact
+  - message instructs the author to wrap the computation in
+    `computed(() => ...)` or move it to a site that lowers
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
@@ -528,7 +617,8 @@ Diagnostics emitted in all modes:
     `computed(() => ...)`, module-scope `lift()`, or a helper.
 - **Error** `pattern-context:patterntool-requires-pattern`
   - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
-    function expression) rather than a `pattern(...)`. The runtime/transformer
+    function expression, read through transparent parentheses) rather than a
+    `pattern(...)`. The runtime/transformer
     auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
     authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
     diagnostic is reported on the bare-callback argument.
@@ -575,8 +665,9 @@ structurally representable.
   `pattern:any-result-schema`
 - individual inferred-result **fields** whose type is `unknown` emit **Error**
   `pattern-result:unknown-type`, naming the offending paths — the schema would
-  carry `{ type: "unknown" }` there and a consumer reading the field back
-  would materialize `undefined` (`schema-injection.ts:2621`)
+  carry `{ type: "unknown" }` there, which a consumer does not materialize: it
+  reads the field back as an opaque reference carrying no properties
+  (`schema-injection.ts:2621`)
 - authors who intentionally want a permissive/opaque output boundary must make
   it explicit with `pattern<Input, Output>(...)`
 
@@ -603,8 +694,30 @@ described in the target-language spec:
 
 - JSX expressions
 - top-level pattern-body value-expression sites
-- callback-local value-expression sites inside supported reactive collection
-  callbacks
+- callback-local value-expression sites inside supported collection callbacks,
+  both the reactive ones that become sub-patterns and the plain-array `map`
+  callbacks that run during pattern build
+
+`isEligiblePatternOwnedWrapperCallbackSite` decides the third bucket from the
+enclosing callback's boundary kind
+(`supportsPatternOwnedWrapperCallbackSite`, `policy/callback-boundary.ts`).
+`reactive-array-method`, `pattern-builder`, and `render-builder` carry
+pattern-owned sites outright; the compute-owned boundaries (`computed`,
+`action`, `lift`, `handler`, event handlers) never do.
+
+`plain-array-value` carries them only for the callback role that can hold
+them, which `isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`)
+decides. It admits a callback that is argument zero of the configured
+default-library `Array`/`ReadonlyArray` type and names a method in
+`COLLECTING_ARRAY_METHOD_NAMES` — today `map` alone — over a plain receiver no
+reactive lowering owns. A source or ambient type merely named `Array` or
+`ReadonlyArray` is not a standard array. `map` stores each result without
+reading it, so a result that is a cell stays a cell. Every other callback-taking
+array method reads the result as it runs:
+`filter`, `find`, `some`, and `every` as a boolean, `sort` as a number,
+`flatMap` as an array test, `reduce` as the next accumulator. A cell reaching
+any of those is an object, which is truthy, not a number, and not an array, so
+those callbacks keep the diagnostic instead.
 
 `findLowerableExpressionSite` walks outward through enclosing pattern-context
 containers until it finds the nearest lowerable site admitted by
@@ -737,8 +850,9 @@ report these through the same collector (deduplicated via §2.2's
   §6.6
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
-  be `{ type: "unknown" }` and the runner would read it back as `undefined`;
-  the message directs authors to add an explicit type
+  be `{ type: "unknown" }` and the runner would not materialize it, reading it
+  back as an opaque reference carrying no properties; the message directs
+  authors to add an explicit type
 - **Error** `reactive:call-argument-computation`
   (`expression-rewrite/emitters/compute-wrap-invariants.ts:112`) — an authored
   reactive computation (e.g. `profile ?? profileWish.result` or
@@ -805,6 +919,12 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+- array-method family calls are never wrapped as a unit: the analysis marks
+  them `skip-call-rewrite`, so only the receiver chain before the method is
+  processed. Via §5's spelling fallback this equally covers an
+  already-rewritten symbol-less `*WithPattern` call encountered inside a
+  processed branch — it stays in place rather than acquiring a lift around
+  the rewritten call
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
     lowered to the lift-applied form)
@@ -915,6 +1035,15 @@ Transform eligibility:
 
 - decision is context/receiver-policy driven:
   - pattern context + reactive receiver origin -> transform
+  - pattern context + receiver identifier bound, directly in a `pattern` /
+    `render` builder callback body, to an initializer the shared
+    expression-site policy classifies as a lowerable `variable-initializer`
+    site (`const view = rows.get().filter(...)`, which §6.5's autowrap turns
+    into a lift) -> transform, and the receiver symbol is registered in
+    `syntheticReactiveCollectionRegistry` so post-closure consumers of the
+    provenance walk agree with the decision. A local inside a JSX IIFE or any
+    other callback is not admitted here — it belongs to that callback's own
+    lowering
   - compute context + `celllike_requires_rewrite` receiver kind -> transform
   - compute context + `opaque_autounwrapped` receiver kind -> do not transform
   - compute context + local alias in the same callback whose initializer
@@ -922,6 +1051,15 @@ Transform eligibility:
     `wish`, already-rewritten collection calls, or other reactive cell-like
     receivers) -> transform
 - plain array `.map()` is not transformed
+- an inline cell-read receiver (`rows.get().filter(...)` used directly as a
+  `.map` receiver, or standing alone) is NOT transformed by this strategy —
+  the read itself is the thing being lowered, and the expression-site
+  machinery owns it (§6.5); inside standalone hardened functions the eager
+  `<cell>.get().filter(...)` spelling stays untouched plain JavaScript
+- the inline callback argument is read through transparent parentheses:
+  `receiver.map(((r) => ...))` lowers exactly like the bare spelling
+  (target-language spec §5.7 paren-invariance; fixture
+  `map-paren-wrapped-callback` pins the emission)
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
 - synthetic compute-owned array-method nodes assert that stale pattern ownership
@@ -1093,6 +1231,17 @@ structurally representable top-level result:
   - prepends event/state schemas
   - unresolved generic helper-definition-site type parameters degrade to
     `{ type: "unknown" }`
+- the schema-first authored form `handler<Event, State[, Result]>(eventSchema,
+  stateSchema, callback[, options])` — recognized when arguments 0 and 1 are
+  not callable and argument 2 is, with callable-ness taken from the checker's
+  call signatures rather than from the expression's spelling, so an arrow, a
+  reference, a function declaration, and a property access all recognize the
+  form — keeps its authored arguments: nothing is prepended, since generated
+  schemas on top would displace the callback out of the positions the runtime
+  dispatch and the sandbox verifier accept (argument 0 or 2). A declared
+  `Result` still lowers onto the trailing options object exactly as below;
+  without one the call passes through unchanged. Fixture:
+  `handler-schema/schema-first-declared-result`.
 - with single function arg:
   - infers event/state schemas from parameters
   - event absent -> `never`; untyped params -> `unknown`
@@ -1102,8 +1251,8 @@ structurally representable top-level result:
   declared result into this third type-argument slot (§7). An absent third
   argument, and an explicit `void`, emit no options object at all: a declared
   result is opt-in and never inferred, so a concise body whose completion
-  value happens to be a cell declares nothing. A call that already passes
-  options (the `{ proxy: true }` form) keeps them, spread into the same object.
+  value happens to be a cell declares nothing. A call that already passes an
+  options object keeps it, spread into the same object.
   The runtime reads `resultSchema` off that slot onto the node's
   `Module.resultSchema` (`packages/runner/src/builder/module.ts`); it does NOT
   reach the pattern's own `resultSchema`, which is what the piece update gate
@@ -1207,6 +1356,20 @@ adjustments:
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
+- reads inside an inline array-method callback count as reads of the enclosing
+  builder's parameter: the element parameter is bound to the receiver's item
+  path, so `table.find((row) => equals(self, row.topic))` records
+  `table[].topic` and, through the capture, `self`. The left operand of a `??`
+  / `||` fallback resolves to a single source ref, which reaches a root through
+  a member/call spine and consumes nothing else; an operand whose spine passes
+  through a call is therefore walked as well, covering that call's callback and
+  arguments and any call nested in them (`memberSpineContainsCall` in
+  `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-array-callbacks.test.ts`). An operand whose
+  ref resolves dynamically instead — a computed element-access key, as in
+  `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
+  which disables shrinking for the whole parameter: its declared shape is
+  emitted intact, without the capability wrappers a walked operand would derive
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
@@ -1347,6 +1510,18 @@ suffixes (`__cfLift_1`, `__cfPattern_1`, …), **not** `factory.createUniqueName
 — whose `.text` carries only the bare prefix and defers suffixing to emit, which
 would make every hoisted identifier share the same `.text` and break the
 identity-by-text lookups later stages rely on.
+
+`__cfPattern_<n>` is a **reserved namespace**, and the runner enforces it:
+registering an evaluated module (`PatternManager.registerEvaluatedModules`)
+refuses a module that EXPORTS a builder artifact under one of these names.
+Hoists reach the artifact index through `__cfReg` (§11.4) rather than through
+exports, so the reservation costs a compiled module nothing — and it is what
+lets a consumer of the index read provenance from the spelling. The
+pattern-update gates depend on exactly that: a recorded instantiation named
+`__cfPattern_<n>` is derivation the updated source re-runs, and is held to a
+different rule than an authored artifact
+(`docs/specs/pattern-update-testing.md`). Only artifacts are refused; a plain
+value under such a name is inert, since nothing but an artifact is indexable.
 
 ### 11.4 `__cfReg` content-addressed registration
 
@@ -1494,7 +1669,7 @@ not yet `.for(...)`-wrapped.
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark
 `cf piece verbs` hides by default (verb contract WS-F; everything stays
-callable, `cf piece call` never consults marks). A property is marked when its
+callable, `cf call` never consults marks). A property is marked when its
 returned value resolves (identifier → nearest const initializer, callback body
 first then module scope) to an applied handler factory that:
 
@@ -1512,7 +1687,10 @@ first then module scope) to an applied handler factory that:
    doing its job, not wrapping a UI.
 
 Every hop that does not match leaves the property unmarked — the mark fails
-open. The companion mark `deprecated: true` is produced in the schema
+open. Property names are read statically throughout — identifier and
+string-literal spellings alike, in the inference and the schema mutation both
+— and a computed name is never inferred. The companion mark
+`deprecated: true` is produced in the schema
 generator itself (`@deprecated` JSDoc on a stream-valued property,
 `packages/schema-generator/src/doc-utils.ts`), and both keys are classified
 annotation-class in the piece compat checker so they add and remove freely
@@ -1903,7 +2081,7 @@ contract, analogous to §11.4's `__cfReg` pairing:
   (`packages/runner/test/security.test.ts`, "does not expose loader machinery on
   the module compartment globals").
 - **Tooling consumer** — `cf view` classifies the three names as "module
-  scaffolding" for syntax colouring via its own hard-coded copy of the list
+  scaffolding" for syntax coloring via its own hard-coded copy of the list
   (`packages/cli/lib/view/languages/typescript/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
   `SHADOWED_FACTORY_BINDINGS` since it does not import it.
 
@@ -2911,9 +3089,12 @@ Consequence for maintenance: the transformer's AST helper builders
 sandbox-contract string builders are maintained **by hand in two encodings**.
 Any drift between them is loud — every transformed module carries at least
 `__cfHardenFn(h);` (§17.2), so a non-matching helper fails verification for
-every pattern load — but there is no unit test asserting the equivalence
-directly (`packages/utils/test/sandbox-contract.test.ts` covers only the
-trusted-name lists).
+every pattern load — and the equivalence is asserted directly by
+`packages/runner/test/sandbox-contract-helper-equivalence.test.ts`, which
+transforms a module and compares each emitted helper declaration's
+trivia-stripped text against the corresponding string builder's output
+(`packages/utils/test/sandbox-contract.test.ts` covers only the trusted-name
+lists).
 
 ### 17.7 Edge cases (observed)
 

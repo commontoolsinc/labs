@@ -1,24 +1,30 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 import "@commonfabric/ui";
-import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
-import { setupHostToggles } from "./lib/host-toggles.ts";
-import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
+
 // Statically imported, deliberately. A dynamic `await import()` here pushes
-// `shared/app/*` into esbuild's lazy `__esm` wrappers, and esbuild then emits
-// one of those wrappers as a NON-async function containing a top-level await —
-// a bundle that is a SyntaxError, so the whole shell fails to load.
+// the navigation and app-state modules into esbuild's lazy `__esm` wrappers,
+// and esbuild then emits one of those wrappers as a NON-async function
+// containing a top-level await — a bundle that is a SyntaxError, so the whole
+// shell fails to load.
 // (`node --check dist/scripts/index.js` catches it; the type checker and the
 // unit tests do not.) There was nothing to gain either way: the shell's
 // `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
 // rather than emitting a chunk.
 import { handleDeviceLink } from "./lib/device-link-login.ts";
+import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
+import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
+import { setupHostToggles } from "./lib/host-toggles.ts";
+
 import "./components/index.ts";
 import "./views/index.ts";
-import { Navigation } from "../shared/mod.ts";
-import type { XRootView } from "./views/RootView.ts";
-import { ROOT_KEY } from "./lib/root-key.ts";
+
 import { KeyStore } from "@commonfabric/identity";
+
+import { Navigation } from "./lib/navigation.ts";
+import { ROOT_KEY } from "./lib/root-key.ts";
+import type { XRootView } from "./views/RootView.ts";
+
 import "./globals.ts";
 
 // Device-link login: /#k=<base64url 32-byte BIP39 entropy>.
@@ -52,7 +58,6 @@ setupHostToggles();
 
 const root = document.querySelector<XRootView>("x-root-view");
 if (!root) throw new Error("No root view found.");
-globalThis.app = root;
 
 // Opens the browser key store, hands it to the root element, and restores a
 // logged-in session from the stored root identity when there is one.
@@ -76,3 +81,9 @@ if (deviceLink.kind !== "absent") {
 await initializeKeys(root);
 
 const _navigation = new Navigation(root);
+
+// `globalThis.app` is the integration-driver readiness boundary. Publishing
+// it before Navigation is installed lets a driver change the view while this
+// module is awaiting the KeyStore, only for Navigation's initial URL apply to
+// overwrite that newer view when bootstrap resumes.
+globalThis.app = root;

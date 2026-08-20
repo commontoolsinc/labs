@@ -11,6 +11,7 @@
  * Event-driven (no wall-clock sleeps): a deterministic microtask drain settles
  * the loopback pipeline.
  */
+
 import { assertEquals } from "@std/assert";
 import { connect, loopback, type Transport } from "../v2/client.ts";
 import { Server } from "../v2/server.ts";

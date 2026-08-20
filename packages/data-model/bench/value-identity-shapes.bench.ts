@@ -20,8 +20,8 @@
  *       --allow-env --no-check bench/value-identity-shapes.bench.ts
  */
 
-import { hashOf } from "../src/value-hash.ts";
-import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
+import { hashOf } from "@/value-hash.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 //
 // Doc-shaped test data, mirroring the default-app integration:

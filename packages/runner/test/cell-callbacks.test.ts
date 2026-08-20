@@ -1,25 +1,28 @@
 // Cell commit callback tests: verifying that onCommit callbacks fire correctly
 // after cell writes reach a final commit result.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
-import { JSONSchema } from "../src/builder/types.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { JSONSchema } from "../src/builder/types.ts";
+import { isCell } from "../src/cell.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import {
   type IExtendedStorageTransaction,
   type IStorageTransaction,
 } from "../src/storage/interface.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -265,6 +268,7 @@ describe("Cell commit callbacks", () => {
     const inner = {
       journal: {},
       clearReadOnly() {},
+      status: () => ({ status: "ready", journal: {} }),
       commit: () => Promise.reject(rejection),
     } as unknown as IStorageTransaction;
     const extended = new ExtendedStorageTransaction(inner);

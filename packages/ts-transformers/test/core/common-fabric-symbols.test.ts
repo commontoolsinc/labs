@@ -5,9 +5,12 @@
  * Fabric Default<T,V> from `@commonfabric/api`. A user type named "Default"
  * does not trigger the same special handling.
  */
-import ts from "typescript";
-import { describe, it } from "@std/testing/bdd";
+
 import { assert, assertEquals, assertFalse } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import ts from "typescript";
+
 import {
   getImportTypeModuleName,
   isCommonFabricDeclaration,

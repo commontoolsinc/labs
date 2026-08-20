@@ -1,7 +1,8 @@
-import { BGPieceEntry } from "./schema.ts";
-import { Cell } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
+import { Cell } from "@commonfabric/runner";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
+
+import { BGPieceEntry } from "./schema.ts";
 import {
   isWorkerIPCRequest,
   isWorkerIPCResponse,

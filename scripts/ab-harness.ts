@@ -1,7 +1,10 @@
-// deno-lint-ignore-file no-explicit-any -- The point of this file is to load
-// the SAME modules from two checkouts whose types differ, and where a member
-// may not even be spelled the same in both. Typing the dynamic imports to
-// either tree defeats the comparison.
+// deno-lint-ignore-file no-explicit-any cf-imports/no-inline-module-import --
+// The point of this file is to load the SAME modules from two checkouts whose
+// types differ, and where a member may not even be spelled the same in both.
+// Typing the dynamic imports to either tree defeats the comparison, and only a
+// dynamic import can name a module by a path built from CF_ROOT. The two
+// imports that do name a module outright are ordered too: the logger names are
+// claimed before anything else can construct one disabled.
 
 /**
  * A/B harness: runs the same probes against two checkouts and diffs the
@@ -114,12 +117,15 @@ const Top = pattern(({ n }: any) => ({
 // A synthetic fixture cannot exhibit what it has no shape for; every claim
 // below is made against this one.
 const { Engine } = await import(`${R}/harness/engine.ts`);
-const { FileSystemProgramResolver } = await import("@commonfabric/js-compiler");
+const { resolveLocalProgram } = await import(
+  "@commonfabric/runner/local-program.deno"
+);
 const FIXTURE = Deno.env.get("CF_FIXTURE") ??
   `${ROOT}/packages/patterns/factory-outputs/parking-coordinator/main.test.tsx`;
 const engine = new Engine(runtime);
-const realProgram = await engine.resolve(
-  new FileSystemProgramResolver(FIXTURE, ROOT),
+const realProgram = await resolveLocalProgram(
+  (resolver) => engine.resolve(resolver),
+  { main: FIXTURE, root: ROOT },
 );
 const Real: any = (await engine.compileAndEvaluateModules(realProgram)).main
   ?.default;

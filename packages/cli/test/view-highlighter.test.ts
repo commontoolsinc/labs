@@ -1,13 +1,14 @@
 /**
  * The incremental highlighter ({@link createHighlighter}) must produce exactly
- * the same coloured lines as a full {@link highlightDocument} parse — it keeps
+ * the same colored lines as a full {@link highlightDocument} parse — it keeps
  * the TypeScript source file warm and re-highlights only the region an edit
  * touches, so its result has to match a from-scratch parse at every step of a
  * realistic edit. These tests drive it through the edits a person makes: typing
  * a file out and deleting it one character at a time, and opening then closing
- * the multi-line constructs (block comment, template, string) whose colour
+ * the multi-line constructs (block comment, template, string) whose color
  * spills onto later lines.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   createHighlighter,
@@ -81,7 +82,7 @@ Deno.test("highlighter: opening and closing multi-line constructs matches a full
   const tail = SAMPLE.slice(mid);
   const at = (s: string) => head + s + tail;
   // A block comment, a template literal, and a string, each grown one keystroke
-  // at a time from unterminated to closed — the states that recolour the lines
+  // at a time from unterminated to closed — the states that recolor the lines
   // below the cursor.
   checkSequence("open-close-constructs", [
     SAMPLE,
@@ -124,7 +125,7 @@ Deno.test("highlighter: inserting and deleting at every position matches a full 
 });
 
 Deno.test("highlighter: an edit re-baselines correctly across a multi-line comment", () => {
-  // Opening a block comment recolours the lines it now swallows; closing it
+  // Opening a block comment recolors the lines it now swallows; closing it
   // restores them. The incremental result must track a full parse through both.
   const hl = createHighlighter(
     "const a = 1;\nconst b = 2;\nconst c = 3;\n",
@@ -134,7 +135,7 @@ Deno.test("highlighter: an edit re-baselines correctly across a multi-line comme
   const inc = hl.update(opened);
   assert(
     inc[1].spans.every((s) => s.cls === "comment" || s.cls === "whitespace"),
-    "line inside the open comment is comment-coloured",
+    "line inside the open comment is comment-colored",
   );
   assertEquals(firstDiff(inc, highlightDocument(opened, "m.ts")), -1);
   const closed = "/* const a = 1;\nconst b = 2; */\nconst c = 3;\n";

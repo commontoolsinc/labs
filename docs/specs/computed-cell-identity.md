@@ -244,8 +244,7 @@ is undecided — see Open Questions.) A cell is tagged iff:
   `node.outputs`. Zero-writer cells are seeded state and are never tagged.
 - **No writer disqualifies** (`writerDisqualifies`). Disqualifying writers
   are exactly:
-  - handler wrappers (`wrapper === "handler"`) and legacy writable-proxy
-    modules (`writableProxy === true`);
+  - handler wrappers (`wrapper === "handler"`);
   - effect modules (`isEffect === true`);
   - `raw`, `isolated`, unrecognized module types, and opaque non-module
     values;
@@ -286,8 +285,7 @@ is undecided — see Open Questions.) A cell is tagged iff:
     possibly-granting, because the writable grant could hide behind the
     reference. Under-collection here would silently drop user writes, so
     every structural doubt disqualifies.
-  - *Schema-less or writable-proxy handlers*: every input root
-    disqualifies.
+  - *Schema-less handlers*: every input root disqualifies.
   - *Sub-pattern nodes* (`type: "pattern"`): every input root disqualifies
     — pattern arguments are writable-by-default aliases, and handlers
     inside the sub-pattern are invisible at this layer.
@@ -536,8 +534,8 @@ changes here:
   handle-bearing lift without provenance, sync-builtin writers, read-only
   handler captures, result-surface exposure) and negative battery for every
   disqualifier (async-builtin writer, unknown ref name, write-capable
-  `asCell` handler capture, writable-proxy handler, stream, zero-writer
-  cell, sub-pattern input, op-sub-pattern builtin input); a registry
+  `asCell` handler capture, stream, zero-writer cell, sub-pattern input,
+  op-sub-pattern builtin input); a registry
   cross-check that every registered builtin name is either replayable or on
   the documented non-replayable list; a pattern refactor that flips a
   cell's kind mints a new id and re-materializes via the manifest.

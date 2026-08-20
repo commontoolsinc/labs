@@ -7,10 +7,12 @@
 // → source maps → eval → error → parseStack → original line numbers.
 
 import { assertEquals, assertMatch } from "@std/assert";
-import { Runtime } from "../src/runtime.ts";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

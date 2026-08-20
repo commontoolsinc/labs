@@ -102,7 +102,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
 | `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts` | Existing by-identity load path the resolver builds on |
-| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. An unseeded default-host provider remains provisional until the first hint arrives or its session accepts a stateful operation. A different host cancels unfinished session setup, replaces the provisional replica, makes overlapping read-only callers use the hinted replica, and loads dependencies discovered from the hinted data. Transactions based on the old replica are rejected. A different-host hint conflicts after an ordinary or scheduler transaction, ACL setup transaction, or SQLite source registration is accepted for issue, even if its acknowledgement later fails. The first accepted late hint then remains stable. Seeds, live hints, and initial table hydration accept only an HTTP or HTTPS origin with no credentials, path, query, or fragment. Hydration selects the last accepted entry for each space without replacing a route already accepted through IPC. A conflicting table route accepted first makes later IPC registration fail. Historical lifecycle resolution can apply a host from an explicit `cf://` reference to the live runtime, but durable route persistence remains planned |
+| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. An unseeded default-host provider remains provisional until the first hint arrives or its session accepts a stateful operation. A different host cancels unfinished session setup, replaces the provisional replica, makes overlapping read-only callers use the hinted replica, and loads dependencies discovered from the hinted data. Transactions based on the old replica are rejected. A different-host hint conflicts after an ordinary or scheduler transaction, ACL setup transaction, or SQLite source registration is accepted for issue, even if its acknowledgment later fails. The first accepted late hint then remains stable. Seeds, live hints, and initial table hydration accept only an HTTP or HTTPS origin with no credentials, path, query, or fragment. Hydration selects the last accepted entry for each space without replacing a route already accepted through IPC. A conflicting table route accepted first makes later IPC registration fail. Historical lifecycle resolution can apply a host from an explicit `cf://` reference to the live runtime, but durable route persistence remains planned |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -205,6 +205,90 @@ therefore creates a distinct revision even when the executable source is
 unchanged. Test dependencies remain ordinary source files in that revision, but
 only paths supplied with `--test` are recovered as test entry points.
 
+### Data files
+
+The same three local deployment commands accept a repeatable
+`--datafile <path>` flag, which attaches a file that is stored with the source
+package and never treated as code. A data file is a file the pattern's author
+keeps beside the pattern source and its tests — a fixture, a table, a list of
+names — and wants deployed with them so that every checkout of the piece
+receives the same bytes.
+
+The bytes are stored verbatim. They are never scanned for imports, never
+transformed, never type-checked, and never compiled or executed, so a data file
+may hold anything a source package can carry. A source package holds text, so a
+data file must be valid UTF-8; the CLI refuses one that is not, by name, rather
+than storing replacement characters. Nothing imports a data file: an import
+specifier that would land on one does not resolve, and fails the compile.
+
+When `--root` is omitted, the CLI uses the common directory containing the main
+entry, every test entry, and every data file. An explicit `--root` remains
+authoritative, and a data file outside it is refused — including one reached
+through a symbolic link. A data file's stored name is its path relative to that
+root, so `--datafile ./data/cities.json` deployed from a root of `.` is stored
+as `/data/cities.json`.
+
+Attached data files participate in the deployed source revision's identity, on
+the same footing as attached test entry points and through the same kind of
+identity-only edge from the entry module. Changing, adding, or removing a data
+file therefore creates a distinct revision even when the executable source is
+unchanged, and each revision stays independently recoverable with its own
+bytes. Source recovery and `cf piece getsrc` return the executable source, its
+attached tests, and its data files together, and report which files are data.
+Repeat the complete set of `--datafile` flags on every `setsrc` because each
+update defines a complete source revision. `set-home --reset` rejects
+`--datafile` because a reset deploys no local source package.
+
+A pattern reads an attached data file with `dataFile(path)` from
+`commonfabric`, naming the path the file is stored under. A data file belongs
+to the package rather than to any one module, so that path is absolute within
+the package and does not resolve relative to the caller — every module in the
+package names a given file the same way, and a sub-pattern reads one as readily
+as the entry does. A path naming no attached data file throws.
+
+The read is immediate. A data file's bytes travel with the pattern's code in
+the same content-addressed closure, so they are present before any module
+executes and the read needs no storage access. It therefore returns the same
+bytes on every load of a given source revision, cold or warm. A data file is
+still not importable: an import specifier that would land on one does not
+resolve.
+
+Data files are fixed at deploy time. Data that changes while the pattern runs
+belongs in its cells; a data file changes only by deploying a new source
+revision.
+
+The same bytes are read by whatever reads the source package: `cf piece
+getsrc`, the FUSE `.src/` view, and any tool working from a recovered
+checkout.
+
+`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
+pattern that reads a data file can be checked and tested before it is deployed.
+An integration test names its data files on the scenario or fixture it runs —
+`dataFiles`, grounded by `dataRoot` — rather than on a command line.
+Without it such a pattern still compiles and type-checks, because `dataFile` is
+declared whether or not a file is attached; the absence surfaces when the
+pattern runs.
+
+### What a data file costs a load
+
+A data file's bytes are in the compiled set, so they travel with every warm
+load. That is what makes the read work after a restart, and it prices the
+feature in closure size rather than in time.
+
+Closure size grows by the size of the attached files, one byte for one byte.
+Warm-load time does not move with it: measured over a pattern whose only
+difference was an attached file of 0, 64 KiB, 512 KiB and 2 MiB, the median
+by-identity load stayed flat at about a millisecond across the range. That is
+the design working — a data document is filtered out before anything parses a
+body, verifies it, or builds it into a record, so its size reaches no per-byte
+work.
+
+Those figures come from an emulated storage manager, which holds the closure in
+memory. They therefore measure the runtime's own cost and say nothing about
+moving the bytes to a client over a real connection, which is where a large
+attached file would actually be felt. Treat closure size as the number that
+matters when deciding how much data belongs in a package.
+
 ## Specifier syntax
 
 ### One grammar, no type tag
@@ -267,8 +351,8 @@ Parsing rules (each form is disjoint by prefix; no segment counting needed):
   always space-scoped (slug ids are `slugIdForSpace(space, slug)`), with the
   current space as default. A parsed `pattern:` ref with a subpath is rejected
   during resolution because one module identity does not bind an exports map.
-- The emitted-namespace specifiers `cf:module/<hash>` and `cf:cache-root/`
-  remain compiler-internal and are **rejected in authored source**.
+- The compiler-internal specifiers `cf:module/<hash>`, `cf:cache-root/`,
+  `cf:source-root/`, and `cf:data-file/` are **rejected in authored source**.
 
 ### Resolution and target selection
 
@@ -550,7 +634,7 @@ expose arbitrary filenames or infer names from entry-module re-exports.
 | `./ ../ /` | program-relative files | today |
 | bare (`commonfabric`, `turndown`, …) | **reserved for runtime modules only**, allowlist | today; never used for packages |
 | `cf:` (authored reference grammar above) | this spec | today for content-addressed and same-toolshed entry references; host-qualified routing, explicit exports maps, and subpaths planned |
-| `cf:module/`, `cf:cache-root/` | compiled output / cache internals; rejected in authored source | today |
+| `cf:module/`, `cf:cache-root/`, `cf:source-root/`, `cf:data-file/` | compiled output, cache internals, and source-package identity edges; rejected in authored source | today |
 | `npm: jsr: https:` | future external packages | reserved now |
 
 Reserving bare specifiers for runtime modules is the load-bearing rule: future
@@ -597,7 +681,8 @@ with storage and network access, and `ProgramResolver.resolveSource` is async)
   `isSlugAddress`/`validateSlug`.
 - `runtime-module-policy.ts`: `isAllowedAuthoredImportSpecifier` accepts
   specifiers parsing under the `cf:` reference grammar (and continues to
-  reject the emitted namespaces `cf:module/`, `cf:cache-root/`).
+  reject the compiler-internal namespaces `cf:module/`, `cf:cache-root/`,
+  `cf:source-root/`, `cf:data-file/`).
 
 ### 2. Resolution (a `FabricProgramResolver` wrapper)
 
@@ -718,7 +803,7 @@ Consequences:
   intended data. A different-host hint can replace an operation that is still
   waiting for a session. Once the session accepts an ordinary or scheduler
   transaction, ACL setup transaction, or SQLite source registration for issue,
-  the route is fixed even if acknowledgement later fails. Host-qualified
+  the route is fixed even if acknowledgment later fails. Host-qualified
   import resolution must still use this registration path before opening the
   referenced space.
 - A cacheable, anonymous HTTP mirror for published patterns (CDN-style
@@ -822,8 +907,8 @@ unchanged.
 
 - **Grammar**: parse/format round-trips; prefix-form table (`cf:ref`,
   `cf:/space/ref`, `cf://host/space/ref`, subpaths, pins, DIDs-as-space,
-  `of:`/`pattern:` refs); rejection of `cf:module/` and `cf:cache-root/` in
-  authored source.
+  `of:`/`pattern:` refs); rejection of `cf:module/`, `cf:cache-root/`,
+  `cf:source-root/`, and `cf:data-file/` in authored source.
 - **Resolution chase**: slug→piece→pattern, slug→pattern (direct
   publication), `of:<patternId>` start, `pattern:<hash>` terminal; "not a
   pattern" failures per chain shape.
@@ -1019,3 +1104,26 @@ unchanged.
    are authenticated, how stale site-table entries are replaced, whether
    failover is allowed, and how an open session closes and reconnects without
    losing or duplicating work after a seed or hint has made the route explicit.
+
+### One way to build a local program
+
+Everything that compiles source from disk — the deployment commands, `cf check`,
+`cf test` and its multi-user workers, and every pattern integration harness —
+goes through `resolveLocalProgram`. It resolves the entry, merges the closures
+of any attached test entries, and attaches any data files, as one operation.
+
+That is a deliberate constraint rather than a convenience. A program assembled
+by hand from a `FileSystemProgramResolver` is complete in every way a compiler
+or type checker can see; what it silently lacks is any data file the caller
+meant to attach, and nothing reports that until a pattern reads one. Composing
+the whole operation in one place removes the opportunity to omit the step, and
+`deno task check-local-program` keeps that the only route by failing on any
+file that names the resolver in code, which catches an alias or a namespace
+import as readily as a direct construction. The check parses each file and
+looks for an identifier, so a document, a doc comment, or a diagnostic message
+may name the resolver while explaining why not to reach for it. Its allowlist
+holds only sites that never build a program to compile: the operation itself,
+the package that declares and re-exports the resolver, the tests of the
+resolver's containment rules, and the import walk behind `cf deps`.
+Extending it means the same claim — a site that compiles what it builds belongs
+on the route, not beside it.

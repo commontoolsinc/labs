@@ -17,11 +17,11 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
@@ -66,8 +66,8 @@ describe("ProblematicValue", () => {
     });
 
     it("survives a state whose own membership check throws", () => {
-      // Prophylaxis rather than a proxy guard: this path must not fail even
-      // if `isFabricValue()` itself has a defect, since throwing here would
+      // Prophylaxis rather than a proxy guard: this path must not fail even if
+      // `isValidFabricValue()` itself has a defect, since throwing here would
       // replace the failure being reported rather than add to it. A hostile
       // proxy is the only way to provoke that from outside.
       const hostile = new Proxy({}, {
@@ -109,7 +109,7 @@ describe("ProblematicValue", () => {
         expect(result).toBe(pv);
         expect(Object.isFrozen(pv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(isDeepFrozenFabricValue(pv)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(pv)).toBe(true);
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {
@@ -197,14 +197,51 @@ describe("ProblematicValue", () => {
         });
       });
 
-      describe("decode()", () => {
-        const CONTEXT = EMPTY_RECONSTRUCTION_CONTEXT;
+      describe("canDecode()", () => {
+        it("returns `true` for a record of the three fields", () => {
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: { x: 1 }, error: "oops" },
+          )).toBe(true);
+        });
 
-        it("reconstructs the tag, state, and error", () => {
+        it("returns `true` for a `state` present and `undefined`", () => {
+          // Every `FabricValue` is a valid state, `undefined` among them.
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: undefined, error: "oops" },
+          )).toBe(true);
+        });
+
+        it("returns `false` for a record with no `state` property at all", () => {
+          // An absent property is the only thing that marks a record this
+          // codec did not write. Filling it in would put a reshaped record
+          // back on the wire rather than reporting the one that arrived.
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", error: "oops" },
+          )).toBe(false);
+        });
+
+        it("returns `false` for a non-string `tag` or `error`", () => {
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: 7, state: 1, error: "oops" },
+          )).toBe(false);
+          expect(ProblematicValue[CODEC].canDecode(
+            { tag: "Weird@7", state: 1, error: 7 },
+          )).toBe(false);
+        });
+
+        it("returns `false` for state that is not an object", () => {
+          expect(ProblematicValue[CODEC].canDecode("nope")).toBe(false);
+        });
+      });
+
+      describe("decode()", () => {
+        const ENV = NULL_LIVE_ENVIRONMENT;
+
+        it("decodes the tag, state, and error", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: { x: 1 }, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
@@ -216,37 +253,11 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: undefined, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
           expect(result.state).toBe(undefined);
-        });
-
-        it("reports a record with no `state` property at all", () => {
-          // Every `FabricValue` is a valid state, `undefined` among them, so
-          // an absent property is the only thing that marks a record this
-          // codec did not write. Filling it in would put a reshaped record
-          // back on the wire rather than reporting the one that arrived.
-          const result = ProblematicValue[CODEC].decode(
-            "Problematic@1",
-            { tag: "Weird@7", error: "oops" },
-            CONTEXT,
-          ) as ProblematicValue;
-
-          expect(result.wireTypeTag).toBe("Problematic@1");
-          expect(result.error).toMatch(/`state` property/);
-        });
-
-        it("reports a state that is not an object", () => {
-          const result = ProblematicValue[CODEC].decode(
-            "Problematic@1",
-            "nope",
-            CONTEXT,
-          ) as ProblematicValue;
-
-          expect(result.wireTypeTag).toBe("Problematic@1");
-          expect(result.error).toMatch(/expected object state/);
         });
       });
     });

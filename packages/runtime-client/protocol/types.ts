@@ -1,3 +1,13 @@
+import type { MetaField } from "@commonfabric/api";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import type { DID, KeyPairRaw } from "@commonfabric/identity";
+import { type Program } from "@commonfabric/js-compiler/interface";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
+import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
   ActionRunTraceEntry,
   JSONSchema,
@@ -12,12 +22,7 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
-import type { DID, KeyPairRaw } from "@commonfabric/identity";
-import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
-import type { MetaField } from "@commonfabric/api";
 export type { JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
@@ -120,10 +125,10 @@ export enum NotificationType {
   PendingWritesChanged = "callback:pending-writes",
 }
 
-export interface IPCClientMessage {
+export type IPCClientMessage = {
   msgId: MessageId;
   data: IPCClientRequest;
-}
+};
 
 export enum RuntimeErrorCode {
   CompilerStackLoadFailed = "compiler-stack-load-failed",
@@ -151,11 +156,11 @@ export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
  * That is a requirement on whatever delivers a request, not a property of any
  * particular transport -- see `RuntimeTransport.send()`.
  */
-export interface BaseRequest {
+export type BaseRequest = {
   type: RequestType;
-}
+};
 
-export interface InitializationData {
+export type InitializationData = {
   // URL of backend server. Also the default host for spaces absent from
   // `spaceHostMap`.
   apiUrl: string;
@@ -166,6 +171,11 @@ export interface InitializationData {
   // IPC boundary. Fixed for the connection's lifetime.
   spaceHostMap?: Record<string, string>;
   // Signer.
+  //
+  // TODO(danfuzz): this and `spaceIdentity` below are the other crossing the
+  // `InsecureCryptoKeyPair` marker in `@commonfabric/identity`'s
+  // `interface.ts` is about, and want the same `FabricBytes` for the same
+  // reason.
   identity: KeyPairRaw;
   // Identity of space.
   spaceDid: DID;
@@ -190,6 +200,10 @@ export interface InitializationData {
     // 2026-08-11 m7). The worker refuses initialization when its
     // resolved posture disagrees with this declaration.
     serverExecution?: boolean;
+    // Link writers emit cid: schema-document references, with each closure
+    // materialized in the carrying transaction (content-addressed schemas
+    // Phase 1). Default off.
+    contentAddressedSchemas?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -215,8 +229,8 @@ export interface InitializationData {
   // (display-dischargeable classes). Undefined = no ceiling (current
   // behavior).
   renderConfidentialityCeiling?: {
-    atoms?: unknown[];
-    caveatKinds?: string[];
+    atoms?: readonly CfcConfClause[];
+    caveatKinds?: readonly string[];
   };
   // Static trust snapshot applied to worker-owned transactions.
   trustSnapshot?: {
@@ -242,18 +256,18 @@ export interface InitializationData {
   // effect on the next runtime (reload), not live. Off by default; the shell
   // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
   concurrentWatchRefresh?: boolean;
-}
+};
 
-export interface InitializeRequest extends BaseRequest {
+export type InitializeRequest = BaseRequest & {
   type: RequestType.Initialize;
   data: InitializationData;
-}
+};
 
-export interface DisposeRequest extends BaseRequest {
+export type DisposeRequest = BaseRequest & {
   type: RequestType.Dispose;
-}
+};
 
-export interface CellGetRequest extends BaseRequest {
+export type CellGetRequest = BaseRequest & {
   type: RequestType.CellGet;
   cell: CellRef;
   meta?: MetaField;
@@ -267,7 +281,7 @@ export interface CellGetRequest extends BaseRequest {
   // and its schema carries the declarations (e.g. stream fields) that the
   // value alone does not.
   includeRef?: boolean;
-}
+};
 
 /**
  * A cell's value as this connection carries it: the data a cell holds, with a
@@ -282,9 +296,10 @@ export interface CellGetRequest extends BaseRequest {
  * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
  * is `postMessage` rather than JSON, so that is a gap rather than a limit --
  * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `JsonCodecEngine`
- * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
- * blob-upload bodies in `backends/runtime-processor.ts`. Until then
+ * with its prototype and private fields gone. `codec-realm` is the mechanism,
+ * being the format written for this crossing: a `bigint` travels as itself, a
+ * `symbol` under a tag, and a `FabricBytes` as an `ArrayBuffer` a send can
+ * transfer. Until then
  * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
  * rather than silent loss.
  */
@@ -298,29 +313,29 @@ export type WireCellValue =
   | { readonly [key: string]: WireCellValue }
   | CellRef;
 
-export interface CellSetRequest extends BaseRequest {
+export type CellSetRequest = BaseRequest & {
   type: RequestType.CellSet;
   cell: CellRef;
   value: WireCellValue;
-}
+};
 
 // A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
 // it carries the whole already-appended array — but routed as its own request so
 // the runtime keeps the read-target as a commit precondition (compare-and-set),
 // rather than the blind last-write-wins of CellSet.
-export interface CellPushRequest extends BaseRequest {
+export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
   cell: CellRef;
   value: WireCellValue;
-}
+};
 
-export interface CellSendRequest extends BaseRequest {
+export type CellSendRequest = BaseRequest & {
   type: RequestType.CellSend;
   cell: CellRef;
   event: WireCellValue;
-}
+};
 
-export interface CellSubscribeRequest extends BaseRequest {
+export type CellSubscribeRequest = BaseRequest & {
   type: RequestType.CellSubscribe;
   cell: CellRef;
   // Opt in to reactive CFC-label delivery: each CellUpdate then carries the
@@ -328,58 +343,58 @@ export interface CellSubscribeRequest extends BaseRequest {
   // dependency of the sink, so a label-only write (value unchanged) re-fires
   // the subscription. Off by default — only label-displaying callers pay it.
   includeCfcLabel?: boolean;
-}
+};
 
-export interface CellUnsubscribeRequest extends BaseRequest {
+export type CellUnsubscribeRequest = BaseRequest & {
   type: RequestType.CellUnsubscribe;
   cell: CellRef;
-}
+};
 
-export interface CellResolveAsCellRequest extends BaseRequest {
+export type CellResolveAsCellRequest = BaseRequest & {
   type: RequestType.CellResolveAsCell;
   cell: CellRef;
-}
+};
 
-export interface CellGetCfcLabelRequest extends BaseRequest {
+export type CellGetCfcLabelRequest = BaseRequest & {
   type: RequestType.CellGetCfcLabel;
   cell: CellRef;
-}
+};
 
 // unused?
-export interface GetCellRequest extends BaseRequest {
+export type GetCellRequest = BaseRequest & {
   type: RequestType.GetCell;
   space: DID;
   cause: FabricValue;
   schema?: JSONSchema;
-}
+};
 
-export interface GetHomeSpaceCellRequest extends BaseRequest {
+export type GetHomeSpaceCellRequest = BaseRequest & {
   type: RequestType.GetHomeSpaceCell;
-}
+};
 
-export interface EnsureHomePatternRunningRequest extends BaseRequest {
+export type EnsureHomePatternRunningRequest = BaseRequest & {
   type: RequestType.EnsureHomePatternRunning;
-}
+};
 
-export interface IdleRequest extends BaseRequest {
+export type IdleRequest = BaseRequest & {
   type: RequestType.Idle;
-}
+};
 
 /**
  * Await storage/piece-manager convergence for EVERY space this worker
  * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
  * which awaits one named space's piece context.
  */
-export interface RuntimeSyncedRequest extends BaseRequest {
+export type RuntimeSyncedRequest = BaseRequest & {
   type: RequestType.RuntimeSynced;
-}
+};
 
 /** Resolve a legacy named space inside the worker so its derived identity can
  * be retained as fresh-space ACL bootstrap authority. */
-export interface ResolveSpaceNameRequest extends BaseRequest {
+export type ResolveSpaceNameRequest = BaseRequest & {
   type: RequestType.ResolveSpaceName;
   name: string;
-}
+};
 
 /**
  * Record a runtime-learned HTTP or HTTPS host hint for a space (site-table v0).
@@ -396,11 +411,11 @@ export interface ResolveSpaceNameRequest extends BaseRequest {
  * accepted site-table route can reject a conflicting IPC hint. The IPC does
  * not override a seed or route already accepted for the session.
  */
-export interface RegisterSpaceHostRequest extends BaseRequest {
+export type RegisterSpaceHostRequest = BaseRequest & {
   type: RequestType.RegisterSpaceHost;
   space: DID;
   host: string;
-}
+};
 
 /**
  * Await all in-flight compile-cache write-backs (persistence durability), as
@@ -408,172 +423,174 @@ export interface RegisterSpaceHostRequest extends BaseRequest {
  * assert a precompiled pattern loads without an in-client recompile: the cache
  * write must be durable before a subsequent load reads it.
  */
-export interface FlushCompileCacheWritesRequest extends BaseRequest {
+export type FlushCompileCacheWritesRequest = BaseRequest & {
   type: RequestType.FlushCompileCacheWrites;
-}
+};
 
-export interface GetGraphSnapshotRequest extends BaseRequest {
+export type GetGraphSnapshotRequest = BaseRequest & {
   type: RequestType.GetGraphSnapshot;
-}
+};
 
-export interface GetLoggerCountsRequest extends BaseRequest {
+export type GetLoggerCountsRequest = BaseRequest & {
   type: RequestType.GetLoggerCounts;
-}
+};
 
-export interface GetPatternCoverageRequest extends BaseRequest {
+export type GetPatternCoverageRequest = BaseRequest & {
   type: RequestType.GetPatternCoverage;
-}
+};
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-export interface SetLoggerLevelRequest extends BaseRequest {
+export type SetLoggerLevelRequest = BaseRequest & {
   type: RequestType.SetLoggerLevel;
   /** Logger name. If not provided, sets level for all loggers. */
   loggerName?: string;
   level: LogLevel;
-}
+};
 
-export interface SetLoggerEnabledRequest extends BaseRequest {
+export type SetLoggerEnabledRequest = BaseRequest & {
   type: RequestType.SetLoggerEnabled;
   /** Logger name. If not provided, sets enabled for all loggers. */
   loggerName?: string;
   enabled: boolean;
-}
+};
 
-export interface SetTelemetryEnabledRequest extends BaseRequest {
+export type SetTelemetryEnabledRequest = BaseRequest & {
   type: RequestType.SetTelemetryEnabled;
   enabled: boolean;
-}
+};
 
-export interface SetForwardWorkerConsoleRequest extends BaseRequest {
+export type SetForwardWorkerConsoleRequest = BaseRequest & {
   type: RequestType.SetForwardWorkerConsole;
   enabled: boolean;
-}
+};
 
-export interface ResetLoggerBaselinesRequest extends BaseRequest {
+export type ResetLoggerBaselinesRequest = BaseRequest & {
   type: RequestType.ResetLoggerBaselines;
-}
+};
 
-export interface GetSettleStatsRequest extends BaseRequest {
+export type GetSettleStatsRequest = BaseRequest & {
   type: RequestType.GetSettleStats;
-}
+};
 
-export interface SetSettleStatsEnabledRequest extends BaseRequest {
+export type SetSettleStatsEnabledRequest = BaseRequest & {
   type: RequestType.SetSettleStatsEnabled;
   enabled: boolean;
-}
+};
 
-export interface GetSettleStatsHistoryRequest extends BaseRequest {
+export type GetSettleStatsHistoryRequest = BaseRequest & {
   type: RequestType.GetSettleStatsHistory;
-}
+};
 
-export interface GetActionRunTraceRequest extends BaseRequest {
+export type GetActionRunTraceRequest = BaseRequest & {
   type: RequestType.GetActionRunTrace;
-}
+};
 
-export interface SetActionRunTraceEnabledRequest extends BaseRequest {
+export type SetActionRunTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetActionRunTraceEnabled;
   enabled: boolean;
-}
+};
 
-export interface GetTriggerTraceRequest extends BaseRequest {
+export type GetTriggerTraceRequest = BaseRequest & {
   type: RequestType.GetTriggerTrace;
-}
+};
 
-export interface SetTriggerTraceEnabledRequest extends BaseRequest {
+export type SetTriggerTraceEnabledRequest = BaseRequest & {
   type: RequestType.SetTriggerTraceEnabled;
   enabled: boolean;
-}
+};
 
-export interface GetWriteStackTraceRequest extends BaseRequest {
+export type GetWriteStackTraceRequest = BaseRequest & {
   type: RequestType.GetWriteStackTrace;
-}
+};
 
-export interface SetWriteStackTraceMatchersRequest extends BaseRequest {
+export type SetWriteStackTraceMatchersRequest = BaseRequest & {
   type: RequestType.SetWriteStackTraceMatchers;
   matchers: WriteStackTraceMatcher[];
-}
+};
 
-export interface DetectNonIdempotentRequest extends BaseRequest {
+export type DetectNonIdempotentRequest = BaseRequest & {
   type: RequestType.DetectNonIdempotent;
   durationMs?: number;
-}
+};
 
-export interface SettleStatsResponse {
+export type SettleStatsResponse = {
   stats: SettleStats | null;
-}
+};
 
-export interface SettleStatsHistoryResponse {
+export type SettleStatsHistoryResponse = {
   history: SettleStatsHistoryEntry[];
-}
+};
 
-export interface ActionRunTraceResponse {
+export type ActionRunTraceResponse = {
   trace: ActionRunTraceEntry[];
-}
+};
 
-export interface TriggerTraceResponse {
+export type TriggerTraceResponse = {
   trace: TriggerTraceEntry[];
-}
+};
 
-export interface WriteStackTraceResponse {
+export type WriteStackTraceResponse = {
   trace: WriteStackTraceEntry[];
-}
+};
 
-export interface DetectNonIdempotentResponse {
+export type DetectNonIdempotentResponse = {
   result: SchedulerDiagnosisResult;
-}
+};
 
-export interface GetPatternSourcesRequest extends BaseRequest {
+export type GetPatternSourcesRequest = BaseRequest & {
   type: RequestType.GetPatternSources;
-}
+};
 
-export interface PatternSourceFile {
+export type PatternSourceFile = {
   name: string;
   contents: string;
-}
+};
 
-export interface PatternSourceInfo {
+export type PatternSourceInfo = {
   /** Content identity of the pattern's entry module (`cf:module/<hash>`). */
   identity: string;
   files: PatternSourceFile[];
-}
+};
 
-export interface PatternSourcesResponse {
+export type PatternSourcesResponse = {
   patterns: PatternSourceInfo[];
-}
+};
 
-export interface SetBreakpointsRequest extends BaseRequest {
+export type SetBreakpointsRequest = BaseRequest & {
   type: RequestType.SetBreakpoints;
   actionIds: string[];
-}
+};
 
-export interface UploadBlobRequest extends BaseRequest {
+export type UploadBlobRequest = BaseRequest & {
   type: RequestType.UploadBlob;
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
   contentType: string;
   /**
-   * The blob's bytes. The type has to stay structured-clone-able, this being an
-   * IPC payload: a class does not survive the crossing, where a typed array
-   * does and carries whole rather than element by element.
+   * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
+   * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
+   * and a send can transfer. It decodes back into a `FabricBytes`, so the
+   * bytes are an immutable value at both ends rather than a view a sender
+   * still holds.
    */
-  body: Uint8Array;
+  body: RealmEncodedValue;
   suffix?: string;
-}
+};
 
-export interface UploadBlobResponse {
+export type UploadBlobResponse = {
   id: string;
   url: string;
-}
+};
 
 // Logger count types for IPC (matches @commonfabric/utils/logger types)
-export interface LogCounts {
+export type LogCounts = {
   debug: number;
   info: number;
   warn: number;
   error: number;
   total: number;
-}
+};
 
 export type LoggerBreakdown = {
   [messageKey: string]: LogCounts;
@@ -585,20 +602,20 @@ export type LoggerCountsData = Record<string, LoggerBreakdown> & {
   total: number;
 };
 
-export interface LoggerInfo {
+export type LoggerInfo = {
   enabled: boolean;
   level: LogLevel;
-}
+};
 
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
 // Timing stats types for IPC (matches @commonfabric/utils/logger types)
-export interface CDFPoint {
+export type CDFPoint = {
   x: number; // Latency in ms
   y: number; // Cumulative probability (0-1)
-}
+};
 
-export interface TimingStats {
+export type TimingStats = {
   count: number; // Total measurements
   min: number; // Minimum time (ms)
   max: number; // Maximum time (ms)
@@ -610,19 +627,23 @@ export interface TimingStats {
   lastTimestamp: number; // When last recorded
   cdf: CDFPoint[]; // CDF of all samples since start
   cdfSinceBaseline: CDFPoint[] | null; // CDF of samples since baseline reset
-}
+};
 
 export type LoggerTimingData = Record<
   string,
   Record<string, TimingStats>
 >;
 
+/**
+ * Active logger flags, by logger name, flag name and id. A flag set without
+ * metadata is `null`.
+ */
 export type LoggerFlagsData = Record<
   string,
-  Record<string, Record<string, Record<string, unknown> | null>>
+  Record<string, Record<string, FabricPlainObject | null>>
 >;
 
-export interface PageCreateRequest extends BaseRequest {
+export type PageCreateRequest = BaseRequest & {
   type: RequestType.PageCreate;
   /** The space the piece is created in — part of its address. */
   space: DID;
@@ -631,10 +652,15 @@ export interface PageCreateRequest extends BaseRequest {
   } | {
     program: Program;
   };
+  // TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
+  // narrows it to the JSON-compatible subset with nothing carrying the rest.
+  // The same gap `WireCellValue` is marked with, at the other request that
+  // sends a value into the worker, and closed by the same mechanism
+  // (`codec-realm`).
   argument?: JSONValue;
   cause?: string;
   run?: boolean;
-}
+};
 
 /**
  * Page operations resolve against one space's piece context, and every
@@ -642,100 +668,100 @@ export interface PageCreateRequest extends BaseRequest {
  * space at this layer. The worker lazily builds a piece context per
  * space, sharing the one runtime/storage connection.
  */
-export interface PageGetSpaceDefault extends BaseRequest {
+export type PageGetSpaceDefault = BaseRequest & {
   type: RequestType.GetSpaceRootPattern;
   space: DID;
-}
+};
 
-export interface RecreateSpaceRootPatternRequest extends BaseRequest {
+export type RecreateSpaceRootPatternRequest = BaseRequest & {
   type: RequestType.RecreateSpaceRootPattern;
   space: DID;
-}
+};
 
-export interface PageGetRequest extends BaseRequest {
+export type PageGetRequest = BaseRequest & {
   type: RequestType.PageGet;
   pageId: string;
   runIt?: boolean;
   space: DID;
-}
+};
 
-export interface PageGetSlugRequest extends BaseRequest {
+export type PageGetSlugRequest = BaseRequest & {
   type: RequestType.PageGetSlug;
   pageId: string;
   space: DID;
-}
+};
 
-export interface PageRemoveRequest extends BaseRequest {
+export type PageRemoveRequest = BaseRequest & {
   type: RequestType.PageRemove;
   pageId: string;
   space: DID;
-}
+};
 
-export interface PageStartRequest extends BaseRequest {
+export type PageStartRequest = BaseRequest & {
   type: RequestType.PageStart;
   pageId: string;
   space: DID;
-}
+};
 
-export interface PageStopRequest extends BaseRequest {
+export type PageStopRequest = BaseRequest & {
   type: RequestType.PageStop;
   pageId: string;
   space: DID;
-}
+};
 
-export interface PageGetAllRequest extends BaseRequest {
+export type PageGetAllRequest = BaseRequest & {
   type: RequestType.PageGetAll;
   space: DID;
-}
+};
 
-export interface PageSyncedRequest extends BaseRequest {
+export type PageSyncedRequest = BaseRequest & {
   type: RequestType.PageSynced;
   space: DID;
-}
+};
 
 /**
  * Read one piece's source state: the pattern it runs, the origin it tracks, the
  * history metadata it carries, and its authored source files. See
  * `docs/specs/piece-source-lifecycle.md`.
  */
-export interface PieceGetSourceRequest extends BaseRequest {
+export type PieceGetSourceRequest = BaseRequest & {
   type: RequestType.PieceGetSource;
   space: DID;
   pieceId: string;
-}
+};
 
 /** Read the authored files retained for one recorded source revision. */
-export interface PieceGetSourceRevisionRequest extends BaseRequest {
+export type PieceGetSourceRevisionRequest = BaseRequest & {
   type: RequestType.PieceGetSourceRevision;
   space: DID;
   pieceId: string;
   revisionId: string;
-}
+};
 
 /** Create a copy of a piece in another space. */
-export interface PieceCloneRequest extends BaseRequest {
+export type PieceCloneRequest = BaseRequest & {
   type: RequestType.PieceClone;
   sourceSpace: DID;
   pieceId: string;
   destinationSpace: DID;
   /** Seed the clone with snapshots of the source piece's durable data. */
   copyData?: boolean;
-}
+};
 
 /** How a piece's origin URL resolves. */
 export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
 
-export interface PieceOriginView {
+export type PieceOriginView = {
   url: string;
   kind: PieceOriginKind;
   /** The URL as recorded on the piece, when normalization changed it. */
   recorded?: string;
-}
+};
 
-export interface PiecePatternRefView {
+export type PiecePatternRefView = {
   identity: string;
   symbol: string;
-}
+};
 
 export type PieceSourceRevisionOperation =
   | "baseline"
@@ -747,16 +773,16 @@ export type PieceSourceRevisionOperation =
   | "follow"
   | "repoint";
 
-export interface PieceSourceRevisionView {
+export type PieceSourceRevisionView = {
   revisionId: string;
   timestamp: number;
   pattern: PiecePatternRefView;
   origin?: PieceOriginView;
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
-}
+};
 
-export interface PieceSourceView {
+export type PieceSourceView = {
   space: DID;
   pieceId: string;
   name?: string;
@@ -769,87 +795,87 @@ export interface PieceSourceView {
   files: PatternSourceFile[];
   history: PieceSourceRevisionView[];
   currentRevisionId?: string;
-}
+};
 
-export interface PieceSourceResponse {
+export type PieceSourceResponse = {
   source: PieceSourceView;
-}
+};
 
-export interface PieceSourceRevisionSourceView {
+export type PieceSourceRevisionSourceView = {
   pattern: PiecePatternRefView;
   files: PatternSourceFile[];
-}
+};
 
-export interface PieceSourceRevisionResponse {
+export type PieceSourceRevisionResponse = {
   source: PieceSourceRevisionSourceView;
-}
+};
 
 export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
   | { kind: "follow"; revisionId: string };
 
-export interface PieceUpdateSourceRequest extends BaseRequest {
+export type PieceUpdateSourceRequest = BaseRequest & {
   type: RequestType.PieceUpdateSource;
   space: DID;
   pieceId: string;
   action: PieceSourceAction;
   /** Opaque token returned with an incompatibility warning. */
   confirmationToken?: string;
-}
+};
 
-export interface PieceUpdateSourceResponse extends PieceSourceResponse {
+export type PieceUpdateSourceResponse = PieceSourceResponse & {
   compatibilityWarning?: string;
   confirmationToken?: string;
   executionWarning?: string;
-}
+};
 
 /** One access level in a space ACL. */
 export type SpaceAclCapability = "READ" | "WRITE" | "OWNER";
 
 /** The space ACL and the current principal's ability to administer it. */
-export interface SpaceAclView {
+export type SpaceAclView = {
   space: DID;
   principal: DID;
   acl: Record<string, SpaceAclCapability>;
   canEdit: boolean;
-}
+};
 
 /** Response carrying a space's access-control view. */
-export interface SpaceAclResponse {
+export type SpaceAclResponse = {
   access: SpaceAclView;
-}
+};
 
 /** Reads the ACL for one space. */
-export interface SpaceGetAclRequest extends BaseRequest {
+export type SpaceGetAclRequest = BaseRequest & {
   type: RequestType.SpaceGetAcl;
   space: DID;
-}
+};
 
 /** Adds or replaces one explicit ACL entry in a space. */
-export interface SpaceSetAclEntryRequest extends BaseRequest {
+export type SpaceSetAclEntryRequest = BaseRequest & {
   type: RequestType.SpaceSetAclEntry;
   space: DID;
   user: string;
   capability: SpaceAclCapability;
-}
+};
 
 /** Removes one explicit ACL entry from a space. */
-export interface SpaceRemoveAclEntryRequest extends BaseRequest {
+export type SpaceRemoveAclEntryRequest = BaseRequest & {
   type: RequestType.SpaceRemoveAclEntry;
   space: DID;
   user: string;
-}
+};
 
 /** Common shape for one-way main -> worker notifications. */
-export interface BaseClientNotification {
+export type BaseClientNotification = {
   type: ClientNotificationType;
-}
+};
 
 /**
  * VDOM event message sent from main thread to worker when a DOM event fires.
  */
-export interface VDomEventNotification extends BaseClientNotification {
+export type VDomEventNotification = BaseClientNotification & {
   type: ClientNotificationType.VDomEvent;
   /** The mount ID that this event belongs to */
   mountId: number;
@@ -859,12 +885,12 @@ export interface VDomEventNotification extends BaseClientNotification {
   event: SerializedDomEvent;
   /** The node ID where the event occurred */
   nodeId: number;
-}
+};
 
 /**
  * Serialized DOM event data for IPC.
  */
-export interface SerializedDomEvent {
+export type SerializedDomEvent = {
   type: string;
   provenance?: {
     origin?: string;
@@ -888,12 +914,12 @@ export interface SerializedDomEvent {
   buttons?: number;
   target?: SerializedEventTarget;
   detail?: JSONValue;
-}
+};
 
 /**
  * Serialized event target data for IPC.
  */
-export interface SerializedEventTarget {
+export type SerializedEventTarget = {
   name?: string;
   value?: string;
   checked?: boolean;
@@ -901,39 +927,39 @@ export interface SerializedEventTarget {
   selectedIndex?: number;
   selectedOptions?: { value: string }[];
   dataset?: Record<string, string>;
-}
+};
 
 /**
  * Request to start VDOM rendering for a cell.
  * The worker will subscribe to the cell and send VDomBatch notifications.
  */
-export interface VDomMountRequest extends BaseRequest {
+export type VDomMountRequest = BaseRequest & {
   type: RequestType.VDomMount;
   /** Unique ID for this mount instance (used to match unmount) */
   mountId: number;
   /** The cell to render as VDOM */
   cell: CellRef;
-}
+};
 
 /**
  * Request to stop VDOM rendering for a mount.
  */
-export interface VDomUnmountRequest extends BaseRequest {
+export type VDomUnmountRequest = BaseRequest & {
   type: RequestType.VDomUnmount;
   /** The mount ID to stop */
   mountId: number;
-}
+};
 
 /**
  * Notification sent after the main thread applies a VDOM batch.
  */
-export interface VDomBatchAppliedNotification extends BaseClientNotification {
+export type VDomBatchAppliedNotification = BaseClientNotification & {
   type: ClientNotificationType.VDomBatchApplied;
   /** The mount ID that received the batch */
   mountId: number;
   /** The applied batch ID */
   batchId: number;
-}
+};
 
 /** Union of all one-way main -> worker notifications. */
 export type IPCClientNotification =
@@ -943,11 +969,24 @@ export type IPCClientNotification =
 /**
  * Response to VDomMount with the root node ID.
  */
-export interface VDomMountResponse {
+export type VDomMountResponse = {
   /** The root node ID for this mount */
   rootId: number;
-}
+};
 
+/**
+ * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
+ * transport implemented using `codec-realm`. As of this writing, secure crypto
+ * keypairs cannot be properly represented: `InitializeRequest`'s `identity` is
+ * a `KeyPairRaw`, whose `CryptoKeyPair` arm is a pair of opaque host objects
+ * that no fabric class covers. Note also that an `interface` never satisfies
+ * `FabricPlainObject` -- TypeScript grants an implicit index signature to an
+ * anonymous object type and not to an interface -- so every arm here has to
+ * become a type alias. The two ends of the crossing carry the matching
+ * markers: `WebWorkerRuntimeTransport.send()` in
+ * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
+ * listener in `../backends/web-worker/index.ts`.
+ */
 export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
@@ -1012,55 +1051,67 @@ export type NullResponse = null;
 
 export type EmptyResponse = undefined;
 
-export interface BooleanResponse {
+export type BooleanResponse = {
   value: boolean;
-}
+};
 
-export interface JSONValueResponse {
+/**
+ * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
+ * its way in.
+ *
+ * TODO(danfuzz): the two directions want the same type and do not have it.
+ * `JSONValue` cannot carry the whole `FabricValue` domain either, and this
+ * direction loses where the inbound one throws: the producer hands over a
+ * value with its `FabricPrimitive`s intact and structured clone strips each to
+ * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
+ * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
+ * is one change.
+ */
+export type JSONValueResponse = {
   value: JSONValue | undefined;
-}
+};
 
-export interface CellGetResponse extends JSONValueResponse {
+export type CellGetResponse = JSONValueResponse & {
   // Present only when the request set `includeCfcLabel`. `undefined` is a valid
   // value (the cell carries no label); the field is omitted when not requested.
   cfcLabel?: CfcLabelView | undefined;
   // Present only when the request set `includeRef` and the read resolved to a
   // cell (a raw-metadata read has no cell to reference).
   cell?: CellRef;
-}
+};
 
-export interface CellResponse {
+export type CellResponse = {
   cell: CellRef;
-}
+};
 
-export interface CfcLabelViewResponse {
+export type CfcLabelViewResponse = {
   cfcLabel: CfcLabelView | undefined;
-}
+};
 
-export interface PageResponse {
+export type PageResponse = {
   page: PageRef;
-}
+};
 
-export interface SlugResponse {
+export type SlugResponse = {
   slug: string | undefined;
-}
+};
 
-export interface SpaceResponse {
+export type SpaceResponse = {
   space: DID;
-}
+};
 
-export interface GraphSnapshotResponse {
+export type GraphSnapshotResponse = {
   snapshot: SchedulerGraphSnapshot;
-}
+};
 
-export interface LoggerCountsResponse {
+export type LoggerCountsResponse = {
   counts: LoggerCountsData;
   metadata: LoggerMetadata;
   timing: LoggerTimingData;
   flags: LoggerFlagsData;
-}
+};
 
-export interface PatternCoverageResponse {
+export type PatternCoverageResponse = {
   /**
    * The worker collector's spans and hit counts, or `null` when this worker was
    * built without a collector. Null and empty are kept apart on purpose: a
@@ -1069,31 +1120,39 @@ export interface PatternCoverageResponse {
    * makes the first invisible.
    */
   data: PatternCoverageData | null;
-}
+};
 
-export interface CellUpdateNotification {
+export type CellUpdateNotification = {
   type: NotificationType.CellUpdate;
   cell: CellRef;
+  // TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
+  // the push form of the same read, produced by the same conversion.
   value: JSONValue;
   // Present only for subscriptions that opted in via `includeCfcLabel`. Carries
   // the cell's current display label so the client re-renders on label changes
   // without a separate getCfcLabel round-trip.
   cfcLabel?: CfcLabelView | undefined;
-}
+};
 
-export interface ConsoleNotification {
+export type ConsoleNotification = {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
+  // TODO(danfuzz): these arrive pre-flattened to text by
+  // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
+  // receiver hands them to `console.log()` -- a devtools inspector, which can
+  // show more of a value than a string of it can. A `codec-realm` arm here is
+  // what lets the fabric among them cross whole; see the marker at the producer
+  // for what else has to move first.
   args: JSONValue[];
-}
+};
 
-export interface NavigateRequestNotification {
+export type NavigateRequestNotification = {
   type: NotificationType.NavigateRequest;
   targetCellRef: CellRef;
-}
+};
 
-export interface ErrorNotification {
+export type ErrorNotification = {
   type: NotificationType.ErrorReport;
   message: string;
   code?: RuntimeErrorCode;
@@ -1102,12 +1161,12 @@ export interface ErrorNotification {
   patternId?: string;
   spellId?: string;
   stackTrace?: string;
-}
+};
 
-export interface TelemetryNotification {
+export type TelemetryNotification = {
   type: NotificationType.Telemetry;
   marker: RuntimeTelemetryMarkerResult;
-}
+};
 
 /**
  * Worker-to-page mirror of the storage manager's durability barrier: `pending`
@@ -1115,10 +1174,10 @@ export interface TelemetryNotification {
  * once the pending set drains. The shell consults the latest value from its
  * beforeunload handler so a reload with unconfirmed writes prompts the user.
  */
-export interface PendingWritesNotification {
+export type PendingWritesNotification = {
   type: NotificationType.PendingWritesChanged;
   pending: boolean;
-}
+};
 
 /**
  * The vocabulary of DOM mutations carried by a VDOM batch. The worker
@@ -1133,7 +1192,7 @@ export type { VDomOp };
 /**
  * VDOM batch notification sent from worker to main thread.
  */
-export interface VDomBatchNotification {
+export type VDomBatchNotification = {
   type: NotificationType.VDomBatch;
   /** Identifier for this batch (for debugging/logging) */
   batchId: number;
@@ -1143,7 +1202,7 @@ export interface VDomBatchNotification {
   rootId?: number;
   /** The mount ID this batch belongs to */
   mountId?: number;
-}
+};
 
 export type RemoteResponse =
   | EmptyResponse

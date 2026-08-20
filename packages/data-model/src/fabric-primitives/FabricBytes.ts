@@ -4,16 +4,19 @@ import {
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
+import type { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
-  ReconstructionContext,
+  JSON_CODEC,
+  LiveEnvironment,
+  REALM_CODEC,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -119,25 +122,23 @@ export class FabricBytes extends BaseFabricPrimitive {
   //
 
   static #jsonCodec = Object.freeze(
-    new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue> {
+    new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue, string> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
       }
 
       /** @inheritDoc */
+      canDecode(state: JsonCodecValue): state is string {
+        return typeof state === "string";
+      }
+
+      /** @inheritDoc */
       decode(
         typeTag: string,
-        state: JsonCodecValue,
-        _context: ReconstructionContext,
+        state: string,
+        _env: LiveEnvironment,
       ): FabricBytes | ProblematicValue {
-        if (typeof state !== "string") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `Bytes: expected string state, got ${typeof state}`,
-          );
-        }
         try {
           const bytes = fromBase64url(state);
           return new FabricBytes(bytes, true);
@@ -151,8 +152,73 @@ export class FabricBytes extends BaseFabricPrimitive {
       }
 
       /** @inheritDoc */
-      encode(value: FabricBytes): JsonCodecValue {
+      encode(value: FabricBytes): string {
         return toUnpaddedBase64url(value.#bytes);
+      }
+    })(),
+  );
+
+  static #realmCodec = Object.freeze(
+    new (class BytesCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * An `ArrayBuffer` rather than a view onto one, because that is the
+       * form `postMessage()` can *transfer*. The buffer is an unshared copy
+       * covering exactly these bytes, so a caller assembling a transfer list
+       * can hand it over outright: nothing else refers to it, and a caller
+       * mutating the encoded tree before it crosses cannot reach into this
+       * instance.
+       */
+      encode(value: FabricBytes): RealmCodecValue {
+        return value.sliceBuffer();
+      }
+
+      /** @inheritDoc */
+      canDecode(state: RealmCodecValue): state is ArrayBuffer {
+        return state instanceof ArrayBuffer;
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * A detached buffer throws rather than being reported. It is not a
+       * malformed state -- it is a well-formed one this tree already spent --
+       * so it is not {@link #canDecode}'s to refuse, and it is caught rather
+       * than tested for, the constructor being what discovers it.
+       */
+      decode(
+        _typeTag: string,
+        state: ArrayBuffer,
+        _env: LiveEnvironment,
+      ): FabricValue {
+        // Taken over rather than copied. This buffer reached here either by
+        // being cloned -- in which case it is this realm's own and nobody
+        // else's -- or by being transferred, which detaches the sender's.
+        // Either way nothing on this side but the wire tree refers to it, and
+        // that tree is spent once decoding is done.
+        try {
+          return new FabricBytes(new Uint8Array(state), true);
+        } catch (e) {
+          // The one way an `ArrayBuffer` reaches here and cannot be built
+          // from is by being detached, and it detaches by having been taken
+          // over already -- so this tree was decoded before, and the bytes
+          // went to that call. Said here because the alternative is the
+          // engine reporting the runtime's own phrasing, which names a
+          // detached buffer without saying how it came to be one. The tag is
+          // left out: the report carries it either way, and naming it here
+          // would say it twice.
+          throw new Error(
+            "The state is a detached buffer, this tree having been decoded " +
+              "already.",
+            { cause: e },
+          );
+        }
       }
     })(),
   );
@@ -160,5 +226,13 @@ export class FabricBytes extends BaseFabricPrimitive {
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#jsonCodec;
+  }
+
+  /**
+   * The codec for instances of this class in the realm-crossing format. The
+   * bytes travel as bytes, where JSON has to encode them as base64url text.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }

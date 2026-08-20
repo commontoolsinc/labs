@@ -1,15 +1,16 @@
+import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { context, diag, trace } from "@opentelemetry/api";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   defaultResource,
   resourceFromAttributes,
 } from "@opentelemetry/resources";
-import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
-import env from "@/env.ts";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { registerTelemetry } from "ai";
+
+import env from "@/env.ts";
 import { createAiSdkTelemetry } from "@/lib/ai-telemetry.ts";
-import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { samplerFromEnv } from "@/lib/otel-sampler.ts";
 import { detachRuntimeOtelBridgeIfAttached } from "@/runtime-options.ts";
 

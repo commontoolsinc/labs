@@ -27,11 +27,36 @@ const removePiece = handler({
     type: "object",
     properties: {
         piece: {
-            type: "unknown",
+            $ref: "#/$defs/MentionablePiece",
             asCell: ["comparable"]
         }
     },
-    required: ["piece"]
+    required: ["piece"],
+    $defs: {
+        MentionablePiece: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                isHidden: {
+                    type: "boolean"
+                },
+                mentioned: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/MentionablePiece"
+                    }
+                },
+                backlinks: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/MentionablePiece"
+                    }
+                }
+            }
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

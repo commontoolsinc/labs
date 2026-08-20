@@ -1,9 +1,10 @@
-import { Command } from "@cliffy/command";
-import { Engine } from "@commonfabric/runner";
-import { join } from "@std/path/join";
-import { getCompilerOptions } from "@commonfabric/js-compiler/typescript";
-import { StaticCache } from "@commonfabric/static";
 import { dirname } from "@std/path/dirname";
+import { join } from "@std/path/join";
+
+import { Command } from "@cliffy/command";
+import { getCompilerOptions } from "@commonfabric/js-compiler/typescript";
+import { Engine } from "@commonfabric/runner";
+import { StaticCache } from "@commonfabric/static";
 
 export const init = new Command()
   .name("init")

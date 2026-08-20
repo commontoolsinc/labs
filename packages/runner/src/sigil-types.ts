@@ -4,13 +4,13 @@ import type {
   JSONValue,
   LinkScope,
 } from "@commonfabric/api";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { URI } from "@commonfabric/memory/interface";
 import {
   LINK_V1_TAG,
   type LinkRef,
   type WireLinkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
 import { isLinkScope } from "./scope.ts";
 
 export type { URI } from "@commonfabric/memory/interface";
@@ -44,7 +44,19 @@ export type CellLinkRefPayload = {
  */
 export type WebhookCellLinkRefPayload = Omit<CellLinkRefPayload, "schema">;
 
-const WEBHOOK_LINK_KEYS = [
+/**
+ * The payload members that address a cell: which document, in which space and
+ * scope, at which path, and whether a write there redirects. This is the whole
+ * of what a link says about where it points; everything else a payload may
+ * carry -- `schema`, cfc's `cfcLabelView` -- describes how the value there is
+ * read or labeled.
+ *
+ * Two consumers turn on that distinction, and share this list so they cannot
+ * drift apart on what "addressing" means. The webhook wire admits these and
+ * refuses the rest ({@link assertWebhookCellLinkRefPayload}), and a node's
+ * cause is reduced to them (`sigilLinkAddressOnly`).
+ */
+export const LINK_ADDRESS_KEYS = [
   "id",
   "space",
   "scope",
@@ -63,7 +75,7 @@ export function assertWebhookCellLinkRefPayload(
   payload: WireLinkRefPayload,
 ): asserts payload is WebhookCellLinkRefPayload {
   for (const key of Object.keys(payload)) {
-    if (!(WEBHOOK_LINK_KEYS as readonly string[]).includes(key)) {
+    if (!(LINK_ADDRESS_KEYS as readonly string[]).includes(key)) {
       throw new Error(`Unexpected cell-link field: "${key}".`);
     }
   }

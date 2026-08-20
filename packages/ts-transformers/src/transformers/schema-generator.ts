@@ -1,19 +1,21 @@
-import ts from "typescript";
-import {
-  CF_HELPERS_IDENTIFIER,
-  HelpersOnlyTransformer,
-  TransformationContext,
-} from "../core/mod.ts";
 import {
   type SchemaGenerationOptions,
   SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
+import ts from "typescript";
+
 import {
   getNodeText,
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
+import {
+  CF_HELPERS_IDENTIFIER,
+  HelpersOnlyTransformer,
+  TransformationContext,
+} from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
@@ -86,7 +88,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        const arg0 = node.arguments[0];
+        const arg0 = node.arguments[0] && unwrapExpression(node.arguments[0]);
         let optionsObj: Record<string, unknown> = {};
         let widenLiterals: boolean | undefined;
         if (arg0 && ts.isObjectLiteralExpression(arg0)) {

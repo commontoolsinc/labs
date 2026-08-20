@@ -1,13 +1,14 @@
 /**
- * Colour theme for the `cf view` pager: a modern dark scheme. Light-grey text on
+ * Color theme for the `cf view` pager: a modern dark scheme. Light-gray text on
  * a near-black editor surface, with a One-Dark-inspired accent palette — purple
  * keywords, green strings, amber types, blue functions, orange numbers, and
  * bright-white comments. A slightly lighter surface holds the status bar and
  * dialogs. Each {@link TokenClass} maps to an ANSI {@link Style}; the chrome
  * styles (status bar, selection, search, overlay) and the rainbow bracket cycle
  * round it out. The general aesthetic (double-line dialog frames, drop shadows,
- * green buttons) is unchanged — only the colours differ.
+ * green buttons) is unchanged — only the colors differ.
  */
+
 import { hex, type Rgb, type Style } from "./ansi.ts";
 import type { Line, TokenClass } from "./model.ts";
 
@@ -77,7 +78,7 @@ const TOKEN_STYLES: Record<TokenClass, Style> = {
   diffMeta: { fg: C.fgDim },
 };
 
-/** Full-row background tints for diff lines (syntax colours stay on top). */
+/** Full-row background tints for diff lines (syntax colors stay on top). */
 const LINE_BGS: Record<NonNullable<Line["bg"]>, Rgb> = {
   add: C.addBg,
   del: C.delBg,
@@ -101,7 +102,7 @@ export function styleFor(cls: TokenClass): Style {
   return TOKEN_STYLES[cls];
 }
 
-/** Token colours for content shown inside a dialog. The comment token marks
+/** Token colors for content shown inside a dialog. The comment token marks
  * muted labels there, while builderCall marks shortcut keys. */
 const DIALOG_TOKEN_STYLES: Record<TokenClass, Style> = {
   ...TOKEN_STYLES,
@@ -111,7 +112,7 @@ const DIALOG_TOKEN_STYLES: Record<TokenClass, Style> = {
 };
 
 /** The dialog-palette style for a token class (bracket depth is ignored: a
- * dialog draws every bracket in the default colour rather than rainbow). */
+ * dialog draws every bracket in the default color rather than rainbow). */
 export function dialogStyleFor(cls: TokenClass): Style {
   return DIALOG_TOKEN_STYLES[cls];
 }

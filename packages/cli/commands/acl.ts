@@ -1,10 +1,11 @@
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
+import { isCapability } from "@commonfabric/memory";
+
 import { getAcl, removeAclEntry, setAclEntry } from "../lib/acl.ts";
-import { parseSpaceOptions } from "./piece.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
-import { isCapability } from "@commonfabric/memory";
+import { parseSpaceOptions } from "./piece.ts";
 
 // Usage patterns for examples
 const spaceUsage = `--identity <identity> --api-url <api-url> --space <space>`;

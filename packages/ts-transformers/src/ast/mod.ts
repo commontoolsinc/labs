@@ -1,4 +1,8 @@
 export {
+  type CallArgumentPosition,
+  getCallArgumentPosition,
+} from "./call-arguments.ts";
+export {
   type ArrayCallbackContainerCallKind,
   type ArrayMethodAccessKind,
   type ArrayMethodCallSiteInfo,
@@ -34,6 +38,7 @@ export {
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
+  resolveCallbackFunctionExpression,
   type VerbBuilderName,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";

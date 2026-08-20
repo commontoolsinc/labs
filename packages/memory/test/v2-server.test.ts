@@ -2419,6 +2419,9 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
         },
       }],
     } as any));
+    // The broken watch answers with a QueryError — evaluation state is
+    // staged, so the session continues on this connection and the failed
+    // add's "extra" watch left nothing behind.
     const failed = nextResponse<any>(messages);
     assertEquals(failed.requestId, "watch-2");
     assertEquals(failed.error?.name, "QueryError");
@@ -2445,7 +2448,8 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
 
     await tick();
     // The accept's catch-up marker rides an otherwise-empty frame
-    // (CT-1927); no watched novelty is echoed.
+    // (CT-1927); no watched novelty is echoed — a leaked "extra" watch
+    // would have put doc:2's update on this frame.
     const marker2 = assertEffect(shiftMessage(messages));
     assertEquals(marker2.effect.upserts, []);
     assertEquals(marker2.effect.caughtUpLocalSeq, 2);

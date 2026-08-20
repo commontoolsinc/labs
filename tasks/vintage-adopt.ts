@@ -26,7 +26,12 @@
  * fixture whose every replay fails — the dead end the capture guard exists to
  * prevent, one tool over.
  */
+
 import { Identity } from "@commonfabric/identity";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { getPatternIdentityRef } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
+
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -34,9 +39,6 @@ import {
   vintageRoot,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { getPatternIdentityRef } from "@commonfabric/runner";
-import type { Cell } from "@commonfabric/runner";
 import {
   patternKeyFromMain,
   PINNED,
@@ -243,8 +245,9 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
       const source = `${roots.patternsRoot}/${entryKey}`;
       let program;
       try {
-        program = await vintage.runtime.harness.resolve(
-          new FileSystemProgramResolver(source, roots.repoRoot),
+        program = await resolveLocalProgram(
+          (resolver) => vintage.runtime.harness.resolve(resolver),
+          { main: source, root: roots.repoRoot },
         );
       } catch (error) {
         throw new Error(

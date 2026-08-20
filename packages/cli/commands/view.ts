@@ -9,7 +9,7 @@ const description = cliText(
 A less-like viewer for the dense output of '--show-transformed' and saved source
 files. Transformed TypeScript is parsed with the same parser the transformer
 uses, so blocks, closures, schemas, type positions and Common Fabric builders
-(pattern/lift/handler/…) are coloured exactly as the compiler sees them.
+(pattern/lift/handler/…) are colored exactly as the compiler sees them.
 Markdown, JSON, JSONC, YAML and Python files use syntax highlighting selected
 from language metadata. Python interpreter shebangs select Python. Node, Deno
 and Bun shebangs select the TypeScript and JavaScript language family.
@@ -23,13 +23,13 @@ explicitly with '--language' or supply a virtual name with '--filename'. Either
 option suppresses unified-diff auto-detection; use '--diff' instead for a diff.
 The Markdown language also has a rendered view that formats headings, lists,
 quotes, tables, links, emphasis and code while retaining source line positions.
-Source views remain verbatim and add colour only.
+Source views remain verbatim and add color only.
 
 Raw unified diffs are detected automatically when their structural header is
 the first nonblank line. Standard Git commit output is detected from its complete
 header. Binary detection examines bytes; other source content is not used to
 guess a language. Piping 'git diff' in gives added and removed lines their
-tints, full syntax colour, a structure tree of the code each hunk touches, and
+tints, full syntax color, a structure tree of the code each hunk touches, and
 the semantic features (inferred types, go-to-definition) answered against the
 CURRENT state of the workspace files the diff names.
 
@@ -46,7 +46,7 @@ KEYS (press ? in the viewer for the full list):
   Enter info card · in it: ↑/↓ pick a reference · Enter opens it · z reveals it
   v source/rendered · t look up a definition · # line numbers · \\ wrap mode · q quit
 
-When stdout is not a terminal (piped/redirected) it prints the colourised text
+When stdout is not a terminal (piped/redirected) it prints the colorized text
 and exits, like less.`,
 );
 
@@ -59,7 +59,7 @@ export const view = new Command()
   )
   .example(
     cliText(`git diff origin/main | cf view`),
-    "View a diff with syntax colour, structure navigation and types.",
+    "View a diff with syntax color, structure navigation and types.",
   )
   .example(
     cliText(`cf view transformed.ts`),
@@ -67,12 +67,12 @@ export const view = new Command()
   )
   .option(
     "--color <when:string>",
-    "Colourise: always | auto | never (auto = when stdout is a TTY).",
+    "Colorize: always | auto | never (auto = when stdout is a TTY).",
     { default: "auto" },
   )
   .option(
     "--plain",
-    "Do not launch the interactive pager; print colourised text and exit.",
+    "Do not launch the interactive pager; print colorized text and exit.",
   )
   .option(
     "-n, --line-numbers",

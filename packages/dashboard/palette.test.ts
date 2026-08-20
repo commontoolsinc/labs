@@ -1,8 +1,11 @@
-// The palette's job is to keep four statuses apart, including for a viewer who
-// cannot separate red from green. That is a measurable property rather than a
-// matter of taste, so it is measured here: each color is put through a
-// simulation of dichromatic vision and the pairs are compared in a space where
-// distance matches what a person sees.
+/**
+ * The palette's job is to keep four statuses apart, including for a viewer who
+ * cannot separate red from green. That is a measurable property rather than a
+ * matter of taste, so it is measured here: each color is put through a
+ * simulation of dichromatic vision and the pairs are compared in a space where
+ * distance matches what a person sees.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Status } from "./types.ts";

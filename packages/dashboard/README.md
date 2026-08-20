@@ -39,7 +39,6 @@ dashboard/
   palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
   theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
-  blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
@@ -56,7 +55,7 @@ dashboard/
 collects each tile that is due (respecting its `intervalMs`), renders the
 results uniformly, mounts any drill-down routes a tile declares, and pushes new
 tile markup as each independent collection completes. Every registered tile has
-a gray placeholder labelled with its id in its registered position until its
+a gray placeholder labeled with its id in its registered position until its
 first collection completes, so slow collectors do not leave holes in the board.
 A later ticker pass skips a tile or shared workflow fetch that is still
 updating. It starts every other due collection, so pending work does not pause
@@ -84,6 +83,21 @@ snapshot and publishes those tile updates together. Each workflow can trigger a
 tile once per collection interval. A tile with several workflows can update
 once for each workflow as they arrive. This keeps a repository's build, trust,
 duration, and recent-run views in agreement when their intervals coincide.
+
+A workflow snapshot is read a page at a time, and the pages have to describe
+one moment. A page after the first asks GitHub for the runs created at or
+before the run the page before it ended on, rather than for an offset into a
+list that shifts as runs land. That run is one the window already holds, so the
+page has to carry it; a page that comes back without it was cut from a moment
+that never held that run, and the fetch fails rather than joining the two. This
+reads the same whichever side went stale. The cost is the one run each page
+repeats, which is why the window is up to the configured maximum rather than
+exactly it. The runs that do come back are ordered newest-first by the
+collection, not by the order the pages arrived in. A fetch whose newest run is older than the newest run already held
+read a stale view of the workflow: the scheduler keeps the snapshot it has and
+names the source, and the next fetch that reaches a current view clears that.
+Together these keep a stale read from putting a run from weeks back at the head
+of a window, where every CI tile takes the state of the tree from.
 
 The recent-main-runs tile reads both the Labs and Loom snapshots. It rebuilds
 and sorts the combined list whenever either snapshot arrives. If one snapshot
@@ -299,8 +313,8 @@ surveillance tool.
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
-| ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A source whose feed stopped being written more than four days ago counts as one that cannot be read, rather than charting the days since as $0. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| github spend | the organization's whole metered GitHub bill, projected to month-end in USD: every product its billing report carries, added into one figure. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0. "What the GitHub figure covers" below says which spend reaches the API | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -317,6 +331,59 @@ runs. Each duration starts when GitHub creates the workflow run for the landed
 commit and ends when that run finishes, so it includes runner queueing and
 reruns.
 
+### What the GitHub figure covers
+
+The **github spend** tile reads the organization's billing usage report, which
+carries one row per product, SKU, repository and day. The tile adds up every
+row, so the figure is the organization's whole metered GitHub bill rather than
+any one product's share of it. GitHub meters these products, and a product the
+organization does not use simply has no row:
+
+| product | what it bills for |
+|---|---|
+| `actions` | workflow minutes on every runner size, plus Actions and cache storage |
+| `packages` | Packages storage and bandwidth |
+| `codespaces` | Codespaces compute, storage, and prebuild storage |
+| `git_lfs` | Git LFS storage and bandwidth |
+| `copilot` | Copilot seats (`copilot_for_business`, `copilot_enterprise`, `copilot_standalone`) and the AI credits Copilot consumes |
+| `ghec` | GitHub Enterprise Cloud seat licenses (`ghec_licenses`) |
+| `ghas` | Advanced Security seat licenses, whole and by tier |
+| `models` | model inference |
+| `sandbox` | Copilot sandbox compute, memory, and snapshots |
+| `spark` | Spark AI credits |
+
+Seat licenses arrive as billed dollars in that same report, so Copilot seats
+and Enterprise Cloud licenses are inside the figure without any per-seat price
+having to be configured here.
+
+One caveat applies to the projection rather than to the figure. GitHub dates
+every row by the day the usage occurred, and the month-end projection carries
+the recent daily rate across the remaining days, which suits spend that accrues
+daily. A charge posted as a single lump instead of as a daily series would be
+carried across the month as though it recurred, overstating the projection
+while leaving month-to-date correct. No such charge has been observed here, and
+seat licenses are the products to watch for one: compare the headline with the
+month-to-date total beside it the first month a seat-licensed product appears.
+
+What the API does not expose, and the figure therefore excludes:
+
+- **A subscription billed outside the usage report.** An organization's plan
+  reaches the API only when its licensing is metered, as `ghec_licenses` rows.
+  An organization billed for its plan as a flat subscription — a **Team** plan,
+  which has no product or SKU of its own at all, or an **Enterprise** plan whose
+  licensing has not moved to metered billing — has no row for it, and its
+  seat cost is absent from the figure. `orgs/{org}` reports the seat counts
+  (`plan.name`, `plan.seats`, `plan.filled_seats`) but never a price, so there
+  is nothing to add up from.
+- **Anything billed at the enterprise account rather than the organization.**
+  The usage report is scoped to one organization. An enterprise account's own
+  report is a separate endpoint under `enterprises/{enterprise}`, needs
+  enterprise-level administration, and is not read here.
+
+Both gaps are silent: the figure is a true total of what GitHub reports, not a
+total of what GitHub charges. Check it against the billing page the tile links
+to before treating it as the whole bill.
+
 ## Credentials
 
 Every tile that reads a private source is gated on its own env var(s) and grays
@@ -332,9 +399,9 @@ if you lose it you have to regenerate.
 ### `GH_TOKEN` (or `GITHUB_TOKEN`)
 
 Powers **labs ci**, **labs ci trust**, **labs ci duration**, the **loom**
-counterparts, **recent main runs**, **ci spend**, and **github users**. Needs repo
-**Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`; the
-github-ci-spend tile additionally needs org **Administration: read** on
+counterparts, **recent main runs**, **github spend**, and **github users**. Needs
+repo **Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`;
+the github-ci-spend tile additionally needs org **Administration: read** on
 `commontoolsinc`. The **github users** tile needs org **Members: read**. One
 fine-grained token can carry all of these permissions:
 
@@ -350,7 +417,7 @@ organization member; other callers see only public memberships.
    and `commontoolsinc/loom`.
 4. **Repository permissions**: set **Actions** and **Contents** to **Read-only**.
 5. **Organization permissions**: set **Members** to **Read-only** for GitHub
-   users. Set **Administration** to **Read-only** for ci spend. Only an org
+   users. Set **Administration** to **Read-only** for github spend. Only an org
    owner or billing manager can grant the latter permission. Skip either
    permission when its tile is not needed.
 6. **Generate token** and copy it (`github_pat_…`, shown once).
@@ -358,32 +425,8 @@ organization member; other callers see only public memberships.
 If you only need the labs CI tiles, keep `commontoolsinc` as the resource owner,
 select only `commontoolsinc/labs`, and grant Actions/Contents read without any
 organization permissions. Classic PATs also work (use `read:org` for GitHub
-users and `admin:org` for ci spend). If the org requires approval for
+users and `admin:org` for github spend). If the org requires approval for
 fine-grained tokens, yours stays pending until an owner approves it.
-
-### `BLACKSMITH_API_TOKEN`
-
-Powers the Blacksmith share of **ci spend**. Use the bearer token accepted by
-the Blacksmith CLI. The CLI's documented
-[`blacksmith auth login`](https://docs.blacksmith.sh/blacksmith-testbox/cli#blacksmith-auth-login)
-flow opens a browser and saves the returned token under
-`~/.blacksmith/credentials`. The CLI also accepts
-`blacksmith auth login --api-token <token>` as a non-interactive way to save an
-existing token to that file. The flag does not create or register a token with
-Blacksmith.
-
-The dashboard does not read the CLI credentials file. Complete the browser
-login on a trusted workstation, then copy the saved token into the deployment's
-secret manager as `BLACKSMITH_API_TOKEN`. Do not run the CLI login command in
-the dashboard container. Set `BLACKSMITH_ORG` when it differs from
-`GH_BILLING_ORG` or the owner in `DASHBOARD_REPO`. The account needs
-organization billing access. Blacksmith
-[maps billing access to organization admins](https://docs.blacksmith.sh/blacksmith-administration/permissions).
-
-The collector sends the token as `Authorization: Bearer` to
-`https://backend.blacksmith.sh`. It makes read-only `GET` requests and does not
-store or rotate the token. `BLACKSMITH_API_URL` overrides the backend URL in the
-same way as the CLI, primarily for local testing.
 
 ### `SIGNOZ_URL` + `SIGNOZ_API_KEY`
 
@@ -555,10 +598,7 @@ it.
 
 | env var | tile | purpose |
 |---|---|---|
-| `GH_BILLING_ORG` | ci spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
-| `BLACKSMITH_ORG` | ci spend | Blacksmith organization login. Defaults to `GH_BILLING_ORG`, then the owner from `DASHBOARD_REPO`. |
-| `BLACKSMITH_API_URL` | ci spend | Blacksmith backend URL. Defaults to `https://backend.blacksmith.sh`. |
-| `CI_MONTHLY_BUDGET` | ci spend | combined monthly USD budget across GitHub and Blacksmith. Without it, a single provider uses its configured budget. Two providers use the sum when both have a configured budget. |
+| `GH_BILLING_ORG` | github spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
@@ -607,27 +647,27 @@ Notes:
   read. A second token would not reduce exposure because the process would hold
   both, so there is just one. With Actions read alone, those two tiles gray out
   and the other GitHub tiles still work.
-- **`ci spend`** shows the **projected** full-month total across GitHub Actions
-  and Blacksmith. Each source is projected from its own recent daily rate. The
-  rate uses at least two weeks and reaches into last month early in a month.
-  GitHub contributes net Actions spend after discounts and included usage.
-  Blacksmith's current invoice amount supplies its all-in month-to-date total
-  and current-month projection input. Daily runner cost supplies its history
-  and chart; storage usage is not requested or charted separately.
-  `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
-  uses its own configured budget. With both providers, their budgets are added
-  only when both exist. Blacksmith's budget is its monthly spending-alert
-  threshold. A failed configured source turns the tile gray and shows `$???`
-  for that source. The values from responding sources remain as a lower bound.
-  A source that has stopped reporting fails the same way. Both feeds report a
-  day or two after a day ends, and a settled day neither has a row for is a day
-  that cost nothing — which holds only while the feed is still being written.
-  Each is read no further than its own newest row reaches: GitHub's report is
-  one pipeline across every product the org uses, so any product's row dates it,
-  and Blacksmith's daily endpoint dates itself. Four days without a row is a
-  stopped feed rather than a slow one.
-  A GitHub classic-plan setup still falls back to minutes when Blacksmith is not
-  configured.
+- **`github spend`** shows the **projected** full-month GitHub total. Its recent
+  daily rate uses at least two weeks and reaches into last month early in a
+  month. Spend is net of discounts and included usage. The projection is
+  compared with the organization's product budgets added together, which is
+  what it has authorized itself to spend. Only the budgeted products' share of
+  the projection goes into that comparison: a product with no budget of its own
+  is taken to be spending within one, so it counts toward the headline without
+  moving the color. The light therefore turns on the products someone actually
+  set a limit for, and taking up a product nobody has budgeted cannot redden
+  the tile on its own. The budget printed beside the headline covers the same
+  products the headline does — the budgets that exist, plus each unbudgeted
+  product's own projection standing in for the budget it lacks — so the
+  headline sits at or under it exactly when the tile is green. Printing the
+  configured total alone would show a headline above its budget on a green
+  tile. An organization with no product budget at all leaves the projection
+  uncompared. A
+  source that has stopped reporting turns the tile gray. The billing report is
+  one pipeline across every product the organization uses, so any product's row
+  dates it. Four days without a row is a stopped feed rather than a slow one. A
+  classic-plan organization falls back to minutes against its included
+  allowance.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the bench files that workflow lists — micro-benchmarks across the runner,
@@ -642,9 +682,10 @@ Notes:
   **Only a broad, across-the-board move shifts an index.** A regression in one
   benchmark barely registers, however slow that benchmark is. The drill-down
   covers individual benchmarks. A summed total would instead be dominated by
-  the few slowest benchmarks. Each CPU has its own coloured line. The headline
-  shows the largest established CPU trend. A second line names how many
-  benchmarks the latest run measured and the highlighted window when applicable.
+  the few slowest benchmarks. Each CPU has its own colored line. The headline
+  shows the largest established trend among CPUs measured in the preceding
+  twelve hours. A second line names how many benchmarks the latest run measured
+  and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
   treated as failed. Either failure takes over that second line, in place of the
@@ -661,20 +702,23 @@ Notes:
   with nothing readable reads **no benchmark data**. A **running** badge sits in
   the header while a run is under way, wherever in the list it sits — a rerun
   keeps its original place instead of moving to the head. The badge says the
-  colour may be about to move; the runs that have finished still set it. The red
+  color may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
-  one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
-  last `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`,
-  whichever set is larger. This matches the window rule used for the CI
-  duration median. The corresponding line still spans the full ~45 days. Its
-  trend window is brighter. Green means every established CPU is flat or
-  falling. A benchmark runs either to a fixed time budget or for a fixed number
-  of iterations, and neither is a measurement. The run's wall clock therefore
-  barely moves with performance. The per-operation times do move, so the tile
-  trends those values instead. Because the index
-  comes from artifacts, the tile turns gray when no in-window run has readable
-  data and the latest run is neither failed nor empty. A collection leaves its
+  one CPU measured in the preceding twelve hours has an index **trending up**
+  past 5%. Each CPU trend uses the runs in the last
+  `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever set
+  is larger. This matches the window rule used for the CI duration median. The
+  corresponding line still spans the full ~45 days. Its trend window is
+  brighter. Green means every eligible established CPU is flat or falling. If
+  no CPU has been measured in the preceding twelve hours, the tile turns gray
+  and reports **no recent benchmark data**. A benchmark runs either to a fixed
+  time budget or for a fixed number of iterations, and neither is a
+  measurement. The run's wall clock therefore barely moves with performance.
+  The per-operation times do move, so the tile trends those values instead.
+  Because the index comes from artifacts, the tile also turns gray when no
+  in-window run has readable data and the latest run is neither failed nor
+  empty. A collection leaves its
   last completed color and values in place until the workflow status and
   artifact refresh have both settled. A collection that takes more than a
   minute says **refresh still pending** without changing that color. A newly
@@ -714,7 +758,7 @@ Notes:
   their difference apart, with at least 3 samples supporting each — so noise
   produces no levels, and one stray sample is not a level. The second fit is a
   **straight line** through the median of the pairwise log-slopes, which is the
-  shape a series takes when it drifts, and it answers when its total deviation
+  shape a series takes when it drifts, and it wins when its total deviation
   is at least a tenth smaller. Reporting the difference across the fit rather
   than a slope extended over the window means a shift reads at its true size
   wherever in the window it sits: a shift in the newest samples is the one worth
@@ -736,9 +780,9 @@ Notes:
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one completed run per shortest-view
-    bucket, whatever colour it finished, downloads that artifact, and unzips it
+    bucket, whatever color it finished, downloads that artifact, and unzips it
     in the process. It then reads each benchmark's timings and CPU. A run's
-    colour does not say whether it measured anything: `deno bench` exits
+    color does not say whether it measured anything: `deno bench` exits
     non-zero when one benchmark throws, having already written a complete report
     of the rest, and dropping those runs cost about a seventh of the history in
     blocks a dozen runs long. The artifact decides instead. A report without a
@@ -751,7 +795,7 @@ Notes:
     finished. Only new runs and attempts are fetched after the first fill or a
     server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
-  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one colored
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
     A late-starting CPU line sits at the right. A single sample appears as a
     point. A stale line visibly ends short of the current date. The dashboard
@@ -759,7 +803,7 @@ Notes:
     Selectors choose which measurement to plot (**p0** = the fastest sample,
     **mean** = the arithmetic mean, **p75**, **p99**, **p99.5**, **p99.9**,
     **p100** = the slowest) and whether to group by source **file** or sort by
-    latest **duration** or **trend**. The mean selector was once labelled
+    latest **duration** or **trend**. The mean selector was once labeled
     `p50`, and `?stat=p50` still opens it so that a saved link does not quietly
     fall back to the default column.
     A "hide green" checkbox drops the steady ones. A slider from 1
@@ -775,9 +819,9 @@ Notes:
     directly. Each row shows one latest value and trend from the CPU with the
     most benchmark samples in the selected window. A tie uses the CPU with the
     newest sample, then its name for a stable result. That representative CPU
-    also sets the row colour and sorting. A numbered CPU key identifies the
+    also sets the row color and sorting. A numbered CPU key identifies the
     representative series and links to its definition. The same key and a
-    colour swatch appear in one CPU legend after all benchmark graphs instead
+    color swatch appear in one CPU legend after all benchmark graphs instead
     of repeating processor names in every row. It includes the full processor
     identity reported by the artifacts, the number of benchmark graphs and runs
     shown for that CPU, and the observed date range. The page reads from the
@@ -916,12 +960,9 @@ Local-first: no build step, no deployment, a single process on `localhost`.
 
 Env knobs for the dev loop:
 
-- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. CI spend also
-  needs Administration read. GitHub users also needs Members read. Without the
-  token, those tiles stay gray.
-- `BLACKSMITH_API_TOKEN` — enables the Blacksmith share of CI spend. Use
-  `BLACKSMITH_ORG` when its organization differs from the GitHub billing
-  organization.
+- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. GitHub spend
+  also needs Administration read. GitHub users also needs Members read. Without
+  the token, those tiles stay gray.
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
@@ -999,7 +1040,7 @@ its embedded tsnet).
    ```
    The GitHub token is fine-grained and read-only. It has Actions read for the
    dashboard repositories. The GitHub users tile also needs org Members read;
-   CI spend also needs org Administration read.
+   GitHub spend also needs org Administration read.
 3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
    history file and Tailscale node state. The dashboard remains a one-replica
    `Recreate` Deployment; pod replacement reuses the same non-ephemeral
@@ -1065,8 +1106,7 @@ during Google's initial export backfill it reports `no billing data yet` rather
 than a false zero.
 
 Every backend is reached over HTTP, so the image carries no cloud CLI. The
-GitHub tiles use `GH_TOKEN`. The Blacksmith share of CI spend uses
-`BLACKSMITH_API_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
+GitHub tiles use `GH_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
 own service account through Workload Identity. The infra repo's
 `tofu/gke/dashboard.tf` provisions that account, the Workload Identity binding,
 and its BigQuery Job User and Data Viewer grants, so no key is stored in the

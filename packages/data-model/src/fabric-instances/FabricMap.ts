@@ -3,11 +3,11 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
@@ -94,12 +94,24 @@ export class FabricMap
       /**
        * @inheritDoc
        *
+       * Stub -- accepts anything until `Map` support is implemented.
+       */
+      canDecode(_state: FabricValue): _state is FabricValue {
+        // The refusal is `decode()`'s, where "not yet implemented" is the
+        // honest answer. Refusing here would name the payload as the thing at
+        // fault.
+        return true;
+      }
+
+      /**
+       * @inheritDoc
+       *
        * Stub -- throws until `Map` support is implemented.
        */
       decode(
         _typeTag: string,
         _state: FabricValue,
-        _context: ReconstructionContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         throw new Error("`FabricMap`: not yet implemented");
       }

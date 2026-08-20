@@ -4,14 +4,16 @@
  * Verifies that Object.keys(), spread, Object.entries(), and
  * JSON.stringify work correctly on query result proxies.
  */
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
-import { Runtime } from "../src/runtime.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
+import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -50,7 +52,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const keys = Object.keys(proxy);
@@ -82,7 +83,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const spread = { ...proxy };
@@ -108,7 +108,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const entries = Object.entries(proxy);
@@ -136,7 +135,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const spread = { ...proxy };
@@ -161,7 +159,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const json = JSON.stringify(proxy);
@@ -184,7 +181,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     const keys = Object.keys(proxy);
@@ -207,7 +203,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     cell.set({ changed: true });
@@ -230,7 +225,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     expect(Object.keys(proxy)).toEqual([]);
@@ -250,7 +244,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
 
     expect("a" in proxy).toBe(true);
@@ -259,7 +252,7 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect("nonExistentKey" in proxy).toBe(false);
   });
 
-  it("after mutation via set trap, ownKeys reflects new state", () => {
+  it("reflects a key added through the cell in `ownKeys`", () => {
     const cell = runtime.getCell<{ a: number; b?: number }>(
       space,
       "test-mutation-keys",
@@ -268,38 +261,22 @@ describe("CT-1240: query result proxy enumeration", () => {
     );
     cell.set({ a: 1 });
 
-    const frame = {
-      cause: "test-frame-enum",
-      space,
+    const proxy = createQueryResultProxy<Record<string, number>>(
       runtime,
       tx,
-      generatedIdCounter: 0,
-      inHandler: true,
-      reactives: new Set(),
-    };
-    pushFrame(frame);
+      cell.getAsNormalizedFullLink(),
+      0,
+    );
 
-    try {
-      const proxy = createQueryResultProxy<Record<string, number>>(
-        runtime,
-        tx,
-        cell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
+    expect(Object.keys(proxy)).toEqual(["a"]);
 
-      expect(Object.keys(proxy)).toEqual(["a"]);
+    cell.key("b").set(2);
 
-      proxy.b = 2;
-
-      // After mutation, new key should be visible
-      const keysAfter = Object.keys(proxy);
-      expect(keysAfter).toContain("a");
-      expect(keysAfter).toContain("b");
-    } finally {
-      popFrame(frame);
-    }
+    const keysAfter = Object.keys(proxy);
+    expect(keysAfter).toContain("a");
+    expect(keysAfter).toContain("b");
   });
+
   // A trap that answers about OWN properties must not consult the prototype
   // chain. It used to use `in`, so every member of `Object.prototype` came back
   // as an own property of the proxy while `ownKeys` listed none of them -- two
@@ -322,7 +299,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      true,
     );
 
     // The two names the FabricValue boundary reserves, plus enough of
@@ -355,8 +331,8 @@ describe("CT-1240: query result proxy enumeration", () => {
     }
   });
 
-  // `in` IS the `has` trap's own operator, so inherited names SHOULD answer
-  // true there. Pinned so a future cleanup does not "fix" both traps alike.
+  // `in` IS the `has` trap's own operator, so inherited names SHOULD be true
+  // there. Pinned so a future cleanup does not "fix" both traps alike.
   it("the `in` operator still sees inherited names", () => {
     const cell = runtime.getCell<{ a: number }>(
       space,
@@ -371,7 +347,6 @@ describe("CT-1240: query result proxy enumeration", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      true,
     );
 
     expect("toString" in proxy).toBe(true);

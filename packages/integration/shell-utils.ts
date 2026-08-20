@@ -1,3 +1,12 @@
+import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
+
+import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
+import {
+  Identity,
+  InsecureCryptoKeyPair,
+  serializeKeyPairRaw,
+  TransferrableInsecureCryptoKeyPair,
+} from "@commonfabric/identity";
 import {
   Browser,
   dismissDialogs,
@@ -6,27 +15,19 @@ import {
   pipeConsole,
   type PresentationParticipant,
 } from "@commonfabric/integration";
-import { getPresentationSession } from "./presentation/session.ts";
 import {
-  Identity,
-  InsecureCryptoKeyPair,
-  serializeKeyPairRaw,
-  TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
-import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
-import {
-  AppState,
   AppView,
   appViewToUrlPath,
-  deserialize,
   isAppViewEqual,
-} from "@commonfabric/shell/shared";
-import { waitFor } from "./utils.ts";
+} from "@commonfabric/navigation";
+import { AppState, deserialize } from "@commonfabric/shell/app-state";
+
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
-import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
+import { getPresentationSession } from "./presentation/session.ts";
+import { waitFor, waitForCondition } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 
@@ -46,6 +47,8 @@ export async function login(page: Page, identity: Identity): Promise<void> {
       "Could not serialize identity. Requires 'noble' implementation.",
     );
   }
+
+  await waitForCondition(page, () => globalThis.app !== undefined);
 
   await page!.evaluate<
     Promise<void>,

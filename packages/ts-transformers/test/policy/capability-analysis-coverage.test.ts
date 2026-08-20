@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
 // These tests drive `analyzeFunctionCapabilities` through parameter-summary

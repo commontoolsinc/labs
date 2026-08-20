@@ -3,6 +3,7 @@
  * `assert(...)` can be checked. Run by assert-diagnostics.test.ts, which
  * expects the failures; it is not a pattern under test.
  */
+
 import { assert, cell, pattern, TESTS } from "commonfabric";
 
 function inRange(value: number, low: number, high: number): boolean {

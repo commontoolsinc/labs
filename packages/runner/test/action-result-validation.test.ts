@@ -47,6 +47,9 @@ describe("normalizeSandboxResult", () => {
     try {
       const {
         normalizeSandboxResult: normalizeWithoutNativeErrorCheck,
+        // The test needs an instance built while Error.isError is absent; the
+        // query string is what makes that instance.
+        // deno-lint-ignore cf-imports/no-inline-module-import
       } = await import(
         "../src/sandbox/result-normalization.ts?error-is-error-unavailable"
       );
@@ -272,7 +275,7 @@ describe("validateAndCheckReactives", () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       expect(() => validateAndCheckReactives(circular)).toThrow(
-        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Not representable as a `FabricValue`: circular reference/,
+        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Conversion refuses a circular reference/,
       );
     });
 

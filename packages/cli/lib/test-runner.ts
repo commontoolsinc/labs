@@ -7,25 +7,40 @@
  * 3. Return { [TESTS]: TestStep[] } under the reserved `[TESTS]` output key
  *
  * TestStep is a discriminated union:
- * - { assertion: Reactive<boolean> } from computed(() => condition)
- * - { action: Stream<void> } from action(() => sideEffect)
+ * - { assertion: Reactive<AssertRecord> } from assert(() => condition)
+ * - { action: Stream<unknown> } from action(() => sideEffect)
+ * - { render: unknown } naming a UI target to materialize
+ * - { settle: true } settling fully at a point the author names
+ * - { label: string } and { await: string } coordinating participants
+ *   in a multi-user test
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.
  *
  * Example:
  * [TESTS]: [
- *   { assertion: computed(() => game.phase === "playing") },
+ *   { assertion: assert(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
- *   { assertion: computed(() => game.phase === "started") },
+ *   { assertion: assert(() => game.phase === "started") },
  * ]
  *
- * Note: By default, test patterns can only import from their own directory or
- * subdirectories. To enable imports from sibling directories (e.g., `../shared/`),
- * use the --root option to specify a common ancestor directory.
+ * Note: A test pattern's imports resolve within its root directory: an
+ * explicit --root when given, otherwise the nearest ancestor whose
+ * deno.json(c) declares a package name, otherwise the test file's own
+ * directory. An import that climbs above that root is refused by name.
  */
 
+import { basename } from "@std/path";
+
+import {
+  FragmentWriter,
+  repositoryRelativePath,
+} from "@commonfabric/test-support/records";
+
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -49,26 +64,29 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { AssertRecord, Reactive } from "@commonfabric/api";
-import { asAssertRecord, formatAssertRecord } from "./assert-record.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { basename } from "@std/path";
+import {
+  type CDFPoint,
+  clearTimingMeasures,
+  getLogger,
+  getLoggerCountsBreakdown,
+  getTimingMeasuresState,
+  getTimingStatsBreakdown,
+  resetAllCountBaselines,
+  resetAllLoggerCounts,
+  resetAllTimingBaselines,
+  resetAllTimingStats,
+  resetTimingMeasureBudget,
+  setTimingMeasuresEnabled,
+  TIMING_MEASURE_PREFIX,
+} from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
+
+import { assertionOutcome } from "./assert-record.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  buildActionEvent,
-  type TrustedUiDescriptor,
-} from "./trusted-test-event.ts";
-import {
-  multiUserDescriptorMeta,
-  runMultiUserTestPattern,
-} from "./multi-user-test-runner.ts";
 import {
   type FetchMockEntry,
   makeMockFetch,
@@ -76,15 +94,11 @@ import {
 } from "./fetch-mock.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
-  type CDFPoint,
-  getLogger,
-  getLoggerCountsBreakdown,
-  getTimingStatsBreakdown,
-  resetAllCountBaselines,
-  resetAllLoggerCounts,
-  resetAllTimingBaselines,
-  resetAllTimingStats,
-} from "@commonfabric/utils/logger";
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import { inferProgramRoot } from "./program-root.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,
@@ -120,6 +134,43 @@ async function withPhase<T>(
   }
 }
 
+interface CapturedMeasure {
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
+/**
+ * Take this file's emitted measures off the timeline.
+ *
+ * Draining per file rather than reading once at the end is what makes a
+ * multi-file run work at all: each file starts by clearing the timeline, so
+ * anything not collected before the next one begins is gone.
+ */
+function drainTimingMeasures(into: CapturedMeasure[]): void {
+  for (const entry of performance.getEntriesByType("measure")) {
+    if (!entry.name.startsWith(TIMING_MEASURE_PREFIX)) continue;
+    into.push({
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    });
+  }
+  clearTimingMeasures();
+}
+
+async function writeTimingMeasures(
+  path: string,
+  entries: readonly CapturedMeasure[],
+): Promise<void> {
+  await Deno.writeTextFile(path, JSON.stringify(entries));
+  console.log(
+    `\nWrote ${entries.length} timing measure(s) to ${path}. Aggregate with:` +
+      `\n  deno run --allow-read ` +
+      `skills/perf-investigation/scripts/aggregate-measures.ts ${path}`,
+  );
+}
+
 function formatError(error: unknown): string {
   return error instanceof Error
     ? error.stack || error.message || String(error)
@@ -135,34 +186,11 @@ function indentLines(text: string, indent: string): string {
 }
 
 /**
- * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
- * property.
- * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
- * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
- *
- * Action steps may carry an `event` payload (sent instead of `undefined`) and
- * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
- * renderer-trusted DOM provenance for that surface/action — the headless
- * equivalent of the user clicking the trusted surface — which CFC
- * `TrustedActionWrite` policies require under enforcement.
- *
- * A `{ settle: true }` step waits for FULL settlement (the scheduler, storage,
- * and every in-flight async builtin operation — a `db.query` RPC + writeback, a
- * fetch / llm call) via `runtime.settled()`. The light per-action settle returns
- * before that I/O lands, so insert `{ settle: true }` before an assertion that
- * reads an async-builtin result to keep the read deterministic under load.
+ * The loose shape the runner reads a step cell as, to classify it by which
+ * field is present. The authored `TestStep` union (in the api) is already
+ * type-checked at the pattern's return; here the fields arrive from storage as
+ * `unknown`, so this is deliberately permissive.
  */
-export type TestStep =
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
-  | {
-    action: Stream<unknown>;
-    event?: unknown;
-    trustedUi?: TrustedUiDescriptor;
-    skip?: boolean;
-  }
-  | { render: unknown; skip?: boolean }
-  | { settle: true; skip?: boolean };
-
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
@@ -173,6 +201,12 @@ type HarnessTestStepMeta = {
   // `{ settle: true }` step: wait for full settlement (scheduler + storage +
   // in-flight async builtin I/O) via `runtime.settled()` before the next step.
   settle?: boolean;
+  // `{ label }` / `{ await }` synchronize participants in a multi-user test.
+  // A single-user run has no participant to synchronize with, so they carry
+  // no work here — but they still have to be recognized, or a step holding
+  // one matches no discriminant and the run reports it as malformed.
+  label?: string;
+  await?: string;
 };
 
 type HarnessTestStepCell = Cell<unknown>;
@@ -183,7 +217,13 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
-      event: { type: "unknown" },
+      // The payload is what the step sends, so it is read as authored: an
+      // object arrives as an object, reaching the handler as a reference into
+      // this step rather than a snapshot of it. `type: "unknown"` marks a
+      // value the traversal must not descend into, which is right for the
+      // fields this schema only tests for presence and wrong here, where it
+      // drops an object payload to `undefined`.
+      event: true,
       trustedUi: {
         type: "object",
         properties: {
@@ -194,6 +234,8 @@ const testStepPeekSchema = internSchema(
       render: { type: "unknown" },
       skip: { type: "boolean" },
       settle: { type: "boolean" },
+      label: { type: "string" },
+      await: { type: "string" },
     },
   },
 );
@@ -282,8 +324,17 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
-  /** Root directory for resolving imports. If not provided, uses the test file's directory. */
+  /**
+   * Root directory for resolving imports. If not provided, the nearest
+   * ancestor of the test file whose deno.json(c) declares a package name is
+   * used, falling back to the test file's directory.
+   */
   root?: string;
+  /**
+   * Data file paths to attach, so a pattern under test that reads one with
+   * `dataFile` reads here what it will read once deployed.
+   */
+  dataFilePaths?: string[];
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
@@ -302,6 +353,16 @@ export interface TestRunnerOptions {
   patternCoverageDir?: string;
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+  /**
+   * Emit a `performance.measure` per logger time span and write them here.
+   *
+   * The statistics a run prints are aggregates: they say a key was reached
+   * 4,000 times and what that cost on average, and nothing about which of
+   * them nested inside which. The measures keep each span's own interval, so
+   * a consumer can roll them up by key prefix and find the level where the
+   * count starts multiplying.
+   */
+  timingMeasuresOut?: string;
   /**
    * Run against a caller-supplied identity and storage manager, and observe
    * what the run instantiates.
@@ -937,9 +998,22 @@ export async function runTestPattern(
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
+  // The effective import root: an explicit `root` wins; otherwise the nearest
+  // package root above the test file, so imports that span the package (shared
+  // helpers, sibling patterns) resolve without a flag. When neither exists the
+  // resolver anchors at the file's own directory.
+  const root = options.root ?? inferProgramRoot(testPath);
+  if (options.verbose && !options.root && root !== undefined) {
+    console.log(
+      `  Resolving imports from ${root} (nearest package root; --root overrides)`,
+    );
+  }
   const startTime = performance.now();
   performance.clearMarks();
   performance.clearMeasures();
+  // The line above drops this run's emitted measures along with everything
+  // else, so the budget they were charged against has to come back too.
+  resetTimingMeasureBudget();
   resetAllLoggerCounts();
   resetAllTimingStats();
 
@@ -978,6 +1052,9 @@ export async function runTestPattern(
     await withPhase(
       ["runTestPattern", "storageManager"],
       async () => {
+        // The Deno storage cache opens SQLite as it loads, which a
+        // caller-supplied storage host makes unnecessary.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { StorageManager } = await import(
           "@commonfabric/runner/storage/cache.deno"
         );
@@ -1075,9 +1152,13 @@ export async function runTestPattern(
     const program = await withPhase(
       ["runTestPattern", "resolve"],
       () =>
-        engine.resolve(
-          new FileSystemProgramResolver(testPath, options.root),
-        ),
+        resolveLocalProgram((r) => engine.resolve(r), {
+          main: testPath,
+          ...(root === undefined ? {} : { root }),
+          ...(options.dataFilePaths === undefined
+            ? {}
+            : { dataFilePaths: options.dataFilePaths }),
+        }),
     );
     const evalResult = await withPhase(
       ["runTestPattern", "compile"],
@@ -1114,7 +1195,14 @@ export async function runTestPattern(
       writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
-        () => runMultiUserTestPattern(testPath, multiUserMeta, options),
+        // The participant workers compile the file again in their own
+        // processes; passing the resolved root keeps their import resolution
+        // identical to the detection compile above.
+        () =>
+          runMultiUserTestPattern(testPath, multiUserMeta, {
+            ...options,
+            root,
+          }),
       );
     }
 
@@ -1390,6 +1478,12 @@ export async function runTestPattern(
       const isAssertion = Object.hasOwn(stepValue, "assertion");
       const isRender = Object.hasOwn(stepValue, "render");
       const isSettle = Object.hasOwn(stepValue, "settle");
+      const isMarker = Object.hasOwn(stepValue, "label") ||
+        Object.hasOwn(stepValue, "await");
+
+      // A multi-user marker in a single-user run: inert, and transparent to
+      // the reported results.
+      if (isMarker) continue;
 
       // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
       // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
@@ -1424,8 +1518,8 @@ export async function runTestPattern(
       if (!isAction && !isAssertion) {
         throw new Error(
           `Test step at index ${i} must have an 'action', 'assertion', ` +
-            `'render', or 'settle' key. Got: ${
-              toCompactDebugString(Object.keys(stepValue))
+            `'render', 'settle', 'label', or 'await' key. Got: ${
+              toCompactDebugString(Object.keys(stepCell.get() as object))
             }`,
         );
       }
@@ -1665,21 +1759,9 @@ export async function runTestPattern(
           try {
             const assertCell = stepCell.key("assertion") as Cell<unknown>;
             const value = await assertCell.pull();
-            if (value === true) {
-              return { passed: true };
-            }
-            // An `assert(...)` assertion carries the operands recorded by the
-            // evaluation that produced this value, so report them.
-            const record = asAssertRecord(value);
-            if (record) {
-              return record.ok
-                ? { passed: true }
-                : { passed: false, error: formatAssertRecord(record) };
-            }
-            return {
-              passed: false,
-              error: `Expected true, got ${toCompactDebugString(value)}`,
-            };
+            // An `assert(...)` assertion carries the operands recorded while
+            // the condition ran, so a failure names them and their values.
+            return assertionOutcome(value);
           } catch (err) {
             return {
               passed: false,
@@ -1807,8 +1889,9 @@ export async function runTestPattern(
 
     // Add helpful hint for import resolution errors when --root wasn't provided
     if (
-      errorMessage.includes("No such file or directory") &&
-      errorMessage.includes("readfile") &&
+      (errorMessage.includes("escapes the program root") ||
+        (errorMessage.includes("No such file or directory") &&
+          errorMessage.includes("readfile"))) &&
       !options.root
     ) {
       errorMessage +=
@@ -1841,7 +1924,7 @@ export async function runTestPattern(
           writePatternCoverageLcov(
             patternCoverage,
             patternCoverageOutputPath(options.patternCoverageDir!, testPath),
-            { root: options.root },
+            { root },
           ),
       ).catch((error) => {
         console.error(
@@ -1924,13 +2007,46 @@ export async function runTests(
   results: TestRunResult[];
 }> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  // Emission is process-global, so a run that turns it on owes the process its
+  // previous state back — otherwise a later `runTests()` without the option
+  // keeps emitting into a buffer nobody will read.
+  const priorMeasures = getTimingMeasuresState();
+  const captured: CapturedMeasure[] | undefined = options.timingMeasuresOut
+    ? []
+    : undefined;
+  if (options.timingMeasuresOut) {
+    // Draining per file means the buffer never holds more than one file's
+    // worth, so the default ceiling — which exists to bound a process that
+    // never drains — would only truncate the capture for no benefit.
+    setTimingMeasuresEnabled(true, { cap: Number.MAX_SAFE_INTEGER });
+  }
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
   let totalSkipped = 0;
 
+  // One record per file, spooled with the file's final verdict — the one
+  // that includes the runtime-error, console, and idempotence checks below,
+  // not just the assertion results. Inert unless CF_TEST_RECORDS_DIR is
+  // set; the integration orchestrator clears that variable for its cf
+  // children and records from its own clock instead.
+  const recordsFragment = FragmentWriter.openForRun();
+  const recordFile = (testPath: string, failed: boolean, durationMs: number) =>
+    recordsFragment?.append({
+      line: "record",
+      test: {
+        k: "pattern",
+        s: "patterns",
+        n: repositoryRelativePath(testPath),
+      },
+      outcome: failed ? "fail" : "pass",
+      durationMs: Math.round(durationMs),
+    });
+
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
+    const failedBefore = totalFailed;
+    const fileStarted = performance.now();
 
     // `runTestPattern` RAISES a teardown that did not complete, which is the
     // right contract for a direct caller — the vintage capture is about to read
@@ -1944,7 +2060,12 @@ export async function runTests(
     } catch (error) {
       totalFailed++;
       console.log(`  ✗ ${formatError(error)}`);
+      recordFile(testPath, true, performance.now() - fileStarted);
       continue;
+    } finally {
+      // Before the next file clears the timeline, and on the failure path too:
+      // a file that wedged is often the one whose measures are wanted.
+      if (captured) drainTimingMeasures(captured);
     }
     allResults.push(result);
 
@@ -2083,6 +2204,21 @@ export async function runTests(
         }
       }
     }
+
+    recordFile(testPath, totalFailed > failedBefore, result.totalDurationMs);
+  }
+  recordsFragment?.close();
+
+  try {
+    if (options.timingMeasuresOut && captured) {
+      await writeTimingMeasures(options.timingMeasuresOut, captured);
+    }
+  } finally {
+    // Both halves of what was borrowed, and in a `finally` because a failed
+    // write must not strand them: the switch left on costs every later run in
+    // the process, and the raised ceiling left behind removes the retention
+    // bound entirely.
+    setTimingMeasuresEnabled(priorMeasures.enabled, { cap: priorMeasures.cap });
   }
 
   // Summary

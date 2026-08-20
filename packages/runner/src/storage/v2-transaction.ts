@@ -1,9 +1,11 @@
+import type { FabricValue } from "@commonfabric/api";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import {
   canResolveScopeKey,
   type CommitPrecondition,
@@ -13,19 +15,22 @@ import {
   type ScopeKeyIdentity,
   type SqliteOperation,
 } from "@commonfabric/memory/v2";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { getLogger } from "@commonfabric/utils/logger";
+import { PathKeyMap } from "@commonfabric/utils/path-key-map";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import {
+  patchOpIsStructural,
+  patchOpPointerFields,
+} from "../../../memory/v2/patch.ts";
 import {
   encodePointer,
   parsePointer,
   pathsOverlap,
 } from "../../../memory/v2/path.ts";
-import {
-  patchOpIsStructural,
-  patchOpPointerFields,
-} from "../../../memory/v2/patch.ts";
-import { PathKeyMap } from "@commonfabric/utils/path-key-map";
-import type { FabricValue } from "@commonfabric/api";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import type { CellScope } from "../builder/types.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   Activity,
   ChangeGroup,
@@ -64,6 +69,31 @@ import type {
 } from "./interface.ts";
 import { createReadOnlyTransactionError } from "./interface.ts";
 import {
+  buildMergeableIntent,
+  foldMergeableIntent,
+  isNoopMergeableDelta,
+  type MergeableBuildContext,
+  type MergeableOpDelta,
+  type MergeableOpIntent,
+  mergeableOpPayloadContains,
+  type OpSuppression,
+} from "./mergeable-ops.ts";
+import {
+  ignoreReadForCommit,
+  isMutableTransactionReadAllowed,
+  isReadIgnoredForScheduling,
+  isReadMarkedAsAttemptedWrite,
+  isUiInputBlindWriteTx,
+  registerCommitRejectionListener,
+  takeCoverageWaits,
+} from "./reactivity-log.ts";
+import {
+  ReadOnlyAddressError,
+  TransactionAborted,
+  TransactionCompleteError,
+  WriteIsolationError,
+} from "./transaction-errors.ts";
+import {
   claim,
   load as loadInline,
   read as readAttestation,
@@ -74,41 +104,24 @@ import {
   getValueTypeName,
   isContainerValue,
 } from "./transaction/mutable-path-write.ts";
-import {
-  ReadOnlyAddressError,
-  TransactionAborted,
-  TransactionCompleteError,
-  WriteIsolationError,
-} from "./transaction-errors.ts";
-import {
-  ignoreReadForCommit,
-  isMutableTransactionReadAllowed,
-  isReadIgnoredForScheduling,
-  isReadMarkedAsAttemptedWrite,
-  isUiInputBlindWriteTx,
-  registerCommitRejectionListener,
-  takeCoverageWaits,
-} from "./reactivity-log.ts";
-import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  buildMergeableIntent,
-  foldMergeableIntent,
-  isNoopMergeableDelta,
-  type MergeableBuildContext,
-  type MergeableOpDelta,
-  type MergeableOpIntent,
-  mergeableOpPayloadContains,
-  type OpSuppression,
-} from "./mergeable-ops.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
-import { normalizeCellScope } from "../scope.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import type { CellScope } from "../builder/types.ts";
 
 type RootAttestation = IAttestation;
 
 const DOCUMENT_MIME = "application/json" as const;
+
+/**
+ * A root this transaction replaced, and the epoch it stood until.
+ *
+ * `root` is the document's value for every read epoch at or below `until`; the
+ * write that moved the epoch past `until` is the one that displaced it.
+ */
+type DisplacedRoot = {
+  until: number;
+  root: RootAttestation;
+};
 
 type ReadDocumentEntry = {
   initial: RootAttestation;
@@ -117,6 +130,10 @@ type ReadDocumentEntry = {
   frozenReads?: PathKeyMap<FabricValue | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
   patchDetails?: Map<string, TransactionWriteDetail>;
+  // Oldest first, and only for epochs a reader was actually handed. Absent on
+  // the overwhelming majority of documents: one is created the first time a
+  // write displaces a root some materialized read may still describe.
+  displaced?: DisplacedRoot[];
 };
 
 type WritableDocumentEntry = {
@@ -126,6 +143,7 @@ type WritableDocumentEntry = {
   frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
   patchDetails: Map<string, TransactionWriteDetail>;
+  displaced?: DisplacedRoot[];
   // Mergeable-write intents recorded by recordMergeableOp, keyed by document
   // path. The commit emits these as the corresponding mergeable op (which the
   // server resolves against durable state) instead of a value diffed against a
@@ -208,6 +226,27 @@ function withCommitTiming<T>(
 const currentDocument = (doc: DocumentEntry): RootAttestation =>
   doc.current ?? doc.initial;
 
+/**
+ * The root a read at `epoch` describes.
+ *
+ * The displaced roots are oldest first and short — one per epoch actually
+ * handed to a reader — so the first one still standing at `epoch` is the
+ * answer. Falling off the end means no write has displaced anything this
+ * reader could still be describing, which is the ordinary case.
+ */
+const documentAtEpoch = (
+  doc: DocumentEntry,
+  epoch: number,
+): RootAttestation => {
+  const displaced = doc.displaced;
+  if (displaced !== undefined) {
+    for (let index = 0; index < displaced.length; index++) {
+      if (displaced[index].until >= epoch) return displaced[index].root;
+    }
+  }
+  return doc.current ?? doc.initial;
+};
+
 const isWritableDocument = (
   doc: DocumentEntry,
 ): doc is WritableDocumentEntry =>
@@ -274,12 +313,12 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // `cloneIfNecessary()`.
   //
   // `cloneIfNecessary()` decides its own identity fast path with
-  // `isDeepFrozenFabricValue()`, which conjoins the frozen-ness question with
-  // a membership walk of every node in the value. That walk is uncached, so
-  // the first read of a stored document runs it in full, and for a list it
+  // `isValidDeepFrozenFabricValue()`, which conjoins the frozen-ness question
+  // with a membership walk of every node in the value. That walk is uncached,
+  // so the first read of a stored document runs it in full, and for a list it
   // costs several times what the rest of the read does. Membership is settled
-  // before a value reaches the replica: the write paths below hand every
-  // value to `cloneIfNecessary()`, which either accepts it as a deep-frozen
+  // before a value reaches the replica: the write paths below hand every value
+  // to `cloneIfNecessary()`, which either accepts it as a deep-frozen
   // `FabricValue` or rebuilds it as one.
   return (isDeepFrozen(value) ? value : cloneIfNecessary(value)) as T;
 };
@@ -892,6 +931,20 @@ export class V2StorageTransaction implements IStorageTransaction {
   // and recordPatchIntent(). Consumed by CFC write-prefix provenance
   // (docs/specs/cfc-write-prefix-provenance.md §4/§6).
   #activityClock = 0;
+  // How many times this transaction has replaced a document root. A read taken
+  // at epoch E describes the state after E replacements, which is what lets a
+  // materialized read keep answering for the moment it was taken while the
+  // reader goes on writing. Zero writes means every document still stands at
+  // its `initial` attestation, so every epoch describes the same state and
+  // nothing below has to run.
+  #writeEpoch = 0;
+  // The epoch reads resolve against while a materialized read is walking, or
+  // undefined for the transaction's current state.
+  #readEpoch: number | undefined;
+  // The newest epoch handed to a reader, or undefined where none has been. A
+  // replacement keeps the root it displaces only when a reader could still ask
+  // for it, and this is what decides that.
+  #lastIssuedEpoch: number | undefined;
   #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
@@ -1384,7 +1437,14 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.branch(address.space);
     const { doc } = this.document(branch, address);
-    const current = currentDocument(doc);
+    // The one place a read chooses which root it is reading. A materialized
+    // read walking under an epoch describes the state that epoch names; every
+    // other read describes the transaction's current state. The epoch is only
+    // ever set on a transaction that has written, because before that the two
+    // are the same root.
+    const current = this.#readEpoch === undefined
+      ? currentDocument(doc)
+      : documentAtEpoch(doc, this.#readEpoch);
     const readMeta = options?.meta ?? EMPTY_META;
     // In a UI-input blind-leaf-write tx (a scalar `$value` overwrite), every read
     // is recorded for CFC/scheduling but carries no value-equality commit
@@ -1436,7 +1496,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         },
       };
     }
-    const frozenReads = doc.frozenReads;
+    // The frozen-reads cache describes the current root — writes invalidate it
+    // along the chain they touch — so a read resolving against an earlier epoch
+    // neither takes from it nor adds to it.
+    const cacheable = this.#readEpoch === undefined;
+    const frozenReads = cacheable ? doc.frozenReads : undefined;
     if (frozenReads?.has(memoryAddress.path)) {
       return {
         ok: {
@@ -1459,13 +1523,97 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const frozenValue = freezeReadValue(result.ok.value);
-    (doc.frozenReads ??= new PathKeyMap()).set(memoryAddress.path, frozenValue);
+    if (cacheable) {
+      (doc.frozenReads ??= new PathKeyMap()).set(
+        memoryAddress.path,
+        frozenValue,
+      );
+    }
     return {
       ok: {
         ...result.ok,
         value: frozenValue,
       },
     };
+  }
+
+  hasWrites(): boolean {
+    return this.#writeEpoch > 0;
+  }
+
+  /**
+   * The epoch a materialized read taken now should describe.
+   *
+   * Handing one out is what tells a later write that the root it displaces is
+   * still being described, so a reader that never asks costs the write path
+   * nothing.
+   */
+  issueReadEpoch(): number {
+    // A read taken while another is already walking is part of that walk — a
+    // view building the child a reader just touched — so it describes the same
+    // instant. Handing it a fresh epoch would let a subtree resolved after a
+    // write describe a later moment than the value it hangs off.
+    if (this.#readEpoch !== undefined) return this.#readEpoch;
+    this.#lastIssuedEpoch = this.#writeEpoch;
+    return this.#writeEpoch;
+  }
+
+  /**
+   * Resolve reads against `epoch` until the matching {@link exitReadEpoch}.
+   *
+   * Paired rather than wrapped around a callback so a reader on the hot path
+   * allocates no closure per property it touches. Returns the epoch that was
+   * in force, which the caller hands back to restore it.
+   */
+  enterReadEpoch(epoch: number | undefined): number | undefined {
+    const previous = this.#readEpoch;
+    this.#readEpoch = epoch;
+    return previous;
+  }
+
+  exitReadEpoch(previous: number | undefined): void {
+    this.#readEpoch = previous;
+  }
+
+  /**
+   * Move `doc` to a new root, keeping the one it displaces if a reader may
+   * still be describing it.
+   *
+   * Every write funnels here, so the epoch counts root replacements and
+   * nothing else.
+   *
+   * The root about to be displaced has stood since this document's last
+   * displacement, so it answers for every epoch in between. It is worth keeping
+   * exactly when a reader was handed one of those — which is the newest issued
+   * epoch, since an older one is answered by the same root. A run of writes
+   * with no read taken between them therefore keeps one root, not one per
+   * write, and a document nobody has read against keeps none.
+   *
+   * Keeping one means freezing it, and freezing it before the write starts.
+   * A write descends through `cloneForMutation` with `force: false`, which
+   * thaws a frozen container by shallow-cloning it and leaves an already-
+   * mutable one alone — so the root a first write leaves behind is mutable, and
+   * the next write edits it where it stands rather than replacing it. Freezing
+   * first puts that write on the cloning path, which is what makes the kept
+   * root stay the value it was. `deepFreeze` short-circuits on what is already
+   * deep-frozen, so this costs only what this transaction has thawed by
+   * writing.
+   *
+   * Called before the write reads the root it is about to descend, which is why
+   * this is separate from {@link V2StorageTransaction.#replaceCurrent}.
+   */
+  #preserveForReaders(doc: DocumentEntry): void {
+    const issued = this.#lastIssuedEpoch;
+    if (issued === undefined) return;
+    if (issued <= (doc.displaced?.at(-1)?.until ?? -1)) return;
+    const standing = currentDocument(doc);
+    deepFreeze(standing.value);
+    (doc.displaced ??= []).push({ until: this.#writeEpoch, root: standing });
+  }
+
+  #replaceCurrent(doc: DocumentEntry, next: RootAttestation): void {
+    this.#writeEpoch++;
+    doc.current = next;
   }
 
   trackReadPaths(
@@ -1629,6 +1777,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const { doc: readDoc } = this.document(branch, address);
     const doc = ensureWritableDocument(readDoc);
+    this.#preserveForReaders(doc);
     const current = doc.current;
     const previous = inspectPath(current.value, address.path);
     if (previous.kind === "ok") {
@@ -1712,7 +1861,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       value: collapseEmptyJsonDocumentEnvelope(result.ok.root),
     };
 
-    doc.current = collapsedNext;
+    this.#replaceCurrent(doc, collapsedNext);
     invalidateFrozenReadsOnChain(doc, address.path);
     this.recordPatchIntent(
       space,
@@ -1766,6 +1915,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const { doc: readDoc } = this.document(branch, writes[0]!.address);
     const doc = ensureWritableDocument(readDoc);
+    this.#preserveForReaders(doc);
     const originalRoot = doc.current.value;
     let nextRoot = originalRoot;
     let changed = false;
@@ -1841,12 +1991,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       );
       if (result.error) {
         if (changed) {
-          doc.current = {
+          this.#replaceCurrent(doc, {
             ...doc.current,
             value: collapseEmptyJsonDocumentEnvelope(
               nextRoot,
             ),
-          };
+          });
           for (const written of writtenPaths) {
             invalidateFrozenReadsOnChain(doc, written);
           }
@@ -1885,12 +2035,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: {} };
     }
 
-    doc.current = {
+    this.#replaceCurrent(doc, {
       ...doc.current,
       value: collapseEmptyJsonDocumentEnvelope(
         nextRoot,
       ),
-    };
+    });
     for (const written of writtenPaths) {
       invalidateFrozenReadsOnChain(doc, written);
     }

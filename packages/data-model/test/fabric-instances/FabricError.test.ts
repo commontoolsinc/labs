@@ -4,7 +4,7 @@
  *
  * `type` and `name` are stored separately, and the encoding leans on their
  * usual agreement: `name` is written as `null` when it matches `type`, and
- * spelled out only when it does not. Decoding has to invert that, rebuild the
+ * written out only when it does not. Decoding has to invert that, rebuild the
  * right `Error` subclass from `type`, and still accept older state in which
  * only `name` was present.
  *
@@ -26,18 +26,18 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
   deepFreeze,
   isDeepFrozen,
-  isDeepFrozenFabricValue,
+  isValidDeepFrozenFabricValue,
 } from "@/deep-freeze.ts";
-import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
+import { dummyEnv, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricError", () => {
   // Pure type-identity / supertype checks: they don't fit a single member and
@@ -228,7 +228,7 @@ describe("FabricError", () => {
         const restored = FabricError[CODEC].decode(
           CODEC_TYPE_TAGS.Error,
           state,
-          dummyContext,
+          dummyEnv,
         ) as unknown as FabricError;
 
         expect(restored.name).toBe("CustomError");
@@ -251,7 +251,7 @@ describe("FabricError", () => {
         const restored = FabricError[CODEC].decode(
           CODEC_TYPE_TAGS.Error,
           state,
-          dummyContext,
+          dummyEnv,
         ) as unknown as FabricError;
         expect(restored.toNativeValue(true)).toBeInstanceOf(TypeError);
         expect(restored.name).toBe("SpecialType");
@@ -443,12 +443,12 @@ describe("FabricError", () => {
 
       it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + cause are frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
-        expect(isDeepFrozenFabricValue(fe)).toBe(false);
+        expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
         Object.freeze(fe); // wrapper only; some descendants still mutable
         // (May be true since this particular FabricError has no nested
         // FabricValue descendants beyond primitive strings.)
         deepFreeze(fe);
-        expect(isDeepFrozenFabricValue(fe)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(fe)).toBe(true);
       });
 
       it("via direct member invocation: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {
@@ -547,7 +547,7 @@ describe("FabricError", () => {
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Error;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Error` wire type tag", () => {
@@ -594,6 +594,22 @@ describe("FabricError", () => {
 
       // Decoding hand-built state (not via `encode()`): exercises name/type
       // handling and back-compat that the round-trip tests don't.
+      describe("canDecode()", () => {
+        it("returns `true` for a record", () => {
+          expect(codec.canDecode({ type: "Error", message: "boop" }))
+            .toBe(true);
+        });
+
+        it("returns `false` for state that is not a plain object", () => {
+          // Wire state is untrusted input. Without this check these decode
+          // into a `FabricError` bearing a default type and an empty message,
+          // which is a malformation admitted silently rather than reported.
+          for (const state of ["hello", 42, true, null, [1, 2]]) {
+            expect(codec.canDecode(state as never)).toBe(false);
+          }
+        });
+      });
+
       describe("decode()", () => {
         // `JSON.parse` creates an own `__proto__` property where an object
         // literal instead invokes the setter, so parsed wire state is the one
@@ -607,7 +623,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
 
           expect([...result.extraKeys()]).toEqual(["code"]);
@@ -620,7 +636,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
           expect(result).toBeInstanceOf(FabricError);
           expect(result.toNativeValue(true)).toBeInstanceOf(Error);
@@ -642,7 +658,7 @@ describe("FabricError", () => {
             const result = codec.decode(
               expectedTag,
               state,
-              context,
+              env,
             ) as unknown as FabricError;
             expect(result.toNativeValue(true)).toBeInstanceOf(cls);
             expect(result.name).toBe(type);
@@ -658,7 +674,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
           expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
           expect(result.name).toBe("CustomTypeName");
@@ -669,7 +685,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
           expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
         });
@@ -679,7 +695,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
           expect(result.name).toBe("MyCustomError");
         });
@@ -695,7 +711,7 @@ describe("FabricError", () => {
           const result = codec.decode(
             expectedTag,
             state,
-            context,
+            env,
           ) as unknown as FabricError;
           expect(result.cause).toBe("something went wrong");
           expect(result.getExtra("code")).toBe(404);
@@ -708,7 +724,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
           expect(decoded.toNativeValue(true)).toBeInstanceOf(Error);
@@ -721,7 +737,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
           expect(decoded.toNativeValue(true)).toBeInstanceOf(TypeError);
@@ -736,7 +752,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
           expect(decoded.toNativeValue(true)).toBeInstanceOf(RangeError);
@@ -751,7 +767,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(outer),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("outer");
           // The cause is a FabricError (the inner wrapper) after round-trip.
@@ -771,7 +787,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(outerSe),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("outer");
           expect(decoded.cause).toBeInstanceOf(FabricError);
@@ -786,7 +802,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("oops");
           const native = decoded.toNativeValue(true) as unknown as Record<
@@ -804,7 +820,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.name).toBe("MyCustomError");
           expect(decoded.message).toBe("custom");
@@ -815,7 +831,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.toNativeValue(true)).toBeInstanceOf(TypeError);
           expect(decoded.name).toBe("TypeError");
@@ -832,7 +848,7 @@ describe("FabricError", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(se),
-            context,
+            env,
           ) as unknown as FabricError;
           expect(decoded.toNativeValue(true)).toBeInstanceOf(Error);
           expect(decoded.name).toBe("CustomName");

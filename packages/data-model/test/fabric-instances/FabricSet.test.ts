@@ -17,13 +17,13 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricSet", () => {
@@ -82,7 +82,7 @@ describe("FabricSet", () => {
       it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
         const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
         Object.freeze(fs);
-        expect(() => isDeepFrozenFabricValue(fs)).toThrow(
+        expect(() => isValidDeepFrozenFabricValue(fs)).toThrow(
           "`FabricSet`: not yet implemented",
         );
       });
@@ -111,7 +111,7 @@ describe("FabricSet", () => {
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Set;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Set` wire type tag", () => {
@@ -134,9 +134,19 @@ describe("FabricSet", () => {
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for any state (stub)", () => {
+          // Accepting is what leaves the refusal to `decode()`, where "not
+          // yet implemented" is the honest account of it. A stub that refused
+          // here would report the payload as the thing at fault.
+          expect(codec.canDecode(null)).toBe(true);
+          expect(codec.canDecode([["k", "v"]])).toBe(true);
+        });
+      });
+
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

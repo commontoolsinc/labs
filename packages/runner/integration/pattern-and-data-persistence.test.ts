@@ -1,8 +1,6 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * Integration test: Pattern and Data Persistence
- *
  * This test demonstrates the full layered persistence model:
  * 1. Pattern source code stored in `datum` table (content-addressed)
  * 2. Precious data stored in `datum` table
@@ -21,12 +19,13 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { env } from "@commonfabric/integration";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 /** A content-addressed pattern pointer. */
 type PatternRef = { identity: string; symbol: string };
-import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
 

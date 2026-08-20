@@ -8,7 +8,7 @@ the part that changes what a caller types.
 The split is deliberate, though not absolute. The read layer breaks two things,
 both of which it owns and sequences itself. Scoping invocation ids to a session
 makes `--invocation` without one an error — a spelling that works today and that
-[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches — and that lands
+[Verbs over the CLI](../common/verbs/over-the-cli.md) teaches — and that lands
 alone, ahead of anything that publishes an address. Checking projection keys
 against an allowlist refuses a schema carrying a key that was silently dropped
 before, which is a command that exited zero and now does not.
@@ -23,9 +23,10 @@ quickly.
 
 ## Governing decisions
 
-**Additive until step 6.** Steps 4 and 5 only add. Every spelling that works
-today still works, and nothing is deprecated until the replacement carries real
-traffic.
+**Additive until 6b.** Steps 4 through 6a only add: 6a adds a warning, not a
+removal. Every spelling that works today still works, and the old ones keep
+working until the date those warnings name — two weeks after 6a reaches main,
+written into the warning as a literal so it reads the same on any day.
 
 **A deprecated spelling keeps working.** It costs a line of aliasing to leave a
 redirect in place, and it costs every script and skill file that used it to
@@ -53,16 +54,20 @@ Four decisions it explicitly declines to make are inherited as constraints:
 
 ## The accounting
 
-`cf piece` has twenty subcommands today:
+`cf piece` has twenty-two subcommands today:
 
 ```
 ls  search  new  set-slug  step  apply  getsrc  setsrc  inspect  view
 render  link  get  set  map  call  verbs  rm  recreate-root  set-home
+get-label  set-label
 ```
 
 The target surface keeps eight — `new`, `setsrc`, `getsrc`, `rm`, `ls`,
 `search`, `verbs`, `set-slug` — plus `step` and `link`, which are settled above.
-The rest move:
+`get-label` and `set-label` (#5673) postdate the shape document's accounting;
+whether they stay piece-scoped or join a label surface is a step-7-class
+decision that document has not made, so they are queued with the merges rather
+than silently kept or moved. The rest move:
 
 | Today | Becomes | Step |
 | --- | --- | --- |
@@ -119,11 +124,12 @@ and say what replaced them.
 teach `--piece` or `--input` today. They move to the new spellings in one pass,
 because a skill teaching a warned spelling teaches an agent to generate warnings.
 
-*The decision this needs.* **What "carries traffic" means.** The shape document
-defers deprecation until the new spellings carry traffic, and nothing in the CLI
-measures that. Either a signal is added, or the condition is replaced with one
-that can actually be evaluated — a release count, the skills being migrated, or
-a date. Deprecating on an unmeasurable condition means deprecating on a guess.
+*Decided: a date, not a traffic threshold.* Each warning names the day its
+spelling stops working, two weeks after D1 reaches main, written in as a literal
+so the warning reads the same whenever it is read. Traffic was never measurable
+here — both spellings mount the same builder and emit identical requests, and
+the CLI sends nothing that would let a server attribute one to either, so the
+condition could only ever have been estimated.
 
 *Exit:* no file in this repository teaches a deprecated spelling, and every
 deprecated spelling still works.
@@ -178,8 +184,8 @@ outside the accretion this addresses.
 | P2 | P1 | the suffix attaches to the positional |
 | N1 | P1, P2 | a new name should be born with the new address forms, not gain them later |
 | N2 | — | nothing to do |
-| D1 | N1 | cannot deprecate before the replacement exists |
-| D2 | D1 | and before the traffic question is answered |
+| D2 | P1, P2, N1 | it teaches what those three add, so it cannot precede them |
+| D1 | N1, D2 | cannot deprecate before the replacement exists, nor before the sweep: a warning that fires on examples this repository still teaches trains agents to generate warnings |
 | M1–M5 | — | each independent of the others and of everything above |
 
 The merges do not depend on the renames. They are ordered last because they are
@@ -223,9 +229,11 @@ commands that agree by coincidence.
 behaviors, and merging keeps one. Without characterization tests first, the
 survivor is whichever was easier to keep.
 
-**Deprecating on an unmeasurable condition.** Named above as the decision D1
-needs. Left unresolved, "once it carries traffic" becomes "whenever someone feels
-ready", which is how a deprecation stalls indefinitely or lands too early.
+**Deprecating on an unmeasurable condition.** Retired: the condition is a date
+the warning itself carries, so "whenever someone feels ready" is not available
+as an answer. What the date cannot cover is consumers outside this repository,
+who are unreachable by any sweep here and unmeasurable by any signal the CLI
+could add — which is what the two weeks are for.
 
 ## Documentation owed
 

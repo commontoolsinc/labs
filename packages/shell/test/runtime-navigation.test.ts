@@ -1,7 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
+import { createSession, Identity } from "@commonfabric/identity";
 import { EventEmitter } from "../../runtime-client/client/emitter.ts";
+import {
+  createRuntimeClientOptions,
+  RuntimeInternals,
+} from "../src/lib/runtime.ts";
 
 const env = globalThis as typeof globalThis & {
   $API_URL?: string;
@@ -64,7 +69,6 @@ type NavigationDetail = {
 
 describe("RuntimeInternals navigation", () => {
   it("exposes page slug metadata", async () => {
-    const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     client.slugByPageId.set("piece-789", "demo");
@@ -100,7 +104,6 @@ describe("RuntimeInternals navigation", () => {
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
 
-    const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     const runtime = new (RuntimeInternals as any)(client);
@@ -174,7 +177,6 @@ describe("RuntimeInternals navigation", () => {
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
 
-    const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const nextSpace = "did:key:z6Mk-shell-runtime-did-nav-next" as DID;
     const client = new MockRuntimeClient();
     const runtime = new (RuntimeInternals as any)(client);
@@ -216,13 +218,6 @@ describe("RuntimeInternals navigation", () => {
   });
 
   it("creates worker runtime options with explicit CFC enforcement and principal trust", async () => {
-    const { createRuntimeClientOptions } = await import(
-      "../src/lib/runtime.ts"
-    );
-    const { createSession, Identity } = await import(
-      "@commonfabric/identity"
-    );
-
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,

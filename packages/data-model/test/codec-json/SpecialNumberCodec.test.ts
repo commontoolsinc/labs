@@ -17,13 +17,12 @@ import { expect } from "@std/expect";
 
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
   const expectedTag = CODEC_TYPE_TAGS.SpecialNumber;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const env = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -70,37 +69,31 @@ describe("SpecialNumberCodec", () => {
       });
     });
 
-    describe("decode()", () => {
-      it("decodes non-string state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          0,
-          context,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "SpecialNumber@1",
-        );
+    describe("canDecode()", () => {
+      it("returns `true` for each of the four literals", () => {
+        for (const literal of ["-0", "+Infinity", "-Infinity", "NaN"]) {
+          expect(codec.canDecode(literal)).toBe(true);
+        }
       });
 
-      it("decodes an unknown literal to `ProblematicValue`", () => {
+      it("returns `false` for state that is not a string", () => {
+        expect(codec.canDecode(0)).toBe(false);
+      });
+
+      it("returns `false` for a string that is not one of the literals", () => {
         // "Infinity" (missing leading +) is not a recognized literal.
-        const result = codec.decode(expectedTag, "Infinity", context);
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "SpecialNumber@1",
-        );
+        expect(codec.canDecode("Infinity")).toBe(false);
       });
     });
 
     describe("round trip encode-decode", () => {
       it("round-trips `-0` (preserves sign of zero)", () => {
-        const result = codec.decode(expectedTag, codec.encode(-0), context);
+        const result = codec.decode(expectedTag, codec.encode(-0), env);
         expect(Object.is(result, -0)).toBe(true);
       });
 
       it("round-trips `NaN`", () => {
-        const result = codec.decode(expectedTag, codec.encode(NaN), context);
+        const result = codec.decode(expectedTag, codec.encode(NaN), env);
         expect(Number.isNaN(result)).toBe(true);
       });
 
@@ -108,7 +101,7 @@ describe("SpecialNumberCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(Infinity),
-          context,
+          env,
         );
         expect(result).toBe(Infinity);
       });
@@ -117,7 +110,7 @@ describe("SpecialNumberCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(-Infinity),
-          context,
+          env,
         );
         expect(result).toBe(-Infinity);
       });

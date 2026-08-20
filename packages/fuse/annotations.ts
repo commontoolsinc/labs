@@ -1,7 +1,10 @@
+import { encodeHex } from "@std/encoding/hex";
+
 import { CFC_FUSE_ATOM_CLASS, cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { isLinkRef } from "@commonfabric/runner/shared";
-import { encodeHex } from "@std/encoding/hex";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { CallableKind } from "./callables.ts";
 
 export type CfcProjectionKind =
@@ -194,10 +197,6 @@ const emptyDerivedSlots = (): CfcDerivedSlotsAnnotation => ({
 
 function labelKeys(): Array<keyof CfcLabel> {
   return ["confidentiality", "integrity"];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function canonicalPath(path: readonly CfcPathSegment[]): string[] {
@@ -623,7 +622,7 @@ export class CfcProjectionAnnotator {
       );
     }
 
-    if (isRecord(value) && !isLinkRef(value)) {
+    if (isObjectNotArray(value) && !isLinkRef(value)) {
       const keys = Object.keys(value);
       if (keys.length === 0) return this.labelAt(path);
       return joinLabels(...keys.map((key) => this.labelAt([...path, key])));

@@ -1,34 +1,18 @@
 import { AnyCellWrapping } from "@commonfabric/api";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isReadonlyObjectOrArray,
-} from "@commonfabric/utils/types";
-import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-  shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneIfNecessary,
   FabricInstance,
   FabricPrimitive,
+  type FabricValue,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import { createCell, isCell } from "./cell.ts";
-import { canFollowScopedLink } from "./scope.ts";
-import { forEachSubschema } from "./schema-walk.ts";
-import { arrayMatchesPositionally } from "./schema-match.ts";
 import {
   readMaybeLink,
   resolveLink,
@@ -49,6 +33,10 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import { materializeSchemaView } from "./schema-view.ts";
 import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import {
   canBranchMatch,
   combineOptionalSchema,
   combineSchema,
@@ -58,9 +46,19 @@ import {
   mergeSchemaFlags,
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
-import { ignoreReadForScheduling } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
+
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
+import { createCell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -69,12 +67,34 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
-import { isCellScope } from "./scope.ts";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
+import type { CfcAddress } from "./cfc/types.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
+import {
+  createQueryResultProxy,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { type Runtime } from "./runtime.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
+import { materializeSchemaView } from "./schema-view.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { canFollowScopedLink, isCellScope } from "./scope.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -111,10 +131,15 @@ const linkWithAsCellScope = (
 // Cache per deep-frozen schema identity; mutable schemas recompute per call.
 // The cached candidates are interned (combineSchema interns its results), so
 // downstream identity-keyed memos see stable references too.
-const compoundAsCellCandidatesCache = new WeakMap<
+let compoundAsCellCandidatesCache = new WeakMap<
   JSONSchemaObj,
   readonly JSONSchemaObj[]
 >();
+// Candidates embed resolved branch content, so a registry clear (last lease
+// out) swaps the cache — a resolution success must not outlive its epoch.
+onSchemaRegistryClear(() => {
+  compoundAsCellCandidatesCache = new WeakMap();
+});
 
 const asCellCompoundCandidates = (
   schema: JSONSchemaObj,
@@ -124,6 +149,7 @@ const asCellCompoundCandidates = (
     const cached = compoundAsCellCandidatesCache.get(schema);
     if (cached !== undefined) return cached;
   }
+  const missesBefore = externalResolutionMissCount();
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
@@ -143,7 +169,10 @@ const asCellCompoundCandidates = (
       }
     }
   }
-  if (cacheable) {
+  // Populate only when no `cid:` resolution missed while building: a branch
+  // whose ref missed resolves to nothing and would be missing from a
+  // memoized candidate list forever, though the document can still arrive.
+  if (cacheable && externalResolutionMissCount() === missesBefore) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
@@ -526,7 +555,12 @@ export function resolveSchemaForValue(
 // A future contributor must not relax the populate guard to accept
 // non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
 // is shallow-only.
-const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+let _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+// A verdict computed over registry content must not outlive the lease epoch
+// that made the content available; the clear swaps the cache.
+onSchemaRegistryClear(() => {
+  _hasIfcCache = new WeakMap();
+});
 
 interface SchemaHasIfcContext {
   seenByRoot: WeakMap<object, WeakSet<object>>;
@@ -559,10 +593,16 @@ export function schemaHasIfc(
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
+  const missesBefore = externalResolutionMissCount();
   const result = _schemaHasIfcUncached(schema, fullSchema, context);
-  // Populate only under a deep-frozen guard. See the invariant comment
-  // above `_hasIfcCache`.
-  if (isTopLevel && isDeepFrozen(schema)) {
+  // Populate only under a deep-frozen guard (see the invariant comment
+  // above `_hasIfcCache`), and only when no `cid:` resolution missed while
+  // computing — a verdict computed over an absent schema document must not
+  // outlive the document's arrival.
+  if (
+    isTopLevel && isDeepFrozen(schema) &&
+    externalResolutionMissCount() === missesBefore
+  ) {
     _hasIfcCache.set(schema, result);
   }
   return result;
@@ -969,7 +1009,7 @@ export function mergeDefaults(
  * is first shallow-cloned. It is up to callers to ensure that mutable and
  * unbound `value`s are indeed appropriate to be mutated.
  */
-function annotateWithBackToCellSymbols(
+export function annotateWithBackToCellSymbols(
   value: any,
   runtime: Runtime,
   link: NormalizedFullLink,
@@ -1062,11 +1102,11 @@ function deriveDereferenceLabelView(
  * The value a resolved link points at, including the one address that is
  * computed rather than stored.
  *
- * A string's `length` is not a path the store holds. Traversal answers it from
+ * A string's `length` is not a path the store holds. Traversal reads it off
  * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
  * — `subject.key("label", "length")` where `label` is a string — resolves to
  * an address the store cannot serve, and a bare read of it yields `undefined`.
- * Answering it from the string applies traversal's rule where a link is
+ * Reading it off the string applies traversal's rule where a link is
  * followed rather than where a value is walked, so both routes agree on what
  * `<string>/length` is worth. An array's `length` needs none of this; the store
  * reads that segment itself.
@@ -1129,7 +1169,7 @@ export function validateAndTransform(
   //
   // A transaction marked for lazy materialization is kept whatever its state:
   // a view reads the state ITS transaction saw, and swapping a finished one for
-  // a fresh read would answer from newer state where the view's contract is to
+  // a fresh read would read newer state where the view's contract is to
   // refuse. The refusal comes from the marked transaction's own guard below.
   if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 
@@ -1217,7 +1257,7 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView);
+    return createQueryResultProxy(runtime, tx, link, 0, cfcLabelView);
   }
 
   // Now resolve further links until we get the actual value.
@@ -1299,14 +1339,12 @@ export function validateAndTransform(
   // combination — so a view and an eager read start from the same link and the
   // same schema; only the materialization differs.
   //
-  // Not once the transaction has written, though. A view resolves each path
-  // when the reader touches it, so a view taken before a write reports the
-  // value after it, where an eager read hands back a value detached at the
-  // moment it was taken. Falling back keeps every read describing one instant,
-  // which is what a reader iterating a list while writing into it depends on.
-  // Nothing is lost where the win is: a lift reads its argument before it
-  // writes anything, so that read is still lazy.
-  if (tx.isLazyMaterialize() && !tx.hasWrites()) {
+  // A view describes the instant this read fixes, and goes on describing it
+  // however the reader writes afterwards — which is what a reader iterating a
+  // list while writing into it stands on, and what an eager read gives, since
+  // an eager read hands back a value built before the write. Seeing its own
+  // write means taking the read again.
+  if (tx.isLazyMaterialize()) {
     // Crossing the last link is a hop the eager traverser combines schemas
     // across (`linkHopSelector`), because a link's own schema describes the
     // value at its target while the reader's schema describes what the reader
@@ -1381,6 +1419,36 @@ const combinedCellSchemaCache = new WeakMap<
   JSONSchemaObj,
   Map<string, JSONSchema>
 >();
+
+/**
+ * The value an opaque (`type: "unknown"`) position projects to when something
+ * is there: an empty object carrying the back-to-cell annotation and the
+ * marker that says it holds nothing of what it names. Both read paths mint it
+ * here, so a reader cannot tell which one answered.
+ */
+export function createOpaqueReference(
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  tx: IExtendedStorageTransaction | undefined,
+  synced: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+): FabricValue {
+  const value: Record<symbol, unknown> = {};
+  // Non-enumerable, like the back-to-cell annotation beside it, so the marker
+  // stays off `Object.keys` and out of a spread.
+  Object.defineProperty(value, opaqueReference, {
+    value: true,
+    enumerable: false,
+  });
+  return annotateWithBackToCellSymbols(
+    value,
+    runtime,
+    link,
+    tx,
+    synced,
+    cfcLabelView,
+  );
+}
 
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
@@ -1503,6 +1571,30 @@ class TransformObjectCreator
   }
 
   /**
+   * An opaque (`type: "unknown"`) position that holds something projects to an
+   * empty object carrying the back-to-cell annotation. That is the whole
+   * contract: it is truthy, it compares by identity through `equals()`, and
+   * writing it back stores a link to the same document. It carries no
+   * properties, so a reader that probes it learns nothing about the target
+   * beyond its existence — which is what `unknown` declares.
+   *
+   * An empty object rather than a fresh symbol only because the back-to-cell
+   * annotation is carried as a property and a symbol cannot hold one; see the
+   * TODO on `toCell`.
+   */
+  createOpaquePresence(
+    link: NormalizedFullLink,
+  ): AnyCellWrapping<FabricValue> {
+    return createOpaqueReference(
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      this.labelViewFor(link),
+    ) as AnyCellWrapping<FabricValue>;
+  }
+
+  /**
    * Plain-schema traversal has already ruled out asCell and default keywords,
    * so only attach the ordinary back-to-cell annotation here. Keeping this
    * beside createObject() makes the skipped semantics explicit and leaves the
@@ -1539,7 +1631,6 @@ class TransformObjectCreator
         this.tx,
         link,
         0,
-        false,
         this.labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
@@ -1589,7 +1680,6 @@ class TransformObjectCreator
           this.tx,
           link,
           0,
-          false,
           this.labelViewFor(link),
         );
       }

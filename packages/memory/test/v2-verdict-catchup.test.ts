@@ -594,91 +594,6 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   );
 });
 
-Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-multi-space",
-  });
-  const { server, space, committerMessages } = context;
-
-  // A SECOND space with its own observing session, so stranding is
-  // observable: without an observer, a stranded space holds dirty docs no
-  // assertion can see, and the pin passes even against the pre-fix code.
-  const spaceB = "did:key:z6Mk-verdict-catchup-second-space";
-  const observerMessages: ServerMessage[] = [];
-  const observer = server.connect((message) => observerMessages.push(message));
-  await observer.receive(encodeMemoryBoundary(HELLO));
-  const observerSessionOpen = expectHelloOk(observerMessages);
-  await observer.receive(encodeMemoryBoundary({
-    type: "session.open",
-    requestId: "observer-open",
-    space: spaceB,
-    session: {},
-    invocation: authInvocation(observerSessionOpen),
-  }));
-  const observerSessionId =
-    assertResponse<{ sessionId: string }>(shiftMessage(observerMessages))
-      .ok!.sessionId;
-  await observer.receive(encodeMemoryBoundary({
-    type: "session.watch.set",
-    requestId: "watch-z",
-    space: spaceB,
-    sessionId: observerSessionId,
-    watches: [{
-      id: "root",
-      kind: "graph",
-      query: {
-        roots: [{ id: "of:doc:z", selector: { path: [], schema: false } }],
-      },
-    }],
-  }));
-  assertResponse(shiftMessage(observerMessages));
-  // Parked novelty in spaceB, mirroring setup's doc:b in the first space.
-  await server.writeDocument(spaceB, "of:doc:z", { parked: true });
-
-  const original = server.syncSessionForConnection.bind(server);
-  let failed = false;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
-    if (!failed) {
-      failed = true;
-      return Promise.reject(new Error("synthetic first-space failure"));
-    }
-    return original(...args);
-  };
-
-  let threw = false;
-  try {
-    await server.flushSessions([space, spaceB]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
-  // The failing pass delivered NOTHING: the rejected sync sent no frame,
-  // and the pass aborted before reaching the other space.
-  assertEquals(committerMessages.length, 0);
-  assertEquals(observerMessages.length, 0);
-
-  // Recovery must reach BOTH spaces: the failed space's consumed batch was
-  // requeued, and the unreached space was never removed from the dirty set
-  // (spaces leave it at their own processing turn). Pre-fix the whole
-  // selection was deleted up front, so whichever space the failure skipped
-  // stayed stranded and its observer never heard the parked novelty.
-  await server.flushSessions();
-  const committerSync = assertEffect(shiftMessage(committerMessages))
-    .effect as SessionSync;
-  assertEquals(
-    committerSync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
-  );
-  const observerSync = assertEffect(shiftMessage(observerMessages))
-    .effect as SessionSync;
-  assertEquals(
-    observerSync.upserts.map((upsert) => upsert.id),
-    ["of:doc:z"],
-  );
-});
 
 Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
   const context = await setup({
@@ -836,5 +751,292 @@ Deno.test("memory v2 server: the verdict leaves within the transact's publicatio
       { id: "of:doc:b", seq: 1, doc: { value: { from: "writer" } } },
     ],
   );
+  assertEquals(committerMessages.length, 0);
+});
+
+Deno.test("memory v2 server: an evaluation failure skips only that session's frame; later spaces deliver in the same pass", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-multi-space",
+  });
+  const { server, space, committerMessages } = context;
+
+  // A SECOND space with its own observing session, so stranding is
+  // observable: without an observer, a stranded space holds dirty docs no
+  // assertion can see, and the pin passes even against the pre-fix code.
+  const spaceB = "did:key:z6Mk-verdict-catchup-second-space";
+  const observerMessages: ServerMessage[] = [];
+  const observer = server.connect((message) => observerMessages.push(message));
+  await observer.receive(encodeMemoryBoundary(HELLO));
+  const observerSessionOpen = expectHelloOk(observerMessages);
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "observer-open",
+    space: spaceB,
+    session: {},
+    invocation: authInvocation(observerSessionOpen),
+  }));
+  const observerSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(observerMessages))
+      .ok!.sessionId;
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.watch.set",
+    requestId: "watch-z",
+    space: spaceB,
+    sessionId: observerSessionId,
+    watches: [{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:doc:z", selector: { path: [], schema: false } }],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(observerMessages));
+  // Parked novelty in spaceB, mirroring setup's doc:b in the first space.
+  await server.writeDocument(spaceB, "of:doc:z", { parked: true });
+
+  const original = server.syncSessionForConnection.bind(server);
+  let failed = false;
+  (server as unknown as {
+    syncSessionForConnection: typeof original;
+  }).syncSessionForConnection = (...args) => {
+    if (!failed) {
+      failed = true;
+      return Promise.reject(new Error("synthetic first-space failure"));
+    }
+    return original(...args);
+  };
+
+  // The evaluation failure skips ONLY the failed session's frame; the
+  // same pass still reaches the other space's observer — nothing is
+  // stranded and nothing throws.
+  await server.flushSessions([space, spaceB]);
+  assertEquals(committerMessages.length, 0);
+  const observerSync = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    observerSync.upserts.map((upsert) => upsert.id),
+    ["of:doc:z"],
+  );
+});
+
+Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watchers", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-cid-elide",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // A second session observes the schema document and a control doc.
+  const observerMessages: ServerMessage[] = [];
+  const observer = server.connect((message) => observerMessages.push(message));
+  await observer.receive(encodeMemoryBoundary(HELLO));
+  const observerSessionOpen = expectHelloOk(observerMessages);
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "observer-open",
+    space,
+    session: {},
+    invocation: authInvocation(observerSessionOpen),
+  }));
+  const observerSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(observerMessages))
+      .ok!.sessionId;
+  await observer.receive(encodeMemoryBoundary({
+    type: "session.watch.set",
+    requestId: "observer-watch",
+    space,
+    sessionId: observerSessionId,
+    watches: [{
+      id: "elide-watch",
+      kind: "graph",
+      query: {
+        roots: [
+          {
+            id: "cid:fid1:elide-fanout",
+            selector: { path: [], schema: false },
+          },
+          { id: "of:elide-control", selector: { path: [], schema: false } },
+        ],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(observerMessages));
+
+  // Install both; the observer's frame carries both.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-install",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "cid:fid1:elide-fanout",
+          value: { value: { type: "string", title: "fanout" } },
+        },
+        { op: "set", id: "of:elide-control", value: { value: { round: 1 } } },
+      ],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  // The committer's own accept rides home as an (echo-suppressed) marker
+  // frame; drain it so the next shift sees the second verdict.
+  assertEffect(shiftMessage(committerMessages));
+  const first = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    first.upserts.map((upsert) => upsert.id).toSorted(),
+    ["cid:fid1:elide-fanout", "of:elide-control"],
+  );
+
+  // The identical re-set applies as a no-op, so the observer's next frame
+  // carries ONLY the control change — before elision, the re-set advanced
+  // the schema document's head and re-delivered the unchanged content here.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-reset",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "cid:fid1:elide-fanout",
+          value: { value: { type: "string", title: "fanout" } },
+        },
+        { op: "set", id: "of:elide-control", value: { value: { round: 2 } } },
+      ],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  const second = assertEffect(shiftMessage(observerMessages))
+    .effect as SessionSync;
+  assertEquals(
+    second.upserts.map((upsert) => ({ id: upsert.id, doc: upsert.doc })),
+    [{ id: "of:elide-control", doc: { value: { round: 2 } } }],
+  );
+  observer.close();
+});
+
+Deno.test("memory v2 server: an all-elided accept still delivers its marker on an empty frame", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-all-elided",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-install",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "cid:fid1:all-elided",
+        value: { value: { type: "string", title: "all-elided" } },
+      }],
+    },
+  }));
+  assertResponse(shiftMessage(committerMessages));
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // The whole commit elides: nothing is written and no document turns
+  // dirty, yet the writer parks its promotion on the catch-up marker — the
+  // flush must still run and carry it on an otherwise-empty frame.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-elided",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "cid:fid1:all-elided",
+        value: { value: { type: "string", title: "all-elided" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ elidedOpIndexes?: number[] }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.elidedOpIndexes, [0]);
+  await server.flushSessions([space]);
+  const frame = assertEffect(shiftMessage(committerMessages))
+    .effect as SessionSync;
+  assertEquals(frame.upserts, []);
+  assertEquals(frame.caughtUpLocalSeq, 2);
+});
+
+Deno.test("memory v2 server: an identical direct re-write fans out nothing", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-direct-elide",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // Watch the content-addressed document itself, so a spurious dirty mark
+  // from the direct-write path would be OBSERVED as a re-delivery.
+  await committer.receive(encodeMemoryBoundary({
+    type: "session.watch.add",
+    requestId: "watch-direct-cid",
+    space,
+    sessionId: committerSessionId,
+    watches: [{
+      id: "direct-cid",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "cid:fid1:direct",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }],
+  }));
+  assertResponse(shiftMessage(committerMessages));
+
+  // The install — the blob-upload path — delivers its novelty...
+  const installed = await server.writeDocument(space, "cid:fid1:direct", {
+    type: "string",
+    title: "direct-elide",
+  });
+  assertEquals(installed.revisions.length, 1);
+  await server.flushSessions([space]);
+  const first = assertEffect(shiftMessage(committerMessages))
+    .effect as SessionSync;
+  assertEquals(first.upserts.map((upsert) => upsert.id), ["cid:fid1:direct"]);
+
+  // ...and the identical re-write is a proven no-op: it marks nothing
+  // dirty and schedules nothing, so the watcher hears nothing.
+  const reWritten = await server.writeDocument(space, "cid:fid1:direct", {
+    type: "string",
+    title: "direct-elide",
+  });
+  assertEquals(reWritten.elidedOpIndexes, [0]);
+  assertEquals(reWritten.revisions, []);
+  await server.flushSessions([space]);
   assertEquals(committerMessages.length, 0);
 });

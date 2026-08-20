@@ -202,9 +202,9 @@ export function isInertArray(array: unknown): boolean {
   }
 
   // Every index (each key before `length`, given the check above) must also
-  // hold a data property; an accessor answers `get` / `set` in its descriptor
+  // hold a data property; an accessor carries `get` / `set` in its descriptor
   // and has no `value`. (`length` itself is always a data property.) The
-  // non-null assertion trusts the object to answer a descriptor for a key it
+  // non-null assertion trusts the object to return a descriptor for a key it
   // itself reported; a proxy that disavows one is buggy (this is a
   // best-effort system with regards to proxies), and the resulting
   // `TypeError` is its to own.

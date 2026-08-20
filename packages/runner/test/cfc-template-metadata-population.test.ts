@@ -1,28 +1,30 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
-import {
-  deriveLabelMetadataTemplateEntries,
-  resolveLabelMetadataTemplateConfidentiality,
-} from "../src/cfc/label-metadata-population.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import {
   evaluateConfLabelQuery,
   inspectStoredConfLabel,
 } from "../src/cfc/label-introspection.ts";
+import {
+  deriveLabelMetadataTemplateEntries,
+  resolveLabelMetadataTemplateConfidentiality,
+} from "../src/cfc/label-metadata-population.ts";
 import { containsCfcFieldCommitment } from "../src/cfc/label-representation.ts";
 import { cfcLabelViewFromMetadata } from "../src/cfc/label-view-state.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-template-metadata-population",

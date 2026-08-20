@@ -7,6 +7,7 @@ import {
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -52,6 +53,23 @@ export type HarnessRunTerminalReason =
   | "prompt_loop_error"
   | "process_interrupted";
 
+/**
+ * The resolved CFC posture of the run's fabric session — the Runtime that
+ * `run_pattern` deploys patterns into. This is a different dial from the
+ * run-level `cfcEnforcementMode`, which governs tool policy and the sandbox;
+ * the two are set independently, so the artifacts state both. Absent when the
+ * run has no fabric session configuration — including when a test injects a
+ * session factory directly, whose runtime's posture the harness never saw.
+ */
+export interface HarnessFabricSessionCfcPosture {
+  enforcementMode: "enforce-explicit" | "enforce-strict";
+  /** `configured` when the operator set the dial; `preset-pin` otherwise. */
+  enforcementModeSource: "configured" | "preset-pin";
+  flowLabels: "off" | "observe" | "persist";
+  /** `configured` when the operator set the dial; `default` otherwise. */
+  flowLabelsSource: "configured" | "default";
+}
+
 export interface HarnessRunState {
   runId: string;
   status: HarnessRunStatus;
@@ -60,6 +78,7 @@ export interface HarnessRunState {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
@@ -90,6 +109,7 @@ export interface HarnessRunState {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   handleTable?: HarnessHandleTable;
+  wellKnownGrants?: HarnessWellKnownGrant[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -105,6 +125,7 @@ export interface CreateHarnessRunStateOptions {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
@@ -135,6 +156,7 @@ export interface CreateHarnessRunStateOptions {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   handleTable?: HarnessHandleTable;
+  wellKnownGrants?: HarnessWellKnownGrant[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -157,6 +179,9 @@ export const createHarnessRunState = (
       ? { terminalReason: options.terminalReason }
       : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.fabricSessionCfc !== undefined
+      ? { fabricSessionCfc: options.fabricSessionCfc }
+      : {}),
     ...(options.promptSlotBinding !== undefined
       ? { promptSlotBinding: options.promptSlotBinding }
       : {}),
@@ -240,6 +265,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
+      : {}),
+    ...(options.wellKnownGrants !== undefined
+      ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }

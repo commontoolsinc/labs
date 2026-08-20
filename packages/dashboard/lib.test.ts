@@ -1,4 +1,7 @@
-// Unit tests for the pure helpers. No network, subprocess, or filesystem.
+/**
+ * Unit tests for the pure helpers. No network, subprocess, or filesystem.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, landingHref, lighten, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
 
@@ -23,11 +26,11 @@ Deno.test("landingHref: parses only the first line", () => {
 
 Deno.test("concDot: only genuine failures are red", () => {
   assertEquals(concDot("success", 1), "green");
-  assertEquals(concDot("success", 2), "grey"); // passed only on retry
+  assertEquals(concDot("success", 2), "gray"); // passed only on retry
   assertEquals(concDot("failure", 1), "red");
   assertEquals(concDot("timed_out", 1), "red");
-  assertEquals(concDot("cancelled", 1), "grey"); // non-verdict, not a failure
-  assertEquals(concDot(null, 1), "grey");
+  assertEquals(concDot("cancelled", 1), "gray"); // non-verdict, not a failure
+  assertEquals(concDot(null, 1), "gray");
 });
 
 Deno.test("daysLabel: consistent 'x days' text", () => {

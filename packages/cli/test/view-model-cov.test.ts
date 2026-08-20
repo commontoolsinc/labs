@@ -1,8 +1,9 @@
 /**
  * The shared model's one runtime helper: flattenStructure turns a structure
  * tree into the pre-order sequence that `flatStructure` holds. It is exercised
- * by every parse/markdown/diff document build; this pins its behaviour directly.
+ * by every parse/markdown/diff document build; this pins its behavior directly.
  */
+
 import { assertEquals } from "@std/assert";
 import { flattenStructure, type StructureNode } from "../lib/view/model.ts";
 

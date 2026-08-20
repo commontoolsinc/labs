@@ -1,15 +1,16 @@
 import { assert, assertEquals } from "@std/assert";
-import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
+
+import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
+import { renderLineColored } from "../lib/view/highlight.ts";
 import {
+  _internal,
   labeledDiffMetadataLine,
   overlayBox,
   renderFrame,
   type ViewState,
 } from "../lib/view/render.ts";
-import { _internal } from "../lib/view/render.ts";
-import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
-import { renderLineColored } from "../lib/view/highlight.ts";
 import { lineBg, styleFor, ui } from "../lib/view/theme.ts";
+import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {
@@ -36,7 +37,7 @@ function diffView(over: Partial<ViewState> = {}): ViewState {
 }
 
 /** The editor background sits behind every cell, so a "highlighted" cell is one
- * whose background is some OTHER colour (a selection tint, a search match, a
+ * whose background is some OTHER color (a selection tint, a search match, a
  * diff row). */
 const EDITOR_BG = bgCode(ui.editorBg);
 
@@ -65,7 +66,7 @@ function bgColumns(row: string): boolean[] {
   return out;
 }
 
-/** Background colour active at one visible column, as an RGB tuple string. */
+/** Background color active at one visible column, as an RGB tuple string. */
 function bgAtColumn(row: string, target: number): string | null {
   let bg: string | null = null;
   let col = 0;
@@ -89,7 +90,7 @@ function bgAtColumn(row: string, target: number): string | null {
   return null;
 }
 
-/** Foreground colour active at one visible column, as an RGB tuple string. */
+/** Foreground color active at one visible column, as an RGB tuple string. */
 function fgAtColumn(row: string, target: number): string | null {
   let fg: string | null = null;
   let col = 0;
@@ -281,7 +282,7 @@ Deno.test("renderFrame: edit mode leaves rows after the document blank", () => {
   assertEquals(rows[1], " ".repeat(15));
 });
 
-Deno.test("renderFrame: content rows are verbatim under the colour", () => {
+Deno.test("renderFrame: content rows are verbatim under the color", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(doc, baseView());
   // line 0 is the section header, line 1 is `const define = undefined;`
@@ -574,7 +575,7 @@ Deno.test("renderFrame: draws the whole-diff totals in the first line's corner",
   assert(!scrolled.some((row) => row.includes("+456")));
 });
 
-Deno.test("renderFrame: colours the totals as removals and additions", () => {
+Deno.test("renderFrame: colors the totals as removals and additions", () => {
   const doc = parseDocument("meta");
   const rows = renderFrame(
     doc,
@@ -1168,7 +1169,7 @@ Deno.test("renderFrame: hidden mode collapses a control run and shifts text left
   );
 });
 
-Deno.test("renderFrame: ansi mode paints the sequence's colour onto later text", () => {
+Deno.test("renderFrame: ansi mode paints the sequence's color onto later text", () => {
   const doc = docOf("a\x1b[31mb");
   const rows = renderFrame(doc, baseView({ displayMode: "ansi" }));
   // The escape is consumed; "b" is painted ANSI red (205;49;49) while "a" is not.
@@ -1464,7 +1465,7 @@ Deno.test("overlayBox: inner dimensions never go negative", () => {
       assert(box.innerH >= 0, `innerH >= 0 at ${width}x${height}`);
       assert(box.x >= 0, `x >= 0 at ${width}x${height}`);
       assert(box.y >= 0, `y >= 0 at ${width}x${height}`);
-      // The box never extends past the terminal it is centred in.
+      // The box never extends past the terminal it is centered in.
       assert(box.boxW <= Math.max(0, width), `boxW fits at ${width}x${height}`);
       assert(
         box.boxH <= Math.max(0, height),
@@ -1512,7 +1513,7 @@ Deno.test("renderFrame: the overlay uses a double-line (Turbo Pascal) frame", ()
   }
 });
 
-Deno.test("renderFrame: the info panel uses the dialog panel and text colours", () => {
+Deno.test("renderFrame: the info panel uses the dialog panel and text colors", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
@@ -1531,11 +1532,11 @@ Deno.test("renderFrame: the info panel uses the dialog panel and text colours", 
     }),
   );
   const body = rows.find((r) => stripAnsi(r).includes("hello"))!;
-  assert(body.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
-  assert(body.includes(fgCode(ui.dialogText.fg!)), "the dialog text colour");
+  assert(body.includes(bgCode(ui.overlayBg)), "the dialog panel color");
+  assert(body.includes(fgCode(ui.dialogText.fg!)), "the dialog text color");
 });
 
-Deno.test("renderFrame: a source overlay uses the editor colours, not the dialog panel", () => {
+Deno.test("renderFrame: a source overlay uses the editor colors, not the dialog panel", () => {
   const doc = parseDocument(SAMPLE);
   const overlay = (sourceView: boolean) => ({
     title: "SRC",
@@ -1557,9 +1558,9 @@ Deno.test("renderFrame: a source overlay uses the editor colours, not the dialog
   );
   const dialogBody = rowsDialog.find((r) => stripAnsi(r).includes("code"))!;
   const sourceBody = rowsSource.find((r) => stripAnsi(r).includes("code"))!;
-  assert(dialogBody.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
+  assert(dialogBody.includes(bgCode(ui.overlayBg)), "the dialog panel color");
   assert(
     sourceBody.includes(bgCode(ui.editorBg)),
-    "the source panel is the editor colour",
+    "the source panel is the editor color",
   );
 });

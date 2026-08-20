@@ -1,9 +1,9 @@
 import { getLogger } from "@commonfabric/utils/logger";
+
 import type { Cancel } from "../cancel.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import type { ChangeGroup } from "../storage/interface.ts";
+import type { ChangeGroup, IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   type DependencyGraphState,
   hasInvalidUpstream,
@@ -16,13 +16,13 @@ import {
   type DependencyUpdateState,
   setSchedulerDependencies,
 } from "./dependency-updates.ts";
-import { filterIgnoredAddresses } from "./reactivity.ts";
-import { type WriterIndexState } from "./scheduling-writes.ts";
 import {
   type NodeKind,
   NodeRegistry,
   type SchedulerNode,
 } from "./node-record.ts";
+import { filterIgnoredAddresses } from "./reactivity.ts";
+import { type WriterIndexState } from "./scheduling-writes.ts";
 import {
   applyActionReadDelta,
   ensureCancelForActionTriggers,

@@ -113,7 +113,7 @@ is a no-op.
 **The residual same-DID risk is real, and belongs at the endpoint layer.** Two
 stores now claim one identity, so a mis-pointed client is the hazard. The fix is
 not to change the identity — it is to make the clone unreachable at the prod
-address and loudly labelled at its own. See [Safety rails](#safety-rails).
+address and loudly labeled at its own. See [Safety rails](#safety-rails).
 
 **Interview result:** the July rehearsal used same-DID, and Wilk noticed no
 trouble — caveated that he drove it mostly through an agent, so a mis-point
@@ -414,9 +414,9 @@ Gideon's runbook, made checkable:
 5. **≥20 s cold-load patience** before calling a health check failed. A first
    production attempt was rolled back on this false negative.
 6. **Post-run.** Counts match; content fingerprint of durable topic content
-   unchanged; a cold board read returns every child; a cold crossref read
-   resolves a linked child; churn returns to baseline and *stays* there — a
-   storm is a steady state, not a spike.
+   unchanged; a cold board read returns every child; a cold index read resolves
+   a linked child; churn returns to baseline and *stays* there — a storm is a
+   steady state, not a spike.
 7. **Rollback manifest.** The pristine snapshot path and the exact reset command,
    written down before the live attempt, not improvised during it.
 8. **Two consecutive clean passes** before the live `setsrc`. Reset between

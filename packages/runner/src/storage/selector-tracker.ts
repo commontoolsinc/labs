@@ -1,17 +1,22 @@
-import { LRUCache } from "@commonfabric/utils/cache";
+import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
   scopeOfScopeKey,
 } from "@commonfabric/memory/v2";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "../schema-registry.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import * as Address from "./transaction/address.ts";
 
@@ -288,6 +293,15 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     Map<JSONSchema, readonly string[]>
   >();
 
+  static {
+    // Entries can embed $ref-resolved forms, so a registry clear (last
+    // lease out) swaps the cache — a resolution success must not outlive
+    // its lease epoch.
+    onSchemaRegistryClear(() => {
+      SelectorTracker.#anyOfItemHashesCache = new WeakMap();
+    });
+  }
+
   static #anyOfItemHashes(
     schema: JSONSchema & object,
     item: JSONSchema,
@@ -302,6 +316,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }
     }
     const hashes: string[] = [];
+    const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
     if (schema.$defs !== undefined) {
@@ -311,18 +326,24 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       hashes.push(hashSchema(current));
     }
     if (isObjectOrArray(current) && current.$ref !== undefined) {
-      hashes.push(
-        hashSchema(
-          SelectorTracker.getStandardSchema(
-            ContextualFlowControl.resolveSchemaRefs(
-              current,
-              schema,
-            ) as JSONSchema,
-          ),
-        ),
+      // An unresolvable ref contributes no resolved-form hash. For an
+      // external ref that is a recoverable miss — the schema document can
+      // arrive later — which is why the populate below is gated on the
+      // miss counter.
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        current,
+        schema,
       );
+      if (resolved !== undefined) {
+        hashes.push(
+          hashSchema(SelectorTracker.getStandardSchema(resolved)),
+        );
+      }
     }
-    if (cacheable) {
+    // Populate only when no `cid:` resolution missed while computing: a
+    // hash list computed over a hole must not outlive the document's
+    // arrival. The miss counter is exact and walk-free.
+    if (cacheable && externalResolutionMissCount() === missesBefore) {
       if (byItem === undefined) {
         byItem = new Map();
         SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);

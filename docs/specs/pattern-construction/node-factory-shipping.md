@@ -88,6 +88,15 @@ descriptor state:
 - verified exports and `__cfReg` values already enter the generic artifact
   index, regardless of factory kind.
 
+One factory kind carries that state without declaring it. `lift`'s declared
+return type is its call signature alone — a bare function type, which is what
+lets a generic implementation carry its caller's element type through the
+builder (see `LiftFunction` in `packages/api/index.ts`). The object it returns
+is an ordinary `ModuleFactory` with the whole protocol on it, so everything this
+document specifies about module factories holds for a lift's; only TypeScript
+declines to name it. Code that needs the record rather than the call reaches it
+through `isModule()`.
+
 The existing `toEncodableForm()` path is a one-way conversion. The runtime's
 artifact walk (`packages/runner/src/encodable-form.ts`) replaces each factory
 with inert plain data before the value reaches the data model, which has no

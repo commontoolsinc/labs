@@ -8,6 +8,7 @@
  * scanning every entry) and is the shared home for that concern. A future pass
  * can fold the authorship reader onto these primitives.
  */
+
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type { CfcLabelView };

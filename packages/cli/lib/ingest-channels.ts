@@ -130,7 +130,7 @@ async function call<T>(
  * A fresh idempotency key per invocation. Reuse the SAME id when retrying a
  * failed call and the server answers 409 rather than minting a second live
  * token — within a replay window of about half an hour, which is what the
- * defence is sized for. A retry days later mints a new token and supersedes
+ * defense is sized for. A retry days later mints a new token and supersedes
  * the old one.
  */
 export const newRequestId = (): string => crypto.randomUUID();

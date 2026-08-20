@@ -151,7 +151,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-loader` | Inline spinner for pending async operations | |
 | `cf-location` | Geolocation capture (single or continuous) | `$location` |
 | `cf-map` | Interactive Leaflet/OpenStreetMap map (see [cf-map](#cf-map)) | `$value`, `$center`, `$zoom`, `$bounds` |
-| `cf-markdown` | Renders markdown with syntax highlighting and copy buttons | `$content` |
+| `cf-markdown` | Renders markdown with syntax highlighting and copy buttons; safe for untrusted content, and raw HTML written into the markdown is not rendered | `$content` |
 | `cf-message-beads` | Compact bead visualization of a message history | `$messages` |
 | `cf-message-input` | Input + send button combo for chat-style item entry; emits a synthetic (untrusted) `cf-send` event, so use `cf-submit-input` when the submit must authorize an owner-protected write | |
 | `cf-modal` | Accessible modal dialog with bottom-sheet presentation mode | `$open` |
@@ -179,7 +179,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-slider` | Range input slider | |
 | `cf-space-link` | Renders a space as a clickable navigation pill | |
 | `cf-submit-input` | Text field + submit button whose real (trusted) click carries the typed text as `event.target.value` with the surface's UI integrity, so it can authorize an owner-protected runtime write; prefer over `cf-message-input` when the submit gesture must be trusted | |
-| `cf-svg` | Renders SVG content from a string | |
+| `cf-svg` | Renders SVG content from a string; safe for untrusted content, and anything that would run script is dropped | |
 | `cf-switch` | Toggle switch for binary on/off state | `$checked` |
 | `cf-tab` | Individual tab button used within `cf-tab-list` | |
 | `cf-tab-bar` | Fixed navigation bar for app-like UIs (with `cf-tab-bar-item`) | `$value` |
@@ -472,7 +472,7 @@ result schemas carry and dispatches an event to one, with an optional JSON
 payload. A handler only appears if the stream is declared in the pattern's
 output (or argument) type — the schema'd read is closed-world, so a handler
 returned at runtime behind an index signature is invisible to it. Dispatches
-from the menu are accepted-for-delivery acknowledgements (the commit is
+from the menu are accepted-for-delivery acknowledgments (the commit is
 asynchronous) and are not renderer-trusted, so a handler gated on UI
 provenance will refuse them.
 

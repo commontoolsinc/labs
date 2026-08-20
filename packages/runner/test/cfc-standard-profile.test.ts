@@ -1,25 +1,31 @@
-import { describe, it } from "@std/testing/bdd";
-import { type CfcConfClause, type CfcOrClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
   cfcAtom,
 } from "@commonfabric/api/cfc";
-import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
+
+import {
+  type CfcConfClause,
+  type CfcOrClause,
+  clauseAlternatives,
+  clausesEqual,
+  normalizeClause,
+} from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
+import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
+import {
+  dischargeMaterialRiskAtoms,
+  INJECTION_SAFE_ATOM,
+} from "../src/cfc/schema-sanitization.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
   MATERIAL_RISK_DISCHARGE_POLICY,
   STANDARD_PROMPT_CAVEAT_POLICY,
 } from "../src/cfc/standard-profile.ts";
-import {
-  dischargeMaterialRiskAtoms,
-  INJECTION_SAFE_ATOM,
-} from "../src/cfc/schema-sanitization.ts";
-import { clauseAlternatives, clausesEqual } from "../src/cfc/clause.ts";
-import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
-import { normalizeClause } from "../src/cfc/clause.ts";
 
 // Epic B6 (docs/history/plans/cfc-future-work-implementation.md §3): the §10.1
 // standard prompt-caveat profile as PolicyRecords. The goldens prove the

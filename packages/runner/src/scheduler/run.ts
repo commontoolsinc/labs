@@ -155,7 +155,7 @@ export function watchReactiveActionCommit(state: {
     // A CONFLICT is an upstream stale read: the authoritative version is ahead of
     // this replica, and the action's read set is stale until the replica catches
     // up (the conflict's `readyToRetry` gates exactly that catch-up). A
-    // STORAGE-TRANSACTION-INCONSISTENT is the local analogue: a value the
+    // STORAGE-TRANSACTION-INCONSISTENT is the local analog: a value the
     // transaction read changed on this replica between the read and the commit,
     // which re-running against the settled replica resolves. It carries no
     // `readyToRetry`, so the re-queue below runs it afresh once the local write

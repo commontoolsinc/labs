@@ -12,10 +12,24 @@
  * - **metrics**: aggregated traverser counters. These are *not* asserted —
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
+import type { SchemaPathSelector } from "@commonfabric/api";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { SchemaPathSelector } from "@commonfabric/api";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
+import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
+} from "../../src/storage/interface.ts";
+import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
+import {
+  fixtureDocKey,
+  type TraverseFixture,
+} from "../../src/traverse-recorder.ts";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -29,18 +43,6 @@ import {
   SchemaObjectTraverser,
   type TraversalContext,
 } from "../../src/traverse.ts";
-import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
-import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import type {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  IReadOptions,
-} from "../../src/storage/interface.ts";
-import {
-  fixtureDocKey,
-  type TraverseFixture,
-} from "../../src/traverse-recorder.ts";
 import { readMaybeGzippedText } from "./gzip.ts";
 
 export type ReplayInvocationOracle = {

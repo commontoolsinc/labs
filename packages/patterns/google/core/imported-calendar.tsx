@@ -19,6 +19,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -59,6 +60,8 @@ interface Input {
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   title: string;
   eventCount: number;
   localEvents: LocalEvent[];
@@ -353,19 +356,37 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   ).result!;
 
   // Current date sourced from the reactive #now cell (one-shot, coarsened to
-  // 1s) instead of reading the clock directly at pattern-body level. Like the
-  // #calendarEvents wish above, the result is available synchronously here.
+  // 1s) instead of reading the clock directly at pattern-body level. The wish
+  // fills its result in later, so every value derived from it is reactive and
+  // reads as empty until it arrives.
   const nowCell = wish<number>({ query: "#now" });
-  const todayDate = getTodayDate(nowCell.result!);
+  const todayDate = computed(() => {
+    const nowMs = nowCell.result;
+    return nowMs != null ? getTodayDate(nowMs) : "";
+  });
 
-  // Navigation State (Writable so navigation buttons work)
-  const startDate = new Writable(getWeekStart(todayDate));
+  // Navigation State (Writable so navigation buttons work). The week is seeded
+  // from #now once that resolves, and only while the cell still holds the
+  // empty value it started with.
+  const startDate = new Writable("");
+  computed(() => {
+    const nowMs = nowCell.result;
+    if (nowMs != null && startDate.get() === "") {
+      startDate.set(getWeekStart(getTodayDate(nowMs)));
+    }
+  });
   const visibleDays = new Writable(7);
 
   // Create Form State
   const showNewEventPrompt = new Writable<boolean>(false);
   const newEventTitle = new Writable<string>("");
-  const newEventDate = new Writable<string>(todayDate);
+  const newEventDate = new Writable<string>("");
+  computed(() => {
+    const nowMs = nowCell.result;
+    if (nowMs != null && newEventDate.get() === "") {
+      newEventDate.set(getTodayDate(nowMs));
+    }
+  });
   const newEventStartTime = new Writable<string>("09:00");
   const newEventEndTime = new Writable<string>("10:00");
   const newEventColor = new Writable<string>(COLORS[0]);
@@ -387,7 +408,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   const importedEventCount = importedEvents?.length || 0;
   const localEventCount = localEvents.get().length;
   const eventCount = importedEventCount + localEventCount;
-  const weekDates = getWeekDates(startDate.get(), 7);
+  const weekDates = computed(() => {
+    const s = startDate.get();
+    return s === "" ? [] : getWeekDates(s, 7);
+  });
 
   // Navigation Actions
   const goPrev = action(() => {

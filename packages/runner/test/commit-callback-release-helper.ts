@@ -1,21 +1,24 @@
-// Helper for commit-callback-release.test.ts. Runs in its own process so it
-// can use `--v8-flags=--expose-gc` and the real clock (WeakRef state only
-// settles across task boundaries, which the package's fake-clock preload
-// would freeze).
-//
-// A commit callback runs exactly once, when its transaction settles. The
-// question here is what the transaction holds afterwards. Callbacks are
-// closures over the machinery that registered them — a child registry, a
-// result cell, an action's captured frame — so a settled transaction that
-// keeps its callback set keeps all of that reachable for as long as anything
-// still references the transaction. Long-lived structures do reference
-// settled transactions (a cell carries the transaction it was created with),
-// so this is a live retention path, not a theoretical one.
-//
-// The helper registers a callback whose closure captures a sentinel object,
-// commits, drops every reference except a WeakRef to the sentinel and a
-// strong reference to the settled transaction, and reports whether the
-// sentinel is still reachable.
+/**
+ * Helper for commit-callback-release.test.ts. Runs in its own process so it
+ * can use `--v8-flags=--expose-gc` and the real clock (WeakRef state only
+ * settles across task boundaries, which the package's fake-clock preload
+ * would freeze).
+ *
+ * A commit callback runs exactly once, when its transaction settles. The
+ * question here is what the transaction holds afterwards. Callbacks are
+ * closures over the machinery that registered them — a child registry, a
+ * result cell, an action's captured frame — so a settled transaction that
+ * keeps its callback set keeps all of that reachable for as long as anything
+ * still references the transaction. Long-lived structures do reference
+ * settled transactions (a cell carries the transaction it was created with),
+ * so this is a live retention path, not a theoretical one.
+ *
+ * The helper registers a callback whose closure captures a sentinel object,
+ * commits, drops every reference except a WeakRef to the sentinel and a
+ * strong reference to the settled transaction, and reports whether the
+ * sentinel is still reachable.
+ */
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";

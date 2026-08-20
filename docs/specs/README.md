@@ -33,9 +33,14 @@ decision is reversed or superseded).
 - [Hosted pattern authoring](hosted-pattern-authoring.md)
 - [Scoped cell instances](scoped-cell-instances.md)
 
+### Agent execution
+
+- [Agent harness](agent-harness/README.md)
+
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
+- [Content-addressed schemas](content-addressed-schemas.md)
 - [Sigil data model](data-model/sigil.md)
 - [Sparse-array preservation](sparse-array-preservation.md)
 - [Space model](space-model/README.md)
@@ -48,6 +53,7 @@ decision is reversed or superseded).
 - [Server-primary execution](server-side-execution/README.md)
 - [Verifiable execution](verifiable-execution/README.md)
 - [Webhook ingress](webhook-ingress/README.md)
+- [Test-run records](test-records.md)
 
 ### Contextual flow control and security
 

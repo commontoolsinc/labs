@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getCallArgumentPosition } from "./call-arguments.ts";
 import { detectCallKind } from "./call-kind.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
@@ -24,6 +25,7 @@ export interface ReactiveContextInfo {
 
 export interface ReactiveContextLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
+  isSourceFileDefaultLibrary?(sourceFile: ts.SourceFile): boolean;
   isSyntheticComputeCallback?(node: ts.Node): boolean;
   isSyntheticComputeOwnedNode?(node: ts.Node): boolean;
 }
@@ -84,13 +86,9 @@ function getMarkedSyntheticCallbackContext(
       }
 
       if (lookup?.isSyntheticComputeCallback?.(current)) {
-        const callParent = current.parent;
-        if (
-          callParent &&
-          ts.isCallExpression(callParent) &&
-          callParent.arguments.includes(current)
-        ) {
-          const callKind = detectCallKind(callParent, checker);
+        const position = getCallArgumentPosition(current);
+        if (position) {
+          const callKind = detectCallKind(position.call, checker);
           if (callKind?.kind === "lift-applied") {
             return { kind: "compute", owner: "lift-applied", inJsxExpression };
           }
@@ -117,11 +115,9 @@ export function findEnclosingCallbackContext(
   let current: ts.Node | undefined = resolveContextAnchor(node).parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent: ts.Node | undefined = current.parent;
-      if (parent && ts.isCallExpression(parent)) {
-        if (parent.arguments.includes(current as ts.Expression)) {
-          return { callback: current, call: parent };
-        }
+      const position = getCallArgumentPosition(current);
+      if (position) {
+        return { callback: current, call: position.call };
       }
     }
     current = current.parent;
@@ -136,13 +132,18 @@ export function isStandaloneFunctionDefinition(
     return true;
   }
 
-  const parent = func.parent;
+  // Parentheses around the function are spelling: `const f = ((x) => x)`
+  // defines the same standalone function as the bare initializer, and must
+  // reach the same standalone validation and context classification.
+  let parent: ts.Node | undefined = func.parent;
+  while (parent && ts.isParenthesizedExpression(parent)) {
+    parent = parent.parent;
+  }
+  if (!parent) return false;
   if (ts.isVariableDeclaration(parent)) return true;
   if (ts.isPropertyAssignment(parent)) return true;
-  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
-    return false;
-  }
-  if (ts.isJsxExpression(parent)) return false;
+  // Everything else — call arguments, JSX expressions, operands — is an
+  // inline use, owned by whatever consumes it.
   return false;
 }
 
@@ -216,6 +217,8 @@ export function classifyReactiveContext(
           {
             isArrayMethodCallback: (node) =>
               lookup?.isArrayMethodCallback(node) ?? false,
+            isSourceFileDefaultLibrary: (sourceFile) =>
+              lookup?.isSourceFileDefaultLibrary?.(sourceFile) ?? false,
           },
         );
         const bodyContext = boundarySemantics.bodyContext;

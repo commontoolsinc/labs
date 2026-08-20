@@ -1,3 +1,11 @@
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
+
+import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import { resolveLink } from "../src/link-resolution.ts";
+import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
+import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   afterEach,
   beforeEach,
@@ -9,7 +17,6 @@ import {
   Runtime,
   space,
 } from "./scheduler-test-utils.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type {
   Cell,
   IExtendedStorageTransaction,
@@ -108,21 +115,21 @@ function delayNextServerTransact(
   };
 }
 
+/**
+ * Await a signal the test itself resolves — a gate's deferred, a commit
+ * callback. Deliberately no deadline: the package clock preload freezes
+ * test-armed positive-delay timers, so a `setTimeout(reject, …)` race here
+ * could never fire and would backstop nothing
+ * (`docs/development/waiting-in-tests.md`). A signal that never arrives lets
+ * the event loop quiesce, and Deno fails the pending wait at once, naming
+ * the test; the label keeps the call site readable for whoever reads that
+ * failure.
+ */
 async function waitForSignal(
   signal: Promise<void>,
-  message: string,
+  _label: string,
 ): Promise<void> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      signal,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  await signal;
 }
 
 async function waitForSchedulerCondition(
@@ -130,13 +137,18 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 1_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever — hanging the suite to the CI
+  // job timeout with no test name. Each round drains the scheduler and
+  // yields one real timer turn — transport pumps and the emulated server's
+  // fan-out flush (which resolves awaited commits at marker coverage,
+  // CT-1950) ride zero-delay timers, which are exempt from the fake clock's
+  // test-armed freeze — so a condition the system will ever reach is reached
+  // within a bounded number of rounds, and one it never reaches throws
+  // `message` instead of hanging.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a zero-delay timer turn: an idle() that resolves through
-    // microtasks alone would otherwise starve the timer queue, and the
-    // emulated server's fan-out flush — which resolves awaited commits at
-    // marker coverage (CT-1950) — rides a zero-delay timer.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
@@ -220,13 +232,18 @@ describe("scheduler event receipts", () => {
     let handlerInvocations = 0;
     const recordEvent = handler<
       { value: number },
-      { effects: { total: number } }
+      { effects: Cell<{ total: number }> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (event, { effects }) => {
         handlerInvocations++;
-        effects.total += event.value;
+        const total = effects.key("total");
+        total.set(total.get() + event.value);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ total: 0 });
@@ -296,11 +313,12 @@ describe("scheduler event receipts", () => {
     });
     let handlerInvocations = 0;
     const launchChild = handler<{ value: number }, Record<string, never>>(
+      true,
+      true,
       (event) => {
         handlerInvocations++;
         return childPattern({ value: event.value });
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       return { stream: launchChild({}) };
@@ -517,11 +535,12 @@ describe("scheduler event receipts", () => {
     });
     let handlerInvocations = 0;
     const launchChild = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => {
         handlerInvocations++;
         return Child({});
       },
-      { proxy: true },
     );
     const Root = pattern(() => ({ stream: launchChild({}) }));
     const rootCell = runtime.getCell<{ stream: unknown }>(
@@ -615,13 +634,10 @@ describe("scheduler event receipts", () => {
     const launchChild = handler<
       { value: number },
       Record<string, never>
-    >(
-      (event) => {
-        handlerInvocations++;
-        Child.inSpace(targetSpace)({ value: event.value });
-      },
-      { proxy: true },
-    );
+    >(true, true, (event) => {
+      handlerInvocations++;
+      Child.inSpace(targetSpace)({ value: event.value });
+    });
     const rootPattern = pattern(() => ({ stream: launchChild({}) }));
     const rootCell = runtime.getCell<{ stream: unknown }>(
       space,
@@ -840,13 +856,18 @@ describe("scheduler event receipts", () => {
     let handlerInvocations = 0;
     const recordEvent = handler<
       { value: number },
-      { effects: { total: number } }
+      { effects: Cell<{ total: number }> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (event, { effects }) => {
         handlerInvocations++;
-        effects.total += event.value;
+        const total = effects.key("total");
+        total.set(total.get() + event.value);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ total: 0 });
@@ -907,13 +928,17 @@ describe("scheduler event receipts", () => {
     let handlerInvocations = 0;
     const setHandled = handler<
       unknown,
-      { effects: { handled: boolean } }
+      { effects: Cell<{ handled: boolean }> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (_event, { effects }) => {
         handlerInvocations++;
-        effects.handled = true;
+        effects.key("handled").set(true);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ handled: false });
@@ -977,12 +1002,9 @@ describe("scheduler event receipts", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
-    const noLaunch = handler<unknown, Record<string, never>>(
-      () => {
-        handlerInvocations++;
-      },
-      { proxy: true },
-    );
+    const noLaunch = handler<unknown, Record<string, never>>(true, true, () => {
+      handlerInvocations++;
+    });
     const rootPattern = pattern(() => {
       return { stream: noLaunch({}) };
     });
@@ -1063,12 +1085,20 @@ describe("scheduler event receipts", () => {
     // shape the receipt cause cannot tell apart once $event is overwritten by
     // a caller-supplied id. A minted id embeds the stream link and keeps them
     // apart; a caller-supplied one must not lose that.
-    const increment = handler<unknown, Record<string, never>>(() => {
-      incremented++;
-    }, { proxy: true });
-    const decrement = handler<unknown, Record<string, never>>(() => {
-      decremented++;
-    }, { proxy: true });
+    const increment = handler<unknown, Record<string, never>>(
+      true,
+      true,
+      () => {
+        incremented++;
+      },
+    );
+    const decrement = handler<unknown, Record<string, never>>(
+      true,
+      true,
+      () => {
+        decremented++;
+      },
+    );
     const rootPattern = pattern(() => ({
       increment: increment({}),
       decrement: decrement({}),
@@ -1125,9 +1155,13 @@ describe("scheduler event receipts", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
-    const addComment = handler<unknown, Record<string, never>>(() => {
-      handlerInvocations++;
-    }, { proxy: true });
+    const addComment = handler<unknown, Record<string, never>>(
+      true,
+      true,
+      () => {
+        handlerInvocations++;
+      },
+    );
     const rootPattern = pattern(() => ({ stream: addComment({}) }));
     const rootCell = runtime.getCell<{ stream: unknown }>(
       space,
@@ -1186,9 +1220,9 @@ describe("scheduler event receipts", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
-    const noLaunch = handler<unknown, Record<string, never>>(() => {
+    const noLaunch = handler<unknown, Record<string, never>>(true, true, () => {
       handlerInvocations++;
-    }, { proxy: true });
+    });
     const rootPattern = pattern(() => ({ stream: noLaunch({}) }));
     const rootCell = runtime.getCell<{ stream: unknown }>(
       space,
@@ -1216,12 +1250,9 @@ describe("scheduler event receipts", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
-    const noLaunch = handler<unknown, Record<string, never>>(
-      () => {
-        handlerInvocations++;
-      },
-      { proxy: true },
-    );
+    const noLaunch = handler<unknown, Record<string, never>>(true, true, () => {
+      handlerInvocations++;
+    });
     const rootPattern = pattern(() => {
       return { stream: noLaunch({}) };
     });
@@ -1270,16 +1301,18 @@ describe("scheduler event receipts", () => {
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
     const returnsPlain = handler<{ value: number }, Record<string, never>>(
+      true,
+      true,
       (event) => {
         handlerInvocations++;
         return { ok: true, n: event.value };
       },
-      { proxy: true },
     );
     // A value-less handler on the same board: its receipt must stay `{}`.
     const returnsNothing = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => {},
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       return { plain: returnsPlain({}), empty: returnsNothing({}) };
@@ -1371,11 +1404,12 @@ describe("scheduler event receipts", () => {
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
     const returnsPlain = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => {
         handlerInvocations++;
         return { dropped: true };
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       return { stream: returnsPlain({}) };
@@ -1426,13 +1460,18 @@ describe("scheduler event receipts", () => {
     let handlerInvocations = 0;
     const recordEvent = handler<
       { value: number },
-      { effects: { total: number } }
+      { effects: Cell<{ total: number }> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (event, { effects }) => {
         handlerInvocations++;
-        effects.total += event.value;
+        const total = effects.key("total");
+        total.set(total.get() + event.value);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ total: 0 });
@@ -1974,12 +2013,9 @@ describe("scheduler event receipts", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     let handlerInvocations = 0;
-    const noop = handler<unknown, Record<string, never>>(
-      () => {
-        handlerInvocations++;
-      },
-      { proxy: true },
-    );
+    const noop = handler<unknown, Record<string, never>>(true, true, () => {
+      handlerInvocations++;
+    });
     const rootPattern = pattern(() => ({ stream: noop({}) }));
     const rootCell = runtime.getCell<{ stream: unknown }>(
       space,
@@ -2040,11 +2076,12 @@ Deno.test("navigateTo handler results navigate once and deduplicate redelivery",
     }));
     let handlerInvocations = 0;
     const openTarget = handler<Record<string, never>, Record<string, never>>(
+      true,
+      true,
       () => {
         handlerInvocations++;
         return navigateTo(Target({}));
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       return { stream: openTarget({}) };

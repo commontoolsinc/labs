@@ -15,7 +15,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { join } from "@std/path";
 import {
@@ -176,22 +176,14 @@ function topicProse(index: number, wordCount: number): string {
 }
 
 /**
- * The body of the topic at `index`, citing the fids of the earlier topics it
- * references. `fids` holds the topics created so far, in creation order.
+ * The body of the topic at `index`. Prose only: what this topic references is
+ * recorded as references through `mention`, not written into the sentence.
  */
 function topicBody(
   index: number,
-  fids: readonly string[],
-  shape: {
-    topicCount: number;
-    crossrefsPerTopic: number;
-    citingTopics: number;
-    bodyWords: number;
-  },
+  shape: { bodyWords: number },
 ): string {
-  const citations = crossrefTargets(index, shape)
-    .map((target) => `See also ${fids[target]}.`);
-  return [topicProse(index, shape.bodyWords), ...citations].join(" ");
+  return topicProse(index, shape.bodyWords);
 }
 
 /**
@@ -240,8 +232,9 @@ export async function seedTopicBoard(
 
     const sourcePath = join(import.meta.dirname!, "..", "topics", "main.tsx");
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     const board = await cc.create(program, { start: true });
 
@@ -250,17 +243,29 @@ export async function seedTopicBoard(
     releaseBoard = cc.getResult(board.getCell()).sink(() => {});
 
     const topics: SeededTopic[] = [];
-    const fids: string[] = [];
+    // The created pieces themselves, because a mention is a reference: the
+    // fid is what the fixture reports, not what it seeds an edge with.
+    const pieces: PieceController[] = [];
     for (let index = 0; index < options.topicCount; index++) {
       const title = topicTitle(index);
       await board.result.set({
         title,
-        body: topicBody(index, fids, shape),
+        body: topicBody(index, shape),
         agentName: AGENT_NAME,
       }, ["addTopic"]);
       const created = await topicAt(board, index);
+      // Each citation is a REFERENCE, recorded through the topic's own verb.
+      // Writing `See also fid1:…` into the body used to make an edge; nothing
+      // reads prose for addresses now, so a seeded board built that way would
+      // carry the sentences and none of the graph — and every benchmark over it
+      // would quietly measure a board with no crossrefs at all.
+      for (const target of crossrefTargets(index, shape)) {
+        await created.result.set({ topic: pieces[target].getCell() }, [
+          "mention",
+        ]);
+      }
+      pieces.push(created);
       topics.push({ fid: created.id, title });
-      fids.push(created.id);
       options.onTopic?.(index);
     }
 

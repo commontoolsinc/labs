@@ -235,7 +235,7 @@ Deno.test("card: dependencies stay within the node's own span", () => {
   const deps = findDependencies(doc, fd);
   // `url` (a shorthand reference inside the call) is a real dependency...
   assert(deps.some((d) => d.name === "url"), "url is a dependency");
-  // ...but `page`, the binding the call initialises on the same line, is not
+  // ...but `page`, the binding the call initializes on the same line, is not
   assert(!deps.some((d) => d.name === "page"), "page is not a dependency");
 });
 

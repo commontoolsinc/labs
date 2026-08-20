@@ -13,8 +13,8 @@ import { cf, stripAnsi } from "./utils.ts";
 /**
  * `CliResult` streams are line arrays; join before substring assertions.
  *
- * The escapes go too: the CLI colours help and error output whenever the
- * environment asks for colour, so an assertion on raw text passes or fails by
+ * The escapes go too: the CLI colors help and error output whenever the
+ * environment asks for color, so an assertion on raw text passes or fails by
  * where the developer ran it.
  */
 const text = (lines: string[]): string => stripAnsi(lines.join("\n"));

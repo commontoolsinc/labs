@@ -4,7 +4,7 @@ import type { Document, StructureNode } from "../lib/view/model.ts";
 
 function byLabel(doc: Document, label: string): StructureNode {
   const node = doc.flatStructure.find((n) => n.label === label);
-  if (!node) throw new Error(`no node labelled "${label}"`);
+  if (!node) throw new Error(`no node labeled "${label}"`);
   return node;
 }
 

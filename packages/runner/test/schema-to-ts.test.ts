@@ -1,29 +1,34 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { handler } from "../src/builder/module.ts";
 // Bring lift's schema-bearing, type-materializing overloads into scope. They live
 // in `@commonfabric/api/schema` (CT-1625) — the facade module that augments
 // LiftFunction. The lift materialization test below is compile-time only and
 // declares a locally-typed `lift` (the facade `lift` is `declare const`, no
 // runtime value). (handler still materializes via its module.ts overloads.)
 import type { LiftFunction } from "@commonfabric/api";
+
+import { handler } from "../src/builder/module.ts";
+
 import "@commonfabric/api/schema";
+
+import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
+import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { pattern } from "../src/builder/pattern.ts";
 import {
   type AnyCellWrapping,
   type JSONSchema,
   type Reactive,
   Schema,
 } from "../src/builder/types.ts";
-import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
-import { pattern } from "../src/builder/pattern.ts";
-import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // This file primarily tests Schema<> & co from commonfabric/api/index.ts, which
 // gets transitively loaded by the above

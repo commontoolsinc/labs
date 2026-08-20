@@ -114,19 +114,19 @@ export interface FabricEpochNsecConstructor {
 export declare const FabricEpochNsec: FabricEpochNsecConstructor;
 
 /**
- * Temporal type representing days from the POSIX Epoch.
- * Wraps a `bigint` value.
+ * Temporal type representing a particular day, as a count of days from the
+ * POSIX Epoch. Wraps a `bigint` value.
  */
-export interface FabricEpochDays extends FabricPrimitive {
+export interface FabricEpochDay extends FabricPrimitive {
   readonly value: bigint;
 }
 
-export interface FabricEpochDaysConstructor {
-  new (value: bigint): FabricEpochDays;
-  prototype: FabricEpochDays;
+export interface FabricEpochDayConstructor {
+  new (value: bigint): FabricEpochDay;
+  prototype: FabricEpochDay;
 }
 
-export declare const FabricEpochDays: FabricEpochDaysConstructor;
+export declare const FabricEpochDay: FabricEpochDayConstructor;
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -1825,7 +1825,7 @@ export type MutableJSONValue = Mutable<JSONValue>;
 export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
   [
     "FabricBytes",
-    "FabricEpochDays",
+    "FabricEpochDay",
     "FabricEpochNsec",
     "FabricHash",
     "FabricRegExp",
@@ -1898,6 +1898,8 @@ export type JSONSchemaObj = {
   readonly patternProperties?: Readonly<Record<string, JSONSchema>>; // not validated
   readonly additionalProperties?: JSONSchema;
   readonly propertyNames?: JSONSchema; // not validated
+  readonly unevaluatedProperties?: JSONSchema; // not validated
+  readonly unevaluatedItems?: JSONSchema; // not validated
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
@@ -2399,10 +2401,12 @@ export interface BuiltInCompileAndRunState<T> {
 /**
  * The reserved output fields the runtime reads off a pattern's result, each
  * typed so a value of the wrong shape under a reserved key is a compile error.
- * `[NAME]` names the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]` are its
- * renderings; `[FS]` is its filesystem projection. Each is `FactoryInput`-
- * wrapped so a reactive value (a `computed()`, a cell) is accepted alongside a
- * plain one.
+ * `[NAME]` and `[TYPE]` label the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]`
+ * are its renderings; `[FS]` is its filesystem projection. Those are each
+ * `FactoryInput`-wrapped, so a reactive value (a `computed()`, a cell) is
+ * accepted alongside a plain one. `[TESTS]` is the exception: it holds a
+ * `TestStep[]` written out at build time, not a reactive value, so it is not
+ * wrapped.
  */
 type ReservedOutput = {
   [NAME]?: FactoryInput<string>;
@@ -2411,6 +2415,7 @@ type ReservedOutput = {
   [TILE_UI]?: FactoryInput<VNode> | JSXElement;
   [CHIP_UI]?: FactoryInput<VNode> | JSXElement;
   [FS]?: FactoryInput<FsProjection>;
+  [TESTS]?: TestStep[];
 };
 
 /**
@@ -2536,9 +2541,22 @@ export type PatternToolFunction = <
 // `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
 // on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
+  // A BARE function type, and it has to be one. A generic implementation —
+  // `<T extends { … what the body reads … }>(input) => T` — declares that its
+  // result is the very value it was handed, so a caller passing the whole
+  // document gets the whole document back rather than the narrow shape the
+  // body read. TypeScript carries that type parameter out to the caller only
+  // when the outer signature's return is a function type with a single call
+  // signature and no members at all (`getSingleSignature(…, allowMembers:
+  // false)`); an intersection like `ModuleFactory` fails that test, and the
+  // parameter collapses to its constraint at the `lift(…)` call instead.
+  //
+  // The cost is that a lift's declared type no longer says it is also a
+  // `Module` — the factory object still is one, and `isModule()` narrows to it
+  // where a module record is what's wanted (the module registry, say).
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, R>;
+  ): (inputs: FactoryInput<StripCell<T>>) => Reactive<R>;
 
   <T>(
     implementation: (input: T) => any,
@@ -2568,12 +2586,6 @@ export interface HandlerFunction {
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
 
-  // Without schemas
-  <E, T>(
-    handler: (event: E, props: T) => any,
-    options: { proxy: true },
-  ): HandlerFactory<E, T>;
-
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
@@ -2586,11 +2598,6 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<E, T, R>;
-
-  <E, T, R>(
-    handler: (event: E, props: T) => R,
-    options: { proxy: true },
   ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
@@ -2658,7 +2665,8 @@ export type AssertRawPart = {
  *
  * It is one record on both paths rather than `true | AssertPart[]`, because a
  * union return infers as `unknown`, and a field whose schema is
- * `{ type: "unknown" }` reads back as `undefined`.
+ * `{ type: "unknown" }` is not materialized: it reads back as an opaque
+ * reference carrying none of the value's properties.
  */
 export type AssertRecord = {
   ok: boolean;
@@ -2703,6 +2711,62 @@ export type AssertRenderPartsFunction = (
   ok: boolean,
   parts: AssertRawPart[],
 ) => AssertPart[];
+
+/**
+ * The discriminant keys of a {@link TestStep} — the property that selects
+ * which kind of step it is. Exactly one is present on a well-formed step.
+ */
+type TestStepKey =
+  | "assertion"
+  | "action"
+  | "render"
+  | "settle"
+  | "label"
+  | "await";
+
+/**
+ * One step shape made exclusive. It carries its own fields and the shared
+ * optional `skip`, and bars every other step's discriminant key with
+ * `?: never`. A step that names two kinds at once — `{ assertion, action }` —
+ * is then a compile error rather than being resolved by runtime precedence.
+ */
+type OnlyTestStep<Own extends TestStepKey, Fields> =
+  & Fields
+  & { skip?: boolean }
+  & { [Other in Exclude<TestStepKey, Own>]?: never };
+
+/**
+ * One step of a pattern's test, addressed under the reserved `[TESTS]` key.
+ * The shapes are mutually exclusive:
+ *
+ * - `{ assertion }` evaluates a condition. It is the record an `assert(...)`
+ *   call produces, which carries the operands read while the condition ran,
+ *   so a failure names them and their values rather than reporting only the
+ *   verdict. A bare `Reactive<boolean>` is not accepted: `assert()` is the
+ *   way to write an assertion.
+ * - `{ action }` sends an event into a stream. `event` is the payload;
+ *   `trustedUi` names a trusted UI surface and the control inside it when the
+ *   action must originate from rendered UI under enforcement.
+ * - `{ render }` materializes a VDOM subtree.
+ * - `{ settle: true }` waits for full settlement (scheduler, storage, and
+ *   in-flight async builtin I/O) before the next step.
+ * - `{ label }` and `{ await }` synchronize a multi-user test: a participant
+ *   announces reaching `label`, and another participant blocks on `await`
+ *   until that marker is announced. They are inert in a single-user test.
+ *
+ * `skip` omits the step.
+ */
+export type TestStep =
+  | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>
+  | OnlyTestStep<"action", {
+    action: Stream<unknown>;
+    event?: unknown;
+    trustedUi?: { surface: string; action: string };
+  }>
+  | OnlyTestStep<"render", { render: unknown }>
+  | OnlyTestStep<"settle", { settle: true }>
+  | OnlyTestStep<"label", { label: string }>
+  | OnlyTestStep<"await", { await: string }>;
 
 export type StrFunction = (
   strings: TemplateStringsArray,
@@ -2865,6 +2929,22 @@ export type StreamDataFunction = <T>(
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => Reactive<BuiltInCompileAndRunState<S>>;
+
+/**
+ * Read an attached data file's text.
+ *
+ * `path` is the file's root-relative path within the deployed source package —
+ * the same spelling `cf piece getsrc` writes it at, and the same one passed to
+ * `--datafile`. A data file belongs to the package rather than to any one
+ * module, so the path is absolute within the package and does not resolve
+ * relative to the caller.
+ *
+ * The bytes travel with the pattern's code in the same content-addressed
+ * closure, so this reads memory rather than storage: it is synchronous, it
+ * cannot fail part-way, and it returns the same bytes on every load of a given
+ * source revision. A path naming no attached data file throws.
+ */
+export type DataFileFunction = (path: string) => string;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
@@ -3440,6 +3520,7 @@ export declare const fetchJsonUnchecked: FetchJsonUncheckedFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const dataFile: DataFileFunction;
 export declare const sqliteDatabase: SqliteDatabaseFunction;
 export declare const sqliteQuery: SqliteQueryFunction;
 export declare const table: SqliteTableFunction;

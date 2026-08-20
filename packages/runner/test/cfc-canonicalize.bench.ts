@@ -12,17 +12,18 @@
  * charts on its /bench page.
  */
 
-import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import {
   canonicalizeLogicalPath,
   canonicalizePreparedDigestInput,
 } from "../src/cfc/canonical.ts";
-import { watchIdForEntry } from "../src/storage/v2-watch.ts";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
 import type { WritePolicyInput } from "../src/cfc/types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { watchIdForEntry } from "../src/storage/v2-watch.ts";
 
 const SPACE: MemorySpace =
   "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSdoom8Beere1L9DwwTm";
@@ -172,6 +173,39 @@ const LARGE_INPUT: PreparedDigestInput = {
   trustSnapshot: undefined,
 };
 
+// A duplicate-heavy fixture, and the one that reflects the trace volume a
+// real commit reaches. A list read through the reactive proxy resolves each
+// element's link once per access, so a quadratic scan — `sources.filter(...)`
+// inside a loop over `sources` — records one trace per element per pass: an
+// 80-entry board produces ~6.5k traces over 80 distinct dereferences. The
+// other fixtures carry six traces, which is the shape of a commit that
+// touched a handful of links rather than walked a list.
+//
+// `canonicalizePreparedDigestInput` reduces these to the distinct set, so
+// what this measures is the sort over the raw list plus the one adjacent
+// pass that collapses it. Both scale with what was RECORDED, which is why
+// the fixture is sized by reads rather than by dereferences.
+const DUPLICATE_BOARD_ENTRIES = 80;
+const DUPLICATE_SCAN_PASSES = 81;
+const DUPLICATE_HEAVY_INPUT: PreparedDigestInput = {
+  consumedReads: [],
+  attemptedWrites: [],
+  writes: [],
+  writeAttemptLog: [],
+  dereferenceTraces: Array.from(
+    { length: DUPLICATE_BOARD_ENTRIES * DUPLICATE_SCAN_PASSES },
+    (_, i) => ({
+      source: makeAddress("board", String(i % DUPLICATE_BOARD_ENTRIES)),
+      target: makeAddress(`row-${i % DUPLICATE_BOARD_ENTRIES}`),
+      kind: "value" as const,
+    }),
+  ),
+  triggerReads: [],
+  writePolicyInputs: [],
+  implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
+  trustSnapshot: undefined,
+};
+
 // A tiebreak-heavy fixture: many `custom` policies that share `kind` AND
 // `name`, forcing every pairwise sort comparison through the
 // `hashStringOf()` tiebreaker. With the chokepoint freeze in place each
@@ -278,6 +312,14 @@ Deno.bench(
   { group: "preparedDigestFor" },
   () => {
     canonicalizePreparedDigestInput(LARGE_INPUT);
+  },
+);
+
+Deno.bench(
+  "preparedDigestFor — duplicate-heavy (80-entry board scanned quadratically)",
+  { group: "preparedDigestFor" },
+  () => {
+    preparedDigestFor(DUPLICATE_HEAVY_INPUT);
   },
 );
 

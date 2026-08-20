@@ -19,13 +19,23 @@
  * Reorder them, or delete one, and inference starts picking those returns up
  * silently. These assertions fail if that happens.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Cell, HandlerFactory, Stream } from "@commonfabric/api";
+import type {
+  Cell,
+  HandlerFactory,
+  HandlerState,
+  Stream,
+} from "@commonfabric/api";
 import { handler } from "../src/builder/module.ts";
 
 type MustBeTrue<T extends true> = T;
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** Identity equality — distinguishes readonly modifiers, which assignability
+ * (and therefore `Same`) ignores. */
+type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends
+  (<T>() => T extends Y ? 1 : 2) ? true : false;
 
 interface AddTopic {
   title: string;
@@ -37,6 +47,11 @@ interface TopicRef {
 
 interface BoundState {
   selected: Cell<string>;
+}
+
+interface MixedState {
+  selected: Cell<string>;
+  label: string;
 }
 
 /**
@@ -61,14 +76,6 @@ export function _handlerOverloadTypeProbe() {
   );
   type _DeclaredCarriesResult = MustBeTrue<
     Same<typeof declared, HandlerFactory<AddTopic, BoundState, TopicRef>>
-  >;
-
-  const declaredProxy = handler<AddTopic, BoundState, TopicRef>(
-    (_event, _state) => ({ id: "topic-1" }),
-    { proxy: true },
-  );
-  type _ProxyCarriesResult = MustBeTrue<
-    Same<typeof declaredProxy, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredWithSchemas = handler<AddTopic, BoundState, TopicRef>(
@@ -97,7 +104,27 @@ export function _handlerOverloadTypeProbe() {
     Same<ReturnType<typeof declared>, Stream<AddTopic, TopicRef>>
   >;
 
-  return { concise, declared, declaredProxy, declaredWithSchemas };
+  // Props parity with api's `HandlerFunction` (the other hand-maintained
+  // half): a callback sees `HandlerState<T>` — non-handle members readonly,
+  // cell handles passed through whole.
+  const stateTyped = handler<AddTopic, MixedState>((_event, state) => {
+    type _PropsAreHandlerState = MustBeTrue<
+      Equal<typeof state, HandlerState<MixedState>>
+    >;
+    type _PlainMemberIsReadonly = MustBeTrue<
+      Equal<Pick<typeof state, "label">, { readonly label: string }>
+    >;
+    type _CellPassesThroughWhole = MustBeTrue<
+      Same<(typeof state)["selected"], Cell<string>>
+    >;
+    state.selected.set("writable-through-the-handle");
+  });
+  return {
+    concise,
+    declared,
+    declaredWithSchemas,
+    stateTyped,
+  };
 }
 
 describe("handler overload resolution", () => {

@@ -15,14 +15,31 @@ Common Fabric product.
 
 1. Foundation: api, data-model, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
-3. Capabilities: piece, html, llm
-4. Operation: background-piece-service, cli, fuse, state-inspector, cf-harness
+3. Capabilities: piece, html, llm, navigation
+4. Operation: agents-host, background-piece-service, cli, connectors/agents,
+   fuse, state-inspector, cf-harness
 5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
 
 Anything under `packages/` not named above — utilities, build tooling, test
 support, internal dashboards, example code — sits outside the layer stack.
+
+Dependencies run downward: a package imports from its own layer or a lower one.
+That is the direction the stack is designed around, and the one to hold a new
+import to. It does not describe the tree as it stands — a number of imports run
+the other way, `runner` reaching into `js-compiler` and `llm` among them — so an
+existing import upward is not a precedent for the next one. Only the weaker
+property is enforced: `deno task check-package-cycles` fails when two packages
+import each other. Layer direction rests on review.
+
+When a module looks as though it belongs to a higher layer but something lower
+needs it, decide by what the module actually touches rather than by what it is
+named after. The JSX factory is the worked example. `h()` resolves cells to
+links and returns a plain view-node object, which is data construction over
+runtime primitives, so it lives in `runner` alongside the schema that describes
+that object. Turning those view nodes into DOM is rendering, so that lives in
+`html`.
 
 ## Documentation Lifecycle
 
@@ -138,23 +155,27 @@ change a subsystem you have not worked on before.
 
 #### Browser tests in agent sandboxes
 
-On macOS, an agent must request unsandboxed execution before its first attempt
-to run a command that can launch a browser. This includes the root
-`deno task test`; the unfiltered root `deno task integration` command;
-unfiltered integration runs for `shell`, `patterns`, or `patterns-reload`;
-`deno task demo`; `deno-web-test`; and focused or filtered tests whose setup
-launches Chrome through Astral or `ShellIntegration`. Never try the command in
-the agent sandbox first. Deno's `-A` flag does not escape the outer sandbox, and
-a browser startup failure caused by that sandbox is not test evidence. The
+On macOS, a command that can launch a browser needs unsandboxed execution. Which
+side of that you are on is a fact about your own execution state, and your
+harness reports it: if the session already runs unsandboxed, run the command; if
+it runs sandboxed, request unsandboxed execution rather than trying the command
+there first. The browser-launching commands are the root `deno task test`; the
+unfiltered root `deno task integration` command; unfiltered integration runs for
+`shell`, `patterns`, or `patterns-reload`; `deno task demo`; `deno-web-test`;
+and focused or filtered tests whose setup launches Chrome through Astral or
+`ShellIntegration`. Deno's `-A` flag does not escape the outer sandbox, and a
+browser startup failure caused by that sandbox is not test evidence. The
 complete rule is in
 [`docs/development/TESTING.md`](docs/development/TESTING.md#browser-tests-in-agent-sandboxes).
 
 Three obligations that are easy to miss:
 
-- `docs/README.md` governs everything this repository writes down. It says how
-  to write documentation, where a new document belongs, which examples belong in
-  one, and which spelling of English both documents and comments use. Read it
-  before you write either.
+- `docs/README.md` governs everything this repository writes down: how to write
+  documentation, where a new document belongs, and which examples belong in one.
+  Read it before you write a document. The words themselves — American spelling,
+  and one word per concept — are standardized under "Word choice" in
+  `docs/development/DEVELOPMENT.md`, and that reaches comments, error and log
+  messages, and test descriptions as much as it reaches documents.
 - `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
   experimental flag. Read it before adding, changing, or removing a flag, and
   update it in the same change.
@@ -192,10 +213,20 @@ consider the information in `docs/development/COVERAGE.md`.
 ### Automated gates
 
 `deno task check` type-checks a hand-maintained list of paths in
-`tasks/check.sh`. Several workspace packages are absent from that list — `fuse`,
-`lib-shell`, `schema-generator`, `data-model` and `state-inspector` among them —
-so a green `deno task check` is not evidence that the tree type-checks. Run
-`deno task test` in every package you touched.
+`tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
+there), and that list now names every workspace package. Most are covered in
+full; a few are partial by design. The `*.input.ts` transformer fixtures under
+`schema-generator` and `ts-transformers` name ambient wrappers the transformer
+supplies, so they do not compile on their own and are left out. `ui` is checked
+only for its `v2` components, and not the outliner among them.
+
+Patterns are the exception `deno task check` does not own. It lists some pattern
+directories and checks them through the automatic-JSX environment the rest of
+the tree uses, but patterns compile under a different (classic-`h`) JSX runtime,
+and the two disagree on some advanced pattern types. `deno task cfcheck` (the
+"CFC Pattern Check" CI job) type-checks every pattern in the JSX and
+runtime-type environment they actually compile under, and is the authoritative
+pattern type-check. Run `deno task test` in every package you touched.
 
 Each of these gates fails CI on its own, and none of them run as part of
 `deno task check`:
@@ -211,10 +242,21 @@ Each of these gates fails CI on its own, and none of them run as part of
   in a file, which `docs/` has no other mechanical gate against
 - `deno task check-skill-facts` — a path or import cited by a skill, an
   `AGENTS.md`, or a rule that stopped resolving
+- `deno task check-verb-session-sync` — a `cf` command or act reference in
+  `docs/common/verbs/the-verb-session.md` or
+  `docs/common/verbs/session-walkthrough.md` that its demo script does not back;
+  both documents quote commands, never compose them
 - `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
   dependency declarations across the workspace
+- `deno task check-package-cycles` — two packages that import each other, the
+  part of "Dependencies run downward" above that a machine can settle
+- `deno task check-local-program` — a program built from local files by hand
+  rather than through `resolveLocalProgram`, which silently drops any data files
+  the caller attached
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
+- `deno task check-test-aliases` — a test-identity alias line that was edited or
+  removed rather than appended, mapped an identity twice, or formed a cycle
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

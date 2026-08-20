@@ -852,7 +852,7 @@ const EXAMPLE_TITLES = [
 export const DISCLAIMER_EXAMPLE_COUNT = 14;
 export const DISCLAIMER_RENDERED_EXAMPLE_COUNT = 14;
 
-export default pattern(() => {
+export default pattern<Record<PropertyKey, never>>(() => {
   const renderedExamples = [
     DisclaimerPromptRoutingAckExample({}),
     DisclaimerAIGeneratedContentAckExample({}),

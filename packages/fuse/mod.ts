@@ -8,17 +8,20 @@
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
+
+import { linkRefFrom } from "@commonfabric/runner/shared";
+
+import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
 import {
   CellBridge,
   type HandlerTarget,
   type SourceWritePath,
   type WritePath,
 } from "./cell-bridge.ts";
-import {
-  type CfcXattrNamespace,
-  getCfcXattrValue,
-  listCfcXattrNames,
-} from "./annotations.ts";
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
@@ -47,6 +50,29 @@ import {
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
 import {
+  type DirectorySnapshotEntry,
+  replyWithRetainedState,
+  visitDirectoryEntries,
+} from "./directory-handles.ts";
+import {
+  handleHasBufferedContent,
+  handleHasPendingChanges,
+  HandleMap,
+  type HandleState,
+  validateVirtualFileRange,
+} from "./handles.ts";
+import { ReverseInvalidationQueue } from "./invalidation.ts";
+import {
+  buildMountFuseArgs,
+  type MountCacheOptions,
+  resolveMountCacheOptions,
+} from "./mount-options.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
+import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import {
   EACCES,
   EFBIG,
   EINVAL,
@@ -64,32 +90,8 @@ import {
   O_WRONLY,
   readCString,
 } from "./platform.ts";
-import { linkRefFrom } from "@commonfabric/runner/shared";
-import { FsTree } from "./tree.ts";
-import {
-  handleHasBufferedContent,
-  handleHasPendingChanges,
-  HandleMap,
-  type HandleState,
-  validateVirtualFileRange,
-} from "./handles.ts";
-import {
-  type DirectorySnapshotEntry,
-  replyWithRetainedState,
-  visitDirectoryEntries,
-} from "./directory-handles.ts";
-import {
-  closeKernelFileHandle,
-  createFuseOperationState,
-} from "./operation-wiring.ts";
-import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
-import {
-  buildMountFuseArgs,
-  type MountCacheOptions,
-  resolveMountCacheOptions,
-} from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership } from "./stat.ts";
-import { ReverseInvalidationQueue } from "./invalidation.ts";
+import { FsTree } from "./tree.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -186,6 +188,27 @@ export function appendDecodedJsonPath(
 
 export function sourceRelPathToTreeSegments(relPath: string): string[] {
   return encodeFusePathSegments(relPath.split("/"));
+}
+
+/**
+ * Decode a write bound for a pattern's source package, or `undefined` when the
+ * bytes are not valid UTF-8 text.
+ *
+ * A source package holds text, so a write that is not text has no faithful
+ * representation in it. Decoding strictly reports that instead of substituting
+ * replacement characters, which would store something other than what was
+ * written. A byte order mark is content and is kept, since an attached data
+ * file is stored byte-for-byte.
+ */
+export function decodeSourceWriteText(
+  buffer: Uint8Array,
+): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+      .decode(buffer);
+  } catch {
+    return undefined;
+  }
 }
 
 export function bufferForNoHandleTruncate(
@@ -1727,7 +1750,12 @@ export async function main(argv: string[] = Deno.args) {
 
       if (writeTarget?.kind === "source") {
         const { piece, relPath, srcIno } = writeTarget.target;
-        const text = new TextDecoder().decode(buffer);
+        const text = decodeSourceWriteText(buffer);
+        if (text === undefined) {
+          console.error(`[source] Write to ${relPath} is not valid UTF-8 text`);
+          markExistingFailed("write is not valid UTF-8 text");
+          return EINVAL;
+        }
 
         // Optimistically update the file content in the tree
         let fileIno: bigint | undefined = srcIno;
@@ -1802,6 +1830,7 @@ export async function main(argv: string[] = Deno.args) {
             mainExport: baseMainExport,
             files: updatedFiles,
             sourceRoots: program.sourceRoots,
+            dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
           // Clear error.log on success
           const errorLogIno = tree.lookup(srcIno, "error.log");

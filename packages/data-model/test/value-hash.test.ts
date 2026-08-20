@@ -24,14 +24,12 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { hashOf, hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricValue } from "@/interface.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-
-// Dynamic import to satisfy the no-external-import lint rule.
-const nodeCrypto = await import("node:crypto");
+import * as nodeCrypto from "@node/crypto";
 
 /**
  * Returns the SHA-256 hash of a raw byte sequence, for verifying against
@@ -459,33 +457,33 @@ describe("value-hash", () => {
         expect(hash.length).toBe(32);
       });
     });
-    describe("FabricEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)", () => {
-      it("matches a hand-computed byte stream for `FabricEpochDays(0n)`", () => {
-        // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
+    describe("FabricEpochDay (dedicated TAG_EPOCH_DAY primitive tag)", () => {
+      it("matches a hand-computed byte stream for `FabricEpochDay(0n)`", () => {
+        // TAG_EPOCH_DAY (0x28) + LEB128(1) + [0x00]
         const expected = sha256([
           0x28,
           0x01,
           0x00,
         ]);
-        expect(hashBytesOf(new FabricEpochDays(0n))).toEqual(expected);
+        expect(hashBytesOf(new FabricEpochDay(0n))).toEqual(expected);
       });
 
-      it("produces different hashes for FabricEpochDays values", () => {
-        const d1 = new FabricEpochDays(0n);
-        const d2 = new FabricEpochDays(19723n);
+      it("produces different hashes for FabricEpochDay values", () => {
+        const d1 = new FabricEpochDay(0n);
+        const d2 = new FabricEpochDay(19723n);
         expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
       });
 
-      it("hashes a FabricEpochDays with negative value (pre-epoch)", () => {
-        const days = new FabricEpochDays(-365n);
+      it("hashes a FabricEpochDay with negative value (pre-epoch)", () => {
+        const days = new FabricEpochDay(-365n);
         const hash = hashBytesOf(days);
         expect(hash.length).toBe(32);
       });
 
-      it("produces different hashes for `FabricEpochNsec` and `FabricEpochDays` with the same `bigint`", () => {
+      it("produces different hashes for `FabricEpochNsec` and `FabricEpochDay` with the same `bigint`", () => {
         // Same underlying value, different tag -> different hash
         const nsec = new FabricEpochNsec(100n);
-        const days = new FabricEpochDays(100n);
+        const days = new FabricEpochDay(100n);
         expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
       });
     });
@@ -763,7 +761,7 @@ describe("value-hash", () => {
           {},
           { a: 1 },
           new FabricEpochNsec(0n),
-          new FabricEpochDays(0n),
+          new FabricEpochDay(0n),
           new FabricBytes(new Uint8Array([1])),
           FabricError.fromNativeError(new Error("x")),
         ];

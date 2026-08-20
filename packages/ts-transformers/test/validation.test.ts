@@ -2328,6 +2328,57 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step(
+    "allows a parenthesized inline callback argument",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted(((a, b) => a.sentAt - b.sentAt));
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const creationErrors = errors.filter((error) =>
+        error.type === "pattern-context:function-creation"
+      );
+      assertEquals(
+        creationErrors.length,
+        0,
+        "a parenthesized inline callback occupies the same argument " +
+          "position as its bare spelling",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on a parenthesized arrow function in pattern body",
+    async () => {
+      const source = `      import { pattern, h } from "commonfabric";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const helper = (() => item.price * 2);
+        return <div>{helper()}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:function-creation");
+    },
+  );
+
+  await t.step(
     "allows arithmetic computation inside authored ifElse branches",
     async () => {
       const source = `      import { ifElse, pattern } from "commonfabric";
@@ -3311,6 +3362,106 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows optional access inside an inline comparator on a .get() chain",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        );
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "the binding site's lift absorbs the comparator, so its '?.' runs " +
+          "on resolved values",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional access inside a parenthesized inline comparator",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted(((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        ));
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "parentheses around the comparator change neither the carrier " +
+          "decision nor the inline-argument allowance",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on optional access inside a lowered array-method callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        flag?: boolean;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const flagged = rows.get().filter((r) => r?.flag);
+        return { flagged };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
+
+  await t.step(
+    "still errors on optional access inside a plain array-method callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ label: Writable<string> }>(({ label }) => {
+        const lens = ["a", "bb"].map((s) => s?.length ?? 0);
+        return { lens, label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
+
+  await t.step(
     "errors on a .get() inside a reactive array-method callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
@@ -3332,7 +3483,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "errors on a .get() inside a plain array-method callback",
+    "allows a .get() inside a plain array map callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3345,8 +3496,95 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "map collects what the callback returns, so its value sites carry " +
+          "the read into a per-element lift",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on a named reactive comparison inside a plain filter",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b", "c"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const filtered = VALUES.filter((value) => {
+          const matches = value === t;
+          return matches;
+        });
+        return { filtered };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:get-call");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "still errors on a named reactive comparison inside a plain find",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b", "c"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const found = VALUES.find((value) => {
+          const foundMatch = value === t;
+          return foundMatch;
+        });
+        return { found };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "still errors inside a source-defined `Array.map()` callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      class Array<T> {
+        constructor(readonly value: T) {}
+
+        map(callback: (value: T) => unknown): T[] {
+          return callback(this.value) ? [this.value] : [];
+        }
+      }
+
+      const VALUES = new Array("a");
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const selected = VALUES.map((value) => {
+          const matches = value === t;
+          return matches;
+        });
+        return { selected };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
     },
   );
 
@@ -4136,6 +4374,26 @@ Deno.test("Standalone Function Validation", async (t) => {
     },
   );
 
+  await t.step(
+    "errors on computed() inside a parenthesized standalone function",
+    async () => {
+      const source = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = (() => {
+        return computed(() => count.get() * 2);
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
+    },
+  );
+
   const builderFactoryCases = [
     {
       name: "action()",
@@ -4250,6 +4508,29 @@ Deno.test("Standalone Function Validation", async (t) => {
       const tool = patternTool(({ query }: { query: string }) => {
         return computed(() => query.length * multiplier.get());
       });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(
+        errors,
+        "pattern-context:patterntool-requires-pattern",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when patternTool's first argument is a parenthesized bare callback",
+    async () => {
+      const source =
+        `      import { patternTool, computed, Cell } from "commonfabric";
+
+      declare const multiplier: Cell<number>;
+
+      const tool = patternTool((({ query }: { query: string }) => {
+        return computed(() => query.length * multiplier.get());
+      }));
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONFABRIC_TYPES,
@@ -4771,4 +5052,237 @@ Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
       assert(hasKeyPathRead(root, "0", "foo"));
     },
   );
+});
+
+Deno.test("Paren-Invariance Twins", async (t) => {
+  // Target-language spec §5.7: parentheses around a site are spelling and do
+  // not change its classification. Each step validates a bare/parenthesized
+  // source pair: the bare spelling must match the expected diagnostic types
+  // (so a twin can never pass because both sides broke the same way), and the
+  // parenthesized spelling must reproduce the bare spelling exactly.
+  const assertTwins = async (
+    bare: string,
+    paren: string,
+    expectedBareErrorTypes: string[],
+  ) => {
+    const bareResult = await validateSource(bare, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const parenResult = await validateSource(paren, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const typesOf = (diagnostics: typeof bareResult.diagnostics) =>
+      getErrors(diagnostics).map((error) => error.type).sort();
+    assertEquals(
+      typesOf(bareResult.diagnostics),
+      expectedBareErrorTypes.slice().sort(),
+      "bare spelling expectation",
+    );
+    assertEquals(
+      typesOf(parenResult.diagnostics),
+      typesOf(bareResult.diagnostics),
+      "parenthesized spelling matches its bare twin",
+    );
+  };
+
+  const countPattern = (body: string) =>
+    `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        ${body}
+      });
+    `;
+
+  const rowsPattern = (body: string) =>
+    `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt?: number;
+        label: string;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        ${body}
+      });
+    `;
+
+  await t.step("variable-initializer site", async () => {
+    await assertTwins(
+      countPattern(`const v = count.get();
+        return { v };`),
+      countPattern(`const v = (count.get());
+        return { v };`),
+      [],
+    );
+  });
+
+  await t.step("object-property site", async () => {
+    await assertTwins(
+      countPattern(`return { value: count.get() };`),
+      countPattern(`return { value: (count.get()) };`),
+      [],
+    );
+  });
+
+  await t.step("array-element site", async () => {
+    await assertTwins(
+      countPattern(`return { list: [count.get()] };`),
+      countPattern(`return { list: [(count.get())] };`),
+      [],
+    );
+  });
+
+  await t.step("call-argument site", async () => {
+    const bare =
+      `      import { ifElse, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>(
+        ({ count, show }) => {
+          return { v: ifElse(show, count.get(), 0) };
+        },
+      );
+    `;
+    const paren =
+      `      import { ifElse, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>(
+        ({ count, show }) => {
+          return { v: ifElse(show, (count.get()), 0) };
+        },
+      );
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("computation-over-read site", async () => {
+    await assertTwins(
+      countPattern(`const v = count.get() * 2;
+        return { v };`),
+      countPattern(`const v = (count.get()) * 2;
+        return { v };`),
+      [],
+    );
+  });
+
+  await t.step("receiver-chain site", async () => {
+    await assertTwins(
+      rowsPattern(`const s = rows.get().map((r) => r.label).join(",");
+        return { s };`),
+      rowsPattern(`const s = (rows.get()).map((r) => r.label).join(",");
+        return { s };`),
+      [],
+    );
+  });
+
+  await t.step("JSX expression site", async () => {
+    const bare = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <div>{count.get()}</div> };
+      });
+    `;
+    const paren = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <div>{(count.get())}</div> };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("statement-position read stays rejected", async () => {
+    await assertTwins(
+      countPattern(`count.get();
+        return { done: true };`),
+      countPattern(`(count.get());
+        return { done: true };`),
+      ["pattern-context:get-call"],
+    );
+  });
+
+  await t.step("inline comparator with optional access", async () => {
+    await assertTwins(
+      rowsPattern(
+        `const sorted = rows.get().toSorted((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        );
+        return { sorted };`,
+      ),
+      rowsPattern(
+        `const sorted = rows.get().toSorted(((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        ));
+        return { sorted };`,
+      ),
+      [],
+    );
+  });
+
+  await t.step("parenthesized reactive map callback", async () => {
+    await assertTwins(
+      rowsPattern(`const out = rows.map((r) => r.label);
+        return { out };`),
+      rowsPattern(`const out = rows.map(((r) => r.label));
+        return { out };`),
+      [],
+    );
+  });
+
+  await t.step("parenthesized builder callback", async () => {
+    const bare =
+      `      import { computed, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        const doubled = computed(() => count.get() * 2);
+        return { doubled };
+      });
+    `;
+    const paren =
+      `      import { computed, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        const doubled = computed((() => count.get() * 2));
+        return { doubled };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("standalone helper with reactive operation", async () => {
+    const bare = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = () => {
+        return computed(() => count.get() * 2);
+      };
+    `;
+    const paren = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = (() => {
+        return computed(() => count.get() * 2);
+      });
+    `;
+    await assertTwins(bare, paren, [
+      "standalone-function:reactive-operation",
+    ]);
+  });
+
+  await t.step("parenthesized JSX event handler", async () => {
+    const bare = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <button onClick={() => count.set(1)}>x</button> };
+      });
+    `;
+    const paren = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <button onClick={(() => count.set(1))}>x</button> };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
 });

@@ -1,26 +1,27 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { encodableFormOf } from "./encodable-form.ts";
-import {
-  hasEntityUriScheme,
-  hashStringForEntityAddress,
-} from "./entity-kind.ts";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
   entityRefFrom,
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { isReactive } from "./builder/types.ts";
+import { isCell } from "./cell.ts";
+import { encodableFormOf } from "./encodable-form.ts";
+import {
+  hasEntityUriScheme,
+  hashStringForEntityAddress,
+} from "./entity-kind.ts";
+import { isSigilLink, parseLink } from "./link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isSigilLink, parseLink } from "./link-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -105,6 +106,13 @@ export function createRef(
     // cell, recognized through the cell-rep / sigil chokepoint predicates rather
     // than the raw `{ "/": ... }` shape.
     //
+    // A link is hashed as it stands, schema and all. This walk takes what it
+    // is given: a caller deriving an id has to hand over a preimage that is
+    // causal, and reducing one here would only hide the difference between a
+    // caller that did and one that did not. `causalFormOfBinding()` does the
+    // reducing for a node's cause, at the seam that knows which links a bound
+    // tree holds and why they carry a schema at all.
+    //
     // TODO(danfuzz): the other data-model special-object type, `FabricInstance`
     // (a container that holds other values), is not handled here. Unlike a
     // primitive it *does* need descending into — but by its actual contents,
@@ -137,7 +145,7 @@ export function createRef(
     // A _nullish_ form leaves the value in place, which is what the `??` is
     // for -- a value carrying no form at all needs no fallback, since that
     // answer is the value already. `CellImpl` is the one implementation that
-    // answers nullish, doing so for a cell whose link is not built yet, and the
+    // returns nullish, doing so for a cell whose link is not built yet, and the
     // branches below need that cell rather than the `null`: one of them builds
     // the link.
     obj = encodableFormOf(obj) ?? obj;
@@ -186,7 +194,7 @@ export function createRef(
       );
     } else if (typeof obj === "function") return obj.toString();
     // A primitive reaches here only as an encodable FORM, the reassignment above
-    // having replaced the value it came from -- a primitive INPUT is answered at
+    // having replaced the value it came from -- a primitive INPUT is handled at
     // the top of the walk. A form is its own preimage, and stringifying one
     // would make the form `7` and the form `"7"` name a single document.
     else return obj;

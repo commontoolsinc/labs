@@ -149,8 +149,8 @@ by any repo test.
 | Dictionary with both string and number index | treated as object map, not array | `type-utils.ts` | untested directly |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
-| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
-| Fabric-primitive class (`FabricBytes`, `FabricEpochDays`, `FabricEpochNsec`, `FabricHash`, `FabricRegExp` carrying the `FabricSpecialObject` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
+| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
+| Fabric-primitive class (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricRegExp` carrying the `FabricSpecialObject` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
 | `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
@@ -180,7 +180,7 @@ Whether a type gets a name is decided by `getNamedTypeKey`
 sets — not the short name list in the README. A type is *excluded* when any of
 these holds:
 
-- the type **node** spells a wrapper: `Default`, `Cell`, `Writable`,
+- the type **node** names a wrapper: `Default`, `Cell`, `Writable`,
   `ReadonlyCell`, `WriteonlyCell`, `ComparableCell`, `OpaqueCell`, `Stream`,
   `SqliteDb` (name sets `CELL_LIKE_WRAPPER_NAMES` / `OPAQUE_WRAPPER_NAMES`;
   `Reactive` is *not* excluded on the node axis);
@@ -211,7 +211,7 @@ same-named types emit `$ref`s to it.
 this writing: `VNode` →
 `{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
 and `Uint8Array` → `{ type: "object" }`; the five fabric-primitive classes
-(`FabricBytes`, `FabricEpochDays`, `FabricEpochNsec`, `FabricHash`,
+(`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`,
 `FabricRegExp`) → `{ type: "<Name>" }` (the fabric-primitive schema
 vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
 `URL` → `{ type: "string", format:
@@ -564,6 +564,26 @@ both survive: `PerUser<Cell<PerSession<string>>>` → `{ asCell: [{ kind:
 "cell", scope: "user" }], scope: "session", type: "string" }` (fixture
 `scoped-wrappers`).
 
+A scope wrapper **as a union member throws** (`A scope wrapper cannot be a
+member of a union.`; tested, scope-wrappers.test.ts). The runtime reads a
+slot's scope from the top level of that slot's own schema
+(`ContextualFlowControl.getSchemaScopeCap`), so a declaration that lands in an
+`anyOf` branch is invisible to the write path: no narrowing redirect is
+written, the value lands on the shared space row, and every principal reads
+the same instance. Write the union inside the wrapper
+(`PerUser<string | undefined>` → `{ type: ["string", "undefined"], scope:
+"user" }`) or make the property optional (`draft?: PerUser<string>` →
+`{ type: "string", scope: "user" }`) — both keep the scope at the top level.
+
+Two detection points enforce this, because a wrapper around a cell loses its
+scope before the schema is built. `formatWrapperUnion`
+(`common-fabric-formatter.ts`) catches a scope-wrapped union member while the
+wrapper is still visible; `assertScopeDeclarationsAreReachable`
+(`scope-placement.ts`), run on every finished schema, catches a scope that
+reached an `anyOf`/`oneOf`/`allOf` branch by any route. A scope nested deeper
+— on a property of an object that is itself a union member — is that
+property's own top-level declaration and is accepted.
+
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 
 The canonical authoring surface contains 18 names. The inventory is
@@ -626,6 +646,12 @@ Mechanics:
   `normalizeWriterIdentityFile`). The transformer also handles the direct-root
   `toSchema<WriteAuthorizedBy<T, typeof b>>` form specially so the wrapper's
   value schema remains the root while the same identity marker is attached.
+  The content-addressed identity (`moduleIdentity`, and the legacy `bundleId`)
+  is update-volatile in the piece compat checker: it rehashes on any edit to
+  the authoring module, so `assertPatternSchemasBackwardCompatible` normalizes
+  it out of the `ifc` comparison and compares only the binding `file`/`path`
+  and the `uiContract`. The runner still verifies the live writer's
+  `moduleIdentity` against the claim at write time, so this narrows nothing.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
@@ -747,6 +773,7 @@ Everything that throws, with source (test-pinned unless noted):
 | `DeepDefault` without object target/default | `DeepDefault must be unioned with an object type …` | `union-formatter.ts` |
 | `DeepDefault` unknown key | `DeepDefault key "…" does not exist on the target object type.` | `union-formatter.ts` |
 | Nested scope wrappers | `Nested scope wrappers require a cell boundary between scopes.` | `common-fabric-formatter.ts` |
+| Scope wrapper as a union member | `A scope wrapper cannot be a member of a union.` | `common-fabric-formatter.ts`, `scope-placement.ts` |
 | Circular type alias (wrapper chain) | `Circular type alias detected: A -> B -> …` | `type-utils.ts` |
 | Circular type alias (union alias) | `Circular type alias detected: <name>` | `union-formatter.ts` |
 | Wrapper/scope/CFC alias without type argument | `<Kind><T> requires type argument` | `common-fabric-formatter.ts` (untested) |

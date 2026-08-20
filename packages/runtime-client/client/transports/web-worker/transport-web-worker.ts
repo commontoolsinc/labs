@@ -43,6 +43,12 @@ export class WebWorkerRuntimeTransport
   }
 
   send(data: IPCClientMessage | IPCClientNotification): void {
+    // TODO(danfuzz): this send should encode `data` with `codec-realm`, which
+    // is what would let the payload carry the whole `FabricValue` domain
+    // instead of whatever structured cloning happens to preserve of it. The
+    // payload type carries the matching marker -- `IPCClientRequest` in
+    // `../../../protocol/types.ts` -- as does the receiving end, the `message`
+    // listener in `../../../backends/web-worker/index.ts`.
     this._worker.postMessage(data);
   }
 

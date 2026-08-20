@@ -51,6 +51,8 @@
 //                  (`hasTable`, the scope_key shim). A schema-migration concern.
 // └────────────────────────────────────────────────────────────────────────────┘
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
 import { reconstructDocument } from "./reconstruct.ts";
@@ -113,10 +115,6 @@ export interface EntityModel {
   links?: number;
 }
 
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
 /** The target id of a SigilLink value, if it is one. */
 function linkId(v: unknown): string | undefined {
   return parseSigilLink(v)?.id ?? undefined;
@@ -127,7 +125,7 @@ function internalIds(internal: unknown): string[] {
   if (!Array.isArray(internal)) return [];
   const out: string[] = [];
   for (const el of internal) {
-    if (isObj(el) && "link" in el) {
+    if (isObjectNotArray(el) && "link" in el) {
       const id = linkId(el.link);
       if (id) out.push(id);
     }
@@ -143,26 +141,28 @@ function basename(p: string): string {
 export function isModuleValue(
   v: unknown,
 ): v is { code: string; identity: string; filename?: string; kind?: string } {
-  return isObj(v) && typeof v.code === "string" &&
+  return isObjectNotArray(v) && typeof v.code === "string" &&
     typeof v.identity === "string";
 }
 
 /** A value shaped like a JSONSchema stored as data: `{ type, properties|$defs }`. */
 function isSchemaValue(v: unknown): boolean {
-  if (!isObj(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   if (typeof v.type !== "string") return false;
-  if (!(isObj(v.properties) || isObj(v.$defs))) return false;
+  if (!(isObjectNotArray(v.properties) || isObjectNotArray(v.$defs))) {
+    return false;
+  }
   // Schemas-as-data don't carry render markers.
   return !("$UI" in v) && !("$NAME" in v);
 }
 
 function isStreamValue(v: unknown): boolean {
-  return isObj(v) && v.$stream === true;
+  return isObjectNotArray(v) && v.$stream === true;
 }
 
 /** A piece result value: carries render/name markers. */
 function isPieceResultValue(v: unknown): boolean {
-  return isObj(v) && ("$UI" in v || "$NAME" in v || "$TILE_UI" in v);
+  return isObjectNotArray(v) && ("$UI" in v || "$NAME" in v || "$TILE_UI" in v);
 }
 
 /**
@@ -179,7 +179,7 @@ function isLegacyProcessValue(
   spell?: unknown;
   source?: unknown;
 } {
-  return isObj(v) && typeof v.$TYPE === "string" &&
+  return isObjectNotArray(v) && typeof v.$TYPE === "string" &&
     ("resultRef" in v || "spell" in v || "source" in v);
 }
 
@@ -190,7 +190,7 @@ function valueShapeOf(v: unknown): ValueShape {
   if (isSchemaValue(v)) return "schema";
   if (isPieceResultValue(v)) return "piece-result";
   if (Array.isArray(v)) return "array";
-  if (isObj(v)) return "object";
+  if (isObjectNotArray(v)) return "object";
   return "scalar";
 }
 
@@ -227,7 +227,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
 
   // --- Pieces -------------------------------------------------------------
   // Modern: the durable piece → pattern pointer is `patternIdentity`.
-  if (isObj(doc.patternIdentity)) {
+  if (isObjectNotArray(doc.patternIdentity)) {
     const pi = doc.patternIdentity as { identity?: unknown; symbol?: unknown };
     lineage.argument = linkId(doc.argument);
     lineage.internal = internalIds(doc.internal);
@@ -237,7 +237,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
         symbol: typeof pi.symbol === "string" ? pi.symbol : undefined,
       };
     }
-    const name = isObj(value) && typeof value.$NAME === "string"
+    const name = isObjectNotArray(value) && typeof value.$NAME === "string"
       ? value.$NAME
       : undefined;
     return {
@@ -269,7 +269,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
   // Legacy: a result cell links to its process cell via top-level `source`.
   if ("source" in doc && isPieceResultValue(value)) {
     lineage.source = linkId(doc.source);
-    const name = isObj(value) && typeof value.$NAME === "string"
+    const name = isObjectNotArray(value) && typeof value.$NAME === "string"
       ? value.$NAME
       : undefined;
     return {
@@ -307,7 +307,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
   if (isSchemaValue(value)) {
-    const ifc = isObj(value) && "ifc" in value ? "+ifc" : "";
+    const ifc = isObjectNotArray(value) && "ifc" in value ? "+ifc" : "";
     return {
       kind: "schema",
       regime: "n/a",
@@ -575,7 +575,7 @@ export function describePiece(
   if (c.kind !== "piece") return { error: `not a piece (kind=${c.kind})` };
 
   const value = doc.value;
-  const name = isObj(value) && typeof value.$NAME === "string"
+  const name = isObjectNotArray(value) && typeof value.$NAME === "string"
     ? value.$NAME
     : "(unnamed)";
 
@@ -646,8 +646,8 @@ export function describePiece(
     name,
     pattern,
     input,
-    resultKeys: isObj(value) ? Object.keys(value) : [],
-    schemaKeys: isObj(doc.schema) ? Object.keys(doc.schema) : [],
+    resultKeys: isObjectNotArray(value) ? Object.keys(value) : [],
+    schemaKeys: isObjectNotArray(doc.schema) ? Object.keys(doc.schema) : [],
     ownedCells,
   };
 }

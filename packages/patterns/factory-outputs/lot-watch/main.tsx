@@ -429,52 +429,18 @@ const prepareLotWatchAdminToggle = (
 };
 
 // ============================================================
-// Default seed data
-// ============================================================
-
-const DEFAULT_SPOTS: ParkingSpot[] = [
-  { spotNumber: "1", label: "Near entrance", active: true },
-  { spotNumber: "5", label: "", active: true },
-  { spotNumber: "12", label: "Compact only", active: true },
-  { spotNumber: "13", label: "", active: true },
-];
-
-// ============================================================
 // Pattern
 // ============================================================
 
 export default pattern<LotWatchInput, LotWatchOutput>(
-  ({
-    spots: inputSpots,
-    sightings: inputSightings,
-    people: inputPeople,
-    knownVehicles: inputKnownVehicles,
-    adminRegistry: inputAdminRegistry,
-  }) => {
+  ({ spots, sightings, people, knownVehicles, adminRegistry }) => {
     // ---- Cells (DESIGN §5) ----
+    //
+    // Each optional cell input materializes seeded from its type's `Default<>`
+    // when the caller wires nothing; a parent that owns the cells (e.g.
+    // lot-with-coordinator-demo) shares them by passing them in.
 
-    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
-    const sightings = inputSightings ??
-      Writable.perSpace.of<Sighting[]>([]);
-
-    // Phase 3b: known-vehicle registry (guests + offenders). When wired from a
-    // parent space we share the same cell; standalone we own it.
-    const knownVehicles = inputKnownVehicles ??
-      Writable.perSpace.of<KnownVehicle[]>([]);
-
-    // Phase 3b: people cell — read-only for deriving the "ours" vehicle set.
-    // When absent (standalone) the "ours" bucket is empty.
-    const people = inputPeople ??
-      Writable.perSpace.of<PersonWithVehicles[]>([]);
-
-    // DESIGN §6: admin registry + manager credential (mirror coordinator)
-    const defaultAdminRegistry = new Writable.perSpace<
-      LotWatchAdminRegistryValue
-    >(
-      {} as LotWatchAdminRegistryValue,
-    );
-    const adminRegistry: LotWatchAdminRegistryCell = inputAdminRegistry ??
-      defaultAdminRegistry;
+    // DESIGN §6: admin manager credential (mirror coordinator)
     const adminManagerCredential = new Writable.perUser<
       LotWatchAdminManagerCredential | null
     >(null);

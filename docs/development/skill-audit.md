@@ -36,7 +36,7 @@ tripwire already scans all three. Point the audit at them on the same terms —
 what a rule says about a gate is as capable of quietly becoming untrue as what
 a skill says about a canonical home, and neither shows up as a broken citation.
 
-A rule has one defence a skill does not: it should be short enough to re-read
+A rule has one defense a skill does not: it should be short enough to re-read
 in full while you are changing the thing it describes. A rule that has grown
 past that is drifting whether or not anyone has noticed yet.
 

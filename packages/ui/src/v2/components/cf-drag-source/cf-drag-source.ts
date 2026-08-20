@@ -1,5 +1,7 @@
+import type { CellHandle } from "@commonfabric/runtime-client";
 import { css, html, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   createDragPreview,
@@ -7,7 +9,6 @@ import {
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import type { CellHandle } from "@commonfabric/runtime-client";
 
 /**
  * CFDragSource - Wraps draggable content and initiates drag operations

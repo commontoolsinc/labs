@@ -1,7 +1,14 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { describe, it } from "@std/testing/bdd";
+
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { toCell } from "../src/back-to-cell.ts";
+import { type FactoryInput, UI } from "../src/builder/types.ts";
 import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
@@ -10,16 +17,12 @@ import {
   redactSigilCfcLabelViewsForDisplay,
   stripSigilCfcLabelViews,
 } from "../src/cfc/link-label-view.ts";
+import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { toCell } from "../src/back-to-cell.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type FactoryInput, UI } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 describe("CFC label view helpers", () => {
   it("collects labels that apply to a logical value path", () => {
@@ -57,6 +60,84 @@ describe("CFC label view helpers", () => {
           label: { integrity: ["summarized-by-trusted-pattern"] },
         },
       ],
+    });
+  });
+
+  it("collects declared labels from schema paths and local references", () => {
+    expect(cfcLabelViewFromSchema({
+      type: "object",
+      ifc: {
+        confidentiality: ["workspace"],
+        maxConfidentiality: ["workspace"],
+      },
+      properties: {
+        items: {
+          type: "array",
+          items: { $ref: "#/$defs/Reviewed" },
+        },
+      },
+      $defs: {
+        Reviewed: {
+          type: "string",
+          ifc: { integrity: ["reviewed"], observes: "value" },
+        },
+      },
+    })).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: { confidentiality: ["workspace"] },
+        },
+        {
+          path: ["items", "*"],
+          label: { integrity: ["reviewed"] },
+          observes: "value",
+        },
+      ],
+    });
+  });
+
+  it("ignores a root value that is not a schema", () => {
+    expect(cfcLabelViewFromSchema(null as never)).toBeUndefined();
+  });
+
+  it("keeps declarations beside an unresolved schema reference", () => {
+    expect(cfcLabelViewFromSchema({
+      $ref: "#/$defs/Missing",
+      ifc: { confidentiality: ["workspace"] },
+    })).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
+    });
+  });
+
+  it("ignores an IFC block that is not an object", () => {
+    expect(cfcLabelViewFromSchema({ ifc: null } as never)).toBeUndefined();
+  });
+
+  it("ignores IFC label fields that are not arrays", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: 7, integrity: { trusted: true } },
+    } as never)).toBeUndefined();
+    expect(cfcLabelViewFromSchema({
+      ifc: { integrity: "trusted" },
+    } as never)).toBeUndefined();
+  });
+
+  it("ignores a properties value that is not an object", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: ["workspace"] },
+      properties: null,
+    } as never)).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
     });
   });
 
@@ -111,7 +192,7 @@ describe("CFC label view helpers", () => {
   it("does not treat schema constraints as display labels", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-cell",
+        id: "of:labeled-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],
@@ -130,7 +211,7 @@ describe("CFC label view helpers", () => {
   it("does not ask result metadata for label display", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-result-cell",
+        id: "of:labeled-result-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],
@@ -166,7 +247,7 @@ describe("CFC label view helpers", () => {
         type: "application/json",
         path: [],
       }, {
-        value: "labelled content",
+        value: "labeled content",
         cfc: {
           version: 1,
           schemaHash: "test-schema",
@@ -286,6 +367,88 @@ describe("CFC label view helpers", () => {
           },
         }],
       });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("carries the link slot's label on a second resolution of the same link", async () => {
+    // Every caller that derives a hop's label view brackets the resolution
+    // with the trace-array length and slices off what it appended
+    // (`Cell.resolveAsCell` here; `deriveDereferenceLabelView` and the
+    // query-result proxy identically). So a resolution MUST append its traces
+    // even when it repeats one the transaction already recorded — suppressing
+    // the repeat empties the slice, and the label view falls back to the
+    // resolved document's own labels.
+    //
+    // The link slot's label is what that loses: it lives on the CONTAINER,
+    // reachable only through the trace's `source` address, so the resolved
+    // document cannot supply it. Deduplication belongs in
+    // `canonicalizePreparedDigestInput`, which reads the finished list.
+    const signer = await Identity.fromPassphrase("cfc label view repeat hop");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-repeat-source",
+        undefined,
+        tx,
+      );
+      source.set({ detail: "linked content" } as never);
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-repeat-target",
+        undefined,
+        tx,
+      );
+      target.set({ inner: source } as never);
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: ["cfc"],
+      }, {
+        version: 1,
+        schemaHash: "target-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["inner"],
+            label: { confidentiality: ["link-slot-only"] },
+          }],
+        },
+      });
+      await tx.commit();
+
+      // Both resolutions run on ONE transaction, so the second is the repeat.
+      const readTx = runtime.edit();
+      const handle = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-repeat-target",
+        undefined,
+        readTx,
+      );
+      const first = handle.key("inner").withTx(readTx).resolveAsCell();
+      const second = handle.key("inner").withTx(readTx).resolveAsCell();
+      expect(cfcLabelViewForCell(first)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: expect.arrayContaining(["link-slot-only"]),
+          },
+        }],
+      });
+      expect(cfcLabelViewForCell(second)).toEqual(cfcLabelViewForCell(first));
+      readTx.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1215,7 +1378,7 @@ describe("CFC label view helpers", () => {
         type: "application/json",
         path: [],
       }, {
-        value: { body: "labelled content" },
+        value: { body: "labeled content" },
         cfc: {
           version: 1,
           schemaHash: "test-schema",
@@ -1258,7 +1421,7 @@ describe("CFC label view helpers", () => {
   it("reads stored metadata directly from the queried cell", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-cell",
+        id: "of:labeled-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],

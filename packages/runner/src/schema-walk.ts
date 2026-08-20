@@ -16,8 +16,9 @@
  * would only waste work on the rest. These keywords are excluded by default:
  *
  *   `patternProperties`, `contains`, `if`, `then`, `else`, `propertyNames`,
- *   `dependentSchemas`, `contentSchema` (and `definitions`, the pre-2019 alias
- *   for `$defs`, which we never emit at all).
+ *   `dependentSchemas`, `contentSchema`, `unevaluatedProperties`,
+ *   `unevaluatedItems` (and `definitions`, the pre-2019 alias for `$defs`,
+ *   which we never emit at all).
  *
  * A structural walk that must be COMPLETE regardless of what we emit — notably
  * `$ref` discovery in `cfc/schema-refs.ts`, a fail-closed guard: a ref that
@@ -93,6 +94,8 @@ export const UNUSED_SINGLE_SUBSCHEMA_KEYS = [
   "contains",
   "propertyNames",
   "contentSchema",
+  "unevaluatedProperties",
+  "unevaluatedItems",
 ] as const;
 
 /** Record-subschema keywords we never emit — walked only with `includeUnused`. */

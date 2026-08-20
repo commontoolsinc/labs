@@ -5,11 +5,11 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
@@ -18,8 +18,8 @@ import { ProblematicStateError } from "./ProblematicStateError.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the
- * serialization system meets a tag no codec claims during deserialization, it
- * wraps the tag and state here; on re-serialization, the preserved pair
+ * codec system encounters a tag no codec claims during decoding,
+ * it wraps the tag and state here; on re-encoding, the preserved pair
  * reproduces the original wire form. See Section 3.3 of the formal spec.
  *
  * The tag is a real tag, checked at construction. That is what makes the
@@ -56,7 +56,7 @@ export class UnknownValue extends BaseFabricInstance {
     }
 
     this.#wireTypeTag = wireTypeTag;
-    this.#state = state; // TODO(danfuzz): Should be guaranteed deep-frozen.
+    this.#state = state;
   }
 
   /** Arbitrary raw instance state. */
@@ -121,15 +121,22 @@ export class UnknownValue extends BaseFabricInstance {
       }
 
       /** @inheritDoc */
+      canDecode(_state: FabricValue): _state is FabricValue {
+        // What arrives under a tag no registry claims is preserved rather than
+        // interpreted, so there is no shape it could fail to have.
+        return true;
+      }
+
+      /** @inheritDoc */
       decode(
         typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        env: LiveEnvironment,
       ): FabricValue {
         const result = new UnknownValue(typeTag, state);
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

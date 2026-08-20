@@ -1,21 +1,24 @@
-// Pins the KNOWN QUIRK in mapping spec §2/§16.7: the two analysis paths
-// encode literals differently for the SAME authored type.
-//   type path  (generateSchema):                 { type, enum: [v] }
-//   node path  (generateSchemaFromSyntheticTypeNode, schema-generator.ts
-//               ~:879-896):                      { type, const: v }
-// For literal unions the divergence is structural, not just spelling:
-//   type path:  { enum: [a, b] }
-//   node path:  { anyOf: [{ const: a }, { const: b }] }
-// The consumer (ts-transformers SchemaGeneratorTransformer) routes a type
-// arg to the node path whenever it is synthetic-and-any OR contains an
-// `any`/`unknown` keyword anywhere, so adding `data: unknown` to a type
-// flips sibling literal encodings. Runner validation treats const and enum
-// equivalently (runner/src/schema.ts matchesConcreteValue), but structural
-// schema equality (runner/src/cfc/prepare.ts schemasEqualIgnoringWriterStamp)
-// does not — the spellings are different schemas to deepEqual.
-//
-// These tests pin today's divergence so a canonicalization fix (e.g. the
-// node path emitting enum-spelling) flips them consciously.
+/**
+ * Pins the KNOWN QUIRK in mapping spec §2/§16.7: the two analysis paths
+ * encode literals differently for the SAME authored type.
+ *   type path  (generateSchema):                 { type, enum: [v] }
+ *   node path  (generateSchemaFromSyntheticTypeNode, schema-generator.ts
+ *               ~:879-896):                      { type, const: v }
+ * For literal unions the divergence is structural, not just spelling:
+ *   type path:  { enum: [a, b] }
+ *   node path:  { anyOf: [{ const: a }, { const: b }] }
+ * The consumer (ts-transformers SchemaGeneratorTransformer) routes a type
+ * arg to the node path whenever it is synthetic-and-any OR contains an
+ * `any`/`unknown` keyword anywhere, so adding `data: unknown` to a type
+ * flips sibling literal encodings. Runner validation treats const and enum
+ * equivalently (runner/src/schema.ts matchesConcreteValue), but structural
+ * schema equality (runner/src/cfc/prepare.ts schemasEqualIgnoringWriterStamp)
+ * does not — the spellings are different schemas to deepEqual.
+ *
+ * These tests pin today's divergence so a canonicalization fix (e.g. the
+ * node path emitting enum-spelling) flips them consciously.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";

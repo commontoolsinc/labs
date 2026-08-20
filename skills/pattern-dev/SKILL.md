@@ -14,7 +14,11 @@ write automated pattern tests, run every test entry with `cf test`, and attach
 every entry with repeatable `--test` flags on `piece new` and every later
 `piece setsrc`. Manual browser or CLI verification does not replace the
 automated tests. Deployment packages and type-checks attached tests but does not
-run them.
+run them. A file the pattern ships with that is not code — a fixture, a lookup
+table — attaches the same way with repeatable `--datafile` flags, is stored
+verbatim rather than compiled, and is read with `dataFile(path)` from
+`commonfabric`. `cf check` and `cf test` take `--datafile` too, so a pattern
+that reads one is checkable and testable locally.
 
 Also read the foundational reactivity references before implementing or
 debugging pattern state:

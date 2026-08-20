@@ -51,7 +51,7 @@ export default pattern(() => {
     counter.increment.send();
   });
 
-  // 3. Define assertions (reactive booleans that report their operands)
+  // 3. Define assertions (reactive conditions that report their operands)
   const assert_is_zero = assert(() => counter.value === 0);
   const assert_is_one = assert(() => counter.value === 1);
 
@@ -81,6 +81,20 @@ deno task cf test packages/patterns/my-pattern/main.test.tsx --verbose
 deno task cf test packages/patterns/my-pattern/
 ```
 
+### Import roots
+
+A test pattern's imports resolve within its root directory. Without `--root`,
+`cf test` anchors at the nearest ancestor whose `deno.json(c)` declares a
+package name — `packages/patterns` for this repository's patterns — so imports
+that span the package (shared helpers such as `test/vnode-helpers.ts`, sibling
+patterns, `cfc/` modules) resolve without a flag. A config file with no `name`,
+such as a workspace member stub that only defines tasks, does not anchor the
+root. Pass `--root` to anchor somewhere else; an import that climbs above the
+root fails naming the import and the importing file. The CI "Pattern Unit
+Tests" job (the `pattern-tests` target in `tasks/integration.ts`) passes
+`--root packages/patterns` explicitly, so a bare local run resolves imports
+the same way CI does.
+
 ## Test Step Format
 
 Tests use a **discriminated union** format:
@@ -90,12 +104,14 @@ Tests use a **discriminated union** format:
 return {
   [TESTS]: [
     { action: action_do_something },     // Runner calls .send()
-    { assertion: assert_something },     // Runner checks === true
+    { assertion: assert_something },     // Runner reads the assert() record
   ],
 };
 ```
 
-Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
+Each step is either `{ action: Stream<void> }` or `{ assertion }`, where the
+assertion is the record `assert()` produces — see
+[Write assertions with `assert()`](#write-assertions-with-assert) below.
 
 ## Walking the Rendered Tree
 
@@ -161,7 +177,7 @@ const action_setup_game = action(() => {
 ### Firing a handler the pattern does not export
 
 A handler bound only in JSX can still be fired, so a pattern that keeps its
-behaviour behind a button does not have to change to be tested. The prop carries
+behavior behind a button does not have to change to be tested. The prop carries
 a stream whether the handler was written inline or bound from module scope. Walk
 the rendered tree to the node, read the prop, and send it an event:
 
@@ -195,7 +211,7 @@ and exporting it would only serve the test.
 
 ## Writing Assertions
 
-Use `assert()` to create reactive boolean assertions:
+Use `assert()` to state each condition a test checks:
 
 ```tsx
 // Shown for illustration only.
@@ -213,21 +229,21 @@ const assert_game_ready = assert(() => {
 });
 ```
 
-### Prefer `assert()` over `computed()`
+### Write assertions with `assert()`
 
-Write new assertions with `assert()`. Most test patterns in the repository
-use `assert()` for their assertions; a step also accepts a `computed()` boolean,
-but a failing `computed()` assertion can only ever report the boolean it
-produced:
+A test step's `assertion` is the record `assert()` produces; a bare
+`Reactive<boolean>` — a `computed()` or a plain cell — is a compile error.
+This is what `assert()` buys. A bare boolean could only ever report the value
+it produced, because the comparison ran inside a closure and its operands were
+gone before the runner saw anything:
 
 ```
 ✗ assertion_1
     Expected true, got false
 ```
 
-The comparison ran inside your own closure, so its operands were gone before
-the runner saw anything. `assert()` records them as the assertion runs and
-reports them on failure:
+`assert()` records those operands as the assertion runs and reports them on
+failure:
 
 ```
 ✗ assertion_1
@@ -236,7 +252,7 @@ reports them on failure:
       budget = 30
 ```
 
-Each operand is labelled with the source text you wrote. `assert()` reports:
+Each operand is labeled with the source text you wrote. `assert()` reports:
 
 - the operands of the top-level operator — `total` and `budget` above
 - the arguments of a call — `assert(() => inRange(value, low, high))` reports
@@ -357,13 +373,13 @@ deno task cf piece new ./main.test.tsx
 deno task cf piece inspect --piece <PIECE_ID>
 
 # Get specific values
-deno task cf piece get subject/items --piece <PIECE_ID>
+deno task cf get subject/items --piece <PIECE_ID>
 
 # Step through manually (the reserved key is the literal `$TESTS`, quoted so
 # the shell does not expand it)
-deno task cf piece call '$TESTS/0/action' --piece <PIECE_ID>
+deno task cf call --piece <PIECE_ID> '$TESTS/0/action'
 deno task cf piece step --piece <PIECE_ID>
-deno task cf piece get '$TESTS/1/assertion' --piece <PIECE_ID>
+deno task cf get '$TESTS/1/assertion' --piece <PIECE_ID>
 ```
 
 This diagnostic command deliberately deploys the test pattern as the executable

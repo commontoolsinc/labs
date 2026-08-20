@@ -1,19 +1,21 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "../link-utils.ts";
 import type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
-import {
-  areNormalizedLinksSame,
-  type NormalizedFullLink,
-} from "../link-utils.ts";
+import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -41,22 +43,9 @@ import {
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
 import {
-  getPieceMetadataFromFrame,
-  getSchedulerActionId,
-  getSchedulerActionTelemetryInfo,
-  handleSchedulerError,
-  queueTask,
-  recordTriggerTrace as recordTriggerTraceState,
-  type SchedulerActionIdentityState,
-} from "./diagnostics.ts";
-import {
-  type DiagnosisRecord,
-  runSchedulerDiagnosis,
-  runSchedulerIdempotencyCheck,
-  type SchedulerDiagnosisControlState,
-  startSchedulerDiagnosis,
-  stopSchedulerDiagnosis,
-} from "./diagnosis.ts";
+  applyPullExecuteContinuation,
+  type ExecuteContinuationState,
+} from "./continuation.ts";
 import {
   collectDirectWritersForLog,
   type DependencyGraphState,
@@ -66,6 +55,24 @@ import {
   setNodeProvisionalDemand,
   updateDependentEdgesForLog,
 } from "./dependency-graph.ts";
+import type { DependencyUpdateState } from "./dependency-updates.ts";
+import {
+  type DiagnosisRecord,
+  runSchedulerDiagnosis,
+  runSchedulerIdempotencyCheck,
+  type SchedulerDiagnosisControlState,
+  startSchedulerDiagnosis,
+  stopSchedulerDiagnosis,
+} from "./diagnosis.ts";
+import {
+  getPieceMetadataFromFrame,
+  getSchedulerActionId,
+  getSchedulerActionTelemetryInfo,
+  handleSchedulerError,
+  queueTask,
+  recordTriggerTrace as recordTriggerTraceState,
+  type SchedulerActionIdentityState,
+} from "./diagnostics.ts";
 import { keyAtRatchet } from "./fan-out.ts";
 import { SchedulerMaterializers } from "./materializers.ts";
 import {
@@ -77,9 +84,11 @@ import {
   shouldShapeDelivery,
   WakeShaper,
 } from "./wake-shaping.ts";
-import { type DependencyUpdateState } from "./dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduling-writes.ts";
-import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
+import {
+  NodeRegistry,
+  type SchedulerNode,
+} from "./node-record.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -91,7 +100,21 @@ import {
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
-import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
+import {
+  runSchedulerAction,
+  type SchedulerActionRunState,
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
+} from "./run.ts";
+import {
+  addSchedulerEventHandler,
+  dropQueuedEvent,
+  isHeadEventParked as isHeadEventParkedState,
+  processPullQueuedEventDuringExecute,
+  queueSchedulerEvent,
+  type SchedulerEventExecutionState,
+  type SchedulerEventQueueState,
+} from "./events.ts";
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
@@ -102,10 +125,13 @@ import {
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   type SettlingTracker,
+  summarizeNonSettlingWindow,
 } from "./execution.ts";
-import { runPullSchedulerSettleLoop } from "./settle.ts";
+import {
+  collectPullIterationSeeds as collectPullIterationSeedsState,
+  runPullSchedulerSettleLoop,
+} from "./settle.ts";
 import { CooperativeYield } from "./cooperative-yield.ts";
-import { collectPullIterationSeeds as collectPullIterationSeedsState } from "./settle.ts";
 import {
   type DirtyPullRunnableState,
   type DirtyPullRunnableStateWithDebounce,
@@ -114,44 +140,34 @@ import {
   type PendingPullRunnableState,
   type PullSchedulingState,
 } from "./work-oracle.ts";
-import type { ExecuteContinuationState } from "./continuation.ts";
-import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
   markInvalid as markInvalidRecord,
   type MarkInvalidOptions,
+  processStorageNotification,
   type StorageNotificationState,
 } from "./invalidation.ts";
-import { processStorageNotification } from "./invalidation.ts";
 import {
+  resubscribePullSchedulerAction,
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
   type SchedulerUnsubscribeActionState,
+  subscribePullSchedulerAction,
   unsubscribeSchedulerAction,
 } from "./registration.ts";
-import {
-  resubscribePullSchedulerAction,
-  subscribePullSchedulerAction,
-} from "./registration.ts";
-import {
-  type ActionTimingState,
-  getActionStats as getActionStatsFromState,
-} from "./timing.ts";
-import { getCommitLocalSeq } from "../storage/commit-identity.ts";
-import {
-  addSchedulerEventHandler,
-  dropQueuedEvent,
-  isHeadEventParked as isHeadEventParkedState,
-  queueSchedulerEvent,
-  type SchedulerEventExecutionState,
-  type SchedulerEventQueueState,
-} from "./events.ts";
-import { SpeculationLineage } from "./lineage.ts";
-import { processPullQueuedEventDuringExecute } from "./events.ts";
 import {
   buildSchedulerGraphSnapshot,
   type SchedulerGraphSnapshotState,
 } from "./graph-snapshot.ts";
+import {
+  entityKey,
+  entityNameKey,
+} from "./keys.ts";
+import { SpeculationLineage } from "./lineage.ts";
+import {
+  type ActionTimingState,
+  getActionStats as getActionStatsFromState,
+} from "./timing.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -166,9 +182,6 @@ import type {
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
-import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { entityKey, entityNameKey } from "./keys.ts";
-
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -384,6 +397,9 @@ export class Scheduler {
   private subscriptionState!: SchedulerSubscriptionState;
   private subscribeActionState!: SchedulerSubscribeActionState;
   private unsubscribeState!: SchedulerUnsubscribeActionState;
+  /** The storage subscriber registered in the constructor, kept so `dispose`
+   * can hand it back. */
+  readonly #storageSubscription: IStorageSubscription;
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
@@ -459,10 +475,11 @@ export class Scheduler {
       errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
     }
 
-    // Subscribe to storage notifications
-    this.runtime.storageManager.subscribe(
-      this.createStorageSubscription(),
-    );
+    // Subscribe to storage notifications. The subscriber is retained because
+    // `subscribe` returns nothing — the argument is the only handle disposal
+    // will ever have to hand back, and one built inline is unreachable.
+    this.#storageSubscription = this.createStorageSubscription();
+    this.runtime.storageManager.subscribe(this.#storageSubscription);
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
@@ -603,10 +620,7 @@ export class Scheduler {
         this.gates.releaseInitialRunHold(action);
       }
     });
-    this.backgroundTasks.add(task);
-    task.finally(() => {
-      this.backgroundTasks.delete(task);
-    });
+    this.trackBackgroundTask(task);
   }
 
   /**
@@ -691,6 +705,44 @@ export class Scheduler {
     return await runSchedulerAction(this.actionRunState, action);
   }
 
+  /**
+   * Count `work` as outstanding scheduler work until it settles: `idle()` waits
+   * for it and then re-checks every quiescence condition from scratch, so work
+   * that schedules actions, and the commits it issues, are covered as well.
+   *
+   * This is for work the runtime has already undertaken and whose result the
+   * reactive graph is waiting on — a system pattern being fetched so the
+   * surface a builtin has already emitted into the view can be filled in, a
+   * piece being started so a queued event can be delivered. While such work is
+   * in flight the graph is quiet because it is waiting, not because it is
+   * finished, and a caller that reads quiet as finished reads it wrongly.
+   *
+   * It is not for work whose result the graph does not depend on. An LLM call
+   * or an outbound fetch a pattern kicked off leaves the view interactive while
+   * it runs, and holding `idle()` open for it would put every caller behind the
+   * network; `Runtime.trackAsyncWork` and `Runtime.settled()` are that barrier.
+   *
+   * A rejection ends the work as surely as a result does, so it releases the
+   * barrier rather than propagating. Observing it is what makes it this
+   * method's to report: attaching a handler is the only way to learn that the
+   * work settled, and it is also what stops the runtime from reporting the
+   * rejection as unhandled, so the warning below is the account of a failure
+   * that would otherwise vanish. The entry is dropped once the work settles, so
+   * nothing accumulates.
+   */
+  trackBackgroundTask(work: Promise<unknown>): void {
+    const task = work.then(() => {}, (error) => {
+      logger.warn("scheduler-background-task", () => [
+        "A tracked background task failed",
+        error,
+      ]);
+    });
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+    });
+  }
+
   idle(): Promise<void> {
     return this.waitForQuiescence(false);
   }
@@ -698,7 +750,7 @@ export class Scheduler {
   // Client-facing quiescence: reactive quiescence AND durability of in-flight
   // commits. Commits are issued fire-and-forget (event handlers, direct cell
   // writes over IPC, reactive recomputation write-backs), so plain idle()
-  // reports quiescence while a commit is still travelling to the server; a
+  // reports quiescence while a commit is still traveling to the server; a
   // client that reads idle as a safe point to navigate or reload would then
   // drop that write when the page and its worker are torn down. The pending
   // set is sourced from the storage manager — the single chokepoint every
@@ -745,14 +797,24 @@ export class Scheduler {
       // on settles.
       const recheck = () =>
         this.waitForQuiescence(awaitPendingCommits).then(resolve);
-      // A parked waiter (idlePromises) resolves when the scheduler drains, but
-      // a commit can still be in flight then, so the commit-aware variant
-      // re-checks instead of resolving. The re-check is deferred to a microtask
-      // so it does not re-enter waitForQuiescence synchronously while
-      // resolveIdlePromises is iterating idlePromises.
-      const park = awaitPendingCommits
-        ? () => queueMicrotask(recheck)
-        : resolve;
+      // A parked waiter (idlePromises) is released when the scheduler drains,
+      // and draining settles only the conditions the execute loop owns. Two
+      // things can still be outstanding at that moment: a commit in flight,
+      // which is why the commit-aware variant re-checks rather than resolving,
+      // and a background task registered after this waiter parked, which is
+      // what a builtin starting one from inside a pass produces. A re-check is
+      // deferred to a microtask so it does not re-enter waitForQuiescence
+      // synchronously while resolveIdlePromises is iterating idlePromises.
+      //
+      // Plain idle re-checks only when there is tracked work to re-check for.
+      // Re-checking unconditionally costs a fresh promise chain per drain, and
+      // a graph that never converges drains without end — which turns that cost
+      // into unbounded growth rather than a slow path (measured: the
+      // non-converging cycle in scheduler-convergence.test.ts exhausts the heap).
+      const park = awaitPendingCommits ? () => queueMicrotask(recheck) : () => {
+        if (this.backgroundTasks.size === 0) resolve();
+        else queueMicrotask(recheck);
+      };
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(recheck);
@@ -1732,6 +1794,13 @@ export class Scheduler {
    * Should be called when the scheduler is being torn down.
    */
   dispose(): void {
+    // A storage manager outliving this scheduler keeps every subscriber it was
+    // given, and each holds its scheduler reachable. The subscription does not
+    // retire itself: its `next` returns `{ done: false }` unconditionally, and
+    // `{ done: true }` is the only self-cancelling answer the contract has.
+    // `unsubscribe` is optional on the capability, so a manager without one is
+    // left as it was rather than crashing a disposal.
+    this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     this.disposed = true;
@@ -1889,19 +1958,28 @@ export class Scheduler {
     settleResult: SchedulerSettleResult,
   ): void {
     if (!settleResult.backoffApplied) return;
-    const nonSettlingTelemetry = markNonSettlingEpisode(this.settlingTracker);
-    if (!nonSettlingTelemetry) return;
 
+    const deferredActions = this.describeDeferredActions(
+      settleResult.backoffActions,
+    );
     this.runtime.telemetry.submit({
       type: "scheduler.non-settling",
-      ...nonSettlingTelemetry,
+      ...summarizeNonSettlingWindow(this.settlingTracker),
+      deferredActions,
+      deferredActionCount: settleResult.backoffActions.length,
     });
-    this.warnNonSettlingActions(settleResult.backoffActions);
+
+    // The marker carries every episode; the warning is a latched
+    // summary so a permanently non-converging graph does not flood the log.
+    if (markNonSettlingEpisode(this.settlingTracker)) {
+      this.warnNonSettlingActions(settleResult.backoffActions, deferredActions);
+    }
   }
 
-  private warnNonSettlingActions(actions: readonly Action[]): void {
+  /** Labels the first few deferred actions, readable name first when known. */
+  private describeDeferredActions(actions: readonly Action[]): string[] {
     const maxListedActions = 10;
-    const labels = actions.slice(0, maxListedActions).map((action) => {
+    return actions.slice(0, maxListedActions).map((action) => {
       const actionId = this.getActionId(action);
       const info = getSchedulerActionTelemetryInfo(action);
       const readableName = info?.moduleName ?? info?.patternName;
@@ -1909,6 +1987,12 @@ export class Scheduler {
         ? `${readableName} (${actionId})`
         : actionId;
     });
+  }
+
+  private warnNonSettlingActions(
+    actions: readonly Action[],
+    labels: readonly string[],
+  ): void {
     const omittedCount = actions.length - labels.length;
     const actionList = labels.length > 0
       ? labels.join(", ") +
@@ -2195,9 +2279,9 @@ export class Scheduler {
         this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       // Engaged only while an initial rehydration is being applied (synchronous
-      // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
-      // the event-driven piece-start task (events.ts), so gating on it would
-      // pause all pull scheduling on every piece-start.
+      // post-phase-7). MUST NOT read backgroundTasks: that set holds work such
+      // as an event-driven piece start (events.ts) or a sidecar pattern launch,
+      // so gating on it would pause all pull scheduling on every one of them.
       // Per-node convergence episode state prevents one exhausted subgraph
       // from releasing idle for unrelated work.
       isConvergenceHoldActive: (action) => this.isConvergenceHoldActive(action),

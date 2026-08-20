@@ -7,8 +7,22 @@ import {
   join as joinSandboxPath,
   normalize,
 } from "@std/path/posix";
-import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
+
+import type {
+  CfcEnforcementMode,
+  CfcSandboxJsonValue,
+  CfcSandboxResult,
+  CfcStreamChannel,
+  IFCLabel,
+} from "@commonfabric/runner/cfc";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import { SandboxPathEscapeError } from "./errors.ts";
+import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
 import type {
   DockerNetworkMode,
   DockerRunscAdditionalMount,
@@ -22,17 +36,6 @@ import type {
   SandboxRuntimeMountDescription,
   SandboxShellRequest,
 } from "./types.ts";
-import type {
-  CfcEnforcementMode,
-  CfcSandboxJsonValue,
-  CfcSandboxResult,
-  CfcStreamChannel,
-  IFCLabel,
-} from "@commonfabric/runner/cfc";
-import {
-  CFC_ENFORCING_STRICTNESS,
-  cfcEnforcementStrictness,
-} from "@commonfabric/runner/cfc";
 
 export const DEFAULT_DOCKER_RUNSC_IMAGE =
   "us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest";
@@ -325,9 +328,6 @@ export const assertDockerRunscCfcTransportForMode = (
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const byteLength = (text: string): number => textEncoder.encode(text).length;
 
 const appendStderr = (stderr: string, message: string): string =>
@@ -424,14 +424,14 @@ const hasNonEmptyXattrValue = (value: unknown): boolean => {
   if (Array.isArray(value)) {
     return value.length > 0;
   }
-  if (isRecord(value)) {
+  if (isObjectNotArray(value)) {
     return Object.values(value).some(hasNonEmptyXattrValue);
   }
   return value !== undefined && value !== null;
 };
 
 const runscTaintLabel = (taint: RunscCfcLabelSidecar): IFCLabel => {
-  const xattr = isRecord(taint.xattrJSON) ? taint.xattrJSON : {};
+  const xattr = isObjectNotArray(taint.xattrJSON) ? taint.xattrJSON : {};
   return {
     ...(Array.isArray(xattr.confidentiality)
       ? { confidentiality: xattr.confidentiality }
@@ -441,7 +441,7 @@ const runscTaintLabel = (taint: RunscCfcLabelSidecar): IFCLabel => {
 };
 
 const isPublicRunscTaint = (taint: RunscCfcLabelSidecar): boolean => {
-  if (isRecord(taint.xattrJSON)) {
+  if (isObjectNotArray(taint.xattrJSON)) {
     return !Object.values(taint.xattrJSON).some(hasNonEmptyXattrValue);
   }
   const stringValue = typeof taint.string === "string"
@@ -474,7 +474,7 @@ const cfcResultFromRunscSidecar = (
       },
     );
   }
-  if (!isRecord(parsed.cfcTaint)) {
+  if (!isObjectNotArray(parsed.cfcTaint)) {
     return deniedCfcResult(
       "runsc_cfc_sidecar_missing_taint",
       "runsc CFC result sidecar did not include final CFC taint",

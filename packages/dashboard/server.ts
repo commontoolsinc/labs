@@ -22,13 +22,12 @@
  *   GH_TOKEN                          GitHub tiles; read access to the
  *                                     organization's members also powers the
  *                                     organization-users tile
- *   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
  */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
-import { friendlyError } from "./lib.ts";
+import { friendlyError, githubOperationsInProgress } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell } from "./render.ts";
@@ -200,13 +199,22 @@ function activeTileView(tile: Tile, view: TileView): TileView {
 }
 
 function grayStaleTileUpdates(now: number): void {
-  let changed = false;
-  for (const active of activeTileUpdates.values()) {
+  const newlyStale: string[] = [];
+  for (const [tileId, active] of activeTileUpdates) {
     if (active.stale || now - active.startedAt < STALE_UPDATE_MS) continue;
     active.stale = true;
-    changed = true;
+    newlyStale.push(`${tileId} (${Math.max(0, now - active.startedAt)} ms)`);
   }
-  if (changed) {
+  if (newlyStale.length) {
+    const sources = [...activeRunSourceUpdates];
+    const github = githubOperationsInProgress(now).map((operation) =>
+      `${operation.id} ${operation.path} (${operation.stage}, ${operation.elapsedMs} ms)`
+    );
+    console.error(
+      `dashboard refresh still pending: tiles ${newlyStale.join(", ")}; ` +
+        `active run sources ${sources.length ? sources.join(", ") : "none"}; ` +
+        `active GitHub operations ${github.length ? github.join(", ") : "none"}`,
+    );
     lastChange = now;
     updateFaviconRedSince(now, false);
     broadcast(dashboardUpdate());
@@ -242,6 +250,18 @@ function snapshotCtx(base: Ctx, snapshots: ReadonlyMap<string, Run[]>): Ctx {
     runsFor,
     env: base.env,
   };
+}
+
+// When the newest run in a snapshot started, for comparing one fetch of a source
+// against the last one that was kept. A snapshot with no readable start times
+// counts as having no runs at all.
+function newestRunAt(runs: readonly Run[] | undefined): number {
+  let newest = -Infinity;
+  for (const run of runs ?? []) {
+    const at = Date.parse(run.created_at);
+    if (Number.isFinite(at) && at > newest) newest = at;
+  }
+  return newest;
 }
 
 function sourceLabel(source: RunSource): string {
@@ -375,6 +395,16 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
       }
 
       const key = runSourceKey(group.source);
+      // A repository's newest run on main only ever moves forward. A fetch that
+      // comes back with an older newest run than the one already held read a
+      // stale view of the workflow, and publishing it would age the whole tile
+      // family backwards without saying so. Keep what is held and name the
+      // source stale; the next fetch that reaches a current view clears it.
+      if (runs && newestRunAt(runs) < newestRunAt(runSnapshots.get(key))) {
+        error = "newest run older than the one already collected";
+        console.error(`run source ${key} stale:`, error);
+        runs = undefined;
+      }
       if (runs) {
         runSnapshots.set(key, runs);
         runSourceErrors.delete(key);

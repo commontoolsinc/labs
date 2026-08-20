@@ -79,7 +79,7 @@ Deno.test("parse: schema keys differ from ordinary identifiers", () => {
   );
 });
 
-Deno.test("parse: type positions are coloured as types", () => {
+Deno.test("parse: type positions are colored as types", () => {
   const doc = parseDocument(SAMPLE);
   assert(classesOf(doc, "Foo").has("typeName"), "Foo type alias name");
   assert(classesOf(doc, "Bar").has("interfaceName"), "Bar interface name");
@@ -375,8 +375,8 @@ Deno.test("parse: the whole AST is navigable — RHS expression, chained calls, 
     n.kind === "node" && (n.astKinds?.includes("CallExpression") ?? false) &&
     n.label === ".run(…)"
   );
-  assert(rhs, "the call chain is a node, labelled by its outermost method");
-  // Chained calls are distinct nodes, each labelled by its own method.
+  assert(rhs, "the call chain is a node, labeled by its outermost method");
+  // Chained calls are distinct nodes, each labeled by its own method.
   assert(flat.some((n) => n.label === ".name(…)"), "chained .name() is a node");
   assert(flat.some((n) => n.label === "make(…)"), "the base call is a node");
   // Their arguments are nodes too.
@@ -400,7 +400,7 @@ const x = 1;
   const lines = highlightDocument(text, "m.ts");
   // Lines 0–3 are the whole comment. Every span is a doc comment: the
   // {@link Document} reference is not torn out as an identifier, and the text
-  // after it (and the following lines) is not left uncoloured.
+  // after it (and the following lines) is not left uncolored.
   for (let i = 0; i <= 3; i++) {
     for (const s of lines[i].spans) {
       assertEquals(
@@ -448,8 +448,8 @@ Deno.test("parse: nodes sharing an exact range merge into one", () => {
   );
 });
 
-Deno.test("parse: recognised folds do not expand into raw AST children", () => {
-  // A node classified as a recognised shape (import, schema, type alias,
+Deno.test("parse: recognized folds do not expand into raw AST children", () => {
+  // A node classified as a recognized shape (import, schema, type alias,
   // interface) suppresses its children: the build descends only into the child
   // source nodes the classification chose (`recurseInto`), never into raw
   // `forEachChild` output. Each of these is a leaf in the structure tree.

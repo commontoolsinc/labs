@@ -4,6 +4,7 @@
  * /!\ interfaces and utilities.
  */
 
+export { refuseFabricInstance } from "./fabric-special-object.ts";
 export {
   addressKey,
   CELL_SCOPE_VALUES,
@@ -34,6 +35,7 @@ export {
 } from "./sigil-types.ts";
 export {
   CHIP_UI,
+  FRAMEWORK_RESULT_KEYS,
   type JSONSchema,
   type JSONValue,
   NAME,

@@ -72,11 +72,17 @@
  */
 
 import { exists } from "@std/fs";
+
+import {
+  isStoredArgumentSchemaRefusal,
+  resolveSystemPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+} from "@commonfabric/runner";
+
 import {
   VINTAGE_SPACES_SUFFIX,
   vintageCompanionDir,
 } from "../packages/piece/test/vintage-layout.ts";
-import { resolveSystemPatternSource } from "@commonfabric/runner";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";
@@ -179,7 +185,7 @@ export function parseVintagePath(
   // as the identity. Neither field can be found by splitting on a dash: the
   // stamp contains them (`2026-07-29T16-40-22.484Z`) and so does a base64url
   // identity (`xaLUAd...vaXYy-P8PAkh...`). An earlier version cut at the LAST
-  // dash and silently failed to recognise its own freshly-written fixture for
+  // dash and silently failed to recognize its own freshly-written fixture for
   // home.tsx — whose identity happens to contain one — reporting the pattern
   // as uncovered while the file sat right there.
   //
@@ -322,7 +328,7 @@ export async function removeVintages(
  *
  * That is deliberately NOT the deepest evidence. The newest generation is the
  * one a future version has the LEAST to migrate across, and the oldest — the
- * one retention deletes first — is the strongest test. Promotion optimises for
+ * one retention deletes first — is the strongest test. Promotion optimizes for
  * "what shipped" rather than for depth, and pinning an older generation
  * instead is a `git mv` anyone can do by hand.
  */
@@ -433,7 +439,7 @@ export function requiredPatternKeys(
 /**
  * The URLs `requiredPatternKeys` could not turn into a pattern key.
  *
- * `requiredPatternKeys` skips what it does not recognise, which is right for a
+ * `requiredPatternKeys` skips what it does not recognize, which is right for a
  * derivation and catastrophic for a gate: reroute the patterns endpoint and
  * every required key silently disappears, leaving a gate that insists on
  * nothing. The caller checks this and refuses to run rather than passing an
@@ -730,7 +736,7 @@ export function describeCaptureOutcome(
 export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
 
 /**
- * Flags the task does not recognise.
+ * Flags the task does not recognize.
  *
  * A misspelled flag is silently a DIFFERENT COMMAND here, and the difference
  * is invisible: `--capture-chnged` matches no branch, so the run falls through
@@ -741,7 +747,7 @@ export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
  *
  * For a gate whose every other design decision is about never reading as
  * success by accident — `armVerdictGuard`, the `replayed`/`candidates`/
- * `targets` floors, the per-fixture root control — accepting an unrecognised
+ * `targets` floors, the per-fixture root control — accepting an unrecognized
  * flag and exiting 0 is the same failure in the argument parser.
  */
 export function unknownFlags(args: readonly string[]): string[] {
@@ -764,7 +770,7 @@ export function unknownFlags(args: readonly string[]): string[] {
 /** What the task prints when it was handed a flag it does not know. */
 export function reportUnknownFlags(unknown: readonly string[]): string {
   return [
-    `Unrecognised flag(s): ${unknown.join(", ")}.`,
+    `Unrecognized flag(s): ${unknown.join(", ")}.`,
     "",
     "Stopping rather than guessing. An unknown flag matches no command here,",
     "so the run would fall through to the plain gate, replay everything and",
@@ -1185,4 +1191,62 @@ export function isClean(
 ): boolean {
   return failures.length === 0 && uncovered.length === 0 &&
     counts.replayed > 0 && counts.candidates > 0 && counts.targets > 0;
+}
+
+/**
+ * Whether a recorded instantiation is a transformer-emitted pattern hoist —
+ * an anonymous sub-pattern the compiler derives from the source (a mapped
+ * row's body), as opposed to a pattern an author exports. The `__cfPattern_N`
+ * name is the transformer's own emission convention, and N is a builder node
+ * id with no stability across edits — which is exactly why nothing durable
+ * may be addressed by it. The per-file counter starts at 1, so
+ * `__cfPattern_0` is not a name the transformer mints.
+ *
+ * Spelling IS provenance, because registration enforces it: the runner
+ * refuses an authored builder-artifact export in this namespace
+ * (`RESERVED_HOIST_EXPORT`, `pattern-manager.ts`), and every path that runs
+ * a pattern — the runtime's, and this gate's own capture and replay
+ * compiles — goes through that seam. A symbol with this shape in a manifest
+ * or the artifact index is the transformer's.
+ */
+export function isDerivedHoistSymbol(symbol: string): boolean {
+  return /^__cfPattern_[1-9]\d*$/.test(symbol);
+}
+
+/**
+ * Whether a materialization error is setup refusing the STORED ARGUMENT
+ * against the candidate schema — the classification the runner exports a
+ * constant for, tolerated here in both the Error and the stringified form a
+ * replay outcome may carry.
+ */
+export function isStoredArgumentRefusal(error: unknown): boolean {
+  if (isStoredArgumentSchemaRefusal(error)) return true;
+  return typeof error === "string" &&
+    error.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
+}
+
+/**
+ * Which hold-back rule covers a refused update, or `undefined` when none
+ * does and the refusal must fail the run.
+ *
+ * The whole partition in one place, and the returned string is the reason
+ * the report prints beside the target: a refusal is held back only for a
+ * DERIVED hoist, and only in the two shapes that are supersession rather
+ * than loss — captures the re-run derivation re-supplies, and a hoist
+ * today's source no longer emits under the recorded (renumbered) id.
+ * Anything else about a hoist, and everything about an authored artifact,
+ * is the caller's failure to report.
+ *
+ * `missingArtifact` is passed as the materializer's own verdict rather than
+ * read out of `error`, whose text is arbitrary propagated prose.
+ */
+export function hoistSupersessionReason(
+  symbol: string,
+  error: unknown,
+  missingArtifact: boolean,
+): string | undefined {
+  if (!isDerivedHoistSymbol(symbol)) return undefined;
+  if (isStoredArgumentRefusal(error)) return "stored arguments superseded";
+  if (missingArtifact) return "hoist no longer emitted";
+  return undefined;
 }

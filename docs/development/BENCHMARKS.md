@@ -51,7 +51,7 @@ What the trend still cannot see is a change confined above the 75th percentile,
 and on a user-facing timing that tail is what a person actually notices. Reading
 it from these runs would first need the runner's stalls told apart from the tail
 the code itself produces, which the current sample counts do not allow: on the
-busiest processor `p99` puts 11% of neighbouring run pairs more than a quarter
+busiest processor `p99` puts 11% of neighboring run pairs more than a quarter
 apart with no change behind them, against 2% for the 75th percentile. Until
 that is separable, the drill-down's ladder from `min` to `max` is where the tail
 is visible. A benchmark that measures a whole user-facing journey rather than
@@ -106,7 +106,7 @@ validation step fails the run when the artifact is not valid JSON, lists no
 benches, or carries no machine calibration, so each of those shows up as a red
 run in the Actions tab. What keeps corruption off the charts is the dashboard
 applying the same test to the artifact it downloads, rather than the run's
-colour: a red run's measurements are charted like any other run's. This
+color: a red run's measurements are charted like any other run's. This
 applies to module-scope code as well as bench bodies. Write diagnostics to
 stderr. Module-scope diagnostics may use `console.error`. The JSON reporter
 captures console output from benchmark bodies, so body diagnostics that need
@@ -254,12 +254,19 @@ describe the cost of the list rather than of the join over it.
 Only the 100-topic board runs today. The other two are declared and skipped,
 because a board of that size cannot be built:
 
-- Seeding cost grows as roughly the square of the topic count, because the
-  board recomputes its whole crossref join and index on every write and every
-  topic holds the board's own list. Thirty topics take half a minute; a hundred
-  take about seven and a half minutes and six and a half gigabytes. A thousand
-  extrapolates to the better part of a day and to more memory than a runner
-  has.
+- Seeding cost grows faster than the topic count, because the board recomputes
+  its whole crossref join and index on every write and every topic holds the
+  board's own list. Measured on an Apple M3 Max seeding against a local
+  toolshed: thirty topics take 33 seconds and 0.95GB of peak resident memory,
+  sixty take 143 seconds and 1.6GB, and a hundred take 274 seconds — four and a
+  half minutes — and 2.6GB. Three and a third times the topics costs eight
+  times the time.
+- Time and memory do not grow the same way, and only one of them is what
+  actually stops a larger board. Peak memory is close to linear at roughly
+  26MB per topic, so a thousand needs on the order of 26GB — more than a runner
+  has, which is the binding constraint. Time extrapolates to several hours
+  rather than to anything a scheduled job could absorb, and ten thousand is out
+  of reach on both counts.
 - Crossrefs are not the cause, and neither is the benchmark. Creating the same
   topic pieces standalone is linear and flat in memory — a hundred in
   twenty-five seconds, holding at about a gigabyte — but attaching them to a

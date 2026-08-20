@@ -1,9 +1,9 @@
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -28,13 +28,16 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  *
  * `$alias` records are Pattern-binding vocabulary, not links (#4895):
  * their `schema` field is binding metadata, not a link-schema position, so
- * this walk never interns or expands it. Saved patterns keep emitting
- * alias bindings until a sigil binding encoding replaces them, so those
- * schemas travel inline indefinitely (transport compression absorbs most
- * of the byte cost). Clients shipped BEFORE this change do interpret alias
- * schema positions, so the reserved-ref validator keeps refusing refs
- * there — see {@link findSyncSchemaRef} in sync-schema-ref.ts, which
- * deliberately checks a superset of this walk's positions.
+ * this walk never interns or expands it, and the sync schema table leaves
+ * alias schemas alone. Clients shipped BEFORE this change do interpret
+ * alias schema positions, so the reserved-ref validator keeps refusing
+ * TABLE refs there — see {@link findSyncSchemaRef} in sync-schema-ref.ts,
+ * which deliberately checks a superset of this walk's positions. An alias
+ * is a binding only by CONTEXT: to the storage layer an `$alias`-shaped
+ * record is plain data, so a `cid:` `$ref` a binding's schema carries
+ * (`docs/specs/content-addressed-schemas.md`, Phase 2) is emitted and
+ * resolved by the pattern machinery through the realm registry — no
+ * storage-layer walk treats alias positions as schema carriers.
  *
  * Schema VALUES are opaque to this walk: after a schema position is mapped,
  * the traversal does not descend into the schema (or its mapped

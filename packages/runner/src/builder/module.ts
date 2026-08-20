@@ -1,3 +1,22 @@
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import { generateHandlerSchema } from "../schema.ts";
+import { assertNotInActionExecution } from "./action-context.ts";
+import { toJSONMethod } from "./json-member.ts";
+import {
+  applyArgumentIfcToResult,
+  connectInputAndOutputs,
+} from "./node-utils.ts";
+import {
+  brandTrustedBuilderArtifact,
+  getArtifactEntryRef,
+} from "./pattern-metadata.ts";
+import { getTopFrame } from "./pattern.ts";
+import { reactive, stream } from "./reactive.ts";
+import { moduleToEncodableForm } from "./to-encodable-form.ts";
 import type {
   AssertPart,
   AssertRawPart,
@@ -7,6 +26,7 @@ import type {
   Frame,
   Handler,
   HandlerFactory,
+  HandlerState,
   JSONSchema,
   Module,
   ModuleFactory,
@@ -20,24 +40,6 @@ import type {
   toEncodableForm,
   toJSON,
 } from "./types.ts";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { reactive, stream } from "./reactive.ts";
-import {
-  applyArgumentIfcToResult,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
-import { assertNotInActionExecution } from "./action-context.ts";
-import { moduleToEncodableForm } from "./to-encodable-form.ts";
-import { toJSONMethod } from "./json-member.ts";
-import {
-  brandTrustedBuilderArtifact,
-  getArtifactEntryRef,
-} from "./pattern-metadata.ts";
-import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
-import { getTopFrame } from "./pattern.ts";
-import { generateHandlerSchema } from "../schema.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
@@ -337,12 +339,17 @@ export function resolveSourceLocationFromStack(
  *
  * @returns A module node factory that also serializes as module.
  */
+// The first overload returns a BARE function type so that a generic
+// implementation's type parameter reaches the caller — see `LiftFunction` in
+// `packages/api/index.ts` for what TypeScript requires of that shape and what
+// declaring it costs. The two overloads below keep `ModuleFactory`: neither
+// carries a type parameter through, so neither has anything to preserve.
 export function lift<T, R>(
   implementation: (input: T) => R,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<StripCell<T>, R>;
+): (inputs: FactoryInput<StripCell<T>>) => Reactive<R>;
 export function lift<T>(
   implementation: (input: T) => any,
   argumentSchema?: JSONSchema,
@@ -403,8 +410,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
  * at all, which is what keeps a declared result opt-in.
  *
  * The schema-injected call spreads any options the author wrote into this same
- * object, so a member here may be one this builder does not read: the writable
- * proxy is asked for in the state-schema slot above.
+ * object, so a member here may be one this builder does not read.
  */
 export interface HandlerOptions {
   resultSchema?: JSONSchema;
@@ -415,25 +421,15 @@ function handlerInternal<E, T>(
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema | { proxy: true },
+  stateSchema?: JSONSchema,
   handler?: (event: E, props: T) => any,
   options?: HandlerOptions,
 ): HandlerFactory<E, T> {
-  let writableProxy = false;
   if (typeof eventSchema === "function") {
-    if (
-      stateSchema && typeof stateSchema === "object" &&
-      "proxy" in stateSchema && stateSchema.proxy === true
-    ) {
-      handler = eventSchema;
-      eventSchema = stateSchema = undefined;
-      writableProxy = true;
-    } else {
-      throw new Error(
-        "Handler requires schemas or CTS transformer\n" +
-          "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
-      );
-    }
+    throw new Error(
+      "Handler requires schemas or CTS transformer\n" +
+        "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
+    );
   }
 
   // Attach source location and preview to handler function for debugging
@@ -444,10 +440,7 @@ function handlerInternal<E, T>(
     hardenVerifiedFunction(handler);
   }
 
-  const schema = generateHandlerSchema(
-    eventSchema,
-    stateSchema as JSONSchema | undefined,
-  );
+  const schema = generateHandlerSchema(eventSchema, stateSchema);
 
   // Carry the argument schema's ifc confidentiality through to the declared
   // result, as `createNodeFactory` does for a lift. Only a declared result is
@@ -471,7 +464,6 @@ function handlerInternal<E, T>(
     toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(resultSchema !== undefined && { resultSchema }),
-    ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign(
@@ -522,32 +514,26 @@ export function handler<
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
-  handler: (event: E, props: T) => any,
+  handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 export function handler<E, T>(
-  handler: (Event: E, props: T) => any,
-  options: { proxy: true },
-): HandlerFactory<E, T>;
-export function handler<E, T>(
-  handler: (event: E, props: T) => any,
+  handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 // Declared results, reached only by naming all three type arguments — the
 // same explicit-only rule as `action`'s result overload, mirrored here and in
 // api's `HandlerFunction` (both halves are hand-maintained; an overload
 // present in only one of them is unreachable from patterns while the other's
 // tests stay green). The `=> any` overloads above absorb every inferred call
-// first, so an incidental return never declares a result.
+// first, so an incidental return never declares a result. Props typing
+// mirrors api too: a callback sees `HandlerState<T>`, with non-handle members
+// readonly.
 export function handler<E, T, R>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
-  handler: (event: E, props: T) => R,
+  handler: (event: E, props: HandlerState<T>) => R,
 ): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
-  handler: (event: E, props: T) => R,
-  options: { proxy: true },
-): HandlerFactory<E, T, R>;
-export function handler<E, T, R>(
-  handler: (event: E, props: T) => R,
+  handler: (event: E, props: HandlerState<T>) => R,
 ): HandlerFactory<E, T, R>;
 // The trailing options slot is not part of the authored surface: a pattern
 // declares its result with the type argument above, and the schema-injection
@@ -557,7 +543,7 @@ export function handler<E, T, R = void>(
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema | { proxy: true },
+  stateSchema?: JSONSchema,
   handler?: (event: E, props: T) => any,
   options?: HandlerOptions,
 ): HandlerFactory<E, T, R> {

@@ -55,18 +55,18 @@ which is where an eager read decides the same question:
 
 Either way the read that failed is registered first.
 
-## Answering "nothing is there" still owes a read
+## Returning "nothing is there" still owes a read
 
 The entry point takes the container's value without telling the scheduler, and
 lets whatever materializes it register reads as it walks. So every way a view
-answers without a value has to register the read it stands in for: a refusal, a
+returns without a value has to register the read it stands in for: a refusal, a
 key the container does not hold, and a value replaced by the schema's `default`.
 Miss one and the reader holds no dependency on the path it just found empty — it
 goes on reading its default however late the value arrives.
 
 ## Agreeing with an eager read
 
-A view and an eager read must answer alike; where they do not, the view is
+A view and an eager read must agree; where they do not, the view is
 wrong. Six rules exist only to hold that:
 
 - **The last link hop's schema is combined in.** Eager traversal walks *through*
@@ -88,7 +88,7 @@ wrong. Six rules exist only to hold that:
   [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the whole
   element value.
-- **A property the schema turns down is answered off the schema, not by reading
+- **A property the schema turns down is settled off the schema, not by reading
   it.** Declaring it `false` turns it down, and so does leaving it unnamed by a
   schema that refuses the properties it does not name. Either way it is absent
   to a reader — from `in`, from enumeration and from a plain access alike — and
@@ -98,7 +98,7 @@ wrong. Six rules exist only to hold that:
   and a marked collection would otherwise load one document per element.
   Requiring such a property instead voids the object, since nothing reaches the
   filtered result at that key. This is narrower than it sounds — schema
-  narrowing also answers `false` where it cannot read a child out of the shape
+  narrowing also returns `false` where it cannot read a child out of the shape
   it was given, an `allOf` among them, and there the subschema is still
   reachable below.
 - **A read-only array method visits every element, even past one that does not
@@ -125,15 +125,45 @@ The view withdraws the record for a refusal it catches itself — the optional
 property above, whose answer is absence rather than a refusal. It clears only
 that exact refusal; another one held on the same transaction is somebody else's.
 
+## A view describes the instant it was taken
+
+`Cell.get()` on a marked transaction fixes an instant, and everything read
+through the value it returns describes that instant — the keys an object
+carried, an array's length and iteration order, and the values below them. A
+reader that writes and then reads back through a value it already holds sees
+what was there when it took that value, which is what an eager read gives, since
+an eager read hands back a value built before the write.
+
+Seeing your own write means taking the read again. A fresh `.get()` fixes a
+fresh instant, and so does `.get()` on a handle the argument carried, so a lift
+that writes into a `Writable` input and reads it back gets what it wrote. Two
+values taken either side of a write describe their own instants and disagree
+with each other, which is the point of them.
+
+That is what carries a reader iterating a list while writing into it: the walk
+runs over the list as it stood, whatever the writes do to it meanwhile.
+
+### How an instant is kept
+
+The transaction counts the roots it replaces, and a read taken now names that
+count. A write keeps the root it displaces only where a reader was handed an
+instant that root answers for — so a transaction nobody reads this way keeps
+nothing, and a run of writes with no read between them keeps one root rather
+than one per write.
+
+Keeping a root means freezing it first. A write thaws a frozen container by
+cloning it and edits an already-mutable one where it stands, so a root left
+behind by an earlier write is mutable and the next write would edit the very
+value a reader is describing. Freezing puts that write on the cloning path.
+Deep-freezing what is already deep-frozen costs nothing, so this is paid only on
+what the transaction has thawed by writing.
+
+Before the first write there is nothing to resolve — every document still stands
+at the root it was loaded with, so every instant names the same state — and
+reads skip the machinery outright on that check.
+
 ## Where a view is not used
 
-- **Once the transaction has written.** A view resolves each path when it is
-  touched, so a view taken before a write would report the value after it, where
-  an eager read hands back one detached at the moment it was taken. Reads fall
-  back to eager materialization once `tx.hasWrites()`, which keeps every read
-  describing one instant — what a reader iterating a list while writing into it
-  depends on. Nothing is lost where the win is: a lift reads its argument before
-  it writes anything.
 - **Handlers.** They stay eager.
 - **An absent or `true` schema.** That is the schema-less query-result proxy's
   job, and `validateAndTransform` dispatches to it before a view is considered.
@@ -142,17 +172,18 @@ that exact refusal; another one held on the same transaction is somebody else's.
 
 Assignment, deletion, `defineProperty` and freezing all throw. Snapshot it with
 `snapshotQueryResult` if you need a value you own. A view also keeps the
-transaction it was created with, so what it describes stays what was there when
-it was taken; reading after that transaction finishes throws rather than quietly
-answering from committed state.
+transaction it was created with, so reading after that transaction finishes
+throws rather than quietly reading from committed state.
 
-That last point is what separates a view from the schema-less proxy in
+That is what separates a view from the standing handle in
 [`query-result-proxy.ts`](../../packages/runner/src/query-result-proxy.ts),
 which re-resolves its transaction on every access so a holder keeps reading
 current state after the transaction it was made against has finished. Long-lived
 consumers depend on that — an LLM tool call dispatched later, a SQLite result
 flushed post-commit, a piece started on demand — so the mark is what selects
-between the two readings rather than one replacing the other.
+between the two readings rather than one replacing the other. A schema-less read
+on a marked transaction is a view like any other, and describes its instant; it
+is the unmarked ones that stand.
 
 ## Related documents
 

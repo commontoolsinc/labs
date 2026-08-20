@@ -30,7 +30,7 @@ import type {
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -847,7 +847,7 @@ describe("schema-utils", () => {
     testType("object", { a: 1 });
     // A `FabricPrimitive` gets its specific type name, not "object".
     testType("FabricBytes", new FabricBytes(new Uint8Array([1])));
-    testType("FabricEpochDays", new FabricEpochDays(1n));
+    testType("FabricEpochDay", new FabricEpochDay(1n));
     testType("FabricEpochNsec", new FabricEpochNsec(1n));
     testType("FabricHash", new FabricHash(new Uint8Array(32), "fid1"));
     testType("FabricRegExp", new FabricRegExp(/x/));

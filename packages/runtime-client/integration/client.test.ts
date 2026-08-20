@@ -1,5 +1,10 @@
 #!/usr/bin/env -S deno run -A
 
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import { render } from "@commonfabric/html/client";
+import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
   createSession,
   Identity,
@@ -7,7 +12,8 @@ import {
   Session,
 } from "@commonfabric/identity";
 import { env, waitFor } from "@commonfabric/integration";
-import { defer } from "@commonfabric/utils/defer";
+import { Program } from "@commonfabric/js-compiler";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   $conn,
   CellHandle,
@@ -26,6 +32,7 @@ import { Program } from "@commonfabric/js-compiler";
 import { render } from "@commonfabric/html/client";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
+import { defer } from "@commonfabric/utils/defer";
 
 const { API_URL } = env;
 
@@ -1595,7 +1602,7 @@ export default pattern<Record<string, never>>(() => {
           properties: { note: { type: "string" } },
         } as const satisfies JSONSchema,
       );
-      await cell.set({ note: "labelled" });
+      await cell.set({ note: "labeled" });
       await rt.idle();
 
       await assertRejects(

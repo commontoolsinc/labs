@@ -1,16 +1,18 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import {
   cfcCanonicalClauseDigest,
   type CfcDeclaredMonotonicityMode,
   collectDeclaredMonotonicityViolations,
 } from "../src/cfc/mod.ts";
-import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");

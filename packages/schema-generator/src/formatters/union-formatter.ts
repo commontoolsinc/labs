@@ -1,8 +1,11 @@
-import ts from "typescript";
 import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -15,8 +18,6 @@ import {
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { dedupeByValueEqual } from "../value-equality.ts";
 
 // Simple primitive schemas only have these keys (possibly just one)

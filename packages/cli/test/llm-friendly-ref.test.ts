@@ -113,4 +113,36 @@ describe("llm-friendly-ref", () => {
       /must use handles/,
     );
   });
+
+  it('reads a trailing "#argument" as the arguments-cell selection', () => {
+    expect(normalizeLLMFriendlyRef(`/${HANDLE}#argument`)).toEqual({
+      pieceId: HANDLE,
+      input: true,
+      path: [],
+    });
+    // The suffix closes the whole reference: scope, space, and an embedded
+    // path all sit before it.
+    expect(
+      normalizeLLMFriendlyRef(`/@${DID}/${HANDLE}@user/draft#argument`, {
+        space: "my-space",
+      }),
+    ).toEqual({
+      pieceId: HANDLE,
+      scope: "user",
+      embeddedSpace: DID,
+      input: true,
+      path: ["draft"],
+    });
+  });
+
+  it("rejects any fragment other than #argument", () => {
+    expect(() => normalizeLLMFriendlyRef(`/${HANDLE}#result`)).toThrow(
+      /Unknown reference suffix "#result"/,
+    );
+    // "#" is reserved for the suffix, so a path key containing it is not an
+    // embedded-path spelling.
+    expect(() => normalizeLLMFriendlyRef(`/${HANDLE}/we#ird`)).toThrow(
+      /Unknown reference suffix/,
+    );
+  });
 });

@@ -19,11 +19,11 @@ import {
 } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import {
   codecClasses,
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -50,9 +50,9 @@ const CASES: readonly {
     name: "FabricBytes",
   },
   {
-    ctor: FabricEpochDays,
-    make: () => new FabricEpochDays(1n),
-    name: "FabricEpochDays",
+    ctor: FabricEpochDay,
+    make: () => new FabricEpochDay(1n),
+    name: "FabricEpochDay",
   },
   {
     ctor: FabricEpochNsec,

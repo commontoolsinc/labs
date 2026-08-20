@@ -17,27 +17,27 @@ import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@commonfabric/api";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
-import type { FabricValue } from "@/interface.ts";
+import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import {
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NullLiveEnvironment } from "@/codec-interface/NullLiveEnvironment.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
-import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
+import type { FabricPlainObject, FabricValue } from "@/interface.ts";
 import { errorClassFromType } from "@/native-conversion.ts";
-import { isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -99,7 +99,7 @@ export type FabricErrorState = {
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
  * until frozen and immutable thereafter. Every mutator -- the slot setters
  * along with `setExtra` / `deleteExtra` -- throws once the instance is
- * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * `Object.freeze`'d. The codec layer handles `FabricError` via its
  * static `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
@@ -383,14 +383,14 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
-    const reconstructContext = new EmptyReconstructionContext(
+    const liveEnvironment = new NullLiveEnvironment(
       frozen,
-      "no runtime context (FabricError deep-clone path).",
+      "no live environment (FabricError deep-clone path).",
     );
     return codec.decode(
       CODEC_TYPE_TAGS.Error,
       codec.encode(this),
-      reconstructContext,
+      liveEnvironment,
     ) as FabricError;
   }
 
@@ -427,14 +427,15 @@ export class FabricError extends FabricNativeWrapper<Error>
   //
 
   static #codec = Object.freeze(
-    new (class FabricErrorCodec extends BaseNonterminalCodec {
+    new (class FabricErrorCodec
+      extends BaseNonterminalCodec<FabricPlainObject> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);
       }
 
       /** @inheritDoc */
-      encode(value: FabricError): FabricValue {
+      encode(value: FabricError): FabricPlainObject {
         const state: Record<string, FabricValue> = {
           type: value.type,
           name: value.name === value.type ? null : value.name,
@@ -453,25 +454,30 @@ export class FabricError extends FabricNativeWrapper<Error>
       }
 
       /** @inheritDoc */
+      canDecode(state: FabricValue): state is FabricPlainObject {
+        return isPlainObject(state);
+      }
+
+      /** @inheritDoc */
       decode(
         _typeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        state: FabricPlainObject,
+        env: LiveEnvironment,
       ): FabricValue {
-        const s = state as Record<string, FabricValue>;
-        const type = (s.type as string) ?? (s.name as string) ?? "Error";
+        const type = (state.type as string) ?? (state.name as string) ??
+          "Error";
         // `null` `name` means "same as `type`" (the wire-level optimization).
-        const name = (s.name as string | null | undefined) ?? type;
-        const message = (s.message as string) ?? "";
-        const stack = s.stack as string | undefined;
-        const cause = s.cause;
+        const name = (state.name as string | null | undefined) ?? type;
+        const message = (state.message as string) ?? "";
+        const stack = state.stack as string | undefined;
+        const cause = state.cause;
 
         const extras: Array<[string, FabricValue]> = [];
-        for (const key of Object.keys(s)) {
+        for (const key of Object.keys(state)) {
           if (FABRIC_ERROR_RESERVED_KEYS.has(key) || isUnsafeObjectKey(key)) {
             continue;
           }
-          extras.push([key, s[key]]);
+          extras.push([key, state[key]]);
         }
 
         const result = new FabricError({
@@ -484,7 +490,7 @@ export class FabricError extends FabricNativeWrapper<Error>
         });
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

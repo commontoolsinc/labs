@@ -1,7 +1,18 @@
-import { css, html, nothing, type TemplateResult } from "lit";
-import { state } from "lit/decorators.js";
-import { live } from "lit/directives/live.js";
-import { BaseElement } from "../../core/base-element.ts";
+import {
+  getPieceBoundary,
+  subscribePieceBoundary,
+} from "@commonfabric/html/client";
+import type { DID } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity";
+import {
+  appViewToUrlPath,
+  navigate,
+  type NavigationCommand,
+  openInNewTab,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/navigation";
+import { parseFabricRef } from "@commonfabric/runner/shared";
 import {
   $conn,
   CellHandle,
@@ -17,21 +28,11 @@ import type {
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
-import type { DID } from "@commonfabric/identity";
-import { isDID } from "@commonfabric/identity";
-import { parseFabricRef } from "@commonfabric/runner/shared";
-import {
-  appViewToUrlPath,
-  navigate,
-  type NavigationCommand,
-  openInNewTab,
-  preserveAppViewMode,
-  urlToAppView,
-} from "@commonfabric/shell/shared";
-import {
-  getPieceBoundary,
-  subscribePieceBoundary,
-} from "@commonfabric/html/client";
+import { css, html, nothing, type TemplateResult } from "lit";
+import { state } from "lit/decorators.js";
+import { live } from "lit/directives/live.js";
+
+import { BaseElement } from "../../core/base-element.ts";
 import {
   describeOrigin,
   formatTimestamp,
@@ -193,7 +194,8 @@ function toDisplay(
   // Note this is the second place such a value is lost, not the first: it
   // reaches the client through `postMessage`, and structured clone drops the
   // prototype and private fields on the way. Fixing this alone changes a `{}`
-  // into a `{}` until the wire carries one.
+  // into a `{}` until the wire carries one, which `codec-realm` is the
+  // mechanism for.
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {

@@ -5,7 +5,7 @@ narrow: it explains how that piece behaves, what invariants it holds, and what
 you need to know before you change it. Read one when you are working on the
 thing it describes. None of them is general orientation.
 
-The neighbouring trees answer different questions.
+The neighboring trees answer different questions.
 [`../development/`](../development/README.md) is how to work in this
 repository — style, dependencies, testing, debugging, continuous integration.
 [`../specs/`](../specs/README.md) is what the system is required to do.
@@ -38,7 +38,7 @@ Add a line for each new document to the index below.
   typed error instead of a silent absent read or an endless wait
 - [`lazy-cell-materialization.md`](lazy-cell-materialization.md) — the
   schema-observing view a marked transaction hands back from a read, what it
-  checks and when, and the rules that keep it answering as an eager read does
+  checks and when, and the rules that keep it agreeing with an eager read
 - [`data-uri-identifiers.md`](data-uri-identifiers.md) — the cell identifiers
   that carry their own frozen value rather than naming a document in a space,
   why the runtime keeps both a broad and a narrow test for one, and what

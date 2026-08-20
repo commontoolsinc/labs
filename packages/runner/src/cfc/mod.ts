@@ -40,6 +40,7 @@ export {
   rebaseCfcLabelView,
   redactCaveatSourcesForDisplay,
 } from "./label-view.ts";
+export { cfcLabelViewFromSchema } from "./schema-label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
@@ -118,6 +119,7 @@ export {
   canonicalizeLogicalPath,
   canonicalizePreparedDigestInput,
   canonicalizeWritePolicyInput,
+  cfcDereferenceTracesEqual,
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
@@ -304,6 +306,7 @@ export {
 } from "./schema-refs.ts";
 export {
   type SchemaOpaqueLinkSanitizationResult,
+  type StructuredResultReservedKeys,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue,

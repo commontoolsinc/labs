@@ -13,6 +13,12 @@ import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
+import * as HttpStatusCodes from "stoker/http-status-codes";
+import { z } from "zod";
+
+import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
+import { resolveGitSha } from "@/lib/build-info.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),

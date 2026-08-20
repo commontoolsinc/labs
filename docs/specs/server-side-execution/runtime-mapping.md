@@ -253,7 +253,7 @@ the FIFO slot, `events.ts:331-395`) maps to loading graph structure
 sufficient to run the event's handler — the event IS the demand for
 its handler; events run handlers eagerly, after preflight makes any
 dirty state inputs current (D-v2-2, events.md §2). The derivation
-path needs no analogue: a commit dirtying docs read by unmaterialized
+path needs no analog: a commit dirtying docs read by unmaterialized
 nodes leaves them dirty-unmaterialized until a value-granular client
 pull (a subscription) demands them and their upstream — `idle()`
 already excludes them. Nothing starts a piece because its *inputs* changed,

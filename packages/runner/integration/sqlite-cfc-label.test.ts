@@ -9,12 +9,14 @@
  * (`body AS secret`) to also prove labeling keys off the TRUE origin, not the
  * output name.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "../src/index.ts";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+
+import app from "../../toolshed/app.ts";
 import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
+import { Runtime } from "../src/index.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(

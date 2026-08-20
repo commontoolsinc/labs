@@ -8,10 +8,28 @@ import {
   getCallbackBoundarySemantics,
 } from "../../src/policy/callback-boundary.ts";
 
-function createProgramAndContext(source: string): {
+const virtualLibraryFileName = "/virtual/es2023.d.ts";
+const virtualLibrarySource = `
+  interface ReadonlyArray<T> {
+    map<U>(callback: (value: T) => U): U[];
+  }
+
+  interface Array<T> extends ReadonlyArray<T> {}
+`;
+const ambientArrayFileName = "/ambient/array.d.ts";
+
+function createProgramAndContext(
+  source: string,
+  options: {
+    withDefaultLibrary?: boolean;
+    withVirtualLibrary?: boolean;
+    withAmbientArrayDeclaration?: boolean;
+  } = {},
+): {
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
   context: TransformationContext;
+  program: ts.Program;
 } {
   const fileName = "/test.tsx";
   const compilerOptions: ts.CompilerOptions = {
@@ -19,7 +37,8 @@ function createProgramAndContext(source: string): {
     module: ts.ModuleKind.ESNext,
     jsx: ts.JsxEmit.Preserve,
     strict: true,
-    noLib: true,
+    noLib: !options.withDefaultLibrary && !options.withVirtualLibrary,
+    ...(options.withVirtualLibrary ? { lib: ["es2023.d.ts"] } : {}),
     skipLibCheck: true,
   };
 
@@ -30,19 +49,54 @@ function createProgramAndContext(source: string): {
     true,
     ts.ScriptKind.TSX,
   );
+  const injectedFiles = new Map<string, string>();
+  if (options.withVirtualLibrary) {
+    injectedFiles.set(virtualLibraryFileName, virtualLibrarySource);
+  }
+  if (options.withAmbientArrayDeclaration) {
+    injectedFiles.set(ambientArrayFileName, virtualLibrarySource);
+  }
+  const injectedSourceFiles = new Map(
+    [...injectedFiles].map(([name, text]) => [
+      name,
+      ts.createSourceFile(
+        name,
+        text,
+        compilerOptions.target!,
+        true,
+        ts.ScriptKind.TS,
+      ),
+    ]),
+  );
 
   const host = ts.createCompilerHost(compilerOptions, true);
-  host.getSourceFile = (name) => name === fileName ? sourceFile : undefined;
+  const getSourceFile = host.getSourceFile.bind(host);
+  const fileExists = host.fileExists.bind(host);
+  const readFile = host.readFile.bind(host);
+  host.getSourceFile = (name, languageVersion, onError, shouldCreateNew) => {
+    if (name === fileName) return sourceFile;
+    return injectedSourceFiles.get(name) ??
+      getSourceFile(name, languageVersion, onError, shouldCreateNew);
+  };
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
-  host.fileExists = (name) => name === fileName;
-  host.readFile = (name) => name === fileName ? source : undefined;
+  host.fileExists = (name) =>
+    name === fileName || injectedFiles.has(name) ||
+    fileExists(name);
+  host.readFile = (name) =>
+    name === fileName ? source : injectedFiles.get(name) ?? readFile(name);
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
   host.getNewLine = () => "\n";
+  if (options.withVirtualLibrary) {
+    host.getDefaultLibLocation = () => "/virtual";
+  }
 
-  const program = ts.createProgram([fileName], compilerOptions, host);
+  const rootNames = options.withAmbientArrayDeclaration
+    ? [ambientArrayFileName, fileName]
+    : [fileName];
+  const program = ts.createProgram(rootNames, compilerOptions, host);
   const context = new TransformationContext({
     program,
     sourceFile,
@@ -52,7 +106,7 @@ function createProgramAndContext(source: string): {
     },
   });
 
-  return { sourceFile, checker: program.getTypeChecker(), context };
+  return { sourceFile, checker: program.getTypeChecker(), context, program };
 }
 
 function findFirstNode<T extends ts.Node>(
@@ -82,10 +136,13 @@ function findFirstNode<T extends ts.Node>(
 Deno.test(
   "Callback support policy: plain array map callbacks stay plain-array value callbacks",
   () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
       const result = items.map((item) => item + 1);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
@@ -99,6 +156,73 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: readonly array map callbacks carry a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items: readonly number[] = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: virtual library array map callbacks carry a wrapper site",
+  () => {
+    const { sourceFile, checker, context, program } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withVirtualLibrary: true },
+    );
+    const virtualLibraryFile = program.getSourceFile(virtualLibraryFileName);
+    if (!virtualLibraryFile) {
+      throw new Error("Expected virtual library source file");
+    }
+    assertEquals(program.isSourceFileDefaultLibrary(virtualLibraryFile), true);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: ambient Array declarations carry no wrapper site",
+  () => {
+    const { sourceFile, checker, context, program } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withAmbientArrayDeclaration: true },
+    );
+    const ambientArrayFile = program.getSourceFile(ambientArrayFileName);
+    if (!ambientArrayFile) {
+      throw new Error("Expected ambient Array declaration");
+    }
+    assertEquals(program.isSourceFileDefaultLibrary(ambientArrayFile), false);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
     assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
@@ -106,14 +230,13 @@ Deno.test(
 Deno.test(
   "Callback support policy: plain array find callbacks stay plain-array value callbacks",
   () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      interface Array<T> {
-        find(callback: (value: T) => boolean): T | undefined;
-      }
-
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
       const items = [1, 2, 3];
       const result = items.find((item) => item > 1);
-    `);
+    `,
+      { withDefaultLibrary: true },
+    );
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
@@ -127,7 +250,119 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    // `find` reads what the callback returns as a boolean, so a lifted local
+    // returned from it would always be truthy.
     assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a plain filter callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.filter((item) => item > 1);
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a sort comparator carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.sort((a, b) => a - b);
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a map on some other type carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Grid<T> {
+        map<U>(callback: (value: T) => U): U[];
+      }
+
+      declare const grid: Grid<number>;
+      const result = grid.map((cell) => cell + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a source-defined `Array.map()` carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      class Array<T> {
+        map<U>(callback: (value: T) => U): U[] { return []; }
+      }
+
+      const items = new Array<number>();
+      const result = items.map((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a callback past argument zero carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      interface Array<T> {
+        map<U>(callback: (value: T) => U, andThen: (value: U) => U): U[];
+      }
+
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1, (item) => item * 2);
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callbacks: ts.ArrowFunction[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isArrowFunction(node)) callbacks.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    assertEquals(
+      getCallbackBoundarySemantics(callbacks[0]!, checker, context)
+        .supportsPatternOwnedWrapperCallbackSite,
+      true,
+    );
+    assertEquals(
+      getCallbackBoundarySemantics(callbacks[1]!, checker, context)
+        .supportsPatternOwnedWrapperCallbackSite,
+      false,
+    );
   },
 );
 

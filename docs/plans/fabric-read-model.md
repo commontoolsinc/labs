@@ -85,8 +85,11 @@ come back as values and which come back as addresses you can use later.
 
 ## Why this matters
 
-The last step is not shared today, and the same note renders two different ways
-depending on how you reached it. Read it from the board that holds it:
+The last step is now shared: all four arrivals take `--filter`, `--select` and
+`--schema`, parse them with one parser, and refuse the same mistakes in the
+same words. What follows is the divergence that motivated sharing it — the same
+note rendering two different ways depending on how you reached it. Read it from
+the board that holds it:
 
 ```json
 { "title": "Notes", "body": "…" }
@@ -101,7 +104,7 @@ operation comes along as a raw internal pointer:
 ```
 
 Neither behavior was designed. Each command grew its own output handling and
-they drifted.
+they drifted, which is what one shared read step exists to prevent recurring.
 
 ## What the model settles
 
@@ -114,9 +117,10 @@ many hops away they sit.
 **What format should a verb's result use?** The one a read already uses. Inside
 the result, it *is* a read, on a different cell.
 
-**What makes a receipt special?** Nothing. It is an ordinary cell, distinguished
-only by being created without a schema — which is a defect rather than a
-property.
+**What makes a receipt special?** Nothing. It is an ordinary cell. One
+carrying a plain result declares a descriptive schema like any other cell; one
+carrying a reactive result declares none yet, and closing that gap is an open
+question of the read layer, not a property of receipts.
 
 ## The three concerns
 

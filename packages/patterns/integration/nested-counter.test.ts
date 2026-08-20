@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   initializePiecesController,
   PieceController,
@@ -54,10 +54,10 @@ describe("nested counter integration test", () => {
       "nested-counter.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.runtime.harness
-      .resolve(
-        new FileSystemProgramResolver(sourcePath, rootPath),
-      );
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
+    );
 
     piece = await cc.create(
       program, // We operate on the piece in this thread

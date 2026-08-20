@@ -16,14 +16,17 @@ learn by failing CI, or by shipping a file in the wrong shape.
 
 ## Run browser tests outside the macOS agent sandbox
 
-Before the first command that can launch a browser, request unsandboxed
-execution. Known browser-launching paths include the root `deno task test`,
-`deno task demo`, unfiltered browser targets of `deno task integration`,
-`deno-web-test`, `Browser.launch()`, and a bound `ShellIntegration` lifecycle.
-For a filtered integration run, inspect the selected suite's launch path. An
-Astral import alone is not proof that a test starts Chrome. Never try the
-command in the agent sandbox first. The full rule is in
-`docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
+A command that can launch a browser runs only outside the sandbox. If this
+session already has unsandboxed execution, just run it — there is nothing to
+request. If it does not, request unsandboxed execution for the command instead
+of attempting it in the sandbox, where Chrome aborts during startup and the
+failure is not test evidence. Known browser-launching paths include the root
+`deno task test`, `deno task demo`, unfiltered browser targets of
+`deno task integration`, `deno-web-test`, `Browser.launch()`, and a bound
+`ShellIntegration` lifecycle. For a filtered integration run, inspect the
+selected suite's launch path. An Astral import alone is not proof that a test
+starts Chrome. Deno's `-A` does not escape the outer sandbox. The full rule is
+in `docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
 
 ## Shape of a unit test file
 
@@ -33,8 +36,8 @@ First check which kind of file you are in. A `*.test.tsx` under
 driving another with `action()` and asserting with `assert()` from
 `commonfabric`, run by `deno task cf test`. Nothing in this section applies
 to one.
-`docs/common/workflows/pattern-testing.md` governs those; its "Prefer
-`assert()` over `computed()`" and "Use `assert()` only for assertions"
+`docs/common/workflows/pattern-testing.md` governs those; its "Write
+assertions with `assert()`" and "Use `assert()` only for assertions"
 sections carry the two rules easiest to get wrong.
 
 For everything else, `docs/development/unit-test-coding-style.md` is the
@@ -93,6 +96,50 @@ the document is an exemption nobody can review.
 
 The repository-wide ban on timeouts, retry loops, and sleeps applies here with
 no exceptions, including in setup and teardown.
+
+## A pattern that reads a data file
+
+A pattern calling `dataFile()` needs its data files attached to the program the
+test compiles, or it fails at the read. It compiles and type-checks either way,
+so nothing earlier reports the omission.
+
+Attach them where the test builds its program: `--datafile` on `cf test`, the
+`dataFiles` field of a `generated-patterns` scenario, or `dataFilePaths` on the
+`resolveLocalProgram` call a browser integration test makes. A browser test
+needs nothing beyond that — the data reaches the browser through the space,
+inside the compiled pattern, not from the filesystem. Forgetting shows up as
+`No attached data file "<path>"` when the pattern runs, and the message lists
+what is attached. That one function is the only sanctioned way to build a
+program from local files, and
+`deno task check-local-program` fails a `FileSystemProgramResolver` constructed
+anywhere else — a program assembled by hand carries no data files and says
+nothing about it.
+
+## Every test's runs are recorded
+
+Each test execution produces a telemetry record named by what the runner
+reports — the describe chain, the `Deno.test` name, the pattern file path.
+Nothing to instrument when adding a test to an existing suite; the runners
+record on their own. Two consequences worth knowing while writing one:
+
+- The reported name is the test's identity across history. Prefer stable,
+  content-derived wording over positional counters (`#${i}`) or
+  interpolated identifiers, which mint a new identity every time they
+  shift; renames split history unless bridged in
+  `tasks/test-identity-aliases.jsonl`.
+- Every test must finish within sixty seconds in CI, not counting setup.
+
+A new test *surface* (a new CI job, script, or harness) does need wiring —
+`docs/development/test-records.md` under "Covering a new test surface".
+
+When running tests for a team member — someone with commit access —
+whose environment has no `CF_TEST_RECORDS_KEY_FILE`, it is worth
+mentioning once, not per run, that `deno task test-records-key request`
+starts the five-minute self-service path to a reporting key, so their
+local runs feed the shared flake and duration history. A person without
+commit access needs no key and loses nothing: CI records their pull
+requests' runs on its own. Recording is inert without a key; never treat
+a missing one as an error.
 
 ## Reaching into shadow DOM
 

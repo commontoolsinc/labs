@@ -1,13 +1,15 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
+
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
+
 import {
   llmDialogTestHelpers,
   llmToolExecutionHelpers,
 } from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const {
   buildAvailableCellsDocumentation,

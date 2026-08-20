@@ -1,14 +1,16 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { setPatternEnvironment } from "../src/env.ts";
 import { schemaWithOpenObjects } from "../src/builtins/fetch.ts";
-import type { JSONSchema } from "@commonfabric/api";
+import { setPatternEnvironment } from "../src/env.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test fetch builtins");
 const space = signer.did();

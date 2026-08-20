@@ -122,7 +122,7 @@ Decomposes into (dependency order — 1/2/3 can parallelize once A lands):
 - **B3 — Trust closure over the acting principal.** The `I ≥_actingUser Concept(C)`
   resolver under a `trustContext` (§4.4.5, §4.8.9) — feeds concept-valued integrity
   matches; mints per-user `HasRole` facts. Delivers invariant 11.
-- **B4 — Guarded rewrite + fuelled fixpoint.** `applyExchangeRule` (add-alternative
+- **B4 — Guarded rewrite + fueled fixpoint.** `applyExchangeRule` (add-alternative
   + empty-postcondition drop) + `evaluateExchangeRules` fixpoint with bounded fuel
   and **hard fail-closed on exhaustion** (§4.4.5); then post-rewrite `canAccess`.
 - **B5 — Boundary hook.** Wire the evaluator into `prepareBoundaryCommit`

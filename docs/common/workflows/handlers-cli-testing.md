@@ -65,7 +65,7 @@ deno task cf piece new ... --test pattern.test.tsx pattern.tsx
 deno task cf piece setsrc ... --test pattern.test.tsx pattern.tsx
 
 # Call a handler directly with JSON payload
-deno task cf piece call ... addItem '{"title": "Test Item", "category": "demo"}'
+deno task cf call ... addItem '{"title": "Test Item", "category": "demo"}'
 
 # Run a step to process the handler
 deno task cf piece step ...
@@ -97,10 +97,10 @@ Handler calls below are runtime checks, not replacements for automated coverage.
 1. Write or update automated tests for changed behavior
 2. Run every test entry with `cf test`
 3. Deploy with every test attached using repeatable `--test`
-4. Either call the handler directly with `cf piece call` or mount the space with `cf fuse mount`
+4. Either call the handler directly with `cf call` or mount the space with `cf fuse mount`
 5. Use `cf exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
 6. Execute `*.handler` or `*.tool` via `cf exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
 7. Legacy `echo ... > file.handler` still works for handlers
-8. Inspect state with `cf piece inspect` or `cf piece get`
+8. Inspect state with `cf piece inspect` or `cf get`
 9. Iterate until the callable works correctly, running tests and retaining every
    `--test` flag on `setsrc`, then build UI on top

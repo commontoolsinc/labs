@@ -18,7 +18,7 @@ primitive), and are run via `cf test`.
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf piece get`)
+3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf get`)
 4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 
@@ -85,21 +85,36 @@ avoids the declaration-emit errors TypeScript raises for such a mix:
 import type { AssertRecord } from "commonfabric";
 
 type TestStep =
-  // from assert(() => condition), or computed(() => condition)
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord> }
-  | { action: Stream<void> }           // from action(() => handler.send())
-  | { render: VNode }                  // one headless VDOM demand window
-  | { settle: true };                  // wait for full async settlement
+  | { assertion: Reactive<AssertRecord> } // from assert(() => condition)
+  | {
+    action: Stream<unknown>; // from action(() => handler.send())
+    event?: unknown; // the payload, sent to the stream as authored
+    trustedUi?: { surface: string; action: string };
+  }
+  | { render: VNode } // one headless VDOM demand window
+  | { settle: true } // wait for full async settlement
+  | { label: string } // announce a marker to other participants
+  | { await: string }; // block until a participant announces it
 ```
 
-An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
-rather than a bare boolean. The transformer rewrites its body to record each
-operand as it is computed, so a failure can report the operands and their
-values instead of only `false`. A `computed(...)` assertion carries the boolean
-and reports `Expected true, got false`. See
+An action step's `event` is the payload the stream receives, sent as authored:
+an object arrives as an object. `trustedUi` names a trusted UI surface and the
+control inside it, for an action that must originate from rendered UI under
+enforcement.
+
+`{ label }` and `{ await }` synchronize a multi-user test — a participant
+announces reaching `label`, and another blocks on `await` until it is
+announced. A single-user run has no participant to synchronize with, so both
+are inert there: recognized, skipped, and absent from the reported results.
+
+An assertion is an `AssertRecord` — `{ ok, source, parts }` — which `assert()`
+is the only way to write; a bare `Reactive<boolean>` is a compile error. The
+transformer rewrites the `assert` body to record each operand as it is
+computed, so a failure can report the operands and their values instead of
+only `false`. See
 [Assertion diagnostics](../../packages/ts-transformers/README.md#assertion-diagnostics)
 for the rewrite, and
-[Pattern Testing](../common/workflows/pattern-testing.md#prefer-assert-over-computed)
+[Pattern Testing](../common/workflows/pattern-testing.md#write-assertions-with-assert)
 for the authoring side.
 
 `cf test` does not mount a renderer by default. Under the pull scheduler, a
@@ -281,8 +296,9 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   const engine = runtime.harness;
 
   // 2. Compile and run the test pattern
-  const program = await engine.resolve(
-    new FileSystemProgramResolver(testPath)
+  const program = await resolveLocalProgram(
+    (resolver) => engine.resolve(resolver),
+    { main: testPath, dataFilePaths: options.dataFilePaths },
   );
   const { main } = await engine.process(program, { noCheck: false, noRun: false });
   const testPatternFactory = main.default as Pattern;
@@ -316,6 +332,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       assertion?: unknown;
       render?: unknown;
       settle?: boolean;
+      label?: string;
+      await?: string;
+      event?: unknown;
+      trustedUi?: { surface: string; action: string };
     };
 
     // Check discriminated union keys
@@ -323,6 +343,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     const isAssertion = "assertion" in stepValue;
     const isRender = "render" in stepValue;
     const isSettle = "settle" in stepValue;
+    // Inert in a single-user run, but still a step the runner knows.
+    const isMarker = "label" in stepValue || "await" in stepValue;
+
+    if (isMarker) continue;
 
     if (!isAction && !isAssertion && !isRender && !isSettle) {
       throw new Error(`Test step at index ${i} has no supported discriminant`);
@@ -333,7 +357,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       actionCount++;
       lastActionIndex = i;
       const actionStream = testsCell.key(i).key("action") as Stream<unknown>;
-      actionStream.send();  // No argument needed for void streams
+      // The step's payload, `undefined` for a plain void action. A
+      // `trustedUi` step wraps it in the DOM provenance a renderer would
+      // attach, so a write guarded by a UI contract sees a trusted gesture.
+      actionStream.send(buildActionEvent(stepValue.event, stepValue.trustedUi));
 
       await Promise.race([
         runtime.idle(),
@@ -379,7 +406,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
 
 - **Discriminated union detection:** Check `"action" in step` vs `"assertion" in step`
 - **Cell access via `.key()`:** Access test steps through reactive cell interface
-- **Void stream `.send()`:** No argument required for `Stream<void>`
+- **Action payload:** The step's `event` reaches the stream as authored — an
+  object arrives as an object — and a `trustedUi` step wraps it in the DOM
+  provenance a renderer would attach. A plain void action carries no `event`
+  and sends `undefined`.
 - **Explicit VDOM demand:** A `render` step mounts the worker reconciler only
   for that step; DOM operations are discarded and demand is cleaned up
 
@@ -419,16 +449,16 @@ const action_add_expense = action(() => {
 
 ### Do: Meaningful Assertion Names
 
-Use descriptive computed cell names:
+Use descriptive assertion names:
 
 ```tsx
 // Shown inside a pattern body.
 // ✅ Good - name describes what's being tested
-const assert_total_equals_45 = computed(() => subject.result.total === 45);
-const assert_items_sorted_by_date = computed(() => isSorted(subject.items));
+const assert_total_equals_45 = assert(() => subject.result.total === 45);
+const assert_items_sorted_by_date = assert(() => isSorted(subject.items));
 
 // ❌ Bad - generic names
-const test1 = computed(() => subject.result.total === 45);
+const test1 = assert(() => subject.result.total === 45);
 ```
 
 ### Do: Use Discriminated Union Format

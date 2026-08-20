@@ -1,3 +1,14 @@
+import ts from "typescript";
+
+import { ClosureTransformer } from "./closures/transformer.ts";
+import {
+  CrossStageState,
+  TransformationDiagnostic,
+  TransformationOptions,
+  Transformer,
+} from "./core/mod.ts";
+import type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
+import { LiftLoweringTransformer } from "./lift/transformer.ts";
 import {
   AssertDiagnosticsTransformer,
   BuilderCallHoistingTransformer,
@@ -23,16 +34,6 @@ import {
   VerbTierMarkTransformer,
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
-import { ClosureTransformer } from "./closures/transformer.ts";
-import ts from "typescript";
-import { LiftLoweringTransformer } from "./lift/transformer.ts";
-import {
-  CrossStageState,
-  TransformationDiagnostic,
-  TransformationOptions,
-  Transformer,
-} from "./core/mod.ts";
-import type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
 
 type TransformerStage = new (options: TransformationOptions) => Transformer;
 

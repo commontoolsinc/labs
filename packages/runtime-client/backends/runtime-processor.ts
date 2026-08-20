@@ -1,8 +1,26 @@
-import { DID, Identity, type Session } from "@commonfabric/identity";
+import {
+  fabricFromRealmValue,
+  newDefaultJsonCodecEngine,
+} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
+} from "@commonfabric/home-schemas";
+import {
+  normalizeRenderConfidentialityCeiling,
+  normalizeRenderDeclassificationPolicy,
+  type RenderConfidentialityCeiling,
+  type RenderDeclassificationPolicy,
+  WorkerReconciler,
+} from "@commonfabric/html/worker";
+import { DID, Identity, type Session } from "@commonfabric/identity";
+import type { Program } from "@commonfabric/js-compiler";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   PieceController,
@@ -12,15 +30,6 @@ import {
   readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-  getLoggerFlagsBreakdown,
-  getTimingStatsBreakdown,
-  Logger,
-  resetAllCountBaselines,
-  resetAllTimingBaselines,
-} from "@commonfabric/utils/logger";
 import {
   ACLManager,
   type BrowserWorkerPresetParams,
@@ -46,8 +55,7 @@ import {
   SpaceHostValidationError,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { linkRefPayload } from "@commonfabric/runner/shared";
-import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
+import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -58,14 +66,27 @@ import {
   type SpaceMembershipProvider,
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+import { linkRefPayload } from "@commonfabric/runner/shared";
+import { RemoteResponse } from "@commonfabric/runtime-client";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+  getLoggerFlagsBreakdown,
+  getTimingStatsBreakdown,
+  Logger,
+  resetAllCountBaselines,
+  resetAllTimingBaselines,
+} from "@commonfabric/utils/logger";
+
 import {
   getMetaLink,
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
+import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -152,38 +173,39 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import type { Program } from "@commonfabric/js-compiler";
-import { setLLMUrl } from "@commonfabric/llm";
+import type { VDomOp } from "../protocol/types.ts";
+import { cellRefToKey } from "../shared/utils.ts";
 import {
-  type SiteTable,
-  siteTableCause,
-  siteTableSchema,
-} from "@commonfabric/home-schemas";
+  postContextualRuntimeError,
+  postRuntimeError,
+} from "./runtime-error.ts";
 import {
+  assertFabricLoggerFlags,
   createCellRef,
   createPageRef,
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { cellRefToKey } from "../shared/utils.ts";
-import { RemoteResponse } from "@commonfabric/runtime-client";
-import {
-  normalizeRenderConfidentialityCeiling,
-  normalizeRenderDeclassificationPolicy,
-  type RenderConfidentialityCeiling,
-  type RenderDeclassificationPolicy,
-  WorkerReconciler,
-} from "@commonfabric/html/worker";
-import type { VDomOp } from "../protocol/types.ts";
-import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
-import {
-  postContextualRuntimeError,
-  postRuntimeError,
-} from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodecEngine();
+
+/** Each registered logger's enabled state and level. */
+function loggerMetadata(): LoggerMetadata {
+  const global = globalThis as unknown as {
+    commonfabric?: { logger?: Record<string, Logger> };
+  };
+  const result: LoggerMetadata = {};
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
+      result[name] = {
+        enabled: !logger.disabled,
+        level: (logger.level ?? "info") as LogLevel,
+      };
+    }
+  }
+  return result;
+}
 
 function spaceAclResponse(
   runtime: Runtime,
@@ -476,6 +498,21 @@ function sanitizedBody(
   // and has nothing to descend into, and an instance's codec contents are not
   // reachable by property name. Naming beats refusing here, because what a
   // debug dump was handed is the very thing being debugged.
+  //
+  // TODO(danfuzz): naming it is what the transport forces, not what the
+  // receiver wants. These args land in `console.log()` on the main thread
+  // (`RuntimeInternals.#onConsole` in `lib-shell`), so the reader is a
+  // devtools object inspector -- which renders a live `FabricBytes` as an
+  // expandable value and this string as a string. `codec-realm` carries the
+  // instance across whole, and the receiver decodes before logging.
+  //
+  // Two things stand in the way, and neither is this arm's doing.
+  // `codec-realm` refuses a cycle today, where this walk reports one and
+  // carries on, so its own memo `TODO` is a prerequisite. And a
+  // `console.log()` argument is whatever pattern code passed, which need not
+  // be a `FabricValue` at all -- so what replaces this is a walk that encodes
+  // the fabric it finds and goes on naming the functions, cells and cycles it
+  // finds, not an encode in place of a walk.
   if (obj instanceof FabricSpecialObject) {
     return toCompactDebugString(obj);
   }
@@ -963,6 +1000,7 @@ export class RuntimeProcessor {
     // (`CellHandle.serialize`; see the `WireCellValue` marker in
     // `protocol/types.ts`) — this outbound direction loses silently. The
     // subscription-update path below posts the same conversion.
+    // `codec-realm` is the mechanism for both directions.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,
@@ -1196,9 +1234,8 @@ export class RuntimeProcessor {
     // Always the PiecesController path: ensureDefaultPattern() reconciles the
     // persisted identity and carries the cold-start setup repair that heals an
     // aged home root. Starting the pattern directly here would skip that
-    // repair, and with systemPatternAutoUpdate unset (every default
-    // deployment) nothing else heals the root — so no fast path belongs in
-    // front of the controller.
+    // repair, and with `systemPatternAutoUpdate` unset nothing else heals the
+    // root — so no fast path belongs in front of the controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1587,26 +1624,11 @@ export class RuntimeProcessor {
 
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
-    const metadata = this.#getLoggerMetadata();
+    const metadata = loggerMetadata();
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
+    assertFabricLoggerFlags(flags);
     return { counts, metadata, timing, flags };
-  }
-
-  #getLoggerMetadata(): LoggerMetadata {
-    const global = globalThis as unknown as {
-      commonfabric?: { logger?: Record<string, Logger> };
-    };
-    const result: LoggerMetadata = {};
-    if (global.commonfabric?.logger) {
-      for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
-        result[name] = {
-          enabled: !logger.disabled,
-          level: (logger.level ?? "info") as LogLevel,
-        };
-      }
-    }
-    return result;
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {
@@ -1707,11 +1729,14 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // The `true` below cedes `request.body` to the `FabricBytes` rather than
-    // having it copied. That is legitimate because a handler owns the values
-    // its request carries, per `BaseRequest`, so nothing else can be reading
-    // this array.
-    const bytes = new FabricBytes(request.body, true);
+    // `request.body` is ceded to the decode rather than copied for it. That is
+    // legitimate because a handler owns the values its request carries, per
+    // `BaseRequest`, so nothing else can be reading this tree. What comes back
+    // is a `FabricValue`, of which only the one arm is a blob's bytes.
+    const bytes = fabricFromRealmValue(request.body);
+    if (!(bytes instanceof FabricBytes)) {
+      throw new Error("uploadBlob requires bytes as its body");
+    }
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({

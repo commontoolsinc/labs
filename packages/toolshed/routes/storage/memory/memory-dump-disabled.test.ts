@@ -1,14 +1,19 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the environment
+// is parsed once, as env.ts loads, so the variables this file sets must be set
+// before the router pulls it in.
+
 // The disabled state of the dump endpoint, as an integration test. env is a
 // module-load singleton, so this lives in its own test file (fresh module
 // graph): MEMORY_DUMP_ENABLED is deliberately NOT set before the router is
 // imported, and the routes must 404 as if they never existed — even for a
 // validly signed, allowlisted caller.
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import * as Path from "@std/path";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
-import * as Path from "@std/path";
 
 const DUMP_BASE = "/api/storage/memory/dump";
 

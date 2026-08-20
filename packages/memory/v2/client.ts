@@ -1,4 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+
 import {
   type ClientCommit,
   compatibleMemoryProtocolFlags,
@@ -31,11 +33,10 @@ import {
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
-import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
+import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export type Transport = {

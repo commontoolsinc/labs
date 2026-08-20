@@ -45,13 +45,27 @@ Repaired result certifies the rule, not the whole pipeline:
 - **FIFO by construction.** `Process` admits `Min(Unresolved(s))`, so a
   later same-session commit can never overtake an earlier one in any
   reachable state. The runner's hold-mode admission CAN reorder sends,
-  which is why the shipped exclusion is predecessor-restricted (own commits
-  with `local_seq` below the reader's) rather than session-wide — a rule
-  that coincides with the model's same-session exclusion in every
-  model-reachable state and stays sound under overtaking. Modeling issued
+  which is one reason the shipped exclusion is the DECLARED SET (own
+  commits the read's array names) rather than session-wide — an own write
+  the array does not name conflicts like a foreign one, whether admitted
+  out of order or omitted while durably integrated. Modeling issued
   versus admitted commits separately, with FIFO as a checked invariant
   rather than a structural given, is the natural refinement if this area
   churns.
+- **Canonical dependency arrays.** `Build` records the layers of the
+  CURRENT stack — under channel delivery that set can be sparse relative
+  to session history (processed rejections are gone from `pend`), but it
+  always names every layer the view sat on, so the model's session-wide
+  scan exclusion coincides with the shipped declared-set exclusion on
+  every reachable state. What the model therefore does NOT exercise is
+  the declared-set scan's VALIDATION role (§3.6.3): a buggy client
+  omitting a live layer whose write is durably integrated. That
+  enforcement is checked by the engine unit tests
+  (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`) and the
+  differential harness's sparse mutation; a `SkipLayers` build choice
+  paired with a named-set `InvalidatedBy` — a violation witness under
+  session-wide exclusion, a pass under named-set — is the natural
+  refinement if omission ever becomes more than a hardening concern.
 
 ## Running
 

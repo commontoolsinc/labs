@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CyclicResultError } from "../lib/callable.ts";
 import {
@@ -258,17 +259,22 @@ describe("cf piece call on a piece that points back at its container", () => {
       // address rather than being followed back into the container. The
       // address names the deepest link the walk crossed plus the segments
       // below it, which is the child's own document and the field on it.
-      expect(result.item.parent.$link.id.startsWith("of:")).toBe(true);
-      expect(result.item.parent.$link.space.startsWith("did:")).toBe(true);
-      expect(result.item.parent.$link.scope).toBe("space");
-      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      // One string carries the whole address, so read it back with the
+      // parser the CLI's own intake uses. The space and the scope are
+      // implicit — the piece is in the space the call targeted, at space
+      // scope — and the path is the field that closes the circle.
+      const parent = parseLLMFriendlyLink(result.item.parent.$link);
+      expect(parent.id?.startsWith("of:")).toBe(true);
+      expect(parent.space).toBeUndefined();
+      expect(parent.scope).toBeUndefined();
+      expect(parent.path).toEqual(["parent"]);
       // A stream is a dispatch surface, not a value, and carries nothing to
       // read at the position it occupies.
       expect(Object.hasOwn(result.item, "addChild")).toBe(false);
     });
   });
 
-  it("answers a collection that re-enters with one address per element", async () => {
+  it("returns one address per element for a collection that re-enters", async () => {
     await withTracker("cyclic-returns-container", async ({ call }) => {
       await call("addChildSelf", ["--title", "First"]);
       const result = await call("addChildSelf", ["--title", "Second"]) as any;
@@ -277,7 +283,9 @@ describe("cf piece call on a piece that points back at its container", () => {
       expect(result.container.title).toBe("Root");
       // Each child is addressed by its own document rather than by the slot it
       // sits in, so the answers survive a reordering of the collection.
-      const ids = result.container.children.map((child: any) => child.$link.id);
+      const ids = result.container.children.map((child: any) =>
+        parseLLMFriendlyLink(child.$link).id
+      );
       expect(ids.length).toBe(2);
       expect(new Set(ids).size).toBe(2);
       expect(ids.every((id: string) => id.startsWith("of:"))).toBe(true);
@@ -320,8 +328,13 @@ describe("cf piece call on a piece that points back at its container", () => {
       expect(result.item.title).toBe("Retained");
       // The closing position renders its address, exactly as it does with no
       // selection at all: this is the declared bound answering.
-      expect(result.item.parent.$link.id.startsWith("of:")).toBe(true);
-      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      expect(
+        parseLLMFriendlyLink(result.item.parent.$link).id?.startsWith(
+          "of:",
+        ),
+      ).toBe(true);
+      expect(parseLLMFriendlyLink(result.item.parent.$link).path)
+        .toEqual(["parent"]);
       // And the answer is the DECLARATION's shape, not the caller's: their
       // shape had no rendering at all, so the one in reach that does answers in
       // its place. A verb's streams are dropped by that derivation and are
@@ -331,7 +344,7 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
-  it("answers a `--select` that names the closing position with that position alone", async () => {
+  it("returns that position alone for a `--select` naming the closing position", async () => {
     await withTracker("cyclic-selection-names-cut", async ({ call }) => {
       const result = await call("addChild", ["--title", "Pointed"], {
         selection: { projection: parseSelectProjection("item.parent") },
@@ -341,8 +354,13 @@ describe("cf piece call on a piece that points back at its container", () => {
       // `item.parent` IS the position where the declared type re-enters, so
       // this caller asked for exactly the thing that has no rendering. The
       // address stands in for it, which is the whole of what a bound does.
-      expect(result.item.parent.$link.id.startsWith("of:")).toBe(true);
-      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      expect(
+        parseLLMFriendlyLink(result.item.parent.$link).id?.startsWith(
+          "of:",
+        ),
+      ).toBe(true);
+      expect(parseLLMFriendlyLink(result.item.parent.$link).path)
+        .toEqual(["parent"]);
       // And nothing else comes back. Naming the absent fields is the point: an
       // assertion that only checked `parent` would pass just as well against a
       // bound that answered with the declaration's whole shape, which is a
@@ -397,7 +415,8 @@ describe("cf piece call on a piece that points back at its container", () => {
 
       expect(() => JSON.stringify(result)).not.toThrow();
       expect(result.item.title).toBe("Schema");
-      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      expect(parseLLMFriendlyLink(result.item.parent.$link).path)
+        .toEqual(["parent"]);
     });
   });
 
@@ -475,7 +494,7 @@ describe("cf piece call on a piece that points back at its container", () => {
       // mutation, and the message says so rather than leaving a stack trace to
       // read as "the call failed".
       expect(message).toContain("COMMITTED");
-      expect(message).toContain("cf piece get --piece of:");
+      expect(message).toContain("cf get --piece of:");
       expect(message).toContain("declared result leaves the closing position");
 
       // And the write did land.
@@ -506,7 +525,7 @@ describe("cf piece call on a piece that points back at its container", () => {
           'closes a circle at "/item/parent/children/0"',
         );
         expect(message).toContain("COMMITTED");
-        expect(message).toContain("cf piece get --piece of:");
+        expect(message).toContain("cf get --piece of:");
         expect(message).not.toContain("leaves the closing position");
         // No pattern was loaded to look for a declaration, because this
         // resolution attaches no thunk to reach one through.

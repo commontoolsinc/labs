@@ -7,7 +7,6 @@
  * the full algorithm.
  */
 
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -16,16 +15,17 @@ import {
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { BaseFabricInstance } from "@/codec-common/BaseFabricInstance.ts";
-import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
+import { codecOf } from "@/codec-common/index.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -49,7 +49,7 @@ const TAG_STRING = 0x24;
 const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
-const TAG_EPOCH_DAYS = 0x28;
+const TAG_EPOCH_DAY = 0x28;
 const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
@@ -74,7 +74,7 @@ const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
-const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
+const TAG_EPOCH_DAY_BYTES = new Uint8Array([TAG_EPOCH_DAY]);
 const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
@@ -270,8 +270,8 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.EpochDays: {
-      hasher.update(TAG_EPOCH_DAYS_BYTES);
+    case NATIVE_TAGS.EpochDay: {
+      hasher.update(TAG_EPOCH_DAY_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
       );
@@ -434,12 +434,20 @@ const NEGATIVE_ZERO_HASH = computeHash(-0);
  * bigints, registry-interned symbols) can't be WeakMap keys, so they use a
  * bounded cache. Sizing is based on historical testing (expected ~97% hit
  * rate in practice).
+ *
+ * A string key is held by the cache itself, and a hashed string can be a
+ * whole document: an inline document's `data:` URI runs to tens of thousands
+ * of characters. The entry count alone would let 50,000 of those add up to
+ * gigabytes, so the same byte budget `stringRepCache` carries applies here,
+ * and the count bounds the short keys that make up the rest.
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint | symbol,
   FabricHash
 >({
   capacity: 50_000,
+  weigh: (key) => (typeof key === "string" ? key.length * 2 : 16) + 96,
+  maxWeight: 8 * 1024 * 1024,
 });
 
 /**

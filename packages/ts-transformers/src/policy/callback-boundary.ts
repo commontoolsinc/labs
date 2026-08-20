@@ -1,15 +1,18 @@
 import ts from "typescript";
 
+import { getCallArgumentPosition } from "../ast/call-arguments.ts";
 import {
   classifyArrayCallbackContainerCall,
   detectCallKind,
   getPatternBuilderCallbackArgument,
   getPatternToolCallbackArgument,
+  isCollectingPlainArrayMethodCallback,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 
 export interface CallbackBoundaryLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
+  isSourceFileDefaultLibrary(sourceFile: ts.SourceFile): boolean;
 }
 
 export type SupportedCallbackBoundaryKind =
@@ -125,14 +128,11 @@ function isPatternToolPatternArgument(
   patternCall: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
-  const grandparent = patternCall.parent;
-  if (!grandparent || !ts.isCallExpression(grandparent)) {
+  const position = getCallArgumentPosition(patternCall);
+  if (!position || position.index !== 0) {
     return false;
   }
-  if (grandparent.arguments[0] !== patternCall) {
-    return false;
-  }
-  return detectCallKind(grandparent, checker)?.kind === "pattern-tool";
+  return detectCallKind(position.call, checker)?.kind === "pattern-tool";
 }
 
 export function classifyCallbackBoundary(
@@ -157,13 +157,11 @@ export function classifyCallbackBoundary(
     };
   }
 
-  const parent = callback.parent;
-  if (
-    !parent || !ts.isCallExpression(parent) ||
-    !parent.arguments.includes(callback)
-  ) {
+  const position = getCallArgumentPosition(callback);
+  if (!position) {
     return { kind: "none" };
   }
+  const parent = position.call;
 
   if (lookup?.isArrayMethodCallback(callback)) {
     return {
@@ -208,7 +206,7 @@ export function classifyCallbackBoundary(
   // callback is a compute-owned boundary like lift-applied: legitimate inside
   // a pattern body, never a reactive closure.
   if (
-    parent.arguments.length >= 2 && parent.arguments[1] === callback &&
+    position.index === 1 &&
     isSqliteTableCallee(parent.expression, checker)
   ) {
     return {
@@ -408,6 +406,13 @@ export function getCallbackBoundarySemantics(
     isPatternToolCallback: supportedKind === "pattern-tool",
     supportsPatternOwnedWrapperCallbackSite: supportedKind ===
         "reactive-array-method" ||
+      (supportedKind === "plain-array-value" &&
+        !!lookup &&
+        isCollectingPlainArrayMethodCallback(
+          callback,
+          checker,
+          (sourceFile) => lookup.isSourceFileDefaultLibrary(sourceFile),
+        )) ||
       supportedKind === "pattern-builder" ||
       supportedKind === "render-builder",
     supportsPatternOwnedStatements: supportedKind === "reactive-array-method" ||

@@ -1,7 +1,7 @@
 /**
  * The codec layer's contracts, written without naming any wire format: what a
- * codec is, the two things its state can mean to a walker, and the context
- * objects carried through an encode or a decode.
+ * codec is, the two things its state can mean to a walker, and what an
+ * encode or a decode carries alongside the data.
  *
  * The distinction running through all of it is that a codec's type does not
  * say what its state is for. Every codec has the same members whatever domain
@@ -49,7 +49,25 @@ export const CODEC: unique symbol = Symbol("data-model.codec");
  * `FabricValue`s and leaves every terminal decision to whatever walks the
  * result, so one binding serves every format.
  */
-export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
+export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
+
+/**
+ * Well-known symbol for binding the static getter `[REALM_CODEC]` on a
+ * `FabricPrimitive` class.
+ *
+ * The realm-crossing counterpart to {@link JSON_CODEC}, and the reason that
+ * one is bound per format rather than once. Structured cloning carries bytes
+ * and `bigint` as themselves, so a class built on either has an answer here
+ * that JSON cannot express: `FabricBytes` terminates into an `ArrayBuffer`
+ * rather than base64url text, and both epoch types into a `bigint` rather
+ * than a base64url encoding of one.
+ *
+ * A class binding a format-neutral `[CODEC]` needs nothing here. Every
+ * `FabricInstance` is in that position, its codec expanding an instance into
+ * other `FabricValue`s and leaving every terminal decision to whatever walks
+ * the result.
+ */
+export const REALM_CODEC: unique symbol = Symbol("data-model.realmCodec");
 
 /**
  * Interface for codecs (encoder-decoder objects). These are objects which can
@@ -93,6 +111,29 @@ export interface FabricCodec<Encoded> {
   canEncode(value: FabricValue): boolean;
 
   /**
+   * Returns `true` if the given state is one this codec knows how to decode:
+   * the decode side's counterpart to {@link #canEncode}, answering the same
+   * kind of question about whether a value is in the domain this codec works
+   * over.
+   *
+   * What belongs here is what is cheap to ask and not already asked by the
+   * decoding: the state's type, the presence and types of the parts a decode
+   * reads, membership in a fixed set of literals. What does not belong is a
+   * check whose only implementation is the decode itself. Whether a string is
+   * valid base64 is answered by decoding it, so asking here costs that work
+   * twice; {@link #decode} keeps such a question and is where a state failing
+   * it is refused.
+   *
+   * An implementation states this as a type predicate over its own state type,
+   * which is what lets its {@link #decode} declare that same type and read the
+   * state's parts without re-checking them. See {@link BaseFabricCodec}.
+   *
+   * Called on every state before {@link #decode} sees it, so an implementation
+   * of the latter may take the check as done.
+   */
+  canDecode(state: Encoded): boolean;
+
+  /**
    * Returns the wire type tag to use when encoding the given value. Only ever
    * called on a value for which {@link #canEncode} has returned `true`. Unlike
    * {@link #recognizedTypeTag} -- the codec's single recognized tag, if it has
@@ -112,15 +153,18 @@ export interface FabricCodec<Encoded> {
    * not necessarily correspond to {@link #recognizedTypeTag} (depending on how
    * an instance of this class got hooked up).
    *
-   * `state` is the whole of `Encoded` rather than the narrower thing
-   * {@link #encode} emits, because decoding is dispatched on a tag read from
-   * untrusted input: a payload can carry any state at all under this codec's
-   * tag. Rejecting what does not fit is part of the job.
+   * Only ever called on a state for which {@link #canDecode} has returned
+   * `true`, which is the decode side's counterpart to the way
+   * {@link #canEncode} precedes {@link #encode}. That is what lets an
+   * implementation declare the narrower state type it actually decodes and
+   * read its parts as such. `state` is the whole of `Encoded` here because
+   * this interface is what a registry holds, and the codecs in one agree on
+   * nothing narrower.
    */
   decode(
     typeTag: string,
     state: Encoded,
-    context: ReconstructionContext,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /**
@@ -180,7 +224,7 @@ export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
  * serves every format, and both are "for" this one. This is what a mixed
  * roster holds, what {@link CodecRegistry} stores, and what it hands back.
  *
- * Spelling the union out is unavoidable. {@link FabricCodec} is invariant in
+ * Writing the union out is unavoidable. {@link FabricCodec} is invariant in
  * `Encoded` -- the parameter sits in both an argument and a return position --
  * so a `NonterminalCodec` is assignable to no format's instantiation, and the
  * two arms have to be named separately.
@@ -229,57 +273,30 @@ export interface FabricClassWithNonterminalCodec {
  * avoid a circular dependency between the fabric protocol and the runner.
  * See Section 2.5 of the formal spec.
  */
-export interface ReconstructionContext {
+export interface LiveEnvironment {
   /**
    * Resolves a cell reference, for a type that needs to intern or look up an
-   * existing instance during reconstruction.
+   * existing instance during decoding.
    */
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
 
   /**
-   * Signals whether a reconstruction call should produce a deep-frozen
-   * result: `true` means the reconstructed value should be deep-frozen,
+   * Signals whether a decode call should produce a deep-frozen
+   * result: `true` means the decoded value should be deep-frozen,
    * `false` means a mutable result is acceptable. Same contract as `frozen`
    * passed to `cloneIfNecessary()` (see `value-clone.ts`):
    * `shouldDeepFreeze === true` corresponds to
    * `cloneIfNecessary(value, { frozen: true })`.
    *
-   * Required (not optional): every context declares it. Contexts get it for
-   * free by extending `BaseReconstructionContext`, which centralizes the
+   * Required (not optional): every live environment declares it, and gets it
+   * for free by extending `BaseLiveEnvironment`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
-   * Enforcement: each codec's `decode()` queries this and abides by it,
+   * Enforcement: a decode deep-freezes its result, and a codec that builds
+   * a value cheaper when it may stay thawed reads this to decide,
    * producing a deep-frozen result when it is `true`.
    */
   get shouldDeepFreeze(): boolean;
-}
-
-/**
- * Public boundary interface for serialization contexts. Encodes fabric
- * values into a serialized form and decodes them back. The type parameter
- * `SerializedForm` is the boundary type: `string` for JSON contexts,
- * `Uint8Array` for binary contexts.
- *
- * This is the only interface external callers need. Internal tree-walking
- * machinery is private to the context implementation.
- */
-export interface SerializationContext<SerializedForm = unknown> {
-  /**
-   * Whether a failed reconstruction produces a `ProblematicValue` instead of
-   * throwing.
-   *
-   * @default false
-   */
-  readonly lenient: boolean;
-
-  /** Encodes a fabric value into serialized form for boundary crossing. */
-  encode(value: FabricValue): SerializedForm;
-
-  /** Decodes a serialized form back into a fabric value. */
-  decode(
-    data: SerializedForm,
-    context: ReconstructionContext,
-  ): FabricValue;
 }

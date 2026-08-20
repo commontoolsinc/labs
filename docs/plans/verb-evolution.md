@@ -367,12 +367,17 @@ provider's whole **Output** type (today's default), a narrow demand naming
 **fields only**, one naming a **required verb**, one naming an **optional
 verb**, and a **versioned** interface demand. Probing callers are omitted —
 they bind late and survive every *evolution* row, which is what the table
-scores. What late binding does not survive is an enumeration defect: [#5698]
-measures 8 callable verbs across 4 files that `cf piece verbs` and
-tab-completion both miss, because candidate names are built from the declared
-result type rather than from what the piece stores. A probing caller is
-therefore only as good as the listing it probes, and absence from one today
-is ambiguous between deprecated, retired, and never enumerated.
+scores. What late binding does not survive is an enumeration defect, so a
+probing caller is only as good as the listing it probes: a name the listing
+never proposes is indistinguishable to that caller from one that was
+deprecated or retired. `cf piece verbs` therefore draws its candidates from
+the piece's stored surface and its compiled graph rather than from the
+pattern's declared result type, and a verb the type omits is listed on the
+same terms as one it names. Two residual gaps are the probing caller's to
+know about, and [the CLI verb guide](../common/verbs/over-the-cli.md) states
+both: a listing reporting `incomplete` is a lower bound, and a handler whose
+stored schema carries no stream marker is callable without ever being listed.
+Absence is evidence of retirement only on a listing that reports neither.
 
 | Provider evolution | Full Output | Fields only | Req. verb | Opt. verb | Versioned |
 | --- | --- | --- | --- | --- | --- |
@@ -630,15 +635,14 @@ person, a recipe for a tool. Where it lives matters most: askable of the
 piece itself, so an agent watching a holding piece's errors can ask the
 held piece for upgrade instructions and decide whether to apply them. The
 channel exists — the shape already lifts deprecation out of JSDoc into
-listings — and it carries a named precondition, because that channel is the
-listing surface: while [#5698] holds, the listing omits verbs the piece
-really has, and instructions served over a surface that drops their subject
-arrive incomplete. Closing that enumeration gap is on this direction's
-critical path; where it sits in the order is the owner of
-[the verbs implementation plan](verbs-implementation.md) to decide, not this
-document. Scoped acknowledgment is the natural place to ask for the
-instructions themselves: a deliberate break proceeds when it says what those
-it breaks should do instead.
+listings — and it carries a standing precondition, because that channel is
+the listing surface: instructions served over a surface that drops their
+subject arrive incomplete, so whatever carries them must ride an enumeration
+no narrower than the piece's stored surface and its compiled graph, and must
+propagate that enumeration's own report of when it fell short rather than
+serving a quietly shortened set. Scoped acknowledgment is the natural place
+to ask for the instructions themselves: a deliberate break proceeds when it
+says what those it breaks should do instead.
 
 The anchors are the systems that permit breakage and manage it rather than
 forbid it. Kubernetes deprecates an API, keeps serving it for a published
@@ -689,5 +693,4 @@ Five smaller calls belong to whoever does the work:
   rather than one list is for.
 
 [#5663]: https://github.com/commontoolsinc/labs/issues/5663
-[#5698]: https://github.com/commontoolsinc/labs/issues/5698
 [#5746]: https://github.com/commontoolsinc/labs/pull/5746

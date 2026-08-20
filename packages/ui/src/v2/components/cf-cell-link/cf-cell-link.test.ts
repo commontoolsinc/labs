@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFCellLink } from "./index.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import type { CellRef } from "@commonfabric/runtime-client";
+
+import { endDrag, getCurrentDrag, isDragging } from "../../core/drag-state.ts";
 import { installMockDocument } from "../../test-utils/mock-document.ts";
 import { createRenderableCellHandle } from "../../test-utils/mock-vdom-connection.ts";
-import { endDrag, getCurrentDrag, isDragging } from "../../core/drag-state.ts";
+import { CFCellLink } from "./index.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

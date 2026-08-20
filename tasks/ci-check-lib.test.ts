@@ -37,6 +37,7 @@ import {
   REPO,
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
+  unknownAcceptedMetrics,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
@@ -249,15 +250,15 @@ Deno.test("coverage debt metrics format and parse line units", () => {
   assertEquals(formatOverrideSuggestion(1), "1 line");
 
   const overrides = parseBaselineOverrides(
-    "ACCEPT_COVERAGE_DEBT: coverage-debt: workspace uncovered lines = 7 lines",
+    "ACCEPT_COVERAGE_DEBT: workspace +7 lines",
   );
   assertEquals(overrides.metrics.get(metric), 7);
   assertEquals(overrides.coverageBaselineReset, false);
 });
 
-Deno.test("baseline override parser accepts coverage-debt line overrides", () => {
+Deno.test("baseline override parser accepts a group's line increment", () => {
   const overrides = parseBaselineOverrides(
-    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines",
+    "ACCEPT_COVERAGE_DEBT: packages/runner  +123 lines",
   );
 
   assertEquals(
@@ -267,15 +268,116 @@ Deno.test("baseline override parser accepts coverage-debt line overrides", () =>
   assertEquals(overrides.coverageBaselineReset, false);
 });
 
-Deno.test("baseline override parser rejects non-coverage-debt metrics", () => {
+Deno.test("baseline override parser reads a one-line increment", () => {
+  const overrides = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: tasks +1 line",
+  );
+
+  assertEquals(
+    overrides.metrics.get("coverage-debt: tasks uncovered lines"),
+    1,
+  );
+});
+
+Deno.test("baseline override parser rejects a total in place of an increment", () => {
+  // An acceptance naming a total says nothing about how much debt the pull
+  // request adds, and means something different against every baseline, so it
+  // is rejected rather than read as though it were an increment.
   assertThrows(
     () =>
       parseBaselineOverrides(
-        "ACCEPT_COVERAGE_DEBT: job: Check = 7 lines",
+        "ACCEPT_COVERAGE_DEBT: packages/runner = 123 lines",
       ),
     Error,
-    "only coverage-debt metrics can be accepted",
+    "<source group> +N lines",
   );
+});
+
+Deno.test("baseline override parser rejects a metric name in place of a group", () => {
+  assertThrows(
+    () =>
+      parseBaselineOverrides(
+        "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines +7 lines",
+      ),
+    Error,
+    "<source group> +N lines",
+  );
+});
+
+Deno.test("baseline override parser rejects a name no source group could have", () => {
+  assertThrows(
+    () =>
+      parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: packages/a/b/c +7 lines"),
+    Error,
+    "name a coverage source group",
+  );
+
+  // Only `packages` splits into a second level, so a path below any other
+  // top-level directory names nothing the collection rolls a file up to.
+  assertThrows(
+    () => parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: tasks/foo +7 lines"),
+    Error,
+    "name a coverage source group",
+  );
+});
+
+Deno.test("unknownAcceptedMetrics names an accepted group nothing measured", () => {
+  const overrides = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: packages/nonexistent +7 lines\n" +
+      "ACCEPT_COVERAGE_DEBT: tasks +2 lines",
+  );
+  const measured = new Set([
+    "coverage-debt: tasks uncovered lines",
+    "coverage-debt: workspace uncovered lines",
+  ]);
+
+  // A shape a group could have is not a group this run has: the acceptance
+  // would otherwise sit in the description having no effect on anything.
+  assertEquals(unknownAcceptedMetrics(overrides, measured), [
+    "coverage-debt: packages/nonexistent uncovered lines",
+  ]);
+
+  measured.add("coverage-debt: packages/nonexistent uncovered lines");
+  assertEquals(unknownAcceptedMetrics(overrides, measured), []);
+});
+
+Deno.test("baseline override parser reads only a marker starting a line", () => {
+  // A description explaining the mechanism carries no acceptance, and is not a
+  // malformed one either.
+  const prose =
+    "Rebasing changes what an ACCEPT_COVERAGE_DEBT: total means, so it " +
+    "accepts a rise instead.";
+  assertEquals(parseBaselineOverrides(prose).metrics.size, 0);
+
+  // An indented example of the marker is an example. A description showing the
+  // form — as this change's own does — accepts nothing by showing it, and says
+  // so, so an author who indented one by mistake can see why it did nothing.
+  const warnings: string[] = [];
+  const example = parseBaselineOverrides(
+    "Accept a rise above the baseline instead:\n\n" +
+      "    ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n",
+    false,
+    (message) => warnings.push(message),
+  );
+  assertEquals(example.metrics.size, 0);
+  assertEquals(warnings.length, 1);
+  assertStringIncludes(warnings[0], "is indented, so it is read as an example");
+
+  // A merged description is read for its acceptances alone, so the examples it
+  // carries are passed over without comment.
+  const merged: string[] = [];
+  parseBaselineOverrides(
+    "    ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n",
+    true,
+    (message) => merged.push(message),
+  );
+  assertEquals(merged, []);
+
+  // Flush against the left margin, the same line is an acceptance.
+  const accepted = parseBaselineOverrides(
+    "Accepting the flapping lines:\n\nACCEPT_COVERAGE_DEBT: tasks +3 lines\n",
+  );
+  assertEquals(accepted.metrics.get("coverage-debt: tasks uncovered lines"), 3);
 });
 
 Deno.test("baseline override parser reads legacy coverage-debt acceptance only when asked", () => {
@@ -291,6 +393,30 @@ Deno.test("baseline override parser reads legacy coverage-debt acceptance only w
   assertEquals(
     legacy.metrics.get("coverage-debt: packages/runner uncovered lines"),
     123,
+  );
+});
+
+Deno.test("a merged PR's acceptance counts whatever form it was written in", () => {
+  const body =
+    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines\n" +
+    "ACCEPT_COVERAGE_DEBT: packages/memory +4 lines";
+
+  const merged = parseBaselineOverrides(body, true);
+  assertEquals(
+    acceptsCoverageDebt(
+      merged,
+      "coverage-debt: packages/memory uncovered lines",
+    ),
+    true,
+  );
+  // The pre-increment form no longer names an amount the ratchet can use, so
+  // the metric it accepted is passed over rather than failing the whole body.
+  assertEquals(
+    acceptsCoverageDebt(
+      merged,
+      "coverage-debt: packages/runner uncovered lines",
+    ),
+    false,
   );
 });
 
@@ -501,6 +627,21 @@ Deno.test("buildCoverageDebtSuggestionComment lists files (not lines), command, 
     comment,
     "coverage-debt: packages/runner uncovered lines  <=  12",
   );
+  // A failed workspace run yields a partial coverage profile. The agent is
+  // told to get a passing run, with temporary skips allowed only while
+  // collecting local coverage.
+  assertStringIncludes(
+    comment,
+    "make it pass or temporarily skip it for\nthe coverage run",
+  );
+  assertStringIncludes(
+    comment,
+    "Do not\ninclude temporary test skips in the PR",
+  );
+  assertStringIncludes(
+    comment,
+    "code in packages it never\nruns is counted as fully uncovered",
+  );
   // The comment ends at the prompt block — no verify/footer sections.
   assertFalse(comment.includes("### Verify locally"));
 });
@@ -605,7 +746,7 @@ Deno.test("buildCoverageResolvedComment uses a single line of one uncovered line
 
 Deno.test("buildCoverageResolvedComment reports a group that gained uncovered lines", () => {
   // A changed group can reach the resolved comment with more uncovered lines
-  // than `main` when the regression was accepted with a per-metric override or
+  // than `main` when the regression was accepted with a per-group acceptance or
   // the coverage reset marker. The table reports the increase rather than
   // hiding it.
   const resolved = buildCoverageResolvedComment(0, [
@@ -1089,10 +1230,11 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
     comment,
     "`packages/runner/src/scheduler/diagnosis.ts`: 333, 334",
   );
-  // The line to paste into the description, with the count this PR measured.
+  // The line to paste into the description, with the rise this PR measured
+  // rather than the total it reached, so a rebase leaves it saying the same.
   assertStringIncludes(
     comment,
-    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 4614 lines",
+    "ACCEPT_COVERAGE_DEBT: packages/runner +2 lines",
   );
   // The agent prompt is about the flapping lines, not about this PR.
   assertStringIncludes(comment, "### Prompt for an AI coding agent");

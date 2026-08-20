@@ -41,6 +41,173 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
+  // A CFC write authorization (`TrustedActionWrite`) lowers to an
+  // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is the
+  // content-addressed hash of the authoring module. Editing that module at all
+  // — a type annotation, a comment, whitespace — rehashes it, so `moduleIdentity`
+  // changes while `file`, `path`, and the `uiContract` stay identical. That is a
+  // recompile of the same authorization, not a narrowed contract, so the
+  // backward-compatibility check accepts it: the content-addressed identity is
+  // normalized out of the `ifc` comparison. The ten baselined patterns that
+  // carry a CFC write (system/home, system/profile-*, lobby, and the cfc-*
+  // demos) depend on this to stay editable.
+  it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
+    const resultSchema = (moduleIdentity: string): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                file: "/packages/patterns/demo/main.tsx",
+                path: ["setFlag"],
+                moduleIdentity,
+              },
+            },
+            uiContract: {
+              helper: "UiAction",
+              action: "SetFlag",
+              trustedPattern: "DemoSurface",
+              requiredEventIntegrity: ["DemoSurface"],
+            },
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, resultSchema("UVJh2ChHuLkknYrVet0Iu")),
+        pattern({ type: "object" }, resultSchema("DCTZZ89BogydamlP301Qx")),
+      )
+    ).not.toThrow();
+  });
+
+  // The identity fields excluded from the comparison are only the content
+  // hashes. The rest of the writer claim and the whole uiContract still name
+  // the real consumer-facing contract, so a change to any of them must still be
+  // rejected. These build two result schemas that differ in exactly one such
+  // field and assert the update is refused.
+  const trustedWriteResult = (
+    identity: Record<string, unknown>,
+    uiContract: Record<string, unknown>,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      flag: {
+        type: "boolean",
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: identity },
+          uiContract,
+        },
+      },
+    },
+  });
+
+  const baselineIdentity = {
+    file: "/packages/patterns/demo/main.tsx",
+    path: ["setFlag"],
+    moduleIdentity: "UVJh2ChHuLkknYrVet0Iu",
+  };
+  const baselineUiContract = {
+    helper: "UiAction",
+    action: "SetFlag",
+    trustedPattern: "DemoSurface",
+    requiredEventIntegrity: ["DemoSurface"],
+  };
+
+  it("also treats the legacy bundleId as recompile-volatile", () => {
+    const withBundleId = (bundleId: string): JSONSchema =>
+      trustedWriteResult(
+        { file: baselineIdentity.file, path: baselineIdentity.path, bundleId },
+        baselineUiContract,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBundleId("bundle-old")),
+        pattern({ type: "object" }, withBundleId("bundle-new")),
+      )
+    ).not.toThrow();
+  });
+
+  it("still rejects a writeAuthorizedBy binding file change", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(
+            { ...baselineIdentity, file: "/packages/patterns/other/main.tsx" },
+            baselineUiContract,
+          ),
+        ),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  it("still rejects a writeAuthorizedBy binding path change", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(
+            { ...baselineIdentity, path: ["setOtherFlag"] },
+            baselineUiContract,
+          ),
+        ),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  it("still rejects a uiContract change", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, {
+            ...baselineUiContract,
+            action: "ClearFlag",
+          }),
+        ),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
+  it("still rejects a change to the builtin writeAuthorizedBy list", () => {
+    const withBuiltins = (builtins: readonly string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: { writeAuthorizedBy: builtins },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, withBuiltins(["otherBuiltin"])),
+        pattern({ type: "object" }, withBuiltins(["trustedBuiltin"])),
+      )
+    ).toThrow(/flag: ifc changed/);
+  });
+
   it("accepts named Fabric projection fields through an open link target", () => {
     const source: JSONSchema = {
       type: "object",
@@ -192,6 +359,151 @@ describe("piece schema compatibility", () => {
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
+
+    const constrainedSameNodeDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            refsOut: { type: "array", items: { type: "string" } },
+          },
+          required: ["refsOut"],
+        },
+        { type: "undefined" },
+      ],
+      default: { refsOut: [] },
+    };
+    expect(() =>
+      assertSchemaSubset(
+        constrainedSameNodeDefault,
+        constrainedSameNodeDefault,
+      )
+    ).not.toThrow();
+
+    const disjointCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "undefined" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointCompositionWithDescendantDefault,
+        disjointCompositionWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const disjointOneOfWithDescendantDefault: JSONSchema = {
+      oneOf: [
+        {
+          type: "array",
+          items: { type: "number", default: 0 },
+        },
+        { type: "string" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointOneOfWithDescendantDefault,
+        disjointOneOfWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const impossibleAlternativeWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        false,
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        impossibleAlternativeWithDescendantDefault,
+        impossibleAlternativeWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const overlappingCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "object" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        overlappingCompositionWithDescendantDefault,
+        overlappingCompositionWithDescendantDefault,
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    for (
+      const alternatives of [
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          true,
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { properties: {} },
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { type: "unknown" },
+        ],
+        [
+          {
+            type: "number",
+            default: 0,
+          },
+          { type: "integer" },
+        ],
+        [
+          {
+            type: "integer",
+            default: 0,
+          },
+          { type: "number" },
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { type: "FabricBytes" },
+        ],
+      ] as JSONSchema[][]
+    ) {
+      const unprovableComposition: JSONSchema = { anyOf: alternatives };
+      expect(() =>
+        assertSchemaSubset(unprovableComposition, unprovableComposition)
+      ).toThrow(/not stable under default insertion/);
+    }
+
+    const invalidSameNodeDefault: JSONSchema = {
+      oneOf: [{ type: "number" }, { minimum: 0 }],
+      default: 1,
+    };
+    expect(() =>
+      assertSchemaSubset(invalidSameNodeDefault, invalidSameNodeDefault)
+    ).toThrow(/not stable under default insertion/);
+
     expect(() =>
       assertSchemaSubset(
         { ...stableSource, minProperties: 1 },
@@ -1930,7 +2242,7 @@ describe("piece schema compatibility", () => {
         properties: { value: { type: "integer" } },
         required: ["value", brand],
       };
-      for (const epochType of ["FabricEpochNsec", "FabricEpochDays"]) {
+      for (const epochType of ["FabricEpochNsec", "FabricEpochDay"]) {
         expect(() =>
           assertPatternSchemasBackwardCompatible(
             pattern(withField(oldEpoch), true),

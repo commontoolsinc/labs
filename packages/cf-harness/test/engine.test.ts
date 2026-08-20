@@ -156,6 +156,97 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
 });
 
+Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in run state", () => {
+  const configured = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    },
+  });
+  assertEquals(configured.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
+    flowLabels: "persist",
+    flowLabelsSource: "configured",
+  });
+
+  const pinned = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+  });
+  assertEquals(pinned.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "off",
+    flowLabelsSource: "default",
+  });
+
+  const sessionless = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+  });
+  assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
+});
+
+Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+  });
+  assertEquals(await engine.establishWellKnownGrants(), []);
+  assertEquals(engine.getRunState().wellKnownGrants, undefined);
+  assertEquals(engine.handleTable, undefined);
+});
+
+Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the record", async () => {
+  const registrySpace =
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const registryId = `of:fid1:${"C".repeat(43)}`;
+  let registryReads = 0;
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => registrySpace,
+            getDefaultPattern: (_runIt: boolean) => {
+              registryReads += 1;
+              return Promise.resolve({
+                getMetaRaw: () => undefined,
+                key: (segment: string) => ({
+                  getAsNormalizedFullLink: () => ({
+                    space: registrySpace,
+                    id: registryId,
+                    path: [segment],
+                  }),
+                }),
+              });
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+
+  const granted = await engine.establishWellKnownGrants();
+  assertEquals(granted.length, 1);
+  assertEquals(granted[0]!.name, "piece-registry");
+  assertEquals(granted[0]!.ref, `/${registryId}/pieceRegistry`);
+  assertEquals(engine.getRunState().wellKnownGrants, granted);
+  assertEquals(engine.handleTable?.entries.length, 1);
+
+  // A second establishment answers from the record without another resolve.
+  assertEquals(await engine.establishWellKnownGrants(), granted);
+  assertEquals(registryReads, 1);
+});
+
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
   const resumedState = (
     modelProvider: "openai-codex" | "openai-compatible-gateway",

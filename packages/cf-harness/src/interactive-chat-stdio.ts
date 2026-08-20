@@ -1,5 +1,9 @@
 import { resolve, toFileUrl } from "@std/path";
 import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+import {
   createHarnessChatErrorResponse,
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
@@ -20,6 +24,7 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import {
   createHarnessInteractiveChatService,
   type HarnessInteractiveChatService,
@@ -173,6 +178,9 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
 const openSessionStore = async (
   sessionDbPath: string,
 ): Promise<HarnessChatSessionStore> => {
+  // The SQLite session store opens its native library as it loads, and only a
+  // session-backed run needs it.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { openSqliteHarnessChatSessionStore } = await import(
     "./sqlite-session-store.ts"
   );
@@ -198,17 +206,12 @@ const SUPPORTED_TURN_STATUSES = new Set([
   "completed",
   "failed",
 ]);
-const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
-  "bash",
-  "bash-no-sandbox",
-  "read_file",
-  "view_image",
-  "web_fetch",
-  "read_skill_resource",
-  "edit_file",
-  "write_file",
-  "delegate_task",
-]);
+// Every tool the harness defines, taken from the registry that defines them:
+// a client naming a tool this build offers is submitting a policy this build
+// can honour, and a second list here would refuse one the run advertises.
+const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>(
+  BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
+);
 const SUPPORTED_POLICY_SUBAGENT_PROFILES = new Set<HarnessSubagentProfile>(
   HARNESS_SUBAGENT_PROFILES,
 );
@@ -219,16 +222,13 @@ const SUPPORTED_CFC_ENFORCEMENT_MODES = new Set([
   "enforce-strict",
 ]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const hasOptionalString = (
-  value: Record<string, unknown>,
+  value: ReadonlyRecord,
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === "string";
 
 const hasOptionalStringIn = (
-  value: Record<string, unknown>,
+  value: ReadonlyRecord,
   key: string,
   allowedValues: readonly string[],
 ): boolean =>
@@ -236,14 +236,14 @@ const hasOptionalStringIn = (
   (typeof value[key] === "string" && allowedValues.includes(value[key]));
 
 const hasOptionalNonNegativeInteger = (
-  value: Record<string, unknown>,
+  value: ReadonlyRecord,
   key: string,
 ): boolean =>
   value[key] === undefined ||
   (Number.isInteger(value[key]) && Number(value[key]) >= 0);
 
 const hasOptionalPositiveInteger = (
-  value: Record<string, unknown>,
+  value: ReadonlyRecord,
   key: string,
 ): boolean =>
   value[key] === undefined ||
@@ -253,13 +253,13 @@ const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
 
 const isValidWorkspaceParam = (value: unknown): boolean =>
-  isRecord(value) &&
+  isObjectNotArray(value) &&
   typeof value.hostPath === "string" &&
   hasOptionalString(value, "cwd") &&
   hasOptionalString(value, "sandboxPath");
 
 const isValidTurnInputParam = (value: unknown): boolean =>
-  isRecord(value) &&
+  isObjectNotArray(value) &&
   typeof value.text === "string" &&
   (value.imageAttachments === undefined ||
     Array.isArray(value.imageAttachments));
@@ -281,7 +281,7 @@ const isValidPromptSlotParam = (value: unknown): boolean => {
 };
 
 const isValidBrowserAccessParam = (value: unknown): boolean =>
-  isRecord(value) &&
+  isObjectNotArray(value) &&
   value.type === HARNESS_BROWSER_ACCESS_LEASE_TYPE &&
   isNonEmptyString(value.leaseId) &&
   isNonEmptyString(value.cdpUrl) &&
@@ -299,7 +299,7 @@ const isValidBrowserAccessParam = (value: unknown): boolean =>
   );
 
 const isValidChatPolicyParam = (value: unknown): boolean =>
-  isRecord(value) &&
+  isObjectNotArray(value) &&
   value.type === "cf-harness.chat-policy" &&
   typeof value.toolMode === "string" &&
   SUPPORTED_POLICY_TOOL_MODES.has(value.toolMode) &&
@@ -316,7 +316,7 @@ const isValidChatPolicyParam = (value: unknown): boolean =>
 
 const isValidRequestParams = (
   method: HarnessChatRequestMethod,
-  params: Record<string, unknown>,
+  params: ReadonlyRecord,
 ): boolean => {
   switch (method) {
     case "start_session":
@@ -324,23 +324,24 @@ const isValidRequestParams = (
         isValidWorkspaceParam(params.workspace) &&
         hasOptionalString(params, "model") &&
         hasOptionalString(params, "artifactRoot") &&
-        (params.context === undefined || isRecord(params.context)) &&
+        (params.context === undefined || isObjectNotArray(params.context)) &&
         (params.policy === undefined ||
           isValidChatPolicyParam(params.policy)) &&
-        (params.capabilities === undefined || isRecord(params.capabilities)) &&
+        (params.capabilities === undefined ||
+          isObjectNotArray(params.capabilities)) &&
         (params.browserAccess === undefined ||
           isValidBrowserAccessParam(params.browserAccess)) &&
-        (params.metadata === undefined || isRecord(params.metadata));
+        (params.metadata === undefined || isObjectNotArray(params.metadata));
     case "start_turn":
       return typeof params.sessionId === "string" &&
         hasOptionalString(params, "turnId") &&
         isValidTurnInputParam(params.input) &&
-        (params.context === undefined || isRecord(params.context)) &&
+        (params.context === undefined || isObjectNotArray(params.context)) &&
         (params.policy === undefined ||
           isValidChatPolicyParam(params.policy)) &&
         (params.browserAccess === undefined ||
           isValidBrowserAccessParam(params.browserAccess)) &&
-        (params.metadata === undefined || isRecord(params.metadata));
+        (params.metadata === undefined || isObjectNotArray(params.metadata));
     case "cancel_turn":
       return typeof params.sessionId === "string" &&
         hasOptionalString(params, "turnId") &&
@@ -366,7 +367,7 @@ const isRequestEnvelope = (
   value: unknown,
 ): value is HarnessChatRequestEnvelope => {
   if (
-    !isRecord(value) ||
+    !isObjectNotArray(value) ||
     !("type" in value) ||
     value.type !== HARNESS_CHAT_REQUEST_TYPE ||
     !("protocolVersion" in value) ||
@@ -377,7 +378,7 @@ const isRequestEnvelope = (
     typeof value.method !== "string" ||
     !SUPPORTED_REQUEST_METHODS.has(value.method as HarnessChatRequestMethod) ||
     !("params" in value) ||
-    !isRecord(value.params)
+    !isObjectNotArray(value.params)
   ) {
     return false;
   }
@@ -388,7 +389,7 @@ const isRequestEnvelope = (
 };
 
 const requestIdFromUnknown = (value: unknown): string =>
-  isRecord(value) &&
+  isObjectNotArray(value) &&
     "requestId" in value &&
     typeof value.requestId === "string"
     ? value.requestId
@@ -473,9 +474,7 @@ export const runHarnessInteractiveChatNdjsonTransport = async (
 const isTransportErrorResponse = (
   value: unknown,
 ): value is HarnessChatResponse =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
+  isObjectNotArray(value) &&
   "type" in value &&
   value.type === HARNESS_CHAT_RESPONSE_TYPE &&
   "ok" in value &&

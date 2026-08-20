@@ -26,8 +26,10 @@
  * - Property access used in computation: ERROR (must wrap in computed())
  * - Optional chaining:
  *   - optional property/element access is allowed in supported lowerable
- *     expression sites
- *   - non-lowerable optional access still errors
+ *     expression sites, and inside an inline callback whose owning call
+ *     lowers at one (the lift absorbs the callback)
+ *   - non-lowerable optional access still errors, including inside a
+ *     lowered array-method callback
  * - Calling .get() on a cell with no lowerable expression site to carry the
  *   read: ERROR (must wrap in computed()); a read at a lowerable site is
  *   auto-wrapped into a lift instead
@@ -36,9 +38,11 @@
  * - Local computed()/lift() aliases used as plain values in the same
  *   callback: ERROR (use a nested computed()/lift())
  */
+
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
@@ -58,6 +62,7 @@ import {
 import {
   classifyRestrictedReactiveComputation,
   classifyUnsupportedExpressionSiteCallRoot,
+  findInlineCallbackCarrierSite,
   findLowerableExpressionSite,
 } from "./expression-site-policy.ts";
 import {
@@ -217,9 +222,11 @@ export class PatternContextValidationTransformer
 
       // Check for optional navigation in reactive context. Optional property /
       // element access remains valid at lowerable expression sites (including
-      // JSX). When the chain is a call callee, the call-root policy decides
-      // whether the underlying call kind is lowerable; optionality itself does
-      // not change that decision.
+      // JSX), and inside an inline callback whose owning call lowers at one —
+      // the lift wrapping that site absorbs the callback, so the access runs
+      // on resolved values. When the chain is a call callee, the call-root
+      // policy decides whether the underlying call kind is lowerable;
+      // optionality itself does not change that decision.
       if (
         (
           ts.isPropertyAccessExpression(node) ||
@@ -232,14 +239,18 @@ export class PatternContextValidationTransformer
         if (
           !optionalCallTargetHandledByCallRootPolicy &&
           isInRestrictedReactiveContext(node, checker, context) &&
-          !findLowerableExpressionSite(node, context, analyze)
+          !findLowerableExpressionSite(node, context, analyze) &&
+          !findInlineCallbackCarrierSite(node, context, analyze)
         ) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
             message:
-              `Optional chaining '?.' is not allowed in reactive context. ` +
-              `Use ifElse() or wrap in computed() for conditional access.`,
+              `This optional access has no expression site that can carry ` +
+              `it, so it cannot be lowered against resolved values. Wrap ` +
+              `it in computed(() => ...) for conditional access, or use it ` +
+              `at a site that lowers — a binding, a return, an object ` +
+              `property, or a JSX expression.`,
             node,
           });
         }
@@ -931,7 +942,7 @@ export class PatternContextValidationTransformer
     if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
       return;
     }
-    const firstArg = node.arguments[0];
+    const firstArg = node.arguments[0] && unwrapExpression(node.arguments[0]);
     if (
       !firstArg ||
       !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))

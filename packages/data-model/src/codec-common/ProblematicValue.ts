@@ -7,11 +7,11 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
@@ -20,7 +20,19 @@ import { toReportableState } from "./toReportableState.ts";
 import { toReportableTag } from "./toReportableTag.ts";
 
 /**
- * Container for a value whose deconstruction or reconstruction failed.
+ * The encoded state of a {@link ProblematicValue}: its three preserved facts,
+ * the tag among them. What was at fault is data here rather than wire
+ * structure, which is what lets an instance reporting a malformed tag be
+ * encoded at all.
+ */
+type ProblematicValueState = {
+  tag: string;
+  state: FabricValue;
+  error: string;
+};
+
+/**
+ * Container for a value whose encoding or decoding failed.
  * Preserves the tag and raw state at fault, for round-tripping and debugging.
  * Used in lenient mode to allow graceful degradation rather than hard
  * failures. See Section 3.5 of the formal spec.
@@ -142,20 +154,15 @@ export class ProblematicValue extends BaseFabricInstance {
   }
 
   static #codec = Object.freeze(
-    new (class ProblematicValueCodec extends BaseNonterminalCodec {
+    new (class ProblematicValueCodec
+      extends BaseNonterminalCodec<ProblematicValueState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Problematic, ProblematicValue);
       }
 
-      /**
-       * @inheritDoc
-       *
-       * All three preserved fields, the tag among them: what was at fault is
-       * data here rather than wire structure, which is what lets an instance
-       * reporting a malformed tag be encoded at all.
-       */
-      encode(value: ProblematicValue): FabricValue {
+      /** @inheritDoc */
+      encode(value: ProblematicValue): ProblematicValueState {
         return {
           tag: value.wireTypeTag,
           state: value.state,
@@ -166,50 +173,38 @@ export class ProblematicValue extends BaseFabricInstance {
       /**
        * @inheritDoc
        *
-       * A state that is not the encoded shape becomes a `ProblematicValue` of
-       * this decode rather than a half-built one of the original fault. The
-       * recursion is one deep: what this produces is well-formed by
+       * `tag` and `error` must be strings; `state` need only be present.
+       */
+      canDecode(state: FabricValue): state is ProblematicValueState {
+        // Every `FabricValue` is a valid state, `undefined` among them, so an
+        // absent property is the only thing that marks a record this codec did
+        // not write -- and accepting one would put it back on the wire with
+        // the property filled in, which is a silent reshaping rather than a
+        // report.
+        return isPlainObject(state) && (typeof state.tag === "string") &&
+          (typeof state.error === "string") && Object.hasOwn(state, "state");
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * The recursion is one deep: what this produces is well-formed by
        * construction.
        */
       decode(
         _typeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        state: ProblematicValueState,
+        env: LiveEnvironment,
       ): FabricValue {
-        let result: ProblematicValue;
-
-        if (!isPlainObject(state)) {
-          result = new ProblematicValue(
-            CODEC_TYPE_TAGS.Problematic,
-            state,
-            "expected object state, got " + typeof state,
-          );
-        } else {
-          const { tag, state: inner, error } = state as {
-            tag: any;
-            state: any;
-            error: any;
-          };
-
-          // `state` is checked for presence rather than for type, unlike the
-          // other two. Every `FabricValue` is a valid state, `undefined`
-          // among them, so an absent property is the only thing that marks a
-          // record this codec did not write -- and accepting one would put it
-          // back on the wire with the property filled in, which is a silent
-          // reshaping rather than a report.
-          result = ((typeof tag === "string") && (typeof error === "string") &&
-              Object.hasOwn(state, "state"))
-            ? new ProblematicValue(tag, inner, error)
-            : new ProblematicValue(
-              CODEC_TYPE_TAGS.Problematic,
-              state,
-              "expected string `tag` and `error`, and a `state` property",
-            );
-        }
+        const result = new ProblematicValue(
+          state.tag,
+          state.state,
+          state.error,
+        );
 
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

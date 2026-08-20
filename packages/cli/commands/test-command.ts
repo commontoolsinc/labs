@@ -1,6 +1,8 @@
-import { Command } from "@cliffy/command";
-import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
+import { resolve } from "@std/path";
+
+import { Command } from "@cliffy/command";
+
 import { cliText } from "../lib/cli-name.ts";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
@@ -40,7 +42,12 @@ export const test = new Command()
   )
   .option(
     "--root <dir:string>",
-    "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
+    "Root directory for resolving imports. Defaults to the nearest ancestor whose deno.json(c) declares a package name, else the test file's directory.",
+  )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file the pattern under test reads with dataFile(). Repeatable.",
+    { collect: true },
   )
   .option(
     "--stats-threshold <ms:number>",
@@ -68,6 +75,12 @@ export const test = new Command()
   .option(
     "--pattern-coverage-dir <dir:string>",
     "Write pattern runtime coverage LCOV artifacts to this directory.",
+  )
+  .option(
+    "--timing-measures-out <file:string>",
+    "Emit a performance.measure per logger time span and write them here as " +
+      "JSON. Aggregate with skills/perf-investigation/scripts/" +
+      "aggregate-measures.ts.",
   )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
@@ -144,11 +157,17 @@ export const test = new Command()
       timeout: options.timeout,
       verbose: options.verbose,
       root,
+      dataFilePaths: options.datafile?.map((path: string) =>
+        resolve(Deno.cwd(), path)
+      ),
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,
       storageStats: options.storageStats,
       storageStatsLimit: options.storageStatsLimit,
+      timingMeasuresOut: options.timingMeasuresOut
+        ? resolve(Deno.cwd(), options.timingMeasuresOut)
+        : undefined,
       patternCoverageDir,
       continuousUI: Deno.env.get("CF_TEST_CONTINUOUS_UI") === "1",
     });

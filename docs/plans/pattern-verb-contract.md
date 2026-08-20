@@ -35,9 +35,10 @@ gain the second reason they are load-bearing.
 **Amendment (2026-07-30)**, from repointing this document's source citations at
 symbols rather than line numbers. Verifying each one against the tree showed
 that WS-D has landed whole, and the claims below are corrected in place:
-`Cell.send` accepts a caller-supplied event id and scopes it per stream;
-`resolveInvocationId` mints one for every `cf piece call`, so the id is always
-supplied rather than only when a caller passes `--invocation`;
+`Cell.send` accepts a caller-supplied event id and scopes it by the session
+that chose it and the stream it was sent to; `resolveInvocationIdentity` mints
+the id–session pair for every `cf piece call`, so the pair is always supplied
+rather than only when a caller passes `--invocation`;
 `executeResolvedCallable` forwards it, then reads the handling's outcome back
 off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
 on a receipt-exists collision, where the original handling's outcome settles
@@ -49,10 +50,12 @@ recorded in the implementation plan). What remains open is all of Part 1.
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
-topic on the team board takes six CLI invocations, returns no handle, hides
-rejections, and duplicates on retry. The fix is smaller than it looks, because
-the hard parts already exist in the runtime: a durable id per event, a
-per-invocation result cell addressed by it, and an exactly-once receipt.
+topic on the team board took six CLI invocations, returned no handle, hid
+rejections, and duplicated on retry; `topics` is now down to three and surfaces
+its refusals, which is what adopting this contract buys. The fix was smaller
+than it looked, because the hard parts already exist in the runtime: a durable
+id per event, a per-invocation result cell addressed by it, and an exactly-once
+receipt. Retry idempotence is the part still outstanding.
 
 The design is two halves. **Part 1, the verb contract**: rules pattern authors
 adopt so their verbs are drivable — pattern-owned vocabulary, no new machinery.
@@ -64,30 +67,31 @@ results back. Patterns choose the words; the runtime carries them.
 
 ## The problem
 
-Filing one topic headlessly takes six CLI invocations:
+Filing one topic headlessly takes three CLI invocations:
 
 | invocations | what | cause |
 | --- | --- | --- |
-| 1 | `addTopic {title, agentName}` | the create itself |
-| 1 | `get crossrefs --step` to learn the new fid | create returns no handle |
-| 3 | `setBody` / `addComment` / `addLink` | the body cannot ride the create; the comment and link are the real work |
-| 1 | a verification read (`get … --step`) | no result to inspect |
+| 1 | `addTopic {title, body, agentName}` | the create itself, carrying the body and handing back the topic it made |
+| 2 | `addComment` / `addLink` | the real work, and not protocol tax |
 
-Half of this is protocol tax: the fid lookup and the verification read exist
-only because nothing is returned, and `setBody` rides every create only
-because the create cannot carry a body.
+That is what this contract asks of a create, and `topics` has reached it: the
+body rides the create, so no `setBody` finishes one; a declared result hands
+the topic back, so the caller neither searches a list for what it just made nor
+reads it back to learn whether the call did anything; and a refusal throws
+rather than returning quietly. What remains below is stated against the shape
+that got here.
 
-Three consequences:
+Three consequences the contract exists to remove, two of them now removed in
+`topics`:
 
-- **Create returns no handle.** `addTopic` returns nothing, so the caller reads
-  `crossrefs` to learn which topic it made — and `TopicCrossref.fid` reads `""`
-  until known. (Sub-piece addressability by fid itself works — #4758; only the
-  return value is missing.)
+- **A create with no declared result returns no handle**, leaving the caller to
+  search a list for the thing it just made. `addTopic` declares one
+  (`AddTopicResult.topic`) and hands back the piece itself, which is the shape
+  this contract asks of every create.
 - **Semantic rejection is invisible.** Runtime failures surface; a verb
-  declining on its own terms does not. `addTopic` early-returns on an empty
-  title and on a blank `agentName`, both indistinguishable from success.
-  (Throwing instead would surface today — as prose in a failure message, not a
-  typed code.)
+  declining on its own terms does not. `addTopic` now throws through
+  `rejectMutation` on an empty title and on a blank `agentName`, which surfaces
+  — as prose in a failure message, not yet as a typed code.
 - **Retries can duplicate.** One reported headless session saw creates report a
   sync timeout after the write had committed, so retrying minted duplicates.
   The topics skill advises "retry once" on an initial-sync timeout — safe only
@@ -162,16 +166,19 @@ plumbing through the callable layer:
 
 1. **No caller-supplied id from the CLI.** *Closed.* Written when `cf piece
    call` sent without an `eventId`, so a client retry minted a fresh event and
-   re-executed rather than colliding on the receipt. `resolveInvocationId`
-   (`packages/cli/commands/piece.ts`) now mints an id whenever `--invocation`
-   is absent, and `executeResolvedCallable`'s handler branch
-   (`packages/cli/lib/callable.ts`) forwards it as `{ eventId: invocationId }`.
+   re-executed rather than colliding on the receipt. `resolveInvocationIdentity`
+   (`packages/cli/commands/piece.ts`) now mints the id–session pair whenever
+   neither is named — refusing an `--invocation` named without its session —
+   and `executeResolvedCallable`'s handler branch
+   (`packages/cli/lib/callable.ts`) forwards it as
+   `{ eventId: invocation.id, session: invocation.session }`.
 2. **No readback.** *Closed.* The same handler branch reads the receipt at
    `tx.handlingReceiptLink` through `runtime.getCellFromLink`, pulls it, and
    returns the value as `invocation.result`, treating a value-less verb's
    empty record as existence-only. A receipt-exists collision reads back the
    ORIGINAL handling's outcome, so a retry settles as a success without
-   re-executing.
+   committing again — the redelivered body still runs, and then loses the
+   race for the receipt.
 3. **Patterns return nothing.** All of `topics` is handlers that return no
    value — `addTopic: Stream<AddTopicEvent>` on the board, and the
    `AgentAuthoredEvent` family (`addComment`, `addLink`, `setBody`) on the
@@ -188,7 +195,7 @@ flag a wrong assumption before it becomes a wrong choice: the redesign keeps
 what is load-bearing and changes only what is not.
 
 **Fire-and-forget streams are essential** — in a narrow sense worth pinning
-down, because the loom FUSE audit calls a neighbouring behaviour a bug.
+down, because the loom FUSE audit calls a neighboring behavior a bug.
 Essential: a handler's *effect* is writes that propagate, not a value returned
 into the stream. *Not* essential, and what the audit flags as a spec violation,
 is *acknowledging a write before its transaction commits*. The runtime's own
@@ -201,8 +208,8 @@ model; it exposes it.
 the result cell are omissions in the callable layer, not properties the system
 relies on. Closing them is safe; what it costs is two commitments:
 
-- **Honouring caller-supplied ids** obliges us to define what a repeated id
-  means and to trust callers not to collide — though the collision behaviour
+- **Honoring caller-supplied ids** obliges us to define what a repeated id
+  means and to trust callers not to collide — though the collision behavior
   itself (create-only receipt) is already the scheduler's invariant, not new
   machinery.
 - **Handing out result-cell addresses** commits the runtime to those addresses
@@ -342,23 +349,22 @@ board one read. The pattern owns the reference and summary; the client, which
 can inspect the backing cells, owns rendering the reference as a fid or full
 path.
 
-`topics.crossrefs` already carries each `topic` reference, but it is the
-cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
-`referencedBy` expand to full pieces on read
-(the `TopicCrossref` interface, `packages/patterns/topics/main.tsx`), and a
-headless survey of the live
-board through it produced over 300k tokens of output. Its explicit `fid` field
-is not the general model either: it is derived indirectly from runtime-only
-cell surface, reads `""` while unresolved, and a pattern cannot reliably see
-its own runtime address. The index is therefore a separate result — one
-reference-plus-summary row per child, reference edges as sibling references,
-never expanded pieces — and generic clients render identity on top: a coarse
-exploration mode such as `--include-ids` can annotate every point where the
-backing identity changes, with a narrower path-selected form to follow if the
-broad form proves too noisy. Both are projections of existing references, not
-fields every pattern must maintain. Acceptance for an index: its serialization
+`topics.index` is the worked example: one reference-plus-summary row per child,
+the reference declared through a title-only schema so no row can expand a topic
+(the `TopicIndexRow` interface, `packages/patterns/topics/main.tsx`). A
+reference-bearing result that does not do this is not an index — a row whose
+reference expands to the full piece made a headless survey of the live board
+produce over 300k tokens of output. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
+
+A row carries no authored identifier, and that is the general model: the row IS
+the child, read through the narrow schema, so its address is the child's and a
+survey can be followed without the pattern maintaining an address field it
+cannot reliably see. A client asks for that address where it wants one —
+`--select index[].@` names it, the `@` suffix being the concise address form.
+Identity is a projection of a reference the result already holds, so no pattern
+has to publish one.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
@@ -461,14 +467,16 @@ required field later stops the sugar applying rather than silently misbinding.
 
 ### Applied to `topics`
 
-`topics` already satisfies the interim atomic-attribution rule; filing is six
-invocations. The rest of Part 1 — a body argument on `addTopic` so `setBody`
-becomes an editing verb rather than part of every create, and thrown rejections
-in place of silent early-returns — makes it five. The remaining waste — the
-handle lookup and the verification read — is exactly what a returned child
-reference removes, and that is Part 2's job: with it, filing is `addTopic`,
-`addComment`, `addLink` — one call per thing the author meant to do. The CLI
-renders the returned reference as a usable fid/path.
+`topics` already satisfies the interim atomic-attribution rule, and Part 1 has
+landed there: filing is `addTopic` (carrying the body, handing back the topic),
+`addComment`, `addLink` — three invocations, one per thing the author meant to
+do. The handle lookup and the verification read are gone with the declared
+result, `setBody` is an editing verb rather than part of every create, and
+`rejectMutation` throws where the verbs used to return quietly. The CLI renders
+the returned reference as a usable address.
+
+What is still owed is the typed rejection code — a refusal surfaces as prose in
+a failure message — and Part 2's retry idempotence.
 
 ## Part 2 — the invocation protocol
 
@@ -531,12 +539,12 @@ with fan-out.
 This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
-acknowledgement of an already-committed write is held hostage to every derived
-recomputation it triggered. On the live topics board that is `crossrefs`
-re-deriving over the whole board; mutations were observed taking 60–80 s. The
+acknowledgment of an already-committed write is held hostage to every derived
+recomputation it triggered. On the live topics board that is the board's own
+index re-deriving over every topic; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
-slow derived recomputation cannot delay acknowledgement (implementation plan,
+slow derived recomputation cannot delay acknowledgment (implementation plan,
 WS-D).
 
 Waiting is a caller-side choice — whether to wait at all, and for how long. The
@@ -593,7 +601,7 @@ cells already inherit `resultScope` from the callable cell
 exists; today those
 cells are unlinked and merely unguessable.
 
-Scope is not the whole confidentiality story: a result derived from labelled
+Scope is not the whole confidentiality story: a result derived from labeled
 data carries CFC confidentiality labels of its own, so a stored invocation
 record is subject to the same label rules as any other cell
 (`docs/specs/cfc-label-metadata-confidentiality.md`). Retention and readback
@@ -771,25 +779,33 @@ contract.
 ### Client surface
 
 ```text
+# An invocation id deduplicates only within the session it was chosen in,
+# so a run mints one session and every call of that run shares it.
+$ export CF_INVOCATION_SESSION="$(cf invocation-session new)"
+
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The client mints the id before sending and prints it even when its wait
-# times out. Retrying with it returns the original — no re-execution.
+# The client mints the id before sending and prints it — beside its session —
+# even when its wait times out. Retrying the pair returns the original
+# outcome: the body re-runs and loses the create-only receipt race, so
+# nothing commits twice. An --invocation named without a session is refused.
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --invocation inv_7f3a
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The caller chooses whether and how long to wait
+# The caller chooses whether to wait: a detached call exits at the commit
+# acknowledgment with the receipt's address, and collecting the outcome
+# later is an ordinary read of that address.
 $ cf piece call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
-{ "invocation": "inv_9c1b", "status": "pending" }
-$ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
-{ "invocation": "inv_9c1b", "status": "settled",
-  "result": { "summary": "..." } }
+{ "invocation": "inv_9c1b", "status": "committed",
+  "receipt": "/of:fid1:…" }
+$ cf piece get --piece /of:fid1:… summary
+"..."
 ```
 
 Client-local `@name` bindings are deferred. They can encode host + space +
@@ -923,7 +939,7 @@ client retry needs.
    without it. Options: a small runtime change writing the validated plain
    return into the receipt instead of `{}`, or a contract rule that results
    carry at least one reactive. The first looks right; it is the one place this
-   design asks the runtime for new behaviour rather than exposure. That change
+   design asks the runtime for new behavior rather than exposure. That change
    now exists behind the `plainResultReceipts` experimental option (WS-C),
    default-on since the three-topic integration proof (#5244), so neither the
    mechanism nor the default remains open — an explicit `false` stays the

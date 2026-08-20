@@ -312,7 +312,7 @@ The runner's llm tests wait on that shape often enough to have a name for it.
 `waitForLlmSettled`, in `packages/runner/test/support/llm-result.ts`, resolves
 once `llm`, `generateText` or `generateObject` has finished a request. It is a
 call to `waitForCellValue` carrying the predicate those builtins settle on,
-`pending === false`, and it holds no wait machinery of its own. Its neighbour
+`pending === false`, and it holds no wait machinery of its own. Its neighbor
 `waitForLlmMessages` adds a message count to that predicate, which is how an
 `llmDialog` test names the turn it is waiting for — every turn ends in the same
 settled state, so the count is what tells one from the next. Reach for them
@@ -984,7 +984,7 @@ global, and a `waitForCondition` predicate runs in the page, so it could call
 
 First, the predicate is serialized into the page and closes over nothing from the
 test module, so everything it needs has to be inlined. `waitForState` compares
-views through `isAppViewEqual` from `@commonfabric/shell/shared`, and it compares
+views through `isAppViewEqual` from `@commonfabric/navigation`, and it compares
 identities by DID — which the serialized state does not carry. `serialize()`
 writes the identity out as a raw key pair, and `deserialize()` recovers the DID by
 importing that private key through `Identity.fromRaw`. An in-page predicate can

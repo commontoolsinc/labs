@@ -1,17 +1,20 @@
 /**
  * End-to-end coverage of the `cf view` command and its non-interactive entry
  * (mod.ts). Each case runs the real CLI as a subprocess: with stdout piped the
- * viewer prints the colourised text and exits, like `less` when redirected, so
+ * viewer prints the colorized text and exits, like `less` when redirected, so
  * these exercise the command wiring, argument handling, input reading and the
  * print path without a terminal.
  */
+
 import { assert, assertEquals } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
-import { cf } from "./utils.ts";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+
 import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
+import { cf } from "./utils.ts";
 
 const SRC = "export const x = pattern(() => ({ value: 1 }));\nconst y = x;\n";
 const CLI_PACKAGE_DIR = join(import.meta.dirname!, "..");
@@ -46,7 +49,7 @@ function runViewForBytes(args: string[]): Promise<Deno.CommandOutput> {
   });
 }
 
-Deno.test("cf view --plain prints colourised source and exits 0", async () => {
+Deno.test("cf view --plain prints colorized source and exits 0", async () => {
   const { code, stdout } = await cf("view --plain", { stdin: SRC });
   assertEquals(code, 0);
   assert(stdout.join("\n").includes("pattern"), stdout.join("\n"));

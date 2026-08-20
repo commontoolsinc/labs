@@ -1,10 +1,11 @@
-import type { CellScope, JSONSchema } from "../builder/types.ts";
-import type { CfcConfClause } from "./clause.ts";
 import type { FabricValue } from "@commonfabric/api";
 import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { Metadata } from "../storage/interface.ts";
+import type { CfcConfClause } from "./clause.ts";
 import type {
   CfcLabelView,
   IFCLabel,

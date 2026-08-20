@@ -1,15 +1,16 @@
-import { type BuiltInCompileAndRunParams } from "commonfabric";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commonfabric/js-compiler";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
+import { type BuiltInCompileAndRunParams } from "commonfabric";
+
 import type { CellScope } from "../builder/types.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { type Cell } from "../cell.ts";
 import { waveRunContextOf } from "../executor/wave.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
 import { narrowestScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 
 /**
  * Compile a pattern/module and run it.

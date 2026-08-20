@@ -62,7 +62,7 @@ unsupported. Both restrictions hold whichever syntax the reader writes in.
 
 ### What a shape can say today
 
-There are two syntaxes, and today both ride `--schema`
+There are two syntaxes, each on its own flag
 (`packages/cli/README.md`, "Output Conventions"):
 
 ```bash
@@ -72,12 +72,10 @@ There are two syntaxes, and today both ride `--schema`
 ```
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
-object and is what expresses nested structure.
-[CLI surface shape](cli-surface-shape.md) proposes giving them separate flags —
-`--select` for the concise syntax, `--schema` for full schemas — and this
-document writes them that way throughout. The measured facts at the end use
-`--schema` for both, because that is the flag the measurements were taken
-against.
+object and is what expresses nested structure. [CLI surface
+shape](cli-surface-shape.md) is where the split between them is reasoned out.
+The measured facts at the end write `--schema` for both, because that is the
+flag the measurements were taken against.
 
 **`--filter` is the other axis.** A shape names paths; it cannot say "only the
 elements where `status == "open"`". That is `--filter`, a predicate over array
@@ -96,7 +94,7 @@ than each item.
 
 There are two kinds of thing a reader's schema may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
-`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`). Both
+`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/cell-selection.ts`). Both
 are checked when a full schema is parsed — the inline and `@file` forms. The
 concise form reaches neither check; what keeps it from expressing them is its
 identifier grammar, which has no way to write a keyword at all. So the two
@@ -155,8 +153,7 @@ rendered as an address at once:
 returning
 
 ```json
-{ "topic": { "$link": { "id": "of:fid1:…", "space": "did:key:…" },
-             "title": "New topic" } }
+{ "topic": { "$link": "/of:fid1:…", "title": "New topic" } }
 ```
 
 **Semantics: link *instead of* contents.** A bare marker returns the address and
@@ -173,27 +170,26 @@ structural change.
 
 The runtime's own link encoding is dispatched on an experimental option and
 mid-migration, so a caller reading it builds on something replaceable. A rendered
-address is therefore a **declared** shape, and the moment callers are told to
-`jq` a result, that shape is a public contract — the only choice is whether it is
-one we declared or one that leaked. The spelling follows `state-inspector`'s
-`annotate()`, which already projects stored values to `{ $link }` / `{ $ref }` /
-`"$stream"` for the same reason, though only its key name: that projection drops
-empty and absent fields where this one fills them.
+address is therefore a **declared** form, and the moment callers are told to
+`jq` a result, that form is a public contract — the only choice is whether it is
+one we declared or one that leaked.
 
-| Field | | Why |
+The form is the fabric's canonical reference syntax,
+`/[@did/]<id>[@scope][/path]`, serialized by the runner's
+`createLLMFriendlyLink` — the same string a pattern, the shell and this CLI's
+own intake all name a cell by. One string rather than a record of fields is
+what makes an address passable: a caller holding it writes
+`--piece "$THAT"` with no reassembly, and a position below a document's root
+travels with the path that names it instead of losing it in a sibling field.
+
+| Part | | Why |
 | --- | --- | --- |
-| `id` | always, **scheme included** | The scheme is the kind, and `of:` and `computed:` over one hash are different entities. Dropping it is a silent retarget |
-| `space` | always, filled in | Measured: the runtime emits it on some links and not others, so a consumer cannot rely on it. Filling it means no fallbacks in `jq`, and an address stays meaningful when copied out of context |
-| `scope` | always, defaulting `"space"` | Absence silently meaning `"space"` is a trap |
-| `path` | always, `[]` when empty | One shape, no optional-key branching |
+| id | always, **scheme included** | The scheme is the kind, and `of:` and `computed:` over one hash are different entities. Dropping it is a silent retarget |
+| space | `@did:key:…` prefix, where it differs from the space the command targeted | The space is part of the address, and an address that left its space resolves to a different cell without it. Where it agrees, spelling it adds nothing a reader can act on |
+| scope | `@user`/`@session` suffix on the id, where it is not the default | Absence silently meaning something OTHER than `"space"` is the trap; absence meaning the default is the grammar |
+| path | trailing segments, absent at a document's root | The one thing a decomposed record could not carry onward in a single value |
 | `overwrite` | **dropped** | A write-redirect marker with no caller meaning. Measured on references and aliases alike, so it discriminates nothing |
 | `schema` | **omitted** | A rendered address has no use for one, and a single measured link carried an entire schema with its `$defs` — inlining would make a bounded result unbounded, which is the defect this exists to prevent |
-
-Every optional field becomes required with a filled default. That costs a few
-bytes per address and buys a shape callers index without defensive branching.
-The cost is worth naming: on a marked collection those bytes repeat per element,
-which is the case this design otherwise calls cheap. If that becomes the
-constraint, it is the windowing trigger already recorded under Deferred work.
 
 **`$link` in the output shares a namespace with the fields beside it**, so a
 document holding a field genuinely named `$link` renders ambiguously. That is
@@ -217,7 +213,7 @@ directly.
 The name says what the caller gets. Addresses are many-to-one over cells: a
 holder of one cannot tell a canonical id from an alias, and nothing in normal
 use requires them to. What comes back is a link to read next, not a claim about
-canonical identity — and the rendered output is a link object, so the request
+canonical identity — and the rendered output is a link reference, so the request
 vocabulary matches the response.
 
 #### Why not `asCell`
@@ -353,25 +349,25 @@ second one.
 
 ### Receipts carry a descriptive schema
 
-A receipt is an ordinary cell, and like any other it should say what it holds.
-Today it does not: receipts are created with no schema argument
-(`handleJavaScriptHandlerResult`, `packages/runner/src/runner.ts`), so the
-stored document carries an empty `schema` field. Two consequences follow, and
-both are the read layer's mechanisms failing to engage rather than anything
-special about receipts:
+A receipt is an ordinary cell, and like any other it says what it holds — for
+a plain result. `handleJavaScriptHandlerResult`
+(`packages/runner/src/runner.ts`) derives a structural description from the
+value it has just written and stores it in the durable schema metadata —
+`setMetaRaw("schema", …)`, the field `piece get` reads back through
+`asSchema`, not the schema argument to `getCell`, which seeds the link scope
+and the in-memory cell only. The receipt is minted before the handler runs,
+so there is no shape at that moment; the schema is written at result-write
+time, in the same create-only transaction, from the value the runtime is
+already holding. A verb returning anything reactive gets no schema at all —
+deriving a shape needs a settled value, and a launched result has none when
+the receipt is written — so for exactly those receipts the read layer's
+mechanisms still fail to engage:
 
 - The fetch narrowing above cannot engage, so a shape is applied after
   everything has been loaded.
 - A caller's shape is matched against the runtime value rather than against a
-  declaration — field names that happen to coincide, rather than a subtree of a
-  declared structure.
-
-Giving the receipt cell a schema addresses both. It goes in the durable schema
-metadata — `setMetaRaw("schema", …)`, the field `piece get` reads back through
-`asSchema` — not the schema argument to `getCell`, which seeds the link scope
-and the in-memory cell only. The receipt is minted before the handler runs, so
-there is no shape at that moment; it is written at result-write time, in the
-same create-only transaction, from the value the runtime is already holding.
+  declaration — field names that happen to coincide, rather than a subtree of
+  a declared structure.
 
 What is recorded is **descriptive**: what this receipt holds, never a contract
 constraining anything later. That is a safe thing for a write-once document,

@@ -6,6 +6,7 @@
  *
  * @element cf-dot-mark
  */
+
 import type { MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 

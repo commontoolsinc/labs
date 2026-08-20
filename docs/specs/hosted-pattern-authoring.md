@@ -410,16 +410,19 @@ the retention and identifier obligations above.
 
 - **`run_pattern` is not this specification's verification gate.** The harness
   `run_pattern` tool is an exploration and smoke capability. It takes
-  single-string, test-less pattern source and produces an unlisted piece.
+  single-string, test-less pattern source, and its companion `assign_slug`
+  joins a piece to the space's piece list under a caller-chosen slug.
   Publication here requires `cf check`, retained test files in the
   authored-program manifest, and trusted publication. A pattern that ran under
-  `run_pattern` has passed none of those gates.
+  `run_pattern` has passed none of those gates, and a piece `assign_slug`
+  registered is a named address rather than a verified one.
 
-- **Spaces may contain unlisted pieces.** Harness-created pieces are durable,
-  absent from the piece list, and their source-history revisions are
-  storage-retention roots. Root validation, retention, and space-clone
-  reasoning over "the pieces in a space" must not assume the piece list is
-  exhaustive.
+- **Spaces may contain pieces the piece list does not name.** Harness-created
+  pieces are durable whether or not `assign_slug` registered them, an
+  unregistered one never joins the piece list, and every one of their
+  source-history revisions is a storage-retention root. Root validation,
+  retention, and space-clone reasoning over "the pieces in a space" must not
+  assume the piece list is exhaustive.
 
 - **Handles redact at the model boundary; the progress surface is separate.**
   Session handles (`cfh:` tokens,
@@ -427,7 +430,11 @@ the retention and identifier obligations above.
   model boundary. This specification's exclusion of identifiers from progress
   events is a separate, person-facing projection and remains required. The
   identifier scrubber for compile diagnostics — bare tagged hashes, DIDs,
-  `data:` URIs — covers the identifier class that handles cannot reach.
+  `data:` URIs — covers the identifier class that handles cannot reach. What a
+  handle does disclose is shape: `describe_handle` answers with the referent's
+  declared schema reduced to structure, so property names cross and values,
+  prose, and definition names do not. That is a model-facing channel, not a
+  progress-event one, and it discloses no piece content.
 
 - **The handle table is retained session state.** The retention window
   enumerated under failure and cancellation includes the harness run-state

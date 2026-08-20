@@ -9,6 +9,7 @@
  * `packages/api/index.ts`), so the declared-result cases also prove the
  * `action<E, R>` / `handler<E, T, R>` overloads are reachable from a pattern.
  */
+
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
@@ -118,13 +119,6 @@ Deno.test("explicit return under a void-declared handler errors, on every call f
   `);
   assertEquals(typed.length, 1);
   assertStringIncludes(typed[0].message, "handler<Event, State, Result>");
-
-  const proxy = await errorsIn(`
-    const verb = handler((id: string, _state: { note: string }) => {
-      return { picked: id };
-    }, { proxy: true });
-  `);
-  assertEquals(proxy.length, 1);
 
   const schemas = await errorsIn(`
     const verb = handler(

@@ -4,15 +4,14 @@
  * flags whose consumers are ambient.
  */
 
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
 import {
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -21,6 +20,9 @@ import {
 } from "@commonfabric/memory/v2";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -47,6 +49,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
+        contentAddressedSchemas: false,
         commitPreconditions: false,
         plainResultReceipts: false,
         computedCellIds: false,
@@ -71,6 +74,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
+        contentAddressedSchemas: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
@@ -91,6 +95,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
+        contentAddressedSchemas: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,

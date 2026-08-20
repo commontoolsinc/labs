@@ -24,7 +24,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -178,9 +178,9 @@ describe("to-encodable-form", () => {
     it("converts a native to its canonical fabric form", () => {
       // A `Uint8Array` is NOT a `FabricValue`. Left to the `for...in` copy it
       // is rebuilt by property name into `{"0":7,"1":9}` -- which IS an inert
-      // plain object and so passes `isFabricValue()`. That is the hazard: not
-      // a lost value, but a legal one meaning something else, stored with no
-      // trace of what it was. A `Date` goes the same way, to `{}`.
+      // plain object and so passes `isValidFabricValue()`. That is the hazard:
+      // not a lost value, but a legal one meaning something else, stored with
+      // no trace of what it was. A `Date` goes the same way, to `{}`.
       const fromBytes = withAliasBindings(new Uint8Array([7, 9]) as any) as any;
       expect(fromBytes).toBeInstanceOf(FabricBytes);
       expect([...fromBytes.slice()]).toEqual([7, 9]);
@@ -242,7 +242,7 @@ describe("to-encodable-form", () => {
       // the conversion, the `for...in` rebuild would silently drop the symbol
       // key, EVALUATE the accessor into a data property, and reparent the
       // null-prototype object -- each producing a plain object that satisfies
-      // `isFabricValue()` while meaning something else, with nothing
+      // `isValidFabricValue()` while meaning something else, with nothing
       // downstream able to notice. They must be refused here.
       const sym = Symbol("s");
       expect(() => withAliasBindings({ a: 1, [sym]: "x" } as any)).toThrow(
@@ -267,10 +267,10 @@ describe("to-encodable-form", () => {
     });
 
     it("throws given an array that is not inert, rather than laundering it", () => {
-      // The array analogue of the plain-object case above, and it matters for
+      // The array analog of the plain-object case above, and it matters for
       // the same reason: `.map()` rebuilds by index, so a named property is
       // dropped and an accessor-backed index is EVALUATED into a data
-      // property, each yielding an array that satisfies `isFabricValue()`
+      // property, each yielding an array that satisfies `isValidFabricValue()`
       // while meaning something else. An `Array` subclass is worse than
       // laundered -- `.map()` honors `Symbol.species`, so the result is still
       // a subclass instance, carrying a live prototype that `isInertArray()`
@@ -386,11 +386,9 @@ describe("moduleToEncodableForm", () => {
       "../../patterns/factory-outputs/parking-coordinator/main.test.tsx",
       import.meta.url,
     ).pathname;
-    const program = await compileEngine.resolve(
-      new FileSystemProgramResolver(
-        sourcePath,
-        repoRoot,
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => compileEngine.resolve(resolver),
+      { main: sourcePath, root: repoRoot },
     );
     const { main } = await compileEngine.compileAndEvaluateModules(program);
     const pattern = main?.default as any;

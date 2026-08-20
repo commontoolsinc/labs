@@ -141,6 +141,7 @@ Deno.test("live candidates: path-shaped slots defer to the shell", async () => {
     ["cf piece ls -i ", "files"],
     ["cf piece new --root ", "dirs"],
     ["cf piece new --test ", "files"],
+    ["cf piece new --datafile ", "files"],
     ["cf check ", "files"],
     ["cf space verify ", "dirs"],
     ["cf space clone --to ", "dirs"],
@@ -289,7 +290,7 @@ Deno.test("command: a deno line that is not ours is reported as such", async () 
   assertEquals(out, ":cf:notmine");
 });
 
-Deno.test("shaping: a piece is labelled by name, falling back to its pattern", () => {
+Deno.test("shaping: a piece is labeled by name, falling back to its pattern", () => {
   assertEquals(
     shapePieceCandidates([
       { id: "fid1:a", name: "Todo List" },

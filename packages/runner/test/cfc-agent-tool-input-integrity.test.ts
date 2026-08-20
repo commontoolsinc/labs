@@ -1,16 +1,18 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { enableMockMode } from "@commonfabric/llm/client";
+import { describe, it } from "@std/testing/bdd";
+
 import type { JSONSchema } from "@commonfabric/api";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { CfcEnforcementMode } from "../src/cfc/types.ts";
-import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
-import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
+import { enableMockMode } from "@commonfabric/llm/client";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import type { CfcEnforcementMode } from "../src/cfc/types.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("cfc agent tool-input integrity");
 const space = signer.did();

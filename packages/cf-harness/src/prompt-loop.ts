@@ -1,10 +1,4 @@
-import {
-  type BuiltinToolInputMap,
-  CfHarnessEngine,
-  type CreateHarnessEngineOptions,
-} from "./engine.ts";
-import { isHarnessModelProviderId } from "./config.ts";
-import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
+import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
 import {
   type CfcEnforcementMode,
   type CfcSandboxExitCodeObservation,
@@ -12,38 +6,42 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
-import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
-import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
-  createObservationDenied as makeObservationDenied,
-  createOpaqueHandle,
-  type ObservationDenied,
-} from "./contracts/observation.ts";
-import type { HarnessImageAttachment } from "./contracts/image.ts";
-import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
-import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
+import { isHarnessModelProviderId } from "./config.ts";
+import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import {
   createHarnessCfcPolicySnapshot,
   type HarnessParentToolAllowance,
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
-import type {
-  HarnessToolCall,
-  HarnessToolTranscriptMessage,
-  HarnessTranscriptEvent,
-  HarnessTranscriptMessage,
-} from "./contracts/transcript.ts";
-import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
-import type {
-  BuiltinToolId,
-  HarnessToolDescriptor,
-} from "./contracts/tool-descriptor.ts";
-import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import {
+  HANDLE_TOKEN_PATTERN,
+  type HarnessHandleEntry,
+  type HarnessHandleTable,
+} from "./contracts/handle-table.ts";
+import type { HarnessFetch } from "./contracts/http-fetch.ts";
+import type { HarnessImageAttachment } from "./contracts/image.ts";
+import {
+  createHarnessInvalidToolCall,
+  type CreateHarnessInvalidToolCallOptions,
+} from "./contracts/invalid-tool-call.ts";
+import {
+  createObservationDenied as makeObservationDenied,
+  createOpaqueHandle,
+  type ObservationDenied,
+} from "./contracts/observation.ts";
 import {
   createHarnessPolicyTrace,
   type HarnessPolicyDecisionReasonCode,
 } from "./contracts/policy-trace.ts";
+import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessRunReport,
   type HarnessModelAttempt,
@@ -52,7 +50,9 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
+import type { HarnessSkillRegistry } from "./contracts/skill.ts";
 import {
+  asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
   type DelegateTaskToolInput,
@@ -69,52 +69,78 @@ import {
   type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
+  PATTERN_AUTHOR_SUBAGENT_PROFILE,
+  SUBAGENT_FAILURE_REASON_CODES,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
+import type {
+  BuiltinToolId,
+  HarnessToolDescriptor,
+  HarnessToolEffectClass,
+} from "./contracts/tool-descriptor.ts";
+import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
+import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
+import type {
+  HarnessToolCall,
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptEvent,
+  HarnessTranscriptMessage,
+} from "./contracts/transcript.ts";
+import { HarnessControlError } from "./control-errors.ts";
 import {
-  parseSubagentReturnJson,
-  parseSubagentReturnSchema,
-  validateAndSanitizeSubagentReturn,
-} from "./subagent-return.ts";
-import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+  createHarnessFailureRecord,
+  type HarnessFailureRecord,
+} from "./diagnostics.ts";
+import {
+  type BuiltinToolInputMap,
+  CfHarnessEngine,
+  type CreateHarnessEngineOptions,
+} from "./engine.ts";
+import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
   mintAddressHandle,
+  resolveHandleToken,
   swapLinksForTokens,
   swapTokensForRefs,
 } from "./handle-table.ts";
-import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
-import {
-  cwdMarkerForOutput,
-  extractFinalWorkingDirectory,
-} from "./tools/shell-cwd.ts";
-import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
-import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
-import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
-import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
-import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
-import {
-  toModelFacingWebFetchOutput,
-  type WebFetchToolOutput,
-} from "./tools/web-fetch.ts";
-import {
-  isRunSkillScriptToolSuccessOutput,
-  type RunSkillScriptToolOutput,
-} from "./tools/run-skill-script.ts";
-import { loadHarnessSkillContext } from "./skills/registry.ts";
-import type { HarnessFailureRecord } from "./diagnostics.ts";
-import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
-import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelClient,
   HarnessModelUsage,
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
-import { HarnessControlError } from "./control-errors.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
+import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { isSealedOpaqueLinkObject } from "./structured-result.ts";
+import {
+  parseSubagentReturnJson,
+  parseSubagentReturnSchema,
+  validateAndSanitizeSubagentReturn,
+} from "./subagent-return.ts";
+import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
+import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
+import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
+import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import {
+  isRunPatternToolSuccessOutput,
+  scrubBareFabricIdentifiers,
+} from "./tools/run-pattern.ts";
+import {
+  isRunSkillScriptToolSuccessOutput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
+import {
+  cwdMarkerForOutput,
+  extractFinalWorkingDirectory,
+} from "./tools/shell-cwd.ts";
+import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
+import {
+  toModelFacingWebFetchOutput,
+  type WebFetchToolOutput,
+} from "./tools/web-fetch.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -181,37 +207,41 @@ export interface HarnessPromptLoopResult {
 }
 
 const isBuiltinToolId = (input: string): input is BuiltinToolId =>
-  getBuiltinTool(input as BuiltinToolId) !== undefined;
+  getBuiltinTool(input) !== undefined;
+
+/**
+ * The outcome of decoding the arguments string a model wrote for a tool call:
+ * either the object the tool takes, or the complaint the model reads instead
+ * of running it. Neither branch throws — a model that mistypes its arguments
+ * gets another turn, not a dead run.
+ */
+type ParsedToolArguments =
+  | { input: Record<string, unknown> }
+  | { invalid: CreateHarnessInvalidToolCallOptions };
 
 const parseToolArguments = (
   toolCall: HarnessToolCall,
-): Record<string, unknown> => {
+): ParsedToolArguments => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(toolCall.function.arguments);
-  } catch (error) {
-    throw new Error(
-      `failed to parse tool arguments for ${toolCall.function.name}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(
-      `tool arguments for ${toolCall.function.name} must decode to an object`,
-    );
-  }
-  return parsed as Record<string, unknown>;
-};
-
-const tryParseToolArguments = (
-  toolCall: HarnessToolCall,
-): Record<string, unknown> | undefined => {
-  try {
-    return parseToolArguments(toolCall);
   } catch {
-    return undefined;
+    return {
+      invalid: {
+        reason: "unparsable-arguments",
+        expected: "a JSON object encoding this tool's arguments",
+      },
+    };
   }
+  if (!isObjectNotArray(parsed)) {
+    return {
+      invalid: {
+        reason: "arguments-not-an-object",
+        expected: "a JSON object encoding this tool's arguments",
+      },
+    };
+  }
+  return { input: parsed as Record<string, unknown> };
 };
 
 const TRUSTED_ONLY_TOOL_INPUT_FIELDS = ["cfcInputLabels"];
@@ -361,20 +391,41 @@ const nextSubagentSequence = (
   return Math.max(retainedDelegateOutputs, retainedChildRunSequence) + 1;
 };
 
+/**
+ * What a tool name stands as in a parent-facing summary when the run offers no
+ * tool by that name. A call the model wrote names whatever the model wrote, so
+ * the name is model text — bounded harness text stands in for it.
+ */
+const UNKNOWN_TOOL_SUMMARY_SENTINEL = "[unknown-tool]";
+
+/**
+ * The parent-facing view of a child's failure: what KIND of thing went wrong
+ * and where in the harness it went wrong, and nothing a child wrote.
+ *
+ * A failure record is an audit artifact and keeps every identifier as it was —
+ * the tool name the model wrote, the call id it chose, the command name a
+ * missing-binary diagnostic parsed out of the child's own shell output. None
+ * of those reach this summary, because this one is read by the parent MODEL: a
+ * child that cannot smuggle text through its return channel could otherwise
+ * smuggle it through a tool name or a call id and have the harness relay it as
+ * harness-authored diagnostic. What is left is harness vocabulary — a tool id
+ * the run offers, an output id the harness minted, a `kind`, a `source`, an
+ * exit code — plus a sentinel where a model-chosen name stood.
+ */
 const summarizeSubagentFailure = (
   failure: HarnessFailureRecord,
 ): HarnessSubagentFailureSummary => ({
   type: "cf-harness.subagent-failure-summary",
   kind: failure.kind,
   source: failure.source,
-  ...(failure.toolId !== undefined ? { toolId: failure.toolId } : {}),
-  ...(failure.toolCallId !== undefined
-    ? { toolCallId: failure.toolCallId }
+  ...(failure.toolId !== undefined
+    ? {
+      toolId: isBuiltinToolId(failure.toolId)
+        ? failure.toolId
+        : UNKNOWN_TOOL_SUMMARY_SENTINEL,
+    }
     : {}),
   ...(failure.outputId !== undefined ? { outputId: failure.outputId } : {}),
-  ...(failure.commandName !== undefined
-    ? { commandName: failure.commandName }
-    : {}),
   ...(failure.exitCode !== undefined ? { exitCode: failure.exitCode } : {}),
 });
 
@@ -582,7 +633,7 @@ const summarizeToolInput = async (
             sourceTextDigest: sourceTextSummary.digest,
           }
           : {}),
-        ...(isObjectRecord(input.inputs)
+        ...(isObjectNotArray(input.inputs)
           ? { inputCount: Object.keys(input.inputs).length }
           : {}),
         ...(resultSchemaSummary !== undefined
@@ -600,14 +651,28 @@ const summarizeToolInput = async (
   };
 };
 
+/**
+ * The outcome of reading a `delegate_task` input the model wrote: either the
+ * delegation to run, or the field that did not fit and the shape it wanted.
+ * The field name and the expected shape are both harness vocabulary, so the
+ * complaint can go back to the model without carrying the rejected value.
+ */
+type ParsedDelegateTaskInput =
+  | { input: DelegateTaskToolInput }
+  | { invalid: { field: string; expected: string } };
+
 const parseDelegateTaskInput = (
   input: Record<string, unknown>,
-): DelegateTaskToolInput => {
+): ParsedDelegateTaskInput => {
   if (typeof input.goal !== "string" || input.goal.trim().length === 0) {
-    throw new Error("delegate_task goal must be a non-empty string");
+    return {
+      invalid: { field: "goal", expected: "a non-empty string" },
+    };
   }
   if (input.context !== undefined && typeof input.context !== "string") {
-    throw new Error("delegate_task context must be a string when provided");
+    return {
+      invalid: { field: "context", expected: "a string, or omit it" },
+    };
   }
   const profile = input.profile === undefined
     ? DEFAULT_SUBAGENT_PROFILE
@@ -616,11 +681,12 @@ const parseDelegateTaskInput = (
     ? input.profile
     : undefined;
   if (profile === undefined) {
-    throw new Error(
-      `delegate_task profile must be one of ${
-        HARNESS_SUBAGENT_PROFILES.join(", ")
-      }`,
-    );
+    return {
+      invalid: {
+        field: "profile",
+        expected: `one of ${HARNESS_SUBAGENT_PROFILES.join(", ")}`,
+      },
+    };
   }
   const maxModelTurns = input.maxModelTurns;
   if (
@@ -630,21 +696,40 @@ const parseDelegateTaskInput = (
       maxModelTurns <= 0 ||
       maxModelTurns > MAX_SUBAGENT_MAX_MODEL_TURNS)
   ) {
-    throw new Error(
-      `delegate_task maxModelTurns must be an integer from 1 to ${MAX_SUBAGENT_MAX_MODEL_TURNS}`,
-    );
+    return {
+      invalid: {
+        field: "maxModelTurns",
+        expected: `an integer from 1 to ${MAX_SUBAGENT_MAX_MODEL_TURNS}`,
+      },
+    };
   }
-  const parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
+  let parsedReturnSchema: ReturnType<typeof parseSubagentReturnSchema>;
+  try {
+    parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
+  } catch {
+    return {
+      invalid: {
+        field: "returnSchema",
+        expected:
+          "a JSON Schema object, a boolean, or a string holding one of those as JSON",
+      },
+    };
+  }
+  // A profile that declares a return contract applies it to a delegation
+  // that declares none, so the child's return is a shape the parent can test
+  // rather than prose a failure and a success both fit.
+  const returnSchema = parsedReturnSchema?.schema ??
+    getHarnessSubagentProfileConfig(profile).defaultReturnSchema;
   return {
-    goal: input.goal,
-    profile,
-    ...(typeof input.context === "string" && input.context.trim().length > 0
-      ? { context: input.context }
-      : {}),
-    ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
-    ...(parsedReturnSchema !== undefined
-      ? { returnSchema: parsedReturnSchema.schema }
-      : {}),
+    input: {
+      goal: input.goal,
+      profile,
+      ...(typeof input.context === "string" && input.context.trim().length > 0
+        ? { context: input.context }
+        : {}),
+      ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
+      ...(returnSchema !== undefined ? { returnSchema } : {}),
+    },
   };
 };
 
@@ -675,6 +760,140 @@ const createSubagentInputSummary = async (
       }
       : {}),
   };
+};
+
+/**
+ * The tool surface a subagent profile offers in this run. `run_pattern` is
+ * declared by the `default` profile, but a run with no fabric session cannot
+ * build one, so the tool leaves the profile rather than being offered and
+ * failing — the same gate the parent surface applies.
+ */
+const subagentProfileConfigForRun = (
+  profile: HarnessSubagentProfile,
+  fabricSessionAvailable: boolean,
+): HarnessSubagentProfileConfig => {
+  const config = getHarnessSubagentProfileConfig(profile);
+  if (
+    fabricSessionAvailable ||
+    !config.allowedToolIds.some((toolId) => FABRIC_SESSION_TOOL_IDS.has(toolId))
+  ) {
+    return config;
+  }
+  return {
+    ...config,
+    allowedToolIds: config.allowedToolIds.filter((toolId) =>
+      !FABRIC_SESSION_TOOL_IDS.has(toolId)
+    ),
+  };
+};
+
+/**
+ * The tools that exist only over a fabric session. They join the tool
+ * surface exactly when the run can build one; without it each is absent
+ * rather than present-but-failing, even when an explicit allowlist names it.
+ */
+const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["run_pattern", "assign_slug"] as const,
+);
+
+/**
+ * The child's initial handle table for a delegation: an empty table salted
+ * with the child's own run id, carrying a verbatim copy of every parent entry
+ * whose token the parent named in the delegation's `goal` or `context`.
+ * Returns `undefined` when the delegation names no resolvable token, leaving
+ * the child to mint its first table itself.
+ *
+ * This is the cross-agent privilege boundary. A token the parent did not
+ * write into the delegation is not in the child's table, so the child cannot
+ * resolve it — what a child can reach is exactly what the delegation handed
+ * it. Copying entries verbatim keeps the token stable across the hierarchy:
+ * minting looks up by `addressKey`, so a child minting a handle for a seeded
+ * address returns the parent's token.
+ */
+const seedSubagentHandleTable = (
+  parentTable: HarnessHandleTable | undefined,
+  childRunId: string,
+  input: DelegateTaskToolInput,
+): HarnessHandleTable | undefined => {
+  if (parentTable === undefined || parentTable.entries.length === 0) {
+    return undefined;
+  }
+  const seeded = new Map<string, HarnessHandleEntry>();
+  for (const text of [input.goal, input.context ?? ""]) {
+    for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
+      const entry = resolveHandleToken(parentTable, match[0]);
+      if (entry !== undefined) {
+        seeded.set(entry.token, entry);
+      }
+    }
+  }
+  if (seeded.size === 0) {
+    return undefined;
+  }
+  return {
+    ...createHarnessHandleTable(childRunId),
+    entries: [...seeded.values()].map((entry) => ({ ...entry })),
+  };
+};
+
+/**
+ * What a token-shaped string a child emitted becomes once the child's own
+ * table has had its say. Fixed harness text, and deliberately not itself a
+ * token: the parent must not be able to resolve it either.
+ */
+const SCRUBBED_CHILD_HANDLE_TOKEN = "[handle-token-removed]";
+
+/**
+ * The child's final text with its own tokens resolved back to canonical
+ * references, which is how a reference the child produced reaches the parent.
+ * The parent's own outbound boundary mints what comes back: a seeded address
+ * mints to the token the parent already holds, and an address the child
+ * discovered for itself becomes a fresh parent token.
+ *
+ * Whatever still looks like a token is scrubbed instead, irreversibly. The two
+ * tables share a token grammar but not a salt, and the parent's table is the
+ * larger one: a token the child was never handed resolves to nothing in the
+ * child's table, and the parent's outbound pass swaps addresses rather than
+ * tokens, so token-shaped text would cross the boundary untouched and then
+ * resolve in the PARENT's table — naming an entry the delegation deliberately
+ * withheld. Replacing it with inert text closes that, and costs nothing real:
+ * a token the child holds legitimately becomes an address on this same line.
+ *
+ * Resolving and scrubbing are ONE scan of the child's text, and that is what
+ * makes them safe together. Each token-shaped match is decided once — the
+ * child's table either holds it (it becomes that entry's reference) or does
+ * not (it becomes the inert placeholder) — and no text this scan writes is
+ * examined again. Run as two passes, the scrub would read the references the
+ * first pass produced: a reference whose PATH SEGMENT happens to match the
+ * token grammar would be mangled mid-address, leaving the parent unable to
+ * address the very cell the child was reporting.
+ */
+const resolveChildHandleTokens = (
+  childEngine: CfHarnessEngine,
+  text: string,
+): string => {
+  const table = childEngine.handleTable;
+  return text.replace(
+    new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
+    (token) =>
+      (table === undefined ? undefined : resolveHandleToken(table, token))
+        ?.ref ?? SCRUBBED_CHILD_HANDLE_TOKEN,
+  );
+};
+
+/**
+ * The profile's skills that this run's registry actually carries. A profile
+ * names the skills its child works best with; a run's skills root is
+ * configured independently and need not hold them. Preloading what is present
+ * keeps a profile usable against any skills root — a child missing its
+ * guidance is a weaker child, not a failed delegation.
+ */
+const availableProfileSkillNames = (
+  registry: HarnessSkillRegistry,
+  skillNames: readonly string[],
+): readonly string[] => {
+  const present = new Set(registry.skills.map((skill) => skill.name));
+  return skillNames.filter((name) => present.has(name));
 };
 
 const resolveSubagentModel = (
@@ -763,6 +982,22 @@ const buildSubagentSystemPrompt = (
               : []),
           ]
           : []),
+      ]
+      : []),
+    ...(profileConfig.profile === PATTERN_AUTHOR_SUBAGENT_PROFILE
+      ? [
+        "You author Common Fabric pattern source and run it with run_pattern against the one Fabric space this run is configured for. That is the whole job.",
+        "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
+        "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
+        "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
+        "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
+        'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
+        "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
+        `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
+          SUBAGENT_FAILURE_REASON_CODES.join(", ")
+        }>} with an optional free-text "detail".`,
+        "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
@@ -854,22 +1089,6 @@ const summarizeSubagentRunState = (
 };
 
 /**
- * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
- * is a sealed opaque-link object — the single-key `@link` object the
- * sanitizer substitutes for a position it seals.
- */
-const isSealedOpaqueLinkObject = (value: unknown): boolean => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const target = record["@link"];
-  return Object.keys(record).length === 1 &&
-    typeof target === "string" &&
-    target.startsWith("opaque:");
-};
-
-/**
  * Helper for `createStructuredSubagentReturn()`, which walks a sanitized
  * structured return and the raw value it was sanitized from in tandem,
  * replacing each sealed opaque-link object whose raw counterpart is a string
@@ -911,18 +1130,14 @@ const swapSealedAddressStringsForTokens = async (
     }
     return { table, value: items, replaced };
   }
-  if (
-    typeof sanitized === "object" && sanitized !== null &&
-    !Array.isArray(sanitized) &&
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-  ) {
+  if (isObjectNotArray(sanitized) && isObjectNotArray(raw)) {
     let replaced = 0;
     const entries: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(sanitized)) {
       const result = await swapSealedAddressStringsForTokens(
         table,
         child,
-        (raw as Record<string, unknown>)[key],
+        raw[key],
       );
       table = result.table;
       replaced += result.replaced;
@@ -1026,13 +1241,18 @@ const createStructuredSubagentReturn = async (
         updatedHandleTable = swapped.table;
       }
     }
+    const failureReport = asHarnessSubagentFailureReport(parsedValue);
     return {
       valid: true,
-      summary:
-        "Subagent returned structured data matching the requested schema.",
+      summary: failureReport === undefined
+        ? "Subagent returned structured data matching the requested schema."
+        : `Subagent reported failure (${failureReport.code}).`,
       structuredReturn: {
         type: "cf-harness.subagent-structured-return",
         status: "valid",
+        ...(failureReport !== undefined
+          ? { failureCode: failureReport.code }
+          : {}),
         schemaDigest,
         rawOutputId,
         ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
@@ -1048,15 +1268,38 @@ const createStructuredSubagentReturn = async (
       ? error.message
       : "structured return did not match the schema";
     const validationError = "structured return did not match the schema";
+    // A child saying it failed is heard as having failed even when the rest of
+    // its return does not fit the schema. Only `ok` and the code cross the
+    // boundary here: both are inert by construction, and every other position
+    // is exactly the part that did not validate.
+    const failureReport = asHarnessSubagentFailureReport(parsedValue);
     await persistRawReturn({
       type: "cf-harness.subagent-raw-return",
       childRunId: options.childRunId,
       schemaDigest,
       rawFinalAssistantText: options.rawFinalAssistantText,
       value: parsedValue,
-      validationStatus: "invalid",
+      validationStatus: failureReport === undefined
+        ? "invalid"
+        : "child-reported-failure",
       validationError: rawValidationError,
     });
+    if (failureReport !== undefined) {
+      return {
+        valid: false,
+        summary: `Subagent reported failure (${failureReport.code}).`,
+        structuredReturn: {
+          type: "cf-harness.subagent-structured-return",
+          status: "child-reported-failure",
+          failureCode: failureReport.code,
+          schemaDigest,
+          rawOutputId,
+          ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
+          value: { ok: false, code: failureReport.code },
+          linkedStringCount: 0,
+        },
+      };
+    }
     return {
       valid: false,
       summary: `Subagent return validation failed: ${validationError}`,
@@ -1120,27 +1363,65 @@ interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
 }
 
-const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const cfcResultFromOutput = (
   output: unknown,
 ): CfcSandboxResult | undefined =>
-  isObjectRecord(output) &&
+  isObjectNotArray(output) &&
     "cfcResult" in output &&
-    isObjectRecord(output.cfcResult) &&
+    isObjectNotArray(output.cfcResult) &&
     output.cfcResult.version === 1
     ? output.cfcResult as CfcSandboxResult
     : undefined;
 
 const stripInternalCfcFields = (output: unknown): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const { cfcResult: _cfcResult, ...publicOutput } = output as
     & CfcSandboxResultCarrier
     & Record<string, unknown>;
   return publicOutput;
+};
+
+/**
+ * Applies the model-boundary scrub to every string a value carries at every
+ * depth, its object KEYS included.
+ *
+ * Scrubbing the free-text fields a tool declares is enough only for a tool
+ * whose author-controlled text sits in named fields. It is not enough for one
+ * whose output is a structure whose own shape is author-controlled — a
+ * disclosed JSON Schema most of all, where the property names are the point of
+ * the disclosure and are arbitrary text whoever wrote the schema chose. So the
+ * walk reaches keys as well as values.
+ *
+ * The scrub itself is {@link scrubBareFabricIdentifiers}; this decides only
+ * where it lands. A key that scrubs to the same text as a sibling collapses
+ * into it, which is the honest outcome: two names differing only in an
+ * identifier this boundary refuses to disclose are not distinguishable on the
+ * model's side of it either.
+ */
+const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
+  if (typeof value === "string") {
+    return scrubBareFabricIdentifiers(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
+  }
+  if (isObjectNotArray(value)) {
+    const scrubbed: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      // `defineProperty` rather than assignment, so a scrubbed key of
+      // `__proto__` becomes an own property instead of reaching the prototype.
+      Object.defineProperty(scrubbed, scrubBareFabricIdentifiers(key), {
+        value: scrubBareFabricIdentifiersDeep(entry),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return scrubbed;
+  }
+  return value;
 };
 
 const toolOutputNeedsSandboxMediation = (
@@ -1298,7 +1579,7 @@ const truncateModelFacingBashOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const stdout = truncateModelFacingBashStream(
@@ -1334,7 +1615,7 @@ const truncateModelFacingReadFileOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const content = truncateModelFacingBashStream(
@@ -1480,7 +1761,7 @@ const modelContextObservationForExitCode = (
 };
 
 const renderMediatedBashOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1614,7 +1895,7 @@ const renderMediatedRunSkillScriptOutput = (
 };
 
 const renderMediatedReadFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1650,7 +1931,7 @@ const renderMediatedReadFileOutput = (
 };
 
 const renderMediatedEditFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1867,17 +2148,21 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
-    // `run_pattern` joins the tool surface exactly when the run can build a
-    // fabric session; without one the tool is absent rather than
-    // present-but-failing, even when an explicit allowlist names it.
+    // The fabric-session tools join the tool surface exactly when the run
+    // can build a session; see FABRIC_SESSION_TOOL_IDS.
     const requestedToolIds = options.allowedToolIds ??
       (this.engine.fabricSessionAvailable
-        ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+        ? [
+          ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
+          ...FABRIC_SESSION_TOOL_IDS,
+        ]
         : DEFAULT_PROMPT_LOOP_TOOL_IDS);
     this.#allowedToolIds = new Set(
       this.engine.fabricSessionAvailable
         ? requestedToolIds
-        : requestedToolIds.filter((toolId) => toolId !== "run_pattern"),
+        : requestedToolIds.filter((toolId) =>
+          !FABRIC_SESSION_TOOL_IDS.has(toolId)
+        ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -1939,7 +2224,10 @@ export class CfHarnessPromptLoop {
         allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
-          getHarnessSubagentProfileConfig(profile)
+          subagentProfileConfigForRun(
+            profile,
+            this.engine.fabricSessionAvailable,
+          )
         ),
         ...(cfc?.absenceBehavior !== undefined
           ? { absenceBehavior: cfc.absenceBehavior }
@@ -2283,15 +2571,17 @@ export class CfHarnessPromptLoop {
 
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
-   * tool input with their canonical address strings. Never applies to
-   * `delegate_task`, whose input reaches the child as the model wrote it.
-   * Returns `input` itself when no substitution applies.
+   * tool input with their canonical address strings. Two tools are exempt:
+   * `delegate_task`, whose input reaches the child as the model wrote it, and
+   * `describe_handle`, whose input names a token rather than a referent — it
+   * looks the token up in the table itself. Returns `input` itself when no
+   * substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (toolId === "delegate_task") {
+    if (toolId === "delegate_task" || toolId === "describe_handle") {
       return input;
     }
     const table = this.engine.handleTable;
@@ -2299,6 +2589,33 @@ export class CfHarnessPromptLoop {
       return input;
     }
     return swapTokensForRefs(table, input) as Record<string, unknown>;
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records the compiled pattern's
+   * result schema on the handle for a `run_pattern` result reference. The
+   * outbound swap that follows mints the same address and so returns this
+   * entry, shape already attached — which is what lets `describe_handle`
+   * answer what the reference is without any fabric read. `resultRef` is the
+   * LLM-friendly rendering of a live cell's link, so it names an address and
+   * the mint below succeeds; a mint that throws here is a harness bug and is
+   * left to travel as one.
+   */
+  async #recordRunPatternResultShape(
+    toolId: BuiltinToolId,
+    output: unknown,
+  ): Promise<void> {
+    if (toolId !== "run_pattern" || !isRunPatternToolSuccessOutput(output)) {
+      return;
+    }
+    const table = this.engine.handleTable ??
+      createHarnessHandleTable(this.engine.getRunState().runId);
+    const minted = await mintAddressHandle(table, output.resultRef, {
+      schema: output.resultRefSchema,
+    });
+    if (minted.table !== table) {
+      await this.engine.recordHandleTable(minted.table);
+    }
   }
 
   /**
@@ -2315,6 +2632,85 @@ export class CfHarnessPromptLoop {
     return swapped.value;
   }
 
+  /**
+   * Helper for `#invokeToolCall()`, which turns a call the model wrote wrong
+   * into the result the model reads. The call leaves the same trail a run one
+   * does — a tool-activity row, a policy decision, and a failure record — so
+   * the run report shows the malformed call rather than a gap where one was.
+   */
+  async #rejectInvalidToolCall(options: {
+    toolCall: HarnessToolCall;
+    invalid: CreateHarnessInvalidToolCallOptions;
+    sequence: number;
+    startedAt: string;
+    promptSlotBinding?: PromptSlotBinding;
+    effectClass?: HarnessToolEffectClass;
+    toolInputSummary?: HarnessToolInputSummary;
+    policyEventIndexes?: readonly number[];
+    recordActivity: (activity: HarnessToolActivity) => void;
+  }): Promise<InvokedToolCallMessages> {
+    const invalid = createHarnessInvalidToolCall(options.invalid);
+    const runState = this.engine.getRunState();
+    this.engine.appendFailureRecord(createHarnessFailureRecord({
+      kind: "invalid_tool_call",
+      source: "tool_call",
+      detail: invalid.detail,
+      at: runState.updatedAt,
+      toolId: options.toolCall.function.name,
+      toolCallId: options.toolCall.id,
+    }));
+    options.recordActivity({
+      type: "cf-harness.tool-activity",
+      runId: runState.runId,
+      sequence: options.sequence,
+      startedAt: options.startedAt,
+      endedAt: this.engine.getRunState().updatedAt,
+      toolCallId: options.toolCall.id,
+      toolId: options.toolCall.function.name,
+      ...(options.effectClass !== undefined
+        ? { effectClass: options.effectClass }
+        : {}),
+      cfcEnforcementMode: runState.cfcEnforcementMode,
+      policyDecision: "denied",
+      executionStatus: "not-run",
+      ...(options.promptSlotBinding !== undefined
+        ? { promptSlot: options.promptSlotBinding }
+        : {}),
+      ...(options.toolInputSummary !== undefined
+        ? { toolInputSummary: options.toolInputSummary }
+        : {}),
+      ...optionalPolicyEventIndexes(options.policyEventIndexes ?? []),
+      errorDetail: invalid.detail,
+    });
+    await this.engine.recordPolicyDecision({
+      toolActivitySequence: options.sequence,
+      toolCallId: options.toolCall.id,
+      toolId: options.toolCall.function.name,
+      ...(options.effectClass !== undefined
+        ? { effectClass: options.effectClass }
+        : {}),
+      cfcEnforcementMode: runState.cfcEnforcementMode,
+      decision: "denied",
+      reasonCodes: ["invalid_tool_call"],
+      detail: invalid.detail,
+      ...(options.promptSlotBinding !== undefined
+        ? { promptSlot: options.promptSlotBinding }
+        : {}),
+      ...(options.toolInputSummary !== undefined
+        ? { toolInputSummary: options.toolInputSummary }
+        : {}),
+      ...optionalPolicyEventIndexes(options.policyEventIndexes ?? []),
+    });
+    return {
+      toolMessage: {
+        role: "tool",
+        toolCallId: options.toolCall.id,
+        toolName: options.toolCall.function.name,
+        content: JSON.stringify(invalid),
+      },
+    };
+  }
+
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     model: string,
@@ -2324,27 +2720,40 @@ export class CfHarnessPromptLoop {
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
   ): Promise<InvokedToolCallMessages> {
-    if (!isBuiltinToolId(toolCall.function.name)) {
-      throw new Error(
-        `unknown builtin tool requested: ${toolCall.function.name}`,
-      );
-    }
+    // The name the model wrote stays out of the complaint: it is model text,
+    // and a tool name carries injected instruction as readily as any other
+    // argument. The tools the run offers are harness vocabulary, so listing
+    // those is what tells the model how to call again.
+    const rejectUnknownTool = (): Promise<InvokedToolCallMessages> =>
+      this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "unknown-tool",
+          expected: `one of ${this.#allowedToolIdsForSnapshot().join(", ")}`,
+        },
+        sequence,
+        startedAt: this.engine.getRunState().updatedAt,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        recordActivity,
+      });
+    // The lookup is the check: a name the registry does not answer to is not
+    // a tool id. What it returns carries the canonical id, so the rest of the
+    // call works from `toolId` rather than from the string the model wrote.
     const tool = getBuiltinTool(toolCall.function.name);
     if (tool === undefined) {
-      throw new Error(
-        `unknown builtin tool requested: ${toolCall.function.name}`,
-      );
+      return await rejectUnknownTool();
     }
-    const parsedInput = tryParseToolArguments(toolCall);
-    const parsedInputForDeniedTool = parsedInput === undefined
-      ? undefined
-      : stripTrustedOnlyToolInputFields(parsedInput);
-    const deniedToolInputSummary = parsedInputForDeniedTool === undefined
-      ? undefined
-      : await summarizeToolInput(
-        toolCall.function.name,
-        parsedInputForDeniedTool,
-      );
+    const toolId = tool.descriptor.toolId;
+    // Decoded once, here: what the arguments string yields is the same either
+    // way this call ends, and a tool denied before it runs still gets its
+    // input summarized for the denial record.
+    const parsedArguments = parseToolArguments(toolCall);
+    const toolInput: ParsedToolArguments = "input" in parsedArguments
+      ? { input: stripTrustedOnlyToolInputFields(parsedArguments.input) }
+      : { invalid: parsedArguments.invalid };
+    const deniedToolInputSummary = "input" in toolInput
+      ? await summarizeToolInput(toolId, toolInput.input)
+      : undefined;
     const policyEventIndexes: number[] = [];
     const activityStartedAt = this.engine.getRunState().updatedAt;
     const activityEndedAt = (): string => this.engine.getRunState().updatedAt;
@@ -2357,7 +2766,7 @@ export class CfHarnessPromptLoop {
       startedAt: activityStartedAt,
       endedAt: activityEndedAt(),
       toolCallId: toolCall.id,
-      toolId: toolCall.function.name,
+      toolId,
       effectClass: tool.descriptor.effectClass,
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       policyDecision,
@@ -2373,14 +2782,14 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyEvent(event);
       policyEventIndexes.push(index);
     };
-    if (!this.#allowedToolIds.has(toolCall.function.name)) {
+    if (!this.#allowedToolIds.has(toolId)) {
       const denial = makeObservationDenied("not-authorized", {
-        detail: `${toolCall.function.name} is not allowed in this run`,
+        detail: `${toolId} is not allowed in this run`,
       });
       await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
@@ -2388,7 +2797,7 @@ export class CfHarnessPromptLoop {
         ...(deniedToolInputSummary !== undefined
           ? { toolInputSummary: deniedToolInputSummary }
           : {}),
-        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        detail: denial.detail ?? `${toolId} is not allowed`,
         observationDenied: denial,
       });
       recordActivity({
@@ -2402,12 +2811,12 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyDecision({
         toolActivitySequence: sequence,
         toolCallId: toolCall.id,
-        toolId: toolCall.function.name,
+        toolId,
         effectClass: tool.descriptor.effectClass,
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: ["tool_not_allowed"],
-        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        detail: denial.detail ?? `${toolId} is not allowed`,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
@@ -2420,26 +2829,39 @@ export class CfHarnessPromptLoop {
         toolMessage: {
           role: "tool",
           toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
+          toolName: toolId,
           content: JSON.stringify(denial),
         },
       };
     }
-    const parsedAllowedInput = parsedInputForDeniedTool ??
-      stripTrustedOnlyToolInputFields(parseToolArguments(toolCall));
+    if ("invalid" in toolInput) {
+      // Arguments that failed to decode: a model that mistyped them reads the
+      // complaint and writes the call again.
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: { ...toolInput.invalid, toolId },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        policyEventIndexes,
+        recordActivity,
+      });
+    }
+    const parsedAllowedInput = toolInput.input;
     // Handle tokens resolve to their referents here, so policy evaluation,
     // summarization, and the tool itself all see the real addresses. Denial
     // summaries recorded above keep the tokens the model wrote. A
     // `delegate_task` input is exempt: tokens in its goal and context reach
     // the child verbatim as inert text.
     const input = this.#resolveHandleTokensInToolInput(
-      toolCall.function.name,
+      toolId,
       parsedAllowedInput,
     );
     const toolInputSummary = input === parsedAllowedInput
       ? deniedToolInputSummary ??
-        await summarizeToolInput(toolCall.function.name, input)
-      : await summarizeToolInput(toolCall.function.name, input);
+        await summarizeToolInput(toolId, input)
+      : await summarizeToolInput(toolId, input);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
@@ -2453,7 +2875,7 @@ export class CfHarnessPromptLoop {
       await recordPolicyEvent({
         severity: "warning",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
@@ -2467,18 +2889,18 @@ export class CfHarnessPromptLoop {
     if (!decision.allowed) {
       const denial = decision.denial ??
         makeObservationDenied("not-authorized", {
-          detail: `${toolCall.function.name} was denied`,
+          detail: `${toolId} was denied`,
         });
       await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
         toolInputSummary,
-        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        detail: denial.detail ?? `${toolId} was denied`,
         observationDenied: denial,
       });
       recordActivity({
@@ -2490,12 +2912,12 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyDecision({
         toolActivitySequence: sequence,
         toolCallId: toolCall.id,
-        toolId: toolCall.function.name,
+        toolId,
         effectClass: tool.descriptor.effectClass,
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: policyDecisionReasonCodes,
-        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        detail: denial.detail ?? `${toolId} was denied`,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
@@ -2506,42 +2928,32 @@ export class CfHarnessPromptLoop {
         toolMessage: {
           role: "tool",
           toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
+          toolName: toolId,
           content: JSON.stringify(denial),
         },
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
-    if (toolCall.function.name === "delegate_task") {
-      try {
-        delegateInput = parseDelegateTaskInput(input);
-      } catch (error) {
-        recordActivity({
-          type: "cf-harness.tool-activity",
-          ...baseActivity(policyDecision, "failed"),
-          toolInputSummary,
-          ...optionalPolicyEventIndexes(policyEventIndexes),
-          errorDetail: toErrorDetail(error),
-        });
-        await this.engine.recordPolicyDecision({
-          toolActivitySequence: sequence,
-          toolCallId: toolCall.id,
-          toolId: toolCall.function.name,
+    if (toolId === "delegate_task") {
+      const parsedDelegateInput = parseDelegateTaskInput(input);
+      if ("invalid" in parsedDelegateInput) {
+        return await this.#rejectInvalidToolCall({
+          toolCall,
+          invalid: {
+            reason: "invalid-argument",
+            toolId: "delegate_task",
+            ...parsedDelegateInput.invalid,
+          },
+          sequence,
+          startedAt: activityStartedAt,
           effectClass: tool.descriptor.effectClass,
-          cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
-          decision: policyDecision,
-          reasonCodes: policyDecisionReasonCodes,
-          ...(policyDecisionDetail !== undefined
-            ? { detail: policyDecisionDetail }
-            : {}),
-          ...(promptSlotBinding !== undefined
-            ? { promptSlot: promptSlotBinding }
-            : {}),
+          ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
           toolInputSummary,
-          ...optionalPolicyEventIndexes(policyEventIndexes),
+          policyEventIndexes,
+          recordActivity,
         });
-        throw error;
       }
+      delegateInput = parsedDelegateInput.input;
       if (!this.#allowedSubagentProfiles.has(delegateInput.profile)) {
         const detail =
           `delegate_task profile "${delegateInput.profile}" is not allowed in this run`;
@@ -2549,7 +2961,7 @@ export class CfHarnessPromptLoop {
         await recordPolicyEvent({
           severity: "denied",
           mode: this.engine.getRunState().cfcEnforcementMode,
-          toolId: toolCall.function.name,
+          toolId,
           toolCallId: toolCall.id,
           ...(promptSlotBinding !== undefined
             ? { promptSlot: promptSlotBinding }
@@ -2567,7 +2979,7 @@ export class CfHarnessPromptLoop {
         await this.engine.recordPolicyDecision({
           toolActivitySequence: sequence,
           toolCallId: toolCall.id,
-          toolId: toolCall.function.name,
+          toolId,
           effectClass: tool.descriptor.effectClass,
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           decision: "denied",
@@ -2587,7 +2999,7 @@ export class CfHarnessPromptLoop {
           toolMessage: {
             role: "tool",
             toolCallId: toolCall.id,
-            toolName: toolCall.function.name,
+            toolName: toolId,
             content: JSON.stringify(denial),
           },
         };
@@ -2597,7 +3009,7 @@ export class CfHarnessPromptLoop {
     await this.engine.recordPolicyDecision({
       toolActivitySequence: sequence,
       toolCallId: toolCall.id,
-      toolId: toolCall.function.name,
+      toolId,
       effectClass: tool.descriptor.effectClass,
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       decision: policyDecision,
@@ -2621,7 +3033,7 @@ export class CfHarnessPromptLoop {
       resultRef: ToolResultRef;
     };
     try {
-      result = toolCall.function.name === "delegate_task"
+      result = toolId === "delegate_task"
         ? await this.#invokeDelegateTaskTool({
           toolCall,
           input: delegateInput!,
@@ -2632,7 +3044,7 @@ export class CfHarnessPromptLoop {
           recordDescendantUsage,
         })
         : await this.#invokeBuiltinTool(
-          toolCall.function.name,
+          toolId,
           input,
           signal,
         );
@@ -2647,16 +3059,25 @@ export class CfHarnessPromptLoop {
       // Reaching this catch means a genuinely fatal tool failure — sandbox
       // spawn/infra, CFC transport, artifact/run-state persistence, an engine
       // invariant, or a cancelled run. These are not model-correctable, so the
-      // run stays fatal. RECOVERABLE mistakes (a `cwd` outside the sandbox, a
-      // command timeout) never arrive here: the bash tool converts them into an
-      // ordinary failed BashToolOutput the model reacts to, which flows through
-      // the normal CFC-mediated output path below (see bash.ts). Keeping the
-      // narrowing at the tool boundary is what lets this catch stay run-fatal
-      // without matching error-message strings.
+      // run stays fatal. RECOVERABLE mistakes never arrive here, and there are
+      // two kinds. A mistake inside the tool (a `cwd` outside the sandbox, a
+      // command timeout) becomes an ordinary failed BashToolOutput the model
+      // reacts to, flowing through the normal CFC-mediated output path below
+      // (see bash.ts). A mistake in how the model wrote the call itself (a name
+      // no tool answers to, arguments that are not JSON, an argument of the
+      // wrong shape) is caught before dispatch and answered by
+      // `#rejectInvalidToolCall()`. Keeping both narrowings above this catch is
+      // what lets it stay run-fatal without matching error-message strings.
       throw error;
     }
+    // Before the outbound swap, so the token it mints for the result cell
+    // already carries the shape the compiler knew.
+    await this.#recordRunPatternResultShape(
+      toolId,
+      result.output,
+    );
     const modelOutputResult = await this.#modelFacingToolOutput(
-      toolCall.function.name,
+      toolId,
       result.output,
       result.resultRef,
       toolCall.id,
@@ -2690,7 +3111,7 @@ export class CfHarnessPromptLoop {
     const toolMessage: HarnessToolTranscriptMessage = {
       role: "tool",
       toolCallId: toolCall.id,
-      toolName: toolCall.function.name,
+      toolName: toolId,
       content: JSON.stringify(modelOutput),
       resultRef: result.resultRef,
     };
@@ -2812,16 +3233,23 @@ export class CfHarnessPromptLoop {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
     }
-    if (toolId === "run_pattern" && isObjectRecord(output)) {
+    if (toolId === "run_pattern" && isObjectNotArray(output)) {
       // The persisted artifact keeps the raw result value and the piece id
       // — a bare fabric identifier the handle boundary never swaps, and
       // redundant with `resultRef` since the piece cell is the result cell.
-      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // It also keeps the pattern's result schema, which reaches the model
+      // through `describe_handle` on the minted token rather than inline.
+      // The model sees `resultRef` and the schema-sanitized `value`.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
-      const { rawValue: _rawValue, pieceId: _pieceId, ...publicOutput } =
-        output;
+      const {
+        rawValue: _rawValue,
+        rawCauseMessage: _rawCauseMessage,
+        pieceId: _pieceId,
+        resultRefSchema: _resultRefSchema,
+        ...publicOutput
+      } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
       for (const field of ["message", "valueError"]) {
         const text = scrubbed[field];
@@ -2830,6 +3258,27 @@ export class CfHarnessPromptLoop {
         }
       }
       return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "assign_slug" && isObjectNotArray(output)) {
+      // The slug is the model's own word and the URL is composed from the
+      // session's API URL and space name, so neither is a fabric identifier;
+      // only the free-text error message could carry one.
+      const scrubbed: Record<string, unknown> = { ...output };
+      if (typeof scrubbed.message === "string") {
+        scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
+      }
+      return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "describe_handle") {
+      // A disclosed schema's property names are whoever authored the schema's
+      // own text, and the shape reduction passes them through deliberately —
+      // code cannot be written over data without the names of its fields. That
+      // makes a property name a route for a bare fabric identifier into model
+      // context, at any depth of the schema, so the whole reply is scrubbed
+      // keys and all rather than field by field.
+      return {
+        output: scrubBareFabricIdentifiersDeep(stripInternalCfcFields(output)),
+      };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
@@ -2889,7 +3338,7 @@ export class CfHarnessPromptLoop {
       });
       return { output: denial };
     }
-    if (toolId === "bash" && isObjectRecord(output)) {
+    if (toolId === "bash" && isObjectNotArray(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);
     }
     if (
@@ -2902,7 +3351,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "read_file" && isObjectRecord(output)) {
+    if (toolId === "read_file" && isObjectNotArray(output)) {
       return renderMediatedReadFileOutput(
         output,
         cfcResult,
@@ -2910,7 +3359,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "edit_file" && isObjectRecord(output)) {
+    if (toolId === "edit_file" && isObjectNotArray(output)) {
       return renderMediatedEditFileOutput(
         output,
         cfcResult,
@@ -2953,8 +3402,9 @@ export class CfHarnessPromptLoop {
     resultRef: ToolResultRef;
   }> {
     const delegateInput = options.input;
-    const profileConfig = getHarnessSubagentProfileConfig(
+    const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
+      this.engine.fabricSessionAvailable,
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
     const inheritsParentModel = childModel.source === "parent";
@@ -3019,10 +3469,23 @@ export class CfHarnessPromptLoop {
         ? { browserAccess: this.#browserAccess }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
+      // The child shares the parent's fabric session, so a subagent can call
+      // `run_pattern` against the one space the run is configured for.
+      ...(this.engine.fabricSessionFactory !== undefined
+        ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        : {}),
       ...(parentRunState.runManifest !== undefined
         ? { runManifest: parentRunState.runManifest }
         : {}),
     });
+    const seededHandleTable = seedSubagentHandleTable(
+      this.engine.handleTable,
+      childRunId,
+      delegateInput,
+    );
+    if (seededHandleTable !== undefined) {
+      await childEngine.recordHandleTable(seededHandleTable);
+    }
     const childCreatedState = childEngine.getRunState();
     const childSkillContextMessages: string[] = [];
     const manifest: HarnessSubagentRunManifest = {
@@ -3084,7 +3547,7 @@ export class CfHarnessPromptLoop {
       cacheAffinityKey: childRunId,
       // Provider controls follow only a child that inherits the parent model.
       // A profile-overridden child keeps its model's own reasoning/cache
-      // defaults, and a chat-routed override like web_search cannot honour the
+      // defaults, and a chat-routed override like web_search cannot honor the
       // parent model's controls at all. `compactThreshold: 0` is the exception:
       // the model-independent off-switch stays run-wide.
       ...(this.#compactThreshold !== undefined &&
@@ -3115,15 +3578,16 @@ export class CfHarnessPromptLoop {
           `subagent profile ${delegateInput.profile} model ${childModel.model} is not available from provider openai-codex`,
         );
       }
-      if (
-        profileConfig.skillNames !== undefined &&
-        profileConfig.skillNames.length > 0 &&
-        parentRunState.skillRegistry !== undefined
-      ) {
-        await childEngine.persistSkillRegistry(parentRunState.skillRegistry);
+      const skillRegistry = parentRunState.skillRegistry;
+      const preloadSkillNames =
+        profileConfig.skillNames !== undefined && skillRegistry !== undefined
+          ? availableProfileSkillNames(skillRegistry, profileConfig.skillNames)
+          : [];
+      if (preloadSkillNames.length > 0 && skillRegistry !== undefined) {
+        await childEngine.persistSkillRegistry(skillRegistry);
         const skillContext = await loadHarnessSkillContext({
-          registry: parentRunState.skillRegistry,
-          skillNames: profileConfig.skillNames,
+          registry: skillRegistry,
+          skillNames: preloadSkillNames,
           source: "subagent-inherit",
           runId: childRunId,
           activatedAt: childCreatedState.updatedAt,
@@ -3150,7 +3614,16 @@ export class CfHarnessPromptLoop {
         promptSlotBinding: options.promptSlotBinding,
         signal: options.signal,
       });
-      summary = childResult.finalAssistantText;
+      // The child speaks in its own tokens; the parent boundary speaks in
+      // addresses. Resolving here is what makes a reference the child
+      // produced usable by the parent: the parent's outbound swap mints the
+      // canonical address into a parent token — the same token for a seeded
+      // address, a fresh one for an address only the child ever saw.
+      const childFinalText = resolveChildHandleTokens(
+        childEngine,
+        childResult.finalAssistantText,
+      );
+      summary = childFinalText;
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;
       if (childUsage !== undefined) {
@@ -3171,7 +3644,7 @@ export class CfHarnessPromptLoop {
         const structured = await createStructuredSubagentReturn({
           childEngine,
           childRunId,
-          rawFinalAssistantText: childResult.finalAssistantText,
+          rawFinalAssistantText: childFinalText,
           schema: delegateInput.returnSchema,
           handleTable,
         });

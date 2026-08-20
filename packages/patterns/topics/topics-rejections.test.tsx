@@ -2,7 +2,7 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 9` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 13` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
@@ -11,6 +11,7 @@
 import { action, assert, TESTS } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics from "./main.tsx";
+import Topic from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
@@ -79,9 +80,49 @@ export default pattern(() => {
     });
   });
 
+  // mention / unmention: a payload that is not a reference. This is the shape
+  // an inline CLI call argument produces — parsed as plain JSON, an address
+  // arrives as the string it looks like. The narrowed payload does not refuse
+  // it on its own (an `asCell` field is wrapped whole, without validating what
+  // is behind it); the verbs read the one named field and reject on
+  // `undefined`. Casts, because the point is a caller that was never
+  // type-checked.
+  const action_mention_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (board.topics?.[0]?.mention as any)?.send({ topic: "fid1:notAReference" });
+  });
+  const action_unmention_text_address = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (board.topics?.[0]?.unmention as any)?.send({
+      topic: "fid1:notAReference",
+    });
+  });
+
+  // setTitle: blank title; blank agentName. On a direct instance, because the
+  // verb lives on the direct interface rather than the shared projection —
+  // and unlike its elders, a MISSING agentName is as rejected as a blank one:
+  // the verb postdates the unsigned-caller era and carries no legacy path.
+  const directTopic = Topic({ title: "Keep this title" });
+  const action_rename_blank_title = action(() => {
+    directTopic.setTitle.send({ title: "   ", agentName: "Sol" });
+  });
+  const action_rename_unsigned = action(() => {
+    directTopic.setTitle.send({ title: "must not land", agentName: "   " });
+  });
+
+  const assert_direct_title_unchanged = assert(() =>
+    directTopic.title === "Keep this title" &&
+    (directTopic.titleUpdatedAt ?? 0) === 0
+  );
+
   const assert_seeded = assert(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "Seed"
+  );
+
+  // No inert entry was stored by either rejection.
+  const assert_no_mentions = assert(() =>
+    (board.topics?.[0]?.mentions ?? []).length === 0
   );
 
   // The one seeded topic, untouched: no comments, no links, empty body.
@@ -95,11 +136,11 @@ export default pattern(() => {
   const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
 
   return {
-    // Every rejection below MUST surface as a thrown handler error — nine
-    // throwing actions, nine runtime errors. The exact count means a single
-    // verb quietly reverting to a silent early-return fails this suite; the
-    // no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 9,
+    // Every rejection below MUST surface as a thrown handler error — thirteen
+    // throwing actions, thirteen runtime errors. The exact count means a
+    // single verb quietly reverting to a silent early-return fails this suite;
+    // the no-write assertions then prove the throw also blocked the write.
+    expectRuntimeErrors: 13,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -121,6 +162,14 @@ export default pattern(() => {
       { assertion: assert_board_unchanged },
       { action: action_set_body_unsigned },
       { assertion: assert_board_unchanged },
+      { action: action_mention_text_address },
+      { assertion: assert_no_mentions },
+      { action: action_unmention_text_address },
+      { assertion: assert_no_mentions },
+      { action: action_rename_blank_title },
+      { assertion: assert_direct_title_unchanged },
+      { action: action_rename_unsigned },
+      { assertion: assert_direct_title_unchanged },
     ],
   };
 });

@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import {
+  entityRefToString,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { createSession, Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -17,20 +23,16 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import {
-  entityRefToString,
-  linkRefPayload,
-} from "@commonfabric/data-model/cell-rep";
-import { defer } from "@commonfabric/utils/defer";
+  validateAgainstSchema,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import {
-  validateAgainstSchema,
-  validateSchemaValue,
-} from "@commonfabric/runner/cfc";
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   assertSuppliedLinkSchemasCompatible,
   assertWritablePiecePath,
@@ -1542,6 +1544,46 @@ describe("piece pull materialization", () => {
     ).toThrow(/source Cell constraints disagree/);
   });
 
+  it("fails closed when the producer contract stops at a scalar ancestor", async () => {
+    // A supplied link that reaches THROUGH a scalar slot of its producer's
+    // durable schema has no derivable source contract: the contract walk in
+    // `buildSourceContracts` fails, and that failure must surface as the
+    // uniform supplied-link rejection rather than escaping unwrapped.
+    const scalarAncestorSchema: JSONSchema = {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    };
+    const source = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: scalarAncestorSchema,
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      source.withTx(tx).setMetaRaw("schema", scalarAncestorSchema);
+    });
+    const base = runtime.getCell(
+      pieces.getSpace(),
+      "scalar-ancestor-base-" + crypto.randomUUID(),
+    );
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: [], value: source.key("value").key("deep") }],
+        true,
+        base,
+        pieces,
+      )
+    ).toThrow(
+      /input link at <root> schema is not compatible: schema does not describe a container at deep/,
+    );
+  });
+
   it("recovers only producer-owned argument and internal contracts", async () => {
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
@@ -1623,6 +1665,7 @@ describe("piece pull materialization", () => {
           pieces,
           true,
           [],
+          undefined,
           resolving,
         ),
       ).toBe("already-materialized");
@@ -3572,6 +3615,223 @@ describe("piece pull materialization", () => {
         event: source.key("event"),
       }),
     ).rejects.toThrow(/input link.*schema is not compatible/);
+  });
+
+  it("ignores a producer document the write does not reach", async () => {
+    const far = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+        },
+        result: { n: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const producer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        result: {
+          obj: { $alias: { cell: "argument", path: ["obj"] } },
+          linked: { $alias: { cell: "argument", path: ["linked"] } },
+        },
+        nodes: [],
+      }),
+      { obj: { n: 1 }, linked: 2 },
+      undefined,
+      { start: true },
+    );
+    await new PieceController(pieces, producer).input.set(
+      far.key("n"),
+      ["linked"],
+    );
+    // The producer now links a document its own schema refuses. Nothing the
+    // consumer writes below reaches it.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped("bad");
+    });
+
+    const consumer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: {
+              type: "object",
+              properties: { n: { type: ["number", "string"] } },
+              required: ["n"],
+            },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, consumer);
+    await controller.input.set(producer.key("obj"), ["slot"]);
+
+    await controller.input.set(5, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // The producer's contract still decides the path the write does reach,
+    // even though the consumer declares it wider.
+    await expect(controller.input.set("bad", ["slot", "n"])).rejects.toThrow(
+      /^updated input does not match its write destination: value does not match type number$/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // A target that exists but reads as undefined is still a target: the link
+    // settles it, and the write goes through.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped(undefined);
+    });
+    await controller.input.set(7, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
+
+    // Having no target at all is the case the link cannot settle: empty the far
+    // document and the producer's `linked` member has nothing behind it, so
+    // `required` refuses.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).setRawUntyped({});
+    });
+    await expect(controller.input.set(8, ["slot", "n"])).rejects.toThrow(
+      /updated input does not match its write destination: missing required property linked/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
+  });
+
+  it("sends a stream event past an invalid producer sibling", async () => {
+    const members = {
+      other: { type: "number" },
+      spare: { type: "number" },
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+            ...members,
+          },
+          required: ["event", "other", "spare"],
+        },
+        // The result declares the same stream with its payload unconstrained,
+        // so a payload only the producer refuses reaches the producer contract
+        // instead of stopping at this Piece's own result schema.
+        resultSchema: {
+          type: "object",
+          properties: { event: { asCell: ["stream"] }, ...members },
+          required: ["event", "other", "spare"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+          other: { $alias: { cell: "argument", path: ["other"] } },
+          spare: { $alias: { cell: "argument", path: ["spare"] } },
+        },
+        nodes: [],
+      }),
+      { event: { $stream: true }, other: 1, spare: 2 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    const argument = pieces.getArgument(piece);
+    // A producer member that no write below touches, holding a value the
+    // producer's own schema refuses.
+    await runtime.editWithRetry((tx) => {
+      argument.withTx(tx).key("spare").setRawUntyped("bad");
+    });
+
+    const stream = argument.key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+    try {
+      await controller.result.set(7, ["event"]);
+      await runtime.idle();
+      expect(events).toEqual([7]);
+      // The premise the skip rests on: sending stores nothing, so the producer
+      // document the root pass would have judged is the one it already was.
+      expect(argument.getRawUntyped()).toEqual({
+        event: { $stream: true },
+        other: 1,
+        spare: "bad",
+      });
+
+      // Bypassing the root pass does not excuse a payload the producer's own
+      // event contract refuses: nothing further reaches the stream.
+      await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
+        /does not match its write destination: value does not match type number/,
+      );
+      await runtime.idle();
+      expect(events).toEqual([7]);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("drops a raw key the materialized view does not carry", async () => {
+    // `omitMissingProjectionAliases` reconciles two views of one document. A
+    // raw key with no counterpart in the materialized view is not a missing
+    // alias to resolve — there is nothing on the materialized side to keep — so
+    // it is skipped rather than recursed into.
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const result = omitMissingProjectionAliases(
+      { kept: 1 },
+      { kept: 1, absentFromMaterialized: 2 },
+      undefined,
+      pieces.getResult(piece),
+      pieces,
+    );
+    // `toEqual` treats a present undefined as absent, so ask about the key
+    // itself: recursing would have set it, to undefined.
+    expect(Object.hasOwn(result as object, "absentFromMaterialized")).toBe(
+      false,
+    );
+    expect(result).toEqual({ kept: 1 });
   });
 
   it("rejects descendant writes through Stream wrappers", async () => {

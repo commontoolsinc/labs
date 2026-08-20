@@ -1,13 +1,17 @@
-import { describe, it } from "@std/testing/bdd";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  type CfcConfClause,
+  clausesEqual,
+  normalizeClause,
+} from "../src/cfc/clause.ts";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcObservationFitsCeiling,
   type CfcObservationMaxConfidentiality,
   meetCfcObservationCeilings,
 } from "../src/cfc/observation.ts";
-import { clausesEqual, normalizeClause } from "../src/cfc/clause.ts";
 
 // Decision 6 of docs/history/plans/cfc-future-work-implementation.md (corrected
 // 2026-07-02, #4482): the general clause meet is the pairwise

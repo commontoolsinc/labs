@@ -1,8 +1,10 @@
-import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
-import { render } from "../lib/render.ts";
-import { process } from "../lib/dev.ts";
+
+import { Command } from "@cliffy/command";
+
 import { cliText } from "../lib/cli-name.ts";
+import { process } from "../lib/dev.ts";
+import { render } from "../lib/render.ts";
 
 const description = cliText(`Compile and execute patterns for debugging.
 
@@ -40,6 +42,7 @@ async function checkAction(
     json?: boolean;
     root?: string;
     space?: string;
+    datafile?: string[];
   },
   ...files: string[]
 ) {
@@ -69,11 +72,26 @@ async function checkAction(
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
         space: options.space,
+        dataFilePaths: options.datafile?.map((path) =>
+          isAbsolute(path) ? path : join(Deno.cwd(), path)
+        ),
         patternJson: options.patternJson,
       });
       results.push({ file, output, transformed, patternJson });
     } catch (error) {
       hasError = true;
+      // The runtime reports that a data file is not attached; it does not know
+      // how this caller would attach one. `cf check` does, so it names its own
+      // flag here rather than leaving the reader to find it.
+      if (
+        error instanceof Error &&
+        error.message.includes("No attached data file") &&
+        options.datafile === undefined
+      ) {
+        console.error(
+          "Attach it with --datafile <path>, repeating the flag per file.",
+        );
+      }
       // Re-throw for single file, continue for multiple files
       if (files.length === 1) {
         throw error;
@@ -143,6 +161,10 @@ function createCheckCommand(): Command<any> {
       cliText(`cf check ./pattern.tsx --no-check`),
       "Compile and evaluate pattern without typechecking.",
     )
+    .example(
+      cliText(`cf check ./pattern.tsx --datafile ./data/cities.json`),
+      "Check a pattern that reads an attached data file.",
+    )
     .option("--no-run", "Do not execute input, only type check.")
     .option("--no-check", "Do not type check input.")
     .option(
@@ -175,6 +197,11 @@ function createCheckCommand(): Command<any> {
     .option(
       "--root <path:string>",
       "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    )
+    .option(
+      "--datafile <path:string>",
+      "Attach a data file the pattern reads with dataFile(). Repeatable.",
+      { collect: true },
     )
     .option(
       "--space <did:string>",

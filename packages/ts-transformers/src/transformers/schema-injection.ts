@@ -1,12 +1,5 @@
-import ts from "typescript";
-import {
-  cloneTypeNode,
-  createRegisteredTypeLiteral,
-  getDeclaredTypeNodeForBindingElement,
-  reportUnknownReactiveType,
-  shouldPreserveBindingDeclaredTypeNode,
-} from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import ts from "typescript";
 
 import {
   classifyArrayMethodCall,
@@ -29,11 +22,18 @@ import {
   isUnresolvedSchemaType,
   preserveSourceMapRange,
   registerSyntheticCallType,
+  resolveCallbackFunctionExpression,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  cloneTypeNode,
+  createRegisteredTypeLiteral,
+  getDeclaredTypeNodeForBindingElement,
+  reportUnknownReactiveType,
+  shouldPreserveBindingDeclaredTypeNode,
+} from "../ast/type-building.ts";
 import {
   type CapabilityParamSummary,
   type FunctionCapabilitySummary,
@@ -44,15 +44,18 @@ import {
   type TypeRegistry,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
+import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 import {
   applyShrinkAndWrap,
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
+  overlayContractCapabilities,
   preservedWrapperFor,
   printTypeNode,
+  validateShrinkCoverage,
 } from "./type-shrinking.ts";
-import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -311,6 +314,40 @@ function applyCapabilitySummaryToArgument(
   if (!paramSummary) {
     return argumentNode;
   }
+  if (mode === "contract") {
+    // The contract half of docs/history/plans/verb-input-contract.md: the authored
+    // event serves verbatim in structure, with capabilities overlaid from
+    // the body's usage and unobserved cell positions made opaque. The
+    // body's observed paths still validate against the authored type — a
+    // read of an unknown-typed property is an authoring error under either
+    // mode.
+    const overlaid = overlayContractCapabilities(
+      argumentNode,
+      argumentType,
+      paramSummary,
+      checker,
+      factory,
+      sourceFile,
+      context?.state.typeRegistry,
+    );
+    if (context) {
+      validateShrinkCoverage(
+        paramSummary,
+        argumentNode,
+        argumentType,
+        [
+          ...paramSummary.readPaths,
+          ...paramSummary.writePaths,
+          ...paramSummary.fullShapePaths ?? [],
+        ],
+        overlaid,
+        context,
+        fnNode ?? fn,
+        checker,
+      );
+    }
+    return overlaid;
+  }
   const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode) ??
     typeToSchemaTypeNode(
       argumentType && isCellLikeType(argumentType, checker)
@@ -362,6 +399,7 @@ function applyCapabilitySummaryToParameter(
   factory: ts.NodeFactory,
   context?: TransformationContext,
   fnNode?: ts.Node,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): ts.TypeNode | undefined {
   if (!parameterNode) return parameterNode;
 
@@ -376,6 +414,35 @@ function applyCapabilitySummaryToParameter(
   );
   if (!paramSummary) {
     return parameterNode;
+  }
+  if (mode === "contract") {
+    // See the matching branch in applyCapabilitySummaryToArgument.
+    const overlaid = overlayContractCapabilities(
+      parameterNode,
+      parameterType,
+      paramSummary,
+      checker,
+      factory,
+      sourceFile,
+      context?.state.typeRegistry,
+    );
+    if (context) {
+      validateShrinkCoverage(
+        paramSummary,
+        parameterNode,
+        parameterType,
+        [
+          ...paramSummary.readPaths,
+          ...paramSummary.writePaths,
+          ...paramSummary.fullShapePaths ?? [],
+        ],
+        overlaid,
+        context,
+        fnNode ?? fn,
+        checker,
+      );
+    }
+    return overlaid;
   }
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
@@ -404,7 +471,7 @@ function applyCapabilitySummaryToParameter(
     checker,
     sourceFile,
     factory,
-    "full",
+    mode,
     paramSummary.capability,
     context,
     fnNode ?? fn,
@@ -1227,6 +1294,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   context: TransformationContext,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): {
   argumentTypeNode: ts.TypeNode;
   argumentTypeValue: ts.Type | undefined;
@@ -1242,7 +1310,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     checker,
     sourceFile,
     factory,
-    "full",
+    mode,
     context,
     callback,
   );
@@ -1299,6 +1367,7 @@ function resolveDualSchemaBuilderTypes(
       sourceFile,
       factory,
       context,
+      options?.capabilityMode ?? "full",
     ));
   }
 
@@ -1543,8 +1612,10 @@ function visitReactiveConditional(
 
   const argTypes = args.map(typeOf);
   // Only the condition is checked. It is materialized here to choose a branch,
-  // so an unknown condition silently reads back as undefined at this boundary.
-  // The branches are result values that flow outward unmaterialized — an unknown
+  // so an unknown condition silently reads back as a reference at this
+  // boundary — which is truthy whenever the position holds anything, so a
+  // condition that was meant to be `false` picks the other branch. The
+  // branches are result values that flow outward unmaterialized — an unknown
   // branch is not lost here; it propagates as the call's unknown result and is
   // reported where that result is consumed (captured).
   reportUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
@@ -2520,6 +2591,49 @@ function resolveLiftAppliedInputAndCallback(
   return { input, callback };
 }
 
+/**
+ * Whether `expression` names a callback, for recognizing the schema-first
+ * `handler` form and for keeping the trailing-options check from
+ * spread-replacing a callback with the injected result options.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Four review rounds each found the spelling the
+ * previous round's syntax list missed (inline arrow, const reference,
+ * function declaration, property access); asking the type ends the family,
+ * because a schema is never callable and a callback always is, however it
+ * is written. Two backstops cover the type information going missing
+ * rather than a spelling: the syntactic resolver catches a local
+ * `any`-typed callback (no call signatures to ask), and the declaration
+ * fallback catches an IMPORTED one — the resolver cannot cross modules,
+ * but the aliased symbol's declaration still says what the value is.
+ */
+function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
+}
+
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
@@ -2651,8 +2765,9 @@ function reportAnyResultSchema(
  * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
  * result is an error (the whole output is permissive). A concrete result that
  * nests `unknown` fields is also an error: those fields lower to
- * `{ type: "unknown" }`, which a consumer reading them back materializes as
- * `undefined` — the producer-side form of the unknown-capture bug.
+ * `{ type: "unknown" }`, which a consumer does not materialize — it reads
+ * them back as opaque references carrying no properties, the producer-side
+ * form of the unknown-capture bug.
  */
 function reportUnknownPatternResult(
   context: TransformationContext,
@@ -2676,8 +2791,9 @@ function reportUnknownPatternResult(
       `${
         paths.length > 1 ? "have" : "has"
       } inferred type \`unknown\`, so the ` +
-      `output schema carries \`{ type: "unknown" }\` there. A consumer that ` +
-      `reads such a field back materializes it as \`undefined\`. Add an ` +
+      `output schema carries \`{ type: "unknown" }\` there. A consumer does ` +
+      `not materialize such a field: it reads back as an opaque reference ` +
+      `carrying no properties. Add an ` +
       `explicit Output type, e.g. pattern<Input, { /* shape */ }>(...).`,
     node: node.expression,
   });
@@ -3045,9 +3161,9 @@ function handlePatternSchemaInjection(
  * on `handler<Event, State, Result>`, or carried there by the `action<Event,
  * Result>` lowering (`closures/strategies/action-strategy.ts`).
  *
- * A call that already passes options — the `{ proxy: true }` form — keeps
- * them, spread into the same object, so one slot holds every option. A verb
- * that declares no result gets its arguments back untouched.
+ * A call that already passes an options object keeps it, spread into the same
+ * object, so one slot holds every option. A verb that declares no result gets
+ * its arguments back untouched.
  */
 function withDeclaredResultSchema(
   args: readonly ts.Expression[],
@@ -3060,7 +3176,7 @@ function withDeclaredResultSchema(
   const resultTypeNode = declaredVerbResultTypeNode(node, "handler");
   if (!resultTypeNode) return next;
 
-  const { factory, sourceFile } = context;
+  const { factory } = context;
   const resultSchemaCall = createSchemaCallWithRegistryTransfer(
     context,
     resultTypeNode,
@@ -3077,12 +3193,14 @@ function withDeclaredResultSchema(
   }
 
   // Only an argument the author wrote AFTER the callback is an options object;
-  // the callback itself, and the schemas prepended above, never are.
+  // the callback itself, and the schemas prepended above, never are. The
+  // identifier-aware resolver decides callback-ness, so a NAMED callback in
+  // the trailing slot is never mistaken for options and spread-replaced.
   const authoredTail = node.arguments.length >= 2
     ? node.arguments[node.arguments.length - 1]
     : undefined;
   const authoredOptions = authoredTail !== undefined &&
-      !resolveFunctionLikeExpression(authoredTail, checker, sourceFile)
+      !isCallbackReference(authoredTail, checker)
     ? authoredTail
     : undefined;
 
@@ -3231,6 +3349,40 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // The schema-first authored form — handler<E, T[, R]>(eventSchema,
+          // stateSchema, callback[, options]) — already carries its schemas,
+          // so nothing is prepended: injecting generated ones on top would
+          // displace the callback out of the positions the runtime dispatch
+          // and the sandbox verifier accept (argument 0 or 2). What only the
+          // transformer can do — lowering a declared result onto the trailing
+          // options object — still applies. Recognition uses the
+          // identifier-aware resolver, so a NAMED callback recognizes the
+          // form too — the SES verifier still demands a direct callback at
+          // load, but the emission must not garble the call on the way there.
+          if (
+            node.arguments.length >= 3 &&
+            !isCallbackReference(node.arguments[0], checker) &&
+            !isCallbackReference(node.arguments[1], checker) &&
+            isCallbackReference(node.arguments[2], checker)
+          ) {
+            const updated = preserveSourceMapRange(
+              factory.createCallExpression(
+                node.expression,
+                undefined,
+                withDeclaredResultSchema(
+                  [...node.arguments],
+                  node,
+                  context,
+                  checker,
+                  typeRegistry,
+                ),
+              ),
+              node,
+            );
+            context.markSchemaInjected(updated);
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+
           let eventTypeNode: ts.TypeNode = eventType;
           let stateTypeNode: ts.TypeNode = stateType;
           const handlerCandidate = node.arguments[0];
@@ -3251,6 +3403,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               typeRegistry,
             );
 
+            // The event is a verb's input contract: authored structure,
+            // usage-derived capability values (docs/history/plans/verb-input-contract.md).
+            // A synthetic event node has no authored structure to serve —
+            // JSX handler events among them — so those keep the usage shrink.
             eventTypeNode = applyCapabilitySummaryToParameter(
               handlerFn,
               0,
@@ -3261,6 +3417,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               context,
               handlerFn,
+              isSyntheticNode(eventType) ? "full" : "contract",
             ) ?? eventType;
 
             stateTypeNode = applyCapabilitySummaryToParameter(
@@ -3328,7 +3485,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (handlerCandidate && handlerFn) {
-            // Infer types from the handler function for both parameters
+            // Infer types from the handler function for both parameters. The
+            // event is a verb's input contract, so an AUTHORED event type —
+            // an explicit parameter annotation — is served in `contract`
+            // mode: authored structure, usage-derived capability values. An
+            // inferred event keeps the usage shrink, which for a handler with
+            // no authored type is the only contract there is.
+            const eventParameterTypeNode = handlerFn.parameters[0]?.type;
             const inferred = collectFunctionSchemaTypeNodes(
               handlerFn,
               checker,
@@ -3336,7 +3499,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               undefined,
               typeRegistry,
-              "full",
+              eventParameterTypeNode && !isSyntheticNode(eventParameterTypeNode)
+                ? "contract"
+                : "full",
               context,
             );
 
@@ -3358,6 +3523,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 factory,
                 undefined,
                 handlerFn,
+                "contract",
               ) ?? eventTypeBase;
 
             // State type: use helper for second parameter
@@ -3582,7 +3748,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
         const factory = transformation.factory;
 
-        const firstArgument = node.arguments[0];
+        const firstArgument = node.arguments[0] &&
+          unwrapExpression(node.arguments[0]);
         if (firstArgument && isToSchemaCall(firstArgument)) {
           const argumentType = firstArgument.typeArguments?.[0];
           const liftCallback = resolveFunctionLikeExpression(

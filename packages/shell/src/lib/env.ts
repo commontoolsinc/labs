@@ -9,6 +9,7 @@ declare global {
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
+  var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -37,6 +38,11 @@ const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
 const EXPERIMENTAL_SERVER_EXECUTION_DEFINE =
   typeof $EXPERIMENTAL_SERVER_EXECUTION === "string"
     ? $EXPERIMENTAL_SERVER_EXECUTION
+    : undefined;
+
+const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
+  typeof $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS === "string"
+    ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -73,11 +79,19 @@ export const EXPERIMENTAL = {
   systemPatternAutoUpdate:
     flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
   // Server-execution v2 (docs/specs/server-side-execution/): the
-  // first-party default (ON since the plan's Phase 7 flip), overridable
-  // by the build define either way (`EXPERIMENTAL_SERVER_EXECUTION=false`
-  // builds the OFF-arm shell — the rollback lever and CI's regression
-  // guard). The worker refuses to initialize if its resolved posture
-  // disagrees with this declaration (runtime-client's posture agreement).
+  // first-party default (the landed-dark constant, `false` until the flip
+  // PR), overridable by the build define either way
+  // (`EXPERIMENTAL_SERVER_EXECUTION=false` builds the OFF-arm shell — the
+  // rollback lever and CI's regression guard). The worker refuses to
+  // initialize if its resolved posture disagrees with this declaration
+  // (runtime-client's posture agreement).
   serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??
     SERVER_EXECUTION_DEFAULT_ENABLED,
+  // Content-addressed schemas Phase 1: link writers emit cid: references.
+  // Off by default, and deliberately so for now — clients read references
+  // before any client writes them, so the writer turns on only once every
+  // deployed client is a reader.
+  contentAddressedSchemas: flagValue(
+    EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  ),
 };

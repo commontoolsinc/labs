@@ -1,9 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import {
   type JSONSchema,
   type Module,
@@ -12,6 +15,14 @@ import {
 } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
+import { validateSchemaValue } from "../src/cfc/mod.ts";
+import {
+  areNormalizedLinksSame,
+  getDerivedInternalCell,
+  getMetaLink,
+  isWriteRedirectLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import {
   extractDefaultValues,
   getPatternIdentityRef,
@@ -21,7 +32,7 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
 } from "../src/runner.ts";
-import { validateSchemaValue } from "../src/cfc/mod.ts";
+import { Runtime } from "../src/runtime.ts";
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,
@@ -30,13 +41,6 @@ import {
   type URI,
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
-import {
-  areNormalizedLinksSame,
-  getDerivedInternalCell,
-  getMetaLink,
-  isWriteRedirectLink,
-  parseLink,
-} from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

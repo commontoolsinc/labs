@@ -1,9 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals, assertMatch } from "@std/assert";
-import {
-  PatternCoverageTransformer,
-} from "../src/transformers/pattern-coverage.ts";
-import { collect, literalToValue, parseModule } from "./transformed-ast.ts";
+
+import ts from "typescript";
+
 import { CommonFabricTransformerPipeline } from "../src/cf-pipeline.ts";
 import {
   type PatternCoverageOptions,
@@ -11,6 +9,10 @@ import {
   TransformationContext,
   type TransformationDiagnostic,
 } from "../src/core/mod.ts";
+import {
+  PatternCoverageTransformer,
+} from "../src/transformers/pattern-coverage.ts";
+import { collect, literalToValue, parseModule } from "./transformed-ast.ts";
 
 interface TransformResult {
   output: string;
@@ -519,6 +521,62 @@ Deno.test("statements rebuilt as synthetic nodes still get coverage", () => {
   ]);
 });
 
+Deno.test("a synthetic statement with no original keeps its source map range", () => {
+  const fileName = "/pattern.tsx";
+  const source = "const keep = 1;\nconst drop = 2;\n";
+  const { program, sourceFile } = createProgramForSource(fileName, source);
+  const spans: PatternCoverageSpan[] = [];
+
+  // Model a stage that rebuilds `drop` without linking the authored node, and
+  // records where it came from as a source map range instead. That range is
+  // the only thing left to place the span by.
+  const rebuildWithSourceMapRange: ts.TransformerFactory<ts.SourceFile> = (
+    tsContext,
+  ) =>
+  (file) => {
+    const statements = file.statements.map((statement) => {
+      if (
+        ts.isVariableStatement(statement) &&
+        ts.isIdentifier(statement.declarationList.declarations[0]!.name) &&
+        statement.declarationList.declarations[0]!.name.text === "drop"
+      ) {
+        const rebuilt = tsContext.factory.createVariableStatement(
+          undefined,
+          tsContext.factory.createVariableDeclarationList(
+            [tsContext.factory.createVariableDeclaration(
+              "drop",
+              undefined,
+              undefined,
+              tsContext.factory.createNumericLiteral(2),
+            )],
+            ts.NodeFlags.Const,
+          ),
+        );
+        return ts.setSourceMapRange(rebuilt, {
+          pos: statement.getStart(file),
+          end: statement.getEnd(),
+        });
+      }
+      return statement;
+    });
+    return tsContext.factory.updateSourceFile(file, statements);
+  };
+
+  const transformer = new PatternCoverageTransformer({
+    patternCoverage: { registerSpan: (span) => spans.push(span) },
+  });
+  ts.transform(sourceFile, [
+    rebuildWithSourceMapRange,
+    transformer.toFactory(program),
+  ]).dispose();
+
+  assertEquals(spans.length, 2);
+  assertEquals(spans.map((span) => span.startLine).sort((a, b) => a - b), [
+    1,
+    2,
+  ]);
+});
+
 Deno.test("leading non-directive string statement is instrumented", () => {
   const source = `function f() {
   "leading note";
@@ -550,6 +608,51 @@ switch (x) {
   // A span must start on the `case 1:` label line so reaching the case is
   // recorded.
   assertEquals(spans.some((span) => span.startLine === caseOneLine), true);
+});
+
+Deno.test("switch default clause statements are recorded", () => {
+  const source = `const x = 3;
+switch (x) {
+  case 1:
+    doOne();
+    break;
+  default:
+    doDefault();
+}
+`;
+  const { output, spans } = transformWithCoverage(source);
+
+  // The default clause is rebuilt like a case clause, so its statements carry
+  // their own span rather than inheriting the switch's.
+  expectSpanContaining(spans, source, "doOne();");
+  expectSpanContaining(spans, source, "doDefault();");
+  // The rebuilt clause is what carries the hit call into the emitted code.
+  assertMatch(
+    output,
+    /default:\s+globalThis\.__cfPatternCoverage\?\.hit\([\s\S]+?\);\s+doDefault\(\);/,
+  );
+});
+
+Deno.test("an empty switch default clause is recorded at its label", () => {
+  const source = `const x = 3;
+switch (x) {
+  case 1:
+    doOne();
+    break;
+  default:
+}
+`;
+  const { output, spans } = transformWithCoverage(source);
+  const defaultLine =
+    source.split("\n").findIndex((line) => line.includes("default:")) + 1;
+
+  // A clause with no statements gets a hit call of its own, so falling into
+  // the default is recorded even though it does nothing.
+  assertEquals(spans.some((span) => span.startLine === defaultLine), true);
+  assertMatch(
+    output,
+    /default:\s+globalThis\.__cfPatternCoverage\?\.hit\([\s\S]+?\);\s+\}/,
+  );
 });
 
 Deno.test("single-statement control-flow bodies are wrapped and recorded", () => {

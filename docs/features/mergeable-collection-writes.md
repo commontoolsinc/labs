@@ -200,7 +200,7 @@ The same machinery carries three mergeable ops. `append` is described below;
   op, never an indexed `add`/`remove`/`move` (`assertNoIndexedArrayStructuralOps`
   guards this). So a reader of the list is invalidated by an op, while the op's
   own (dropped) read keeps two ops from conflicting with each other — the
-  array-membership analogue of the conflict-granularity fix for distinct-key
+  array-membership analog of the conflict-granularity fix for distinct-key
   writers to a container.
 
 ### The op family
@@ -254,13 +254,10 @@ missing value is a zero default, `increment` is always zero-based: a counter
 whose displayed starting value should be non-zero must be `set` to that value
 first, since the op carries only the delta.
 
-- **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) and the
-  query-result-proxy's `push` (`packages/runner/src/query-result-proxy.ts`,
-  which routes array mutators through `diffAndUpdate`) both call
+- **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) calls
   `recordMergeableOp` with an `append` delta after writing the combined array, so
-  id anchoring,
-  cross-space link elements, and CFC write-policy recording continue to run
-  through the existing `diffAndUpdate` path unchanged.
+  id anchoring, cross-space link elements, and CFC write-policy recording
+  continue to run through the existing `diffAndUpdate` path unchanged.
 
 ## Semantics and limitations
 
@@ -292,10 +289,8 @@ first, since the op carries only the delta.
   hold is the list of commit-time checks below, each of which had to be found.
   The rule is that every whole-value write poisons the ops it
   covers, so the sites to keep in step are every path that performs one:
-  `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
-  and the proxy's property-assignment trap — the last two being separate code
-  paths for the same reshape. Plus `recordMergeableOp` itself, on a second,
-  different op kind at one path. `poisonMergeableOp` is what they all call, and
+  `Cell.set` and `Cell.setRawUntyped`. Plus `recordMergeableOp` itself, on a
+  second, different op kind at one path. `poisonMergeableOp` is what they all call, and
   it acts on every intent at *or beneath* the path written — a
   write to an enclosing object (`doc.set({rows})`) reshapes the array inside it
   just as surely as a write to the array itself — and on nothing above it. So a
@@ -358,7 +353,7 @@ first, since the op carries only the delta.
 
   In every case reachable today the reshaping write also leaves an unmarked read
   at the path, which keeps it in the conflict set regardless — so the delete is
-  belt and braces rather than a demonstrated behaviour change, and no test
+  belt and braces rather than a demonstrated behavior change, and no test
   asserts a conflict outcome that depends on it. It is kept because the
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.
@@ -442,8 +437,8 @@ retry.
 The implemented drop is narrower than that. It removes only the reads the op
 *itself* issues — the list value it reads to build the write (marked
 `mergeableOpRead`), the link-resolution and element sub-reads strictly beneath
-the array path, the query-result proxy's shape-only container read of the array,
-and the `["cfc"]` policy label — and keeps a *recursive* read at the array path
+the array path, the shape-only container read a view of the array records, and
+the `["cfc"]` policy label — and keeps a *recursive* read at the array path
 that the op did not make, which is the handler's own explicit `.get()`/`.some()`.
 So a handler that reads the list and then `push`es still records that read: two
 concurrent conditional appends conflict, the loser retries, sees the winner's

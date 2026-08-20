@@ -1,24 +1,15 @@
-import { StaticCache } from "@commonfabric/static";
-import { RuntimeTelemetry } from "@commonfabric/runner";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import type { NonIdempotentReport } from "./telemetry.ts";
-import type {
-  AnyCell,
-  JSONSchema,
-  Module,
-  NodeFactory,
-  Pattern,
-  Schema,
-} from "./builder/types.ts";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
@@ -28,14 +19,27 @@ import {
   serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
+  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
+import { RuntimeTelemetry } from "@commonfabric/runner";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
+import { StaticCache } from "@commonfabric/static";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isDeno } from "@commonfabric/utils/env";
+
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
   isEagerSourceAnnotationEnabled,
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
-import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -46,6 +50,16 @@ import type {
   TransactionSealDestination,
   URI,
 } from "./storage/interface.ts";
+import type {
+  AnyCell,
+  Frame,
+  JSONSchema,
+  Module,
+  NodeFactory,
+  Pattern,
+  Schema,
+} from "./builder/types.ts";
+import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
   createCell,
@@ -107,13 +121,27 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
+import { Engine } from "./harness/index.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
+import { addressKey } from "./link-types.ts";
+import {
+  CellLink,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { ModuleRegistry } from "./module.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { ModuleRegistry } from "./module.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
@@ -122,13 +150,23 @@ import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import {
-  type AsyncLocalStore,
-  FallbackAsyncLocalStore,
-} from "@commonfabric/utils/async-local-store";
-import { popFrame, pushFrame } from "./builder/pattern.ts";
-import type { Frame } from "./builder/types.ts";
-import type { ConsoleMessage } from "./interface.ts";
-import type { ConsoleMethod } from "./harness/console.ts";
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import type {
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  MemorySpace,
+  URI,
+} from "./storage/interface.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -137,12 +175,13 @@ import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
 } from "./storage/write-stack-trace.ts";
+import type { NonIdempotentReport } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { toURI } from "./uri-utils.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -167,10 +206,10 @@ const isFullNormalizedLinkShape = (
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
 // otherwise. The `await import` stays here (not in the shared utils module): a
 // top-level await in widely-imported utils stalls Deno module evaluation.
-const WriteDebugContextStorage =
-  (isDeno()
-    ? (await import("node:async_hooks")).AsyncLocalStorage
-    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
+const WriteDebugContextStorage = (isDeno()
+  // deno-lint-ignore cf-imports/no-inline-module-import
+  ? (await import("node:async_hooks")).AsyncLocalStorage
+  : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -218,6 +257,16 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
+  /**
+   * Link writers replace inline schemas with references to
+   * content-addressed schema documents
+   * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
+   * writers stamp references, and selectors externalize opportunistically
+   * when their closure is already persisted in the target space. Gates
+   * emission only; readers and the server accept both forms
+   * unconditionally. Defaults to off.
+   */
+  contentAddressedSchemas?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
@@ -1193,6 +1242,20 @@ export class Runtime {
     // `undefined` and probably get very confused).
     setModernCellRepConfig(this.experimental.modernCellRep);
     this.experimental.modernCellRep = getModernCellRepConfig();
+    setContentAddressedSchemasConfig(
+      this.experimental.contentAddressedSchemas,
+    );
+    this.experimental.contentAddressedSchemas =
+      getContentAddressedSchemasConfig();
+    if (this.experimental.contentAddressedSchemas) {
+      // Content-addressed schema references and the sync schema table dedupe
+      // the same link-schema positions; a reference-bearing link never needs
+      // frame compression, so a flag-on process stops negotiating the table
+      // entirely rather than running both mechanisms. Ambient and one-way
+      // like the flag itself: once any runtime in the realm enables the
+      // flag, the table stays off for the process.
+      setSyncSchemaTableConfig(false);
+    }
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     // Like eagerSourceAnnotation below, propagate only when EXPLICITLY
@@ -1702,109 +1765,124 @@ export class Runtime {
   }
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
-    // A kept store keeps RECORDING, so this path drains what could still write
-    // into it. In-flight async builtin work is that shape: a fetch / llm call or
-    // a sqlite RPC runs from a post-commit outbox flush and writes its result
-    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
-    // nor `synced()` waits for it. `settled()` is the barrier that does. The
-    // closing path skips it because a caller who let the store close has no
-    // reader left to mislead, and waiting on the network in every teardown is a
-    // real cost; here the caller is about to read what this runtime wrote.
-    //
-    // BEFORE the cancellation below, not after: `stopAll()` and
-    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
-    // leaving the store holding part of a result — which is worse than either
-    // extreme for a reader trying to learn what state this runtime reached.
-    //
-    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
-    // loop and returns — silently, with work still outstanding — which is
-    // exactly the hole this drain exists to close, one layer down. Measured: 60
-    // generations of chained tracked work, and a capped drain returned at
-    // generation 50 while the chain kept running and writing. `settledFor`'s
-    // JSDoc gives the reason a cap is wrong for this question and why removing
-    // it cannot spin: every round awaits real promises, so a runtime that keeps
-    // working keeps the barrier open rather than busy-looping.
-    if (!closeStorage) await this.settled(Infinity);
-    // Abort any pending (not-yet-started) queued jobs so they don't start
-    // after storage is torn down.
-    for (const queue of this.queues.values()) {
-      queue.abortPending();
+    try {
+      // A kept store keeps RECORDING, so this path drains what could still write
+      // into it. In-flight async builtin work is that shape: a fetch / llm call or
+      // a sqlite RPC runs from a post-commit outbox flush and writes its result
+      // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+      // nor `synced()` waits for it. `settled()` is the barrier that does. The
+      // closing path skips it because a caller who let the store close has no
+      // reader left to mislead, and waiting on the network in every teardown is a
+      // real cost; here the caller is about to read what this runtime wrote.
+      //
+      // BEFORE the cancellation below, not after: `stopAll()` and
+      // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+      // leaving the store holding part of a result — which is worse than either
+      // extreme for a reader trying to learn what state this runtime reached.
+      //
+      // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+      // loop and returns — silently, with work still outstanding — which is
+      // exactly the hole this drain exists to close, one layer down. Measured: 60
+      // generations of chained tracked work, and a capped drain returned at
+      // generation 50 while the chain kept running and writing. `settledFor`'s
+      // JSDoc gives the reason a cap is wrong for this question and why removing
+      // it cannot spin: every round awaits real promises, so a runtime that keeps
+      // working keeps the barrier open rather than busy-looping.
+      if (!closeStorage) await this.settled(Infinity);
+      // Abort any pending (not-yet-started) queued jobs so they don't start
+      // after storage is torn down.
+      for (const queue of this.queues.values()) {
+        queue.abortPending();
+      }
+      this.queues.clear();
+      // Stop all running docs
+      this.runner.stopAll();
+
+      // The speculation overlay dies with the runtime (speculation.md §1:
+      // process-memory only): withdraw its live entries and release the
+      // watermark sinks BEFORE the storage sessions they read through
+      // close.
+      this.#speculationOverlay?.close();
+      this.#speculationOverlay = undefined;
+      this.#effectsChannel?.close();
+      this.#effectsChannel = undefined;
+      // Release the manager-side hook — but only when the installed hook
+      // is OUR OWN (identity match): a later runtime constructed over the
+      // SAME manager (the LT8 second life) has already replaced it, and
+      // clearing unconditionally would drop THAT runtime's hook — its
+      // channel would miss every space opened after this dispose
+      // (independent review NOTE-a).
+      if (
+        this.#installedSpaceOpenObserver !== undefined &&
+        this.storageManager.spaceOpenObserver ===
+          this.#installedSpaceOpenObserver
+      ) {
+        this.storageManager.spaceOpenObserver = undefined;
+      }
+      this.#installedSpaceOpenObserver = undefined;
+
+      // Background source checks are deliberately outside the scheduler. Abort
+      // and settle them before the storage sessions they may write through close.
+      await this.patternUpdater.dispose();
+
+      // Same contract for the runner's unloadable-pointer roll-forward commits
+      // (CT-1923): settle before their storage sessions close. Commits only —
+      // never the watcher pattern LOADS, which can be held/wedged arbitrarily
+      // long and are lifecycle-epoch-guarded instead.
+      await this.runner.settlePointerCommits();
+
+      // Scheduler background work can still be using storage, for example the
+      // lifecycle-guarded boot-time persistent-state listing. Let that finish
+      // before tearing down storage sessions.
+      await this.scheduler.idle();
+
+      // Clear module registry
+      this.moduleRegistry.clear();
+
+      // Cancel all storage operations
+      if (closeStorage) await this.storageManager.close();
+
+      // Wait for any pending operations
+      await this.scheduler.idle();
+
+    } finally {
+      // Released whatever happened above. `storageManager.close()` can reject
+      // — through a provider's `replica.close()` — and it is the one await
+      // here that can. Every statement below is synchronous field-clearing
+      // that cannot fail in turn, so running them on the error path costs
+      // nothing while skipping them strands the process: the config resets
+      // are PROCESS-GLOBAL, and one skipped leaves a non-default experimental
+      // flag set for every runtime built afterwards, with nothing to put it
+      // back.
+      //
+      // The error still propagates. What changes is how much has been
+      // released by the time it does, not whether disposal fails.
+      this.scheduler.dispose();
+      this.runner.dispose();
+
+      // Pop the default frame
+      if (this.defaultFrame) {
+        popFrame(this.defaultFrame);
+        this.defaultFrame = undefined;
+      }
+
+      // Dispose the Engine (clears compiler/runtime state and the console
+      // hook)
+      this.harness.dispose();
+
+      // Reset experimental config to defaults. serverExecution releases
+      // this runtime's ENABLER (stage F): the flag resets only when the
+      // last live enabler process-wide goes — disposing a flag-less
+      // runtime, or parking one serving runtime of several, must not clear
+      // the ambient flag other owners and the memory server's admission
+      // still depend on (mid-wave `derived` commits would be refused as
+      // unclaimable). A single-runtime test keeps its stage-A cleanup
+      // contract: the last enabler's dispose resets. Released in
+      // #releaseServerExecutionEnabler (also called from the dispose
+      // catch), so a REJECTING async teardown cannot leak the enabler.
+      resetModernCellRepConfig();
+      resetCommitPreconditionsConfig();
     }
-    this.queues.clear();
-    // Stop all running docs
-    this.runner.stopAll();
-
-    // The speculation overlay dies with the runtime (speculation.md §1:
-    // process-memory only): withdraw its live entries and release the
-    // watermark sinks BEFORE the storage sessions they read through
-    // close.
-    this.#speculationOverlay?.close();
-    this.#speculationOverlay = undefined;
-    this.#effectsChannel?.close();
-    this.#effectsChannel = undefined;
-    // Release the manager-side hook — but only when the installed hook
-    // is OUR OWN (identity match): a later runtime constructed over the
-    // SAME manager (the LT8 second life) has already replaced it, and
-    // clearing unconditionally would drop THAT runtime's hook — its
-    // channel would miss every space opened after this dispose
-    // (independent review NOTE-a).
-    if (
-      this.#installedSpaceOpenObserver !== undefined &&
-      this.storageManager.spaceOpenObserver ===
-        this.#installedSpaceOpenObserver
-    ) {
-      this.storageManager.spaceOpenObserver = undefined;
-    }
-    this.#installedSpaceOpenObserver = undefined;
-
-    // Background source checks are deliberately outside the scheduler. Abort
-    // and settle them before the storage sessions they may write through close.
-    await this.patternUpdater.dispose();
-
-    // Same contract for the runner's unloadable-pointer roll-forward commits
-    // (CT-1923): settle before their storage sessions close. Commits only —
-    // never the watcher pattern LOADS, which can be held/wedged arbitrarily
-    // long and are lifecycle-epoch-guarded instead.
-    await this.runner.settlePointerCommits();
-
-    // Scheduler background work can still be using storage, for example the
-    // lifecycle-guarded boot-time persistent-state listing. Let that finish
-    // before tearing down storage sessions.
-    await this.scheduler.idle();
-
-    // Clear module registry
-    this.moduleRegistry.clear();
-
-    // Cancel all storage operations
-    if (closeStorage) await this.storageManager.close();
-
-    // Wait for any pending operations
-    await this.scheduler.idle();
-
-    // Clean up scheduler timers
-    this.scheduler.dispose();
-
-    // Pop the default frame
-    if (this.defaultFrame) {
-      popFrame(this.defaultFrame);
-      this.defaultFrame = undefined;
-    }
-
-    // Dispose the Engine (clears compiler/runtime state and the console hook)
-    this.harness.dispose();
-
-    // Reset experimental config to defaults. serverExecution releases
-    // this runtime's ENABLER (stage F): the flag resets only when the
-    // last live enabler process-wide goes — disposing a flag-less
-    // runtime, or parking one serving runtime of several, must not clear
-    // the ambient flag other owners and the memory server's admission
-    // still depend on (mid-wave `derived` commits would be refused as
-    // unclaimable). A single-runtime test keeps its stage-A cleanup
-    // contract: the last enabler's dispose resets. Released in
-    // #releaseServerExecutionEnabler (also called from the dispose
-    // catch), so a REJECTING async teardown cannot leak the enabler.
-    resetModernCellRepConfig();
-    resetCommitPreconditionsConfig();
   }
 
   /** Release this runtime's server-execution enabler (idempotent — the
@@ -2712,7 +2790,7 @@ export class Runtime {
    * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
    * derives the space key from the name alone (the identity is ignored on the
    * `spaceName` path), so equal names map to the same shared space across users.
-   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * This is the deliberate "shared profile space" behavior today; revisit once
    * we can derive unique space DIDs from a string.
    */
   async resolveSpaceName(name: string): Promise<MemorySpace> {
@@ -2841,7 +2919,7 @@ export class Runtime {
   /**
    * The host that serves a space's space-bound work (LLM, fetch, blob).
    * A mapped space resolves to its host; everything else to the
-   * default `apiUrl`. The single compute-side analogue of the storage
+   * default `apiUrl`. The single compute-side analog of the storage
    * layer's per-space address resolver.
    */
   hostForSpace(space: MemorySpace): URL {
@@ -2891,9 +2969,9 @@ export class Runtime {
   /**
    * True iff the default host AND every distinct mapped host are
    * reachable — one runtime can span hosts, so health is the
-   * conjunction over all of them.
+   * conjunction over all of them. The optional signal cancels the requests.
    */
-  async healthCheck(): Promise<boolean> {
+  async healthCheck(signal?: AbortSignal): Promise<boolean> {
     // Overlapping calls each capture into their own generation; only the
     // newest call's capture publishes, so a slow earlier response cannot
     // overwrite a newer one after the fact.
@@ -2915,7 +2993,7 @@ export class Runtime {
     }
     const checks = [...hosts].map(async (host) => {
       try {
-        const res = await fetch(new URL("/_health", host));
+        const res = await fetch(new URL("/_health", host), { signal });
         if (
           host === defaultHost && generation === this.#healthCheckGeneration
         ) {
@@ -2924,6 +3002,7 @@ export class Runtime {
         }
         return res.ok;
       } catch (_) {
+        signal?.throwIfAborted();
         return false;
       }
     });

@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { ValidationError } from "@cliffy/command";
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -10,25 +12,12 @@ import {
   type NormalizedFullLink,
   Runtime,
 } from "@commonfabric/runner";
+import {
+  createLLMFriendlyLink,
+  parseLLMFriendlyLink,
+} from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  type CallableResolution,
-  CF_RUNTIME_ERROR_LOG,
-  collectInvocationResultLinks,
-  executeResolvedCallable,
-  normalizeAbsentVerbPayload,
-  runtimeErrorLog,
-  schemaIsObjectShaped,
-  verbInputSchemaError,
-  VerbInputValidationError,
-} from "../lib/callable.ts";
-import {
-  executePieceCallable,
-  PieceResultProjectionError,
-  PieceVerbReadError,
-} from "../lib/piece.ts";
-import type { ExecutedPieceCallable } from "../lib/piece.ts";
-import { ValidationError } from "@cliffy/command";
+
 import {
   boundedSettlement,
   exitPieceCallFailure,
@@ -36,6 +25,7 @@ import {
   invocationJson,
   invocationPhaseReporter,
   isPieceGetDataError,
+  parseLink,
   parsePieceCallSelection,
   pieceCallInvocation,
   pieceCallPhaseObserver,
@@ -49,14 +39,40 @@ import {
   verbInputErrorReport,
   WaitBoundExpired,
 } from "../commands/piece.ts";
-import { LinkValidationError } from "../lib/piece.ts";
+import {
+  type CallableResolution,
+  CF_RUNTIME_ERROR_LOG,
+  collectInvocationResultLinks,
+  executeResolvedCallable,
+  normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
 import {
   type CellSelection,
   CellSelectionError,
   type deriveSelectedValue,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
+import {
+  executePieceCallable,
+  LinkValidationError,
+  PieceResultProjectionError,
+  PieceVerbReadError,
+} from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
+
+/**
+ * The runner's own stream-send options, derived from `Cell["send"]` rather
+ * than restated by hand — so a runner-side rename (`session`, `eventId`)
+ * fails `deno task check` on this file instead of leaving these doubles
+ * green while production breaks: the #5505/#5582 drift class, one layer
+ * down.
+ */
+type CellSendOptions = NonNullable<Parameters<Cell<unknown>["send"]>[2]>;
 
 // The session an invocation id is chosen within, for the calls whose subject
 // is something else: a call names the pair or it names no invocation.
@@ -65,7 +81,7 @@ const callerSession = "ses:piece-call-test";
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
     // The forced-stream probe's type guard: a piece cell without asSchema
-    // cannot take the cast, so the third resolution path answers null and
+    // cannot take the cast, so the third resolution path returns null and
     // the resolver reports not-found instead of crashing on the probe.
     const emptyChild: Record<string, unknown> = {
       schema: undefined,
@@ -333,6 +349,54 @@ describe("executePieceCallable", () => {
     // retry that actually sends a payload can still use it.
     expect(harness.tracker.handlerWrites).toEqual([]);
     expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  // The $ref-carrying stream shape is schema-less to the arg parser, so a
+  // bare call skips the implicit-pipe read and the absence gate above
+  // decides — with stdin untouched. A rejecting reader pins the "untouched"
+  // half: piped bytes cannot reach a verb through this shape, they can only
+  // be spelled explicitly (`--json`, `--json-file -`).
+  it("refuses a bare $ref-stream verb call without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.reject(new Error("stdin was read")),
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied/,
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
@@ -756,6 +820,42 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("invokes a schema-less verb bare without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "archive",
+      inputSchema: { asCell: ["stream"] } as JSONSchema,
+    });
+
+    // A rejecting reader proves stdin stays untouched: the verb declares no
+    // input, so the bare spelling dispatches immediately instead of waiting
+    // for a pipe to reach EOF.
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "archive",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.reject(new Error("stdin was read")),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["archive"],
+        value: undefined,
+      },
+    ]);
+  });
+
   it("refuses implicit piped JSON that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -834,7 +934,7 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("renders piece-call help with the piece-call command prefix", async () => {
+  it("renders help under the canonical spelling when no mount names itself", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
       cellKey: "search",
@@ -871,18 +971,21 @@ describe("executePieceCallable", () => {
       },
     );
 
+    // The default prefix is the top-level spelling: a page minted with no
+    // mount to name must not teach the deprecated one. Each mount passes its
+    // own spelling as helpCommandPrefix.
     expect(result.helpText).toContain(
-      "cf piece call ... search --help",
+      "cf call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf piece call ... search -- [run] --query <string>",
+      "cf call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(result.helpText).toContain(
-      "cf piece call ... search --json [<json>]",
+      "cf call ... search --json [<json>]",
     );
     expect(result.helpText).toContain("query: string");
     expect(result.helpText).toContain("Flags after `--`:");
@@ -890,7 +993,7 @@ describe("executePieceCallable", () => {
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf piece call ... search -- [run] --help",
+      "cf call ... search -- [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
   });
@@ -925,6 +1028,41 @@ describe("executePieceCallable", () => {
         },
       ),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
+
+  it("surfaces a pre-dispatch drop's reason from the aborted transaction", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      abortedWithReason: "Event backlog for this stream is full " +
+        "(256 pending), so this send was refused before dispatch",
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        ["--message", "milk"],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(
+      /Handler "recordMessage" failed: Event backlog for this stream is full/,
+    );
   });
 
   it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
@@ -1135,8 +1273,11 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.invocation?.receipt).toEqual(harnessReceipt);
-    expect(harness.tracker.receiptLinkRequested?.id).toBe(
-      result.invocation?.receipt?.id,
+    expect(result.invocation?.receipt).toBe(
+      createLLMFriendlyLink(
+        harness.tracker.receiptLinkRequested as NormalizedFullLink,
+        "did:key:test-home" as MemorySpace,
+      ),
     );
   });
 
@@ -1172,6 +1313,82 @@ describe("executePieceCallable", () => {
     });
   });
 
+  it("returns a keyless instance result instead of reading it as value-less", async () => {
+    // The value-less witness is a PLAIN empty record. A fabric primitive
+    // whose slots are private — FabricBytes — has no enumerable keys, and a
+    // key-count test alone would swallow it as "no result".
+    class FakeBytes {
+      #bytes = "private";
+      describe(): string {
+        return this.#bytes;
+      }
+    }
+    const bytes = new FakeBytes();
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportBytes",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: bytes,
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportBytes",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-bytes", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(bytes);
+  });
+
+  it("keeps a result whose stored form is non-empty when it materializes keyless", async () => {
+    // The stored-vs-materialized divergence the presence check exists for: a
+    // FabricInstance materializes as a query-result proxy over an empty
+    // ordinary stub — plain-looking, keyless — while its STORED form is the
+    // non-empty codec shape. Presence reads the stored form, so the result
+    // survives. (The live suite pins the same seam through a real runtime;
+    // this is the harness-level mirror, and what `receiptRaw` models.)
+    const proxyLikeStub = {};
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportLink",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: proxyLikeStub,
+      receiptRaw: { "link@1": { id: "of:fid1:target", path: [] } },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportLink",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-stored-form", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(proxyLikeStub);
+  });
+
   it("sends without options and returns no invocation when no id is supplied", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -1203,15 +1420,11 @@ describe("executePieceCallable", () => {
 });
 
 /** The address the harness's handling files its receipt under: the link its
- * `send` hands the commit callback, in the serialized form the envelope
- * publishes. Every settled or committed invocation the harness produces
+ * `send` hands the commit callback, in the canonical reference syntax the
+ * envelope publishes. Every settled or committed invocation the harness produces
  * carries it, because the runtime hands the address over at commit rather
  * than at readback. */
-const harnessReceipt = {
-  space: "did:key:test-home",
-  id: "of:receipt-1",
-  scope: "space",
-};
+const harnessReceipt = "/of:receipt-1";
 
 function createPieceCallableHarness(options: {
   callableKind: "handler" | "tool";
@@ -1224,15 +1437,26 @@ function createPieceCallableHarness(options: {
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
+  /** Commit settles as an aborted transaction whose error wraps the drop
+   * reason (`StorageTransactionAborted.reason`) — the shape a pre-dispatch
+   * drop hands the commit callback (a send refused at the event-backlog
+   * cap, a piece that failed to load). Unlike `handlerFailureMessage`,
+   * nothing reaches the runtime error log: the reason on the transaction is
+   * the whole signal. */
+  abortedWithReason?: string;
   callableScope?: "space" | "user" | "session";
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
   receiptValue?: unknown;
+  /** The receipt's STORED form, when it differs from the materialized
+   * `receiptValue` — a proxied instance's codec shape, most usefully.
+   * Presence is decided on this, mirroring the production readback. */
+  receiptRaw?: unknown;
   /** Simulate the create-only receipt collision: commit fails with
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
   receiptExists?: boolean;
   /** Hold settlement open: `send` records the dispatch but never invokes the
-   * commit callback, so anything awaiting acknowledgement waits forever.
+   * commit callback, so anything awaiting acknowledgment waits forever.
    * This is how a test proves a path does NOT await the commit — the path
    * completes anyway — or exercises a wait bound against a call that can
    * never beat it. */
@@ -1252,9 +1476,7 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<
-      { eventId?: string; session?: string } | undefined
-    >,
+    sendOptions: [] as Array<CellSendOptions | undefined>,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1300,7 +1522,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string; session?: string },
+            sendOptions?: CellSendOptions,
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
@@ -1314,7 +1536,15 @@ function createPieceCallableHarness(options: {
             if (options.neverCommit) return;
             onCommit?.({
               status: () =>
-                options.handlerFailureMessage
+                options.abortedWithReason
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Transaction was aborted"),
+                      { reason: new Error(options.abortedWithReason) },
+                    ),
+                  }
+                  : options.handlerFailureMessage
                   ? {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),
@@ -1395,11 +1625,19 @@ function createPieceCallableHarness(options: {
   const defaultReceiptCell = {
     get: () => options.receiptValue,
     pull: () => Promise.resolve(options.receiptValue),
+    // The stored form presence is decided on. Defaults to the materialized
+    // value — faithful for plain JSON; a test modeling a proxied instance
+    // sets `receiptRaw` to the stored shape the runtime would hold.
+    getRaw: () =>
+      "receiptRaw" in options ? options.receiptRaw : options.receiptValue,
     key: (_key: string) => defaultReceiptCell,
   };
 
   const pieces = {
-    getSpace: () => "home",
+    // The DID the CLI's `--space home` resolves to: a resolution's space is
+    // always the space DID, and an address rendered relative to it carries no
+    // `@did` prefix.
+    getSpace: () => "did:key:test-home",
     synced: () => {
       tracker.syncedCalls++;
       return Promise.resolve();
@@ -1945,6 +2183,39 @@ describe("piece call stdin payloads", () => {
     expect(printed).toEqual([]);
   });
 
+  it("writes the Invocation JSON to stdout when the wait bound expires", () => {
+    // A wait expiry is the one failure that still owes stdout a machine
+    // surface: the same Invocation JSON shape as a settled call, carrying
+    // the furthest observed phase as its status, so a script parses one
+    // shape either way. The stderr lines stay exactly the ordinary failure
+    // contract.
+    const printed: string[] = [];
+    const rendered: string[] = [];
+    const exited: number[] = [];
+    const observer = pieceCallPhaseObserver(false, () => {}, () => {}, () => 0);
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new WaitBoundExpired(5),
+        "inv-9",
+        "dispatched",
+        {
+          printError: (message) => printed.push(message),
+          render: (text) => rendered.push(text),
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
+    expect(printed[1]).toBe("invocation: inv-9 phase: dispatched");
+    expect(rendered).toEqual([
+      JSON.stringify({ invocation: "inv-9", status: "dispatched" }, null, 2),
+    ]);
+    expect(exited).toEqual([1]);
+  });
+
   it("closes the verbose span on the pre-dispatch payload-rejection exit", () => {
     // reportVerbInputErrorOrRethrow terminates the process from inside the
     // promise chain, bypassing the action's catch — without the observer
@@ -2087,11 +2358,7 @@ describe("piece call stdin payloads", () => {
     // Beside the id and the status, not inside the result: it addresses the
     // outcome rather than being part of one, and a value-less verb has an
     // address just the same.
-    const receipt = {
-      space: "did:key:s",
-      id: "of:receipt-1",
-      scope: "space" as const,
-    };
+    const receipt = "/of:receipt-1";
     expect(
       invocationJson({
         id: "inv-1",
@@ -2299,7 +2566,7 @@ describe("piece call wait control", () => {
     });
   });
 
-  it('refuses a bound that spells "don\'t wait"', () => {
+  it('refuses a bound that means "don\'t wait"', () => {
     expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
@@ -2484,7 +2751,7 @@ describe("piece call wait control", () => {
     });
   });
 
-  it("still awaits the commit acknowledgement under --no-wait", async () => {
+  it("still awaits the commit acknowledgment under --no-wait", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "addComment",
@@ -2496,7 +2763,7 @@ describe("piece call wait control", () => {
         required: ["message"],
       },
       // The commit callback never fires. --no-wait must NOT return: exiting
-      // before the acknowledgement would abandon the invocation un-executed
+      // before the acknowledgment would abandon the invocation un-executed
       // (the handler runs in this process), not leave it settling elsewhere.
       neverCommit: true,
     });
@@ -2514,7 +2781,7 @@ describe("piece call wait control", () => {
     ).catch((e) => e);
 
     // Only the deadline got us out — the skip-readback path was still
-    // parked on the commit acknowledgement, exactly where it must wait.
+    // parked on the commit acknowledgment, exactly where it must wait.
     expect(error).toBeInstanceOf(WaitBoundExpired);
     expect(phases).toEqual(["dispatched"]);
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
@@ -2708,7 +2975,7 @@ describe("piece call wait control", () => {
     observer.finish("detached");
     // "settled" would be a lie here — the readback was skipped, so nobody
     // observed a settlement. The span sequence also documents where
-    // --no-wait stops: after the commit acknowledgement, never before it.
+    // --no-wait stops: after the commit acknowledgment, never before it.
     expect(lines).toEqual([
       "timing: initial_sync → dispatched 20.0ms",
       "timing: dispatched → committed 30.0ms",
@@ -2723,7 +2990,7 @@ interface MockLinkedDoc {
   space: string;
   scope?: "space" | "user" | "session";
   /** Where inside the backing doc the link points (a link below its root). */
-  path?: (string | number)[];
+  path?: string[];
 }
 
 /** One node of a mock receipt tree: `doc` marks the value at this path as a
@@ -2739,7 +3006,7 @@ interface MockLinkedNode {
  * fixture leaves them out. */
 function mockLink(
   doc: MockLinkedDoc,
-  path: (string | number)[] = doc.path ?? [],
+  path: string[] = doc.path ?? [],
 ): NormalizedFullLink {
   return {
     id: doc.id,
@@ -2786,7 +3053,7 @@ function linkedReceiptCell(
   const build = (
     node: MockLinkedNode,
     doc: MockLinkedDoc,
-    pathInDoc: (string | number)[],
+    pathInDoc: string[],
   ): Cell<any> => {
     const cell: Cell<any> = mockCell({
       get: () => value,
@@ -2814,6 +3081,9 @@ function linkedReceiptCell(
   return mockCell({
     get: () => value,
     pull: () => Promise.resolve(value),
+    // These receipts hold plain JSON, whose stored form is the value itself;
+    // presence is decided on this, mirroring the production readback.
+    getRaw: () => value,
     key: () => barren,
     resolveAsCell: () => resolvedRoot,
     getAsNormalizedFullLink: () => mockLink(receiptDoc),
@@ -2852,18 +3122,17 @@ function recordingReceiptCell(
 describe("collectInvocationResultLinks", () => {
   const receiptDoc = { id: "of:receipt-1", space: "did:key:test-home" };
   const receiptLink = mockLink(receiptDoc);
-  const receiptRef = {
-    space: "did:key:test-home",
-    id: "of:receipt-1",
-    scope: "space",
-  };
+  /** The space the call targeted: an address in it carries no `@did`. */
+  const contextSpace = "did:key:test-home" as MemorySpace;
+  const receiptRef = "/of:receipt-1";
 
   it("yields just the receipt for a plain-JSON-only result", () => {
     const value = { total: 3, tags: ["a", "b"], nested: { deep: true } };
     const cell = linkedReceiptCell(receiptDoc, value);
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+      });
   });
 
   it("skips a child key() refuses to address, keeping its siblings' links", () => {
@@ -2888,14 +3157,11 @@ describe("collectInvocationResultLinks", () => {
         return innerRoot.key(segment);
       },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-      "/comment": {
-        space: "did:key:test-home",
-        id: "of:comment-1",
-        scope: "space",
-      },
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/comment": "/of:comment-1",
+      });
   });
 
   it("annotates each hop to a different backing document, rebasing below it", () => {
@@ -2919,24 +3185,17 @@ describe("collectInvocationResultLinks", () => {
         },
       },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-      "/comment": {
-        space: "did:key:test-home",
-        id: "of:comment-1",
-        scope: "space",
-      },
-      // Compared against of:comment-1, not the receipt — each hop is
-      // annotated exactly once, where the document changes. The scope is
-      // part of the address and rides along.
-      "/comment/author": {
-        space: "did:key:test-home",
-        id: "of:author-1",
-        scope: "user",
-      },
-      // No "/comment/body", no "/count": a path inside the same plain JSON
-      // needs no link.
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/comment": "/of:comment-1",
+        // Compared against of:comment-1, not the receipt — each hop is
+        // annotated exactly once, where the document changes. The scope is
+        // part of the address and rides along.
+        "/comment/author": "/of:author-1@user",
+        // No "/comment/body", no "/count": a path inside the same plain JSON
+        // needs no link.
+      });
   });
 
   it("addresses an array element reference by its index", () => {
@@ -2950,14 +3209,11 @@ describe("collectInvocationResultLinks", () => {
         },
       },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-      "/items/1": {
-        space: "did:key:test-home",
-        id: "of:item-b",
-        scope: "space",
-      },
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/items/1": "/of:item-b",
+      });
   });
 
   it("keeps the sub-document path of a link below a doc's root", () => {
@@ -2968,22 +3224,18 @@ describe("collectInvocationResultLinks", () => {
           doc: {
             id: "of:list-1",
             space: "did:key:test-home",
-            path: ["entries", 3],
+            path: ["entries", "3"],
           },
         },
       },
     });
     // Without the path the address would name the wrong value — the list
     // document's root rather than the entry the result actually references.
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-      "/pick": {
-        space: "did:key:test-home",
-        id: "of:list-1",
-        scope: "space",
-        path: ["entries", 3],
-      },
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/pick": "/of:list-1/entries/3",
+      });
   });
 
   it("escapes pointer-special characters in path keys (RFC 6901)", () => {
@@ -2993,14 +3245,11 @@ describe("collectInvocationResultLinks", () => {
         "a/b": { doc: { id: "of:odd-key", space: "did:key:test-home" } },
       },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": receiptRef,
-      "/a~1b": {
-        space: "did:key:test-home",
-        id: "of:odd-key",
-        scope: "space",
-      },
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/a~1b": "/of:odd-key",
+      });
   });
 
   it("resolves a result that is itself a reference — a scalar that is its own doc", () => {
@@ -3013,10 +3262,11 @@ describe("collectInvocationResultLinks", () => {
     const cell = linkedReceiptCell(receiptDoc, 42, {
       doc: { id: "of:answer-1", space: "did:key:test-home" },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, 42)).toEqual({
-      "/": { space: "did:key:test-home", id: "of:answer-1", scope: "space" },
-      receipt: receiptRef,
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, 42, contextSpace))
+      .toEqual({
+        "/": "/of:answer-1",
+        receipt: receiptRef,
+      });
   });
 
   it("rebases children of a reference-backed root onto its document", () => {
@@ -3027,21 +3277,14 @@ describe("collectInvocationResultLinks", () => {
         author: { doc: { id: "of:author-1", space: "did:key:test-home" } },
       },
     });
-    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
-      "/": {
-        space: "did:key:test-home",
-        id: "of:comment-1",
-        scope: "space",
-      },
-      receipt: receiptRef,
-      "/author": {
-        space: "did:key:test-home",
-        id: "of:author-1",
-        scope: "space",
-      },
-      // No "/body": it lives in the ROOT's backing document — comparing it
-      // against the receipt instead would wrongly annotate every child.
-    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": "/of:comment-1",
+        receipt: receiptRef,
+        "/author": "/of:author-1",
+        // No "/body": it lives in the ROOT's backing document — comparing it
+        // against the receipt instead would wrongly annotate every child.
+      });
   });
 
   it("carries the receipt's own scope on the root entry", () => {
@@ -3055,10 +3298,28 @@ describe("collectInvocationResultLinks", () => {
         mockLink(scoped),
         linkedReceiptCell(scoped, {}),
         {},
+        contextSpace,
       ),
     ).toEqual({
-      "/": { space: "did:key:test-home", id: "of:receipt-2", scope: "session" },
+      "/": "/of:receipt-2@session",
     });
+  });
+
+  it("prefixes an address in another space with its space DID", () => {
+    // The space is part of the address: a caller reading a link that left
+    // the space they called in needs it spelled out, or the reference
+    // resolves in their own space, which is a different cell.
+    const value = { shared: { title: "elsewhere" } };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        shared: { doc: { id: "of:shared-1", space: "did:key:other-space" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
+      .toEqual({
+        "/": receiptRef,
+        "/shared": "/@did:key:other-space/of:shared-1",
+      });
   });
 
   it("addresses no path inside a live (non-plain) object in the result", () => {
@@ -3094,6 +3355,7 @@ describe("collectInvocationResultLinks", () => {
       receiptLink,
       recordingReceiptCell(receiptDoc, requested),
       value,
+      contextSpace,
     );
     // The stream itself is addressed — it is a property of the result and
     // may carry a document of its own. Nothing below it is.
@@ -3120,6 +3382,7 @@ describe("collectInvocationResultLinks", () => {
       receiptLink,
       recordingReceiptCell(receiptDoc, requested),
       new FakeRuntime(),
+      contextSpace,
     );
     expect(requested).toEqual([]);
     expect(links).toEqual({ "/": receiptRef });
@@ -3187,12 +3450,8 @@ describe("piece call --show-links", () => {
       receipt: harnessReceipt,
       result: commentValue,
       links: {
-        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
-        "/comment": {
-          space: "did:key:test-home",
-          id: "of:comment-1",
-          scope: "space",
-        },
+        "/": "/of:receipt-1",
+        "/comment": "/of:comment-1",
       },
     });
     // And the stdout JSON carries it as a sibling of result — beside the
@@ -3260,7 +3519,7 @@ describe("piece call --show-links", () => {
       status: "settled",
       receipt: harnessReceipt,
       links: {
-        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+        "/": "/of:receipt-1",
       },
     });
   });
@@ -3373,6 +3632,7 @@ describe("piece call selection", () => {
     const receiptCell = {
       get: () => topicResult,
       pull: () => Promise.resolve(topicResult),
+      getRaw: () => topicResult,
       key: () => receiptCell,
     } as unknown as Cell<any>;
     const harness = createPieceCallableHarness({ ...addTopic, receiptCell });
@@ -3403,7 +3663,7 @@ describe("piece call selection", () => {
     expect(selector.calls).toHaveLength(1);
     expect(selector.calls[0].cell).toBe(receiptCell);
     expect(selector.calls[0].selection).toBe(selection);
-    expect(selector.calls[0].space).toBe("home");
+    expect(selector.calls[0].space).toBe("did:key:test-home");
   });
 
   it("leaves the Invocation JSON unshaped when no selection was asked for", async () => {
@@ -3570,7 +3830,7 @@ describe("piece call selection", () => {
       receipt: harnessReceipt,
       result: { count: 1 },
       links: {
-        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+        "/": "/of:receipt-1",
       },
     });
   });
@@ -3733,11 +3993,11 @@ describe("piece call over a live runtime", () => {
   /** The serialized address of the receipt `settleWith` commits — what the
    * envelope publishes, read off the same real cell the handling hands the
    * commit callback. */
-  function receiptAddress(): Record<string, unknown> {
+  function receiptAddress(): string {
     const link = runtime
       .getCell(space, "handling-receipt")
       .getAsNormalizedFullLink();
-    return { space: link.space, id: link.id, scope: link.scope };
+    return createLLMFriendlyLink(link, space);
   }
 
   it("projects a settled result through the real selection step", async () => {
@@ -3813,17 +4073,17 @@ describe("piece call over a live runtime", () => {
       },
     );
 
+    // One string, and the string `--piece` takes back in: the address a
+    // later call is written with.
+    const created = runtime.getCell(space, "created-topic")
+      .getAsNormalizedFullLink();
     expect(executed.invocation?.result).toEqual({
-      topic: {
-        $link: {
-          id: runtime.getCell(space, "created-topic")
-            .getAsNormalizedFullLink().id,
-          space,
-          scope: "space",
-          path: [],
-        },
-      },
+      topic: { $link: createLLMFriendlyLink(created, space) },
     });
+    expect(parseLLMFriendlyLink(
+      (executed.invocation?.result as { topic: { $link: string } }).topic
+        .$link,
+    )).toMatchObject({ id: created.id, path: [] });
   });
 
   it("refuses a selection that materializes nothing over a real result", async () => {
@@ -3866,16 +4126,16 @@ describe("piece call over a live runtime", () => {
       receipt: receiptAddress(),
     });
 
-    // Resolve the published id through the entity-URI intake `--piece` runs
-    // it through, and read the cell it names. This covers the address and
-    // the intake; it stops short of the whole `cf piece get` route, which
-    // also runs slug resolution (a pass-through for a token carrying a
-    // colon) and the read-path guards before reaching the same cell.
-    const published = executed.invocation!.receipt!;
+    // Resolve the published address through the reference intake `--piece`
+    // runs it through — the published form IS that intake's form — and read
+    // the cell it names. This covers the address and the intake; it stops
+    // short of the whole `cf piece get` route, which also runs slug
+    // resolution and the read-path guards before reaching the same cell.
+    const published = parseLink(executed.invocation!.receipt!, { space });
     const collected = runtime.getCellFromEntityId(
-      published.space as MemorySpace,
-      entityIdFrom(published.id),
-      [],
+      space,
+      entityIdFrom(published.pieceId),
+      published.path ?? [],
       undefined,
     );
     await collected.sync();
@@ -3967,7 +4227,7 @@ describe("piece get data errors", () => {
     // "Path resolves to a handler; use invoke() instead." — so no extra hint
     // rides along (the --input tip would be a wrong remedy for a verb).
     expect(report?.message).toBe(
-      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
     );
     expect(report?.hint).toBeUndefined();
 
@@ -3982,7 +4242,7 @@ describe("piece get data errors", () => {
     expect(nestedReport?.message).toMatch(
       /cf piece verbs --piece fid1:piece-123/,
     );
-    expect(nestedReport?.message).not.toContain("cf piece call");
+    expect(nestedReport?.message).not.toContain("cf call");
     expect(nestedReport?.hint).toBeUndefined();
 
     // Threaded through the shared data-error exit: stderr message, exit 1.
@@ -3999,7 +4259,7 @@ describe("piece get data errors", () => {
       })
     ).toThrow("exit-sentinel");
     expect(printed).toEqual([
-      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
     ]);
     expect(exited).toEqual([1]);
   });
@@ -4103,9 +4363,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
+  // `{}` rather than a misspelling, so this reaches the schema validation
+  // rather than the undeclared-field refusal that now precedes it — a
+  // misspelled required property is BOTH, and it is refused as the undeclared
+  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
-    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
-      .toMatch(/message/);
+    expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
   it("rejects a payload of the wrong type", () => {
@@ -4337,7 +4600,7 @@ describe("reportVerbInputErrorOrRethrow", () => {
     expect(printed[1]).toMatch(/<piece>/);
   });
 
-  // Anything that is not an input rejection has to keep travelling: a network
+  // Anything that is not an input rejection has to keep traveling: a network
   // failure reported as a payload problem would send an agent to fix a payload
   // that was fine.
   it("re-throws an unrelated failure untouched", () => {
@@ -4351,6 +4614,55 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("the pre-dispatch gate on the forced-stream path", () => {
+  // A handler resolved through the forced-stream fallback dispatches on a
+  // cast cell whose schema is only { asCell: ["stream"] } — a shape every
+  // payload satisfies. The resolution carries the piece's published payload
+  // schema as `inputSchema`, and the gate judges against THAT, so a
+  // malformed payload is refused before the invocation id is spent instead
+  // of dispatching a handling that runs with no event.
+  const forcedStreamResolution = (sends: unknown[]) =>
+    ({
+      callableCell: createMockCell({ $stream: true }, { asCell: ["stream"] }, {
+        send: (value, onCommit) => {
+          sends.push(value);
+          onCommit?.({ status: () => ({ status: "done" }) });
+        },
+      }),
+      callableKind: "handler",
+      cellKey: "addNote",
+      pieces: { runtime: {} },
+      space: "did:key:test-home",
+      inputSchema: {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+      },
+    }) as unknown as CallableResolution;
+
+  it("refuses a payload the published schema rejects, before dispatch", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    await expect(
+      executeResolvedCallable(resolved, { titel: "typo" }),
+    ).rejects.toThrow(VerbInputValidationError);
+    expect(sends).toEqual([]);
+  });
+
+  it("dispatches a payload the published schema accepts", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    const executed = await executeResolvedCallable(resolved, {
+      title: "Ship it",
+    });
+
+    expect(sends).toEqual([{ title: "Ship it" }]);
+    expect(executed).toEqual({});
   });
 });
 
@@ -4462,6 +4774,34 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(rendered, ["{}"]);
     assertEquals(hinted.length, 1);
     assertStringIncludes(hinted[0], "of:x");
+    // The address argument the next command takes, not the three-part prose
+    // that named the same cell in a spelling nothing parses. The token stays
+    // bare because the readback runs under the same configured space as the
+    // call; `cf exec`, whose space comes from the mount instead, prints the
+    // space-carrying canonical form for the same cell.
+    assertStringIncludes(hinted[0], "cf get --piece of:x");
+    expect(hinted[0]).not.toContain("(space did:key:s");
+  });
+
+  it("spells a non-space-scoped tool result cell with its scope", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "user" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    // Reopening a user-scoped cell without its scope resolves the
+    // space-scoped instance, which is a different cell — so the suffix rides
+    // the address rather than sitting in a parenthetical the way the prose
+    // form's did.
+    assertStringIncludes(hinted[0], "cf get --piece of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {
@@ -4492,7 +4832,7 @@ describe("renderPieceCallOutcome", () => {
         invocation: {
           id: "inv-1",
           status: "committed",
-          receipt: { space: "did:key:s", id: "of:receipt-1", scope: "space" },
+          receipt: "/of:receipt-1",
         },
       } as unknown as ExecutedPieceCallable,
       "addTopic",
@@ -4507,7 +4847,7 @@ describe("renderPieceCallOutcome", () => {
     // address unguessable, and an argument is readable in a process listing.
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
     // And it says what the replay costs: the receipt witnesses the commit,
@@ -4538,7 +4878,7 @@ describe("renderPieceCallOutcome", () => {
     assertStringIncludes(hinted[0], "executes and commits AGAIN");
     // And no dangling alternative: there is nothing for an "Or" to be or to.
     expect(hinted[0]).not.toContain("Or replay");
-    assertStringIncludes(hinted[0], "cf piece get --piece fid1:piece");
+    assertStringIncludes(hinted[0], "cf get --piece fid1:piece");
   });
 
   it("leads the detached next steps with the address it published", () => {
@@ -4551,11 +4891,7 @@ describe("renderPieceCallOutcome", () => {
         invocation: {
           id: "inv-1",
           status: "committed",
-          receipt: {
-            space: "did:key:s",
-            id: "of:receipt-1",
-            scope: "space",
-          },
+          receipt: "/of:receipt-1",
         },
       } as unknown as ExecutedPieceCallable,
       "addTopic",
@@ -4566,13 +4902,42 @@ describe("renderPieceCallOutcome", () => {
     // Collecting the outcome is a read of the address this call published,
     // and it comes first because it does not run the verb again. The replay
     // stays on offer below it, for a caller that lost the address.
-    assertStringIncludes(hinted[0], "cf piece get --piece of:receipt-1");
+    assertStringIncludes(hinted[0], "cf get --piece /of:receipt-1");
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
-    expect(hinted[0].indexOf("cf piece get --piece of:receipt-1"))
+    expect(hinted[0].indexOf("cf get --piece /of:receipt-1"))
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
+  });
+
+  it("writes a non-space receipt scope into the collect address", () => {
+    // The scope is part of the address: reopening a session-scoped cell
+    // without it resolves the space-scoped instance — a different cell — so
+    // the reference string the envelope published carries its `@scope`, and
+    // the hint hands that string on whole. The bare form stays bare for space
+    // scope, which it already means.
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: "/of:receipt-1@session",
+        },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    assertStringIncludes(
+      hinted[0],
+      "cf get --piece /of:receipt-1@session",
+    );
   });
 
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {

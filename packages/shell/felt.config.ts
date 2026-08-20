@@ -1,6 +1,7 @@
 import { type Config } from "@commonfabric/felt";
-import { computeCurrentCompilerVersion } from "../runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
+
+import { computeCurrentCompilerVersion } from "../runner/src/compilation-cache/compiler-fingerprint.deno.ts";
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
@@ -68,6 +69,9 @@ const config: Config = {
       ),
       "$EXPERIMENTAL_SERVER_EXECUTION": Deno.env.get(
         "EXPERIMENTAL_SERVER_EXECUTION",
+      ),
+      "$EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS": Deno.env.get(
+        "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
       ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,

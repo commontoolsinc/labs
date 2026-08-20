@@ -8,6 +8,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  type VNode,
 } from "commonfabric";
 
 // Import Google Auth utility
@@ -68,6 +69,8 @@ interface Input {
 
 /** Google Docs Markdown Importer. Import Google Docs as Markdown with comments. #googleDocsImporter */
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   docUrl: string;
   markdown: string;
   docTitle: string;

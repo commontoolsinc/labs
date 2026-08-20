@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { dirname, fromFileUrl, join } from "@std/path";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+
 import {
   citedPath,
   collectDrift,

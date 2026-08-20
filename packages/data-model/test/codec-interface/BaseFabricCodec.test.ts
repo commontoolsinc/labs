@@ -2,11 +2,11 @@
  * What the codec base class does on its own, before a concrete codec overrides
  * anything.
  *
- * Two of its answers come straight from what it was constructed with, and both
+ * Two of its results come straight from what it was constructed with, and both
  * are optional: a codec naming no handled class cannot recognize a value by
  * class, and one naming no tag cannot produce a tag. Each is covered in both
  * the supplied and the omitted form, because the omitted form is where the
- * base either answers `undefined` or insists on being overridden, and those
+ * base either returns `undefined` or insists on being overridden, and those
  * are different promises.
  */
 
@@ -15,23 +15,27 @@ import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricCodec } from "@/codec-interface/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**
  * Minimal concrete `BaseFabricCodec` for exercising the base class's own
- * behavior.
- * `encode` / `decode` are not under test here, so they throw.
+ * behavior. The subclass contract is not under test here, so those members
+ * throw.
  */
 class TestCodec extends BaseFabricCodec<FabricValue> {
   encode(_value: FabricValue): FabricValue {
     throw new Error("Unimplemented.");
   }
 
+  canDecode(_state: FabricValue): _state is FabricValue {
+    throw new Error("Unimplemented.");
+  }
+
   decode(
     _typeTag: string,
     _state: FabricValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   }

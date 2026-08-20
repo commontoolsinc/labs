@@ -21,7 +21,7 @@
 // teaching an API.
 //
 // A block with no such comment is checked as-is (a standalone module), matching
-// the previous behaviour. The scaffold supplies the framework surface (a real
+// the previous behavior. The scaffold supplies the framework surface (a real
 // `commonfabric` import) plus ambient declarations for the example identifiers
 // listed in `check.vocabulary.json`.
 //
@@ -378,7 +378,7 @@ const DECORATOR_NAMES = ["property", "state", "customElement", "query"];
 
 function looksLikeClassBody(body: string): boolean {
   return /@[A-Za-z]/.test(body) || // decorators
-    /^\s*[A-Za-z_$][\w$]*\s*=/.test(body) || // field initialisers
+    /^\s*[A-Za-z_$][\w$]*\s*=/.test(body) || // field initializers
     /\)\s*(?::[^;{]+)?\{/.test(body); // method bodies
 }
 

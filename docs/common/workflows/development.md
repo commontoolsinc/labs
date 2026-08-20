@@ -13,8 +13,11 @@ deno task cf test pattern.test.tsx
 # Deploy with every test entry attached
 deno task cf piece new ... --test pattern.test.tsx pattern.tsx
 
-# Update existing and retain the complete test package
+# Update existing and retain the complete source package
 deno task cf piece setsrc ... --test pattern.test.tsx --piece PIECE_ID pattern.tsx
+
+# Ship a file that is not code alongside the source
+deno task cf piece setsrc ... --test pattern.test.tsx --datafile data/cities.json --piece PIECE_ID pattern.tsx
 
 # Inspect data
 deno task cf piece inspect ... --piece PIECE_ID
@@ -28,6 +31,13 @@ deno task cf piece link ... editor-id/items viewer-id/items
 - Write automated pattern tests for new or changed behavior, run every test
   entry with `cf test`, and repeat `--test` for every entry during deployment.
   Deployment packages and type-checks attached tests but does not run them.
+- Attach a file that is not code with repeatable `--datafile`. Its bytes are
+  stored verbatim — never parsed, compiled, or importable — and recovered by
+  `cf piece getsrc` with the rest of the package. The pattern reads one with
+  `dataFile(path)` from `commonfabric`, naming the path it is stored under.
+  `cf check` and `cf test` take `--datafile` as well, so the read works locally.
+  Repeat every flag on each `setsrc`; an update defines the complete source
+  revision.
 - Deploy once, then use `setsrc` for updates
 - Repeat the complete set of `--test` flags on every `setsrc`. Each update
   defines a complete source revision, so omitted test roots are not retained.

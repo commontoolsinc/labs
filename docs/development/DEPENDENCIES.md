@@ -314,7 +314,7 @@ modules are resolved during a build, inside the tool that builds the shell.
 
 Treat 0.25.x as a holding position. The signal to re-evaluate is
 `@deno/esbuild-plugin` widening its esbuild range, or dropping the dependency in
-favour of vendored type declarations. Vendoring the declarations is the fix that
+favor of vendored type declarations. Vendoring the declarations is the fix that
 suits upstream, since the import is type-only, and `@luca/esbuild-deno-loader`
 already does exactly that. If a future esbuild release carries something this
 repo needs, the duplicate is worth accepting. The pairing is safe, and the price
@@ -361,7 +361,7 @@ The CLI uses three declarations that have to remain compatible:
 The two Cliffy packages share internal packages and resolve as a set. They are
 held at the release candidate because Cliffy 1.2.1 changes how a required
 argument followed by a variadic argument is parsed. With that release,
-`cf piece call` stops receiving its first argument.
+`cf call` stops receiving its first argument.
 
 The `@std/fmt/colors` pin has a separate single-copy requirement.
 `setColorEnabled()` stores state in its module instance. If the CLI imports a

@@ -2,9 +2,10 @@ import { renderInProcess } from "@commonfabric/html/in-process";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import { type Cell, UI } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import { loadPieces } from "./piece.ts";
 import type { PieceConfig } from "./piece.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("piece-render", { level: "info", enabled: false });
 

@@ -1,3 +1,6 @@
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { Cancel } from "../cancel.ts";
 import {
   addressesToPathByEntity,
   arraysOverlap,

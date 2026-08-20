@@ -18,7 +18,7 @@ The two gates guard different halves of the same risk:
 | | Gate | CI job | What it proves |
 | --- | --- | --- | --- |
 | Tier 1 | `deno task pattern-compat` | Pattern Update Compatibility | The **contract** a pattern declares can still be applied over every contract it has declared before |
-| Tier 2 | `deno task pattern-vintage` | Pattern Update State Continuity | A real **document** written by an older version is still readable, and its data survives |
+| Tier 2 | `deno task pattern-vintage` | Pattern Update State and Baseline Integrity | A real **document** written by an older version is still readable, and its data survives |
 
 Tier 1 is a statement about schemas. Tier 2 proves the stronger thing schemas
 cannot say. Neither subsumes the other: a contract can stay compatible while
@@ -33,9 +33,11 @@ over every contract recorded for it under `packages/patterns/baselines/`.
 There is no opt-in: a pattern is covered by existing.
 
 Baselines are **append-only**, enforced mechanically by
-`tasks/check-baselines-append-only.ts` (CI job: Pattern Baselines
-Append-Only). An author-run `--update` that could remove a baseline could
-remove the very one that would have caught a break.
+`tasks/check-baselines-append-only.ts` in the Pattern Update State and Baseline
+Integrity job. An author-run `--update` that could remove a baseline could
+remove the very one that would have caught a break. A break the repository
+decides to ship is declared instead, in `tasks/pattern-compat-accepted-breaks.ts`
+— see the finding it answers below.
 
 ### Findings and their remedies
 
@@ -52,6 +54,33 @@ remove the very one that would have caught a break.
   ships; recording it would force a later corrected contract to prove itself
   against a version that only ever existed in a failed CI run, with no way to
   remove it.
+
+  The exception is a break the repository decides to ship: a surface removed on
+  purpose, its held state an accepted casualty. No pattern change satisfies the
+  check then, because the check is measuring the decision. That case is written
+  down in `tasks/pattern-compat-accepted-breaks.ts`, and only there — deleting
+  the offending baselines is the laundering the append-only gate exists to
+  stop.
+
+  An entry is bounded twice. It forgives specific `(pattern, baseline)` pairs,
+  so the contract recorded once the break ships is a baseline no entry names
+  and the next change to that pattern is gated again. Within a pair it forgives
+  only the schema paths it names: one finding carries every issue the proof
+  found against that baseline, so accepting by pair alone would suppress an
+  unintended break landing beside the decided one — and `--update` would then
+  record that contract. A finding blaming any unnamed path stands, and so does
+  one whose paths cannot be parsed. What the proof reports is at most one issue
+  per role, so a second problem in a role whose issue is an accepted path can
+  still hide behind it; name as few paths as the removal needs.
+
+  The run prints every pair it forgave, and fails on one that no longer needs
+  forgiving, so the list can only shrink. That audit is asked per pattern rather
+  than of the whole list, because the CI job always sets `PATTERN_COMPAT_SHARD`
+  — the shard that examined a pattern is the one that can judge its entries,
+  and the shards between them cover all of them.
+
+  Reaching for any of this is a decision to strand data on running pieces; a
+  break that also strands state needs the Tier 2 entry below.
 - **`<role> schema is not valid on its own terms`** — the schema fails
   definition validation independently of any baseline.
 - **`has N baseline(s) but yields no contract now`** — a file that used to be
@@ -92,7 +121,23 @@ Per fixture:
 - the fixture actually **holds** each recorded root, checked per target before
   anything is applied to it;
 - the setup commit carrying the artifact onto that root is **not refused** and
-  completes;
+  completes — for every AUTHORED target. A transformer-derived hoist (a mapped
+  row's anonymous sub-pattern, `__cfPattern_N`) whose STORED ARGUMENTS today's
+  schema refuses is held back and reported instead of failing: a hoist's
+  arguments are the captures of a derivation the updated source re-runs and
+  re-supplies wholesale, and the real update channel validates only the root
+  contract, so a capture that drifted is not a stranded piece. A hoist today's
+  source no longer even defines is the same supersession — hoist ids are
+  builder node ids, renumbered by ordinary edits — and is held back the same
+  way. Only those two refusal shapes are held back, for hoists only: any other
+  error on a hoist fails, an authored export that disappeared fails as the
+  retirement it is, and a hoist that applies is compared like everything else,
+  which is what keeps a row-allocated cell's cause-stability (the
+  moved-`.for()` class) gated. Telling the two apart is spelling, and spelling
+  is decisive because the namespace is reserved: the runner refuses a module
+  that exports a builder artifact named `__cfPattern_<n>`, so a recorded
+  instantiation with that shape can only be the compiler's own
+  (`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` §11.3);
 - the root then **reads as something** rather than nothing;
 - every value the vintage held is **still readable** afterwards.
 
@@ -140,11 +185,33 @@ the setup and a stored rendering never matches a fresh one, so comparing them
 would red every pattern edit while saying nothing about data. Every other key
 is compared, `$NAME` included. Excluding those names is not sufficient on its
 own — a `map`-body hoist is a recorded instantiation whose whole result is a
-vnode under no `$UI` — so a rendering is also recognised by shape, wherever it
+vnode under no `$UI` — so a rendering is also recognized by shape, wherever it
 sits.
 
 What a root holds at a cell or stream position is compared as the **document it
 points at**, so a field that moved to a different document is still a finding.
+
+State a pattern **stopped holding on purpose** is taken off both sides before
+the comparison, from the entry for that pattern in
+`tasks/pattern-vintage-accepted-drops.ts`. It is the Tier 2 half of an accepted
+break, and reaches here only after Tier 1 has accepted the contract change:
+where the surface is gone, no pattern change makes the vintage readable, so the
+comparison would otherwise measure the decision itself.
+
+An entry names **paths**, not fixtures and not bare field names.
+`crossrefs` forgives the root key of that name; `topics[].crossrefs` forgives it
+on each element of the `topics` list. A same-named field anywhere else is
+compared exactly as before, so a removal that also strands a body or a timestamp
+still fails. Nothing off the path to a drop is rebuilt either — a subtree that
+lost nothing is returned as itself, and a reduction (`{"[cell]": …}` and its
+kin) is never opened, because it stands for something the comparison must weigh
+whole.
+
+The run prints every path it held back, and fails on one that no vintage needed,
+so this list can only shrink too. A pattern no fixture records is reported
+separately: nothing replayed could have needed its entry, so the run has no
+evidence either way, and an exemption nothing can audit is one nobody can
+retire.
 
 ### Findings are graded
 
@@ -240,7 +307,7 @@ the current generation, and once no fixture for a key reports zero the next is
 due. A fixture with no targets proved nothing and a failed fixture is the gate's
 own red, so neither counts as evidence of currency.
 
-Unrecognised flags are rejected. An unknown flag matches no command, so the run
+Unrecognized flags are rejected. An unknown flag matches no command, so the run
 would otherwise fall through to the plain gate, replay everything and exit 0 —
 reporting the tree healthy to someone who asked for something else.
 

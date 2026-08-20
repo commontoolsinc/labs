@@ -1,7 +1,9 @@
 import type { BuiltinToolId } from "../contracts/tool-descriptor.ts";
+import { assignSlugTool } from "./assign-slug.ts";
 import { bashTool } from "./bash.ts";
 import { bashNoSandboxTool } from "./bash-no-sandbox.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
+import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
@@ -24,6 +26,8 @@ export const BUILTIN_TOOLS = [
   writeFileTool,
   delegateTaskTool,
   runPatternTool,
+  assignSlugTool,
+  describeHandleTool,
 ] as const;
 
 export const BUILTIN_TOOL_REGISTRY = new Map<
@@ -33,6 +37,13 @@ export const BUILTIN_TOOL_REGISTRY = new Map<
   BUILTIN_TOOLS.map((tool) => [tool.descriptor.toolId, tool]),
 );
 
+/**
+ * The builtin tool registered under `toolId`, or `undefined` when no tool
+ * answers to that name. Takes any string: a name a model wrote is a candidate
+ * id until this lookup says otherwise, and the registry is the only authority
+ * on which names are builtin tool ids.
+ */
 export const getBuiltinTool = (
-  toolId: BuiltinToolId,
-): HarnessToolDefinition | undefined => BUILTIN_TOOL_REGISTRY.get(toolId);
+  toolId: string,
+): HarnessToolDefinition | undefined =>
+  BUILTIN_TOOL_REGISTRY.get(toolId as BuiltinToolId);

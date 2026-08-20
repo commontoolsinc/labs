@@ -61,7 +61,7 @@ describe("fabric-special-object", () => {
         thrownBy("in a pattern binding", value).message;
 
       expect(named(new FabricMap(new Map()))).toContain("`FabricMap`");
-      expect(named(new UnknownValue("zzz@1", { a: 1 }))).toContain(
+      expect(named(new UnknownValue("Zzz@1", { a: 1 }))).toContain(
         "`UnknownValue`",
       );
     });

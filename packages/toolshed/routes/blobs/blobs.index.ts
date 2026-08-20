@@ -1,23 +1,18 @@
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isDID } from "@commonfabric/identity";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { Context } from "@hono/hono";
+
 // Blob routes are intentionally unauthenticated for the MVP. Anyone can POST a
 // blob into any space DID; content addressing prevents overwriting a different
 // payload, but callers can inject blobs and consume storage. Anyone with a hash
 // can GET the blob. Revisit this before any production exposure.
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
-import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import type { Context } from "@hono/hono";
 
 const router = createRouter();
-const blobUploadCodec = newDefaultJsonCodecEngine();
-const blobReconstructionContext = new EmptyReconstructionContext(
-  true,
-  "blob upload payloads cannot contain cell references",
-);
 
 type BlobContents = {
   type: string;
@@ -48,9 +43,6 @@ class BlobPayloadTooLarge extends Error {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
 /**
  * Interprets a decoded request body as bytes, or returns `undefined` when it
  * is not byte-shaped. The result is always freshly allocated and unshared, so
@@ -72,7 +64,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
   ) {
     return Uint8Array.from(value);
   }
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     return undefined;
   }
 
@@ -94,7 +86,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 const asBlobContents = (value: unknown): BlobContents | undefined => {
-  if (!isRecord(value) || typeof value.type !== "string") {
+  if (!isObjectNotArray(value) || typeof value.type !== "string") {
     return undefined;
   }
   if (value.body instanceof FabricBytes) {
@@ -172,13 +164,7 @@ const readRequestContents = async (request: Request) => {
   if (!source) {
     return undefined;
   }
-  try {
-    return asBlobContents(
-      blobUploadCodec.decode(source, blobReconstructionContext),
-    );
-  } catch {
-    return asBlobContents(decodeMemoryBoundary(source));
-  }
+  return asBlobContents(decodeMemoryBoundary(source));
 };
 
 const loadBlobContents = async (

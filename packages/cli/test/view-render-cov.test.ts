@@ -291,15 +291,15 @@ Deno.test("renderStatus: an edit hint shows when there is no message", () => {
   assert(status.includes("Esc Done"), `edit hint shown: "${status}"`);
 });
 
-Deno.test("renderStatus: key hints are highlighted in colour", () => {
+Deno.test("renderStatus: key hints are highlighted in color", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
     baseView({ editHint: [{ key: "Esc", label: "Done" }], color: true }),
   );
   const status = rows[rows.length - 1];
-  // The key is painted in the status-key colour on the status-bar background.
-  assert(status.includes(fgCode(ui.statusKey.fg!)), "the key colour");
+  // The key is painted in the status-key color on the status-bar background.
+  assert(status.includes(fgCode(ui.statusKey.fg!)), "the key color");
   assert(status.includes(bgCode(ui.statusBar.bg!)), "on the status bar");
 });
 
@@ -569,7 +569,7 @@ const SAVE_DIALOG: DialogState = {
   ],
 };
 
-Deno.test("dialog: frames a centred title, body and button row", () => {
+Deno.test("dialog: frames a centered title, body and button row", () => {
   const rows = renderFrame(
     parseDocument(SAMPLE),
     baseView({ width: 60, height: 18, color: false, dialog: SAVE_DIALOG }),
@@ -594,14 +594,14 @@ Deno.test("dialog: the default button is brighter and the shortcuts are yellow",
   );
   const raw = rows.join("");
   const face = bgCode(ui.button.bg!);
-  assert(raw.includes(face), "button face colour");
+  assert(raw.includes(face), "button face color");
   assert(
     raw.includes(fgCode(ui.buttonDefault.fg!) + ";" + face),
-    "default-button label colour on the face",
+    "default-button label color on the face",
   );
   assert(
     raw.includes(fgCode(ui.buttonKey.fg!) + ";" + face),
-    "shortcut-letter colour on the face",
+    "shortcut-letter color on the face",
   );
   // The button shadows are half-block glyphs, not solid cells.
   const plain = stripAnsi(raw);
@@ -694,7 +694,7 @@ Deno.test("dialog: the focused button — not just the default — is highlighte
         dialog: { ...dlg, focus },
       }),
     );
-  // The bright face is the default-button colour on the button-face background;
+  // The bright face is the default-button color on the button-face background;
   // it only appears where a button is highlighted.
   const brightFace = fgCode(ui.buttonDefault.fg!) + ";" + bgCode(ui.button.bg!);
 
@@ -898,7 +898,7 @@ Deno.test("dialog: control characters in the body are shown as glyphs", () => {
       },
     }),
   );
-  // The frame carries its own resets even without colour, so the check is that
+  // The frame carries its own resets even without color, so the check is that
   // the body's own escape and bell are not among what reaches the terminal.
   const joined = rows.join("\n");
   assert(!joined.includes("\x1b[31m"), "the body's escape is not passed on");

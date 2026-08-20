@@ -66,7 +66,19 @@ type ActivePairsByRoot = WeakMap<
   WeakMap<object, WeakMap<object, WeakSet<object>>>
 >;
 
-const ANNOTATION_KEYS = new Set([
+/**
+ * The keywords a schema comparison may ignore: they annotate a schema without
+ * constraining the values it admits, so adding or removing one across a piece
+ * update proves nothing about compatibility either way.
+ *
+ * Exported because a second reader classifies keywords and would otherwise
+ * keep its own copy of this list. What it says is which keywords are
+ * validation-neutral **to this checker**; it is not a statement about what any
+ * other consumer of a schema does with a key, and a reader that acts on one —
+ * the runner reserves three `$comment` values as traversal control markers —
+ * has to settle that against that consumer rather than against this set.
+ */
+export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   "$comment",
   "$defs",
   "$id",
@@ -141,6 +153,71 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
 };
 
 /**
+ * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`
+ * that record the content hash of the authoring module rather than the
+ * authorization's consumer-facing contract.
+ */
+const WRITER_IDENTITY_HASH_KEYS: ReadonlySet<string> = new Set([
+  "bundleId",
+  "moduleIdentity",
+]);
+
+/**
+ * Return an `ifc` extension with the content-addressed identity of a
+ * `writeAuthorizedBy` writer claim removed, so a recompile of the authorizing
+ * module does not read as a contract change in the semantic-extension
+ * comparison below.
+ *
+ * A CFC write authorization (`TrustedActionWrite`) lowers to
+ * `ifc.writeAuthorizedBy.__ctWriterIdentityOf`, whose `moduleIdentity` (and the
+ * legacy `bundleId`) is the content hash of the module that defines the
+ * authorizing handler. When that handler lives in the pattern's own module —
+ * the common case — any edit to the pattern rehashes the module, so
+ * `moduleIdentity` changes while the binding `file` and `path` and the sibling
+ * `uiContract` stay identical. That is the same authorization recompiled, not a
+ * narrowed contract. The runtime still re-verifies the live writer's
+ * `moduleIdentity` against the claim at write time (`writeAuthorizedByReason`,
+ * `packages/runner/src/cfc/prepare.ts`), so dropping it here only stops the
+ * schema diff from reading "the code was edited" as "the contract changed"; it
+ * does not weaken that enforcement.
+ *
+ * Everything a caller can depend on is kept and still compared: the binding
+ * `file` and `path` — a handler moving files or being renamed is a real change
+ * — and the entire `uiContract` (helper/action/surface/role/kind/
+ * trustedPattern/requiredEventIntegrity). The builtin `readonly string[]` form
+ * of `writeAuthorizedBy` names trusted builtins rather than a compiled module,
+ * so it carries no content hash and is returned unchanged.
+ *
+ * This runs where the `ifc` extension is compared as a semantic-extension key,
+ * which the per-node recursion reaches for a claim placed directly on a
+ * property, behind a `$defs` reference, or in an `anyOf` branch. A claim
+ * reached only through a composite keyword (`allOf`, `oneOf`, `if`/`then`,
+ * `not`) is compared by whole-value equality instead, so its content hash still
+ * participates and a recompile there is reported as a change.
+ */
+const ifcWithoutWriterContentHash = (ifc: unknown): unknown => {
+  if (typeof ifc !== "object" || ifc === null) return ifc;
+  const claim = (ifc as Record<string, unknown>).writeAuthorizedBy;
+  if (typeof claim !== "object" || claim === null || Array.isArray(claim)) {
+    return ifc;
+  }
+  const identity = (claim as Record<string, unknown>).__ctWriterIdentityOf;
+  if (typeof identity !== "object" || identity === null) return ifc;
+  const strippedIdentity: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(identity)) {
+    if (WRITER_IDENTITY_HASH_KEYS.has(key)) continue;
+    strippedIdentity[key] = value;
+  }
+  return {
+    ...(ifc as Record<string, unknown>),
+    writeAuthorizedBy: {
+      ...(claim as Record<string, unknown>),
+      __ctWriterIdentityOf: strippedIdentity,
+    },
+  };
+};
+
+/**
  * Reject a piece update unless its argument and result schemas preserve the
  * contracts of the currently running pattern.
  *
@@ -176,6 +253,16 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * current runner and are therefore always marked. Both are pinned as decisions
  * in `packages/runner/test/pattern-update-argument-validation.test.ts` rather
  * than left to be rediscovered.
+ *
+ * The semantic-extension keys (`asCell`, `ifc`, `readOnly`, `scope`,
+ * `writeOnly`) are compared for exact equality, with one exception: a
+ * `writeAuthorizedBy` writer claim's content-addressed module identity
+ * (`moduleIdentity`, and the legacy `bundleId`) is treated as update-volatile
+ * and normalized out before the `ifc` comparison, because it rehashes on any
+ * edit to the authoring module while the authorization it names is unchanged
+ * (see `ifcWithoutWriterContentHash`). The binding `file` and `path` and the
+ * whole `uiContract` are still compared, and the runtime re-verifies the live
+ * writer's identity at write time, so this narrows nothing.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -406,7 +493,17 @@ function schemaSubsetIssue(
     if (constraintIssue) return constraintIssue;
 
     for (const key of SEMANTIC_EXTENSION_KEYS) {
-      if (!fabricAwareEqual(source[key], target[key])) {
+      // The `ifc` extension is compared for exact equality except for a
+      // `writeAuthorizedBy` writer claim's content-addressed module identity,
+      // which is volatile across a recompile of the same authorization (see
+      // ifcWithoutWriterContentHash).
+      const sourceValue = key === "ifc"
+        ? ifcWithoutWriterContentHash(source[key])
+        : source[key];
+      const targetValue = key === "ifc"
+        ? ifcWithoutWriterContentHash(target[key])
+        : target[key];
+      if (!fabricAwareEqual(sourceValue, targetValue)) {
         return `${path}: ${key} changed`;
       }
     }
@@ -487,9 +584,48 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
 /** Whether inserting defaults below this schema leaves its own constraints true. */
 function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
   if (typeof schema !== "object" || schema === null) return true;
-  return Object.keys(schema).every((key) =>
-    DEFAULT_STABLE_SCHEMA_KEYS.has(key)
-  );
+  return Object.keys(schema).every((key) => {
+    if (DEFAULT_STABLE_SCHEMA_KEYS.has(key)) return true;
+    return (key === "anyOf" || key === "oneOf") &&
+      alternativesDeclareDisjointTypes(schema[key]!);
+  });
+}
+
+/**
+ * Whether composition branches can never change membership after descendant
+ * defaults are inserted because their accepted top-level types do not overlap.
+ */
+function alternativesDeclareDisjointTypes(
+  alternatives: readonly JSONSchema[],
+): boolean {
+  const declared = alternatives.map((alternative) => {
+    if (alternative === false) return [] as string[];
+    if (alternative === true) return undefined;
+    const types = schemaTypes(alternative);
+    return types === undefined || types.includes("unknown")
+      ? undefined
+      : [...types];
+  });
+  if (declared.some((types) => types === undefined)) return false;
+  for (let left = 0; left < declared.length; left++) {
+    for (let right = left + 1; right < declared.length; right++) {
+      if (
+        declared[left]!.some((leftType) =>
+          declared[right]!.some((rightType) =>
+            leftType === rightType ||
+            leftType === "number" && rightType === "integer" ||
+            leftType === "integer" && rightType === "number" ||
+            leftType === "object" &&
+              isFabricPrimitiveSchemaType(rightType) ||
+            isFabricPrimitiveSchemaType(leftType) && rightType === "object"
+          )
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function objectSubsetIssue(
@@ -1102,7 +1238,18 @@ function schemaHasUnsafeMaterializedDefault(
   if (activeForPath.has(schema)) return false;
   activeForPath.add(schema);
   try {
-    if (unstable && Object.hasOwn(schema, "default")) return true;
+    // A default on this schema replaces this schema's value. Constraints on
+    // this same node (for example `anyOf` beside `default`) validate that
+    // replacement directly; they are not ancestors that descendant insertion
+    // can perturb. Fail only when a strict ancestor can observe the inserted
+    // value, or when the same-node default is itself invalid.
+    if (
+      Object.hasOwn(schema, "default") &&
+      (unstableAncestor ||
+        !schemaProvidesValidDefault(schema, resolution.root))
+    ) {
+      return true;
+    }
 
     const children: JSONSchema[] = [];
     for (

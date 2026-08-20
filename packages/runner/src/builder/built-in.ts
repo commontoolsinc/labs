@@ -1,15 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { createNodeFactory, lift } from "./module.ts";
-import type {
-  FactoryInput,
-  JSONSchema,
-  NodeFactory,
-  PatternFactory,
-  Reactive,
-  Schema,
-} from "./types.ts";
-import type { Cell as CellType } from "./types.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
@@ -32,11 +23,21 @@ import type {
   WishParams,
   WishState,
 } from "commonfabric";
-import { h } from "@commonfabric/html";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { isCell } from "../cell.ts";
-import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
+
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
+import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
+import { isCell } from "../cell.ts";
+import { h } from "./h.ts";
+import { createNodeFactory, lift } from "./module.ts";
+import type {
+  Cell as CellType,
+  FactoryInput,
+  JSONSchema,
+  NodeFactory,
+  PatternFactory,
+  Reactive,
+  Schema,
+} from "./types.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",

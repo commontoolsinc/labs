@@ -17,7 +17,7 @@ import { clauseSubsumes } from "../src/cfc/clause.ts";
 // Epic B1 (docs/history/plans/cfc-future-work-implementation.md §3): the atom
 // pattern-matching kernel of the exchange-rule calculus (spec §4.3.3/§4.3.4)
 // plus the per-family entailment hook and the new atom families' registry
-// entries. Pure helpers — B4 wires them into the fuelled evaluator.
+// entries. Pure helpers — B4 wires them into the fueled evaluator.
 
 const userA = cfcAtom.user("did:key:alice");
 const userB = cfcAtom.user("did:key:bob");
@@ -134,7 +134,7 @@ describe("CFC atom patterns", () => {
     it("fails closed on malformed var-bearing records, both directions", () => {
       // A record with a `var` key that is not the exact placeholder shape is
       // a malformed pattern: it matches nothing — including atom data that
-      // literally spells the same record.
+      // is literally the same record.
       const malformed = { var: "$x", type: "t" };
       expect(matchAtomPattern(malformed, { var: "$x", type: "t" })).toBeNull();
       expect(matchAtomPattern(malformed, roleAliceX)).toBeNull();

@@ -1,7 +1,21 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { MetaLinkField } from "@commonfabric/api";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  decomposeSchema,
+  SchemaNotDecomposableError,
+} from "./schema-decompose.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "./schema-registry.ts";
+import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -15,23 +29,11 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "./uri-utils.ts";
-import { arrayEqual } from "./path-utils.ts";
-import {
-  CellResultInternals,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "./storage/interface.ts";
-import type { Runtime } from "./runtime.ts";
-import {
+  areNormalizedLinksSame,
   isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
@@ -40,9 +42,19 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
-import { MetaLinkField } from "@commonfabric/api";
+import {
+  CellResultInternals,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { createRef } from "./create-ref.ts";
+import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
+import {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
+import { toURI } from "./uri-utils.ts";
 
 export * from "./link-types.ts";
 
@@ -186,16 +198,34 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
+// Link identity (`areNormalizedLinksSame` and neighbors) lives in
+// ./link-types.ts — one canonical implementation — and reaches importers of
+// this module through the `export *` above.
+
 /**
- * Compare two normalized links for equality
+ * Replaces an inline schema with a reference to content-addressed schema
+ * documents (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2;
+ * `contentAddressedSchemas` flag) — the shared emission for link schemas
+ * and `$alias` binding schemas. Decomposition registers the closure in
+ * the realm registry — in-session resolution works immediately — and the
+ * commit pipeline materializes the documents into the destination space in
+ * the same transaction as the write that carries the reference (the
+ * write-side delivery guarantee). Input decomposition refuses stays inline,
+ * exactly as with the flag off.
  */
-export function areNormalizedLinksSame(
-  link1: NormalizedLink,
-  link2: NormalizedLink,
-): boolean {
-  return link1.id === link2.id && link1.space === link2.space &&
-    (link1.scope ?? "space") === (link2.scope ?? "space") &&
-    arrayEqual(link1.path, link2.path);
+export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
+  try {
+    const { rootRef, documents } = decomposeSchema(schema, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+    return internSchema({ $ref: rootRef });
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return schema;
+    throw error;
+  }
 }
 
 /**
@@ -252,7 +282,11 @@ export function createSigilLinkFromParsedLink(
       link.schema,
       options.keepAsCell ?? KeepAsCell.OnlyStream,
     );
-    if (isNontrivialSchema(schema)) reference.schema = schema;
+    if (isNontrivialSchema(schema)) {
+      reference.schema = getContentAddressedSchemasConfig()
+        ? externalizeSchema(schema as JSONSchemaObj)
+        : schema;
+    }
   }
 
   // Option overrides link value

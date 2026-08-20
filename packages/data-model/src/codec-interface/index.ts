@@ -4,9 +4,9 @@ export {
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   JSON_CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
-  type SerializationContext,
+  REALM_CODEC,
   type TerminalCodec,
   type WireFormat,
 } from "./interface.ts";
@@ -18,8 +18,8 @@ export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 
-export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
+export { BaseLiveEnvironment } from "./BaseLiveEnvironment.ts";
 export {
-  EMPTY_RECONSTRUCTION_CONTEXT,
-  EmptyReconstructionContext,
-} from "./EmptyReconstructionContext.ts";
+  NULL_LIVE_ENVIRONMENT,
+  NullLiveEnvironment,
+} from "./NullLiveEnvironment.ts";

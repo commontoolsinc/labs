@@ -11,7 +11,8 @@
  */
 
 import { exists } from "@std/fs";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { FragmentWriter } from "@commonfabric/test-support/records";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
@@ -19,6 +20,7 @@ import {
   autoGenerationsToPrune,
   collectVintages,
   describeError,
+  hoistSupersessionReason,
   newestAutoGeneration,
   patternKeyFromMain,
   PINNED,
@@ -32,6 +34,7 @@ import {
 } from "./pattern-vintage-lib.ts";
 import {
   isPresentRootValue,
+  isReduction,
   materializeOnCell,
   openFileBackedRuntime,
   readStateUnder,
@@ -46,6 +49,11 @@ import {
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
+import {
+  acceptedDropKey,
+  acceptedDropsFor,
+  withoutAcceptedDrops,
+} from "./pattern-vintage-accepted-drops.ts";
 
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
@@ -84,11 +92,8 @@ function patternsPrefix(roots: GateRoots): string {
   return `${roots.patternsRoot.slice(roots.repoRoot.length)}/`;
 }
 
-function resolver(roots: GateRoots, key: string) {
-  return new FileSystemProgramResolver(
-    `${roots.patternsRoot}/${key}`,
-    roots.repoRoot,
-  );
+function localProgramOptions(roots: GateRoots, key: string) {
+  return { main: `${roots.patternsRoot}/${key}`, root: roots.repoRoot };
 }
 
 /**
@@ -223,7 +228,7 @@ export interface ReplayReport {
    * in `failures`, so a fixture holding any is a RED run rather than a green one
    * with a caveat — the replay skips them, and a verdict that passes while
    * silently covering fewer roots than the fixture holds is this tier's worst
-   * failure mode. Kept as a count for the tests that pin that behaviour.
+   * failure mode. Kept as a count for the tests that pin that behavior.
    */
   unmappable: number;
   /** Targets whose source CHANGED since capture — the actual migrations. */
@@ -265,6 +270,30 @@ export interface ReplayReport {
    * since `uncovered` is exactly the required keys ABSENT from `covered`.
    */
   recorded: Set<string>;
+  /**
+   * Accepted-drop entries that actually removed something from a vintage here.
+   *
+   * `tasks/pattern-vintage-accepted-drops.ts` can only shrink, and an entry
+   * that forgives nothing is indistinguishable from one quietly doing nothing
+   * unless the run counts where each was used. Keyed by the entry's pattern.
+   */
+  dropsApplied: Set<string>;
+  /**
+   * Derived-hoist targets held back from failing, each entry tagged with the
+   * rule that held it. Two refusal shapes qualify: STORED ARGUMENTS today's
+   * schema refused ("stored arguments superseded"), because a hoist's
+   * arguments are the captures of a derivation the updated source re-runs
+   * and re-supplies wholesale; and a recorded hoist today's source no longer
+   * emits ("hoist no longer emitted"), because hoist ids are builder node
+   * ids an ordinary edit renumbers — the same supersession wearing its
+   * second face. The real update channel (`setPattern`) validates only the
+   * root contract, so failing on either held vintages to a stricter rule
+   * than any deployed piece experiences. Nothing else is held back: any
+   * other error on a hoist still fails, and so does the readback comparison
+   * for every hoist that applies — which is what keeps a row-allocated
+   * cell's cause-stability (the moved-`.for()` class) gated.
+   */
+  capturesSuperseded: string[];
   failures: ReplayFailure[];
 }
 
@@ -302,6 +331,8 @@ export async function replayVintage(
     servedRoute: 0,
     covered: new Set<string>(),
     recorded,
+    dropsApplied: new Set<string>(),
+    capturesSuperseded: [],
     failures: [{ ...where, detail }],
   });
   /** Every pattern key a manifest names, for attributing a failed fixture. */
@@ -445,6 +476,8 @@ export async function replayVintage(
       // coverage means "X was replayed"; now it does.
       covered: new Set<string>(),
       recorded: new Set<string>(),
+      dropsApplied: new Set<string>(),
+      capturesSuperseded: [],
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -561,8 +594,9 @@ export async function replayVintage(
       const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
-        program = await runtimeVintage.runtime.harness.resolve(
-          new FileSystemProgramResolver(source, roots.repoRoot),
+        program = await resolveLocalProgram(
+          (r) => runtimeVintage.runtime.harness.resolve(r),
+          { main: source, root: roots.repoRoot },
         );
       } catch (error) {
         report.failures.push({
@@ -686,6 +720,22 @@ export async function replayVintage(
         },
       );
       if (outcome.error !== undefined) {
+        // A derived hoist whose stored arguments no longer satisfy today's
+        // schema is not a stranded piece: see `capturesSuperseded` on the
+        // report. Held back and reported WITH the rule that fired, never
+        // silently dropped. Any other refusal of a hoist — compile, commit,
+        // storage — still fails.
+        const supersession = hoistSupersessionReason(
+          entry.symbol,
+          outcome.error,
+          outcome.missingArtifact === true,
+        );
+        if (supersession !== undefined) {
+          report.capturesSuperseded.push(
+            `${entry.main} ${entry.symbol} (${supersession})`,
+          );
+          continue;
+        }
         report.failures.push({
           ...where,
           detail:
@@ -762,7 +812,26 @@ export async function replayVintage(
         outcome.resultSchema,
       );
       {
-        const findings = strandedKeys(before, after);
+        // A field the pattern REMOVED on purpose is not state this comparison
+        // holds it to — see `pattern-vintage-accepted-drops.ts`, and the Tier 1
+        // acceptance it is downstream of. Taken off both sides so the two are
+        // read the same way, for the same reason `after` is re-read through the
+        // schema `before` came from: an asymmetric strip would measure the
+        // stripping. `applied` is counted from the vintage's side only, since
+        // that is where "the vintage held it" is a fact.
+        const drops = acceptedDropsFor(entry.main ?? "", vintage.stamp);
+        const paths = drops?.paths ?? new Set<string>();
+        const keptBefore = withoutAcceptedDrops(before, paths, isReduction);
+        const keptAfter = withoutAcceptedDrops(after, paths, isReduction);
+        if (drops !== undefined) {
+          for (const path of keptBefore.applied) {
+            report.dropsApplied.add(acceptedDropKey(drops.pattern, path));
+          }
+        }
+        const findings = strandedKeys(
+          keptBefore.value as Record<string, unknown>,
+          keptAfter.value,
+        );
         const describe = (finding: typeof findings[number]) =>
           `${finding.key} (was ${snippet(finding.before)}, now ${
             snippet(finding.after)
@@ -880,6 +949,13 @@ export async function replayAll(
      * with the one that produced the verdict.
      */
     perVintage: VintageOutcome[];
+    /** Accepted-drop entries that forgave something somewhere in this run. */
+    dropsApplied: Set<string>;
+    /**
+     * Derived-hoist targets held back, each tagged with the rule that held
+     * it — a superseded stored argument, or a hoist no longer emitted.
+     */
+    capturesSuperseded: string[];
     failures: ReplayFailure[];
   }
 > {
@@ -887,6 +963,8 @@ export async function replayAll(
   const perVintage: VintageOutcome[] = [];
   const covered = new Set<string>();
   const coveredBy = new Map<string, VintageAttribution>();
+  const dropsApplied = new Set<string>();
+  const capturesSuperseded: string[] = [];
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -895,8 +973,25 @@ export async function replayAll(
     unmappable = 0,
     stranded = 0;
   const failures: ReplayFailure[] = [];
+  // One gate-kind record per fixture, the replay's natural unit: a fixture
+  // covers several patterns, and anything finer would be a redesign. The
+  // stamp is part of the name because each captured generation is its own
+  // test; a new capture is a new test, not a rename.
+  const recordsFragment = FragmentWriter.openForRun();
   for (const vintage of vintages) {
+    const replayStarted = performance.now();
     const report = await replayVintage(roots, vintage);
+    recordsFragment?.append({
+      line: "record",
+      test: {
+        k: "gate",
+        s: "repo",
+        n: `pattern-vintage ${vintage.testKey} ${vintage.tier} ` +
+          vintage.stamp,
+      },
+      outcome: report.failures.length > 0 ? "fail" : "pass",
+      durationMs: Math.round(performance.now() - replayStarted),
+    });
     perVintage.push({
       ref: vintage,
       targets: report.targets,
@@ -911,6 +1006,8 @@ export async function replayAll(
     stranded += report.stranded;
     servedRoute += report.servedRoute;
     for (const key of report.covered) covered.add(key);
+    for (const key of report.dropsApplied) dropsApplied.add(key);
+    capturesSuperseded.push(...report.capturesSuperseded);
     for (const key of report.recorded) {
       // From `recorded`, NOT `covered`: a pattern that was credited needs no
       // attribution, because it never reaches an uncovered report. The one
@@ -930,6 +1027,7 @@ export async function replayAll(
     }
     failures.push(...report.failures);
   }
+  recordsFragment?.close();
   return {
     vintages,
     replayed: vintages.length,
@@ -943,6 +1041,8 @@ export async function replayAll(
     covered,
     coveredBy,
     perVintage,
+    dropsApplied,
+    capturesSuperseded,
     failures,
   };
 }
@@ -1038,8 +1138,9 @@ export async function captureVintage(
     // several. Deriving the name from one of them would have to pick a
     // privileged one, and there is no principled choice — a test that drives
     // two patterns equally has no primary.
-    const program = await vintage.runtime.harness.resolve(
-      resolver(roots, testKey),
+    const program = await resolveLocalProgram(
+      (r) => vintage.runtime.harness.resolve(r),
+      localProgramOptions(roots, testKey),
     );
     const pattern = await vintage.runtime.patternManager.compilePattern(
       program as never,

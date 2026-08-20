@@ -1,5 +1,12 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { JSONSchema } from "../../runner/src/builder/types.ts";
+import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import { isSubschema } from "../../runner/src/schema-walk.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -645,17 +652,24 @@ WHERE session_id = :session_id
 `;
 
 // True-basis (CT-1910) variants of the conflict scans: identical intervals,
-// but writes produced by the reader's own session's TRUE PREDECESSORS
-// (`local_seq` below the reader's) are excluded — the accepted own layers
-// the reader's materialized view included; conflicting with them would be
-// the self-conflict that forced pending reads to over-advance their basis
-// in the first place. The exclusion is deliberately NOT session-wide: an
-// own write with a HIGHER localSeq that was accepted first (out-of-order
-// submission — e.g. the runner's hold-mode admission can release a later
-// blind commit while an earlier read-bearing commit waits) was NOT in the
-// reader's view and must conflict exactly like a foreign write. Checking
-// `local_seq` here, rather than assuming the §3.6.3 same-session ordering
-// holds on the wire, keeps the scan sound without trusting the transport.
+// but writes produced by the layers the read NAMES (`local_seq` in the
+// read's declared dependency array, same session) are excluded — the
+// accepted own layers the reader's materialized view included; conflicting
+// with them would be the self-conflict that forced pending reads to
+// over-advance their basis in the first place. The exclusion is the
+// DECLARED SET, not a predecessor mask (`local_seq <` the reader's): the
+// declared array is the reader's claim of exactly which own layers its
+// view sat on, so an own write the array does NOT name conflicts like a
+// foreign write whatever its localSeq. That covers both an own write with
+// a HIGHER localSeq accepted first (out-of-order submission — e.g. the
+// runner's hold-mode admission can release a later blind commit while an
+// earlier read-bearing commit waits) and an own PREDECESSOR the client
+// omitted while its write is durable — a buggy or selectively-excluding
+// client whose view is missing integrated state (the missed-write
+// direction of INV-1). The declared shape thus validates itself:
+// basisSeq plus the named layers must fully account for the doc's durable
+// history at the read path, and the server checks that rather than
+// trusting client discipline.
 const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
 SELECT r.seq AS seq
 FROM revision r
@@ -665,7 +679,8 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op IN ('set', 'delete')
-  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+  AND (c.session_id <> :exclude_session
+       OR c.local_seq NOT IN (SELECT value FROM json_each(:named_local_seqs)))
 ORDER BY r.seq DESC, r.op_index DESC
 LIMIT 1
 `;
@@ -679,7 +694,8 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op = 'patch'
-  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+  AND (c.session_id <> :exclude_session
+       OR c.local_seq NOT IN (SELECT value FROM json_each(:named_local_seqs)))
 ORDER BY r.seq DESC, r.op_index DESC
 `;
 
@@ -801,6 +817,30 @@ export type Engine = {
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
+  /**
+   * Documents already decoded, by the revision each one is.
+   *
+   * The revision table is only ever appended to, and the snapshots that get
+   * pruned are derived from it rather than authoritative, so the document a
+   * revision decodes to does not change while the process runs. That is what
+   * makes an entry servable without asking whether anything has happened
+   * since. It is a property of how the engine writes rather than a rule the
+   * engine enforces, which is why the key carries the stored row's shape as
+   * well as its address — see {@link documentCacheKey}.
+   *
+   * What it removes is re-decoding. A read reaches a revision by identity and
+   * would otherwise parse its stored text and deep-freeze the result every
+   * time, and a runtime reads the same revision far more often than it writes
+   * a new one. Reconstructed documents go in too, which is the larger saving:
+   * a patched revision costs a base document plus every patch over it.
+   */
+  documentCache: Map<string, EntityDocument | null>;
+  /**
+   * Where {@link cacheDocumentForRevision} puts entries while a commit is
+   * open, so they reach {@link Engine.documentCache} only once its rows are
+   * durable. Absent outside {@link applyCommit}.
+   */
+  stagedDocumentCache?: Map<string, EntityDocument | null>;
 };
 
 export class ConflictError extends Error {
@@ -968,6 +1008,12 @@ export type AppliedCommit = {
    * have been delivered and retired — re-inserting resurrects
    * delivered appends as duplicate delivery work). */
   replayed?: true;
+  /**
+   * Operation indexes whose `cid:` set matched the stored content exactly
+   * and applied as a no-op: no revision, no head advance, no dirty mark.
+   * The commit itself still records and advances the space log.
+   */
+  elidedOpIndexes?: number[];
 };
 
 export type ReadOptions = {
@@ -1453,6 +1499,7 @@ export const open = async (
     snapshotRetention,
     legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
     statements: prepareStatements(database),
+    documentCache: new Map(),
   };
 };
 
@@ -1617,26 +1664,43 @@ const readStateForScopeKey = (
   }
 
   const { row, branch: resolvedBranch } = resolved;
+  // The revision this read resolved to. What it decodes to cannot change, so
+  // a hit here is the same answer the work below would produce.
+  const cacheKey = documentCacheKey(
+    resolvedBranch,
+    id,
+    scopeKey,
+    row.seq,
+    row.op_index,
+    row.op,
+    row.data?.length ?? -1,
+  );
   let document: EntityDocument | null;
-  switch (row.op) {
-    case "set":
-      document = decodeStoredDocument(row.data);
-      break;
-    case "delete":
-      document = null;
-      break;
-    case "patch":
-      document = reconstructPatchedDocument(engine, {
-        id,
-        scopeKey,
-        branch: resolvedBranch,
-        seq: row.seq,
-        opIndex: row.op_index,
-      });
-      break;
-    default:
-      // `sqlite` ops are never stored as revisions; unreachable.
-      throw new Error(`unexpected stored revision op: ${row.op}`);
+  const cached = engine.documentCache.get(cacheKey);
+  if (cached !== undefined) {
+    document = cached;
+  } else {
+    switch (row.op) {
+      case "set":
+        document = decodeStoredDocument(row.data);
+        break;
+      case "delete":
+        document = null;
+        break;
+      case "patch":
+        document = reconstructPatchedDocument(engine, {
+          id,
+          scopeKey,
+          branch: resolvedBranch,
+          seq: row.seq,
+          opIndex: row.op_index,
+        });
+        break;
+      default:
+        // `sqlite` ops are never stored as revisions; unreachable.
+        throw new Error(`unexpected stored revision op: ${row.op}`);
+    }
+    cacheDocumentForRevision(engine, cacheKey, document);
   }
 
   return {
@@ -2641,10 +2705,28 @@ export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
 ): AppliedCommit => {
-  return engine.database.transaction(applyCommitTransaction).immediate(
-    engine,
-    options,
-  );
+  // A commit reads its own uncommitted rows — snapshot materialization asks
+  // for the state it has just written — and those reads are worth keeping,
+  // being of the revisions everything is about to ask for. They are held aside
+  // until the rows behind them are durable: a transaction that throws rolls
+  // SQLite back, and an entry recorded from what it wrote would describe a
+  // revision that never happened. A retry then writes its own revision at the
+  // sequence and operation index the rolled-back one had.
+  const staged = new Map<string, EntityDocument | null>();
+  engine.stagedDocumentCache = staged;
+  try {
+    const applied = engine.database.transaction(applyCommitTransaction)
+      .immediate(engine, options);
+    // Durable now, so what was read from those rows can be remembered.
+    engine.stagedDocumentCache = undefined;
+    for (const [key, document] of staged) {
+      cacheDocumentForRevision(engine, key, document);
+    }
+    return applied;
+  } finally {
+    // Also the rollback path, where `staged` is dropped unread.
+    engine.stagedDocumentCache = undefined;
+  }
 };
 
 /**
@@ -3018,6 +3100,26 @@ export const applyWaveCommit = (
   ).immediate(engine, options);
 };
 
+// Per-version record of stored schema documents whose content verified and
+// whose refs were collected during commit-time closure validation, so a
+// writer re-referencing the same closure pays map lookups, not re-hashes.
+// Bounded; wholesale eviction on overflow.
+const COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES = 4096;
+const commitSchemaRefCaches = new WeakMap<
+  Engine,
+  Map<string, { seq: number; refs: ReadonlySet<string> }>
+>();
+const commitVerifiedSchemaDocRefs = (
+  engine: Engine,
+): Map<string, { seq: number; refs: ReadonlySet<string> }> => {
+  let cache = commitSchemaRefCaches.get(engine);
+  if (cache === undefined) {
+    cache = new Map();
+    commitSchemaRefCaches.set(engine, cache);
+  }
+  return cache;
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -3080,10 +3182,23 @@ const applyCommitTransaction = (
           `${commit.localSeq}: stored class/holder differ from the resubmission`,
       );
     }
+    const replayedRevisions = selectCommitRevisions(engine, existing.seq);
+    // Re-derive the elision report: an elided operation persisted no
+    // revision, so a replayed verdict must name it again or the accept
+    // path would classify the unchanged document as dirty.
+    const revisionOpIndexes = new Set(
+      replayedRevisions.map((revision) => revision.opIndex),
+    );
+    const replayedElided = commit.operations.flatMap((operation, opIndex) =>
+      operation.op !== "sqlite" && !revisionOpIndexes.has(opIndex)
+        ? [opIndex]
+        : []
+    );
     return {
       seq: existing.seq,
       branch: existing.branch,
-      revisions: selectCommitRevisions(engine, existing.seq),
+      revisions: replayedRevisions,
+      ...(replayedElided.length > 0 ? { elidedOpIndexes: replayedElided } : {}),
       replayed: true,
     };
   }
@@ -3373,6 +3488,212 @@ const applyCommitTransaction = (
     sessionId,
   });
 
+  // Content-addressed documents are immutable: the content under a `cid:`
+  // id can never change, so deleting or patching one is a protocol
+  // violation regardless of document class — a deleted or altered
+  // dependency would invalidate every document referencing it — and a
+  // `set` must be the first installation or content-identical to what is
+  // stored (an idempotent re-`set` is how writers install closures).
+  // Equality is `valueEqual`, canonical content-hash equality: a special
+  // object's state lives in private fields a structural walk cannot see.
+  // Conflicting sets of one id within a single commit are equally
+  // rejected. `SessionSync.removes` are watch-result removals, not
+  // deletions, and are unaffected.
+  //
+  // The same pass collects every schema reference the commit's content
+  // introduces — a link schema anywhere in a set's document, a patch's
+  // own values, and an installed schema document's own refs — for the
+  // closure validation below. Known gap: a patch that edits INSIDE an
+  // existing link's schema (replacing a `$ref` string at a sub-path, say)
+  // introduces a reference no patch value carries as a whole link, so
+  // only a scan of the post-patch document would see it — a cost this
+  // validation deliberately does not pay. The gap closes when links
+  // become opaque FabricPrimitive Link objects instead of patchable
+  // plain JSON; until then such a reference escapes commit-time
+  // validation and read-side assembly catches it. The scan is also
+  // conservative the other way: a reference in an operand that does not
+  // survive to the final document (a remove-by-value operand, an
+  // add-then-remove within one commit) is still validated.
+  let cidSetsInCommit: Map<string, unknown> | null = null;
+  // Content-identical re-sets apply as no-ops: the comparison below already
+  // proves nothing changes, and writing a fresh revision anyway would
+  // advance the head and fan the unchanged document out to every watcher —
+  // the cost that makes blind closure re-installs expensive. The commit
+  // still records (the space log advances; a client basis at its seq is
+  // legal and truthful), only the per-document machinery goes quiet.
+  const elidedCidSetOpIndexes = new Set<number>();
+  const elidableCidIds = new Set<string>();
+  const requiredSchemaRefs = new Set<string>();
+  // `$alias` records are NOT scanned: they are Pattern-binding vocabulary
+  // only by context, and to the storage layer an `$alias`-shaped record is
+  // plain data — treating its `schema` member as a schema position would
+  // let a data document that merely looks like a binding reject a commit.
+  // A reference a binding carries is therefore outside this boundary's
+  // guarantee; readers resolve it through the realm registry and fail
+  // closed when they cannot.
+  const collectLinkSchemaRefs = (content: unknown): void => {
+    if (content === null || typeof content !== "object") return;
+    mapLinkSchemas(content as FabricValue, (schema) => {
+      for (
+        const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+      ) {
+        requiredSchemaRefs.add(hash);
+      }
+      return schema;
+    });
+  };
+  for (const [opIndex, operation] of commit.operations.entries()) {
+    if (operation.op === "sqlite") continue;
+    if (operation.op === "patch") {
+      for (const patch of operation.patches ?? []) {
+        if ("value" in patch) collectLinkSchemaRefs(patch.value);
+        if ("add" in patch) collectLinkSchemaRefs(patch.add);
+        if ("values" in patch) collectLinkSchemaRefs(patch.values);
+      }
+    }
+    if (!operation.id.startsWith("cid:")) {
+      if (operation.op === "set") collectLinkSchemaRefs(operation.value);
+      continue;
+    }
+    if (operation.op === "delete" || operation.op === "patch") {
+      throw new ProtocolError(
+        `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
+      );
+    }
+    // Content-addressed documents live at space scope only: a scoped
+    // partition could hold a divergent copy under the same id (the
+    // immutability check reads at the operation's scope, so a scoped set
+    // reads an empty partition and passes as a first installation), and
+    // every reader resolves `cid:` documents at space scope. One id, one
+    // content, one partition.
+    if (normalizeScope(operation.scope) !== DEFAULT_SCOPE) {
+      throw new ProtocolError(
+        `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
+      );
+    }
+    // A `cid:` set that IS a schema document (by content-addressed
+    // identity — `cid:` also holds blobs) contributes its own refs;
+    // anything else is scanned like an ordinary document. Schema content
+    // is never link-scanned: keywords such as `default` may carry
+    // link-shaped DATA.
+    const installedInner = (operation.value as { value?: unknown })?.value;
+    if (
+      isSubschema(installedInner) &&
+      internSchemaAsTaggedHashString(installedInner as JSONSchema) ===
+        operation.id.slice("cid:".length)
+    ) {
+      for (const hash of collectExternalSchemaRefHashes(installedInner)) {
+        requiredSchemaRefs.add(hash);
+      }
+    } else {
+      collectLinkSchemaRefs(operation.value);
+    }
+    // `has()`, not a `get() !== undefined` check: a malformed set can carry
+    // an omitted value, and treating it as absent would let a later set of
+    // the same id skip the conflict comparison.
+    if (cidSetsInCommit?.has(operation.id)) {
+      if (
+        !valueEqual(
+          cidSetsInCommit.get(operation.id) as FabricValue,
+          operation.value as FabricValue,
+        )
+      ) {
+        throw new ProtocolError(
+          `memory v2 commit carries conflicting sets of content-addressed document ${operation.id}`,
+        );
+      }
+      // A duplicate of a stored-identical set elides with it; a duplicate
+      // within a first install keeps today's write-both behavior.
+      if (elidableCidIds.has(operation.id)) {
+        elidedCidSetOpIndexes.add(opIndex);
+      }
+      continue;
+    }
+    const stored = read(engine, {
+      id: operation.id,
+      branch,
+      scope: operation.scope,
+      principal,
+      sessionId,
+    });
+    if (stored !== null) {
+      if (!valueEqual(stored as FabricValue, operation.value as FabricValue)) {
+        throw new ProtocolError(
+          `memory v2 commit cannot change content-addressed document ${operation.id}`,
+        );
+      }
+      elidedCidSetOpIndexes.add(opIndex);
+      elidableCidIds.add(operation.id);
+    }
+    (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
+  }
+
+  // Commit-time closure validation: every schema reference the scan
+  // above collects must be backed by a VERIFIED schema document —
+  // installed by this same commit or already stored in the space — and
+  // so must the whole closure behind it. With this, the commit API
+  // cannot create a broken or forged closure for any reference the scan
+  // sees: an assembly failure downstream means the patch gap documented
+  // above, out-of-band tampering, or a store that predates this
+  // validation.
+  if (requiredSchemaRefs.size > 0) {
+    const verified = commitVerifiedSchemaDocRefs(engine);
+    const pending = [...requiredSchemaRefs];
+    const walked = new Set<string>();
+    while (pending.length > 0) {
+      const hash = pending.pop()!;
+      if (walked.has(hash)) continue;
+      walked.add(hash);
+      const id = `cid:${hash}`;
+      const included = cidSetsInCommit?.has(id)
+        ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+        : undefined;
+      if (included !== undefined) {
+        if (
+          !isSubschema(included) ||
+          internSchemaAsTaggedHashString(included as JSONSchema) !== hash
+        ) {
+          throw new ProtocolError(
+            `memory v2 commit references schema document ${id} whose included content does not verify`,
+          );
+        }
+        for (const dep of collectExternalSchemaRefHashes(included)) {
+          pending.push(dep);
+        }
+        continue;
+      }
+      const state = readState(engine, { id, branch });
+      const cached = verified.get(id);
+      if (cached !== undefined && cached.seq === state?.seq) {
+        for (const dep of cached.refs) pending.push(dep);
+        continue;
+      }
+      const storedInner =
+        state?.document === null || state?.document === undefined
+          ? undefined
+          : (state.document as { value?: unknown }).value;
+      if (storedInner === undefined) {
+        throw new ProtocolError(
+          `memory v2 commit references schema document ${id} that is neither included in the commit nor stored in the space`,
+        );
+      }
+      if (
+        !isSubschema(storedInner) ||
+        internSchemaAsTaggedHashString(storedInner as JSONSchema) !== hash
+      ) {
+        throw new ProtocolError(
+          `memory v2 commit references schema document ${id} whose stored content does not verify`,
+        );
+      }
+      const refs = collectExternalSchemaRefHashes(storedInner);
+      if (verified.size >= COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES) {
+        verified.clear();
+      }
+      verified.set(id, { seq: state!.seq, refs });
+      for (const dep of refs) pending.push(dep);
+    }
+  }
+
   validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
@@ -3467,6 +3788,7 @@ const applyCommitTransaction = (
       });
       continue;
     }
+    if (elidedCidSetOpIndexes.has(opIndex)) continue;
     // Event-append stamping (Phase 3): a declared append's entry gets its
     // stream `seq` (this commit's) and admission-resolved `firedAt`
     // written into a CLONE of the op — the caller's operation objects are
@@ -3540,6 +3862,11 @@ const applyCommitTransaction = (
     seq,
     branch,
     revisions,
+    ...(elidedCidSetOpIndexes.size > 0
+      ? {
+        elidedOpIndexes: [...elidedCidSetOpIndexes].toSorted((a, b) => a - b),
+      }
+      : {}),
   };
 };
 
@@ -4062,10 +4389,13 @@ const resolvePendingReads = (
     }
 
     // CT-1910 repair: a reader that names its true confirmed basis is
-    // scanned over the FULL interval (basisSeq, head], excluding only its
-    // own session's predecessor commits (local_seq below the reader's) —
-    // the accepted layers its materialized view included. A legacy reader
-    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // scanned over the FULL interval (basisSeq, head], excluding only the
+    // own-session layers its dependency array NAMES — the accepted layers
+    // its materialized view included, per its own attestation. An own
+    // write the array omits conflicts like a foreign one, so the scan
+    // verifies that basisSeq plus the named layers fully account for the
+    // doc's durable history at the read path. A legacy reader (no
+    // basisSeq) keeps the max-dependency basis, so the over-advance
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
     const trueBasis = pendingReadBasisSeq(engine, read);
@@ -4078,7 +4408,7 @@ const resolvePendingReads = (
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
-        { sessionKey, beforeLocalSeq: commit.localSeq },
+        { sessionKey, namedLocalSeqs: layers },
       )
       : findConflictSeq(
         engine,
@@ -4114,12 +4444,14 @@ const findConflictSeq = (
   // replace/delete changes the container the shape read observed, so it must
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
-  // True-basis reads (CT-1910): skip writes produced by this commit session
-  // key's TRUE PREDECESSOR commits (`local_seq < beforeLocalSeq`) — the
-  // reader's own accepted layers, which its view included. Own writes with
-  // a higher localSeq (accepted out of submission order) conflict like
-  // foreign writes; see the comment on the *_EXCLUDING_SESSION statements.
-  exclude?: { sessionKey: string; beforeLocalSeq: number },
+  // True-basis reads (CT-1910): skip writes produced by the own-session
+  // layers the read NAMES — the accepted layers whose inclusion in the
+  // reader's view the declared array attests. Any own write the array does
+  // not name conflicts like a foreign write, whether it is a higher
+  // localSeq accepted out of submission order or an omitted predecessor
+  // whose write is durable; see the comment on the *_EXCLUDING_SESSION
+  // statements.
+  exclude?: { sessionKey: string; namedLocalSeqs: readonly number[] },
 ): number | null => {
   const setDeleteStatement = exclude === undefined
     ? engine.statements.selectSetDeleteConflict
@@ -4129,7 +4461,7 @@ const findConflictSeq = (
     : engine.statements.selectPatchConflictsExcludingSession;
   const exclusionParams = exclude === undefined ? {} : {
     exclude_session: exclude.sessionKey,
-    before_local_seq: exclude.beforeLocalSeq,
+    named_local_seqs: JSON.stringify(exclude.namedLocalSeqs),
   };
   const setOrDeleteConflict = setDeleteStatement.get({
     branch,
@@ -4711,6 +5043,96 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
   if (row.status !== "active") {
     throw new Error(`branch is not active: ${branch}`);
   }
+};
+
+/**
+ * How many decoded revisions the cache keeps.
+ *
+ * A read reaches for the head revision of a document over and over while a
+ * board is being worked on, so the entries that earn their place are few and
+ * hot — but eviction here is wholesale, so a bound under the working set
+ * clears just as the entries become worth keeping and buys nothing at all.
+ * Seeding a fifty-topic board decodes 25,833 documents uncached; a bound of
+ * 32 or 64 leaves that at 25,327 and 25,123, while 256 takes it to 12,361.
+ * Above that the curve flattens: 1,024 reaches 10,708 for four times the
+ * retained graphs, and measured no faster.
+ *
+ * The bound is what keeps the decoded graphs of superseded revisions from
+ * accumulating for the life of the process. Peak memory across a seed is the
+ * same with it as without.
+ */
+const DOCUMENT_CACHE_MAX_ENTRIES = 256;
+
+/**
+ * The revision a cached document belongs to. Every part of the address is
+ * needed: the same entity has a different document per branch and per scope,
+ * and a different one again at each point in its history.
+ *
+ * The stored row's `op` and the length of its data join the address, and both
+ * are a cheap discriminator rather than a check on content. Two rows of the
+ * same op and size answer to the same key; and for a revision reconstructed
+ * from patches the key says nothing at all about the base, snapshot and patch
+ * rows the reconstruction read. Making it a real check would mean hashing
+ * every row a read touches, which is the pass over the bytes this cache exists
+ * to avoid.
+ *
+ * What the cache rests on is that the engine only ever appends revisions, so
+ * what one decodes to does not change while the process runs. The shape in the
+ * key covers the part of that which is cheap to cover — a row replaced by
+ * something of a different size — and so keeps the engine's validate-on-decode
+ * meaningful against it (`v2-engine-validation.test.ts`). A database that was
+ * already wrong when it was opened is caught by the first decode either way.
+ */
+const documentCacheKey = (
+  branch: BranchName,
+  id: EntityId,
+  scopeKey: string,
+  seq: number,
+  opIndex: number,
+  op: string,
+  dataLength: number,
+): string =>
+  `${branch}\u0000${id}\u0000${scopeKey}\u0000${seq}\u0000${opIndex}` +
+  `\u0000${op}\u0000${dataLength}`;
+
+/**
+ * Remember the document a revision decodes to.
+ *
+ * A read taken inside an open transaction is not remembered. Commits read
+ * their own uncommitted rows — snapshot materialization asks for the state it
+ * has just written — and a transaction that goes on to throw leaves SQLite as
+ * it was while this map would keep describing a revision that never happened.
+ * A retry then writes its own revision at the sequence and operation index the
+ * rolled-back one had, and had that entry survived, patch data of the same
+ * length would answer to the same key. Declining to record is what closes
+ * that, rather than clearing the map afterwards: it holds for every writer
+ * rather than for the one that remembered to.
+ *
+ * Nothing stops a read inside a transaction from being SERVED. An entry was
+ * recorded from durable state, and a transaction that has written its own
+ * revision resolves to that revision's own sequence — a different key.
+ *
+ * Eviction is wholesale rather than least-recently-used: the working set is
+ * small and the bound is generous, so a run that reaches it is one whose
+ * access pattern a cache of this size was not going to serve anyway, and
+ * clearing costs nothing to get right.
+ */
+const cacheDocumentForRevision = (
+  engine: Engine,
+  key: string,
+  document: EntityDocument | null,
+): void => {
+  if (engine.stagedDocumentCache !== undefined) {
+    engine.stagedDocumentCache.set(key, document);
+    return;
+  }
+  if (engine.database.inTransaction) {
+    return;
+  }
+  if (engine.documentCache.size >= DOCUMENT_CACHE_MAX_ENTRIES) {
+    engine.documentCache.clear();
+  }
+  engine.documentCache.set(key, document);
 };
 
 const decodeStoredDocument = (data: string | null): EntityDocument => {

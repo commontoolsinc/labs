@@ -115,6 +115,95 @@ interface Root<T> { field: Narrow<T>; }
     ).toEqual({ type: "boolean", const: false });
   });
 
+  it("maps a synthetic numeric literal type node to a number const schema", async () => {
+    // schema-generator.ts analyzeTypeNodeStructure: the node-based path reads
+    // a numeric literal type node's text and emits it as a number rather than
+    // as the string the node carries. Which literal kinds the pattern corpus
+    // happens to feed through a synthetic node decides whether this arm runs.
+    const { checker } = await getTypeFromCode("type Dummy = unknown;", "Dummy");
+    const generator = new SchemaGenerator();
+
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createLiteralTypeNode(
+          ts.factory.createNumericLiteral("42"),
+        ),
+        checker,
+      ),
+    ).toEqual({ type: "number", const: 42 });
+  });
+
+  it("maps a synthetic Date type reference to a date-time string schema", async () => {
+    // schema-generator.ts analyzeTypeNodeStructure: a type reference the
+    // surrounding scope cannot resolve falls back to a name check, and `Date`
+    // is the one name that check knows.
+    const { checker } = await getTypeFromCode("type Dummy = unknown;", "Dummy");
+    const generator = new SchemaGenerator();
+
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createTypeReferenceNode("Date"),
+        checker,
+      ),
+    ).toEqual({ type: "string", format: "date-time" });
+  });
+
+  it("accepts any value for a synthetic type reference written as a qualified name", async () => {
+    // schema-generator.ts resolveTypeReferenceFromScope: the scope lookup is
+    // by a single name, so a reference spelled `Namespace.Member` is left
+    // unresolved, and nothing further in the node path claims it.
+    const { checker } = await getTypeFromCode("type Dummy = unknown;", "Dummy");
+    const generator = new SchemaGenerator();
+
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createTypeReferenceNode(
+          ts.factory.createQualifiedName(
+            ts.factory.createIdentifier("Namespace"),
+            "Member",
+          ),
+        ),
+        checker,
+      ),
+    ).toBe(true);
+  });
+
+  it("collapses a synthetic union type node whose members all reject", async () => {
+    // schema-generator.ts analyzeTypeNodeStructure: a `never` member formats
+    // to `false`, which rejects every value and is a no-op inside `anyOf`. A
+    // union of nothing but those collapses to `false`, and a union left with
+    // one member after dropping them is that member alone. A union written
+    // with a single member is that member before any of this.
+    const { checker } = await getTypeFromCode("type Dummy = unknown;", "Dummy");
+    const generator = new SchemaGenerator();
+    const never = () =>
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createUnionTypeNode([
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ]),
+        checker,
+      ),
+    ).toEqual({ type: "number" });
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createUnionTypeNode([never(), never()]),
+        checker,
+      ),
+    ).toBe(false);
+    expect(
+      generator.generateSchemaFromSyntheticTypeNode(
+        ts.factory.createUnionTypeNode([
+          never(),
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        ]),
+        checker,
+      ),
+    ).toEqual({ type: "string" });
+  });
+
   it("resolves a non-keyword type node through the checker when node-based analysis is forced", async () => {
     // schema-generator.ts analyzeTypeNodeStructure: for a real TypeNode kind
     // that none of the earlier node branches or the keyword switch handles, the

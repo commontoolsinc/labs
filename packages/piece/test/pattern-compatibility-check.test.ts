@@ -6,7 +6,12 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -120,7 +125,7 @@ function narrowedOutputProgram(): RuntimeProgram {
 }
 
 /**
- * The CFC-labelled variants below exist because the three rules above all
+ * The CFC-labeled variants below exist because the three rules above all
  * reason about DECLARED types, and a fourth thing decides whether the setup
  * commit lands: the CFC schema envelope physically stored on the piece's
  * argument document. That envelope accumulates across every write the document
@@ -158,7 +163,7 @@ const EXTRA_ATOM = {
 } as const;
 
 /**
- * A CFC-labelled piece, in two revisions whose declared contracts are
+ * A CFC-labeled piece, in two revisions whose declared contracts are
  * IDENTICAL down to the label. Keeping them identical is what isolates the
  * envelope: any ifc difference between the two patterns is caught by the
  * contract proof instead (`argument.seed: ifc changed`), which would make a
@@ -224,16 +229,19 @@ describe("setsrc compatibility preflight", () => {
   let runtime: Runtime;
   let pieces: PiecesController;
 
+  let spaceName: string;
+
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });
+    spaceName = `pattern-compat-check-${crypto.randomUUID()}`;
     pieces = new PiecesController(
       await createSession({
         identity: signer,
-        spaceName: `pattern-compat-check-${crypto.randomUUID()}`,
+        spaceName,
       }),
       runtime,
     );
@@ -322,7 +330,7 @@ describe("setsrc compatibility preflight", () => {
   });
 
   /**
-   * A live CFC-labelled piece whose stored argument envelope has been widened
+   * A live CFC-labeled piece whose stored argument envelope has been widened
    * past what any revision of the pattern declares.
    *
    * This is not a contrived shape: an envelope is the union of every write's
@@ -382,10 +390,10 @@ describe("setsrc compatibility preflight", () => {
     expect(report.issues.schema ?? "").not.toContain("envelope");
   });
 
-  it("clears a CFC-labelled piece whose stored envelope still matches", async () => {
+  it("clears a CFC-labeled piece whose stored envelope still matches", async () => {
     // The control for the two cases below. Carrying a CFC envelope at all must
     // not make a piece un-swappable — otherwise the new rule reads as "any
-    // labelled piece is incompatible" and operators learn to ignore it.
+    // labeled piece is incompatible" and operators learn to ignore it.
     const piece = await pieces.create(labelledBase(), {
       input: { seed: "hello" },
     });
@@ -467,6 +475,11 @@ describe("setsrc compatibility preflight", () => {
     await runtime.idle();
 
     // Serve a different schema at the content address the metadata names.
+    // The commit boundary makes content-addressed documents immutable, so
+    // the mismatched envelope this case guards against can only arise as
+    // out-of-band store corruption — model exactly that, then read it
+    // through a fresh replica: the already-synced one cannot see a
+    // tampered store.
     const link = pieces.getArgument(piece.getCell())
       .getAsNormalizedFullLink();
     const metadata = readStoredCfcMetadata(runtime.readTx(), {
@@ -476,24 +489,49 @@ describe("setsrc compatibility preflight", () => {
     });
     expect(
       metadata?.schemaHash,
-      "the labelled fixture stored no CFC envelope, so there is nothing for " +
+      "the labeled fixture stored no CFC envelope, so there is nothing for " +
         "this case to poison",
     ).toBeDefined();
-    const { error } = await runtime.editWithRetry((tx) => {
-      tx.writeOrThrow({
-        space: link.space,
-        id: `cid:${metadata!.schemaHash}` as typeof link.id,
-        type: "application/json",
-        path: [],
-      }, { value: { type: "string" } });
-    });
-    expect(error?.message).toBeUndefined();
-    await runtime.idle();
+    const server = (storageManager as unknown as {
+      server(): MemoryV2Server.Server;
+    }).server();
+    const engine = await (server as unknown as {
+      openEngine(space: string): Promise<{
+        database: {
+          prepare(sql: string): { run(params: Record<string, unknown>): void };
+        };
+      }>;
+    }).openEngine(link.space);
+    const forged = encodeMemoryBoundary({ value: { type: "string" } });
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: forged, id: `cid:${metadata!.schemaHash}` });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${metadata!.schemaHash}` });
 
-    const report = await piece.checkPattern(labelledNext());
-    expect(report.compatible).toBe(false);
-    expect(report.message).toContain("could not be read");
-    expect(report.message).toContain("hash mismatch");
+    const freshStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const freshRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: freshStorage,
+    });
+    try {
+      const freshPieces = new PiecesController(
+        await createSession({ identity: signer, spaceName }),
+        freshRuntime,
+      );
+      await freshPieces.synced();
+      const reloaded = await freshPieces.get(piece.id, false);
+      const report = await reloaded.checkPattern(labelledNext());
+      expect(report.compatible).toBe(false);
+      expect(report.message).toContain("could not be read");
+      expect(report.message).toContain("hash mismatch");
+    } finally {
+      await freshRuntime.dispose();
+      await freshStorage.close();
+    }
   });
 
   it("still lets the dangerous override through", async () => {

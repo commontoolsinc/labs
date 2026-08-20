@@ -110,11 +110,11 @@ Deno.test("resolve: options already typed are captured for provider context", ()
 });
 
 Deno.test("resolve: bundled short flags do not shift the argument index", () => {
-  // `-qs team` is `-q` plus `-s team`. Mis-parsing it would make `path` look
-  // like the second positional and select the wrong provider.
+  // `-qs team` is `-q` plus `-s team`. Mis-parsing it would make the first
+  // positional look like the second and select the wrong provider.
   const line = resolve("cf piece get -qs team ");
   assert(line.slot?.kind === "argument");
-  assertEquals(line.slot.argument.name, "path");
+  assertEquals(line.slot.argument.name, "addressOrPath");
   assertEquals(line.slot.index, 0);
   assertEquals(line.options.get("space"), "team");
   assert(line.flags.has("quiet"));

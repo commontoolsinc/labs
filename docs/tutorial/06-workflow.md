@@ -105,6 +105,70 @@ infers the common directory that contains the main entry and every test entry.
 An explicit `--root` applies to all of them. A test-only change creates a new
 source revision, so history and recovery keep each test package separate.
 
+Files that hold data rather than code — a fixture, a table, a list of names —
+travel the same way, under a repeatable `--datafile` flag:
+
+```bash
+deno task cf piece setsrc pattern.tsx \
+  --test pattern.test.tsx \
+  --datafile data/cities.json \
+  --piece fid1:abc... -s myspace
+```
+
+A data file is stored verbatim beside the source. Deployment never parses,
+type-checks, or compiles it, and no pattern can import it. It must be UTF-8
+text, and it must sit inside the deployment root, which the CLI infers to cover
+the main entry, every test entry, and every data file. Like a test entry, a data
+file is part of the source revision's identity, so changing one creates a new
+revision, and each revision keeps its own bytes. Repeat the complete set of
+`--datafile` flags on every `setsrc`.
+
+The pattern reads one with `dataFile`, naming the path the file is stored
+under:
+
+```tsx
+// Shown for illustration only.
+import { dataFile, pattern } from "commonfabric";
+
+export default pattern(() => ({
+  cities: JSON.parse(dataFile("/data/cities.json")).cities,
+}));
+```
+
+The bytes travel with the pattern's code, so the read is immediate and returns
+the same text on every load of a given revision. Reading at module scope rather
+than inside a pattern produces a top-level value like any other, so it takes
+the usual `__cf_data` snapshot.
+
+`dataFile` returns text, so parsing it yields `any`. Name the shape you expect,
+or the result schema the transformer infers has nothing to go on:
+
+```tsx
+// Shown for illustration only.
+interface Cities {
+  cities: string[];
+}
+
+const parsed = JSON.parse(dataFile("/data/cities.json")) as Cities;
+```
+
+`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
+pattern that reads one can be checked and tested before it is deployed:
+
+```bash
+deno task cf check pattern.tsx --datafile data/cities.json
+deno task cf test pattern.test.tsx --datafile data/cities.json
+```
+
+Without the flag the pattern compiles and type-checks, then fails on the read —
+`dataFile` is declared whether or not a file is attached, so the absence shows
+up when the pattern runs rather than when it compiles.
+
+Data files also travel for whoever reads the source next — you on another
+machine, a teammate running `cf piece getsrc`, a tool reading the FUSE `.src/`
+view. They are fixed at deploy time: data that changes while the pattern runs
+belongs in its cells.
+
 ## Drive a deployed piece from the CLI
 
 Everything a pattern exports (Chapter 3) is drivable without a browser:
@@ -113,14 +177,33 @@ Everything a pattern exports (Chapter 3) is drivable without a browser:
 deno task cf piece ls -s myspace                       # list registered pieces
 deno task cf piece search -s myspace "invoice"         # search registered pieces
 deno task cf piece inspect --piece <ID>                # dump structure/state
-deno task cf piece get --piece <ID> items              # read one exported field
-deno task cf piece call addItem '{"title": "Test"}' --piece <ID>   # send to a stream
-echo '"hello"' | deno task cf piece set --piece <ID> title          # write a field
+deno task cf get --piece <ID> items                    # read one exported field
+deno task cf call --piece <ID> addItem '{"title": "Test"}'   # send to a stream
+echo '"hello"' | deno task cf set --piece <ID> title   # write a field
 deno task cf piece step --piece <ID>                   # force recompute
 deno task cf piece view --piece <ID>                   # render the UI in the terminal
 deno task cf piece link <srcID>/items <dstID>/items    # wire two pieces
 deno task cf piece set-slug myslug <ID>                # pretty URL
 ```
+
+`--piece` takes an id (`fid1:abc...`), a slug, or the canonical fabric
+reference other commands print (`/of:fid1:...`). The canonical form can carry
+its space — `/@did:key:.../of:fid1:...` — and a reference that does needs no
+`-s` beside it: the embedded space supplies the target, and a `-s` that
+disagrees with it is refused. So an address copied off one command's output
+drives the next command unchanged, even from a shell configured for a
+different space.
+
+On `get`, `set`, and `call`, the canonical reference can also sit in the
+first positional instead of the flag — `cf get /of:fid1:.../items`. On
+the commands that take `--input` (`get` and `set` here), a trailing
+`#argument` selects the piece's arguments cell the way that flag does;
+`call` takes no `--input` and refuses the suffix. The three are the piece
+data commands mounted at top level — reading and writing cells is not
+really a piece-management concern, and the spelling says so. `cf piece
+get`, `cf piece set`, and `cf piece call` are the same commands, deprecated
+as spellings: each still works and warns on stderr with the date it stops
+working.
 
 One subtlety: neither `piece set` nor `piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
@@ -136,13 +219,13 @@ streams, same cells. The browser shell is just one more client.
 ## Testing patterns
 
 Tests are patterns that test patterns: instantiate the subject, alternate
-`action` steps and `computed(() => boolean)` assertions, and return them
+`action` steps and `assert(() => boolean)` assertions, and return them
 under the reserved `[TESTS]` key. From
 `packages/patterns/counter/counter.test.tsx`:
 
 ```tsx
 // Shown at module scope.
-import { action, computed, pattern, TESTS } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -152,8 +235,8 @@ export default pattern(() => {
     counter.increment.send();
   });
 
-  const assert_initial_value_is_0 = computed(() => counter.value === 0);
-  const assert_value_is_1 = computed(() => counter.value === 1);
+  const assert_initial_value_is_0 = assert(() => counter.value === 0);
+  const assert_value_is_1 = assert(() => counter.value === 1);
 
   return {
     [TESTS]: [

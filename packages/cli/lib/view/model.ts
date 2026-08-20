@@ -10,7 +10,7 @@
 
 /**
  * Lexical/semantic classification of a contiguous run of source text. Drives
- * colour selection in {@link ../theme.ts}. Derived from the TypeScript token
+ * color selection in {@link ../theme.ts}. Derived from the TypeScript token
  * kind, refined by the identifier's syntactic role in the AST.
  */
 export type TokenClass =
@@ -21,7 +21,7 @@ export type TokenClass =
   | "storageKeyword" // const/let/var/function/type/interface/class
   | "operator"
   | "punctuation"
-  | "bracket" // (){}[] — coloured by nesting depth, see `bracketDepth`
+  | "bracket" // (){}[] — colored by nesting depth, see `bracketDepth`
   | "string"
   | "template"
   | "number"
@@ -51,13 +51,13 @@ export type TokenClass =
 /** Which representation of the underlying source the pager is displaying. */
 export type ViewMode = "source" | "rendered";
 
-/** A coloured run of text on a single logical (pre-wrap) source line. */
+/** A colored run of text on a single logical (pre-wrap) source line. */
 export interface Span {
   /** 0-based column where this span starts on its line. */
   readonly col: number;
   readonly text: string;
   readonly cls: TokenClass;
-  /** Nesting depth for `bracket` spans, used for rainbow colouring. */
+  /** Nesting depth for `bracket` spans, used for rainbow coloring. */
   readonly bracketDepth?: number;
   /** Symbol name to resolve only at this position, not by matching span text. */
   readonly exactDefinitionName?: string;
@@ -70,7 +70,7 @@ export interface Span {
   readonly strikethrough?: boolean;
 }
 
-/** One logical display line and its coloured spans. */
+/** One logical display line and its colored spans. */
 export interface Line {
   readonly text: string;
   readonly spans: readonly Span[];
@@ -103,7 +103,7 @@ export type StructureKind =
   | "comment" // a `//` or `/* */` comment
   | "hunk"; // a `@@ … @@` hunk in a diff view
 
-/** A field of a JSON schema, summarised for display. */
+/** A field of a JSON schema, summarized for display. */
 export interface SchemaField {
   readonly name: string;
   /** Compact type, e.g. `string`, `string[]`, `object`, `boolean`. */
@@ -113,7 +113,7 @@ export interface SchemaField {
   readonly fields?: readonly SchemaField[];
 }
 
-/** A JSON schema (an object-literal `… satisfies JSONSchema`), summarised. */
+/** A JSON schema (an object-literal `… satisfies JSONSchema`), summarized. */
 export interface SchemaMeta {
   readonly rootType: string;
   readonly required: readonly string[];
@@ -210,7 +210,7 @@ export interface StructureNode {
    * navigable node (e.g. an expression statement and the call it wraps). */
   readonly astKinds?: readonly string[];
   /** A human description of why this node is machine-generated, when a language
-   * can vouch that it is (e.g. the TypeScript view recognising a transformer's
+   * can vouch that it is (e.g. the TypeScript view recognizing a transformer's
    * synthetic helper). Absent means "not known to be generated"; the info card
    * shows an origin line only when it is present. */
   readonly generatedOrigin?: string;

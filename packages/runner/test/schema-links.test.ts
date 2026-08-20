@@ -1,21 +1,23 @@
 // Link resolution tests: array element links, cross-space array links,
 // and validateAndTransform with redirect links.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createCell, isCell } from "../src/cell.ts";
-import { type JSONSchema } from "../src/builder/types.ts";
-import { diffAndUpdate } from "../src/data-updating.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { Runtime } from "../src/runtime.ts";
-import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
-import { areLinksSame } from "../src/link-utils.ts";
+
 import { toCell } from "../src/back-to-cell.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
+import { createCell, isCell } from "../src/cell.ts";
+import { diffAndUpdate } from "../src/data-updating.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { areLinksSame, parseLink } from "../src/link-utils.ts";
 import { CellResult } from "../src/query-result-proxy.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1961,8 +1963,11 @@ describe("Schema - Link Resolution", () => {
       expect(resultInnerContentsCellLink.id).toBe(secondCellLink.id);
       expect(resultInnerContentsCellLink.path).toEqual([]);
 
-      // Test that unknown type from object turns into undefined
-      expect(resultInnerContents!.test).toBeUndefined();
+      // A `type: unknown` property is not descended into, so it projects to a
+      // reference: truthy and comparable, carrying none of the target's
+      // content. See `createOpaquePresence()` in schema.ts.
+      expect(resultInnerContents!.test).toBeTruthy();
+      expect(Object.keys(resultInnerContents!.test as object)).toEqual([]);
 
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns

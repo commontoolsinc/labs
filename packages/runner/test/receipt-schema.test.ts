@@ -1,3 +1,7 @@
+import { defer } from "@commonfabric/utils/defer";
+
+import { resolveLink } from "../src/link-resolution.ts";
+import { parseLink } from "../src/link-utils.ts";
 // The durable `schema` metadata a settled handler dispatch records on its
 // receipt cell alongside the value (`handleJavaScriptHandlerResult`,
 // `src/runner.ts`). It is descriptive — the root container kind, plus the
@@ -23,9 +27,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { defer } from "@commonfabric/utils/defer";
-import { parseLink } from "../src/link-utils.ts";
-import { resolveLink } from "../src/link-resolution.ts";
 
 // The session a caller-supplied id is chosen within, for the sends whose
 // subject is something else: the pair is what a stream send accepts, and one
@@ -69,8 +70,9 @@ describe("receipt schema", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     const verb = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => returns(),
-      { proxy: true },
     );
     const rootPattern = pattern(() => ({ verb: verb({}) }));
     const rootCell = runtime.getCell<{ verb: unknown }>(
@@ -301,8 +303,9 @@ describe("receipt schema", () => {
     // The second delivery returns a DIFFERENT shape, so a loser whose metadata
     // write landed would show up in the schema as well as in the value.
     const verb = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => (++invocations === 1 ? { first: true } : { second: true, n: 2 }),
-      { proxy: true },
     );
     const rootPattern = pattern(() => ({ verb: verb({}) }));
     const rootCell = runtime.getCell<{ verb: unknown }>(

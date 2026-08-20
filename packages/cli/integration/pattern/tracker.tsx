@@ -1,5 +1,5 @@
 /**
- * Fixture for the CLI verb-session demo (`docs/common/verb-session-walkthrough.md`).
+ * Fixture for the CLI verb-session demo (`docs/common/verbs/session-walkthrough.md`).
  *
  * It exists so the demo owns its subject: the shipped patterns are used
  * elsewhere, and a change to one of them should never break a demonstration of
@@ -15,6 +15,7 @@
  * `children`, which is what makes an unshaped read of `items` expand the whole
  * tree — the cost that shaped reads exist to bound.
  */
+
 import {
   action,
   type Default,
@@ -27,7 +28,7 @@ import {
 } from "commonfabric";
 
 /** One work item. Deliberately small: this fixture is about what a verb hands
- * back and how a caller addresses what it made, not about modelling work. */
+ * back and how a caller addresses what it made, not about modeling work. */
 export interface ItemOutput {
   /** File a new item beneath this one. */
   addChild: Stream<AddChildEvent, AddChildResult>;
@@ -43,6 +44,7 @@ export interface ItemOutput {
   archive: Stream<void>;
   [NAME]: string;
   title: string;
+  /** "open" until a verb changes it — "done" or "archived". */
   status: string;
   /** Append-only progress record. Each entry carries a time the caller did not
    * supply and could not have supplied — the pattern reads the clock. */
@@ -50,6 +52,7 @@ export interface ItemOutput {
   /** The item this one files under, or null at a root. Carried so a caller can
    * walk up as well as down, per the documented self-reference shape. */
   parent: ItemOutput | null;
+  /** The tree. */
   children: ItemOutput[];
   /** Items this one waits on. These are not descendants — a blocker can live
    * anywhere in the board, which is what turns the tree into a graph and makes
@@ -226,6 +229,10 @@ interface BoardInput {
   items?: Writable<ItemOutput[] | Default<[]>>;
 }
 
+/** A work-item tracker: root items on a board, everything deeper under an
+ * item's `children`. State changes only through verbs — a caller files,
+ * notes, finishes, archives, and relates items; nothing here is written
+ * directly. */
 interface BoardOutput {
   [NAME]: string;
   /** Root items only. The tree hangs off each one's `children`. */

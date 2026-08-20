@@ -1,11 +1,13 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { Identity } from "../src/identity.ts";
-import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
-import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
-import type { InsecureCryptoKeyPair } from "../src/interface.ts";
+
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
+
+import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
+import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
+import { Identity } from "../src/identity.ts";
+import type { InsecureCryptoKeyPair } from "../src/interface.ts";
 
 Deno.test("Identity generates mnemonics", async () => {
   const [identity, mnemonic] = await Identity.generateMnemonic();
@@ -159,7 +161,7 @@ Deno.test("two toRaw() callers cannot interfere with each other", async () => {
 Deno.test("toRaw throws cleanly for a non-noble implementation", async () => {
   // On Firefox ≥136 the DEFAULT (native/WebCrypto) implementation is used, and
   // it cannot export private material. The failure must be an honest error, not
-  // a PKCS8-flavoured red herring, and pairing callers pass NOBLE explicitly to
+  // a PKCS8-flavored red herring, and pairing callers pass NOBLE explicitly to
   // avoid it entirely.
   const identity = await Identity.generate(); // default implementation
   let message = "";

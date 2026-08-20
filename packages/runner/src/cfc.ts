@@ -1,16 +1,16 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
-import type { CfcConfClause } from "./cfc/clause.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type {
   AsCellEntry,
   CellKind,
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
   cfcSchemaChildRoot,
@@ -26,6 +26,11 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
@@ -37,15 +42,21 @@ export {
 type IFCAtom = JSONValue;
 
 // schemaAtPath derivations per deep-frozen schema identity. The derivation is
-// pure given (schema, path, boolean default flags) when no extra
-// confidentiality is passed — instance state never enters it (`lub` delegates
-// to a static and has no subclasses) — and it runs per array element / object
-// property on read and write-diff paths, so identical lookups repeat
-// constantly. Module-level rather than per-instance: several hot paths create
-// a fresh ContextualFlowControl per call (storage pull/watch, traversal
-// contexts), which would leave a per-instance cache permanently cold.
-// Mutable schemas are never cached (in-place edits must be observed).
-const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// pure given (schema, path, the two defaults) when no extra confidentiality is
+// passed — instance state never enters it (`lub` delegates to a static and has
+// no subclasses) — and it runs per array element / object property on read and
+// write-diff paths, so identical lookups repeat constantly. Module-level
+// rather than per-instance: several hot paths create a fresh
+// ContextualFlowControl per call (storage pull/watch, traversal contexts),
+// which would leave a per-instance cache permanently cold. Mutable schemas are
+// never cached (in-place edits must be observed), and neither is a mutable
+// default (see `defaultSchemaTag`).
+let schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// Path derivations can embed registry content; the registry clear (last
+// lease out) swaps the cache so an epoch's derivations do not outlive it.
+onSchemaRegistryClear(() => {
+  schemaAtPathCache = new WeakMap();
+});
 const SCHEMA_AT_PATH_CACHE_MAX_ENTRIES = 2_048;
 
 type SymbolicSchemaAtPathClassifier = (part: string) => string;
@@ -215,11 +226,41 @@ const symbolicSchemaAtPathPart = (
     : classifier(part);
 };
 
+/**
+ * A stable token for one of `schemaAtPath`'s two default schemas, or
+ * `undefined` where the default cannot take part in a cache key.
+ *
+ * The defaults are usually the booleans `true` and `false`, which name
+ * themselves. A caller can also pass a schema object instead — that is how a
+ * reader asks to be TOLD that a property was not selected rather than handed
+ * something indistinguishable from a selected one, which is what
+ * `schema-view.ts` does for every property and every element it reads. Such a
+ * default is a module-level frozen constant, so its identity is stable for the
+ * life of the process and a tag minted once names it ever after.
+ *
+ * Deep-frozen is the condition, not a convenience: a mutable object could be
+ * changed after a result was cached under it, and the entry would then answer
+ * for a default it no longer describes.
+ */
+const defaultSchemaTags = new WeakMap<object, string>();
+let nextDefaultSchemaTag = 0;
+
+const defaultSchemaTag = (schema: JSONSchema): string | undefined => {
+  if (typeof schema === "boolean") return String(schema);
+  if (!isObjectOrArray(schema) || !isDeepFrozen(schema)) return undefined;
+  let tag = defaultSchemaTags.get(schema);
+  if (tag === undefined) {
+    tag = `#${++nextDefaultSchemaTag}`;
+    defaultSchemaTags.set(schema, tag);
+  }
+  return tag;
+};
+
 const schemaAtPathKey = (
   schema: JSONSchemaObj,
   path: readonly string[],
-  defaultEmptyProperties: boolean,
-  defaultMissingProperty: boolean,
+  defaultEmptyProperties: string,
+  defaultMissingProperty: string,
 ): string => {
   let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
   if (path.length === 1) {
@@ -515,9 +556,17 @@ export class ContextualFlowControl {
     const defs = isObjectOrArray(schema) && schema.$defs
       ? schema.$defs
       : undefined;
+    // Both defaults take part in the cache key, whether each is a boolean or
+    // a frozen sentinel schema. Refusing to cache the sentinel case turned the
+    // cache off for the whole of `schema-view.ts`, which passes sentinels on
+    // every property and every element it reads — so a view re-derived each
+    // child's schema from scratch, and handed the caller a fresh object that
+    // then cost a content hash to intern. That is the hot path, not a corner
+    // of one: reading a list of N references narrows N times per pass.
+    const emptyTag = defaultSchemaTag(defaultEmptyProperties);
+    const missingTag = defaultSchemaTag(defaultMissingProperty);
     const cacheable = extraConfidentiality === undefined &&
-      typeof defaultEmptyProperties === "boolean" &&
-      typeof defaultMissingProperty === "boolean" &&
+      emptyTag !== undefined && missingTag !== undefined &&
       isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
       return ContextualFlowControl.schemaAtPathInternal(
@@ -534,17 +583,13 @@ export class ContextualFlowControl {
       byKey = new Map();
       schemaAtPathCache.set(schema, byKey);
     }
-    const key = schemaAtPathKey(
-      schema,
-      path,
-      defaultEmptyProperties,
-      defaultMissingProperty,
-    );
+    const key = schemaAtPathKey(schema, path, emptyTag, missingTag);
     let result = byKey.get(key);
     if (result === undefined) {
       // Intern the derivation so the cached result is the canonical frozen
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      const missesBefore = externalResolutionMissCount();
       result = internSchema(ContextualFlowControl.schemaAtPathInternal(
         schema,
         path,
@@ -553,8 +598,15 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
-      if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
-      byKey.set(key, result);
+      // Populate-only guard: a derivation during which a `cid:` resolution
+      // missed must not be memoized — the document can arrive later. The
+      // miss counter is exact and walk-free; a schema-content check here
+      // paid a full walk, dormant `$defs` bodies included, on the first
+      // lookup for every schema identity.
+      if (externalResolutionMissCount() === missesBefore) {
+        if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
+        byKey.set(key, result);
+      }
     }
     return result;
   }

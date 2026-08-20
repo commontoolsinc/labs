@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-07-30
+Last verified: 2026-08-18
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -14,11 +14,14 @@ The runtime has four main boundaries:
 1. The caller supplies prompt-slot roles, model and gateway configuration,
    tools, child profiles, mounts, resource bounds, skills, policy mode, and
    optional structured-result schemas.
-2. The prompt loop performs bounded OpenAI-compatible model turns and invokes
-   only the configured tool/profile surface.
-3. Tool execution uses Docker with a configurable runtime, normally `runsc-cfc`.
-   The browser child is the exceptional host-adjacent profile and is constrained
-   to a leased local CDP endpoint and a narrow command policy.
+2. The prompt loop performs bounded turns through the selected model provider
+   and invokes only the configured tool/profile surface.
+3. Most tool execution uses Docker with a configurable runtime, normally
+   `runsc-cfc`. The browser child is a constrained host-adjacent profile bound
+   to a leased local CDP endpoint and narrow command policy. The optional
+   `run_pattern` tool is a distinct trusted-host path whose Fabric identity
+   stays outside Docker and whose authority is constrained to one configured
+   space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
    optional product run manifests.
@@ -39,14 +42,25 @@ The current package provides:
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
-- one child at a time through `default`, `browser`, `web_fetch`, and
-  `web_search` profiles;
+- one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
+  and `pattern-author` profiles;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
 - explicit skill preload, indexed supporting-resource reads, and exact
   allowlisted Deno/Bash skill scripts;
+- recoverable rejection of a malformed tool call: a name no tool answers to,
+  arguments that are not a JSON object, or a `delegate_task` argument of the
+  wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
+  the field and the shape expected of it — never the value it rejected — and the
+  run carries on; the call is recorded as a denied policy decision, a `not-run`
+  tool activity, and an `invalid_tool_call` failure record. Only what the model
+  cannot correct — transport, engine invariants, artifact persistence,
+  cancellation, the turn cap — ends the run;
 - transcript-based resume and durable run artifacts;
+- server-side Responses context compaction with a default threshold derived from
+  the model's input budget, an explicit override/disable control, retained
+  compaction evidence, and tool-call/result-safe transcript pruning;
 - per-turn and aggregate token/cache usage in run reports, operator output,
   batch metadata, and interactive turn-completion events;
 - stable interactive prompt-cache affinity, configurable reasoning effort, and
@@ -62,21 +76,102 @@ The current package provides:
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
   and resolves tokens in model-authored tool arguments before policy evaluation
   and dispatch, `delegate_task` arguments excepted;
-- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
-  `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
-  environment fallbacks): compiles and runs an inline `sourceText` pattern
-  (capped at 256 KiB) against a deployed Fabric space from the trusted host side
-  over a lazy per-run session that caches only a healthy, authorized
-  construction; passes whole-string LLM-friendly link inputs as live cells,
-  refusing links into another space and live-cell values that mismatch the
-  compiled argument schema before any piece exists; honors the run's abort
-  signal by stopping the created piece and returning a structured `cancelled`
-  error; scrubs bare fabric identifiers from model-facing diagnostics; returns
-  the result cell's canonical reference plus an optionally schema-sanitized
-  value, and leaves the piece detached (no recorded origin) and out of the
-  space's registered piece list, with run→piece provenance carried by the run's
-  persisted artifacts; without the session configuration the tool is absent from
-  the tool surface.
+- cross-agent handles: a delegation seeds the child's own table with a verbatim
+  copy of every parent entry whose token the `goal` or `context` names, and
+  nothing else, so a child resolves exactly the references the delegation handed
+  it while the tokens stay identical across the hierarchy; a reference the child
+  produces is resolved through the child's table and minted through the parent's
+  boundary, reaching the parent as a parent-resolvable token, and any
+  token-shaped text still standing after that resolution is scrubbed to fixed
+  inert text so it cannot resolve later in the parent's own table;
+- shape captured where it is free and read back by token: a handle entry may
+  carry the schema of its referent — a `run_pattern` result reference records
+  the compiled pattern's result schema, marked `schemaSource: "harness"` — while
+  no mint takes a schema off the reference it is handed or reads a cell to fill
+  one in, so an entry without one is one whose shape was never free to capture
+  and is answered from the fabric instead;
+- a `describe_handle` tool, available in any run that has handles: given a token
+  it reports the shape of the referent and its path segments, never the value,
+  and reports an unknown token as unknown rather than as an error. The shape is
+  what the referent declares in the session's fabric when the run has one — a
+  piece's document schema is the result schema of the pattern behind it, which
+  is what an agent building over that piece needs — and otherwise the
+  harness-derived schema the mint recorded. Whatever the source, the reported
+  schema is rebuilt from an allowlist of structural keywords at every depth, so
+  `const`, `enum`, `default`, `examples`, and free-text annotations never leave
+  the tool. Property names do cross, since code cannot be written over data
+  without them, so they are bounded in count and length and the model-facing
+  reply is scrubbed of bare fabric identifiers at every depth, keys included.
+  Disclosure is permissive and fixed rather than configurable — no setting
+  narrows it — and is bounded to addresses in the session's own space; that
+  bound is on the handle's own address rather than on everything the document
+  reaches from it. Answering from the fabric establishes the run's fabric
+  session despite the tool's `read` effect class;
+- bounded request-attribution headers on OpenAI-compatible gateway traffic,
+  using persisted operational provenance rather than request content or personal
+  identifiers;
+- content-addressed snapshots for in-run `view_image` observations, while
+  run-start images remain source-integrity-locked;
+- opt-in fabric-session tools — `run_pattern` and `assign_slug`
+  (`--fabric-api-url`, `--fabric-identity`, and `--fabric-space` configured
+  together, or their `CF_HARNESS_FABRIC_*` environment fallbacks).
+  `run_pattern`: compiles and runs an inline `sourceText` pattern (capped at 256
+  KiB) against a deployed Fabric space from the trusted host side over a lazy
+  per-run session that caches only a healthy, authorized construction; passes
+  whole-string LLM-friendly link inputs as live cells, refusing links into
+  another space, inputs the compiled pattern declares no argument for, input
+  values that carry a sealed opaque link anywhere within them, and values that
+  mismatch the compiled argument schema whether a live cell or plain JSON
+  supplies them, all before any piece exists; honors the run's abort signal by
+  stopping the created piece and returning a structured `cancelled` error;
+  scrubs bare fabric identifiers from model-facing diagnostics; reports a result
+  that settles to empty or schema-failing as an error when the invocation's
+  settle window observed a cause — an action error attributed to the piece, or a
+  convergence-budget episode whose deferred actions name this pattern — and
+  otherwise still reports ok, since an empty result with no observed cause is
+  not evidence of failure; returns the result cell's canonical reference plus an
+  optionally schema-sanitized value, and leaves the piece detached (no recorded
+  origin) and out of the space's registered piece list, with run→piece
+  provenance carried by the run's persisted artifacts. `assign_slug` names a
+  piece afterwards, from any handle token referring to one: it validates the
+  slug, fails closed on an availability question the space cannot answer,
+  refuses a slug already naming another piece (one already naming the same piece
+  answers ok), refuses a token that names a position inside a piece, another
+  space, or a document with no pattern identity, and otherwise registers the
+  piece in the space's piece list and points the slug at it, returning the slug
+  and, when composable without a bare fabric identifier, an openable URL.
+  Without the session configuration both tools are absent from the tool surface,
+  for a `default`- or `pattern-author`-profile subagent as much as for the
+  parent — a child shares the one session the parent built;
+  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
+  set the session runtime's CFC dials, so with labels persisted a
+  confidentiality-tainted pattern write is refused at commit under strict —
+  these are the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
+  source) is recorded as `fabricSessionCfc` in run state and printed in the
+  operator summary;
+- a `pattern-author` child profile that authors and runs Common Fabric pattern
+  source: `run_pattern` under the same fabric-session gate, plus `read_file`,
+  `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
+  is a result reference rather than a file. It preloads whichever of
+  `pattern-dev` and `pattern-schema` the run's skill registry carries — a run
+  without them still gets the same child, without the guidance — and it is told
+  that the references its delegation hands it are addresses to wire in as
+  pattern inputs, that it owns the write/compile-error/fix loop, and that it
+  returns the result reference plus an inert description rather than data. This
+  is the division of labour a data question wants: the root orchestrates and
+  never pays for pattern syntax or reads the data, and the child computes over
+  references it cannot read out. It runs on its own turn budget of 24 rather
+  than the default subagent cap of 8, since each compile-error iteration costs a
+  turn, and it carries a return contract — a discriminated union of
+  `{ ok: true, resultRef, describes }` and `{ ok: false, code, detail? }` —
+  applied to any `pattern-author` delegation that declares no `returnSchema` of
+  its own, so a failure and a success are different shapes and only the success
+  branch carries a reference. The failure `code` comes from a fixed inert
+  vocabulary, so a parent learns why without declassifying anything, and any
+  child return saying `ok: false` reaches the parent as a coded failure rather
+  than as a schema complaint.
 
 Run the capability probe instead of copying this list into adapters:
 
@@ -93,6 +188,14 @@ creates a narrow temporary workspace, supplies explicit mounts and skills,
 requests structured capture results, and retains reviewable run artifacts.
 Autonomous wish dispatch currently routes through `cf-harness` when Loom's Page
 authority prerequisites are considered available.
+
+Local batch and interactive entrypoints use a dedicated single-user host
+binding. It resolves the persisted provider from a canonical `CF_HARNESS_HOME`,
+binds Codex credentials to the fixed local owner, records the provider, model,
+authentication source, owner, and home identity, and requires that exact
+snapshot on resume before any provider traffic. Hosted multi-user integrations
+must supply an owner-bound credential resolver rather than reuse this local
+host.
 
 Loom also has an opt-in adapter for the interactive NDJSON protocol. It is not
 the default interactive harness, and browser automation is not yet wired into
@@ -121,12 +224,13 @@ mode.
 - Package-default sandbox networking is a provisional bridge-oriented posture,
   not the final destination policy model. Product adapters may narrow it.
 - Delegation is serial: only one child runs at a time.
-- Every `run_pattern` invocation persists an unlisted piece in the configured
-  space. An aborted run stops its piece, but no piece is ever deleted, and each
-  piece's source-history revision is a storage-retention root the piece list
-  does not reveal. Tooling that enumerates a space's contents from the piece
-  list must not assume the list is exhaustive; there is no garbage collection
-  for these pieces yet.
+- Every `run_pattern` invocation persists a piece in the configured space, and
+  never registers it: the piece joins the space's registered piece list only
+  when `assign_slug` names it. An aborted run stops its piece, but no piece is
+  ever deleted, and each piece's source-history revision is a storage-retention
+  root the piece list does not reveal. Tooling that enumerates a space's
+  contents from the piece list must not assume the list is exhaustive; there is
+  no garbage collection for these pieces yet.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
@@ -134,7 +238,8 @@ mode.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, and the prompt loop swaps model-bound tool output and
   model-authored tool arguments through the address handle table; denial-path
-  tool messages are not swapped.
+  tool messages are not swapped, and interactive restore does not persist the
+  handle table.
 - The session-local handle table covers cell addresses only. Value handles
   (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
   no explicit dereference/release mechanism.

@@ -1,4 +1,3 @@
-import type { Immutable } from "@commonfabric/utils/types";
 import type {
   CellScope,
   FabricValue,
@@ -37,7 +36,24 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
+import type {
+  CommitPrecondition,
+  EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
+  SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+} from "@commonfabric/memory/v2";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
+import type { Immutable } from "@commonfabric/utils/types";
+
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
@@ -60,7 +76,9 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
@@ -208,6 +226,20 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * W advance — see `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2
    * revisit (a)). */
   inputSynced?(): Promise<void>;
+
+  /**
+   * Issue an ordered-after round trip on every open space connection, so that
+   * any subscription fan-out the server has already sent has been received and
+   * applied before this resolves. Unlike `synced()`, which waits only on this
+   * replica's own pending syncs and commits, this waits on the delivery of a
+   * peer's committed writes that the server has begun fanning out. A WebSocket
+   * delivers a connection's frames in order, so a fresh round trip on that
+   * connection cannot resolve ahead of fan-out the server sent earlier on it.
+   * Multi-runtime test harnesses use it to make one runtime observe another's
+   * committed state deterministically; a manager with no open remote
+   * connection resolves immediately.
+   */
+  pullOpenSpacesToHead(): Promise<void>;
 
   /**
    * A throwable `AuthorizationError` when `space` is under a permanent
@@ -986,6 +1018,36 @@ export interface IStorageTransaction {
   recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 
   /**
+   * Optional: whether this transaction has replaced any document root.
+   *
+   * Read by materialization as a fast path — before the first write every read
+   * epoch describes the same state, so a reader can skip epoch handling
+   * outright rather than resolve one per path it touches.
+   */
+  hasWrites?(): boolean;
+
+  /**
+   * Optional: the epoch a materialized read taken now should describe.
+   *
+   * Asking for one is also what tells later writes that the root they displace
+   * is still being described, so a transaction nobody reads this way costs its
+   * write path nothing.
+   */
+  issueReadEpoch?(): number | undefined;
+
+  /**
+   * Optional: resolve reads against `epoch` until the matching
+   * {@link IStorageTransaction.exitReadEpoch}, returning the epoch that was in
+   * force.
+   *
+   * Paired rather than callback-wrapped so a reader walking a large value
+   * allocates no closure per property it touches.
+   */
+  enterReadEpoch?(epoch: number | undefined): number | undefined;
+
+  exitReadEpoch?(previous: number | undefined): void;
+
+  /**
    * Optional raw read observations recorded by this transaction.
    *
    * V2 transactions can provide these directly instead of requiring callers to
@@ -1401,28 +1463,43 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * A marked transaction hands a reader views that resolve each path as it is
    * touched, rather than a value built in one pass before the reader looks at
-   * any of it. A view also keeps the transaction it was created with, so the
-   * value it describes stays the value that was there when it was taken, and
-   * reading after the transaction finishes throws rather than quietly
-   * answering from committed state.
+   * any of it. A view keeps the transaction it was created with and describes
+   * the instant it was taken at — containers and values alike — so a reader
+   * that writes and reads back through a value it already holds still sees what
+   * was there. Taking the read again fixes a later instant, which is how a
+   * reader sees its own writes. Reading after the transaction finishes throws
+   * rather than quietly reading from committed state.
    *
-   * Unmarked, every read behaves exactly as it did before lazy materialization
-   * existed — including the standing-handle semantics that long-lived
-   * consumers rely on, where a query-result proxy keeps tracking current state
+   * Unmarked, a read is built in one pass and the query-result proxy is a
+   * standing handle that long-lived consumers rely on, tracking current state
    * after the transaction it was made against has finished.
    */
   markLazyMaterialize(enabled?: boolean): void;
   isLazyMaterialize(): boolean;
 
   /**
-   * Whether this transaction has written anything yet.
+   * Whether this transaction has replaced any document root.
    *
-   * Lazy materialization reads it to decide whether a view can still describe
-   * one instant: a view resolves each path when it is touched, so once the
-   * transaction has written, a view taken earlier would report the new value
-   * where an eager read hands back a detached one taken before the write.
+   * A materialized read consults it to decide whether epoch resolution can be
+   * skipped: before the first write every document still stands at its
+   * `initial` attestation, so every epoch describes the same state and a read
+   * taken at any of them reads alike.
    */
   hasWrites(): boolean;
+
+  /**
+   * The epoch a materialized read taken now should describe, or undefined
+   * where this transaction cannot answer for an earlier one.
+   */
+  issueReadEpoch(): number | undefined;
+
+  /**
+   * Resolve reads against `epoch` until the matching {@link exitReadEpoch},
+   * returning the epoch that was in force.
+   */
+  enterReadEpoch(epoch: number | undefined): number | undefined;
+
+  exitReadEpoch(previous: number | undefined): void;
 
   /**
    * Record that a reader touched data its schema does not describe.
@@ -1803,6 +1880,38 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     sets: number;
     entries: number;
   };
+
+  /**
+   * Answers this transaction's snapshot has already computed, or `undefined`
+   * while it must not serve any.
+   *
+   * A transaction is a consistent snapshot, so a derivation that reads only
+   * through it gives the same answer every time until something is written.
+   * Link resolution and CFC label-view derivation both do exactly that, and
+   * both are driven per element of a collection, so a scan recomputes them
+   * once per element per pass. Each user owns its own key prefix and entry
+   * shape; the transaction owns when the map may be used and when it is
+   * dropped. It is replaced wholesale on any write — same rule as the
+   * `Cell.get()` cache above — so an entry is only ever served when nothing
+   * has been written since it was made.
+   *
+   * A user must be a derivation whose only observable effect is its result, or
+   * must reproduce the rest itself: the reads a memoized derivation skips were
+   * journaled by the one that filled the entry, so the transaction's read set
+   * is unchanged, but anything consumed positionally (CFC dereference traces)
+   * still has to be recorded on every call.
+   *
+   * `undefined` is returned where a derivation is not a pure function of the
+   * snapshot: once CFC is prepared, where the read path's read-after-prepare
+   * invalidation is load-bearing, and inside a `runWithAmbientReadMeta()`
+   * scope, where the reads carry metadata that a call outside the scope would
+   * not.
+   *
+   * Optional: transactions that must not memoize (the non-reactive `sample()`
+   * wrapper, whose reads are excluded from scheduling) leave it undefined, and
+   * their callers derive for real.
+   */
+  getSnapshotMemo?(): Map<string, unknown> | undefined;
 }
 
 /**

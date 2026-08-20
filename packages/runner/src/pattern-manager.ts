@@ -1,7 +1,7 @@
-import { getLogger } from "@commonfabric/utils/logger";
 import type { Source } from "@commonfabric/js-compiler";
-import { compilerStack } from "./harness/deferred-compiler-stack.ts";
-import { Module, Pattern } from "./builder/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   brandTrustedPattern,
   getArtifactEntryRef,
@@ -13,25 +13,10 @@ import {
   setPatternProgram,
   setPatternSourcePath,
 } from "./builder/pattern-metadata.ts";
-import type { MemorySpace, Runtime } from "./runtime.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { createRef } from "./create-ref.ts";
-import type {
-  CacheableModule,
-  CompiledModuleArtifact,
-  EvaluateResult,
-  Exports,
-  TypeScriptHarnessProcessOptions,
-} from "./harness/types.ts";
-import { RuntimeProgram } from "./harness/types.ts";
-import {
-  type CachedCompiledModule,
-  SOURCE_ROOT_SPECIFIER,
-} from "./sandbox/module-record-compiler.ts";
-import type {
-  CommitError,
-  IExtendedStorageTransaction,
-} from "./storage/interface.ts";
+import { Module, Pattern } from "./builder/types.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
+import type { CfcMetadata } from "./cfc/types.ts";
+import { ColdLoadNegativeMemo } from "./cold-load-negative-memo.ts";
 import {
   buildSourceDocs,
   COMPILED_INTEGRITY_ATOM,
@@ -50,16 +35,38 @@ import {
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
-import { readStoredCfcMetadata } from "./cfc/metadata.ts";
-import type { CfcMetadata } from "./cfc/types.ts";
+import { createRef } from "./create-ref.ts";
+import { interleaveCompileYield } from "./harness/compile-interleave.ts";
+import {
+  deterministicCompileError,
+  isDeterministicCompileFailure,
+} from "./harness/compile-failure.ts";
+import { compilerStack } from "./harness/deferred-compiler-stack.ts";
+import type {
+  CacheableModule,
+  CompiledModuleArtifact,
+  EvaluateResult,
+  Exports,
+  TypeScriptHarnessProcessOptions,
+} from "./harness/types.ts";
+import { RuntimeProgram } from "./harness/types.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import type { MemorySpace, Runtime } from "./runtime.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
+import {
+  type CachedCompiledModule,
+  DATA_FILE_SPECIFIER,
+  SOURCE_ROOT_SPECIFIER,
+} from "./sandbox/module-record-compiler.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
 
@@ -69,6 +76,58 @@ const logger = getLogger("pattern-manager");
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
+
+/**
+ * The compiler's hoist namespace. `builder-call-hoisting` mints
+ * `__cfPattern_<n>` (n counting from 1) for the anonymous sub-patterns it
+ * derives, and registers them through `__cfReg` — never as exports.
+ * Registration refuses an AUTHORED builder-artifact export under these names,
+ * which is what lets everything downstream that must tell a derived hoist
+ * from an authored artifact — the pattern-update gates among them — read
+ * provenance from the spelling alone: a `__cfPattern_<n>` in the artifact
+ * index can only be the transformer's.
+ *
+ * What is PROHIBITED here is deliberately wider than what the compiler
+ * MINTS, and wider than what a consumer recognizes as a hoist (the gate's
+ * `isDerivedHoistSymbol` matches `_1` upward, since that is what actually
+ * gets emitted). `_0` and `_01` are minted by nothing, so reserving them
+ * costs authors nothing real — and leaving them authorable would leave the
+ * confusable spellings, the ones a reader cannot tell from a hoist at a
+ * glance, as the only ones anybody could take. A prohibition may safely
+ * exceed the convention it protects; a recognizer may not.
+ */
+const RESERVED_HOIST_EXPORT = /^__cfPattern_\d+$/;
+
+/**
+ * Throw if any module in an evaluated bundle exports a builder artifact in
+ * the reserved hoist namespace.
+ *
+ * A whole-bundle pre-pass rather than a check inside the registration loop,
+ * so a refused bundle registers nothing at all: a module rejected after its
+ * neighbors were indexed would leave the session holding half a bundle.
+ * Only artifacts are checked — `indexArtifact` admits nothing else, so a
+ * plain value under such a name can never be resolved as a hoist.
+ */
+function assertNoReservedHoistExports(
+  exportsByIdentity: ReadonlyMap<string, Record<string, unknown>>,
+): void {
+  for (const [identity, exports] of exportsByIdentity) {
+    for (const exportName of Object.keys(exports)) {
+      if (
+        RESERVED_HOIST_EXPORT.test(exportName) &&
+        isTrustedBuilderArtifact(exports[exportName])
+      ) {
+        throw new Error(
+          `module ${identity} exports the builder artifact ` +
+            `"${exportName}": the __cfPattern_<n> names are the compiler's ` +
+            `own hoist namespace, and an authored artifact under one reads ` +
+            `as a derived hoist wherever provenance matters — export it ` +
+            `under another name`,
+        );
+      }
+    }
+  }
+}
 
 /** Whether copying source bytes would discard a meaningful stored CFC label. */
 export function sourceCfcMetadataProhibitsCrossSpaceCopy(
@@ -230,6 +289,23 @@ function uniqueCacheableImports(
   return out;
 }
 
+/**
+ * The authored filenames an entry document's source-package edges point at, for
+ * one edge kind — {@link SOURCE_ROOT_SPECIFIER} for attached source entry
+ * points, {@link DATA_FILE_SPECIFIER} for attached data files. An edge whose
+ * target is not in the closure contributes nothing.
+ */
+function sourcePackagePaths(
+  entry: { imports: readonly { specifier: string; identity: string }[] },
+  docsByIdentity: ReadonlyMap<string, { filename: string }>,
+  specifierPrefix: string,
+): string[] {
+  return entry.imports
+    .filter((edge) => edge.specifier.startsWith(specifierPrefix))
+    .map((edge) => docsByIdentity.get(edge.identity)?.filename)
+    .filter((filename): filename is string => filename !== undefined);
+}
+
 export class PatternManager {
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
@@ -250,6 +326,12 @@ export class PatternManager {
     string,
     Promise<Pattern | undefined>
   >();
+  // Session-local negative memo for compile failures that are deterministic
+  // over a fully loaded, Merkle-verified source closure. Verification failure,
+  // absent/incomplete storage, resolution, and evaluation remain retryable.
+  // Keyed by `${space}\0${entryIdentity}` and runtimeVersion so a version bump
+  // re-opens the attempt. Bounded FIFO to cap memory.
+  #coldLoadNegativeMemo = new ColdLoadNegativeMemo();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -665,6 +747,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     return this.patternFromEvaluation(result, program);
   }
@@ -738,6 +821,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     this.registerEvaluatedModules(result);
     return result;
@@ -805,6 +889,7 @@ export class PatternManager {
         graph,
         mainSpecifier,
         program.files,
+        program.dataFiles,
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     }
@@ -975,6 +1060,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     logger.time(evalStart, "compile-cache", "evaluate");
 
@@ -1065,6 +1151,9 @@ export class PatternManager {
         identity,
         filename: doc.filename,
         code: doc.code,
+        // A data entry rides the closure to reach the compartment; the record
+        // builder takes it out before anything reads `code` as a body.
+        ...(doc.kind === "data" ? { isData: true } : {}),
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
           : {}),
@@ -1087,7 +1176,8 @@ export class PatternManager {
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
-            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER) &&
+            !i.specifier.startsWith(DATA_FILE_SPECIFIER)
           )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
@@ -1102,6 +1192,9 @@ export class PatternManager {
         // security boundary — skip redundant SES body re-verification.
         {
           sourceFiles: program.files,
+          ...(program.dataFiles === undefined
+            ? {}
+            : { dataFiles: program.dataFiles }),
           trustedBodies: true,
           ...(patternCoverage ? { patternCoverage } : {}),
         },
@@ -1165,8 +1258,21 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Check before single-flight: follower retries re-enter from the top and
+    // should observe a deterministic failure recorded by the leader. Sitting
+    // ahead of the compiled-closure read is sound because the runtime version
+    // fingerprints all compile-shaping code (`compiler-fingerprint.deno.ts`),
+    // so no same-version peer can publish a compiled closure for bytes this
+    // session cannot compile itself.
     const key = `${space}\0${entryIdentity}`;
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: this.patternCoverageFor() !== undefined },
+    );
+    if (this.#coldLoadNegativeMemo.suppresses(key, runtimeVersion)) {
+      return undefined;
+    }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.loadPatternByIdentityFromStorage(
@@ -1251,6 +1357,9 @@ export class PatternManager {
         identity,
         filename: doc.filename,
         code: doc.code,
+        // A data entry rides the closure to reach the compartment; the record
+        // builder takes it out before anything reads `code` as a body.
+        ...(doc.kind === "data" ? { isData: true } : {}),
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
           : {}),
@@ -1271,7 +1380,8 @@ export class PatternManager {
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
-            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER) &&
+            !i.specifier.startsWith(DATA_FILE_SPECIFIER)
           )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
@@ -1311,6 +1421,26 @@ export class PatternManager {
     }
   }
 
+  /** Record one deterministic compile failure for this session/version. */
+  private memoizeColdLoadFailure(
+    space: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+    reason: string,
+  ): void {
+    this.#coldLoadNegativeMemo.add(
+      `${space}\0${entryIdentity}`,
+      runtimeVersion,
+    );
+    logger.error("load-pattern-by-identity-negative-memo", () => [
+      `entry=${entryIdentity}`,
+      `space=${space}`,
+      `runtimeVersion=${runtimeVersion}`,
+      `reason=${reason}`,
+      "further loads are suppressed for this runtime session/version",
+    ]);
+  }
+
   /**
    * Runtime-version-bump recovery for a content-addressed pattern reference:
    * recompile from the verified source closure, letting fabric imports refetch
@@ -1339,10 +1469,16 @@ export class PatternManager {
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
-    const sourceRoots = entry.imports
-      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
-      .map((edge) => sourceDocs.get(edge.identity)?.filename)
-      .filter((filename): filename is string => filename !== undefined);
+    const sourceRoots = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      SOURCE_ROOT_SPECIFIER,
+    );
+    const dataFiles = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      DATA_FILE_SPECIFIER,
+    );
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -1358,10 +1494,11 @@ export class PatternManager {
           fabricImports: { space },
           ...(patternCoverage ? { patternCoverage } : {}),
           ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
+          ...(dataFiles.length === 0 ? {} : { dataFiles }),
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw new Error(
+        throw deterministicCompileError(
           `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
         );
       }
@@ -1370,6 +1507,7 @@ export class PatternManager {
           identity: module.identity,
           filename: module.filename,
           code: module.js,
+          ...(module.isData ? { isData: true } : {}),
           ...(module.sourceMap !== undefined
             ? { sourceMap: module.sourceMap as never }
             : {}),
@@ -1385,6 +1523,7 @@ export class PatternManager {
         entryIdentity,
         {
           sourceFiles,
+          ...(dataFiles.length === 0 ? {} : { dataFiles }),
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
@@ -1417,6 +1556,23 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
+      // Only engine/local failures explicitly classified after source-closure
+      // verification are memoized. Resolution and evaluation errors carry no
+      // marker and are retried on the next call.
+      // Coverage compilation calls into the runtime-supplied collector while
+      // the compiler is running. A collector failure is not a pure function of
+      // source bytes, so coverage-enabled attempts deliberately fail open.
+      if (
+        patternCoverage === undefined &&
+        isDeterministicCompileFailure(error)
+      ) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          String(error),
+        );
+      }
       return undefined;
     }
   }
@@ -1485,6 +1641,7 @@ export class PatternManager {
   registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
+      assertNoReservedHoistExports(byId);
       for (const [identity, exports] of byId) {
         // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
         // by-identity reload (a separate concern from artifact addressing).
@@ -2131,8 +2288,9 @@ export class PatternManager {
    * cell's `program`: the source docs are written (awaited) by every cold
    * compile, so this returns the same bytes that produced the identity. `main`
    * is the executable entry document's authored filename. `sourceRoots` names
-   * retained source entry points such as attached tests. Returns `undefined`
-   * when no verified source closure exists in the space.
+   * retained source entry points such as attached tests, and `dataFiles` names
+   * attached data files. Returns `undefined` when no verified source closure
+   * exists in the space.
    */
   async getPatternSourceProgramByIdentity(
     entryIdentity: string,
@@ -2143,6 +2301,7 @@ export class PatternManager {
       main: string;
       files: { name: string; contents: string }[];
       sourceRoots?: string[];
+      dataFiles?: string[];
     } | undefined
   > {
     const readTx = this.runtime.edit();
@@ -2186,12 +2345,16 @@ export class PatternManager {
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
-    const sourceRoots = entry.imports
-      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
-      .map((edge) => sourceDocs.get(edge.identity)?.filename)
-      .filter((filename): filename is string =>
-        filename?.startsWith("/") === true
-      );
+    const sourceRoots = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      SOURCE_ROOT_SPECIFIER,
+    ).filter((filename) => filename.startsWith("/"));
+    const dataFiles = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      DATA_FILE_SPECIFIER,
+    ).filter((filename) => filename.startsWith("/"));
     // Return only the AUTHORED files — the faithful replacement for the old
     // meta-cell `program`. The verified source closure also contains
     // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
@@ -2207,6 +2370,7 @@ export class PatternManager {
           contents: doc.code,
         })),
       ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
+      ...(dataFiles.length === 0 ? {} : { dataFiles }),
     };
   }
 

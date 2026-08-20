@@ -1,15 +1,25 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { type Cell, compileAndSavePattern } from "@commonfabric/runner";
+import {
+  type Cell,
+  compileAndSavePattern,
+  getPatternIdentityRef,
+} from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
+  FRAMEWORK_RESULT_KEYS,
   matchLLMFriendlyLink,
+  type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
 import { PieceController } from "@commonfabric/piece/ops";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { fabricRuntimeObservations } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  addressSealedPositions,
+  isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
@@ -29,6 +39,17 @@ export interface RunPatternToolSuccessOutput {
   status: "ok";
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
+  /**
+   * The compiled pattern's result schema — the shape of whatever
+   * `resultRef` names. Known here for free, since compilation produced it,
+   * and recorded on the handle minted for `resultRef` so a later
+   * `describe_handle` can answer what the reference is without reading it.
+   * Stripped from the model-facing rendering by the prompt loop: the model
+   * wrote the pattern this describes, and asks for the shape by token when
+   * it wants it back. Always present: a compiled pattern carries a result
+   * schema.
+   */
+  resultRefSchema: JSONSchema;
   /**
    * Piece id for the persisted tool-output artifact. A bare fabric
    * identifier the handle boundary never swaps, and the piece cell is the
@@ -54,6 +75,18 @@ export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
   message: string;
+  /**
+   * The durable piece a post-persistence failure leaves behind, for the
+   * persisted artifact's run-to-piece provenance. Stripped from the
+   * model-facing rendering like the success output's `pieceId`.
+   */
+  pieceId?: string;
+  /**
+   * The failing computation's own message, retained for the persisted
+   * artifact and stripped from the model-facing rendering: a computation
+   * over data the model cannot read may carry that data in its thrown text.
+   */
+  rawCauseMessage?: string;
 }
 
 export type RunPatternToolOutput =
@@ -65,13 +98,14 @@ export const isRunPatternToolSuccessOutput = (
 ): output is RunPatternToolSuccessOutput =>
   typeof output === "object" && output !== null &&
   "status" in output && output.status === "ok" &&
-  "resultRef" in output && typeof output.resultRef === "string";
+  "resultRef" in output && typeof output.resultRef === "string" &&
+  "resultRefSchema" in output;
 
 export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece is not registered in the space's piece list.",
+    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -92,7 +126,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          "Optional JSON Schema for the result value. When provided, the sanitized result value is returned alongside resultRef.",
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
     },
     required: ["sourceText"],
@@ -105,12 +139,20 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         status: { type: "string", enum: ["ok"] },
         resultRef: { type: "string" },
+        resultRefSchema: {},
         pieceId: { type: "string" },
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
+        rawValue: {},
       },
-      required: ["outputId", "status", "resultRef", "pieceId"],
+      required: [
+        "outputId",
+        "status",
+        "resultRef",
+        "resultRefSchema",
+        "pieceId",
+      ],
       additionalProperties: false,
     }, {
       type: "object",
@@ -121,12 +163,44 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           enum: ["compile-error", "error", "cancelled"],
         },
         message: { type: "string" },
+        pieceId: { type: "string" },
+        rawCauseMessage: { type: "string" },
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
     }],
   } satisfies JSONSchema,
   tags: ["fabric", "pattern", "piece"],
+};
+
+/**
+ * The `@link` object addressing one sealed position of a result: the result
+ * cell's link extended by the sealed path. It rides as a whole object, which
+ * the outbound swap mints from in one piece — the free-text scanner would
+ * stop an address short at a property name's whitespace. A path the link
+ * grammar cannot round-trip — an empty final segment parses back as its
+ * parent — answers `undefined`, keeping the seal rather than becoming a
+ * reference to the wrong cell.
+ */
+export const sealedPositionLink = (
+  resultLink: NormalizedFullLink,
+  path: readonly (string | number)[],
+  space: NormalizedFullLink["space"],
+): { "@link": string } | undefined => {
+  const segments = [...resultLink.path, ...path.map(String)];
+  const ref = createLLMFriendlyLink({ ...resultLink, path: segments }, space);
+  try {
+    const parsed = parseLLMFriendlyLink(ref, space);
+    if (
+      parsed.path.length !== segments.length ||
+      parsed.path.some((segment, i) => segment !== segments[i])
+    ) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return { "@link": ref };
 };
 
 const errorMessage = (error: unknown): string =>
@@ -158,7 +232,7 @@ export const scrubBareFabricIdentifiers = (text: string): string =>
  * serialized link form. Returns `undefined` when the value does not
  * serialize.
  */
-const asSerializableValue = (value: unknown): unknown => {
+export const asSerializableValue = (value: unknown): unknown => {
   try {
     const encoded = JSON.stringify(value);
     return encoded === undefined ? undefined : JSON.parse(encoded);
@@ -167,8 +241,81 @@ const asSerializableValue = (value: unknown): unknown => {
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * The reserved seal target, as `cfcOpaqueLinkForPath` mints it: the literal
+ * `opaque:` scheme, then a percent-encoded handle id, then optionally `#` and
+ * a JSON pointer that always opens with `/`. The handle-id charset is exactly
+ * what `encodeURIComponent` can emit, which is what keeps this narrower than
+ * "any string starting with `opaque:`" — a sentence, a path, or a quoted
+ * phrase carrying that prefix has a space or a delimiter in it and does not
+ * match.
+ */
+const RESERVED_OPAQUE_TARGET =
+  /^opaque:[A-Za-z0-9\-_.!~*'()%]+(?:#\/[\s\S]*)?$/;
+
+/**
+ * Whether `value` is the reserved seal target string. The target is the seal:
+ * the `@link` object is only the wrapper a sanitized result happens to put it
+ * in, and a model that lifts the string out of that wrapper — or reads it out
+ * of one whose other keys it also copied — is passing back the same redaction.
+ */
+const isSealedOpaqueTarget = (value: unknown): boolean =>
+  typeof value === "string" && RESERVED_OPAQUE_TARGET.test(value);
+
+/**
+ * The path at which `value` carries a sealed opaque link, or `undefined` when
+ * it carries none. `path` names the position `value` itself sits at, so a
+ * caller starting from an input key gets back a path that points at the
+ * offending position within that input. The search is exhaustive because a
+ * sealed value reaches an input however the model composed it — nested inside
+ * an object or an array it built around what a tool result handed back, and in
+ * whatever form it lifted it out in.
+ */
+const sealedOpaqueLinkPath = (
+  value: unknown,
+  path: string,
+): string | undefined => {
+  if (isSealedOpaqueTarget(value)) {
+    return path;
+  }
+  if (
+    isSealedOpaqueLinkObject(value) ||
+    (isObjectNotArray(value) && isSealedOpaqueTarget(value["@link"]))
+  ) {
+    return path;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = sealedOpaqueLinkPath(value[index], `${path}[${index}]`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (isObjectNotArray(value)) {
+    for (const [key, entry] of Object.entries(value)) {
+      const found = sealedOpaqueLinkPath(entry, `${path}.${key}`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * What the model is told when it passes back a value a structured result
+ * sealed. The distinction the message has to carry is the whole of the fix: a
+ * seal is a redaction, so it names nothing, and the reference the model was
+ * given for that same data is what it should have passed instead.
+ */
+const sealedInputRefusal = (key: string, path: string): string =>
+  `run_pattern input "${key}" ${
+    path === key
+      ? "is a sealed opaque link"
+      : `carries a sealed opaque link at "${path}"`
+  } — the reserved "opaque:..." target, whether as a bare string or as the "@link" of an object. A sealed value is a redaction, not an address: it marks a position an earlier result withheld, so it names nothing that can be read, and storing it would leave a dead literal where the pattern declared a live reference, with everything computed from it empty. Pass the reference you were given for that data instead — the whole cfh:a: handle token, or the LLM-friendly link it stands for — as the input's own string value.`;
 
 /**
  * Awaits `work` unless `signal` aborts first. Resolution (not rejection)
@@ -215,8 +362,19 @@ export const runPatternTool: HarnessToolDefinition<
       status: RunPatternToolErrorOutput["status"],
       message: string,
     ): RunPatternToolErrorOutput => ({ outputId, status, message });
-    const cancelledOutput = (): RunPatternToolErrorOutput =>
-      errorOutput("cancelled", "run_pattern was cancelled");
+    /**
+     * `detail` is what the cancellation left behind that the caller would
+     * otherwise have to discover by looking: a durable effect the run had
+     * already made and does not undo. The cancelled output carries no fields
+     * beyond `message`, so it is said there.
+     */
+    const cancelledOutput = (detail?: string): RunPatternToolErrorOutput =>
+      errorOutput(
+        "cancelled",
+        detail === undefined
+          ? "run_pattern was cancelled"
+          : `run_pattern was cancelled; ${detail}`,
+      );
     if (context.getFabricSession === undefined) {
       return errorOutput(
         "error",
@@ -264,12 +422,19 @@ export const runPatternTool: HarnessToolDefinition<
     // seen here carry canonical addresses. Non-link strings and non-strings
     // pass through as plain JSON. A link that resolves outside the session's
     // configured space is refused before anything is created: the session's
-    // authority ends at its own space.
+    // authority ends at its own space. So is a value carrying a sealed
+    // opaque link anywhere within it, which is a redaction the model copied
+    // back out of an earlier result rather than a reference to anything.
     let pieceInput: Record<string, unknown> | undefined;
     const liveCellInputs: Array<{ key: string; cell: Cell<unknown> }> = [];
+    const plainInputs: Array<{ key: string; value: unknown }> = [];
     if (input.inputs !== undefined) {
       const converted: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(input.inputs)) {
+        const sealedPath = sealedOpaqueLinkPath(value, key);
+        if (sealedPath !== undefined) {
+          return errorOutput("error", sealedInputRefusal(key, sealedPath));
+        }
         let entry = value;
         if (
           typeof value === "string" && matchLLMFriendlyLink.test(value.trim())
@@ -292,6 +457,9 @@ export const runPatternTool: HarnessToolDefinition<
             entry = cell;
           }
         }
+        if (entry === value) {
+          plainInputs.push({ key, value });
+        }
         defineOwnEntry(converted, key, entry);
       }
       pieceInput = converted;
@@ -307,33 +475,108 @@ export const runPatternTool: HarnessToolDefinition<
       // identifiers from the model-facing rendering.
       return errorOutput("compile-error", errorMessage(error));
     }
-    // A live-cell input's current value must match the compiled pattern's
-    // argument schema for its key before any piece exists, so a mismatch is
-    // a model-correctable error rather than a persisted broken piece.
-    const argumentProperties = isRecord(pattern.argumentSchema) &&
-        isRecord(pattern.argumentSchema.properties)
-      ? pattern.argumentSchema.properties
+    // An input's value must match the compiled pattern's argument schema for
+    // its key before any piece exists, so a mismatch is a model-correctable
+    // error rather than a persisted broken piece. What supplies the value
+    // does not change the question: a live cell is measured by what it
+    // currently holds, and a plain JSON value by itself.
+    const argumentSchema = pattern.argumentSchema;
+    const argumentProperties = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray(argumentSchema.properties)
+      ? argumentSchema.properties
       : undefined;
-    if (argumentProperties !== undefined) {
-      for (const { key, cell } of liveCellInputs) {
-        const propertySchema = argumentProperties[key];
-        if (propertySchema === undefined) {
-          continue;
-        }
-        await cell.sync();
-        const failure = validateAgainstSchema(
-          propertySchema as JSONSchema,
-          cell.get(),
-          pattern.argumentSchema,
+    // An input the compiled pattern declares no argument for is refused for
+    // the same reason: the pattern would run with that argument undefined and
+    // every field computed from it empty, which renders as a complete page
+    // holding nothing. Only a pattern whose argument schema names its
+    // properties is measured this way — one that admits further properties, or
+    // that declares its argument through a `$ref` or a combinator, states no
+    // closed set of names to measure against. `additionalProperties` admits
+    // them both when it is `true` and when it is a schema: a schema there is an
+    // index signature, which names what an undeclared key is allowed to hold
+    // rather than forbidding one. A plain-function pattern compiles with no
+    // argument schema at all — not even a boolean one — so the read is
+    // guarded rather than assumed.
+    const additionalArguments = isObjectNotArray(argumentSchema)
+      ? (argumentSchema as { additionalProperties?: unknown })
+        .additionalProperties
+      : undefined;
+    const admitsUndeclaredArguments = additionalArguments === true ||
+      isObjectNotArray(additionalArguments);
+    if (
+      argumentProperties !== undefined && input.inputs !== undefined &&
+      !admitsUndeclaredArguments
+    ) {
+      const declared = Object.keys(argumentProperties);
+      const undeclared = Object.keys(input.inputs).filter(
+        (key) => !Object.hasOwn(argumentProperties, key),
+      );
+      if (undeclared.length > 0) {
+        return errorOutput(
+          "error",
+          `run_pattern inputs name ${
+            undeclared.map((key) => `"${key}"`).join(", ")
+          }, which the pattern's argument schema does not declare; it declares ${
+            declared.length === 0
+              ? "no inputs"
+              : declared.map((key) => `"${key}"`).join(", ")
+          }`,
         );
-        if (failure !== undefined) {
-          return errorOutput(
-            "error",
-            `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
-          );
-        }
       }
     }
+    // An `additionalProperties` schema is what the argument schema says an
+    // undeclared key may hold, so an input admitted by it is measured against
+    // it: admitting a key is a statement about its value, not an exemption
+    // from having one checked. An `additionalProperties` of `true` states
+    // nothing to measure against — the pattern declared its argument open, so
+    // an undeclared key there is unconstrained by declaration rather than
+    // unchecked by omission — and neither does a key the argument schema
+    // declares no shape for at all.
+    const undeclaredArgumentSchema = isObjectNotArray(additionalArguments)
+      ? additionalArguments as JSONSchema
+      : undefined;
+    const argumentSchemaForKey = (key: string): JSONSchema | undefined =>
+      argumentProperties !== undefined && Object.hasOwn(argumentProperties, key)
+        ? argumentProperties[key] as JSONSchema
+        : undeclaredArgumentSchema;
+    const argumentMismatch = (
+      key: string,
+      value: unknown,
+    ): RunPatternToolErrorOutput | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined) {
+        return undefined;
+      }
+      const failure = validateAgainstSchema(
+        propertySchema,
+        value,
+        argumentSchema,
+      );
+      return failure === undefined ? undefined : errorOutput(
+        "error",
+        `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
+      );
+    };
+    for (const { key, cell } of liveCellInputs) {
+      if (argumentSchemaForKey(key) === undefined) {
+        continue;
+      }
+      await cell.sync();
+      const mismatch = argumentMismatch(key, cell.get());
+      if (mismatch !== undefined) {
+        return mismatch;
+      }
+    }
+    for (const { key, value } of plainInputs) {
+      const mismatch = argumentMismatch(key, value);
+      if (mismatch !== undefined) {
+        return mismatch;
+      }
+    }
+    // Position in the runtime's observation stream before the piece exists,
+    // so the post-settle read covers exactly this invocation's window.
+    const observations = fabricRuntimeObservations(pieces.runtime);
+    const observationStart = observations.sequence();
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
@@ -352,18 +595,21 @@ export const runPatternTool: HarnessToolDefinition<
     } catch (error) {
       return errorOutput("error", errorMessage(error));
     }
-    const barrier = (async () => {
-      await pieces.runtime.settled();
-      await pieces.synced();
-    })();
-    if (await raceWithAbort(barrier, signal) === "aborted") {
-      // Stop without the usual `stopPiece` idle wait: the abort path must
-      // not wait on the very scheduler the signal is escaping.
+    // Stops the created piece without the usual `stopPiece` idle wait: an
+    // abort path must not wait on the very scheduler the signal is escaping.
+    const stopPieceForAbort = () => {
       try {
         pieces.runtime.runner.stop(piece.getCell());
       } catch {
         // Best-effort: the cancelled output stands either way.
       }
+    };
+    const barrier = (async () => {
+      await pieces.runtime.settled();
+      await pieces.synced();
+    })();
+    if (await raceWithAbort(barrier, signal) === "aborted") {
+      stopPieceForAbort();
       return cancelledOutput();
     }
     const resultCell = await piece.result.getCell();
@@ -377,21 +623,107 @@ export const runPatternTool: HarnessToolDefinition<
     let valueError: string | undefined;
     if (parsedResultSchema !== undefined) {
       try {
+        // The raw result is what gets measured: the framework's own result
+        // keys are named to the sanitizer as RESERVED rather than projected
+        // out first. Projecting first would change the question the schema
+        // answers — a value a branch refuses because of what it carries under
+        // `$NAME` would reach that branch with the offending key already
+        // gone — and would miss a `$NAME` the caller declared through a
+        // `$ref` or a combinator rather than at the top level.
         const sanitized = validateAndSanitizeStructuredResult({
           schema: parsedResultSchema.schema,
           value: rawValue,
           opaqueHandleId: outputId,
+          reservedKeys: FRAMEWORK_RESULT_KEYS,
         });
-        value = sanitized.value;
+        // A position the schema could not release as text is fabric-backed
+        // by construction — the result reference plus the sealed path is its
+        // address — so it goes over as that address rather than as a dead
+        // output-scoped link. The outbound swap renders each one as a handle
+        // token, which describe_handle answers and a later run_pattern can
+        // wire by reference. `linkedStringCount` still counts the string
+        // positions withheld as text.
+        const resultLink = resultCell.getAsNormalizedFullLink();
+        value = addressSealedPositions(
+          sanitized.value,
+          sanitized.sealedPaths,
+          (path) => sealedPositionLink(resultLink, path, space),
+        );
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
         valueError = errorMessage(error);
+      }
+    }
+    // A result that settled to nothing is not a success to report. When the
+    // sanitized value failed its schema, or the raw result holds no fields of
+    // its own beyond the framework keys, the runtime's observation window
+    // says why: an action error attributed to this piece names the failing
+    // computation, and a non-settling episode names the other observed shape
+    // — actions deferred past the convergence budget, which is what both a
+    // reactive cycle and a policy-refused commit look like from here. The
+    // refusal reason itself has no channel of its own, so the message names
+    // the shapes rather than claiming to know which one happened.
+    const inertResultKeys = isObjectNotArray(rawValue)
+      ? Object.keys(rawValue).filter((key) => !key.startsWith("$"))
+      : undefined;
+    const resultAbsent = rawValue === undefined || rawValue === null ||
+      (inertResultKeys !== undefined && inertResultKeys.length === 0);
+    if (valueError !== undefined || resultAbsent) {
+      const pieceErrors = observations.errorsSince(observationStart, piece.id);
+      if (pieceErrors.length > 0) {
+        // The thrown text stays out of the model-facing message: a
+        // computation over data the model cannot read may carry that data in
+        // what it throws, so the artifact keeps the diagnostic and the model
+        // gets the fact of the failure.
+        return {
+          ...errorOutput(
+            "error",
+            `the pattern ran but a computation attributed to the created piece failed while settling and the result never landed; the failure text is retained in the run artifact and withheld here, since a computation's thrown message can carry the data it read`,
+          ),
+          pieceId: piece.id,
+          rawCauseMessage: pieceErrors[0].message,
+        };
+      }
+      // A convergence-budget episode is claimed only when its deferred-action
+      // labels name this pattern's module identity — an unrelated piece
+      // churning during this invocation's settle window is not evidence
+      // about this one. Module identity is as fine as the labels resolve:
+      // another live piece created from the same source shares it, so the
+      // message says "this pattern's module" rather than claiming the
+      // episode as this piece's own. An episode lists at most its first ten
+      // deferred actions, so a wide episode can omit this pattern and
+      // under-report, which falls back to the plain ok-with-valueError
+      // rather than misattributing.
+      // The scheduler composes deferred-action ids as
+      // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
+      // ref this meta stamp stores, so the match is on that composed prefix
+      // rather than a bare substring — a representation drift on either
+      // side fails the settle-cause test that drives this path, loudly.
+      const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
+      const ownEpisodes = patternIdentity === undefined
+        ? []
+        : observations.episodesSince(observationStart).filter((episode) =>
+          episode.deferredActions.some((label) =>
+            label.includes(`cf:module/${patternIdentity}:`)
+          )
+        );
+      if (ownEpisodes.length > 0) {
+        return {
+          ...errorOutput(
+            "error",
+            `the pattern ran but its result never landed: while it settled, the scheduler deferred ${
+              ownEpisodes[ownEpisodes.length - 1].deferredActionCount
+            } action(s) of this pattern's module past its convergence budget — this piece's own, or another live piece created from the same source in an earlier attempt. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape`,
+          ),
+          pieceId: piece.id,
+        };
       }
     }
     return {
       outputId,
       status: "ok",
       resultRef,
+      resultRefSchema: pattern.resultSchema,
       pieceId: piece.id,
       ...(value !== undefined ? { value } : {}),
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),

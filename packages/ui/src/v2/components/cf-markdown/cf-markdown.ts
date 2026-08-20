@@ -1,25 +1,30 @@
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
-import { marked } from "marked";
-import { HeadingIdRenderer } from "./heading-id.ts";
+
 import { BaseElement } from "../../core/base-element.ts";
-import "../cf-copy-button/index.ts";
-import "../cf-cell-link/index.ts";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import {
+  type MarkdownCallbacks,
+  markdownTemplate,
+} from "./markdown-template.ts";
 
 export type MarkdownVariant = "default" | "inverse";
 
 /**
  * CFMarkdown - Renders markdown content with syntax highlighting and copy buttons
+ *
+ * The content is rendered as markdown only. Raw HTML written into it is not
+ * rendered, and a link or an image whose URL names a scheme outside the
+ * allowlist in `safe-url.ts` loses its URL, so untrusted content is safe to
+ * pass in. `markdown-template.ts` describes how that holds.
  *
  * @element cf-markdown
  *
@@ -332,8 +337,8 @@ export class CFMarkdown extends BaseElement {
 
       /* Tables */
       /* Scroll container so a wide table scrolls horizontally instead of
-      * cramming its columns on narrow (mobile) screens. Injected around every
-      * <table> by _wrapTablesForScroll. */
+      * cramming its columns on narrow (mobile) screens. Wrapped around every
+      * <table> by markdown-template.ts. */
       .markdown-content .table-scroll {
         overflow-x: auto;
         max-width: 100%;
@@ -440,135 +445,6 @@ export class CFMarkdown extends BaseElement {
     return this.content ?? "";
   }
 
-  private _renderMarkdown(content: string): string {
-    if (!content) return "";
-
-    // Use marked.parse with options to avoid mutating global state
-    // A fresh HeadingIdRenderer per parse restarts the duplicate-heading
-    // suffixes, so the same content always renders the same ids.
-    let renderedHtml = marked.parse(content, {
-      breaks: true,
-      gfm: true,
-      async: false,
-      renderer: new HeadingIdRenderer(),
-    });
-
-    // Wrap code blocks with copy buttons
-    renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
-
-    // Wrap tables so wide tables scroll horizontally instead of cramming
-    renderedHtml = this._wrapTablesForScroll(renderedHtml);
-
-    // Replace cell links with cf-cell-link
-    renderedHtml = this._replaceCellLinks(renderedHtml);
-
-    // TODO(CT-1088): XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
-    //
-    // We need to sanitize the HTML to prevent XSS attacks. Originally we used DOMPurify
-    // but it added a dependency (isomorphic-dompurify) that caused lockfile issues.
-    //
-    // Options to fix this:
-    // 1. Add DOMPurify back with proper lockfile management
-    // 2. Implement our own sanitizer that allows our custom elements (cf-cell-link, cf-copy-button)
-    // 3. Find an alternative sanitization library
-    //
-    // For now, only use this component with trusted markdown content!
-    //
-    // Security note: The _escapeForAttribute() method helps prevent attribute injection,
-    // but this doesn't protect against <script> tags or other HTML-based XSS vectors.
-
-    return renderedHtml;
-  }
-
-  private _replaceCellLinks(html: string): string {
-    // Matches <a href="/of:...">Name</a>, and the cross-space form the
-    // LLM-friendly link writes as /@did:key:.../of:... — a link whose space
-    // differs from the reader's leads with `@space`, and a matcher requiring
-    // an alphanumeric first character would leave it an ordinary relative
-    // anchor pointing at a path the shell does not serve.
-    return html.replace(
-      /<a href="(\/@?[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
-      (_match, link, text) => {
-        return `<cf-cell-link link="${link}" label="${
-          this._escapeForAttribute(text)
-        }"></cf-cell-link>`;
-      },
-    );
-  }
-
-  private _wrapCodeBlocksWithCopyButtons(html: string): string {
-    return html.replace(
-      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-      (_match, codeAttrs, codeContent) => {
-        const decodedContent = this._decodeHtmlEntities(codeContent);
-
-        return `<div class="code-block-container">
-          <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <cf-copy-button
-            class="code-copy-button"
-            text="${this._escapeForAttribute(decodedContent)}"
-            variant="ghost"
-            size="sm"
-            icon-only
-          ></cf-copy-button>
-        </div>`;
-      },
-    );
-  }
-
-  /**
-   * Wrap each rendered <table> in a horizontally scrollable container.
-   *
-   * marked emits a bare <table> with no wrapper, and the table CSS keeps
-   * columns at a readable minimum width. On a narrow screen (mobile) a wide
-   * table therefore overflows; the wrapper's `overflow-x: auto` gives it its
-   * own horizontal scroll so the overflow is handled inside the markdown block
-   * rather than being clipped by an ancestor (cf-screen sets
-   * `overflow-x: hidden`) or cramming the columns. Mirrors the code-block
-   * wrapper approach above. GFM tables cannot nest, so a non-greedy match is
-   * sufficient.
-   */
-  private _wrapTablesForScroll(html: string): string {
-    return html.replace(
-      /<table[\s\S]*?<\/table>/g,
-      (table) => `<div class="table-scroll">${table}</div>`,
-    );
-  }
-
-  private _decodeHtmlEntities(text: string): string {
-    // Use browser API when available for complete entity decoding
-    if (typeof document !== "undefined") {
-      const textarea = document.createElement("textarea");
-      textarea.innerHTML = text;
-      return textarea.value;
-    }
-
-    // Fallback for SSR/test environments - decode common entities
-    return text
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#x27;/g, "'")
-      .replace(/&#x2F;/g, "/")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
-      .replace(
-        /&#x([0-9a-fA-F]+);/g,
-        (_, hex) => String.fromCharCode(parseInt(hex, 16)),
-      );
-  }
-
-  private _escapeForAttribute(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
   override willUpdate(
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
@@ -614,45 +490,12 @@ export class CFMarkdown extends BaseElement {
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
     }
-
-    // Attach click handlers to checkboxes after content is rendered
-    this._attachCheckboxHandlers();
   }
 
-  private _attachCheckboxHandlers() {
-    const container = this.shadowRoot?.querySelector(".markdown-content");
-    if (!container) return;
-
-    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-    checkboxes.forEach((checkbox, index) => {
-      const inputEl = checkbox as HTMLInputElement;
-
-      // Remove the disabled attribute that marked adds by default
-      inputEl.removeAttribute("disabled");
-
-      // Remove existing handler to prevent duplicates
-      inputEl.removeEventListener("change", this._handleCheckboxChange);
-
-      // Store index as data attribute for retrieval in handler
-      inputEl.dataset.checkboxIndex = String(index);
-
-      // Add new handler
-      inputEl.addEventListener("change", this._handleCheckboxChange);
-    });
-  }
-
-  private _handleCheckboxChange = (event: Event) => {
-    const checkbox = event.target as HTMLInputElement;
-    const index = parseInt(checkbox.dataset.checkboxIndex ?? "0", 10);
-    const checked = checkbox.checked;
-
-    this.dispatchEvent(
-      new CustomEvent("cf-checkbox-change", {
-        detail: { index, checked },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+  private _markdownCallbacks: MarkdownCallbacks = {
+    checkboxToggled: (index: number, checked: boolean) => {
+      this.emit("cf-checkbox-change", { index, checked });
+    },
   };
 
   override disconnectedCallback() {
@@ -669,9 +512,6 @@ export class CFMarkdown extends BaseElement {
   }
 
   override render() {
-    const contentValue = this._getContentValue();
-    const renderedContent = this._renderMarkdown(contentValue);
-
     const classes = {
       "markdown-content": true,
       inverse: this.variant === "inverse",
@@ -681,7 +521,7 @@ export class CFMarkdown extends BaseElement {
 
     return html`
       <div class="${classMap(classes)}" part="content">
-        ${unsafeHTML(renderedContent)}
+        ${markdownTemplate(this._getContentValue(), this._markdownCallbacks)}
       </div>
     `;
   }

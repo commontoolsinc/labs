@@ -30,6 +30,19 @@ function jobIds(workflow: string): string[] {
   ].map((match) => match[1]);
 }
 
+function expandedJobCount(job: string): number {
+  const includeRows = [...job.matchAll(/^ {10}- [A-Za-z_][A-Za-z0-9_-]*:/gm)];
+  if (includeRows.length > 0) return includeRows.length;
+
+  const dimensions = [
+    ...job.matchAll(/^ {8}[A-Za-z_][A-Za-z0-9_-]*: \[([^\]]+)\]$/gm),
+  ];
+  return dimensions.reduce(
+    (count, dimension) => count * dimension[1].split(",").length,
+    1,
+  );
+}
+
 function stepBlock(job: string, stepName: string): string {
   const header = `      - name: ${stepName}\n`;
   const start = job.indexOf(header);
@@ -206,6 +219,25 @@ Deno.test("Status waits for every pull request validation job", async () => {
   assertEquals(triggers.includes("\n    paths:"), false);
 });
 
+Deno.test("the first CI wave leaves runner capacity for another run", async () => {
+  const contents = await workflow("deno.yml");
+  const githubParallelRunnerLimit = 60;
+  const firstWaveJobs = jobIds(contents)
+    .map((jobId) => jobBlock(contents, jobId))
+    .filter((job) => !/^ {4}needs:/m.test(job));
+  const firstWaveRunnerCount = firstWaveJobs.reduce(
+    (count, job) => count + expandedJobCount(job),
+    0,
+  );
+
+  assert(
+    firstWaveRunnerCount < githubParallelRunnerLimit / 2,
+    `the dependency-free wave expands to ${firstWaveRunnerCount} jobs; ` +
+      `two overlapping runs must fit within GitHub's ` +
+      `${githubParallelRunnerLimit}-runner limit`,
+  );
+});
+
 Deno.test("every step we name carries a phase marker", async () => {
   // A step whose name starts with no marker in `PHASE_MARKERS` is charted as
   // "other", which is how a job's setup time goes missing from the timings
@@ -234,11 +266,11 @@ Deno.test("every work step is bounded before its job is", async () => {
   // cancelling it, so the job's conclusion is `cancelled` — the same conclusion
   // a run stopped by hand or superseded by a newer push carries, and one that
   // reads as nobody's fault. A step that runs past the step's own bound fails
-  // instead, and its job fails with it. So each work step carries a bound of
-  // its own, below the bound on the job by the headroom the setup and upload
-  // steps around it need, and a wedged test is reported as a failure. Both
-  // bounds are aliases to an anchor, so each is a name here rather than a
-  // number, and the minutes behind the names are written once.
+  // instead, and its job fails with it. Each work step therefore carries a
+  // bound of its own, below the bound on the job by the headroom the setup and
+  // upload steps around it normally need. Both bounds are aliases to an anchor,
+  // so each is a name here rather than a number, and the minutes behind the
+  // names are written once.
   const headroom = 10;
   const contents = await workflow("deno.yml");
   const anchors = anchoredMinutes(contents);
@@ -278,7 +310,7 @@ Deno.test("every work step is bounded before its job is", async () => {
         jobBound - stepBound >= headroom,
         `${jobId}: "${step.name}" is bounded at ${stepBound} minutes within a ` +
           `job bounded at ${jobBound}, leaving under ${headroom} minutes ` +
-          `between them, so the job's bound can be the one a wedge hits first`,
+          `between that step bound and the outer job bound`,
       );
     }
   }
@@ -296,20 +328,28 @@ Deno.test("Coverage Comment follows the CI workflow by name", async () => {
 Deno.test("coverage requirements follow sharded test matrices", async () => {
   const contents = await workflow("deno.yml");
   const jobs = [
-    ["test", "coverage-profile-workspace-"],
-    ["runner-test", "coverage-profile-runner-"],
+    ["test", "coverage-profile-workspace-", "shard"],
+    ["runner-test", "coverage-profile-runner-", "shard"],
     [
       "generated-patterns-integration-test",
       "coverage-profile-generated-patterns-",
+      "shard",
     ],
-    ["pattern-integration-test", "coverage-profile-pattern-integration-"],
+    [
+      "pattern-integration-test",
+      "coverage-profile-pattern-integration-",
+      "shard",
+    ],
+    ["pattern-unit-test", "coverage-profile-pattern-unit-", "chunk"],
   ] as const;
 
-  for (const [jobId, artifactPrefix] of jobs) {
+  for (const [jobId, artifactPrefix, dimension] of jobs) {
     const job = jobBlock(contents, jobId);
-    const shardMatch = job.match(/^ {8}shard: \[([0-9, ]+)\]$/m);
+    const shardMatch = job.match(
+      new RegExp(`^ {8}${dimension}: \\[([0-9, ]+)\\]$`, "m"),
+    );
     const totalMatch = job.match(/^ {8}total: \[(\d+)\]$/m);
-    assert(shardMatch, `${jobId} shard matrix not found`);
+    assert(shardMatch, `${jobId} ${dimension} matrix not found`);
     assert(totalMatch, `${jobId} total matrix not found`);
 
     const shards = shardMatch[1].split(",").map((value) =>
@@ -326,11 +366,11 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
     assertEquals(
       shards,
       Array.from({ length: total }, (_, index) => index + 1),
-      `${jobId} must list every shard exactly once`,
+      `${jobId} must list every ${dimension} exactly once`,
     );
     assertStringIncludes(
       job,
-      `name: ${artifactPrefix}\${{ matrix.shard }}`,
+      `name: ${artifactPrefix}\${{ matrix.${dimension} }}`,
     );
     assertEquals(
       EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
@@ -344,20 +384,23 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
 
 Deno.test("sharded pattern caches follow their shard topology", async () => {
   const contents = await workflow("deno.yml");
-  const topology = "-${{ matrix.total }}-${{ matrix.shard }}-";
   for (
-    const [jobId, selector] of [
+    const [jobId, selector, dimension] of [
       [
         "generated-patterns-integration-test",
         "'tasks/select-generated-pattern-files.ts'",
+        "shard",
       ],
       [
         "pattern-integration-test",
         "'tasks/select-pattern-integration-files.ts'",
+        "shard",
       ],
+      ["pattern-unit-test", "'tasks/integration.ts'", "chunk"],
     ] as const
   ) {
     const job = jobBlock(contents, jobId);
+    const topology = `-\${{ matrix.total }}-\${{ matrix.${dimension} }}-`;
     assertEquals(job.split(topology).length - 1, 2);
     const key = job.match(/^ {10}key: (.+)$/m);
     assert(key, `${jobId} cache key not found`);
@@ -478,4 +521,44 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   for (const name of ["deno.yml", "deploy-production.yml"]) {
     assert(callers.includes(name), `${name}: no deploy.sh call found`);
   }
+});
+
+Deno.test("every test-records artifact name is store-safe and unique", async () => {
+  // The relay derives each store object's name from the artifact's name
+  // through objectNameSlug, which collapses characters unsafe in object
+  // names. Two artifacts in one run whose names differ only by collapsed
+  // characters would produce one object name, and the second would be
+  // mistaken for an idempotent re-ship and silently lost. Holding every
+  // literal to the already-safe alphabet makes the slug the identity on
+  // these names, so distinct names stay distinct in the store. Uniqueness
+  // matters per workflow: object names carry the run id, so two different
+  // workflows can reuse a name.
+  let shipSteps = 0;
+  for (const name of await workflowNames()) {
+    const contents = withoutComments(await workflow(name));
+    const artifacts: string[] = [];
+    const chunks = contents.split("uses: ./.github/actions/test-records-ship");
+    for (const chunk of chunks.slice(1)) {
+      shipSteps++;
+      const artifact = chunk.match(/^\s*artifact: (.+)$/m);
+      assert(artifact, `${name}: a ship step with no artifact input`);
+      artifacts.push(artifact[1].trim());
+    }
+    for (const artifact of artifacts) {
+      const literal = artifact.replaceAll(/\$\{\{[^}]*\}\}/g, "");
+      assert(
+        /^[A-Za-z0-9._-]*$/.test(literal),
+        `${name}: artifact name \`${artifact}\` has characters the store ` +
+          "slug would collapse",
+      );
+    }
+    assertEquals(
+      new Set(artifacts).size,
+      artifacts.length,
+      `${name}: duplicate test-records artifact names`,
+    );
+  }
+  // The count pins the search itself: zero found steps would mean the
+  // extraction broke, not that the repository stopped shipping records.
+  assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
 });

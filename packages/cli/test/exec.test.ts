@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import { undeclaredVerbFieldError } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
@@ -416,8 +417,29 @@ describe("parseExecArgs", () => {
     );
     expect(() => parseExecArgs(spec, ["--query", "tea", "--mode", "invalid"]))
       .toThrow(/Invalid value for --mode/i);
+    // The five elements the payload door gives for the same mistake: the
+    // name, the position, the refusal, and the accepted vocabulary. A caller
+    // who mistypes a flag and one who mistypes a payload key made one
+    // mistake, and the flag spelling is the one the walkthrough teaches.
     expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
-      .toThrow(/Unknown flag --unknown/i);
+      .toThrow(
+        /"--unknown" at <event> is not a field this verb declares\./,
+      );
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
+      .toThrow(/<event> takes "--mode", "--query"/);
+
+    // The fifth element, on a name close enough to have been meant.
+    expect(() => parseExecArgs(spec, ["--quer", "tea"]))
+      .toThrow(/Did you mean "--query"\?/);
+    // And withheld where nothing is close: a wrong guess is worse than none.
+    expect(() => parseExecArgs(spec, ["--zzzzzzzz", "tea"]))
+      .not.toThrow(/Did you mean/);
+
+    // A verb declaring nothing says so rather than trailing an empty list,
+    // which is the same sentence the payload door gives for that case.
+    const bare = makeSpec("handler", { type: "object", properties: {} });
+    expect(() => parseExecArgs(bare, ["invoke", "--titel", "x"]))
+      .toThrow(/<event> declares no fields at all/);
   });
 });
 
@@ -496,10 +518,263 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["--no-enabled"]).input).toEqual({
       enabled: false,
     });
+    // The field exists; the negation is what does not apply. Listing the
+    // vocabulary here would send the caller looking for a name they already
+    // found, so this refusal names only the field it is about.
     expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
-      /Unknown flag/,
+      /"--no-query" negates "--query", which is not a boolean field/,
+    );
+    expect(() => parseExecArgs(spec, ["--no-query"])).not.toThrow(
+      /declared fields are/,
     );
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
+  });
+
+  it("reads a field a conjunction declares, on every flag surface", () => {
+    // `properties` alone missed what an `allOf` member contributes, while the
+    // payload door read it — so one door judged a field the other could not
+    // see. A caller was refused at dispatch for omitting something no surface
+    // had shown them.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      required: ["note"],
+      allOf: [{
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      }],
+    });
+
+    // The flag parses, and to its DECLARED type rather than a string.
+    expect(
+      parseExecArgs(spec, ["invoke", "--note", "hi", "--count", "5"]).input,
+    )
+      .toEqual({ note: "hi", count: 5 });
+
+    // Required is enforced from the member that declares it.
+    expect(() => parseExecArgs(spec, ["invoke", "--note", "hi"]))
+      .toThrow(/Missing required flag --count/);
+
+    // And the help page lists it, which is the half a caller reads first.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).toMatch(/--count/);
+
+    // The type block above the flags shows it too. The two are rendered by
+    // DIFFERENT readers — the flag list by the CLI's own, the type block by
+    // the runner's formatter — so one page could state two answers about one
+    // schema, and did. Sliced out rather than matched against the whole page,
+    // because `--count` in the flag list would satisfy a looser match on its
+    // own and the disagreement is exactly what needs catching.
+    const typeBlock = help.split("Input type:")[1]?.split("Flags:")[0] ?? "";
+    expect(typeBlock).toMatch(/note/);
+    expect(typeBlock).toMatch(/count/);
+  });
+
+  it("follows a reference into the definition a conjunction names", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{ $ref: "#/$defs/Extra" }],
+      $defs: {
+        Extra: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      },
+    });
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+  });
+
+  it("does not pull a field out of a disjunction", () => {
+    // A payload satisfies ONE branch of an `anyOf`, so no single flag list
+    // describes the position and no branch's `required` binds it. Offering
+    // `--only-here` would advertise a flag that fits one branch and breaks the
+    // other.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{
+        anyOf: [{
+          type: "object",
+          properties: { onlyHere: { type: "string" } },
+          required: ["onlyHere"],
+        }],
+      }],
+    });
+
+    // It is not in the DECLARED vocabulary: the help page does not advertise
+    // it, and its `required` does not bind a payload that omits it.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).not.toMatch(/--only-here/);
+    expect(parseExecArgs(spec, ["invoke", "--note", "a"]).input)
+      .toEqual({ note: "a" });
+
+    // A disjunction leaves the position unjudgeable, so BOTH doors fail open
+    // and take an unnamed flag rather than refusing what they cannot assess.
+    // Agreeing is the property worth pinning; which way they agree follows
+    // from the design's "a call wrongly refused cannot be made at all".
+    expect(parseExecArgs(spec, ["invoke", "--only-here", "x"]).input)
+      .toEqual({ "only-here": "x" });
+    expect(undeclaredVerbFieldError({ onlyHere: "x" }, spec.inputSchema))
+      .toBeUndefined();
+  });
+
+  it("leaves a conjunction over a scalar on the single-value path", () => {
+    // `allOf` earns the object path by CONTRIBUTING fields. A conjunction
+    // constraining a scalar contributes none, and routing it through flag
+    // parsing would offer a single-value verb a vocabulary of nothing.
+    const spec = makeSpec("tool", { allOf: [{ type: "string" }] });
+    expect(parseExecArgs(spec, ["run", "--value", "hi"]).input).toBe("hi");
+    expect(() => parseExecArgs(spec, ["run", "--anything", "x"]))
+      .toThrow(/is not a flag this verb takes/);
+  });
+
+  it("keeps the flags beside a disjunction it cannot express", () => {
+    // A root `anyOf` adds constraints no flag list can express, but the
+    // properties beside it are still declared and still typed. Reporting none
+    // because a disjunction is present would take away flags that already
+    // worked — the disjunction is stepped over, not treated as a veto.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" }, count: { type: "number" } },
+      anyOf: [
+        { required: ["note"] },
+        { required: ["count"] },
+      ],
+    });
+
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+    expect(renderExecHelp("/mnt/x.handler", spec, {})).toMatch(/--note/);
+  });
+
+  it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
+    // The two doors are one gate asked in two spellings, so what they let
+    // through must not depend on which the caller reached for. Both
+    // permissive cases are schemas the RUNTIME will not judge either: one
+    // naming no fields at all, and one saying extra fields are welcome.
+    const shapes: Record<string, JSONSchema> = {
+      "no properties key": { type: "object" },
+      "empty properties": { type: "object", properties: {} },
+      "additionalProperties": {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: true,
+      },
+      "closed": { type: "object", properties: { title: { type: "string" } } },
+    };
+
+    const verdicts: Record<string, { flag: string; payload: string }> = {};
+    for (const [label, inputSchema] of Object.entries(shapes)) {
+      const spec = makeSpec("handler", inputSchema);
+      let flag: string;
+      try {
+        parseExecArgs(spec, ["invoke", "--titel", "x"]);
+        flag = "accept";
+      } catch {
+        flag = "refuse";
+      }
+      verdicts[label] = {
+        flag,
+        payload: undeclaredVerbFieldError({ titel: "x" }, inputSchema) ===
+            undefined
+          ? "accept"
+          : "refuse",
+      };
+    }
+
+    // Asserted as one object so a disagreement names WHICH shape drifted,
+    // and so a change making both doors uniformly wrong still fails.
+    expect(verdicts).toEqual({
+      "no properties key": { flag: "accept", payload: "accept" },
+      "empty properties": { flag: "refuse", payload: "refuse" },
+      "additionalProperties": { flag: "accept", payload: "accept" },
+      "closed": { flag: "refuse", payload: "refuse" },
+    });
+
+    // An accepted flag lands as the string the caller typed: the schema
+    // declared no type to read it as, and this door does not invent one.
+    expect(
+      parseExecArgs(makeSpec("handler", shapes["no properties key"]), [
+        "invoke",
+        "--titel",
+        "x",
+      ]).input,
+    ).toEqual({ titel: "x" });
+  });
+
+  it("offers a negated near miss, and only over fields that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        title: { type: "boolean" },
+        done: { type: "boolean" },
+        body: { type: "string" },
+      },
+    });
+
+    // The case the caller actually hits: a typo inside the negated name. The
+    // `no-` prefix is stripped before matching, because otherwise it is three
+    // edits of noise and the threshold scales with the misspelling's length —
+    // so it would get HARDER to match precisely because they typed more.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(/Did you mean "--no-title"\?/);
+
+    // Only booleans are offered, because only a boolean can be negated.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares "--title", "--done"/,
+      );
+
+    // A near miss toward a NON-boolean is withheld: `--no-body` would fail
+    // too, so naming it sends the caller to a spelling that does not work.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-bodi"]))
+      .not.toThrow(/Did you mean/);
+
+    // The unnegated door is untouched, and still lists every field.
+    expect(() => parseExecArgs(spec, ["invoke", "--titel", "x"]))
+      .toThrow(
+        /Did you mean "--title"\? <event> takes "--title", "--done", "--body"/,
+      );
+
+    // A valid negation still works.
+    expect(parseExecArgs(spec, ["invoke", "--no-title"]).input)
+      .toEqual({ title: false });
+  });
+
+  it("says so when a verb declares nothing that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { body: { type: "string" } },
+    });
+    expect(() => parseExecArgs(spec, ["invoke", "--no-body-x"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares none/,
+      );
+  });
+
+  it("refuses a declared field typed in its schema spelling, not aliases it", () => {
+    // The permissive path turns on whether the SCHEMA judges its fields, not
+    // on whether a NAME is declared. Asking the second would read `--fooBar`
+    // as an undeclared field against an open schema and accept it — a silent
+    // alias for `--foo-bar` that no help page teaches and that arrives
+    // untyped, because the synthesized descriptor carries no schema.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { fooBar: { type: "number" } },
+    });
+
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/"--fooBar" at <event> is not a field this verb declares\./);
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/Did you mean "--foo-bar"\?/);
+
+    // And the spelling it names parses to the DECLARED type, not a string.
+    expect(parseExecArgs(spec, ["invoke", "--foo-bar", "5"]).input)
+      .toEqual({ fooBar: 5 });
   });
 
   it("handles each non-object input mode and its errors", () => {
@@ -509,9 +784,19 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(booleanSpec, ["--value", "true"]).input).toBe(true);
     expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
       .toThrow(/Unexpected argument extra/);
+    // A verb taking a single value has no fields to name, so the vocabulary
+    // is the fixed four rather than schema-derived — but a fixed vocabulary
+    // is still a vocabulary, so the near miss is owed here too.
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /Unknown flag/,
+      /"--other" is not a flag this verb takes\./,
     );
+    expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
+      /"--value", "--value-file", "--json", "--json-file"/,
+    );
+    expect(() => parseExecArgs(stringSpec, ["--valu", "x"]))
+      .toThrow(/Did you mean "--value"\?/);
+    expect(() => parseExecArgs(stringSpec, ["--zzzzzzzz", "x"]))
+      .not.toThrow(/Did you mean/);
     expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
       /cannot be combined/,
     );
@@ -530,8 +815,11 @@ describe("parseExecArgs edge cases", () => {
     const spec = makeSpec("tool", { type: "object", properties: {} });
 
     expect(() => parseExecArgs(spec, ["invoke"])).toThrow(/Invalid verb/);
+    // `--help` is not unknown — alone it prints the help page. What it does
+    // not do is take an argument, and only a verb declaring a `help` field
+    // gives it one to fill.
     expect(() => parseExecArgs(spec, ["--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
     expect(parseExecArgs(spec, ["run", "--help"])).toMatchObject({
       verb: "run",
@@ -541,7 +829,7 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["run", "--help", "--json"]))
       .toMatchObject({ showHelp: true, showHelpJson: true });
     expect(() => parseExecArgs(spec, ["run", "--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
   });
 });
@@ -583,6 +871,31 @@ describe("resolveParsedExecInput edge cases", () => {
         readTextInput: () => Promise.resolve(""),
       })).input,
     ).toEqual({});
+  });
+
+  it("resolves a bare schema-less handler call without reading piped stdin", async () => {
+    // A rejecting reader proves stdin stays untouched: a schema-less input
+    // declares no payload, so the bare call must not wait on EOF even when
+    // stdin is a pipe.
+    const deps = {
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.reject(new Error("stdin was read")),
+    };
+
+    const stream = await resolveExecInvocation(
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
+      [],
+      deps,
+    );
+    expect(stream.parsed.verb).toBe("invoke");
+    expect(stream.input).toBeUndefined();
+
+    const unschematized = await resolveExecInvocation(
+      makeSpec("handler", true),
+      [],
+      deps,
+    );
+    expect(unschematized.input).toBeUndefined();
   });
 
   it("normalizes only object inputs for tools with a string help field", () => {
@@ -1131,6 +1444,45 @@ describe("renderPieceCallHelp", () => {
     );
   });
 
+  it("prints a result field's own description beside its placeholder", () => {
+    // The description is a ref-site sibling on the property — the shape a
+    // declared result actually arrives in — so no resolution stands between
+    // the wire and the page. Aligned as the flags are, and a multi-line
+    // comment continues under its own first line.
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        {
+          type: "object",
+          properties: {
+            item: {
+              "$ref": "#/$defs/ItemOutput",
+              description: "The root item this call created.",
+            } as never,
+            openBelow: {
+              type: "number",
+              description: "Descendants still open.\nZero means done.",
+            },
+          },
+        },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json>         The root item this call created.",
+        "    openBelow <number>  Descendants still open.",
+        "                        Zero means done.",
+      ].join("\n"),
+    );
+  });
+
   it("mentions no file to write JSON to, there being none in this context", () => {
     const help = renderPieceCallHelp(
       "cf piece call ... onAddContact",
@@ -1143,7 +1495,7 @@ describe("renderPieceCallHelp", () => {
     // caller has no way to reach — and it is the last line of the page.
     expect(help).not.toContain("write JSON to this file");
     expect(help).not.toContain("Alternatively");
-    // The neighbouring note is about this command's own spelling, and stays.
+    // The neighboring note is about this command's own spelling, and stays.
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );

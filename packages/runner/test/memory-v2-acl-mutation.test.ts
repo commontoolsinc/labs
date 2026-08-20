@@ -1,17 +1,20 @@
-// Post-genesis ACL mutation against a real memory-v2 server.
-//
-// The pre-existing `acl-manager.test.ts` mocks the runtime wholesale — fake
-// cell, fake `editWithRetry` — so it cannot observe the commit the runner
-// actually emits. That is precisely how a bug shipped in which every ACL
-// mutation after genesis was refused by the server ("ACL mutations must
-// replace the space-scoped ACL document"): the runner decomposed the write
-// into `op: "patch"`, the server requires a whole-document `op: "set"`, and no
-// test in the suite could see the difference. `memory-v2-acl-bootstrap.test.ts`
-// uses a real server but only ever covers genesis.
-//
-// These tests therefore assert the emitted OPERATION SHAPE, not just a green
-// path. A patch-based "fix" that happened to succeed, or a fix that only
-// succeeded on a retry, would pass a value-only assertion and fail here.
+/**
+ * Post-genesis ACL mutation against a real memory-v2 server.
+ *
+ * The pre-existing `acl-manager.test.ts` mocks the runtime wholesale — fake
+ * cell, fake `editWithRetry` — so it cannot observe the commit the runner
+ * actually emits. That is precisely how a bug shipped in which every ACL
+ * mutation after genesis was refused by the server ("ACL mutations must
+ * replace the space-scoped ACL document"): the runner decomposed the write
+ * into `op: "patch"`, the server requires a whole-document `op: "set"`, and no
+ * test in the suite could see the difference. `memory-v2-acl-bootstrap.test.ts`
+ * uses a real server but only ever covers genesis.
+ *
+ * These tests therefore assert the emitted OPERATION SHAPE, not just a green
+ * path. A patch-based "fix" that happened to succeed, or a fix that only
+ * succeeded on a retry, would pass a value-only assertion and fail here.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
@@ -481,7 +484,7 @@ Deno.test("ACL mutation preserves sibling envelope fields", async () => {
   const ctx = await withGenesisedSpace("runner-acl-mutation-siblings");
   const bob = await Identity.fromPassphrase("runner-acl-mutation-siblings bob");
   try {
-    // Install a sibling out-of-band, as a labelling layer would.
+    // Install a sibling out-of-band, as a labeling layer would.
     const current = await ctx.server.readDocument(
       ctx.space,
       `of:${ctx.space}`,

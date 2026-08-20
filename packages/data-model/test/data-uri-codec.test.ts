@@ -22,10 +22,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import {
-  JsonCodecEngine,
-  seemsLikeJsonEncodedFabricValue,
-} from "@/codec-json/index.ts";
+import { JsonCodecEngine } from "@/codec-json/index.ts";
 import { jsonFromFabricValue } from "@/codecs.ts";
 import {
   DATA_URI_MEDIA_TYPE,
@@ -75,12 +72,12 @@ describe("data-uri-codec", () => {
       const payload = new TextDecoder().decode(
         fromBase64url(uri.slice(uri.indexOf(",") + 1)),
       );
-      expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded(payload)).toBe(true);
     });
 
     // The payload is base64url of the UTF-8 form of the encoded text. The id
     // is that payload, so however the bytes are arrived at, the answer has to
-    // be the one this spells out. The cases cover text that is entirely
+    // be the one stated here. The cases cover text that is entirely
     // ASCII, text that is not, and text too long to take any short cut.
     it("mints a payload that is base64url of the encoded text", () => {
       const textEncoder = new TextEncoder();

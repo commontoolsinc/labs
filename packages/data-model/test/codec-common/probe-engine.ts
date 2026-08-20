@@ -14,10 +14,13 @@ import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
-  ReconstructionContext,
+  CodecForFormat,
+  LiveEnvironment,
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
+import { BaseEncodeAct } from "@/codec-common/BaseEncodeAct.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -79,10 +82,14 @@ export class XCodec extends BaseTerminalCodec<ProbeValue> {
     return "encoded-X";
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     return "decoded-X";
   }
@@ -134,10 +141,14 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
     return { inner: NESTED };
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     state: ProbeValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return TERMINAL_HOST;
@@ -170,10 +181,14 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
     return { inner: NESTED };
   }
 
+  canDecode(_state: FabricValue): _state is FabricValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     state: FabricValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return NONTERMINAL_HOST;
@@ -197,10 +212,14 @@ export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
     throw new Error("Shouldn't happen: this codec never encodes.");
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     throw new Error("rejected by throwing");
   }
@@ -224,16 +243,51 @@ export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
     throw new Error("Shouldn't happen: this codec never encodes.");
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     typeTag: string,
     state: ProbeValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     return new ProblematicValue(
       typeTag,
       state as FabricValue,
       "rejected by returning",
     );
+  }
+}
+
+/**
+ * Codec that rejects a state by REFUSING it in `canDecode()`, which is the
+ * third way. Reachable by tag only: nothing encodes to it, since what it
+ * exists to exercise is the decode side.
+ */
+export class RefusingCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("Refuses@1", undefined);
+  }
+
+  override canEncode(_value: FabricValue): boolean {
+    return false;
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    throw new Error("Shouldn't happen: this codec never encodes.");
+  }
+
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return false;
+  }
+
+  decode(
+    _typeTag: string,
+    _state: ProbeValue,
+    _env: LiveEnvironment,
+  ): FabricValue {
+    throw new Error("Shouldn't happen: nothing gets past `canDecode()`.");
   }
 }
 
@@ -271,79 +325,134 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
     return "m";
   }
 
+  canDecode(_state: ProbeValue): _state is ProbeValue {
+    return true;
+  }
+
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     return { deep: { n: 1 } };
   }
 }
 
 /**
- * The engine. Its containers do the least a container can do, so that what a
- * test observes is the base class and not this.
+ * One act of encoding in the probe format, whose transport tree is what
+ * crosses: there is nothing to convert on the way out. Its containers do the
+ * least a container can do, so that what a test observes is the base class and
+ * not this.
  */
-export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
-  //
-  // Instance members
-  //
-
-  override encode(value: FabricValue): ProbeValue {
-    return this.encodeValue(value);
+export class ProbeEncodeAct extends BaseEncodeAct<ProbeValue> {
+  /** @inheritDoc */
+  override serializedFromEncoded(encoded: ProbeValue): ProbeValue {
+    return encoded;
   }
 
-  override decode(
-    data: ProbeValue,
-    context: ReconstructionContext,
-  ): FabricValue {
-    return this.decodeValue(data, context);
-  }
-
+  /** @inheritDoc */
   protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
     return new Tagged(tag, state);
   }
 
-  protected override encodeArray(
-    value: readonly FabricValue[],
-    seen: Set<object>,
-  ): ProbeValue {
-    ProbeEngine.enterOrThrow(seen, value);
-    const result = value.map((v) => this.encodeValue(v, seen));
-    seen.delete(value);
-    return result;
+  /** @inheritDoc */
+  protected override encodeArray(value: readonly FabricValue[]): ProbeValue {
+    this.enter(value);
+    try {
+      return value.map((v) => this.encodeValue(v));
+    } finally {
+      this.leave(value);
+    }
   }
 
+  /** @inheritDoc */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    seen: Set<object>,
   ): ProbeValue {
-    ProbeEngine.enterOrThrow(seen, value);
-    const result: Record<string, ProbeValue> = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = this.encodeValue(v, seen);
-    }
-    seen.delete(value);
-    return result;
-  }
-
-  protected override decodeValue(
-    data: ProbeValue,
-    context: ReconstructionContext,
-  ): FabricValue {
-    if (data instanceof Tagged) {
-      return this.decodeTagged(data.tag, data.state, context);
-    } else if (Array.isArray(data)) {
-      return data.map((d) => this.decodeValue(d, context));
-    } else if ((data !== null) && (typeof data === "object")) {
-      const result: Record<string, FabricValue> = {};
-      for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, context);
+    this.enter(value);
+    try {
+      const result: Record<string, ProbeValue> = {};
+      for (const [k, v] of Object.entries(value)) {
+        result[k] = this.encodeValue(v);
       }
       return result;
+    } finally {
+      this.leave(value);
+    }
+  }
+}
+
+/**
+ * One act of decoding in the probe format.
+ *
+ * Cycles are guarded, unlike the JSON format's: this format's transport is the
+ * tree itself, so a caller can hand `decode()` a graph with a cycle in it, and
+ * the guard is what refuses one.
+ */
+export class ProbeDecodeAct extends BaseDecodeAct<ProbeValue> {
+  /**
+   * @inheritDoc
+   *
+   * The tree is what arrives, so there is nothing to convert and nothing this
+   * format can tell is not its own: any value at all is a candidate.
+   */
+  override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
+    return data;
+  }
+
+  /** @inheritDoc */
+  override decodeValue(data: ProbeValue): FabricValue {
+    if ((data === null) || (typeof data !== "object")) {
+      return data as FabricValue;
     }
 
-    return data as FabricValue;
+    // Every object node goes through the guard, the tagged form included: this
+    // format's transport is the tree itself, so a `Tagged` can hold a
+    // reference back to a node above it with no container in between.
+    const cycle = this.enterOrReport(data);
+    if (cycle !== null) {
+      return cycle;
+    }
+
+    try {
+      if (data instanceof Tagged) {
+        return this.decodeTagged(data.tag, data.state);
+      } else if (Array.isArray(data)) {
+        return data.map((d) => this.decodeValue(d));
+      }
+
+      const result: Record<string, FabricValue> = {};
+      for (const [k, v] of Object.entries(data)) {
+        result[k] = this.decodeValue(v as ProbeValue);
+      }
+      return result;
+    } finally {
+      this.leave(data);
+    }
+  }
+}
+
+/**
+ * The engine, which is its configuration and the two act factories: everything
+ * a test observes about a walk belongs to the acts above.
+ */
+export class ProbeEngine extends BaseCodecEngine<
+  ProbeValue,
+  ProbeValue,
+  ProbeEncodeAct,
+  ProbeDecodeAct
+> {
+  /** @inheritDoc */
+  protected override newEncodeAct(env: LiveEnvironment): ProbeEncodeAct {
+    return new ProbeEncodeAct(this, env);
+  }
+
+  /** @inheritDoc */
+  protected override newDecodeAct(
+    env: LiveEnvironment,
+    _data: ProbeValue,
+  ): ProbeDecodeAct {
+    return new ProbeDecodeAct(this, env);
   }
 }
 
@@ -360,8 +469,16 @@ const PROBE_FORMAT: WireFormat<ProbeValue> = Object.freeze({
  * self-representing primitives a walk needs to get anywhere.
  */
 export function newProbeEngine(
-  options?: { lenient?: boolean; record?: HostRecord },
-): { engine: ProbeEngine; record: HostRecord } {
+  options?: {
+    lenient?: boolean;
+    record?: HostRecord;
+    extraCodecs?: readonly CodecForFormat<ProbeValue>[];
+  },
+): {
+  engine: ProbeEngine;
+  record: HostRecord;
+  registry: CodecRegistry<ProbeValue>;
+} {
   const record = options?.record ?? newRecord();
   const registry = new CodecRegistry<ProbeValue>(PROBE_FORMAT);
 
@@ -375,12 +492,17 @@ export function newProbeEngine(
   registry.register(new MarkerCodec());
   registry.register(new ThrowingCodec());
   registry.register(new RejectingCodec());
+  registry.register(new RefusingCodec());
   for (const t of ["null", "boolean", "number", "string", "bigint"] as const) {
     registry.registerSelfRep(t);
+  }
+  for (const codec of options?.extraCodecs ?? []) {
+    registry.register(codec);
   }
   Object.freeze(registry);
 
   return {
+    registry,
     engine: new ProbeEngine({ registry, lenient: options?.lenient ?? false }),
     record,
   };

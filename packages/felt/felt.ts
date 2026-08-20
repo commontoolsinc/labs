@@ -1,8 +1,9 @@
-import { DevServer } from "./dev-server.ts";
-import { Builder } from "./builder.ts";
-import { FeltCommand, ResolvedConfig } from "./interface.ts";
-import { copy } from "@std/fs";
 import { blue, cyan, dim, green, red, yellow } from "@std/fmt/colors";
+import { copy } from "@std/fs";
+
+import { Builder } from "./builder.ts";
+import { DevServer } from "./dev-server.ts";
+import { FeltCommand, ResolvedConfig } from "./interface.ts";
 
 export class Felt {
   constructor(

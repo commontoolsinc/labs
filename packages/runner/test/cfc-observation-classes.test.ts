@@ -1,15 +1,17 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
-import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-observation-classes");
 const space = signer.did();

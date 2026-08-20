@@ -1,15 +1,16 @@
-import { unclaimed } from "@commonfabric/memory/fact";
-import type { FabricPlainObject } from "@commonfabric/api";
-import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
+  isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
+import { unclaimed } from "@commonfabric/memory/fact";
+
+import { normalizeCellScope } from "../scope.ts";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -17,7 +18,6 @@ import type {
   State,
 } from "./interface.ts";
 import * as Address from "./transaction/address.ts";
-import { normalizeCellScope } from "../scope.ts";
 
 // A differential merges one notification batch's changes per address
 // IDENTITY — per scope instance (key-vocabulary.md §1 site 8), so two

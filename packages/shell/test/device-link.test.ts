@@ -7,7 +7,16 @@ import {
   looksLikeDeviceLink,
   parseDeviceLinkFragment,
 } from "../src/lib/device-link.ts";
-import { runDeviceLinkLogin } from "../src/lib/device-link-login.ts";
+import {
+  confirmWithUser,
+  handleDeviceLink,
+  reportDeviceLinkFailure,
+  runDeviceLinkLogin,
+} from "../src/lib/device-link-login.ts";
+import {
+  activateModalDialog,
+  XDeviceLinkView,
+} from "../src/views/DeviceLinkView.ts";
 
 // NOTE: this file lives in test/ deliberately. The shell's test task globs
 // `test/*.test.ts` ONLY — a co-located src/lib/*.test.ts is silently never run,
@@ -332,7 +341,7 @@ describe("runDeviceLinkLogin", () => {
   });
 
   it("shows BOTH DIDs to the confirm gate when replacing", async () => {
-    // The confirm screen is the ONLY defence against a donated-identity link,
+    // The confirm screen is the ONLY defense against a donated-identity link,
     // so it must be handed the DIDs a user can cross-check against the Pair
     // screen — not a truncation or a placeholder.
     const stale = await Identity.fromRaw(
@@ -411,7 +420,7 @@ describe("runDeviceLinkLogin", () => {
 // Previously uncovered: every test above injects its own `confirm`, so the
 // production path and the whole view were unexercised. Two mutations passed the
 // entire suite as a result — `confirmWithUser` hardcoded to true, and the Cancel
-// button rewired to accept. For the screen the design calls the only defence
+// button rewired to accept. For the screen the design calls the only defense
 // against a donated-identity link, those are the mutations that matter most.
 //
 // Follows the repo's view-test idiom (see login-view.test.ts): install fake
@@ -483,8 +492,7 @@ function handlersOf(value: any): Array<() => void> {
 }
 
 describe("DeviceLinkView", () => {
-  async function makeView(state: Record<string, unknown>) {
-    const { XDeviceLinkView } = await import("../src/views/DeviceLinkView.ts");
+  function makeView(state: Record<string, unknown>) {
     const view = new XDeviceLinkView();
     // `guarded` defaults true (tap-through protection); tests opt out unless
     // they are specifically exercising the guard.
@@ -497,10 +505,10 @@ describe("DeviceLinkView", () => {
     return { view, answers };
   }
 
-  it("shows the incoming DID verbatim so it can be cross-checked", async () => {
+  it("shows the incoming DID verbatim so it can be cross-checked", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view } = await makeView({ incomingDid: COUNTING_ENTROPY_DID });
+      const { view } = makeView({ incomingDid: COUNTING_ENTROPY_DID });
       const text = templateText(view.render());
       assert(
         text.includes(COUNTING_ENTROPY_DID),
@@ -515,10 +523,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("shows BOTH DIDs and replace wording when replacing", async () => {
+  it("shows BOTH DIDs and replace wording when replacing", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view } = await makeView({
+      const { view } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
         currentDid: ZERO_ENTROPY_DID,
       });
@@ -531,10 +539,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("CANCEL answers no — the button wiring, not just finish()", async () => {
+  it("CANCEL answers no — the button wiring, not just finish()", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
       });
       const handlers = handlersOf(view.render());
@@ -551,10 +559,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("the primary button answers yes", async () => {
+  it("the primary button answers yes", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
       });
       handlersOf(view.render())[0]();
@@ -564,10 +572,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("ignores an accept that lands inside the tap-through guard", async () => {
+  it("ignores an accept that lands inside the tap-through guard", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
         guarded: true, // as it is for the first moments on screen
       });
@@ -578,10 +586,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("still allows CANCEL during the guard", async () => {
+  it("still allows CANCEL during the guard", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
         guarded: true,
       });
@@ -592,10 +600,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("answers exactly once, even on a double tap", async () => {
+  it("answers exactly once, even on a double tap", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
       });
       const [accept, cancel] = handlersOf(view.render());
@@ -608,10 +616,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("the already-signed-in screen cannot answer anything but yes", async () => {
+  it("the already-signed-in screen cannot answer anything but yes", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({
+      const { view, answers } = makeView({
         incomingDid: COUNTING_ENTROPY_DID,
         currentDid: COUNTING_ENTROPY_DID,
       });
@@ -624,10 +632,10 @@ describe("DeviceLinkView", () => {
     }
   });
 
-  it("the failure screen explains why a refresh will not help", async () => {
+  it("the failure screen explains why a refresh will not help", () => {
     const restore = installBrowserGlobals();
     try {
-      const { view, answers } = await makeView({ failure: "unreadable" });
+      const { view, answers } = makeView({ failure: "unreadable" });
       const text = templateText(view.render());
       assert(text.includes("could not be read"));
       // The scrub has already removed the code, so the design's documented
@@ -663,9 +671,6 @@ describe("confirmWithUser (the production confirm path)", () => {
         created.push(el);
         return el;
       };
-      const { confirmWithUser } = await import(
-        "../src/lib/device-link-login.ts"
-      );
       const pending = confirmWithUser(COUNTING_ENTROPY_DID, null);
       const el = created[0];
       assertEquals(el.incomingDid, COUNTING_ENTROPY_DID);
@@ -693,9 +698,6 @@ describe("confirmWithUser (the production confirm path)", () => {
         created.push(el);
         return el;
       };
-      const { confirmWithUser } = await import(
-        "../src/lib/device-link-login.ts"
-      );
       const pending = confirmWithUser(COUNTING_ENTROPY_DID, ZERO_ENTROPY_DID);
       assertEquals(created[0].currentDid, ZERO_ENTROPY_DID);
       created[0].dispatchEvent(
@@ -711,7 +713,7 @@ describe("confirmWithUser (the production confirm path)", () => {
 // ── the modal activation seam ──────────────────────────────────────────────
 //
 // firstUpdated's imperative DOM work runs only against a real DOM, so the
-// browser-behaviour mutations (Escape rewired to accept, showModal never
+// browser-behavior mutations (Escape rewired to accept, showModal never
 // called, cancel listener never attached) previously ALL survived — the unit
 // tests stub document.body.appendChild to a no-op, so the element never
 // connects and firstUpdated never fires. `activateModalDialog` is extracted so
@@ -744,20 +746,14 @@ function fakeDialog(
 }
 
 describe("activateModalDialog", () => {
-  it("shows the dialog modally and wires the cancel signal", async () => {
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
+  it("shows the dialog modally and wires the cancel signal", () => {
     const { dialog, calls } = fakeDialog();
     activateModalDialog(dialog, () => {});
     assert(calls.includes("showModal"), "must open the top layer");
     assert(calls.includes("listen:cancel"), "must wire the cancel signal");
   });
 
-  it("Escape (a cancel event) resolves to NO, never a silent accept", async () => {
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
+  it("Escape (a cancel event) resolves to NO, never a silent accept", () => {
     const { dialog, fireCancel } = fakeDialog();
     let answer: boolean | undefined;
     activateModalDialog(dialog, () => (answer = false));
@@ -765,12 +761,9 @@ describe("activateModalDialog", () => {
     assertEquals(answer, false);
   });
 
-  it("falls back to a VISIBLE dialog when showModal is unsupported", async () => {
+  it("falls back to a VISIBLE dialog when showModal is unsupported", () => {
     // A <dialog> with no `open` is display:none — on old iOS this would be an
     // invisible, un-dismissable hang. The open attribute makes it show.
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
     const { dialog, calls } = fakeDialog({ hasShowModal: false });
     activateModalDialog(dialog, () => {});
     assert(
@@ -779,10 +772,7 @@ describe("activateModalDialog", () => {
     );
   });
 
-  it("falls back to a visible dialog when showModal THROWS", async () => {
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
+  it("falls back to a visible dialog when showModal THROWS", () => {
     const { dialog, calls } = fakeDialog({ showModalThrows: true });
     activateModalDialog(dialog, () => {});
     assert(calls.includes("showModal"), "tries the top layer first");
@@ -792,10 +782,7 @@ describe("activateModalDialog", () => {
     );
   });
 
-  it("is a no-op on a missing dialog rather than throwing", async () => {
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
+  it("is a no-op on a missing dialog rather than throwing", () => {
     activateModalDialog(null, () => {
       throw new Error("onCancel must not fire for a null dialog");
     });
@@ -817,15 +804,12 @@ describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () 
     });
   }
 
-  it("wires the dialog's cancel (Escape) to a NO answer, not accept", async () => {
+  it("wires the dialog's cancel (Escape) to a NO answer, not accept", () => {
     // M1: the highest-stakes mutation — Escape rewired to accept a donated
     // identity. The seam test proves cancel→onCancel; this proves the COMPONENT
     // passes finish(false) as onCancel, closing the loop.
     const restore = installBrowserGlobals();
     try {
-      const { XDeviceLinkView } = await import(
-        "../src/views/DeviceLinkView.ts"
-      );
       const view = new XDeviceLinkView();
       Object.assign(view, { guarded: false });
       const answers: boolean[] = [];
@@ -851,7 +835,7 @@ describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () 
     }
   });
 
-  it("is scheduled on first update and CLEARED on disconnect", async () => {
+  it("is scheduled on first update and CLEARED on disconnect", () => {
     // A leaked timer would flip `guarded` on an element already removed; a timer
     // never scheduled would leave accept disabled forever. Pin both by
     // capturing the ids through the real firstUpdated/disconnectedCallback.
@@ -870,9 +854,6 @@ describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () 
     (globalThis as any).clearTimeout = (id: number) => cleared.push(id);
     const restore = installBrowserGlobals();
     try {
-      const { XDeviceLinkView } = await import(
-        "../src/views/DeviceLinkView.ts"
-      );
       const view = new XDeviceLinkView();
       // Stub the shadow root so firstUpdated can run without a real DOM; a null
       // dialog exercises the crash-safe path (activateModalDialog no-ops).
@@ -925,9 +906,6 @@ describe("reportDeviceLinkFailure", () => {
     const restore = installBrowserGlobals();
     try {
       const created = withFakeViews();
-      const { reportDeviceLinkFailure } = await import(
-        "../src/lib/device-link-login.ts"
-      );
       const pending = reportDeviceLinkFailure("unreadable");
       assertEquals(created.length, 1);
       assertEquals(created[0].failure, "unreadable");
@@ -946,9 +924,6 @@ describe("reportDeviceLinkFailure", () => {
     const restore = installBrowserGlobals();
     try {
       const created = withFakeViews();
-      const { reportDeviceLinkFailure } = await import(
-        "../src/lib/device-link-login.ts"
-      );
       const pending = reportDeviceLinkFailure("failed");
       assertEquals(created[0].failure, "failed");
       created[0].dispatchEvent(new CustomEvent("device-link-result"));
@@ -962,9 +937,6 @@ describe("reportDeviceLinkFailure", () => {
     const restore = installBrowserGlobals();
     try {
       const created = withFakeViews();
-      const { reportDeviceLinkFailure } = await import(
-        "../src/lib/device-link-login.ts"
-      );
       const pending = reportDeviceLinkFailure("unreadable");
       created[0].dispatchEvent(new CustomEvent("device-link-result"));
       await pending;
@@ -1055,13 +1027,10 @@ describe("scrub failure is survivable", () => {
 });
 
 describe("activateModalDialog — last-ditch fallback", () => {
-  it("does not throw when BOTH showModal and setAttribute fail", async () => {
+  it("does not throw when BOTH showModal and setAttribute fail", () => {
     // The worst case: an exotic/partial <dialog>. We cannot show anything, but
     // throwing here would propagate out of firstUpdated and hang the promise —
     // the crash that bricked boot before. It must degrade quietly.
-    const { activateModalDialog } = await import(
-      "../src/views/DeviceLinkView.ts"
-    );
     let listened = false;
     const hostile = {
       showModal: () => {
@@ -1080,7 +1049,7 @@ describe("activateModalDialog — last-ditch fallback", () => {
 });
 
 describe("the tap-through guard actually releases", () => {
-  it("flips `guarded` false when the timer fires", async () => {
+  it("flips `guarded` false when the timer fires", () => {
     // The timer BODY (not just its scheduling): without this the accept button
     // would stay disabled forever, which is one half of the boot-brick.
     const restore = installBrowserGlobals();
@@ -1092,9 +1061,6 @@ describe("the tap-through guard actually releases", () => {
       return 1;
     };
     try {
-      const { XDeviceLinkView } = await import(
-        "../src/views/DeviceLinkView.ts"
-      );
       const view = new XDeviceLinkView();
       Object.defineProperty(view, "renderRoot", {
         value: { querySelector: () => null },
@@ -1132,12 +1098,7 @@ describe("the tap-through guard actually releases", () => {
 // possible at all; the coverage ratchet was pointing at a genuine design smell.
 
 describe("handleDeviceLink", () => {
-  async function load() {
-    return await import("../src/lib/device-link-login.ts");
-  }
-
   it("reports a malformed fragment and never attempts a login", async () => {
-    const { handleDeviceLink } = await load();
     const reported: string[] = [];
     let loggedIn = false;
     await handleDeviceLink({ kind: "malformed" }, {
@@ -1155,7 +1116,6 @@ describe("handleDeviceLink", () => {
   });
 
   it("reports an invalid entropy outcome", async () => {
-    const { handleDeviceLink } = await load();
     const reported: string[] = [];
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
       report: (r) => {
@@ -1170,7 +1130,6 @@ describe("handleDeviceLink", () => {
   it("is SILENT on cancel and on already-signed-in", async () => {
     // Cancel is an intentional "not mine"; already-signed-in is a successful
     // no-op. Nagging on either would train users to dismiss the real warnings.
-    const { handleDeviceLink } = await load();
     for (const outcome of ["cancelled", "already-signed-in"] as const) {
       const reported: string[] = [];
       let reloaded = false;
@@ -1193,7 +1152,6 @@ describe("handleDeviceLink", () => {
   it("reloads after an accepted replace on the hashchange path", async () => {
     // The running app still holds the OLD identity; without the reload it would
     // keep signing as it despite the KeyStore having been updated.
-    const { handleDeviceLink } = await load();
     let reloaded = false;
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
       reloadOnReplace: true,
@@ -1209,7 +1167,6 @@ describe("handleDeviceLink", () => {
   it("does NOT reload on the bootstrap path", async () => {
     // initializeKeys() has not run yet there, so it picks the new key up
     // directly — reloading would be a gratuitous flash.
-    const { handleDeviceLink } = await load();
     let reloaded = false;
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
       login: () => Promise.resolve("accepted" as const),
@@ -1224,7 +1181,6 @@ describe("handleDeviceLink", () => {
   it("never throws — a mid-flow error is reported, not propagated", async () => {
     // An uncaught throw on the bootstrap path skips initializeKeys AND
     // Navigation, stranding the user on a login screen with no explanation.
-    const { handleDeviceLink } = await load();
     const reported: string[] = [];
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
       login: () => Promise.reject(new Error("KeyStore.open rejected")),
@@ -1237,9 +1193,8 @@ describe("handleDeviceLink", () => {
   });
 
   it("survives the reporter itself failing", async () => {
-    // Last line of defence: if even the failure screen cannot render, boot on
+    // Last line of defense: if even the failure screen cannot render, boot on
     // rather than hanging forever.
-    const { handleDeviceLink } = await load();
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
       login: () => Promise.reject(new Error("boom")),
       report: () => Promise.reject(new Error("the reporter is broken too")),

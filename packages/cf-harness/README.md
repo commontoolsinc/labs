@@ -54,6 +54,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `describe_handle` (shape of a handle's referent, never its value; see
+    [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
 - targeted exact-string edits plus whole-file replace/create and append writes
@@ -67,8 +69,8 @@ What works today:
 - interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
-  default/browser/web_fetch/web_search child profiles, retained child run
-  references, and a sanitized summary/state return channel
+  default/browser/web_fetch/web_search/pattern-author child profiles, retained
+  child run references, and a sanitized summary/state return channel
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -118,21 +120,22 @@ network confinement model.
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
 - a session-local address handle table: deterministic short `cfh:a:` tokens for
-  cell addresses, minted per run, recorded in run state, and carried across
-  `--resume-run`; see
+  cell addresses, minted per run, recorded in run state, carried across
+  `--resume-run`, and seeded into a subagent's own table by the delegation that
+  names them; see
   [Session-local address handles](#session-local-address-handles)
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` together) that compiles and runs a pattern against a deployed
   Fabric space from the trusted host side and returns a live result cell
-  reference; see
+  reference; `assign_slug` names and lists a piece afterwards, so a person can
+  open it; see
   [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- session handle coverage beyond the wired seams: denial-path tool messages,
-  cross-agent handle semantics for `delegate_task` arguments, and value handles
-  (`cfh:v:`)
+- session handle coverage beyond the wired seams: denial-path tool messages, and
+  value handles (`cfh:v:`)
 - richer opaque-handle/pass-through behavior outside schema-validated subagent
   returns, including an explicit release/readback mechanism
 - first-class browser operation policy on top of the provisional browser
@@ -151,6 +154,8 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/handle-table.ts](src/handle-table.ts)
   - session-local address handle table: token minting and both swap directions
+- [src/schema-shape.ts](src/schema-shape.ts)
+  - allowlist rebuild that reduces a schema to structure for `describe_handle`
 - [src/fabric-session.ts](src/fabric-session.ts)
   - lazy, cached trusted Fabric session behind the `run_pattern` tool
 - [src/prompt-loop.ts](src/prompt-loop.ts)
@@ -348,11 +353,28 @@ binding existed are deliberately not resumable through the local adapter; it
 fails closed instead of guessing which credential home or billing route created
 them.
 
+Batch argv is a prompt run and nothing else. `--help` and
+`--describe-capabilities` answer without reading provider or auth state; every
+other argv is bound and executed, so argv led by a CLI subcommand — `auth`,
+`config`, `models`, `whoami` — is rejected as `invalid-request` rather than
+billed as a prompt whose text happens to read like a command. Run those against
+the cf-harness CLI itself. The leading token is what decides, so positional
+prompt text opening on one of those four words is refused the same way; pass it
+through `--prompt` to send it as prompt text.
+
 Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
 Interactive startup failures remain on the NDJSON chat protocol so hosts that do
-not consume stderr still receive the stable provider error code. Run state,
-manifests, reports, child manifests, and structured batch results record only
-provider, the non-secret auth-source label, and the fixed owner reference.
+not consume stderr still receive the stable provider error code. Those failures
+carry `retryable` in HTTP's `Retry-After` sense — set only where waiting alone
+can clear the blocker, which among startup blockers means an unreachable
+provider and nothing else. An unauthenticated or unconfigured provider needs
+someone to act before a retry means anything, so it stays unset, as does a host
+that broke unexpectedly and cannot say. A failure is `invalid-request` only
+while the argv and the recorded binding are still being checked; once a run
+starts being built, an infrastructure fault reports `internal-error`, so a host
+can keep a retry policy keyed on the code. Run state, manifests, reports, child
+manifests, and structured batch results record only provider, the non-secret
+auth-source label, and the fixed owner reference.
 
 Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
 multi-user host must instead:
@@ -586,12 +608,194 @@ bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
 except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text. And a sealed subagent structured-return string whose raw
-value names an address comes back as a token rather than an opaque `@link`
-object; the return's `linkedStringCount` counts only the positions still sealed.
-Denial-path tool messages are not swapped; that coverage, cross-agent handle
-semantics, value handles, and an explicit release/readback mechanism are listed
+there is inert text to the parent boundary. And a sealed subagent
+structured-return string whose raw value names an address comes back as a token
+rather than an opaque `@link` object; the return's `linkedStringCount` counts
+only the positions still sealed. Denial-path tool messages are not swapped; that
+coverage, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+#### Well-known grants
+
+A run configured with a Fabric session starts with a seeded handle: before the
+first model turn, the CLI establishes the session, mints a token for the space's
+piece registry — the same discovery root behind `cf piece ls` — and announces it
+in a context message pairing the token with a fixed, harness-authored
+description. The address stays trusted-side in the handle table like any other
+entry. This is what lets an agent find pieces to compute over without an
+operator handing it references one by one: discovery is `run_pattern` over the
+granted token, not a tool of its own, and `describe_handle` answers the
+registry's shape like any other reference.
+
+What the model receives is a token and fixed prose, never data. Reading anything
+behind the token means running a pattern over it, where the CFC boundary rules
+as it does for every other flow — in particular, a piece's `$NAME` is a value,
+and a name computed from labelled data taints a name-listing pattern's result,
+which strict enforcement refuses whole. The announcement says so and names the
+fallback: a pattern that returns the entry references without reading any
+values, which cannot taint and whose addresses come back as tokens through the
+ordinary outbound swap.
+
+The grants are recorded in run state (`wellKnownGrants`), replayed rather than
+re-minted on resume, and reported in the operator summary as `fabricGrants:`. A
+session that cannot be established leaves the run to proceed without its grants,
+and the CLI says so on stderr rather than staying silent. The grant list is
+designed to grow; the identity's profile is the expected next entry.
+
+#### Inspecting a handle's shape
+
+A token says nothing about what it refers to, and an agent handed one cannot
+write a line of code over it without knowing the shape of what is there.
+`describe_handle` closes that gap without opening the data: given a token, it
+reports the shape of the referent and the path segments — what field of what
+piece the token names — and never the value.
+
+```json
+{
+  "token": "cfh:a:k7m2q",
+  "known": true,
+  "hasSchema": true,
+  "schema": {
+    "type": "object",
+    "properties": { "doubled": { "type": "number" } }
+  },
+  "path": ["doubled"]
+}
+```
+
+Two sources can answer, in this order. The referent's own declared schema, read
+through the run's fabric session when it has one: a piece's document schema is
+the result schema of the pattern behind it, which is exactly what an agent
+holding a handle to that piece would be wiring into a pattern of its own.
+Failing that, the schema the mint recorded out of the harness's own work — a
+`run_pattern` result reference carries the compiled pattern's result schema,
+which compilation produced anyway, and the entry is marked
+`schemaSource: "harness"`. A run with no session still answers from its own
+table, so shape stays inspectable in every run that has handles at all. A token
+the run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here.
+
+**What is disclosed is structure and only structure**: property names, types,
+nesting, required-ness, array and object composition, a `type` from the schema
+vocabulary, a `format` from the small known set, and a local `$ref` with the
+`$defs` it points into. Definition names are not part of that: every `$defs` and
+`definitions` key is replaced by an opaque `d0`, `d1`, … and every `$ref` that
+resolves to one is rewritten to match, so the reported schema stays
+referentially valid while no name its author chose for a definition crosses. A
+`$ref` that resolves to nothing — a pointer into a `$defs` the schema does not
+declare — is dropped rather than reported, since there is nothing left of it but
+its author's text.
+
+**What is not disclosed is anything a value or a word can hide in.** A JSON
+Schema is a place to put data: `const`, `enum`, `default` and `examples` carry
+values outright, and `title`, `description`, `$comment` and `pattern` carry free
+text whoever authored the schema chose. Every schema this tool reports is
+therefore REBUILT from an allowlist of structural keywords rather than copied
+with a few keywords deleted — at every depth, through `properties`, `items`,
+`$defs`, and every combinator — so a keyword nobody anticipated is absent rather
+than disclosed. A `required` name that no property declares is dropped too: that
+is a string, not structure. Numeric bounds, string patterns, and the Common
+Fabric schema extensions do not cross either.
+
+The schema is also reduced to a bounded depth. Past a nesting depth no authored
+schema reaches, a subschema reports as the empty shape `{}`, the same answer a
+schema that refers to itself gets. A deep or cyclic schema therefore yields a
+smaller shape, never a failed call: reduction has no failure mode for
+`describe_handle` to propagate.
+
+That reduction is what makes the fabric-side read safe to allow. The schema a
+piece declares was authored by someone other than this run — quite possibly a
+person — and prose, values, and definition names do not cross the line at all.
+
+**Property names are the residual channel, accepted deliberately.** They are
+author-chosen text, and after the reduction above they are the only such text in
+the output. They cross because they have to: an agent handed a reference cannot
+write a line of code over the data without the names of its fields, which is the
+entire purpose of this tool. So the honest statement is not that no authored
+text crosses, but that exactly one kind does — the kind that carries structure —
+and that a reader of a reported schema should treat property names as coming
+from whoever wrote the schema.
+
+Being the one channel that crosses, they are also the one channel that is
+bounded. At most 200 properties of a single object are named, a property name
+longer than 128 characters is not named at all, and an object that omitted any
+of its properties for either reason reports `additionalProperties: true` — so a
+shortened list is never presented as the whole of them. A name past the limit is
+omitted rather than shortened: a truncated name is the name of nothing, and code
+written against it would read a field that does not exist. Both bounds sit far
+above any schema a person writes; they are there so that an arbitrarily wide one
+cannot fill a model's context with names, not as a boundary on what may be
+disclosed.
+
+The reply is also scrubbed of bare fabric identifiers, exactly as
+`run_pattern`'s diagnostics are, and the scrub reaches property names at every
+depth as well as the reply's own text. A property name is author-chosen, so a
+document whose schema names a field with a DID or a bare tagged hash would
+otherwise put that identifier into model context through the one channel that
+crosses.
+
+Disclosing shape is permissive and fixed rather than configurable: a run that
+holds a token gets an answer for any address in the session's own space, and
+there is no setting that says otherwise. The handle's own address is checked
+against the session's space, and an address outside it is not read at all — the
+session's authority ends at its space. That check is on the address, not on
+everything reachable from it: reading the document's declared schema resolves
+whatever links the document itself carries, and link resolution is not
+space-bounded. What bounds it in practice is that the model chooses the handle
+and never the path taken from it, and that whatever comes back is reduced to
+structure before any of it crosses. An address the session can state no shape
+for is reported as shapeless rather than as a failed call.
+
+`describe_handle` is declared `effectClass: "read"` and reads no value, but
+answering from the fabric establishes the run's fabric session — loading the
+identity key and opening a remote connection. The first call in a run therefore
+carries that cost and that effect.
+
+Shape is also what makes a chain of steps checkable. An orchestrator that passes
+a reference from one step to the next can confirm the reference is the kind of
+thing the next step expects — before it runs, and without reading the data
+flowing through it.
+
+#### Handles across a delegation
+
+A child resolves the parent's tokens through its own boundary, against a table
+the delegation seeds. When the parent delegates, the tokens written into the
+`goal` and `context` are looked up in the parent's table, and each entry that
+resolves is copied verbatim — same token, same reference — into a fresh table
+salted with the child's run id. Nothing else crosses. A token the parent held
+but did not write into the delegation is not in the child's table, so the child
+cannot resolve it; it stays the inert text an unknown token always is. This is
+the privilege boundary: what a subagent can reach by reference is exactly what
+its delegation handed it, and the decomposition structure is therefore the
+opacity structure.
+
+Copying entries verbatim keeps a reference stable across the hierarchy. Minting
+looks up by address, so a child minting a handle for a seeded address gets the
+parent's token back, and the same address is the same token in both runs.
+
+Returns come back the other way. The child's final text is resolved through the
+child's table into canonical references, and the parent's ordinary outbound swap
+mints those into parent tokens. A seeded address mints to the token the parent
+already holds, so a token the child echoes round-trips unchanged. An address
+only the child ever saw — a `run_pattern` result cell it created, say — becomes
+a new entry in the parent's table and reaches the parent as a token the parent
+can pass straight back into its own tools. The child's raw tokens never appear
+in parent-facing text.
+
+Whatever still looks like a token after that resolution is scrubbed to fixed
+inert text, irreversibly. The two tables share a token grammar but not a salt,
+and the parent's table is the larger one, so token-shaped text a child writes
+for itself would otherwise cross the boundary untouched — the child's table
+resolves nothing, and the parent's outbound pass swaps addresses rather than
+tokens — and then resolve in the PARENT's table, naming an entry the delegation
+deliberately withheld. A token the child holds legitimately has already become
+an address by that point, so the scrub costs nothing real.
+
+A `default`- or `pattern-author`-profile subagent inherits the parent's fabric
+session, so it can call `run_pattern` itself, under the same gate as the parent:
+with no session configured the tool is absent from the child's surface rather
+than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
+do not offer it.
 
 ### Running patterns against a Fabric space
 
@@ -615,7 +819,10 @@ configuration error naming the missing flags. The same holds under an explicit
 allowlist: `--allow-tool run_pattern` without the three session flags is a
 configuration error, and the tool is never offered to the model without a
 session. `--fabric-space` accepts a space name or a `did:key`, and
-`--describe-capabilities` reports `runPattern` among its features.
+`--describe-capabilities` reports `runPattern` among its features. The `default`
+and `pattern-author` profiles are offered the tool under the same gate and work
+through the parent's session; the `browser`, `web_fetch`, and `web_search`
+profiles never receive it.
 
 `run_pattern` executes on the trusted host side — it never enters the docker
 sandbox. The session (a `PiecesController` against the deployed API) is built
@@ -624,45 +831,171 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
+Two further flags set the session runtime's CFC dials, and both need the three
+session flags present. `--fabric-cfc-enforcement-mode`
+(`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
+`enforce-strict` — raise-only, since the session's runtime preset already pins
+`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
+confidentiality its target's declared policy does not admit has its commit
+refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
+accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
+onto everything a pattern's transaction writes, which is what makes a labelled
+read visible to that refusal. These dials govern the fabric session's runtime
+only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
+and the sandbox, and the two are set independently.
+
+A run states both postures rather than leaving them to be inferred: the resolved
+fabric-session posture — each dial's value and whether the operator configured
+it or the preset supplied it — is recorded as `fabricSessionCfc` in
+`run-state.json` and the run report, and the operator summary prints it beside
+the harness's own `cfcMode`.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an
 optional `resultSchema`. An `inputs` string value that is a whole-string
 LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
 reference; everything else passes through as plain JSON. A link that resolves
 into a space other than the configured session space is refused with a
-structured error before anything is created, and a live-cell input whose current
-value does not match the compiled pattern's argument schema for its key is
-refused the same way — named after the offending key, with no piece persisted.
-The deployed piece is deliberately unregistered — it never appears in the
-space's piece list — and deliberately detached: no origin is recorded, because
-model-authored source starts detached under the piece source-lifecycle spec.
-Run→piece provenance is carried by the run's persisted artifacts instead —
-run-state and the tool-output artifact record the `pieceId`. When the run's
-abort signal fires while the tool is waiting for the pattern to settle, the tool
-stops the created piece and returns a structured `cancelled` error; the signal
-is the only cancellation source — there is no timeout.
+structured error before anything is created, and an input whose value does not
+match the compiled pattern's argument schema for its key is refused the same way
+— named after the offending key, with no piece persisted. What supplies the
+value does not change that question: a live cell is measured by what it
+currently holds, and a plain JSON value by itself. So is an input the pattern's
+argument schema does not declare at all, listing the names the pattern does
+declare: a misnamed input is the mismatch a shape check cannot see, since the
+pattern then runs with that argument undefined and renders a complete page
+holding no values. Only a pattern whose argument schema names its properties,
+and does not admit further ones, is measured that way — an
+`additionalProperties` that is `true`, or that is a schema describing what an
+undeclared key may hold, admits undeclared inputs by name. What such an input's
+value is measured against is whatever that `additionalProperties` states:
+against the schema when it is one, since admitting a key says what the key may
+hold rather than exempting it from being checked, and against nothing when it is
+`true`, which declares the argument open and states no shape any value could
+miss.
 
-Every `run_pattern` invocation persists such a piece in the configured space. A
-cancelled run stops its piece, but no piece is ever deleted, and each piece's
-source-history revision is a storage-retention root the piece list does not
-reveal. Tooling that enumerates a space's contents from the piece list must not
-assume the list is exhaustive, and there is no garbage collection for these
-pieces yet.
+An input value carrying a sealed opaque link is refused before anything is
+created too, at the top level or nested anywhere inside a plain-JSON value, and
+the refusal names the path it was found at. The seal is the reserved
+`opaque:<handle-id>` target string a `resultSchema` sanitization leaves at a
+position it seals — optionally followed by `#` and a JSON pointer — and it is
+refused wherever it appears: as the `@link` of an object, whatever else that
+object carries alongside it, and as a bare string value a model lifted out of
+that wrapper. A seal is a redaction rather than an address: it marks a position
+an earlier result withheld, and it names nothing any reader resolves, so storing
+one would leave a dead literal where the pattern declared a live reference. The
+reference for that same data is the `cfh:a:` handle token, or the LLM-friendly
+link it stands for, passed as the input's own whole string value — which is what
+the refusal tells the model to do instead. The deployed piece is unregistered by
+default — it never appears in the space's piece list — and always detached: no
+origin is recorded, because model-authored source starts detached under the
+piece source-lifecycle spec. Run→piece provenance is carried by the run's
+persisted artifacts instead — run-state and the tool-output artifact record the
+`pieceId`. When the run's abort signal fires after the piece exists — while the
+tool is waiting for the pattern to settle — the tool stops the created piece and
+returns a structured `cancelled` error; the signal is the only cancellation
+source — there is no timeout.
+
+Naming is a separate operation. `assign_slug` takes a handle token referring to
+a piece — a `run_pattern` `resultRef`, or any granted or discovered piece
+reference — and a `slug`, the named address the piece is reachable at, in the
+same lowercase-hyphen form every fabric slug uses. It registers the piece in the
+space's piece list through the default pattern and then points the slug at it,
+the same two steps `cf piece new` performs. Keeping the two tools apart is
+deliberate: whether a piece deserves a public name is a decision the caller can
+make later, about any piece it can reference, and revise by naming a replacement
+under a fresh slug — and the operation discloses nothing, since the slug is the
+caller's own word and the address behind the token stays trusted-side. The token
+must name a piece itself, in the run's own space: a position inside one, a
+reference into another space, and a document with no pattern identity are each
+refused with a structured error.
+
+The slug is validated, then checked for availability, before anything is
+written, so an unusable slug and a slug already naming another piece are both
+structured errors that change nothing. The availability question fails closed: a
+slug is free only on the outcomes that say nothing is there — no document, a
+malformed one, one that is not a piece, one carrying no piece id — and any other
+failure refuses the call saying the availability could not be established,
+because reporting a storage error as a free name would write over whatever is
+there. That check is what stops a caller from taking over a name a person
+already opens: assigning a slug is a blind write, so without it a model naming
+`home` would repoint `home` at whatever it referenced. It is a check and not a
+lock — resolution and assignment are not atomic, so a slug that becomes taken in
+between is still overwritten — and it closes the case that arises rather than a
+race against a concurrent writer. A slug that already points at the very piece
+the token names answers `ok` rather than a refusal: the request is already true.
+`assign_slug` sets the address, not the title: what the piece list displays is
+the pattern's own `NAME` result, so a pattern that wants a title sets `NAME` in
+its source.
+
+Every `run_pattern` invocation persists a piece in the configured space, named
+or not. A cancelled run stops its piece, but no piece is ever deleted, and each
+piece's source-history revision is a storage-retention root the piece list does
+not reveal. Naming changes only whether a piece is findable, never whether it is
+retained: an unnamed piece is exactly as durable as a named one, and naming
+makes a retained piece visible to the tooling that could otherwise not see it.
+Tooling that enumerates a space's contents from the piece list must not assume
+the list is exhaustive, and there is no garbage collection for these pieces yet.
 
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
 the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
-given. The ordinary outbound swap turns `resultRef` (and any link strings inside
-`value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
-swap resolves such a token passed back through `inputs`; the tool itself carries
-no handle code. The persisted tool-output artifact keeps the raw reference, the
-raw result value, and the `pieceId` — a bare fabric identifier the handle
-boundary never swaps, so it stays out of the model-facing rendering. Compiler
-diagnostics come back as `{ status: "compile-error", message }` so the model can
-iterate on the source; bare fabric identifiers a diagnostic can embed
-(compiler-generated `fid1:` module roots, DIDs, `data:` URIs) are replaced with
-a `[fabric-id]` placeholder in the model-facing message, while the persisted
-artifact keeps the raw text.
+given. `resultSchema` is how a caller reads what the pattern computed: without
+one there is no `value` at all, and with one the inert positions the schema
+models — numbers, booleans, `enum` and `const` strings — come back as
+themselves, while unconstrained strings and anything unmodeled are withheld as
+text and come back as the ADDRESS of the withheld position — the result
+reference plus the sealed path, which the outbound swap renders as a `cfh:a:`
+token. A run_pattern result is fabric-backed by construction, so every position
+the schema cannot release still names a place: `describe_handle` answers its
+shape, and a later `run_pattern` wires it by reference, following whatever links
+sit on the path. (`linkedStringCount` still counts the string positions withheld
+as text.) A sealed `opaque:` link an author declared in the schema, or one
+lifted out of another output, is not this run's to address and passes through —
+and remains refused as an input. The result is measured as it arrived: the
+framework's own result keys (`$NAME`, `$UI` and the other rendering variants)
+are named to the sanitizer as reserved, so a schema describing only the computed
+fields does not have to declare them and does not lose its numbers to the
+whole-object seal an unmodeled key would otherwise cause. Reserved only excuses
+a key from the unmodeled-key rules: one the schema does model — through a `$ref`
+or a combinator branch as readily as at the top level — is measured against what
+the schema says about it and kept, and one it does not model is dropped rather
+than shown. The ordinary outbound swap turns `resultRef` (and any link strings
+inside `value`) into `cfh:a:` tokens at the model boundary, and the ordinary
+inbound swap resolves such a token passed back through `inputs`; the tool itself
+carries no handle code. The persisted tool-output artifact keeps the raw
+reference, the raw result value, and the `pieceId` — a bare fabric identifier
+the handle boundary never swaps, so it stays out of the model-facing rendering.
+
+A result that settles to nothing names its cause when one was observed: when the
+settled result fails the declared `resultSchema` or holds no fields of its own
+beyond the framework keys, the tool consults what the session's runtime reported
+during that invocation's settle window. An action error attributed to the
+created piece names the failing computation; a convergence-budget episode whose
+deferred-action labels name this pattern's module identity names the other
+observed shape, which a reactive cycle, a non-idempotent computation, and a
+policy-refused commit all produce. The refusal reason itself has no channel of
+its own, so the message names the shapes rather than claiming to know which one
+happened, and the failing computation's own text is withheld from model context
+— a computation over data the model cannot read may carry that data in what it
+throws — while the run artifact keeps it. An empty result with no observed cause
+still reports ok, since silence is not evidence of failure.
+
+A successful `assign_slug` returns `{ slug }`, plus `url` when the harness can
+compose one honestly. The URL is the session's API URL, the space, and the slug
+— the address `cf piece new` prints — and it appears only when `--fabric-space`
+names the space. A space configured as a `did:key` has no URL that is not built
+from that DID, and a bare fabric identifier does not cross the model boundary,
+so the output carries the slug alone rather than a fabricated link. Nothing in
+that output is swapped for a handle token, because nothing in it is a fabric
+reference: the slug is the model's own word and the URL is the operator's API
+URL and space name. Its error `message`, which can carry a DID from an
+authorization failure, is scrubbed for bare fabric identifiers like the other
+free-text fields. Compiler diagnostics come back as
+`{ status: "compile-error", message }` so the model can iterate on the source;
+bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
+module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
+in the model-facing message, while the persisted artifact keeps the raw text.
 
 Interactive chat stdio transport:
 
@@ -855,6 +1188,124 @@ subagent return channel. Because this profile overrides the parent model, parent
 `--reasoning-effort` and `--prompt-cache-mode` settings remain on
 model-inheriting loops and do not apply to the search child.
 
+The `pattern-author` profile is where Common Fabric pattern source gets written
+and run. Its child receives `run_pattern` (under the ordinary fabric-session
+gate), plus `read_file`, `bash`, and `read_skill_resource` for reading existing
+patterns and documentation in the workspace, and `describe_handle` for the shape
+of the references it was handed. It receives neither `write_file` nor
+`edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`, and
+the deliverable is a result reference rather than a file. When the run has a
+skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
+from it. That preload is best-effort — a run whose skills root does not carry
+them, or that configures no skills root at all, still gets the same child with
+the same tools, just without the preloaded guidance.
+
+The profile carries its own turn budget of 24, in place of the default subagent
+cap of 8. Authoring is a write, compile-error, fix loop and each iteration costs
+a turn; at the default the loop runs out before a non-trivial pattern compiles,
+and a child that ran out of turns has nothing to return. A delegation may still
+name its own `maxModelTurns`, bounded by the same maximum of 64 every profile
+is.
+
+The profile also carries a return contract, applied to any `pattern-author`
+delegation that declares no `returnSchema` of its own — so no such delegation is
+unstructured:
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "resultRef": { "type": "string" },
+        "describes": { "type": "string" }
+      },
+      "required": ["ok", "resultRef", "describes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": false },
+        "code": {
+          "type": "string",
+          "enum": [
+            "compile-error",
+            "turn-budget-exhausted",
+            "schema-mismatch",
+            "missing-input-shape",
+            "unsupported-request",
+            "other"
+          ]
+        },
+        "detail": { "type": "string" }
+      },
+      "required": ["ok", "code"],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+Success and failure are different shapes, not different prose. A child that
+cannot produce a working pattern — the compile loop does not converge, the task
+is impossible against the references it holds, its turns run out — returns the
+failure branch, and a failure carries no `resultRef` at all. That is what stops
+a failed delegation from being answered with some other step's reference: the
+parent reads `ok`, and a reference exists only on the branch that produced one.
+
+The failure branch says why in a fixed vocabulary rather than in prose. A `code`
+is inert by construction — one of a closed set, carrying nothing read out of a
+space — so it survives sanitization as itself and the parent learns why without
+any declassification. The optional `detail` elaborates in free text and reaches
+the parent as an opaque link, which is the right treatment: the code is the
+actionable part, and the detail is for a reader entitled to open it. The
+free-form `describes` string on the success branch travels the same way; the
+discriminant, the `code`, and the minted `resultRef` token are what the parent
+acts on.
+
+`ok: false` is heard as a failure whatever else about a child's return is
+malformed. When a return says it failed but does not fit the declared schema,
+the parent gets `structuredReturn.status: "child-reported-failure"` carrying
+`failureCode`, not a schema complaint — a child that correctly reports failure
+is never turned into a validation error. A `failureCode` is recorded on a
+validating `ok: false` return too, so the code reaches the parent by the same
+name either way.
+
+The same discipline is what the parent-facing guidance asks of any delegation:
+declare the return shape up front, say what the child should do when it cannot
+succeed, and treat a returned reference as meaningful only together with the
+contract it satisfied. `describe_handle` is how the parent checks that a
+returned reference is the shape the next step needs.
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --fabric-api-url https://toolshed.example/ \
+  --fabric-identity ~/.cf/agent.pkcs8 \
+  --fabric-space my-space \
+  --skills-root labs/skills \
+  --allow-subagent-profile pattern-author \
+  --prompt "Answer the question about my space by delegating a pattern to a pattern-author child."
+```
+
+The division of labour is the point. Pattern syntax is expensive to learn from
+the repository and cheap to preload, so a root agent that pays for it once per
+question runs out of turns before it runs a pattern. The root stays an
+orchestrator: it holds the addresses, decides what to compute, and delegates.
+The child holds the pattern knowledge: it writes the source, owns the write,
+compile-error, fix loop against `run_pattern`, and returns the result reference
+plus a short inert description.
+
+Neither side reads the data. The references a delegation hands the child are
+addresses to wire into the pattern as `run_pattern` inputs, not values to fetch
+and transcribe, and the child's return is a reference for the same reason. The
+handle machinery makes that work in both directions: a token the parent writes
+into the goal is seeded into the child's table and resolves inside the child's
+own `run_pattern` call, and the result reference the child returns arrives at
+the parent as a token the parent can pass straight into its next `run_pattern`.
+
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON
 value. The harness validates it, stores the raw child return under the child
@@ -1029,5 +1480,5 @@ export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc
 - [roadmap](docs/ROADMAP.md)
 - [skills support design and contract](docs/SKILLS_SUPPORT_SPEC.md)
 - [runner README](../runner/README.md)
-- `specs/agent-harness/` in the sibling `specs` repo
+- [Agent Harness specifications](../../docs/specs/agent-harness/README.md)
 - `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

@@ -1,17 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+
+import { entityIdFrom } from "../src/create-ref.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 import {
   type Options,
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
-import { Runtime } from "../src/runtime.ts";
-import { entityIdFrom } from "../src/create-ref.ts";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
-import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
 
 // The silent-collapse pin for sync-layer failures.
 //

@@ -6,9 +6,10 @@ a liability. This covers both kinds — the `//` comment that explains local
 mechanics, and the JSDoc doc comment that states a contract.
 
 Neighboring guidance: [`../README.md`](../README.md) governs the documentation
-tree, including which spelling of English everything written here uses, and
-[`DEVELOPMENT.md`](DEVELOPMENT.md) carries the rest of the coding standards,
-the 80-column line width among them. The `describe()` and `it()` description
+tree, and [`DEVELOPMENT.md`](DEVELOPMENT.md) carries the rest of the coding
+standards — the 80-column line width among them, and the
+[word choice](DEVELOPMENT.md#word-choice) a comment is held to, American
+spelling included. The `describe()` and `it()` description
 strings of a test have their own guide,
 [`unit-test-coding-style.md`](unit-test-coding-style.md), which governs how
 they are worded. What they take from here is the markup below, and the rule

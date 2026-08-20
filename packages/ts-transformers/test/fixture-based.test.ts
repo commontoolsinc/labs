@@ -1,17 +1,18 @@
+import { resolve } from "@std/path";
+
+import { StaticCache } from "@commonfabric/static";
 import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
-import { StaticCache } from "@commonfabric/static";
-import { resolve } from "@std/path";
 import ts from "typescript";
 
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import {
   batchTypeCheckFixtures,
   loadFixture,
   transformFixture,
 } from "./utils.ts";
-import type { TransformationDiagnostic } from "../src/mod.ts";
 
 interface FixtureConfig {
   directory: string;

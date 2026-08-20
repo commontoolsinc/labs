@@ -1,8 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
-import { ContextualFlowControl } from "../src/cfc.ts";
+
 import { listElementLink } from "../src/builtins/list-element-link.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 
 const base = (schema?: NormalizedFullLink["schema"]): NormalizedFullLink => ({

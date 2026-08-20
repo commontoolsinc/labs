@@ -43,10 +43,12 @@ describe("shell felt config", () => {
   it("wires modern experimental env vars into build-time defines", async () => {
     const config = await withEnv({
       EXPERIMENTAL_MODERN_CELL_REP: "true",
+      EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: "true",
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
+      $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: "true",
     });
     const compileCacheVersion = config.esbuild?.define[
       "globalThis.__cfCompileCacheRuntimeVersion"

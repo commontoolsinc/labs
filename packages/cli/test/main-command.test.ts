@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- each test drives
+// its own copy of the command tree, which reads the environment as it is built;
+// the query string is what makes the copy.
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
@@ -55,7 +59,7 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf piece call"]);
+    const customUsageCommands = new Set(["cf piece call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());
@@ -108,7 +112,8 @@ describe("main command", () => {
     );
     const call = piece.getCommand("call")!;
     const expectedUsage =
-      "--identity <identity> --url <url> --api-url <api-url> --space <space> --piece <piece> <callable> [input]";
+      "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
+      "--piece <piece> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",
@@ -276,7 +281,7 @@ describe("main command", () => {
 
   it("shows the supervisor's own help for the direct supervisor entry point", async () => {
     // The subcommand forwards its raw argv to the supervisor's parser, so the
-    // compiled binary and a direct `deno run` of the supervisor answer with the
+    // compiled binary and a direct `deno run` of the supervisor produce the
     // same flags and the same help.
     const { code, stdout } = await cf("fuse-supervisor --help");
 

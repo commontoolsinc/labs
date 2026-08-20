@@ -192,7 +192,7 @@ Writing a legacy fallback into each handler is not a free improvement on that
 decision, and it costs more than it looks.
 
 The fallback needs the whole-list read to find the legacy element. That read
-stays in the conflict set, so the migration does not buy the merge behaviour it
+stays in the conflict set, so the migration does not buy the merge behavior it
 was for: writers still conflict and retry, exactly as they did before.
 
 A legacy element can be removed, but only through a cell. `elementById` does not
@@ -203,7 +203,7 @@ removes it. That cell is positional: it resolves against the snapshot the
 handler read, so a concurrent insert or removal ahead of it addresses a
 different element. The retained read is what keeps that from being wrong — a
 commit carrying a stale read is rejected and retries — and it is the same read
-that costs the merge behaviour. The fallback is contended by construction, not
+that costs the merge behavior. The fallback is contended by construction, not
 broken.
 
 The failure to avoid is handing `removeByValue` the element's content rather

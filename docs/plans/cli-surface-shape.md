@@ -19,7 +19,7 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`, `wish` |
+| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
 | **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
@@ -106,8 +106,9 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Timing argues for doing it now: `piece call` does not have either form yet, so
-splitting them costs one deprecation on a flag that is still young.
+Both spellings are carried on every command that reads — `piece get`,
+`piece call`, `wish` and `exec` — and a command naming both is refused rather
+than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not
@@ -166,14 +167,17 @@ removing, listing, searching, slugs, and listing a piece's verbs. Reading and
 writing cells are not piece operations and stop presenting themselves as ones.
 `recreate-root` and `set-home` are space-level operations sitting under `piece`;
 they belong under `space`, and moving them is part of step 7 rather than
-something this shape decides.
+something this shape decides. `get-label` and `set-label` (#5673) postdate this
+accounting: whether CFC labels stay a piece subcommand or become a surface of
+their own is a step-7-class decision this document leaves open.
 
 `--select` and `--schema` everywhere, split per the reasons above.
 
 ## How to get there
 
-Additive, in dependency order. Nothing before step 6 removes or renames anything
-a caller depends on — steps 1–5 only add.
+Additive, in dependency order. Nothing before 6b removes or renames anything a
+caller depends on — steps 1 through 6a only add, and 6a adds a warning rather
+than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
@@ -186,7 +190,12 @@ a caller depends on — steps 1–5 only add.
    flags, keeping both.
 5. **Add `cf get`/`set`/`call`** as aliases of the existing
    implementations. Same code, honest names, both spellings working.
-6. **Deprecate the old spellings** once the new ones carry traffic.
+6a. **Warn on the old spellings**, each warning naming the date its spelling
+   stops working — two weeks after this step reaches main. The date is a
+   literal, fixed when this step merges, not a window recomputed per run: a
+   caller who reads the warning today and acts on it next week must be told
+   the same date both times.
+6b. **Remove the old spellings** on the date the warnings named.
 7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
    map` against `inspect graph`, and `apply` against `set`.
 
@@ -201,17 +210,31 @@ intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs-over-the-cli.md), which is already stale |
+| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |
-| 6 | Removal of the old spellings, once redirects have carried traffic |
+| 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
+| 6b | Removal of the old spellings, and of the deprecation notes 6a added |
 | 7 | Whatever the merges decide |
 
-**Old spellings stay as redirects, not errors, until step 6 has traffic behind
-it.** A deprecated spelling that still works costs a line of aliasing; one that
-fails costs every script and skill file that used it, including ones outside
-this repository.
+**Old spellings stay as redirects, not errors, until the date 6a names.** A
+deprecated spelling that still works costs a line of aliasing; one that fails
+costs every script and skill file that used it, including ones outside this
+repository.
+
+A DATE rather than a traffic threshold, because the traffic is not observable.
+Both spellings mount the same builder and emit identical requests, and the CLI
+sends nothing that would let a server attribute one to either — so measuring
+adoption means adding a marker to the wire, somewhere to collect it, and a
+privacy decision about a tool that runs on other people's machines. The
+condition that wording implied could not be checked, only estimated.
+
+What IS checkable is this repository, and it is a precondition rather than a
+gate: the sweep in step 5's documentation row should land before 6a, so the
+warning does not fire on examples we ourselves still teach. Consumers outside
+this repository are unmeasurable by any means available here, which is an
+argument for a generous interval rather than for instrumenting one.
 
 ## Decisions this document does not make
 

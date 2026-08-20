@@ -1,5 +1,14 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import type { CfcConfClause } from "../cfc/clause.ts";
+import {
+  BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+  BuiltInLLMMessage,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -11,38 +20,34 @@ import {
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
-import {
-  BuiltInGenerateObjectParams,
-  BuiltInGenerateTextParams,
-  BuiltInLLMMessage,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { mapSubschemas } from "../schema-walk.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
 } from "../cfc/schema-sanitization.ts";
-import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
 import { type Cell, isCell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
-import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -53,11 +58,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -598,17 +599,25 @@ function enqueuePostCommitLLMWork(
   );
 }
 
+/**
+ * Record the hash of the request this transaction stages, which a later run
+ * reads to recognize a request already in flight. If the transaction reports an
+ * error, the hash goes back to what it was and `onRollback` runs, so a caller
+ * can undo state it recorded for the same request.
+ */
 function markRequestHashPendingCommit(
   tx: IExtendedStorageTransaction,
   hash: string,
   getPreviousCallHash: () => string | undefined,
   setPreviousCallHash: (hash: string | undefined) => void,
+  onRollback?: () => void,
 ): void {
   const previousCallHash = getPreviousCallHash();
   setPreviousCallHash(hash);
   tx.addCommitCallback((_committedTx, commitResult) => {
     if (commitResult.error && getPreviousCallHash() === hash) {
       setPreviousCallHash(previousCallHash);
+      onRollback?.();
     }
   });
 }
@@ -1010,6 +1019,10 @@ export function generateText(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1065,6 +1078,18 @@ export function generateText(
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if (!hasPrompt && !messages) {
+      // Abandon a request already in flight, where abandoning one is possible.
+      // Advancing the run makes its response fail the guard on the way back, so
+      // nothing of it reaches the cell, and dropping the remembered hash lets
+      // the same prompt go out again rather than match the in-flight check and
+      // never be sent. A queued request is neither of those: the queue owns its
+      // lifecycle and runs it to completion, so forgetting its hash would
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
+        currentRun++;
+        previousCallHash = undefined;
+      }
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
@@ -1130,12 +1155,17 @@ export function generateText(
       return;
     }
 
+    const previousRequestQueued = lastRequestQueued;
+    lastRequestQueued = !!queueName;
     markRequestHashPendingCommit(
       tx,
       hash,
       () => previousCallHash,
       (next) => {
         previousCallHash = next;
+      },
+      () => {
+        lastRequestQueued = previousRequestQueued;
       },
     );
 
@@ -1304,6 +1334,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  // Whether the most recently issued request went through a queue. Read when a
+  // later run finds no prompt, so the decision follows the request that may
+  // still be in flight rather than whatever the `queue` input says by then.
+  let lastRequestQueued = false;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
   let cellScope: CellScope | undefined;
@@ -1373,6 +1407,18 @@ export function generateObject<T extends Record<string, unknown>>(
       (!hasPrompt && (!messages || messages.length === 0)) ||
       schema === undefined
     ) {
+      // Abandon a request already in flight, where abandoning one is possible.
+      // Advancing the run makes its response fail the guard on the way back, so
+      // nothing of it reaches the cell, and dropping the remembered hash lets
+      // the same prompt go out again rather than match the in-flight check and
+      // never be sent. A queued request is neither of those: the queue owns its
+      // lifecycle and runs it to completion, so forgetting its hash would
+      // enqueue a second copy of a call that is still going to arrive. The
+      // mode is the one the request in flight was issued under.
+      if (!lastRequestQueued) {
+        currentRun++;
+        previousCallHash = undefined;
+      }
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
@@ -1541,12 +1587,17 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
         () => previousCallHash,
         (next) => {
           previousCallHash = next;
+        },
+        () => {
+          lastRequestQueued = previousRequestQueued;
         },
       );
 
@@ -1909,12 +1960,17 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
         () => previousCallHash,
         (next) => {
           previousCallHash = next;
+        },
+        () => {
+          lastRequestQueued = previousRequestQueued;
         },
       );
 

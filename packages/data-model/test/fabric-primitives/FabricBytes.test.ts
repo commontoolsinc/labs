@@ -11,15 +11,15 @@
  * offset is at or past the end copies nothing rather than failing.
  */
 
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricBytes", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
@@ -184,7 +184,7 @@ describe("FabricBytes", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricBytes[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Bytes;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Bytes` wire type tag", () => {
@@ -213,17 +213,22 @@ describe("FabricBytes", () => {
         });
       });
 
-      describe("decode()", () => {
-        it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
+      describe("canDecode()", () => {
+        it("returns `true` for string state", () => {
+          expect(codec.canDecode("AQID")).toBe(true);
         });
 
+        it("returns `false` for state that is not a string", () => {
+          expect(codec.canDecode(42)).toBe(false);
+        });
+      });
+
+      describe("decode()", () => {
         it("decodes malformed base64 to a `ProblematicValue`", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -235,7 +240,7 @@ describe("FabricBytes", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(fb),
-            context,
+            env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
           expect(decoded.slice()).toEqual(new Uint8Array([10, 20, 30, 40]));
@@ -246,7 +251,7 @@ describe("FabricBytes", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(fb),
-            context,
+            env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
           expect(decoded.length).toBe(0);

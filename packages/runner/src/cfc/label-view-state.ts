@@ -69,7 +69,7 @@ export const cfcLabelViewFromMetadata = (
   );
 };
 
-const cfcLabelViewForAddress = (
+const deriveCfcLabelViewForAddress = (
   tx: IExtendedStorageTransaction,
   address: CfcAddress,
 ): CfcLabelView | undefined => {
@@ -81,6 +81,35 @@ const cfcLabelViewForAddress = (
   } catch {
     return undefined;
   }
+};
+
+/**
+ * The stored labels that apply at an address, as a view rebased onto it.
+ *
+ * Memoized on the transaction's snapshot: the derivation reads the target
+ * document's `["cfc"]` metadata and nothing else, so it answers the same until
+ * something is written, and every dereference on a scanned collection asks for
+ * the same handful of addresses once per element. The memoized view is shared
+ * rather than copied — every consumer merges, clones or rebases it into
+ * something new, none writes to it.
+ */
+const cfcLabelViewForAddress = (
+  tx: IExtendedStorageTransaction,
+  address: CfcAddress,
+): CfcLabelView | undefined => {
+  const memo = tx.getSnapshotMemo?.();
+  if (memo === undefined) return deriveCfcLabelViewForAddress(tx, address);
+  const key = `cfcLabels:${address.space}|${address.scope ?? ""}|` +
+    `${address.id}|${JSON.stringify(address.path)}`;
+  // Two-level, so a memoized `undefined` is a hit rather than a miss — an
+  // address with no stored labels is the common case and the one worth having.
+  const cached = memo.get(key) as
+    | { view: CfcLabelView | undefined }
+    | undefined;
+  if (cached !== undefined) return cached.view;
+  const view = deriveCfcLabelViewForAddress(tx, address);
+  memo.set(key, { view });
+  return view;
 };
 
 export const cfcLabelViewForDereference = (

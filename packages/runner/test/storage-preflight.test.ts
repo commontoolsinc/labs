@@ -1,3 +1,11 @@
+/**
+ * The walk itself is `replaceArtifacts()`, covered in `encodable-form.test.ts`.
+ * What this module adds is the HOOK: the walk bound to `noteDerivedCopy`, so
+ * every copy it makes says where it came from. That is not visible in the
+ * replaced value at all -- trust and the content-addressed entry ref live in
+ * identity-keyed side tables -- so it is what these cases look at.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -7,14 +15,6 @@ import {
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "../src/builder/pattern-metadata.ts";
-
-/**
- * The walk itself is `replaceArtifacts()`, covered in `encodable-form.test.ts`.
- * What this module adds is the HOOK: the walk bound to `noteDerivedCopy`, so
- * every copy it makes says where it came from. That is not visible in the
- * replaced value at all -- trust and the content-addressed entry ref live in
- * identity-keyed side tables -- so it is what these cases look at.
- */
 
 /** Builds an artifact of the shape `builder/module.ts` produces. */
 function artifact(serialized: unknown): Record<string, unknown> {
@@ -63,7 +63,7 @@ describe("flattenBuilderArtifacts()", () => {
   });
 
   it("leaves a value it did not copy out of the side table", () => {
-    // Nothing was replaced, so the value is answered by identity and is its
+    // Nothing was replaced, so the value is returned by identity and is its
     // own original -- not a derivation of anything.
     const value = { a: 1, b: { c: [1, 2, 3] } };
     expect(flattenBuilderArtifacts(value)).toBe(value);

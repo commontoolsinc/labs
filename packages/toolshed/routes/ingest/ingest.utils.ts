@@ -1,12 +1,13 @@
+import { sha256 } from "@commonfabric/content-hash";
 import type { JSONSchema, MemorySpace, Runtime } from "@commonfabric/runner";
 import { isLink } from "@commonfabric/runner";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+
 import {
   custodyIngest,
   durableSet,
   type VouchedChannel,
 } from "@/lib/custody-ingest.ts";
-import { sha256 } from "@commonfabric/content-hash";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 // The `journal` sink of a vouched ingest channel: a durable, append-only,
 // ExternalIngest-marked record log. This is the generic capability — location
@@ -515,7 +516,7 @@ export async function getSpaceRegistrationIndex(
 // cache on request proofs (docs/specs/toolshed-access-control.md), so this is
 // durable and per-request rather than an in-memory cache with a timer.
 /**
- * Replay defence only has to span the first-party proof's freshness window, so
+ * Replay defense only has to span the first-party proof's freshness window, so
  * claims older than it can be forgotten. `DEFAULT_MAX_PROOF_AGE_SECONDS` in
  * toolshed-http-auth is 300; this is deliberately generous against clock skew.
  */

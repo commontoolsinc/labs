@@ -111,6 +111,11 @@ interface ScheduleStats {
   accepted: number;
   rejected: number;
   pendingReadAccepts: number;
+  /** Commits whose pending read was sparsely mutated, split by verdict —
+   * both sides must stay exercised for the declared-set exclusion to keep
+   * differential coverage (see the vacuity guard). */
+  sparseAccepts: number;
+  sparseRejects: number;
 }
 
 const runSchedule = async (seed: number): Promise<ScheduleStats> => {
@@ -125,6 +130,8 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     accepted: 0,
     rejected: 0,
     pendingReadAccepts: 0,
+    sparseAccepts: 0,
+    sparseRejects: 0,
   };
 
   const ctx = (step: number, extra: Record<string, unknown> = {}) =>
@@ -185,6 +192,7 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     for (let step = 0; step < STEPS; step++) {
       const session = pick(rng, sessions);
       const id = pick(rng, ENTITIES);
+      let sparseThisStep = false;
 
       // Writes: whole-doc set, key replace, or array append.
       const operations: ClientCommit["operations"] = [];
@@ -228,15 +236,30 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
           ? pick(rng, KEY_LEAVES)
           : (["value", "items"] as const);
         if (stack.length > 0 && chance(rng, 0.5)) {
+          const declaresBasis = chance(rng, 0.5);
+          let declared = [...stack];
+          // Sparse mutation (declared-set exclusion): a basisSeq read
+          // sometimes omits one non-top layer, modeling a client that
+          // dropped a layer from its overlay — or omitted one by bug. The
+          // engine and the naive validator must agree on the verdict either
+          // way: both reject when the omitted layer's durable write sits in
+          // the scan interval, both accept when it left nothing durable
+          // there. Legacy reads keep the full stack — their basis
+          // semantics lean on the highest element, not on exclusion.
+          if (declaresBasis && declared.length >= 2 && chance(rng, 0.3)) {
+            const victim = pick(rng, declared.slice(0, declared.length - 1));
+            declared = declared.filter((layer) => layer !== victim);
+            sparseThisStep = true;
+          }
           reads.pending.push({
             id,
             path: toDocumentPath([...readLeaf]),
-            localSeq: [...stack],
+            localSeq: declared,
             // Half the pending reads declare the reader's true confirmed
-            // basis (the CT-1910 repaired shape, scanned with own-session
-            // exclusion); the rest stay legacy max-dependency so both
-            // admission paths keep differential coverage.
-            ...(chance(rng, 0.5) ? { basisSeq: session.integratedSeq } : {}),
+            // basis (the CT-1910 repaired shape, scanned with declared-set
+            // own-session exclusion); the rest stay legacy max-dependency
+            // so both admission paths keep differential coverage.
+            ...(declaresBasis ? { basisSeq: session.integratedSeq } : {}),
           });
         } else {
           reads.confirmed.push({
@@ -257,10 +280,12 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       if (engineSeq !== null) {
         stats.accepted++;
         if (reads.pending.length > 0) stats.pendingReadAccepts++;
+        if (sparseThisStep) stats.sparseAccepts++;
         stack.push(commit.localSeq);
         session.stacks.set(id, stack);
       } else {
         stats.rejected++;
+        if (sparseThisStep) stats.sparseRejects++;
         // Client retry discipline (§3.12): drop the rejected commit and its
         // dependents, refresh, rebuild. Here: reset this entity's stack and
         // catch the watermark up.
@@ -305,18 +330,20 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       // INV-1 (pending reads, CT-1910 repaired shape): a declared basis makes
       // pending reads post-hoc checkable for the first time — no foreign
       // accepted write overlapping the path may land in (basisSeq, seq).
-      // Own-session writes are skipped only when they are true predecessors
-      // (lower localSeq — the layers the reader's view included); an
-      // out-of-order own write counts like a foreign one. Legacy reads (no
-      // basisSeq) stay uncheckable here; their deviation is recorded against
-      // INV-1 in 09-invariants.md.
+      // Own-session writes are skipped only when the read's array NAMES
+      // them (the layers whose inclusion in the reader's view the array
+      // attests); an own write the array does not name — out-of-order or
+      // omitted — counts like a foreign one. Legacy reads (no basisSeq)
+      // stay uncheckable here; their deviation is recorded against INV-1
+      // in 09-invariants.md.
       for (const rd of record.commit.reads.pending) {
         if (rd.basisSeq === undefined) continue;
+        const named = Array.isArray(rd.localSeq) ? rd.localSeq : [rd.localSeq];
         for (const other of accepted) {
           if (other.seq <= rd.basisSeq || other.seq >= record.seq) continue;
           if (
             other.sessionId === record.sessionId &&
-            other.commit.localSeq < record.commit.localSeq
+            named.includes(other.commit.localSeq)
           ) continue;
           const hit = toNaiveOps(other.commit.operations).some((op) =>
             op.id === rd.id &&
@@ -346,17 +373,28 @@ Deno.test("memory v2 differential: engine admission refines the naive model acro
     accepted: 0,
     rejected: 0,
     pendingReadAccepts: 0,
+    sparseAccepts: 0,
+    sparseRejects: 0,
   };
   for (let seed = 1; seed <= 100; seed++) {
     const stats = await runSchedule(seed);
     totals.accepted += stats.accepted;
     totals.rejected += stats.rejected;
     totals.pendingReadAccepts += stats.pendingReadAccepts;
+    totals.sparseAccepts += stats.sparseAccepts;
+    totals.sparseRejects += stats.sparseRejects;
   }
   // Schedule-shape sanity (deterministic, seeds are fixed): the generator
-  // must keep exercising rejections and accepted pending-stack reads, or
-  // the differential assertions above become vacuous.
-  if (totals.rejected < 50 || totals.pendingReadAccepts < 50) {
+  // must keep exercising rejections, accepted pending-stack reads, and both
+  // verdicts of the sparse mutation (declared-set exclusion), or the
+  // differential assertions above become vacuous. The sparse rate is tuned
+  // LOW on purpose — no current client emits sparse arrays, so the mutation
+  // is a hardening probe, not a workload model; these floors are what keep
+  // "low" from quietly becoming "never".
+  if (
+    totals.rejected < 50 || totals.pendingReadAccepts < 50 ||
+    totals.sparseAccepts < 5 || totals.sparseRejects < 5
+  ) {
     throw new Error(
       `degenerate schedule mix: ${JSON.stringify(totals)} — retune generator`,
     );

@@ -76,12 +76,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   additive path to it. Start here rather than at either part.
 - [References as arguments](references-as-arguments.md) proposes lifting
   address resolution out of the LLM dialog builtin, which already does it, and
-  into the boundary every external caller crosses. An LLM can hand a pattern a
-  reference; the CLI, a webhook, and the ingest path cannot reach the same
-  handler the same way, and three encodings for "an address goes here" have
-  already diverged. It carries the measurement, the size, and the gate-by-gate
-  evidence that the refusal is drift rather than policy — the dispatch gate
-  already accepts link values; the outer gates never got the option.
+  into the boundary every external caller crosses. An LLM and the CLI can
+  hand a pattern a reference — the CLI in both spellings, converting the
+  emitted address against the declared contract at its dispatch gate — while
+  the webhook and ingest paths still forward a payload unresolved. It carries
+  the measurement, the size, and the gate-by-gate evidence that the remaining
+  refusal is drift rather than policy. The ruling it was once gated on is
+  executed and archived:
+  [the verb input contract](../history/plans/verb-input-contract.md).
 - [Designing verbs so they can change](verb-evolution.md) records how verbs are
   declared so that adding to and changing them later is possible: verbs are
   promises and their names are stable by default — an owner may break their
@@ -102,14 +104,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [Projection keys, and the schema a read is handed](projection-key-classification.md)
-  designs the refusal of an unrecognized `--schema` key and the rule it is half
-  of — the projection reader never hands the read boundary a schema it did not
-  construct. Four tiers rather than three, because the keys that decide an
-  untyped position's container change behavior, so a caller's copy of one is
-  consumed rather than carried onward. Carries the measured blast radius, and
-  separates a constraint a caller supplies from the same keyword the reader
-  derives from the source schema.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that

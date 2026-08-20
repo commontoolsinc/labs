@@ -1,22 +1,22 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { Pattern } from "../src/builder/types.ts";
+
 import {
   patternToEncodableForm,
   serializePatternGraph,
   withAliasBindings,
 } from "../src/builder/to-encodable-form.ts";
+import type { FactoryInput, Pattern } from "../src/builder/types.ts";
 import {
   resolveOpPattern,
   resolveStoredPattern,
   resolveStoredPatternAsync,
 } from "../src/builtins/op-pattern-ref.ts";
-import type { FactoryInput } from "../src/builder/types.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
 
 /**
  * Identity E4 (docs/specs/content-addressed-action-identity.md §7): the JSON

@@ -19,8 +19,16 @@ import {
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
+import {
+  cfcSchemaChildRoot,
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
+} from "@commonfabric/runner/cfc/schema-refs";
+import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
+import { nearestName } from "./refusal.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
 
@@ -65,10 +73,10 @@ const LINK_MARKER_KEY = "$link";
 const CONCISE_ADDRESS_SUFFIX = "@";
 
 /**
- * The address a marked position renders, and the key it renders under. Every
- * field is present so a caller indexes it without branching: `id` keeps its
- * scheme, because the scheme is the kind and dropping it retargets the
- * address silently; `path` is `[]` at a document's root.
+ * The address a marked position accumulates as the walk descends, which is
+ * serialized into the LLM-friendly reference it renders as. `id` keeps its
+ * scheme, because the scheme is the kind and dropping it retargets the address
+ * silently; `path` is `[]` at a document's root.
  *
  * The address names the deepest stored link crossed on the way to the marked
  * position, plus the segments below that link. A link is a durable identity
@@ -592,6 +600,149 @@ const ARRAY_PROJECTION_KEYS = [
 ];
 
 /**
+ * What the reader does with a projection keyword. A registry that recorded a
+ * spelling rather than a class could not tell `consulted` from `tolerated`:
+ * both are accepted and neither reaches the schema the reader hands on, but
+ * only one of them changed the read on the way. A key admitted without its
+ * kind has its treatment decided by whatever the reader happens to default to.
+ */
+export type ProjectionKeyTier =
+  | "honored"
+  | "consulted"
+  | "tolerated"
+  | "refused";
+
+/**
+ * The keywords the projection drives itself from. These are the only ones the
+ * reader carries into the schema it constructs, and `type` is why that
+ * construction reads the classified projection rather than the mask: a scalar
+ * leaf's declared `type` is the whole of what filters that leaf, and a mask
+ * reduces every scalar position to `true`.
+ */
+const HONORED_PROJECTION_KEYS = new Set([
+  "type",
+  "properties",
+  "items",
+  "additionalProperties",
+  LINK_MARKER_KEY,
+]);
+
+/**
+ * The keywords {@link impliedProjectionType} reads to decide which container an
+ * untyped position describes, less the three tier H already claims. They
+ * change the read — a position naming only `minItems` reads as an array — and
+ * are then consumed: nothing the caller wrote in one reaches the read
+ * boundary. The reader may still emit `required` there on its own authority
+ * and with the source's meaning, which is a different key of the same
+ * spelling; {@link outputSchemaWithSourceRequired} is where that happens.
+ */
+const CONSULTED_PROJECTION_KEYS = new Set([
+  "required",
+  "minProperties",
+  "maxProperties",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+]);
+
+/**
+ * The annotation keywords projection refuses anyway. `default` is the source
+ * schema's to state, and the two definition keys have no meaning without the
+ * `$ref` projection also refuses.
+ *
+ * Every member is refused **by one of the two denylists above** rather than by
+ * the fall-through, which is asserted over the message each one produces:
+ * dropping a key from its denylist leaves it refused either way, since this set
+ * is what keeps it out of tier T, and only the answer changes. Separately, the
+ * coupling test asserts the two set relations in both directions — a key
+ * dropped from `ANNOTATION_KEYS` and left stranded here is drift a
+ * one-directional assertion misses.
+ *
+ * @internal Exported for the `ANNOTATION_KEYS` coupling and refusal tests.
+ */
+export const PROJECTION_ANNOTATION_EXCEPTIONS: ReadonlySet<string> = new Set([
+  "default",
+  "$defs",
+  "definitions",
+]);
+
+/**
+ * The keywords a caller may write that change nothing. Derived rather than
+ * restated, so that admitting a keyword to the durable dialect's annotations
+ * admits it here too — unless it is one of the three
+ * {@link PROJECTION_ANNOTATION_EXCEPTIONS} names.
+ *
+ * @internal Exported so the inertness test derives the keys it probes from
+ * this set rather than from a list someone typed. Membership here makes a key
+ * a candidate; that it changes nothing on a read is a separate obligation, and
+ * a test iterating its own copy would never notice a key that arrived without
+ * discharging it.
+ */
+export const TOLERATED_PROJECTION_KEYS: ReadonlySet<string> = new Set(
+  [...ANNOTATION_KEYS].filter((key) =>
+    !PROJECTION_ANNOTATION_EXCEPTIONS.has(key)
+  ),
+);
+
+/**
+ * The tolerated keywords the reader accepts and drops rather than carries.
+ * Membership in `ANNOTATION_KEYS` makes a key a candidate; that the checker
+ * may ignore it when comparing two schemas says nothing about what the
+ * **runner** does with it on a read, and only the second question decides
+ * whether carrying it is inert.
+ *
+ * `$id` and `$schema` declare the identity and dialect of a document, and the
+ * reader is not producing the caller's document. `$comment` is not inert at
+ * all: `packages/runner/src/schema-view.ts` reserves `"emptyProperties"`,
+ * `"missingProperty"` and `"rejectedProperty"` as control markers and
+ * `packages/runner/src/traverse.ts` acts on the first two, so a carried
+ * `$comment` is caller-forgeable control flow at the read boundary. Dropping
+ * needs to know nothing about which values are reserved, and a marker the
+ * runner reserves later cannot re-open the hole behind it.
+ */
+const DROPPED_TOLERATED_KEYS: ReadonlySet<string> = new Set([
+  "$comment",
+  "$id",
+  "$schema",
+]);
+
+/** The tolerated keywords that do reach the schema the reader constructs. */
+const CARRIED_TOLERATED_KEYS: readonly string[] = [
+  ...TOLERATED_PROJECTION_KEYS,
+].filter((key) => !DROPPED_TOLERATED_KEYS.has(key));
+
+/**
+ * What the projection reader does with `key`.
+ *
+ * @internal Exported for the classification and coupling tests.
+ */
+export function projectionKeyTier(key: string): ProjectionKeyTier {
+  if (HONORED_PROJECTION_KEYS.has(key)) return "honored";
+  if (CONSULTED_PROJECTION_KEYS.has(key)) return "consulted";
+  if (
+    FORBIDDEN_PROJECTION_KEYS.has(key) || UNSUPPORTED_PROJECTION_KEYS.has(key)
+  ) {
+    return "refused";
+  }
+  return TOLERATED_PROJECTION_KEYS.has(key) ? "tolerated" : "refused";
+}
+
+/** The honored vocabulary, as a refusal names it. */
+const HONORED_PROJECTION_VOCABULARY = [...HONORED_PROJECTION_KEYS]
+  .map((key) => `"${key}"`)
+  .join(", ");
+
+/**
+ * The keyword `key` was most likely meant to be, or `undefined` where nothing
+ * is close enough to name. No read-side surface prints the source schema, so
+ * for a misspelled key the accepted vocabulary is the entire remediation, and
+ * the one keyword a caller transposed two letters of is the useful half of it.
+ */
+function nearestProjectionKey(key: string): string | undefined {
+  return nearestName(key, HONORED_PROJECTION_KEYS);
+}
+
+/**
  * The container a projection position describes but did not state. Schema
  * traversal descends `properties` only under `type: "object"` and `items` only
  * under `type: "array"`, so an omitted `type` silently empties the position —
@@ -649,6 +800,19 @@ function normalizeProjectionSchema(
         `Invalid --schema at ${path}: "${key}" is not supported by projection schemas`,
       );
     }
+    if (projectionKeyTier(key) === "refused") {
+      // No read-side surface prints the schema a read runs against, so a
+      // refusal cannot send a caller off to lift one and prune it. What it
+      // says is what the reader knows without any source at all: the key, the
+      // position, and the vocabulary that position accepts.
+      const nearest = nearestProjectionKey(key);
+      throw new CellSelectionError(
+        `Invalid --schema at ${path}: "${key}" is not a projection schema ` +
+          "keyword. " +
+          (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
+          `Projection reads ${HONORED_PROJECTION_VOCABULARY}`,
+      );
+    }
   }
   const marker = schema[LINK_MARKER_KEY];
   if (marker !== undefined && marker !== true) {
@@ -660,13 +824,27 @@ function normalizeProjectionSchema(
   const { [LINK_MARKER_KEY]: _marker, ...declared } = schema;
   const markers: LinkMarkers = marker === true ? { marked: true } : {};
   const implied = impliedProjectionType(declared);
+  // The reader constructs what it hands on rather than forwarding what a
+  // caller typed. An honored key is written out below; a consulted key was
+  // read by `impliedProjectionType()` just above and goes no further, so no
+  // constraint of the caller's reaches a schema the runner acts on; a
+  // tolerated key is carried only where carrying it is inert past the read
+  // boundary; a refused key never reaches here, the projection naming it
+  // having been rejected.
+  //
   // An implied `type` leads the result, so a normalized schema reads the way a
   // caller would have written it out in full. A position that declared nothing
   // gains nothing: `{}` stays the wildcard it already is, and a bare marker
   // still reduces to `false` below.
-  const result: Record<string, unknown> = implied === undefined
-    ? { ...declared }
-    : { type: implied, ...declared };
+  const result: Record<string, unknown> = {};
+  if (implied !== undefined) result.type = implied;
+  else if (declared.type !== undefined) result.type = declared.type;
+  for (const key of CARRIED_TOLERATED_KEYS) {
+    if (declared[key] !== undefined) result[key] = declared[key];
+  }
+  if (typeof declared.additionalProperties === "boolean") {
+    result.additionalProperties = declared.additionalProperties;
+  }
   if (declared.properties !== undefined) {
     if (!isObjectNotArray(declared.properties)) {
       throw new CellSelectionError(
@@ -1046,45 +1224,33 @@ const DERIVED_ADDRESS: DerivedPosition = {
 const DERIVED_DROPPED: DerivedPosition = { cut: false };
 
 /**
- * The schema a local JSON pointer names inside `root`. Only the local form is
- * resolved, which is the only form a lowered declared result carries; anything
- * else reads as an unresolvable reference and leaves the position unbounded.
- */
-function schemaAtLocalRef(
-  root: JSONSchema,
-  ref: string,
-): JSONSchema | undefined {
-  if (!ref.startsWith("#")) return undefined;
-  const pointer = ref.slice(1);
-  if (pointer !== "" && !pointer.startsWith("/")) return undefined;
-  let current: unknown = root;
-  for (const segment of pointer.split("/").slice(1)) {
-    if (!isObjectOrArray(current)) return undefined;
-    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current === undefined || typeof current === "boolean" ||
-      isObjectOrArray(current)
-    ? current as JSONSchema | undefined
-    : undefined;
-}
-
-/**
  * Helper for {@link declaredResultProjection}: one position of the declared
  * result, written as the projection position it derives.
  *
- * `following` holds the references the walk is already inside. A reference it
- * already holds is the cut: the declared type re-enters itself there, so
- * following it once more is what closes the circle. Every other position is
- * left as wide as it was declared — the derivation bounds a recursion and
- * narrows nothing else.
+ * `following` holds the references the walk is already inside, each paired
+ * with the scope root it was followed under: the same spelling in two `$defs`
+ * scopes names two definitions, so only a reference repeated in ITS OWN scope
+ * is the cut — the declared type re-enters itself there, and following it
+ * once more is what closes the circle. Every other position is left as wide
+ * as it was declared — the derivation bounds a recursion and narrows nothing
+ * else.
+ *
+ * Reference resolution is the canonical resolver's, one hop per recursion —
+ * never a private pointer parser, whose recorded divergence class (escaped
+ * names, nested `$defs` scopes) is exactly what `localRefTarget`'s history
+ * warns about. A reference the resolver does not resolve leaves the position
+ * unbounded, and a readback that still closes a circle then refuses with the
+ * legible message rather than corrupting.
  */
 function derivePosition(
   schema: JSONSchema | undefined,
   root: JSONSchema,
-  following: ReadonlySet<string>,
+  following: ReadonlyArray<{ root: JSONSchema; ref: string }>,
 ): DerivedPosition {
   if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
+  // A subtree carrying its own `$defs` opens a new local-ref scope; every
+  // descent below threads the scope this node establishes.
+  root = cfcSchemaChildRoot(schema, root);
   // A stream carries no value: it renders as the empty object and reading it
   // says nothing. `asCell` otherwise says how a position is held rather than
   // what shape it has, and the shape beside it is what decides the cut.
@@ -1093,13 +1259,16 @@ function derivePosition(
   }
 
   if (typeof schema.$ref === "string") {
-    if (following.has(schema.$ref)) return DERIVED_ADDRESS;
-    const target = schemaAtLocalRef(root, schema.$ref);
+    const ref = schema.$ref;
+    if (following.some((f) => f.ref === ref && f.root === root)) {
+      return DERIVED_ADDRESS;
+    }
+    const target = resolveCfcSchemaRef(root, ref);
     if (target === undefined) return DERIVED_WHOLE;
     return derivePosition(
       target,
-      root,
-      new Set([...following, schema.$ref]),
+      isEmbeddedCfcSchemaRef(ref) ? target : root,
+      [...following, { root, ref }],
     );
   }
 
@@ -1182,7 +1351,7 @@ export function declaredResultProjection(
   declared: JSONSchema | undefined,
 ): SelectionProjection | undefined {
   if (declared === undefined || typeof declared === "boolean") return undefined;
-  const derived = derivePosition(declared, declared, new Set());
+  const derived = derivePosition(declared, declared, []);
   if (!derived.cut || derived.schema === undefined) return undefined;
   return {
     source: DERIVED_PROJECTION_SOURCE,
@@ -1789,6 +1958,14 @@ export function selectSourceSchema(
   // A rejected position holds nothing to require. Keeping it required makes
   // the object unsatisfiable, which reads as an absent value for the whole
   // selection rather than for the one position that declined to be read.
+  //
+  // That test is {@link requiredSurvivesProjection} over the only part of
+  // itself a MASK can state. A mask records `false`, the two containers and
+  // `true`, so a caller's own scalar type is already gone by the time it
+  // reaches here, and "the caller rejected the position outright" is the whole
+  // of what is left to ask. A schema built from the classified projection has
+  // those types in hand and applies the rule entire, in
+  // {@link outputSchemaWithSourceRequired}.
   const selectedRequired = required?.filter((key) =>
     key in properties && properties[key] !== false
   );
@@ -1797,6 +1974,292 @@ export function selectSourceSchema(
     properties,
     ...(selectedRequired?.length ? { required: selectedRequired } : {}),
     additionalProperties: false,
+  };
+}
+
+/**
+ * `source` with its `$ref` chain followed, paired with the local-ref scope the
+ * result sits in — or `undefined` where the chain does not resolve or closes
+ * on itself.
+ *
+ * A named interface is ordinarily spelled as a reference, so a reader that
+ * declined to follow one would prove a container only for sources written
+ * inline. The scope travels beside the schema because a subtree carrying its
+ * own `$defs` opens a new `#/...` scope while everything else keeps resolving
+ * against the document root — which is exactly what a walk that re-roots on
+ * each descent would otherwise lose.
+ *
+ * Resolution is the canonical resolver's, one hop per iteration, never a
+ * private pointer parser. A reference repeated in its own scope closes a
+ * circle and resolves to nothing, which fails closed: `undefined` here proves
+ * no container and so requires nothing.
+ */
+function resolvedSourceNode(
+  source: JSONSchema | undefined,
+  root: JSONSchema,
+): { schema: Exclude<JSONSchema, boolean>; root: JSONSchema } | undefined {
+  const followed: Array<{ root: JSONSchema; ref: string }> = [];
+  let node = source;
+  let scope = root;
+  while (isObjectOrArray(node)) {
+    scope = cfcSchemaChildRoot(node, scope);
+    const ref = node.$ref;
+    if (typeof ref !== "string") return { schema: node, root: scope };
+    if (followed.some((step) => step.ref === ref && step.root === scope)) {
+      return undefined;
+    }
+    const target = resolveCfcSchemaRef(scope, ref);
+    if (target === undefined) return undefined;
+    followed.push({ root: scope, ref });
+    if (isEmbeddedCfcSchemaRef(ref)) scope = target;
+    node = target;
+  }
+  return undefined;
+}
+
+/**
+ * The child schema a resolved source node declares at `key`, **as written**.
+ *
+ * Deliberately not `ContextualFlowControl.schemaAtPath`, which resolves
+ * references eagerly and with no guard against one that closes a circle — a
+ * self-referential definition overflows the stack inside it, before any
+ * caller's own guard can run. {@link resolvedSourceNode} follows the reference
+ * instead, one hop at a time, so what this hands back is the child exactly as
+ * the document spells it.
+ */
+function sourcePropertySchema(
+  node: Exclude<JSONSchema, boolean> | undefined,
+  key: string,
+): JSONSchema | undefined {
+  const properties = node?.properties;
+  if (!isObjectNotArray(properties)) return undefined;
+  const child = properties[key] as JSONSchema | undefined;
+  return child === false ? undefined : child;
+}
+
+/** The element schema a resolved source node declares, as written. */
+function sourceItemSchema(
+  node: Exclude<JSONSchema, boolean> | undefined,
+): JSONSchema | undefined {
+  const items = node?.items as JSONSchema | undefined;
+  return items === false ? undefined : items;
+}
+
+/**
+ * Whether `source` **proves** the position holds the container `named`.
+ *
+ * "Can this be a container" is the wrong question here and "must it be" is the
+ * right one. A position the source declares as `["array","string"]` admits an
+ * array and holds whichever branch was stored; where it holds the string, a
+ * caller's array projection rejects it and the property is omitted. A
+ * `required` retained on the strength of the array branch then voids the
+ * object around a position that simply declined to be read — which is the one
+ * failure this whole survival rule exists to prevent.
+ *
+ * A source declaring no type proves nothing either, so it is not a container
+ * for this purpose: an untyped position can hold a scalar just as a union can.
+ *
+ * The same union has a second spelling that never reaches `schemaTypes`, so
+ * `anyOf` and `oneOf` are proven only where **every** branch proves the same
+ * container. `allOf` is refused outright rather than reasoned through: a
+ * conjunction constrains one value from several members at once, which is not
+ * a shape this derivation can state (#5761), and declining to require costs a
+ * key that would have survived while requiring wrongly costs the whole read.
+ *
+ * A `$ref` is followed first, so a named interface proves what it names.
+ *
+ * `visiting` holds the schema **as the document writes it**, which is what
+ * bounds the recursion: a branch is drawn from a `node.anyOf` array, resolution
+ * spreads shallowly and so leaves that array's members the document's own
+ * objects, and a document holds finitely many of them. Guarding the RESOLVED
+ * node instead would not bound anything — `resolveCfcSchemaRef` returns a fresh
+ * view whenever the target carries a reference, which is exactly the case a
+ * circle is made of, so no two visits to one definition share an identity.
+ */
+function sourceProvesContainer(
+  named: "object" | "array",
+  source: JSONSchema | undefined,
+  root: JSONSchema,
+  visiting = new Set<object>(),
+): boolean {
+  if (!isObjectOrArray(source) || visiting.has(source)) return false;
+  const resolved = resolvedSourceNode(source, root);
+  if (resolved === undefined) return false;
+  const { schema: node, root: scope } = resolved;
+  const declared = schemaTypes(node);
+  if (declared.length > 0) {
+    return declared.every((type) => type === named);
+  }
+  if (node.allOf !== undefined) return false;
+  visiting.add(source);
+  try {
+    for (const branches of [node.anyOf, node.oneOf]) {
+      if (
+        Array.isArray(branches) && branches.length > 0 &&
+        branches.every((branch) =>
+          sourceProvesContainer(named, branch, scope, visiting)
+        )
+      ) {
+        return true;
+      }
+    }
+  } finally {
+    visiting.delete(source);
+  }
+  return false;
+}
+
+/**
+ * Whether a source-`required` property stays required in the schema the reader
+ * constructs. It stays only where nothing the caller wrote inside that
+ * property can cause the property **itself** to be rejected: a position the
+ * caller narrowed may be omitted, but the object holding it must not be voided
+ * because it was.
+ *
+ * The two containers do not decide that the same way, and that is why this is
+ * not one case. `traverseObjectWithSchema`
+ * (`packages/runner/src/traverse.ts`) assembles an object out of the
+ * properties whose traversal returned no error and carries on past one that
+ * failed; `traverseArrayWithSchema` carries a single `valid` flag across every
+ * element and returns `undefined` when any element fails. **A rejected object
+ * property is omitted; a rejected array element voids the array around it.**
+ *
+ * So, against the classified projection at that property:
+ *
+ * - No stated type — `true`, or `{}`. The constructed child is the unprojected
+ *   one, declining exactly the values an unprojected read declines, which is
+ *   the source's meaning `required` is being derived to carry. Stays.
+ * - A scalar `type`. The constraint is the caller's, and declining a value is
+ *   what a caller writes one for. Drops. This is the case a mask cannot see,
+ *   every scalar position reducing to `true` in one.
+ * - An object. What the caller wrote inside narrows a descendant, which is
+ *   omitted rather than rejecting the object — on the condition that each
+ *   descendant's own derived `required` follows this same rule, which
+ *   {@link outputSchemaWithSourceRequired} discharges by recursing.
+ * - An array. What the caller wrote does not stay where it was written: it
+ *   constrains elements, and one rejected element voids the array. So the
+ *   answer follows the ELEMENT schema, by the same rule one level down. An
+ *   array carries no `required` of its own for that recursion to empty, so
+ *   there is nothing below it to absorb a rejection.
+ * - `false`. Drops, as it did before any of this: a rejected position holds
+ *   nothing to require.
+ *
+ * Both container answers stand on the source proving that container at that
+ * position — {@link sourceProvesContainer}, not "the source admits one". A
+ * position the source declares as either an array or a scalar is a position
+ * the caller may have narrowed away from, and requiring it on the strength of
+ * the branch that matches the projection voids the read the same way every
+ * other case here does.
+ *
+ * The rule only ever declines to require. Dropping a key that would have
+ * survived costs nothing; keeping one that would not costs the entire read.
+ */
+function requiredSurvivesProjection(
+  projection: JSONSchema | undefined,
+  source: JSONSchema | undefined,
+  sourceRoot: JSONSchema,
+): boolean {
+  if (projection === false) return false;
+  if (projection === undefined || projection === true) return true;
+  const types = schemaTypes(projection);
+  // Arrays are tested first, matching {@link impliedProjectionType} and
+  // {@link projectionMask}, so a position naming both vocabularies is read as
+  // the array the selector built from it reads.
+  if (types.includes("array") || projection.items !== undefined) {
+    if (!sourceProvesContainer("array", source, sourceRoot)) return false;
+    // The element sits inside whatever the reference resolved to, so it is
+    // read off the resolved node and carries that node's scope.
+    const resolved = resolvedSourceNode(source, sourceRoot);
+    return requiredSurvivesProjection(
+      projection.items,
+      sourceItemSchema(resolved?.schema),
+      resolved?.root ?? sourceRoot,
+    );
+  }
+  if (
+    types.includes("object") || projection.properties !== undefined ||
+    projection.additionalProperties !== undefined
+  ) {
+    return sourceProvesContainer("object", source, sourceRoot);
+  }
+  return types.length === 0;
+}
+
+/**
+ * The schema a JSON projection hands the read boundary: the classified
+ * projection the reader constructed, plus the one key it supplies from
+ * somewhere other than the caller — `required`, taken from the SOURCE schema
+ * and filtered by {@link requiredSurvivesProjection}.
+ *
+ * {@link selectSourceSchema} already derives `required` this way for the
+ * schemas it builds out of the mask, and for the same reason. This extends
+ * that derivation to the position a JSON projection reaches, which is the
+ * position where the caller's own scalar types are in play — so the filter
+ * here is the survival rule rather than the projection membership a mask is
+ * the whole of. Both spell `required`, over two origins, and only one of them
+ * is the caller's to supply.
+ *
+ * A key is derived only for a property the constructed schema names. An open
+ * position keeps whatever the source holds there without the reader vouching
+ * for it, which declines to require rather than risking an unsatisfiable one.
+ *
+ * `sourceRoot` is the document `source` sits in, threaded down because this
+ * walk re-roots on every descent: a child three levels in still spells its
+ * shape as `#/$defs/Thing` against the root, and the subtree it was read out
+ * of cannot resolve that. It travels beside `source` rather than being
+ * recovered from it, since only the caller of the outermost call knows which
+ * document a position came from.
+ *
+ * @internal Exported for focused reference-resolution tests, which reach the
+ * cases a read cannot: the runner resolves a source schema's references
+ * eagerly, so an unresolvable one fails the read before this is consulted.
+ */
+export function outputSchemaWithSourceRequired(
+  projection: JSONSchema,
+  source: JSONSchema | undefined,
+  sourceRoot: JSONSchema = source ?? true,
+): JSONSchema {
+  if (typeof projection === "boolean") return projection;
+  const resolved = resolvedSourceNode(source, sourceRoot);
+  const node = resolved?.schema;
+  const scope = resolved?.root ?? sourceRoot;
+  const types = schemaTypes(projection);
+  if (types.includes("array") || projection.items !== undefined) {
+    if (projection.items === undefined) return projection;
+    return {
+      ...projection,
+      items: outputSchemaWithSourceRequired(
+        projection.items,
+        sourceItemSchema(node),
+        scope,
+      ),
+    };
+  }
+  const declared = projection.properties;
+  if (!isObjectNotArray(declared)) return projection;
+  const sourceRequired = node !== undefined && Array.isArray(node.required)
+    ? node.required
+    : [];
+  const properties: Record<string, JSONSchema> = {};
+  const required: string[] = [];
+  for (const [key, child] of Object.entries(declared)) {
+    const childSource = sourcePropertySchema(node, key);
+    properties[key] = outputSchemaWithSourceRequired(
+      child as JSONSchema,
+      childSource,
+      scope,
+    );
+    if (
+      sourceRequired.includes(key) &&
+      requiredSurvivesProjection(child as JSONSchema, childSource, scope)
+    ) {
+      required.push(key);
+    }
+  }
+  return {
+    ...projection,
+    properties,
+    ...(required.length > 0 ? { required } : {}),
   };
 }
 
@@ -1886,8 +2349,20 @@ function resolveProjection(
   const itemSchema = projectsArrayItems
     ? (projection.schema as Exclude<JSONSchema, boolean>).items ?? true
     : undefined;
+  // The projector applies the caller's shape to a value already in hand and
+  // reads only `properties`, `items` and `additionalProperties` off it, so the
+  // constructed projection is what it wants. The OUTPUT schema is the one the
+  // runner acts on, and it carries the source's `required` besides.
+  // The source cell's own schema is the document every `#/...` in it resolves
+  // against, so it is both the position the walk starts at and the root it
+  // threads down.
+  const outputSchema = outputSchemaWithSourceRequired(
+    projection.schema,
+    sourceSchema,
+    sourceSchema ?? true,
+  );
   return {
-    outputSchema: projection.schema,
+    outputSchema,
     projectionSchema: projection.schema,
     mask,
     projectsArrayItems,
@@ -1896,7 +2371,8 @@ function resolveProjection(
     markers: projection.markers,
     ...(projectsArrayItems
       ? {
-        itemOutputSchema: itemSchema,
+        itemOutputSchema:
+          (outputSchema as Exclude<JSONSchema, boolean>).items ?? true,
         itemProjectionSchema: itemSchema,
         itemMask: projectionMask(itemSchema!),
       }
@@ -1915,6 +2391,13 @@ function resolveProjection(
 interface WalkedPosition {
   cell: Cell<unknown>;
   address: RenderedLinkAddress;
+  /**
+   * The space the rendered reference is written relative to: an address in
+   * another space carries a `@did` prefix, one in this space does not. It is
+   * the space the READER is working in rather than the source cell's, since a
+   * path that crosses a link can land the source elsewhere.
+   */
+  contextSpace: MemorySpace | undefined;
   stored?: { value: unknown };
 }
 
@@ -1940,14 +2423,18 @@ function renderedLinkAddress(link: NormalizedFullLink): RenderedLinkAddress {
 function walkedPosition(
   cell: Cell<unknown>,
   address: RenderedLinkAddress,
+  contextSpace: MemorySpace | undefined,
   stored: { value: unknown } | undefined,
 ): WalkedPosition {
   const link = stored === undefined
     ? undefined
     : parseLink(stored.value, address);
-  return link === undefined
-    ? { cell, address, stored }
-    : { cell, address: renderedLinkAddress(link), stored: undefined };
+  return link === undefined ? { cell, address, contextSpace, stored } : {
+    cell,
+    address: renderedLinkAddress(link),
+    contextSpace,
+    stored: undefined,
+  };
 }
 
 /**
@@ -1966,6 +2453,7 @@ function positionBelow(
   return walkedPosition(
     position.cell.key(key),
     { ...position.address, path: [...position.address.path, key] },
+    position.contextSpace,
     isObjectOrArray(container) ? { value: container[key] } : undefined,
   );
 }
@@ -1975,11 +2463,18 @@ function positionBelow(
  * from, which is the cell the selection read. `lastNode: "top"` stops at a
  * link stored at that cell rather than following it, so a source that holds
  * one is addressed by it, exactly as any position below is.
+ *
+ * `contextSpace` is the space the addresses this walk renders are written
+ * relative to; see {@link WalkedPosition.contextSpace}.
  */
-function sourcePosition(cell: Cell<unknown>): WalkedPosition {
+function sourcePosition(
+  cell: Cell<unknown>,
+  contextSpace: MemorySpace | undefined,
+): WalkedPosition {
   return walkedPosition(
     cell,
     renderedLinkAddress(cell.getAsNormalizedFullLink()),
+    contextSpace,
     { value: cell.getRaw({ lastNode: "top" }) },
   );
 }
@@ -2031,10 +2526,13 @@ async function composeElementAddresses(
  * Composes the addresses a selection's markers asked for into `projected`, the
  * value its projection produced.
  *
- * A marked position renders `{"$link": <address>}`. Where the same position
- * also projected contents, the address joins them in one object, because both
- * were asked for. Where those contents are not an object there is nothing to
- * join them to, and the address is the whole answer.
+ * A marked position renders `{"$link": "/of:fid1:…/path"}` — the fabric's
+ * canonical reference syntax, one string carrying id, space, scope and path,
+ * so the address a read hands back is the address a later command takes in.
+ * Where the same position also projected contents, the address joins them in
+ * one object, because both were asked for. Where those contents are not an
+ * object there is nothing to join them to, and the address is the whole
+ * answer.
  *
  * `implicitArrayTraversal` states that the markers came from a concise field
  * list, which names a field wherever the value holds one rather than at a
@@ -2096,10 +2594,10 @@ async function composeLinkAddresses(
   }
   if (markers.marked !== true) return composed;
   const address = {
-    [LINK_MARKER_KEY]: {
-      ...position.address,
-      path: [...position.address.path],
-    },
+    [LINK_MARKER_KEY]: createLLMFriendlyLink(
+      position.address,
+      position.contextSpace,
+    ),
   };
   return isObjectNotArray(composed) ? { ...address, ...composed } : address;
 }
@@ -2256,7 +2754,7 @@ export async function deriveSelectedValue(
     // the cell's schema.
     const walked = sourceValueCell.asSchema(false);
     await walked.pull();
-    const position = sourcePosition(walked);
+    const position = sourcePosition(walked, space);
     // The graph path refuses a projection over array items that meets a value
     // which is not an array, and the answer to a marked one is the same
     // refusal: a walk over a non-array simply finds no elements to address,
@@ -2502,6 +3000,17 @@ export async function deriveSelectedValue(
         `Could not apply piece get transform: ${committed.error}`,
       );
     }
+    // This wait is GLOBAL: idle() drains the whole reactive graph and
+    // synced() the whole storage manager, not just this transform. On a
+    // plain `piece get` that is benign — nothing else runs in the CLI's
+    // runtime — but a shaped `piece call` readback arrives here right after
+    // its handler ran, so the selection waits on whatever derived
+    // recomputation that handler triggered elsewhere, a coupling the plain
+    // call's transaction-local acknowledgment deliberately avoids.
+    // Documented as a known cost of shaping at the call (decided
+    // 2026-08-14; packages/cli/README.md names the shape-the-collect
+    // alternative); scoping this wait to the transform's own computation is
+    // the named follow-up.
     await outputCell.pull();
     await runtime.idle();
     await runtime.storageManager.synced();
@@ -2540,7 +3049,7 @@ export async function deriveSelectedValue(
     }
     deps.onOutputCell?.(outputCell);
     return markers === undefined ? outputValue : await composeLinkAddresses(
-      sourcePosition(sourceValueCell),
+      sourcePosition(sourceValueCell, space),
       markers,
       outputValue,
       implicitArrayTraversal,
@@ -2616,11 +3125,15 @@ function markersHeldBy(
  * fields they did not name. Working off the value in hand also runs no pattern
  * graph and commits no transaction; what remains is the address walk itself,
  * which is the same one a hand-written `$link` is composed through.
+ *
+ * `contextSpace` is the space the reader is working in, which decides whether
+ * a composed address carries a `@did` prefix.
  */
 export async function boundReadValue(
   sourceCell: Cell<unknown>,
   declared: JSONSchema | undefined,
   value: unknown,
+  contextSpace: MemorySpace,
 ): Promise<unknown> {
   const projection = declaredResultProjection(declared);
   if (projection === undefined) return undefined;
@@ -2633,7 +3146,7 @@ export async function boundReadValue(
     ? undefined
     : markersHeldBy(projection.markers, [value]);
   return markers === undefined ? projected : await composeLinkAddresses(
-    sourcePosition(sourceCell),
+    sourcePosition(sourceCell, contextSpace),
     markers,
     projected,
   );

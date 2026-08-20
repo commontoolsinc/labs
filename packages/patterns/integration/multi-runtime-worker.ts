@@ -20,8 +20,9 @@ import {
   type PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export interface WorkerRequest {
   id: number;
@@ -87,6 +88,12 @@ async function attachPiece(next: PieceController): Promise<void> {
  * stringify bigints (JSON.stringify throws on them).
  */
 function sanitizeForTransfer(value: unknown): unknown {
+  // TODO(danfuzz): most of what reaches here is a `FabricValue` read from a
+  // cell, and this narrows it to the JSON-compatible subset -- a
+  // `FabricPrimitive` becomes `{}`, a `bigint` becomes its own decimal text.
+  // A test that asserted on either would be asserting on the damage. The
+  // crossing is `postMessage`, so `codec-realm` carries the whole domain, and
+  // the harness decodes on the other side.
   if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value, (_key, entry) => {
     if (typeof entry === "function") return undefined;
@@ -189,7 +196,10 @@ async function maybeAttachOtelBridge(identity: Identity): Promise<void> {
   if (!otelActive) return;
   const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
     await Promise.all([
+      // The OpenTelemetry bridge loads only for a run that reports.
+      // deno-lint-ignore cf-imports/no-inline-module-import
       import("@commonfabric/runner/telemetry-otel-bridge"),
+      // deno-lint-ignore cf-imports/no-inline-module-import
       import("@opentelemetry/api"),
     ]);
   const pieces = controller();
@@ -227,15 +237,22 @@ const handlers: Record<
     return { did: identity.did() };
   },
 
-  async createPiece({ programPath, rootPath, input }) {
-    const program = await controller().runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        programPath as string,
-        rootPath as string,
-      ),
+  async createPiece({ programPath, rootPath, dataFilePaths, input }) {
+    // Each runtime compiles the pattern in its own worker, so data files have
+    // to cross this boundary with the paths rather than be attached where the
+    // worker was spawned.
+    const program = await resolveLocalProgram(
+      (resolver) => controller().runtime.harness.resolve(resolver),
+      {
+        main: programPath as string,
+        root: rootPath as string,
+        ...(Array.isArray(dataFilePaths)
+          ? { dataFilePaths: dataFilePaths as string[] }
+          : {}),
+      },
     );
     const created = await controller().create(program, {
-      input: isRecord(input) ? input : undefined,
+      input: isObjectNotArray(input) ? input : undefined,
       start: true,
     });
     await attachPiece(created);
@@ -258,7 +275,7 @@ const handlers: Record<
       // applies when delivering real DOM events.
       eventValue = {
         type: "click",
-        ...(isRecord(event) ? event : {}),
+        ...(isObjectNotArray(event) ? event : {}),
         provenance: {
           origin: "dom",
           trusted: true,
@@ -432,6 +449,15 @@ const handlers: Record<
     return {};
   },
 
+  // Force an ordered-after round trip on every open space connection, so any
+  // subscription fan-out the server has already sent has been received and
+  // applied by this runtime before returning. The harness's cross-runtime
+  // delivery barrier (see MultiRuntimeHarness.settle).
+  async barrier() {
+    await controller().runtime.storageManager.pullOpenSpacesToHead();
+    return {};
+  },
+
   async diagnostics() {
     await idle();
     const scheduler = controller().runtime.scheduler;
@@ -460,9 +486,6 @@ const handlers: Record<
     return {};
   },
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const { id, cmd, args } = event.data;

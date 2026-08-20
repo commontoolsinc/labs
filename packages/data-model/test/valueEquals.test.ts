@@ -7,14 +7,14 @@
  * at all, as are two fabric values of different concrete classes. The cases
  * walk that branch deliberately rather than sampling it.
  *
- * Frozen state must not change an answer, which is what the matrix over it is
+ * Frozen state must not change a result, which is what the matrix over it is
  * for: equality is about what a value holds, not about whether it can still be
  * written to.
  *
  * Signed zeros and `NaN` get their own group, being where a comparison written
- * with `===` answers differently: `-0` and `+0` are distinct here though `===`
- * merges them, and `NaN` equals itself though `===` denies it. The infinities
- * sit in that group as the counterweight -- `===` already answers correctly
+ * with `===` gives a different result: `-0` and `+0` are distinct here though
+ * `===` merges them, and `NaN` equals itself though `===` denies it. The
+ * infinities sit in that group as the counterweight -- `===` is already correct
  * for those, and so must this, so they pin the absence of an over-correction.
  */
 
@@ -25,7 +25,7 @@ import { type FabricValue, valueEqual } from "@/fabric-value.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 
@@ -52,9 +52,9 @@ describe("valueEqual()", () => {
 
   it("throws when given a function (not a `FabricValue`)", () => {
     // A function is reachable only via an unsound cast; the comparison
-    // rejects it rather than silently mis-answering, and does so regardless
-    // of which argument is the function. (Distinct values are used so the
-    // `Object.is()` fast path doesn't short-circuit before the check.)
+    // rejects it rather than quietly returning a wrong result, and does so
+    // regardless of which argument is the function. (Distinct values are used
+    // so the `Object.is()` fast path doesn't short-circuit before the check.)
     const fn = (() => {}) as unknown as FabricValue;
     const fn2 = (() => {}) as unknown as FabricValue;
     expect(() => valueEqual(fn, fn2)).toThrow();
@@ -217,12 +217,12 @@ describe("valueEqual()", () => {
         .toBe(true);
     });
 
-    it("distinguishes FabricRegExp and FabricEpochDays by content", () => {
+    it("distinguishes FabricRegExp and FabricEpochDay by content", () => {
       expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/b/g)))
         .toBe(false);
       expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
         .toBe(true);
-      expect(valueEqual(new FabricEpochDays(1n), new FabricEpochDays(2n)))
+      expect(valueEqual(new FabricEpochDay(1n), new FabricEpochDay(2n)))
         .toBe(false);
     });
 
@@ -247,7 +247,7 @@ describe("valueEqual()", () => {
       it("short-circuits to unequal without hashing", () => {
         // A fresh `UnknownValue` is not auto-frozen, so the pair skips the
         // both-deep-frozen early hash and reaches the constructor check.
-        const u = new UnknownValue("tag@1", 1);
+        const u = new UnknownValue("Tag@1", 1);
         const fb = new FabricBytes(new Uint8Array([1]));
         expect(valueEqual(u, fb)).toBe(false);
         expect(valueEqual(fb, u)).toBe(false);
@@ -263,7 +263,7 @@ describe("valueEqual()", () => {
   //                                  nested value fails `isDeepFrozen()`, so it
   //                                  takes the general subtype + hash path.
   //   U  (unfrozen)                -> likewise the general subtype + hash path.
-  // Every pairing must agree on the value answer regardless of state.
+  // Every pairing must agree on the result regardless of state.
   describe("frozen-state matrix", () => {
     // The nested array keeps the shallow-frozen `F` build genuinely
     // not-deep-frozen (an all-primitive shallow freeze reads as deep-frozen).
@@ -336,7 +336,7 @@ describe("valueEqual()", () => {
         ).toBe(false);
         expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
           .toBe(true);
-        expect(valueEqual(new FabricEpochDays(7n), new FabricEpochDays(7n)))
+        expect(valueEqual(new FabricEpochDay(7n), new FabricEpochDay(7n)))
           .toBe(true);
       });
     });
@@ -350,7 +350,7 @@ describe("valueEqual()", () => {
           ),
         )
           .toBe(false);
-        expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
+        expect(valueEqual(new FabricEpochDay(1n), new FabricRegExp(/a/)))
           .toBe(false);
       });
     });

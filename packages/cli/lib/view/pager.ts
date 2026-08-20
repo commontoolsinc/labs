@@ -9,6 +9,7 @@
  * PagerDeps} so the driver's control flow can be exercised without a real TTY;
  * {@link realPagerDeps} supplies the genuine Deno calls.
  */
+
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
@@ -107,8 +108,8 @@ export async function runPager(
 
   // The terminal fills the area outside the character grid (the sub-cell padding
   // below the last row) with its default background. Set that to the status
-  // bar's colour so the strip beneath the last line blends in instead of showing
-  // the terminal's own background; restore it on exit. Only with colour on.
+  // bar's color so the strip beneath the last line blends in instead of showing
+  // the terminal's own background; restore it on exit. Only with color on.
   const padBg = options.color ? ui.statusBar.bg : undefined;
 
   const session = new Session(

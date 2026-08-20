@@ -1,5 +1,7 @@
-import type { JSONSchema } from "@commonfabric/api";
 import { join, normalize } from "@std/path";
+
+import type { JSONSchema } from "@commonfabric/api";
+
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { BashToolInput, BashToolOutput } from "./bash.ts";
 import {

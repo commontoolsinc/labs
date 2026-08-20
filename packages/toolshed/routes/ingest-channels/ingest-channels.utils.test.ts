@@ -1579,7 +1579,7 @@ describe("ingest-channels control plane", () => {
     expect(other.status).toBe(200);
   });
 
-  it("honours ttlDays and enforces the resulting expiry on the data plane", async () => {
+  it("honors ttlDays and enforces the resulting expiry on the data plane", async () => {
     const res = await mint(alice, "req-t1", { ttlDays: 30 });
     expect(res.status).toBe(200);
     expect(typeof ok(res).expiresAt).toBe("string");

@@ -1,10 +1,11 @@
-import type { AppRouteHandler } from "@/lib/types.ts";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+
 import type * as Routes from "./memory.routes.ts";
-import { memoryServer } from "../memory.ts";
-import { createSpan } from "@/middlewares/opentelemetry.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
+import { createSpan } from "@/middlewares/opentelemetry.ts";
+import { memoryServer } from "@/routes/storage/memory.ts";
 
 type NegotiatedSocketHandlers = {
   onMessage: (message: string) => void;

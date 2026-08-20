@@ -1,446 +1,252 @@
 /**
- * Tests for SVG sanitization
+ * Tests for SVG sanitization.
  *
- * NOTE: These tests require browser APIs (DOMParser, XMLSerializer) and must be run
- * in a browser environment. To run these tests:
- *
- * 1. Using deno-web-test:
- *    deno run -A packages/deno-web-test/cli.ts packages/ui/src/v2/components/cf-svg/sanitize-svg.test.ts
- *
- * 2. Or run them manually in a browser console
- *
- * These tests will fail in a standard Deno test environment because DOMParser
- * is not available outside of a browser context.
+ * These need a browser for `DOMParser`, and run under deno-web-test rather
+ * than `deno test`. The harness registers tests through `Deno.test` and calls
+ * each one with no arguments, so the BDD functions the rest of the repository
+ * uses are not available here.
  */
-import { assert } from "@std/assert";
+
+import { assert, assertEquals } from "@std/assert";
 import { sanitizeSvg } from "./sanitize-svg.ts";
 
-// Helper to check if string contains substring
-function contains(str: string, substring: string): boolean {
-  return str.indexOf(substring) !== -1;
+/** The sanitized drawing, which each test here expects to exist. */
+function sanitized(svg: string): Element {
+  const result = sanitizeSvg(svg);
+  assert(result !== null, "expected the source to survive sanitizing");
+  return result;
 }
 
-// Helper to check if string does NOT contain substring
-function notContains(str: string, substring: string): boolean {
-  return str.indexOf(substring) === -1;
+/** The local names of every element in the sanitized drawing, root included. */
+function elementNames(root: Element): string[] {
+  return [root, ...Array.from(root.querySelectorAll("*"))].map((element) =>
+    element.localName
+  );
 }
 
-// Valid SVG tests
-Deno.test("sanitizeSvg: should pass through simple valid SVG", function () {
-  const svg = '<svg><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(contains(result, "<circle"), "Should contain <circle");
-  assert(contains(result, 'cx="50"'), 'Should contain cx="50"');
-  assert(contains(result, 'cy="50"'), 'Should contain cy="50"');
-  assert(contains(result, 'r="40"'), 'Should contain r="40"');
-});
-
-Deno.test("sanitizeSvg: should preserve SVG attributes", function () {
-  const svg =
-    '<svg viewBox="0 0 100 100" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="blue"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(contains(result, "viewBox"), "Should contain viewBox");
-  assert(contains(result, "width"), "Should contain width");
-  assert(contains(result, "height"), "Should contain height");
-  assert(contains(result, "<rect"), "Should contain <rect");
-  assert(contains(result, 'fill="blue"'), 'Should contain fill="blue"');
-});
-
-Deno.test("sanitizeSvg: should preserve nested groups and elements", function () {
-  const svg =
-    '<svg><g id="layer1"><circle cx="50" cy="50" r="40"/><rect x="10" y="10" width="20" height="20"/></g></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(contains(result, "<g"), "Should contain <g");
-  assert(contains(result, 'id="layer1"'), 'Should contain id="layer1"');
-  assert(contains(result, "<circle"), "Should contain <circle");
-  assert(contains(result, "<rect"), "Should contain <rect");
-});
-
-// Script removal tests
-Deno.test("sanitizeSvg: should remove script tags", function () {
-  const svg =
-    "<svg><script>alert('xss')</script><circle cx='50' cy='50' r='40'/></svg>";
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove multiple script tags", function () {
-  const svg =
-    "<svg><script>alert('xss1')</script><circle cx='50' cy='50' r='40'/><script>alert('xss2')</script></svg>";
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(notContains(result, "xss1"), "Should not contain xss1");
-  assert(notContains(result, "xss2"), "Should not contain xss2");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove nested script tags inside groups", function () {
-  const svg =
-    "<svg><g><script>alert('xss')</script><circle cx='50' cy='50' r='40'/></g></svg>";
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-  assert(contains(result, "<g"), "Should contain <g");
-});
-
-// Event handler removal tests
-Deno.test("sanitizeSvg: should remove onclick attribute", function () {
-  const svg =
-    '<svg><circle onclick="alert(\'xss\')" cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "onclick"), "Should not contain onclick");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-  assert(contains(result, 'cx="50"'), 'Should contain cx="50"');
-});
-
-Deno.test("sanitizeSvg: should remove onload attribute from SVG element", function () {
-  const svg =
-    '<svg onload="alert(\'xss\')"><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "onload"), "Should not contain onload");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove onerror attribute", function () {
-  const svg = '<svg><image onerror="alert(\'xss\')" href="test.png"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "onerror"), "Should not contain onerror");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<image"), "Should contain <image");
-});
-
-Deno.test("sanitizeSvg: should remove multiple event handlers from same element", function () {
-  const svg =
-    '<svg><circle onclick="alert(1)" onload="alert(2)" onmouseover="alert(3)" cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "onclick"), "Should not contain onclick");
-  assert(notContains(result, "onload"), "Should not contain onload");
-  assert(notContains(result, "onmouseover"), "Should not contain onmouseover");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-  assert(contains(result, 'cx="50"'), 'Should contain cx="50"');
-});
-
-Deno.test("sanitizeSvg: should remove event handlers with mixed case", function () {
-  const svg =
-    '<svg><circle onClick="alert(\'xss\')" onLoad="alert(\'xss\')" cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  // Event handlers should be removed regardless of case
-  assert(
-    notContains(result.toLowerCase(), "onclick"),
-    "Should not contain onclick",
+/** Every attribute in the sanitized drawing, as `name=value` pairs. */
+function attributes(root: Element): string[] {
+  return [root, ...Array.from(root.querySelectorAll("*"))].flatMap((element) =>
+    Array.from(element.attributes).map((attribute) =>
+      `${attribute.name}=${attribute.value}`
+    )
   );
-  assert(
-    notContains(result.toLowerCase(), "onload"),
-    "Should not contain onload",
+}
+
+Deno.test("sanitizeSvg keeps a plain drawing", function () {
+  const root = sanitized(
+    '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="blue"/></svg>',
   );
-  assert(notContains(result, "alert"), "Should not contain alert");
+
+  assertEquals(root.getAttribute("viewBox"), "0 0 100 100");
+  const circle = root.querySelector("circle");
+  assertEquals(circle?.getAttribute("cx"), "50");
+  assertEquals(circle?.getAttribute("fill"), "blue");
 });
 
-// URL sanitization tests
-Deno.test("sanitizeSvg: should remove javascript: URL in href", function () {
-  const svg =
-    '<svg><a href="javascript:alert(\'xss\')"><text x="10" y="20">click</text></a></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "javascript:"), "Should not contain javascript:");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<text"), "Should contain <text");
-  assert(contains(result, "click"), "Should contain click");
-});
-
-Deno.test("sanitizeSvg: should remove javascript: URL in xlink:href", function () {
-  const svg =
-    '<svg xmlns:xlink="http://www.w3.org/1999/xlink"><a xlink:href="javascript:alert(\'xss\')"><text x="10" y="20">click</text></a></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "javascript:"), "Should not contain javascript:");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<text"), "Should contain <text");
-});
-
-Deno.test("sanitizeSvg: should remove vbscript: URL", function () {
-  const svg =
-    "<svg><a href=\"vbscript:msgbox('xss')\"><text>click</text></a></svg>";
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "vbscript:"), "Should not contain vbscript:");
-  assert(notContains(result, "msgbox"), "Should not contain msgbox");
-  assert(contains(result, "<text"), "Should contain <text");
-});
-
-Deno.test("sanitizeSvg: should remove data:text/html URL", function () {
-  const svg =
-    "<svg><a href=\"data:text/html,<script>alert('xss')</script>\"><text>click</text></a></svg>";
-  const result = sanitizeSvg(svg);
-
-  // The key security requirement: dangerous URL protocol is removed
-  assert(
-    notContains(result, "data:text/html"),
-    "Should not contain data:text/html",
+Deno.test("sanitizeSvg keeps nested groups, gradients and filters", function () {
+  const root = sanitized(
+    '<svg><defs><linearGradient id="grad"><stop offset="0%" stop-color="red"/>' +
+      '</linearGradient><filter id="blur"><feGaussianBlur stdDeviation="2"/>' +
+      '</filter></defs><g id="layer1"><rect width="10" height="10"/></g></svg>',
   );
-  // Also verify the XSS payload doesn't get through
-  assert(notContains(result, "alert"), "Should not contain alert");
+
+  assertEquals(elementNames(root), [
+    "svg",
+    "defs",
+    "linearGradient",
+    "stop",
+    "filter",
+    "feGaussianBlur",
+    "g",
+    "rect",
+  ]);
 });
 
-Deno.test("sanitizeSvg: should preserve safe URLs", function () {
-  const svg =
-    '<svg><a href="https://example.com"><text x="10" y="20">click</text></a></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(
-    contains(result, "https://example.com"),
-    "Should contain https://example.com",
+Deno.test("sanitizeSvg keeps a style element and a style attribute", function () {
+  const root = sanitized(
+    "<svg><style>.cls { fill: red; }</style>" +
+      '<circle class="cls" style="stroke: blue;" cx="5" cy="5" r="4"/></svg>',
   );
-  assert(contains(result, "<text"), "Should contain <text");
-});
 
-Deno.test("sanitizeSvg: should preserve relative URLs", function () {
-  const svg =
-    '<svg><image href="./image.png" x="0" y="0" width="100" height="100"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(contains(result, "./image.png"), "Should contain ./image.png");
-  assert(contains(result, "<image"), "Should contain <image");
-});
-
-Deno.test("sanitizeSvg: should handle javascript: with mixed case", function () {
-  const svg =
-    "<svg><a href=\"JavaScript:alert('xss')\"><text>click</text></a></svg>";
-  const result = sanitizeSvg(svg);
-
-  assert(
-    notContains(result.toLowerCase(), "javascript:"),
-    "Should not contain javascript:",
-  );
-  assert(notContains(result, "alert"), "Should not contain alert");
-});
-
-// Dangerous element removal tests
-Deno.test("sanitizeSvg: should remove foreignObject element", function () {
-  const svg =
-    '<svg><foreignObject width="100" height="100"><div xmlns="http://www.w3.org/1999/xhtml">html content</div></foreignObject><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(
-    notContains(result, "foreignObject"),
-    "Should not contain foreignObject",
-  );
-  assert(notContains(result, "<div"), "Should not contain <div");
-  assert(
-    notContains(result, "html content"),
-    "Should not contain html content",
-  );
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove set element", function () {
-  const svg =
-    '<svg><set attributeName="onclick" to="alert(\'xss\')"/><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<set"), "Should not contain <set");
-  assert(
-    notContains(result, "attributeName"),
-    "Should not contain attributeName",
-  );
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove iframe element", function () {
-  const svg =
-    '<svg><iframe src="evil.html"/><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<iframe"), "Should not contain <iframe");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove embed element", function () {
-  const svg =
-    '<svg><embed src="evil.swf"/><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<embed"), "Should not contain <embed");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should remove object element", function () {
-  const svg =
-    '<svg><object data="evil.html"/><circle cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<object"), "Should not contain <object");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-// Nested dangerous content tests
-Deno.test("sanitizeSvg: should remove dangerous elements inside defs", function () {
-  const svg =
-    '<svg><defs><script>alert(\'xss\')</script><linearGradient id="grad1"><stop offset="0%" stop-color="red"/></linearGradient></defs></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<defs"), "Should contain <defs");
-  assert(contains(result, "linearGradient"), "Should contain linearGradient");
-});
-
-Deno.test("sanitizeSvg: should remove event handlers in nested elements", function () {
-  const svg =
-    '<svg><g><g><circle onclick="alert(\'xss\')" cx="50" cy="50" r="40"/></g></g></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "onclick"), "Should not contain onclick");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<circle"), "Should contain <circle");
-});
-
-Deno.test("sanitizeSvg: should handle complex nested structure with multiple threats", function () {
-  const svg =
-    '<svg><g id="layer1"><script>alert(1)</script><a href="javascript:alert(2)"><text onclick="alert(3)">text</text></a><foreignObject><div>html</div></foreignObject></g></svg>';
-  const result = sanitizeSvg(svg);
-
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "javascript:"), "Should not contain javascript:");
-  assert(notContains(result, "onclick"), "Should not contain onclick");
-  assert(
-    notContains(result, "foreignObject"),
-    "Should not contain foreignObject",
-  );
-  assert(notContains(result, "<div"), "Should not contain <div");
-  assert(notContains(result, "alert"), "Should not contain alert");
-  assert(contains(result, "<g"), "Should contain <g");
-  assert(contains(result, "<text"), "Should contain <text");
-  assert(contains(result, "text"), "Should contain text");
-});
-
-// Edge case tests
-Deno.test("sanitizeSvg: should return empty string for empty input", function () {
-  const result = sanitizeSvg("");
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should return empty string for whitespace-only input", function () {
-  const result = sanitizeSvg("   \n\t  ");
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should return empty string for null input", function () {
-  const result = sanitizeSvg(null as any);
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should return empty string for undefined input", function () {
-  const result = sanitizeSvg(undefined as any);
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should return empty string for non-string input", function () {
-  const result = sanitizeSvg(123 as any);
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should return empty string for malformed XML", function () {
-  const result = sanitizeSvg("<svg><circle></svg>");
-  assert(result === "", "Should return empty string");
-});
-
-Deno.test("sanitizeSvg: should handle non-SVG content", function () {
-  const result = sanitizeSvg("<div>not svg</div>");
-  // Note: DOMParser with "image/svg+xml" may parse non-SVG elements differently depending on the browser
-  // The important thing is that the result is safe (no scripts, no event handlers)
-  // and non-SVG elements like <div> are either removed or made safe
-  // The current implementation allows <div> since it's not in the dangerous elements list
-  // This is acceptable since <div> without event handlers is not a security risk
-  assert(
-    typeof result === "string" && result.length >= 0,
-    "Should return a string",
+  assertEquals(root.querySelector("style")?.textContent, ".cls { fill: red; }");
+  assertEquals(
+    root.querySelector("circle")?.getAttribute("style"),
+    "stroke: blue;",
   );
 });
 
-// Style element tests
-Deno.test("sanitizeSvg: should preserve style elements", function () {
-  const svg =
-    '<svg><style>.cls { fill: red; }</style><circle class="cls" cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
+Deno.test("sanitizeSvg drops a script element", function () {
+  const root = sanitized(
+    "<svg><script>alert('xss')</script><circle cx='5' cy='5' r='4'/></svg>",
+  );
 
-  // Note: The implementation does NOT remove <style> elements from the dangerous list
-  // Style elements are allowed, which is fine for SVG since they are scoped
-  assert(contains(result, "<style"), "Should contain <style");
-  assert(contains(result, "<circle"), "Should contain <circle");
+  assertEquals(elementNames(root), ["svg", "circle"]);
 });
 
-Deno.test("sanitizeSvg: should preserve inline style attributes", function () {
-  const svg =
-    '<svg><circle style="fill: red; stroke: blue;" cx="50" cy="50" r="40"/></svg>';
-  const result = sanitizeSvg(svg);
+Deno.test("sanitizeSvg drops a script element nested in a group or in defs", function () {
+  const root = sanitized(
+    "<svg><g><script>alert(1)</script><circle cx='5' cy='5' r='4'/></g>" +
+      "<defs><script>alert(2)</script></defs></svg>",
+  );
 
-  assert(contains(result, "style"), "Should contain style");
-  assert(contains(result, "fill: red"), "Should contain fill: red");
-  assert(contains(result, "<circle"), "Should contain <circle");
+  assertEquals(elementNames(root), ["svg", "g", "circle", "defs"]);
 });
 
-// Comprehensive XSS vector test
-Deno.test("sanitizeSvg: should sanitize multiple attack vectors in single SVG", function () {
-  const svg = `<svg onload="alert(1)">
-    <script>alert(2)</script>
-    <a href="javascript:alert(3)"><text onclick="alert(4)">click</text></a>
-    <foreignObject><body onload="alert(5)">test</body></foreignObject>
-    <set attributeName="onload" to="alert(6)"/>
-    <circle onerror="alert(7)" cx="50" cy="50" r="40"/>
-  </svg>`;
-  const result = sanitizeSvg(svg);
-
-  // Ensure no alert() calls remain
-  assert(notContains(result, "alert(1)"), "Should not contain alert(1)");
-  assert(notContains(result, "alert(2)"), "Should not contain alert(2)");
-  assert(notContains(result, "alert(3)"), "Should not contain alert(3)");
-  assert(notContains(result, "alert(4)"), "Should not contain alert(4)");
-  assert(notContains(result, "alert(5)"), "Should not contain alert(5)");
-  assert(notContains(result, "alert(6)"), "Should not contain alert(6)");
-  assert(notContains(result, "alert(7)"), "Should not contain alert(7)");
-
-  // Ensure dangerous elements/attributes removed
-  assert(notContains(result, "<script"), "Should not contain <script");
-  assert(notContains(result, "javascript:"), "Should not contain javascript:");
-  assert(
-    notContains(result, "foreignObject"),
-    "Should not contain foreignObject",
-  );
-  assert(notContains(result, "<set"), "Should not contain <set");
-  assert(
-    notContains(result.toLowerCase(), "onload"),
-    "Should not contain onload",
-  );
-  assert(
-    notContains(result.toLowerCase(), "onclick"),
-    "Should not contain onclick",
-  );
-  assert(
-    notContains(result.toLowerCase(), "onerror"),
-    "Should not contain onerror",
+Deno.test("sanitizeSvg drops an element that would embed foreign content", function () {
+  const root = sanitized(
+    '<svg><foreignObject width="100" height="100">' +
+      '<div xmlns="http://www.w3.org/1999/xhtml">html content</div>' +
+      "</foreignObject><circle cx='5' cy='5' r='4'/></svg>",
   );
 
-  // Ensure safe content preserved
-  assert(contains(result, "<text"), "Should contain <text");
-  assert(contains(result, "click"), "Should contain click");
-  assert(contains(result, "<circle"), "Should contain <circle");
+  assertEquals(elementNames(root), ["svg", "circle"]);
+});
+
+Deno.test("sanitizeSvg drops an animation element that can retarget an attribute", function () {
+  // `<animate>` writes a new value into an attribute while the drawing plays,
+  // which would put a URL into an `href` after it had been checked.
+  const root = sanitized(
+    '<svg><a href="https://example.com">' +
+      '<animate attributeName="href" to="javascript:alert(1)"/>' +
+      "<text>click</text></a></svg>",
+  );
+
+  assertEquals(elementNames(root), ["svg", "a", "text"]);
+});
+
+Deno.test("sanitizeSvg drops an element from outside the SVG namespace", function () {
+  // `desc` and `title` are the two places a drawing may hold HTML, and an
+  // element that arrives there shares a local name with a drawing element it
+  // is not.
+  const root = sanitized(
+    '<svg><desc><a href="javascript:alert(1)">x</a></desc>' +
+      "<circle cx='5' cy='5' r='4'/></svg>",
+  );
+
+  assertEquals(elementNames(root), ["svg", "desc", "circle"]);
+});
+
+Deno.test("sanitizeSvg drops an element it does not recognize", function () {
+  const root = sanitized(
+    "<svg><iframe src='evil.html'/><object data='evil.html'/>" +
+      "<set attributeName='onclick' to='alert(1)'/>" +
+      "<animateTransform attributeName='transform'/>" +
+      "<circle cx='5' cy='5' r='4'/></svg>",
+  );
+
+  assertEquals(elementNames(root), ["svg", "circle"]);
+});
+
+Deno.test("sanitizeSvg drops an event-handler attribute", function () {
+  const root = sanitized(
+    '<svg onload="alert(1)"><circle onclick="alert(2)" onMouseOver="alert(3)"' +
+      ' cx="50" cy="50" r="40"/></svg>',
+  );
+
+  assertEquals(attributes(root), ["cx=50", "cy=50", "r=40"]);
+});
+
+Deno.test("sanitizeSvg drops a URL that runs script", function () {
+  for (
+    const url of [
+      "javascript:alert(1)",
+      "JavaScript:alert(1)",
+      "java\tscript:alert(1)",
+      "java\nscript:alert(1)",
+      "vbscript:msgbox(1)",
+      "data:text/html,<script>alert(1)</script>",
+    ]
+  ) {
+    const root = sanitized(
+      `<svg><a href="${url}"><text>click</text></a></svg>`,
+    );
+
+    assertEquals(root.querySelector("a")?.hasAttribute("href"), false, url);
+    assertEquals(root.querySelector("text")?.textContent, "click");
+  }
+});
+
+Deno.test("sanitizeSvg drops a script URL in xlink:href", function () {
+  const root = sanitized(
+    '<svg xmlns:xlink="http://www.w3.org/1999/xlink">' +
+      '<a xlink:href="javascript:alert(1)"><text>click</text></a></svg>',
+  );
+
+  assertEquals(
+    root.querySelector("a")?.hasAttributeNS(
+      "http://www.w3.org/1999/xlink",
+      "href",
+    ),
+    false,
+  );
+});
+
+Deno.test("sanitizeSvg keeps a URL the browser may follow", function () {
+  const root = sanitized(
+    '<svg><a href="https://example.com"><text>click</text></a>' +
+      '<image href="./picture.png" width="10" height="10"/>' +
+      '<use href="#shape"/></svg>',
+  );
+
+  assertEquals(
+    root.querySelector("a")?.getAttribute("href"),
+    "https://example.com",
+  );
+  assertEquals(
+    root.querySelector("image")?.getAttribute("href"),
+    "./picture.png",
+  );
+  assertEquals(root.querySelector("use")?.getAttribute("href"), "#shape");
+});
+
+Deno.test("sanitizeSvg keeps an image carrying its own bytes", function () {
+  const root = sanitized(
+    '<svg><image href="data:image/png;base64,AAAA" width="10" height="10"/></svg>',
+  );
+
+  assertEquals(
+    root.querySelector("image")?.getAttribute("href"),
+    "data:image/png;base64,AAAA",
+  );
+});
+
+Deno.test("sanitizeSvg drops a data URL from a link, which navigates", function () {
+  const root = sanitized(
+    '<svg><a href="data:image/png;base64,AAAA"><text>click</text></a></svg>',
+  );
+
+  assertEquals(root.querySelector("a")?.hasAttribute("href"), false);
+});
+
+Deno.test("sanitizeSvg returns null for source that holds no drawing", function () {
+  assertEquals(sanitizeSvg(""), null);
+  assertEquals(sanitizeSvg("   \n\t  "), null);
+  assertEquals(sanitizeSvg(null as any), null);
+  assertEquals(sanitizeSvg(undefined as any), null);
+  assertEquals(sanitizeSvg(123 as any), null);
+  assertEquals(sanitizeSvg("<div>not svg</div>"), null);
+});
+
+Deno.test("sanitizeSvg returns null for a fragment with no svg element", function () {
+  // A bare shape is not a drawing. Nothing paints it: an element by that name
+  // outside the SVG namespace has no geometry, and the HTML parser puts one
+  // there unless an `<svg>` encloses it.
+  assertEquals(sanitizeSvg('<circle cx="50" cy="50" r="40"/>'), null);
+  assertEquals(sanitizeSvg("<g><rect width='10' height='10'/></g>"), null);
+});
+
+Deno.test("sanitizeSvg recovers from an unclosed element", function () {
+  const root = sanitized("<svg><circle cx='5' cy='5' r='4'></svg>");
+
+  assertEquals(elementNames(root), ["svg", "circle"]);
+});
+
+Deno.test("sanitizeSvg puts a drawing that declares no namespace in the SVG namespace", function () {
+  // The source a drawing arrives in often omits the declaration, and an
+  // element outside the SVG namespace draws nothing.
+  const root = sanitized("<svg viewBox='0 0 10 10'><rect width='5'/></svg>");
+
+  assertEquals(root.namespaceURI, "http://www.w3.org/2000/svg");
+  assertEquals(root.querySelector("rect")?.namespaceURI, root.namespaceURI);
 });

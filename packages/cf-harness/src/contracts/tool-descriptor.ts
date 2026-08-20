@@ -11,7 +11,9 @@ export type BuiltinToolId =
   | "edit_file"
   | "write_file"
   | "delegate_task"
-  | "run_pattern";
+  | "run_pattern"
+  | "assign_slug"
+  | "describe_handle";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",
@@ -21,6 +23,7 @@ export const DEFAULT_PARENT_TOOL_IDS = [
   "edit_file",
   "write_file",
   "delegate_task",
+  "describe_handle",
 ] as const satisfies readonly BuiltinToolId[];
 
 export type HarnessToolEffectClass = "read" | "write" | "side-effect";

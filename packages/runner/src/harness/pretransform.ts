@@ -41,10 +41,11 @@ export function transformInjectHelperModule(
   // Deferred compiler stack (parses + prints): pretransform only runs on
   // compile flows, which await ensureCompilerStack() at their entry.
   const { isLegacyInjectedEnvelope, transformCfDirective } = compilerStack();
+  const dataFiles = new Set(program.dataFiles ?? []);
   return {
     main: program.main,
     files: program.files.map((source) => {
-      if (source.name.endsWith(".d.ts")) {
+      if (source.name.endsWith(".d.ts") || dataFiles.has(source.name)) {
         return { name: source.name, contents: source.contents };
       }
       // CT-1838 tolerance: an exact legacy-envelope stored doc passes
@@ -77,6 +78,7 @@ export function transformInjectHelperModule(
     }),
     mainExport: program.mainExport,
     sourceRoots: program.sourceRoots,
+    dataFiles: program.dataFiles,
   };
 }
 
@@ -106,6 +108,7 @@ export function transformProgramWithPrefix(
     main: `/index.ts`,
     files,
     sourceRoots: program.sourceRoots?.map((root) => prefix(root, id)),
+    dataFiles: program.dataFiles?.map((data) => prefix(data, id)),
   };
 }
 
@@ -129,6 +132,9 @@ export function pretransformProgramForModules(
       : {}),
     ...(program.sourceRoots !== undefined
       ? { sourceRoots: program.sourceRoots.map((root) => prefix(root, id)) }
+      : {}),
+    ...(program.dataFiles !== undefined
+      ? { dataFiles: program.dataFiles.map((data) => prefix(data, id)) }
       : {}),
   };
 }

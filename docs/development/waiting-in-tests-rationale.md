@@ -3,7 +3,7 @@
 [waiting-in-tests.md](waiting-in-tests.md) is the working guidance for waiting
 in tests: the primitives that resolve on real events, the harnesses that
 control time, the check that keeps new polling `waitFor` out of the
-integration suites, and the catalogue of places where a bounded poll stays.
+integration suites, and the catalog of places where a bounded poll stays.
 This document holds the analysis behind that guidance: the full argument for
 why a bounded timeout is never a guarantee, the sizing of the one backstop
 that argument bears on hardest, how the runner clock classifies timers across

@@ -20,13 +20,12 @@
  *  - **audience** (`aud`): the invocation must carry this server's audience
  *    identity. An open signed for host A cannot be replayed to host B.
  */
+
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { fromDID } from "../util.ts";
 import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
  * Build an `AuthorizationError`. Pass `retriable: true` for the anti-replay
@@ -87,7 +86,7 @@ export type WireSessionOpenAuthorization = {
 export const wireAuthorizationOf = (
   authorization: unknown,
 ): WireSessionOpenAuthorization | undefined => {
-  if (!isRecord(authorization)) return undefined;
+  if (!isObjectNotArray(authorization)) return undefined;
   const { signature } = authorization;
   return signature instanceof FabricBytes ? { signature } : undefined;
 };
@@ -115,7 +114,7 @@ export const verifySessionOpenAuthorization = async (
 ): Promise<string> => {
   const wireAuthorization = wireAuthorizationOf(message.authorization);
   const signature = wireAuthorization?.signature.slice() ?? null;
-  if (!isRecord(message.invocation) || signature === null) {
+  if (!isObjectNotArray(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
 
@@ -124,9 +123,9 @@ export const verifySessionOpenAuthorization = async (
     typeof invocation.iss !== "string" ||
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
-    !isRecord(invocation.args) ||
+    !isObjectNotArray(invocation.args) ||
     invocation.args.protocol !== MEMORY_PROTOCOL ||
-    !isRecord(invocation.args.session) ||
+    !isObjectNotArray(invocation.args.session) ||
     !sameSessionDescriptor(invocation.args.session, message.session)
   ) {
     throw authorizationError("memory session.open authorization mismatch");

@@ -9,15 +9,16 @@
  * having its quoting broken by its own content.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { cloneIfNecessary } from "@/value-clone.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { hashOf } from "@/value-hash.ts";
-import { newDefaultJsonCodecEngine } from "@/codecs.ts";
-import { EmptyReconstructionContext } from "@/codec-common/index.ts";
 import { backtickQuote } from "@commonfabric/utils/markdown";
+
+import { NullLiveEnvironment } from "@/codec-common/index.ts";
+import { newDefaultJsonCodecEngine } from "@/codecs.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { cloneIfNecessary } from "@/value-clone.ts";
+import { hashOf } from "@/value-hash.ts";
 
 /**
  * Builds a class instance whose `constructor.name` holds the given text.
@@ -84,11 +85,11 @@ describe("message quoting", () => {
 
   describe("`JsonCodecEngine.decode()`", () => {
     it("hands back the excerpt it refused", () => {
-      const context = new EmptyReconstructionContext(false);
+      const env = new NullLiveEnvironment(false);
       for (const data of HOSTILE) {
         let message = "";
         try {
-          newDefaultJsonCodecEngine().decode(data, context);
+          newDefaultJsonCodecEngine().decode(data, env);
         } catch (e) {
           message = (e as Error).message;
         }

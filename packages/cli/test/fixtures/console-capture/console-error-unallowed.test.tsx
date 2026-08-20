@@ -2,6 +2,7 @@
  * Fixture: console.error in a computed handler with NO allowConsoleErrors flag.
  * The test runner must fail this even though the assertion passes.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

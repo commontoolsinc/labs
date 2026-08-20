@@ -1,6 +1,9 @@
+import { basename, isAbsolute, relative } from "@std/path";
+
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
-import { basename, isAbsolute, relative } from "@std/path";
+
+import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
 import type {
   HarnessSkillDiagnostic,
   HarnessSkillRecord,
@@ -11,7 +14,6 @@ import type {
   HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
 import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,

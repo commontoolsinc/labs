@@ -1,7 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 describe("noop", () => {
 });

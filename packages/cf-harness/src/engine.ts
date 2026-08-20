@@ -1,38 +1,23 @@
 import {
-  type HarnessConfig,
-  type ResolvedHarnessConfig,
-  resolveHarnessConfig,
-  type ResolveHarnessConfigOptions,
-} from "./config.ts";
+  dirname,
+  join as joinHostPath,
+  normalize as normalizeHostPath,
+  relative as relativeHostPath,
+} from "@std/path";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
+
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
+
 import {
   createFileSystemHarnessArtifactStore,
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
-  appendHarnessCfcModelContextObservations,
-  appendHarnessFailureRecord,
-  appendToHarnessRunState,
-  createHarnessRunState,
-  type HarnessRunState,
-  type HarnessRunTerminalReason,
-  patchHarnessRunState,
-  setHarnessRunStatus,
-  setHarnessSubagentRun,
-} from "./run-state.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
-import {
-  classifyBuiltinToolFailure,
-  classifyHarnessPolicyEventFailure,
-  classifyHarnessRunError,
-  type ClassifyHarnessRunErrorOptions,
-  collectHarnessCapabilitySnapshot,
-  createHarnessFailureRecord,
-  type HarnessFailureRecord,
-} from "./diagnostics.ts";
-import {
-  createHarnessPolicyEvent,
-  type HarnessPolicyEvent,
-} from "./contracts/policy.ts";
+  type HarnessConfig,
+  type ResolvedHarnessConfig,
+  resolveHarnessConfig,
+  type ResolveHarnessConfigOptions,
+} from "./config.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -40,16 +25,20 @@ import {
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
-import { assertValidHarnessHandleTable } from "./handle-table.ts";
-import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
   type HarnessPolicyTrace,
 } from "./contracts/policy-trace.ts";
+import {
+  createHarnessPolicyEvent,
+  type HarnessPolicyEvent,
+} from "./contracts/policy.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
   HarnessSkillActivations,
@@ -63,25 +52,52 @@ import type {
   HarnessSubagentRunRef,
 } from "./contracts/subagent.ts";
 import {
+  type DelegateTaskToolInput,
+  type DelegateTaskToolOutput,
+} from "./contracts/subagent.ts";
+import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import {
   createToolResultRef,
   type ToolOutputId,
   type ToolResultRef,
 } from "./contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
-import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import {
+  classifyBuiltinToolFailure,
+  classifyHarnessPolicyEventFailure,
+  classifyHarnessRunError,
+  type ClassifyHarnessRunErrorOptions,
+  collectHarnessCapabilitySnapshot,
+  createHarnessFailureRecord,
+  type HarnessFailureRecord,
+} from "./diagnostics.ts";
+import {
+  cacheHarnessFabricSessionFactory,
+  createHarnessFabricSessionFactory,
+  type HarnessFabricSessionFactory,
+} from "./fabric-session.ts";
+import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
+import {
+  mintWellKnownGrants,
+  resolveWellKnownGrantRefs,
+} from "./well-known-grants.ts";
+import {
+  appendHarnessCfcModelContextObservations,
+  appendHarnessFailureRecord,
+  appendToHarnessRunState,
+  createHarnessRunState,
+  type HarnessRunState,
+  type HarnessRunTerminalReason,
+  patchHarnessRunState,
+  setHarnessRunStatus,
+  setHarnessSubagentRun,
+} from "./run-state.ts";
 import {
   assertDockerRunscCfcTransportForMode,
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
-import {
-  dirname,
-  join as joinHostPath,
-  normalize as normalizeHostPath,
-  relative as relativeHostPath,
-} from "@std/path";
-import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import {
   DenoProcessRunner,
   type ProcessRunner,
@@ -93,9 +109,9 @@ import type {
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
-  type DelegateTaskToolInput,
-  type DelegateTaskToolOutput,
-} from "./contracts/subagent.ts";
+  type DescribeHandleToolInput,
+  type DescribeHandleToolOutput,
+} from "./tools/describe-handle.ts";
 import {
   type EditFileToolInput,
   type EditFileToolOutput,
@@ -105,6 +121,23 @@ import {
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
 import {
+  type ReadSkillResourceToolInput,
+  type ReadSkillResourceToolOutput,
+} from "./tools/read-skill-resource.ts";
+import { getBuiltinTool } from "./tools/registry.ts";
+import {
+  type RunPatternToolInput,
+  type RunPatternToolOutput,
+} from "./tools/run-pattern.ts";
+import type {
+  AssignSlugToolInput,
+  AssignSlugToolOutput,
+} from "./tools/assign-slug.ts";
+import {
+  type RunSkillScriptToolInput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
+import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
 } from "./tools/view-image.ts";
@@ -113,27 +146,9 @@ import {
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
 import {
-  type ReadSkillResourceToolInput,
-  type ReadSkillResourceToolOutput,
-} from "./tools/read-skill-resource.ts";
-import {
-  type RunSkillScriptToolInput,
-  type RunSkillScriptToolOutput,
-} from "./tools/run-skill-script.ts";
-import {
-  type RunPatternToolInput,
-  type RunPatternToolOutput,
-} from "./tools/run-pattern.ts";
-import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
-import {
-  cacheHarnessFabricSessionFactory,
-  createHarnessFabricSessionFactory,
-  type HarnessFabricSessionFactory,
-} from "./fabric-session.ts";
-import { getBuiltinTool } from "./tools/registry.ts";
 
 export interface BuiltinToolInputMap {
   bash: BashToolInput;
@@ -147,6 +162,8 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  assign_slug: AssignSlugToolInput;
+  describe_handle: DescribeHandleToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -161,6 +178,8 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  assign_slug: AssignSlugToolOutput;
+  describe_handle: DescribeHandleToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -517,10 +536,30 @@ export class CfHarnessEngine {
       this.config,
       options.runState,
     );
+    // The posture the fabric session's runtime will actually run at, resolved
+    // from the same config the session factory reads. The pin/default values
+    // restate what `runtimePresets.remoteClient` and the Runtime constructor
+    // supply when the dial is unset (`coreOptions` in
+    // `packages/runner/src/runtime-presets.ts`).
+    const fabricSessionCfc = this.config.fabricSession !== undefined
+      ? {
+        enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
+          "enforce-explicit" as const,
+        enforcementModeSource:
+          this.config.fabricSession.cfcEnforcementMode !== undefined
+            ? "configured" as const
+            : "preset-pin" as const,
+        flowLabels: this.config.fabricSession.cfcFlowLabels ?? "off" as const,
+        flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
+          ? "configured" as const
+          : "default" as const,
+      }
+      : undefined;
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,
         cfcEnforcementMode: this.config.cfcEnforcementMode,
+        ...(fabricSessionCfc !== undefined ? { fabricSessionCfc } : {}),
         currentDir,
         model: this.config.model,
         modelProvider: this.config.modelProvider,
@@ -554,6 +593,16 @@ export class CfHarnessEngine {
    */
   get fabricSessionAvailable(): boolean {
     return this.#fabricSessionFactory !== undefined;
+  }
+
+  /**
+   * The run's cached fabric-session factory, or `undefined` when the run has
+   * none. A delegating parent hands its factory to the child engine, so a
+   * subagent's `run_pattern` shares the one session the parent built rather
+   * than opening a second one against the same space.
+   */
+  get fabricSessionFactory(): HarnessFabricSessionFactory | undefined {
+    return this.#fabricSessionFactory;
   }
 
   bindRunModel(model: string): HarnessRunState {
@@ -706,6 +755,43 @@ export class CfHarnessEngine {
 
   async persistRunState(): Promise<string | undefined> {
     return await this.artifactStore?.persistRunState(this.#runState);
+  }
+
+  /**
+   * Establishes the run's well-known grants: seeds the handle table with a
+   * token for each reference every Fabric-configured run is entitled to
+   * hold, records the grants in run state, and returns them. Establishing
+   * the Fabric session is the cost of resolving the references, so this
+   * connects eagerly — callers invoke it only on runs configured for a
+   * session. Idempotent across resume: grants already recorded are returned
+   * as they stand, without connecting again.
+   *
+   * A run without a session factory has nothing to grant and answers `[]`.
+   * A session that cannot be established propagates its failure — the caller
+   * decides whether a run proceeds without its grants, and says so.
+   */
+  async establishWellKnownGrants(): Promise<HarnessWellKnownGrant[]> {
+    if (this.#runState.wellKnownGrants !== undefined) {
+      return structuredClone(this.#runState.wellKnownGrants);
+    }
+    if (this.#fabricSessionFactory === undefined) {
+      return [];
+    }
+    const session = await this.#fabricSessionFactory();
+    const refs = await resolveWellKnownGrantRefs(session);
+    const minted = await mintWellKnownGrants(
+      this.handleTable,
+      this.#runState.runId,
+      refs,
+    );
+    await this.recordHandleTable(minted.table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { wellKnownGrants: structuredClone(minted.grants) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return minted.grants;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {
@@ -1383,6 +1469,7 @@ export class CfHarnessEngine {
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
+      handleTable: this.handleTable,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),

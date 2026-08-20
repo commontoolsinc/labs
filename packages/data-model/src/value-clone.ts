@@ -21,7 +21,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
@@ -166,7 +166,7 @@ export function shallowMutableClone<T extends FabricValue>(
  * matches the requested state. When `force` is true, always copies (unless
  * the value is a primitive or special primitive).
  *
- * Deep mode uses `isDeepFrozenFabricValue()` for identity optimization;
+ * Deep mode uses `isValidDeepFrozenFabricValue()` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
  */
 export function cloneHelper(
@@ -178,12 +178,12 @@ export function cloneHelper(
 ): FabricValue {
   // Identity optimization: when `force` is off, check if the value's frozenness
   // already matches the requested state. Deep mode uses
-  // `isDeepFrozenFabricValue()`; shallow mode uses `Object.isFrozen(v) ===
+  // `isValidDeepFrozenFabricValue()`; shallow mode uses `Object.isFrozen(v) ===
   // frozen`.
   function canReturnAsIs(v: FabricValue): boolean {
     if (force) return false;
     if (deep) {
-      if (frozen && isDeepFrozenFabricValue(v)) return true;
+      if (frozen && isValidDeepFrozenFabricValue(v)) return true;
       if (!frozen && !Object.isFrozen(v)) return true;
       return false;
     }
@@ -195,7 +195,7 @@ export function cloneHelper(
     // needed regardless of force.
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.EpochDay:
     case NATIVE_TAGS.FabricBytes:
     case NATIVE_TAGS.FabricRegExp:
     case NATIVE_TAGS.Hash:

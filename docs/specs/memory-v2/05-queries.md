@@ -272,6 +272,15 @@ result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required
 for piece execution metadata to reconstruct the full lineage of a result
 document.
 
+Content-addressed schema documents ride the same mechanism
+(`docs/specs/content-addressed-schemas.md`): a link or selector schema
+holding an external `{ "$ref": "cid:…" }` reference makes traversal load the
+referenced schema document — and, transitively, the documents behind its own
+external refs — into the query result and watch tracker, registering each
+after hash verification (`loadExternalSchemaDocs()` in `traverse.ts`). A
+document whose content does not hash to its id is tracked but never
+registered, and refs to it stay unresolved.
+
 ### 5.3.3 Cycle Detection
 
 Graph traversal must handle cycles. Two cycle detection mechanisms are used,

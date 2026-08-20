@@ -51,7 +51,6 @@ describe("query result proxy array key order", () => {
       tx,
       cell.getAsNormalizedFullLink(),
       0,
-      false,
     );
     cell.set(record);
     return proxy;

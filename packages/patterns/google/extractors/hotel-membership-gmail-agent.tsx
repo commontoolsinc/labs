@@ -14,6 +14,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -100,6 +101,13 @@ type MembershipRecord = InferItem<typeof MembershipSchema> & {
   _fromWish?: boolean;
 };
 
+/** One hotel brand the scan found more than one membership number for. */
+interface MultiAccountBrand {
+  brand: string;
+  /** One entry per distinct membership number, with the tier it was found at. */
+  accounts: { membershipNumber: string; tier?: string }[];
+}
+
 interface HotelMembershipInput {
   memberships?: MembershipRecord[] | Default<[]>;
   lastScanAt?: number | Default<0>;
@@ -122,6 +130,8 @@ interface HotelMembershipInput {
 
 /** Hotel loyalty membership extractor from Gmail. #hotelMemberships */
 export interface HotelMembershipOutput {
+  [NAME]: string;
+  [UI]: VNode;
   memberships: MembershipRecord[];
   lastScanAt: number;
   count: number;
@@ -247,40 +257,42 @@ const HotelMembershipExtractorV2 = pattern<
     // MULTI-ACCOUNT DETECTION
     // ========================================================================
 
-    // Find brands with multiple different membership numbers
+    // Find brands with multiple different membership numbers. The result is a
+    // list rather than a record so the UI walks it as an array: an array is
+    // what the rendered tree can map over.
     const brandsWithMultipleAccounts = computed(() => {
       const list = allMemberships as MembershipRecord[];
-      const brandNumbers: Record<string, Set<string>> = {};
-
-      for (const m of (list || [])) {
-        if (!m) continue; // Skip null/undefined entries during hydration
-        if (!brandNumbers[m.hotelBrand]) {
-          brandNumbers[m.hotelBrand] = new Set();
-        }
-        brandNumbers[m.hotelBrand].add(m.membershipNumber);
-      }
-
-      const multiAccountBrands: Record<
+      const byBrand: Record<
         string,
-        { numbers: string[]; memberships: MembershipRecord[] }
+        Record<string, { membershipNumber: string; tier?: string }>
       > = {};
 
-      for (const [brand, numbers] of Object.entries(brandNumbers)) {
-        if (numbers.size > 1) {
-          multiAccountBrands[brand] = {
-            numbers: Array.from(numbers),
-            memberships: (list || []).filter((m) =>
-              m && m.hotelBrand === brand
-            ),
+      // Keep the first record seen for each membership number, so a brand
+      // holding two records of one number contributes one account.
+      for (const m of (list || [])) {
+        if (!m) continue; // Skip null/undefined entries during hydration
+        if (!byBrand[m.hotelBrand]) byBrand[m.hotelBrand] = {};
+        if (!byBrand[m.hotelBrand][m.membershipNumber]) {
+          byBrand[m.hotelBrand][m.membershipNumber] = {
+            membershipNumber: m.membershipNumber,
+            tier: m.tier,
           };
+        }
+      }
+
+      const multiAccountBrands: MultiAccountBrand[] = [];
+
+      for (const [brand, accounts] of Object.entries(byBrand)) {
+        const distinct = Object.values(accounts);
+        if (distinct.length > 1) {
+          multiAccountBrands.push({ brand, accounts: distinct });
         }
       }
 
       return multiAccountBrands;
     });
 
-    const hasMultipleAccounts =
-      Object.keys(brandsWithMultipleAccounts).length > 0;
+    const hasMultipleAccounts = brandsWithMultipleAccounts.length > 0;
 
     // ========================================================================
     // AGENT GOAL
@@ -697,10 +709,7 @@ Report memberships as you find them. Don't wait until the end.`,
                       Multiple Accounts Detected
                     </div>
                     <div style={{ fontSize: "13px", color: "#78350f" }}>
-                      {Object.entries(brandsWithMultipleAccounts).map((
-                        [brand, data],
-                        brandIdx,
-                      ) => (
+                      {brandsWithMultipleAccounts.map((entry, brandIdx) => (
                         <div
                           key={brandIdx}
                           style={{
@@ -716,10 +725,10 @@ Report memberships as you find them. Don't wait until the end.`,
                               marginBottom: "4px",
                             }}
                           >
-                            {brand}
+                            {entry.brand}
                           </div>
                           <div style={{ fontSize: "12px", color: "#666" }}>
-                            Found {data.numbers.length}{" "}
+                            Found {entry.accounts.length}{" "}
                             different membership numbers:
                             <ul
                               style={{
@@ -727,34 +736,24 @@ Report memberships as you find them. Don't wait until the end.`,
                                 padding: "0",
                               }}
                             >
-                              {data.numbers.map(
-                                (num: string, i: number) => {
-                                  const membership = data.memberships.find((
-                                    m: MembershipRecord,
-                                  ) => m.membershipNumber === num);
-                                  return (
-                                    <li
-                                      key={i}
-                                      style={{ marginBottom: "2px" }}
-                                    >
-                                      <code
-                                        style={{
-                                          background: "#f3f4f6",
-                                          padding: "2px 6px",
-                                          borderRadius: "2px",
-                                        }}
-                                      >
-                                        {num}
-                                      </code>
-                                      {membership?.tier && (
-                                        <span style={{ marginLeft: "4px" }}>
-                                          ({membership.tier})
-                                        </span>
-                                      )}
-                                    </li>
-                                  );
-                                },
-                              )}
+                              {entry.accounts.map((m) => (
+                                <li style={{ marginBottom: "2px" }}>
+                                  <code
+                                    style={{
+                                      background: "#f3f4f6",
+                                      padding: "2px 6px",
+                                      borderRadius: "2px",
+                                    }}
+                                  >
+                                    {m.membershipNumber}
+                                  </code>
+                                  {m.tier && (
+                                    <span style={{ marginLeft: "4px" }}>
+                                      ({m.tier})
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
                             </ul>
                           </div>
                           <div
@@ -798,100 +797,103 @@ Report memberships as you find them. Don't wait until the end.`,
                     );
                   }
 
-                  return brands.map((brand) => (
-                    <details
-                      open
-                      style={{
-                        border: "1px solid #e0e0e0",
-                        borderRadius: "8px",
-                        marginBottom: "12px",
-                        padding: "12px",
-                      }}
-                    >
-                      <summary
+                  return brands.map((brand) => {
+                    const brandMemberships = [...groups[brand]];
+                    return (
+                      <details
+                        open
                         style={{
-                          cursor: "pointer",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          marginBottom: "8px",
+                          border: "1px solid #e0e0e0",
+                          borderRadius: "8px",
+                          marginBottom: "12px",
+                          padding: "12px",
                         }}
                       >
-                        {brand || "Unknown Brand"} ({groups[brand].length})
-                      </summary>
-                      <cf-vstack gap={2} style="paddingLeft: 16px;">
-                        {groups[brand].map((m: MembershipRecord) => (
-                          <div
-                            style={{
-                              padding: "8px",
-                              background: m._fromWish ? "#e0f2fe" : "#f8f9fa",
-                              borderRadius: "4px",
-                              border: m._fromWish
-                                ? "1px dashed #0ea5e9"
-                                : "none",
-                            }}
-                          >
+                        <summary
+                          style={{
+                            cursor: "pointer",
+                            fontWeight: "600",
+                            fontSize: "14px",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          {brand || "Unknown Brand"} ({brandMemberships.length})
+                        </summary>
+                        <cf-vstack gap={2} style="paddingLeft: 16px;">
+                          {brandMemberships.map((m: MembershipRecord) => (
                             <div
                               style={{
-                                fontWeight: "600",
-                                fontSize: "13px",
-                                marginBottom: "4px",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
+                                padding: "8px",
+                                background: m._fromWish ? "#e0f2fe" : "#f8f9fa",
+                                borderRadius: "4px",
+                                border: m._fromWish
+                                  ? "1px dashed #0ea5e9"
+                                  : "none",
                               }}
                             >
-                              {m.programName}
-                              {m._fromWish && (
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    background: "#0ea5e9",
-                                    color: "white",
-                                    padding: "2px 6px",
-                                    borderRadius: "10px",
-                                  }}
-                                >
-                                  imported
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ marginBottom: "4px" }}>
-                              <code
-                                style={{
-                                  fontSize: "14px",
-                                  background: "white",
-                                  padding: "6px 12px",
-                                  borderRadius: "4px",
-                                  display: "inline-block",
-                                }}
-                              >
-                                {m.membershipNumber}
-                              </code>
-                            </div>
-                            {m.tier && (
                               <div
                                 style={{
-                                  fontSize: "12px",
-                                  color: "#666",
-                                  marginBottom: "2px",
+                                  fontWeight: "600",
+                                  fontSize: "13px",
+                                  marginBottom: "4px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
                                 }}
                               >
-                                ⭐ {m.tier}
+                                {m.programName}
+                                {m._fromWish && (
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      background: "#0ea5e9",
+                                      color: "white",
+                                      padding: "2px 6px",
+                                      borderRadius: "10px",
+                                    }}
+                                  >
+                                    imported
+                                  </span>
+                                )}
                               </div>
-                            )}
-                            <div style={{ fontSize: "11px", color: "#999" }}>
-                              📧 {m.sourceEmailSubject || "Unknown email"} •
-                              {" "}
-                              {m.sourceEmailDate
-                                ? new Date(m.sourceEmailDate)
-                                  .toLocaleDateString()
-                                : "Unknown date"}
+                              <div style={{ marginBottom: "4px" }}>
+                                <code
+                                  style={{
+                                    fontSize: "14px",
+                                    background: "white",
+                                    padding: "6px 12px",
+                                    borderRadius: "4px",
+                                    display: "inline-block",
+                                  }}
+                                >
+                                  {m.membershipNumber}
+                                </code>
+                              </div>
+                              {m.tier && (
+                                <div
+                                  style={{
+                                    fontSize: "12px",
+                                    color: "#666",
+                                    marginBottom: "2px",
+                                  }}
+                                >
+                                  ⭐ {m.tier}
+                                </div>
+                              )}
+                              <div style={{ fontSize: "11px", color: "#999" }}>
+                                📧 {m.sourceEmailSubject || "Unknown email"} •
+                                {" "}
+                                {m.sourceEmailDate
+                                  ? new Date(m.sourceEmailDate)
+                                    .toLocaleDateString()
+                                  : "Unknown date"}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </cf-vstack>
-                    </details>
-                  ));
+                          ))}
+                        </cf-vstack>
+                      </details>
+                    );
+                  });
                 })}
               </div>
 

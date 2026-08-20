@@ -4,14 +4,23 @@ import {
   assertMatch,
   assertThrows,
 } from "@std/assert";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { toFileUrl } from "@std/path";
+
 import {
   type EntityRef,
   entityRefFromString,
   LINK_V1_TAG,
 } from "@commonfabric/data-model/cell-rep";
-import { toFileUrl } from "@std/path";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Database } from "@db/sqlite";
+
+import {
+  decodeMemoryBoundary,
+  DEFAULT_BRANCH,
+  encodeMemoryBoundary,
+  type EntityDocument,
+  toDocumentPath,
+} from "../v2.ts";
 import {
   applyCommit,
   close,
@@ -27,13 +36,6 @@ import {
   ProtocolError,
   read,
 } from "../v2/engine.ts";
-import {
-  decodeMemoryBoundary,
-  DEFAULT_BRANCH,
-  encodeMemoryBoundary,
-  type EntityDocument,
-  toDocumentPath,
-} from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;

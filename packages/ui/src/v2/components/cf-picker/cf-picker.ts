@@ -1,11 +1,13 @@
+import { numberSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, PropertyValues } from "lit";
+
 import { BaseElement } from "../../core/base-element.ts";
 import {
   createArrayCellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
-import { numberSchema } from "@commonfabric/runner/schemas";
+
 import "../cf-render/index.ts";
 
 /**

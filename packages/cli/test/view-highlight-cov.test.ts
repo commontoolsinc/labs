@@ -8,7 +8,7 @@ import type { Line } from "../lib/view/model.ts";
 import { stripAnsi } from "../lib/view/ansi.ts";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 
-Deno.test("renderLinePlain returns the verbatim line text, no colour", () => {
+Deno.test("renderLinePlain returns the verbatim line text, no color", () => {
   const line: Line = {
     text: "const x = 1;",
     spans: [
@@ -59,7 +59,7 @@ Deno.test("renderLinePlain matches every parsed line of the sample blob", () => 
   }
 });
 
-Deno.test("renderLinePlain equals stripAnsi of the coloured render", () => {
+Deno.test("renderLinePlain equals stripAnsi of the colored render", () => {
   const doc = parseDocument(SAMPLE);
   for (const line of doc.lines) {
     const plain = renderLinePlain(line);

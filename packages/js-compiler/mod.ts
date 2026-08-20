@@ -22,10 +22,12 @@ export {
   collectImportSpecifiers,
   resolveImportSpecifier,
 } from "./typescript/resolver.ts";
+export { assertImportInsideProgramRoot } from "./specifier.ts";
 export {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
+  readDataFileSource,
 } from "./program.ts";
 export {
   composeBundleSourceMap,

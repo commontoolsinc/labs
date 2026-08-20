@@ -3,15 +3,15 @@ import type { IMemorySpaceAddress, MemorySpace, URI } from "./interface.ts";
 
 export type WriteStackTraceMatchMode = "exact" | "prefix";
 
-export interface WriteStackTraceMatcher {
+export type WriteStackTraceMatcher = {
   space?: MemorySpace;
   entityId?: URI;
   path?: string[];
   match?: WriteStackTraceMatchMode;
   label?: string;
-}
+};
 
-export interface WriteStackTraceEntry {
+export type WriteStackTraceEntry = {
   recordedAt: number;
   space: MemorySpace;
   entityId: URI;
@@ -31,13 +31,13 @@ export interface WriteStackTraceEntry {
     | "object"
     | "other";
   stack?: string;
-}
+};
 
-export interface WriteStackTraceOptions {
+export type WriteStackTraceOptions = {
   errorName?: string;
   scopeId?: string;
   writerActionId?: string;
-}
+};
 
 const writeTraceLogger = getLogger("storage.write-trace", {
   enabled: false,

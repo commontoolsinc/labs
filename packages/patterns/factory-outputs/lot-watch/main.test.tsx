@@ -68,10 +68,19 @@ const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 // ============================================================
 // Minimal fake ImageData — captureSighting only persists url+name
 // ============================================================
+// A contract-complete ImageData: captureSighting's authored event demands
+// the full type, and under the served authored contract
+// (docs/history/plans/verb-input-contract.md) a caller owes every required field —
+// dispatch delivers nothing to a payload that skips them. The verb still
+// persists only the light `url` + `name` reference.
 const fakeImage = {
+  id: "test-image-1",
   url: "blob:http://localhost/test-image",
   name: "test.jpg",
   data: "",
+  timestamp: 0,
+  size: 0,
+  type: "image/jpeg",
 };
 
 export default pattern(() => {

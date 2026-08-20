@@ -135,14 +135,21 @@ rather than one-off flame charts.
 
 #### Documenting the Process
 
-We don't have profiling documentation yet (the debugging docs cover logging
-and pattern-level tips, but not runtime profiling). Whoever does the first
-client or server profile should document the concrete steps — which pattern
-to use, how to start the local dev server, how to record the trace, how to
-attach to the Deno process, what to look for — in
-`docs/development/debugging/profiling.md` so the next person can repeat it.
-This is something we'll need to do periodically; it shouldn't require tribal
-knowledge.
+`skills/perf-investigation/SKILL.md` carries the process for a slowness that
+surfaces in a pattern or in the browser: which instrument reaches what, why a
+logger row and a worker CPU profile answer different questions, and the causes
+this runtime has actually produced. It is live documentation — as those answers
+change, it changes with them.
+
+[`debugging/profiling.md`](debugging/profiling.md) is the walkthrough that goes
+with it: read the timings already being collected, find the phase, bracket it so
+a CPU profile can be read for exactly that window, split until a call explosion
+has an origin, and pin the result with a benchmark that correlates.
+
+The server side is the half still undocumented: attaching to a running
+toolshed's Deno process, and recording OTEL traces against a collector. Whoever
+profiles the server first should write those steps into that same document, so
+that path stops being tribal knowledge too.
 
 ### Making the Loop Fast
 
@@ -172,7 +179,7 @@ debating when the timing is right.
 | INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, runs the benchmarks, compares against main, posts a before/after comment. Nothing gates benchmarks or CI timings on a PR today, so benchmark regressions surface only in the dashboard trends, after merge. The benchmark suite and the four-hourly bench-results artifacts are reusable; the deno-bench ingestion and the per-PR CI-timing gate have both been removed, so a bot would build its comparison from scratch. |
 | INFRA-6 | Benchmark trend visualization | Medium | M | Script that pulls 90 days of benchmark JSON artifacts and produces charts or CSVs. Spots gradual drift that per-PR checks miss. (done: the team ops dashboard charts benchmark trends on its /bench page) |
 | INFRA-7 | Automated budget enforcement | High | L | Hard budgets on critical metrics, CI fails if exceeded. Performance becomes a contract. Requires careful calibration for CI-vs-local variance and a warmup period as warnings-only. Risk of false positives creating CI noise. |
-| INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Partly done: the topic-board navigation benchmark is the first such journey, and `topic-board-scale.bench.ts` is the large-list scenario, both on the four-hourly schedule rather than per PR. Their fixture — `topic-board-fixture.ts` — is the reusable half; a second journey needs its own pattern and synthetic data. The large-list scenario currently reaches only 100 items, because building a bigger board costs roughly the square of its size.) |
+| INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Partly done: the topic-board navigation benchmark is the first such journey, and `topic-board-scale.bench.ts` is the large-list scenario, both on the four-hourly schedule rather than per PR. Their fixture — `topic-board-fixture.ts` — is the reusable half; a second journey needs its own pattern and synthetic data. The large-list scenario currently reaches only 100 items. Seeding time grows faster than the item count, but peak memory is what binds: it is close to linear at roughly 26MB per topic, so a thousand needs more than a runner has. `docs/development/BENCHMARKS.md` carries the measurements.) |
 | INFRA-9 | Ratcheting | Medium | L | When a metric improves, automatically lower the budget to lock in the gain. Requires budget enforcement as prerequisite. Compound improvement without discipline overhead. Risk: lucky fast runs ratcheting to unreproducible levels. |
 | INFRA-10 | Runtime profiling infrastructure | High | L | Structured traces from running toolshed/shell, queryable programmatically. "Show me the 10 slowest reactive cycles." Transforms profiling from squinting at flame charts to querying data. Significant design work to make it zero-cost when inactive. (Note: `cf test --verbose ...` is useful here) |
 | INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Replaces "download artifact, parse JSON, squint." Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. (Partly done: the team ops dashboard's /bench page covers benchmark results and trends.) |
@@ -193,7 +200,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `linkAddressKey` in `link-resolution.ts` allocates via `JSON.stringify` on every hop. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. The same key names a resolution's entry in the transaction's snapshot memo, so a collision there serves one link's resolution for another; the memo's own tests cover that. [Tests needed.](#perf-3-link-resolution) |
 
 ### Likely High-Impact (pending profiling confirmation)
 

@@ -21,7 +21,7 @@
 // invariant violation / corruption, NOT normal "lost update" history. Rejected
 // client commits aren't persisted; we never see them.
 
-import type { SpaceDb } from "./db.ts";
+import type { CellScope, PatchOp } from "@commonfabric/memory/v2";
 import {
   patchOverlapsNonRecursiveRead,
   patchOverlapsRead,
@@ -31,6 +31,8 @@ import {
   type PatchOp,
   resolveScopeKey,
 } from "@commonfabric/memory/v2";
+
+import type { SpaceDb } from "./db.ts";
 import { decodeStored } from "./decode.ts";
 import { parseScope } from "./scopes.ts";
 

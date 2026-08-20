@@ -51,7 +51,7 @@ import {
 const signer = await Identity.fromPassphrase("state continuity vintage");
 
 /**
- * The vintage carries a CFC-labelled field, which is what makes its root doc
+ * The vintage carries a CFC-labeled field, which is what makes its root doc
  * store a CFC schema envelope. That envelope is the thing a later version's
  * schema has to MERGE with. The merge remains strict for input and unclassified
  * document evolution, but an output-role write may introduce required fields

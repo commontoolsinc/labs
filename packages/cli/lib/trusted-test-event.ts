@@ -15,6 +15,7 @@
  */
 
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export interface TrustedUiDescriptor {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
@@ -29,9 +30,6 @@ export const isTrustedUiDescriptor = (
   typeof value === "object" && value !== null &&
   typeof (value as { surface?: unknown }).surface === "string" &&
   typeof (value as { action?: unknown }).action === "string";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Resolve the event value to send for an action step: the step's literal
@@ -50,7 +48,8 @@ export function buildActionEvent(
     return event;
   }
   const eventValue = {
-    ...(isRecord(event) ? event : { type: "click" }),
+    type: "click",
+    ...(isObjectNotArray(event) ? event : {}),
     provenance: {
       origin: "dom",
       trusted: true,

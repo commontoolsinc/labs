@@ -1,4 +1,4 @@
-import { computed, pattern, TESTS, UI } from "commonfabric";
+import { assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
@@ -61,48 +61,48 @@ export default pattern(() => {
   // ALSO asserts direct reads of fetch-derived outputs (`fetchState`,
   // `imageDataUrl`) — parent-readable since the CT-1836 traversal fix (the
   // CT-1811-family gap that once forced a notify-stream seam here).
-  const assert_stored_image_renders_directly = computed(() =>
+  const assert_stored_image_renders_directly = assert(() =>
     findNodeByProp(art[UI], "src", STORED_IMAGE) !== undefined
   );
 
-  const assert_gated_instance_shows_fallback_only = computed(() =>
+  const assert_gated_instance_shows_fallback_only = assert(() =>
     findElement(gated[UI], "img") === undefined &&
     findElement(gated[UI], "cf-image") === undefined
   );
 
-  const assert_empty_prompt_shows_fallback_only = computed(() =>
+  const assert_empty_prompt_shows_fallback_only = assert(() =>
     findElement(empty[UI], "img") === undefined &&
     findElement(empty[UI], "cf-image") === undefined
   );
 
-  const assert_generation_outputs_materialize = computed(() =>
+  const assert_generation_outputs_materialize = assert(() =>
     readValue(generating.fetchState) === "generated" &&
     readValue(generating.imageDataUrl) === EXPECTED_DATA_URL
   );
 
-  const assert_generated_overlay_renders = computed(() =>
+  const assert_generated_overlay_renders = assert(() =>
     findElement(generating[UI], "cf-image") !== undefined
   );
 
-  const assert_safe_image_url_accepts_web_urls = computed(() =>
+  const assert_safe_image_url_accepts_web_urls = assert(() =>
     safeImageUrl(" https://example.com/art.png ") ===
       "https://example.com/art.png" &&
     safeImageUrl("http://example.com/art.png") ===
       "http://example.com/art.png"
   );
 
-  const assert_safe_image_url_rejects_unsafe_or_invalid_urls = computed(() =>
+  const assert_safe_image_url_rejects_unsafe_or_invalid_urls = assert(() =>
     safeImageUrl("javascript:alert(1)") === "" &&
     safeImageUrl("not a URL") === ""
   );
 
-  const assert_generated_url_encodes_title_and_size = computed(() => {
+  const assert_generated_url_encodes_title_and_size = assert(() => {
     const url = generatedImageUrlFor("Tacos & Tea");
     return url.includes("Tacos%20%26%20Tea") &&
       url.endsWith("&width=128&height=128");
   });
 
-  const assert_fetch_state_lifecycle = computed(() =>
+  const assert_fetch_state_lifecycle = assert(() =>
     deriveGeneratedArtFetchState("", undefined, true, false, false, false) ===
       "" &&
     deriveGeneratedArtFetchState(

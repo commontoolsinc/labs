@@ -39,6 +39,7 @@ Deno.test({
       // unpatched module resolves ENVIRONMENT=development, whose default
       // would otherwise be true).
       $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: "false",
+      $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: "true",
     }, importFreshEnvModule);
 
     expect(mod.EXPERIMENTAL).toEqual({
@@ -46,9 +47,10 @@ Deno.test({
       eagerSourceAnnotation: false,
       // Default ON — one flag covers default-app and home roots alike.
       systemPatternAutoUpdate: true,
-      // Server-execution v2: the first-party default (ON since Phase 7's
-      // flip) when the build define is unset.
+      // Server-execution v2: the first-party default (the landed-dark
+      // constant) when the build define is unset.
       serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
+      contentAddressedSchemas: true,
     });
   },
 });

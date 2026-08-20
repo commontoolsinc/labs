@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 
 const nodeTextCache = new WeakMap<ts.Node, string>();

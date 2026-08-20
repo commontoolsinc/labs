@@ -5,7 +5,6 @@ import {
   type Default,
   equals,
   FS,
-  type FsProjection,
   generateText,
   handler,
   NAME,
@@ -59,7 +58,14 @@ export const bareMentionId = (uri: string): string => {
 export interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
-  [FS]: FsProjection;
+  /** A note is always markdown, so it declares that arm rather than the whole
+   * `FsProjection` union: the open arm types every field loosely, and a reader
+   * of this projection wants `content` as the string it is. */
+  [FS]: {
+    type: "text/markdown";
+    frontmatter?: Record<string, unknown>;
+    content: string;
+  };
   title: string;
   content: string;
   summary: string;
@@ -425,7 +431,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       return splitDefinitions(body).definitions.map((d) => d.address);
     });
 
-    // One resolution per address. `cellFromUrl` answers with no cell for an
+    // One resolution per address. `cellFromUrl` returns no cell for an
     // address that names no piece, which is how an ordinary reference link
     // stays an ordinary reference link.
     const pendingResolutions = pendingAddresses.map((address) =>

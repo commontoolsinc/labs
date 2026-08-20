@@ -291,13 +291,14 @@ export class RemoteSessionFactory implements SessionFactory {
         : new Error("memory replica route replaced");
 
     try {
-      if (signal?.aborted) throw abortError();
+      // `connect` and `mount` each refuse an aborted signal on entry, so the
+      // only window this method has to check for itself is the one after the
+      // mount resolves, below.
       client = await MemoryClient.connect({ transport, signal });
       const closeForAbort = (): void => {
         void client?.close().catch(() => {});
       };
       signal?.addEventListener("abort", closeForAbort, { once: true });
-      if (signal?.aborted) throw abortError();
       try {
         const session = await client.mount(
           space,

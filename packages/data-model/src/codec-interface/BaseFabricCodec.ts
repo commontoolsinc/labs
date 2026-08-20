@@ -1,21 +1,33 @@
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
-import type { FabricCodec, ReconstructionContext } from "./interface.ts";
+import type { FabricCodec, LiveEnvironment } from "./interface.ts";
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality:
- * the matching members, and a `tagForValue()` that answers with the codec's one
+ * the matching members, and a `tagForValue()` that returns the codec's one
  * recognized tag.
  *
- * It is abstract in `encode()` and `decode()` and, deliberately, in identity:
- * extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec} rather than
- * this directly. Those two are what tell the codec system whether a state is
- * more work for the walker or the walker's final answer, a difference no
- * signature can carry -- and extending one of them fixes the `Encoded` domain
- * in the same stroke, so the declaration and its consequence cannot drift
- * apart.
+ * It is abstract in `encode()`, `canDecode()` and `decode()` and, deliberately,
+ * in identity: extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec}
+ * rather than this directly. Those two are what tell the codec system whether a
+ * state is more work for the walker or the walker's final answer, a difference
+ * no signature can carry -- and extending one of them fixes the `Encoded`
+ * domain in the same stroke, so the declaration and its consequence cannot
+ * drift apart.
+ *
+ * `State` is the codec's own state type, a subtype of the format-wide
+ * `Encoded`: what `encode()` emits, what `canDecode()` narrows to, and the only
+ * thing `decode()` is handed. Declaring it is how a subclass writes down what
+ * it works over, and one declaration serving all three members is what says the
+ * three agree. A codec that genuinely works over the whole of `Encoded` leaves
+ * it at the default.
+ *
+ * `decode()` taking `State` rests on the walker asking {@link #canDecode} of
+ * every state before dispatching one here, which is what makes the narrower
+ * parameter true rather than merely declared.
  */
-export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
+export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
+  implements FabricCodec<Encoded> {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
@@ -40,15 +52,34 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   // Subclass contract
   //
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * Stated as a type predicate over `State`, which is what makes the check
+   * pay: the narrowing carries across to {@link #decode}, which then reads the
+   * state's parts as the types this method just established them to be.
+   */
+  abstract canDecode(state: Encoded): state is State;
+
+  /**
+   * @inheritDoc
+   *
+   * Narrowed to `State`, this codec having been asked {@link #canDecode} of
+   * the state first.
+   */
   abstract decode(
     typeTag: string,
-    state: Encoded,
-    context: ReconstructionContext,
+    state: State,
+    env: LiveEnvironment,
   ): FabricValue;
 
-  /** @inheritDoc */
-  abstract encode(value: FabricValue): Encoded;
+  /**
+   * @inheritDoc
+   *
+   * What this codec emits is what it takes back: `State` is the same type
+   * {@link #canDecode} narrows to and {@link #decode} is handed.
+   */
+  abstract encode(value: FabricValue): State;
 
   //
   // Instance members
@@ -64,7 +95,7 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
     return this.#recognizedTypeTag;
   }
 
-  /** @innheritDoc */
+  /** @inheritDoc */
   canEncode(value: FabricValue): boolean {
     const cls = this.#uniqueHandledClass;
 

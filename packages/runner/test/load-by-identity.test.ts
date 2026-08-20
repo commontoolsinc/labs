@@ -1,20 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { Identity } from "@commonfabric/identity";
+import type { Source } from "@commonfabric/js-compiler";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   injectCfHelpers,
   isLegacyInjectedEnvelope,
 } from "@commonfabric/ts-transformers";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { Engine } from "../src/harness/engine.ts";
-import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
-import type { Source } from "@commonfabric/js-compiler";
-import type { CachedCompiledModule } from "../src/sandbox/module-record-compiler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
-import { computeModuleHashes } from "../src/harness/module-identity.ts";
+
 import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
@@ -22,6 +16,20 @@ import {
   setCompileCacheRuntimeVersionForTesting,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { Engine } from "../src/harness/engine.ts";
+import { computeModuleHashes } from "../src/harness/module-identity.ts";
+import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import {
+  PatternCoverageCollector,
+  type PatternCoverageSpan,
+} from "../src/pattern-coverage.ts";
+import { Runtime } from "../src/runtime.ts";
+import {
+  buildRecordsFromCompiled,
+  type CachedCompiledModule,
+} from "../src/sandbox/module-record-compiler.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("load-by-identity");
 const space = signer.did();
@@ -251,6 +259,201 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     }
   });
 
+  it("cold-loads an exact attached data-file package", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json", "/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+        {
+          name: "/data/cities.json",
+          contents: '{"cities": ["Oslo", "Lima"]}',
+        },
+        {
+          // Not TypeScript, and readable as an import edge by a parser that
+          // should never see it.
+          name: "/data/notes.txt",
+          contents: 'import { pattern } from "commonfabric";\nplain text',
+        },
+      ],
+    };
+    const compiled = await engine.compileToRecordGraph(program);
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      tx,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const loaded = await coldRuntime.patternManager.loadPatternByIdentity(
+        compiled.entryIdentity,
+        "default",
+        space,
+      );
+      expect(typeof loaded).toBe("function");
+      const recovered = await coldRuntime.patternManager
+        .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+      expect(recovered?.dataFiles).toEqual([
+        "/data/cities.json",
+        "/data/notes.txt",
+      ]);
+      expect(
+        recovered?.files.find((file) => file.name === "/data/cities.json")
+          ?.contents,
+      ).toBe('{"cities": ["Oslo", "Lima"]}');
+      await coldRuntime.patternManager.flushCompileCacheWrites();
+      await coldRuntime.storageManager.synced();
+
+      const warmRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const warm = await warmRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        );
+        expect(typeof warm).toBe("function");
+        const warmSource = await warmRuntime.patternManager
+          .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+        expect(warmSource?.dataFiles).toEqual([
+          "/data/cities.json",
+          "/data/notes.txt",
+        ]);
+      } finally {
+        await warmRuntime.dispose({ closeStorage: false });
+      }
+    } finally {
+      await coldRuntime.dispose({ closeStorage: false });
+    }
+  });
+
+  it("carries attached data-file bytes through the compiled set", async () => {
+    // The warm path never reads the source set, so the compiled closure alone
+    // has to carry everything the pattern needs — including its data.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: '{"cities": ["Oslo"]}' },
+      ],
+    };
+    const compiled = await engine.compileToRecordGraph(program);
+    expect(compiled.graph.dataByPath.get("/data/cities.json")).toBe(
+      '{"cities": ["Oslo"]}',
+    );
+
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      tx,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    // Cold load first, so the compiled set gets written back.
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      expect(
+        typeof await coldRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        ),
+      ).toBe("function");
+      await coldRuntime.patternManager.flushCompileCacheWrites();
+      await coldRuntime.storageManager.synced();
+    } finally {
+      await coldRuntime.dispose({ closeStorage: false });
+    }
+
+    // Warm load: the compiled closure alone must yield the data bytes, and the
+    // data entry must never become a module record.
+    const warmRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const runtimeVersion = await getCompileCacheRuntimeVersion();
+      expect(runtimeVersion).toBeDefined();
+      const readTx = warmRuntime.edit();
+      const closure = await loadCompiledClosure(
+        warmRuntime,
+        space,
+        compiled.entryIdentity,
+        { runtimeVersion: runtimeVersion! },
+        readTx,
+      );
+      readTx.abort?.("warm data-file read complete");
+
+      const dataDoc = [...closure.values()].find((doc) =>
+        doc.filename === "/data/cities.json"
+      );
+      expect(dataDoc?.kind).toBe("data");
+      expect(dataDoc?.code).toBe('{"cities": ["Oslo"]}');
+
+      const graph = buildRecordsFromCompiled(
+        [...closure].map(([identity, doc]) => ({
+          identity,
+          filename: doc.filename,
+          code: doc.code,
+          ...(doc.kind === "data" ? { isData: true } : {}),
+          imports: doc.imports.map((edge) => ({
+            specifier: edge.specifier,
+            targetIdentity: edge.identity,
+          })),
+        })),
+      );
+      expect(graph.dataByPath.get("/data/cities.json")).toBe(
+        '{"cities": ["Oslo"]}',
+      );
+      expect(
+        [...graph.specifierByPath.keys()].includes("/data/cities.json"),
+      ).toBe(false);
+
+      expect(
+        typeof await warmRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        ),
+      ).toBe("function");
+    } finally {
+      await warmRuntime.dispose({ closeStorage: false });
+    }
+  });
+
   it("trusts integrity-gated cached bodies and skips body re-verification", async () => {
     // Spec (module-loading.md, threat model): a warm hit loaded from the
     // integrity-gated compiled set trusts the CFC label, so `trustedBodies`
@@ -301,10 +504,11 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const runtimes: Runtime[] = [];
 
-  const newRuntime = () => {
+  const newRuntime = (patternCoverage?: PatternCoverageCollector) => {
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      ...(patternCoverage === undefined ? {} : { patternCoverage }),
     });
     runtimes.push(rt);
     return rt;
@@ -757,6 +961,280 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     } finally {
       restore();
     }
+  });
+
+  // Companion negative-memo coverage: only failures explicitly classified
+  // after source verification may suppress later attempts. Every transient
+  // boundary is exercised by making the missing state arrive in-session.
+  it("T8a: a deterministic compile failure is memoized", async () => {
+    const rt = newRuntime();
+    const nonEnvelope = "// leading comment\n" + injectCfHelpers(
+      "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+      "/main.tsx",
+    );
+    const bad = await storedModules("/main.tsx", [
+      { name: "/main.tsx", contents: nonEnvelope },
+    ]);
+    await persist(rt, bad);
+
+    const rt2 = newRuntime();
+    const engine2 = rt2.harness as Engine;
+    let coldCompiles = 0;
+    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+    engine2.compileResolvedToRecordGraph =
+      ((...args: Parameters<typeof original>) => {
+        coldCompiles++;
+        return original(...args);
+      }) as typeof engine2.compileResolvedToRecordGraph;
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        bad.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        bad.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+  });
+
+  it("T8b: an absent closure is never memoized", async () => {
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const late = await storedModules("/late.tsx", [{
+      name: "/late.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        late.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    await persist(rt, late);
+    expect(
+      typeof await rt2.patternManager.loadPatternByIdentity(
+        late.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBe("function");
+  });
+
+  it("T8c: a partial closure verify failure is never memoized", async () => {
+    // This is the regression that invalidated the original memo design. When
+    // a linked child has not arrived yet, loadSourceClosure omits that edge;
+    // verification reports a root hash mismatch rather than `missing`. The
+    // classification must therefore stay retryable regardless of the exact
+    // verification detail.
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const fixture = await storedModules("/main.tsx", [
+      {
+        name: "/dep.ts",
+        contents: "export const add = (value: number) => value + 2;",
+      },
+      {
+        name: "/main.tsx",
+        contents: "import { pattern } from 'commonfabric';\n" +
+          "import { add } from './dep.ts';\n" +
+          "export default pattern<{ value: number }>(({ value }) => ({ result: add(value) }));\n",
+      },
+    ], {
+      "/main.tsx": [{ specifier: "./dep.ts", target: "/dep.ts" }],
+    });
+    const entry = fixture.modules.find((module) =>
+      module.identity === fixture.entryIdentity
+    )!;
+    // Publish only the root; its stored link points to the not-yet-present dep.
+    await persist(rt, {
+      modules: [entry],
+      entryIdentity: fixture.entryIdentity,
+    });
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+
+    // Once the dependency arrives, the same PatternManager session retries
+    // verification/compile and succeeds.
+    await persist(rt, fixture);
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      fixture.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
+    expect(await runPattern(rt2, loaded, 5, "T8c partial retry")).toEqual({
+      result: 7,
+    });
+  });
+
+  it("T8d: a runtimeVersion change reopens a memoized identity", async () => {
+    const rt = newRuntime();
+    const nonEnvelope = "// bad versioned\n" + injectCfHelpers(
+      "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+      "/main.tsx",
+    );
+    const bad = await storedModules("/main.tsx", [
+      { name: "/main.tsx", contents: nonEnvelope },
+    ]);
+    await persist(rt, bad);
+
+    const restoreV1 = setCompileCacheRuntimeVersionForTesting("memo-v1");
+    try {
+      const rt2 = newRuntime();
+      const engine2 = rt2.harness as Engine;
+      let coldCompiles = 0;
+      const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+      engine2.compileResolvedToRecordGraph =
+        ((...args: Parameters<typeof original>) => {
+          coldCompiles++;
+          return original(...args);
+        }) as typeof engine2.compileResolvedToRecordGraph;
+      const load = () =>
+        rt2.patternManager.loadPatternByIdentity(
+          bad.entryIdentity,
+          "default",
+          space,
+        );
+      expect(await load()).toBeUndefined();
+      expect(await load()).toBeUndefined();
+      expect(coldCompiles).toBe(1);
+
+      const restoreV2 = setCompileCacheRuntimeVersionForTesting("memo-v2");
+      try {
+        expect(await load()).toBeUndefined();
+        expect(coldCompiles).toBe(2);
+      } finally {
+        restoreV2();
+      }
+    } finally {
+      restoreV1();
+    }
+  });
+
+  it("T8e: a transient fabric-resolution miss is never memoized", async () => {
+    const rt = newRuntime();
+    const rt2 = newRuntime();
+    const dependency = await storedModules("/dep.tsx", [{
+      name: "/dep.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ doubled: value * 2 }));\n",
+    }]);
+    const importer = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        `import dep from "cf:pattern:${dependency.entryIdentity}";\n` +
+        "export default pattern<{ value: number }>(({ value }) => ({ child: dep({ value }) }));\n",
+    }]);
+    await persist(rt, importer);
+
+    // The verified importer exists, but resolving its fabric mount cannot yet
+    // find the dependency. Resolution sits outside the deterministic marker.
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        importer.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+    await persist(rt, dependency);
+
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      importer.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
+    expect(await runPattern(rt2, loaded, 6, "T8e resolver retry")).toEqual({
+      child: { doubled: 12 },
+    });
+  });
+
+  it("T8f: a recompiled-identity mismatch is memoized", async () => {
+    const rt = newRuntime();
+    const fixture = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    await persist(rt, fixture);
+
+    // Compiler drift: the recompile succeeds but emits a different entry
+    // identity than the stored reference. That mismatch is deterministic for
+    // this runtime version, so the memo suppresses the second attempt.
+    const rt2 = newRuntime();
+    const engine2 = rt2.harness as Engine;
+    let coldCompiles = 0;
+    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+    engine2.compileResolvedToRecordGraph = (async (
+      ...args: Parameters<typeof original>
+    ) => {
+      coldCompiles++;
+      const compiled = await original(...args);
+      return { ...compiled, entryIdentity: `${compiled.entryIdentity}-drift` };
+    }) as typeof engine2.compileResolvedToRecordGraph;
+    const load = () =>
+      rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      );
+    expect(await load()).toBeUndefined();
+    expect(await load()).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+  });
+
+  it("retries a coverage-collector failure", async () => {
+    class FailOnceCoverage extends PatternCoverageCollector {
+      #failed = false;
+
+      override registerSpan(span: PatternCoverageSpan): void {
+        if (!this.#failed) {
+          this.#failed = true;
+          throw new Error("transient coverage sink failure");
+        }
+        super.registerSpan(span);
+      }
+    }
+
+    const rt = newRuntime();
+    const fixture = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    await persist(rt, fixture);
+
+    const rt2 = newRuntime(new FailOnceCoverage());
+    expect(
+      await rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBeUndefined();
+
+    const loaded = await rt2.patternManager.loadPatternByIdentity(
+      fixture.entryIdentity,
+      "default",
+      space,
+    );
+    expect(typeof loaded).toBe("function");
   });
 
   it("T9: JS-trailer variant (.jsx module) heals through the cold path", async () => {

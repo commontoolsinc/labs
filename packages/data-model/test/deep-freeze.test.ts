@@ -2,14 +2,14 @@
  * Asking whether a value is deep-frozen, and making it so, across the shapes
  * that complicate both.
  *
- * Caching is the part with teeth. An answer is remembered by identity, so a
+ * Caching is the part with teeth. A result is remembered by identity, so a
  * wrong `true` is not one mistake but a permanent one, and several cases exist
  * to pin when a result may be cached and when it may not. One is kept as a
- * regression pin against a cycle that was once answered wrongly.
+ * regression pin against a cycle that was once judged wrongly.
  *
  * The stricter of the two checks also asks whether the value is a
  * `FabricValue` at all, so an accessor-backed property, a symbol key, or an
- * array whose structure is inadmissible makes it answer `false` where a plain
+ * array whose structure is inadmissible makes it return `false` where a plain
  * frozen-ness test would have said `true`.
  *
  * A fabric instance is reached through its own protocol member rather than by
@@ -22,7 +22,7 @@ import { expect } from "@std/expect";
 import {
   deepFreeze,
   isDeepFrozen,
-  isDeepFrozenFabricValue,
+  isValidDeepFrozenFabricValue,
 } from "@/deep-freeze.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -250,12 +250,12 @@ describe("deep-freeze", () => {
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
     // reference. `isDeepFrozen`'s recursion threads an
-    // `inProgress: Set<object>` for cycle-safety and answers a
+    // `inProgress: Set<object>` for cycle-safety and resolves a
     // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
     // inspecting its logical contents, not its enumerable own-props -- so
     // values held in non-enumerable slots (such as
     // `FabricError`'s private extras `Map`) are checked too.
-    // (`isDeepFrozenFabricValue` uses the same protocol dispatch but
+    // (`isValidDeepFrozenFabricValue` uses the same protocol dispatch but
     // additionally type-guards the value as a `FabricValue`; it has its own
     // coverage in the sibling describe below.)
     describe("`FabricInstance` and `FabricPrimitive`", () => {
@@ -291,11 +291,12 @@ describe("deep-freeze", () => {
       it("returns `false` when an unfrozen value lives in a non-enumerable slot (extras bag)", () => {
         // A `FabricInstance`'s logical contents are not all enumerable
         // own-props: `FabricError` keeps its custom properties in a private
-        // extras `Map`. A generic `Object.values` walk can't see them, so the
-        // frozen-status must be answered via the instance's `[IS_DEEP_FROZEN]`
-        // protocol member, which inspects the extras bag. Here the wrapper is
-        // frozen and every enumerable slot is a frozen primitive, but the
-        // extras bag holds a mutable array -> not deep-frozen.
+        // extras `Map`. A generic `Object.values` walk can't see them, so
+        // frozen-status must be determined via the instance's
+        // `[IS_DEEP_FROZEN]` protocol member, which inspects the extras bag.
+        // Here the wrapper is frozen and every enumerable slot is a frozen
+        // primitive, but the extras bag holds a mutable array -> not
+        // deep-frozen.
         const fe = FabricError.fromNativeError(new Error("has-extras"));
         fe.setExtra("payload", [1, 2, 3]);
         Object.freeze(fe);
@@ -364,25 +365,25 @@ describe("deep-freeze", () => {
     });
   });
 
-  describe("`isDeepFrozenFabricValue()` with `FabricInstance` (R6)", () => {
+  describe("`isValidDeepFrozenFabricValue()` with `FabricInstance` (R6)", () => {
     it("returns `false` without throwing for an unfrozen `FabricInstance`", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
       // Two separate guarantees, hence two assertions: an unfrozen instance is
       // classified rather than refused, and the classification is `false`.
-      expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
-      expect(isDeepFrozenFabricValue(fe)).toBe(false);
+      expect(() => isValidDeepFrozenFabricValue(fe)).not.toThrow();
+      expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
     });
 
     it("returns `true` for a deep-frozen `FabricInstance`", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
       deepFreeze(fe);
-      expect(isDeepFrozenFabricValue(fe)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(fe)).toBe(true);
     });
 
     it("returns `true` for a deep-frozen `FabricInstance` nested in a tree", () => {
       const fe = FabricError.fromNativeError(new Error("nested"));
       const tree = deepFreeze({ a: 1, e: fe });
-      expect(isDeepFrozenFabricValue(tree)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(true);
     });
 
     it("returns `false` (no throw) for a non-canonical-form instance", () => {
@@ -390,26 +391,26 @@ describe("deep-freeze", () => {
       const err = new Error("partial", { cause: { mutable: true } });
       const fe = FabricError.fromNativeError(err);
       Object.freeze(fe);
-      expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
-      expect(isDeepFrozenFabricValue(fe)).toBe(false);
+      expect(() => isValidDeepFrozenFabricValue(fe)).not.toThrow();
+      expect(isValidDeepFrozenFabricValue(fe)).toBe(false);
     });
   });
 
-  describe("`isDeepFrozenFabricValue()` array structure validity", () => {
+  describe("`isValidDeepFrozenFabricValue()` array structure validity", () => {
     it("returns `false` for a frozen array with enumerable named properties", () => {
       // An array carrying a named property has no fabric representation, so it
       // is not a valid `FabricValue` even when fully frozen.
       const arr = [1, 2, 3] as unknown[] & { foo?: string };
       arr.foo = "bar";
       Object.freeze(arr);
-      expect(isDeepFrozenFabricValue(arr)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(arr)).toBe(false);
     });
 
     it("returns `false` for a frozen array with named properties nested in a tree", () => {
       const arr = [1, 2] as unknown[] & { extra?: number };
       arr.extra = 42;
       const tree = Object.freeze({ data: Object.freeze(arr) });
-      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(false);
     });
 
     it("returns `true` for a frozen sparse array (holes are not named properties)", () => {
@@ -417,19 +418,19 @@ describe("deep-freeze", () => {
       sparse[0] = 1;
       sparse[2] = 3; // hole at index 1
       Object.freeze(sparse);
-      expect(isDeepFrozenFabricValue(sparse)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(sparse)).toBe(true);
     });
   });
 
-  describe("`isDeepFrozenFabricValue()` accessor properties", () => {
+  describe("`isValidDeepFrozenFabricValue()` accessor properties", () => {
     it("returns `false` for a frozen object with a getter", () => {
       // Freezing an object does not make an accessor inert: a read still
-      // executes it and can answer differently every time. Such an object
-      // must not be granted the deep-frozen-fabric-value trust level.
+      // executes it and can return a different value every time. Such an
+      // object must not be granted the deep-frozen-fabric-value trust level.
       const obj = { a: 1 };
       Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
       Object.freeze(obj);
-      expect(isDeepFrozenFabricValue(obj)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(obj)).toBe(false);
     });
 
     it("returns `false` for a frozen tree with a getter-bearing record inside", () => {
@@ -437,7 +438,7 @@ describe("deep-freeze", () => {
       Object.defineProperty(inner, "g", { get: () => 4, enumerable: true });
       Object.freeze(inner);
       const tree = Object.freeze({ data: inner });
-      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(false);
     });
 
     it("returns `false` for a frozen array with a getter-backed index", () => {
@@ -450,7 +451,7 @@ describe("deep-freeze", () => {
         configurable: false,
       });
       Object.freeze(arr);
-      expect(isDeepFrozenFabricValue(arr)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(arr)).toBe(false);
     });
 
     it("returns `false` for a frozen tree with a getter-index array inside", () => {
@@ -462,34 +463,34 @@ describe("deep-freeze", () => {
       });
       Object.freeze(inner);
       const tree = Object.freeze({ data: inner });
-      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(false);
     });
   });
 
-  describe("`isDeepFrozenFabricValue()` symbols", () => {
+  describe("`isValidDeepFrozenFabricValue()` symbols", () => {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, consistent with
-    // `isFabricValue()` / `isFabricValueLayer()`.
+    // `isValidFabricValue()` / `isValidFabricValueLayer()`.
     it("returns `true` for an interned symbol", () => {
-      expect(isDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
+      expect(isValidDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
     });
 
     it("returns `false` for a unique (uninterned) symbol", () => {
-      expect(isDeepFrozenFabricValue(Symbol("k"))).toBe(false);
+      expect(isValidDeepFrozenFabricValue(Symbol("k"))).toBe(false);
     });
 
     it("returns `false` for a frozen tree reaching a unique symbol", () => {
       const tree = Object.freeze({ a: 1, s: Symbol("nope") });
-      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(false);
     });
 
     it("returns `true` for a frozen tree reaching only interned symbols", () => {
       const tree = Object.freeze({ a: 1, s: Symbol.for("ok") });
-      expect(isDeepFrozenFabricValue(tree)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(tree)).toBe(true);
     });
   });
 
-  describe("`isDeepFrozenFabricValue()` identity cache", () => {
+  describe("`isValidDeepFrozenFabricValue()` identity cache", () => {
     it("does not revalidate an already-proven frozen Fabric value", () => {
       let childReads = 0;
       const child = Object.freeze({ value: 1 });
@@ -501,18 +502,18 @@ describe("deep-freeze", () => {
       });
       Object.freeze(value);
 
-      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(value)).toBe(true);
       const readsAfterProof = childReads;
       expect(readsAfterProof).toBeGreaterThan(0);
 
-      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      expect(isValidDeepFrozenFabricValue(value)).toBe(true);
       expect(childReads).toBe(readsAfterProof);
     });
   });
 
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-  // 4-arm dispatch) and for `isDeepFrozenFabricValue()`, which composes
-  // `isFabricValue()` and `isDeepFrozen()` -- each threading its own
+  // 4-arm dispatch) and for `isValidDeepFrozenFabricValue()`, which composes
+  // `isValidFabricValue()` and `isDeepFrozen()` -- each threading its own
   // cycle-tracking set (`seen` / `inProgress`) through its recursion.
   //
   // Termination assertion: a cycle without such threading would manifest as
@@ -555,8 +556,8 @@ describe("deep-freeze", () => {
       });
     });
 
-    describe("`isDeepFrozenFabricValue()` (regression pin)", () => {
-      // `isDeepFrozenFabricValue()` composes `isFabricValue()` and
+    describe("`isValidDeepFrozenFabricValue()` (regression pin)", () => {
+      // `isValidDeepFrozenFabricValue()` composes `isValidFabricValue()` and
       // `isDeepFrozen()`, each of which threads its own cycle-tracking set
       // through its recursion, so the composition is cycle-safe. These tests
       // pin that property so a future change does not regress it.
@@ -564,9 +565,9 @@ describe("deep-freeze", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
         Object.freeze(a);
-        expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
+        expect(() => isValidDeepFrozenFabricValue(a)).not.toThrow();
         // The graph is deep-frozen-shaped (every reachable object frozen).
-        expect(isDeepFrozenFabricValue(a)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(a)).toBe(true);
       });
 
       it("terminates on a deep-frozen two-node cycle", () => {
@@ -576,8 +577,8 @@ describe("deep-freeze", () => {
         b.next = a;
         Object.freeze(a);
         Object.freeze(b);
-        expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
-        expect(isDeepFrozenFabricValue(a)).toBe(true);
+        expect(() => isValidDeepFrozenFabricValue(a)).not.toThrow();
+        expect(isValidDeepFrozenFabricValue(a)).toBe(true);
       });
     });
   });

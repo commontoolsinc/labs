@@ -15,11 +15,11 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("UnknownValue", () => {
@@ -85,7 +85,7 @@ describe("UnknownValue", () => {
         expect(result).toBe(uv);
         expect(Object.isFrozen(uv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(isDeepFrozenFabricValue(uv)).toBe(true);
+        expect(isValidDeepFrozenFabricValue(uv)).toBe(true);
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {
@@ -116,6 +116,27 @@ describe("UnknownValue", () => {
         it("returns the bare `state` (the tag is carried separately)", () => {
           const uv = new UnknownValue("Weird@7", { data: [1, 2, 3] });
           expect(UnknownValue[CODEC].encode(uv)).toEqual({ data: [1, 2, 3] });
+        });
+      });
+
+      describe("canDecode()", () => {
+        it("returns `true` for a state of any shape", () => {
+          // What arrives under a tag no registry claims is preserved rather
+          // than interpreted, so there is no shape this codec could refuse.
+          // A codec that refused one would drop the payload of exactly the
+          // value whose purpose is to carry it through untouched.
+          for (
+            const state of [
+              null,
+              undefined,
+              42,
+              "s",
+              [1, 2, 3],
+              { data: { nested: true } },
+            ]
+          ) {
+            expect(UnknownValue[CODEC].canDecode(state)).toBe(true);
+          }
         });
       });
     });

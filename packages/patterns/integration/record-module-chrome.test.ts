@@ -7,11 +7,12 @@
  * or "Work" — falling back to the module type's generic name ("Email") when the
  * module has none, and the settings dialog shows the module's own `settingsUI`
  * under a title carrying that same instance label. Reading either means going
- * through `SubPieceEntry.piece`, which is typed `unknown`: that is the schema
- * the runner reads back as undefined instead of materializing the value, so
+ * through `SubPieceEntry.piece`, which is typed `unknown`: that schema declares
+ * a reference the runner stops at instead of materializing what it names, so
  * these reads saw nothing, the header fell back to the type name, and the
  * dialog opened with a body that was always null. record.tsx now takes them
- * through lifts whose operands name the fields being read.
+ * through lifts whose operands name the fields being read — `settingsUI`
+ * included, which is what makes the gear appear at all.
  *
  * The shell is navigated once in the setup, and each case below drives the
  * page from there, so neither depends on the other having run.
@@ -41,7 +42,7 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   initializePiecesController,
   PieceController,
@@ -109,10 +110,9 @@ describe("record module chrome integration test", () => {
       apiUrl: new URL(API_URL),
       identity,
     });
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        join(import.meta.dirname!, "..", "record.tsx"),
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: join(import.meta.dirname!, "..", "record.tsx") },
     );
     record = await cc.create(program, {
       input: { title: "Elizabeth Bennet", subPieces: [], trashedSubPieces: [] },

@@ -1,13 +1,16 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
+import type { JSONSchema as SchemaDocJSONSchema } from "@commonfabric/api";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
+import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import { lookupSchemaDocument } from "../schema-registry.ts";
+import type { URI } from "../sigil-types.ts";
 import {
   type FabricPlainObject,
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { aclDocId } from "@commonfabric/memory/acl";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
@@ -42,32 +45,12 @@ import type {
   CommitPrecondition,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
-import { TransactionAborted } from "./transaction-errors.ts";
-import {
-  getDirectTransactionReactivityLog,
-  getTransactionReadActivities,
-  getTransactionWriteAttempts,
-  getTransactionWriteDetails,
-} from "./transaction-inspection.ts";
-import {
-  clearSchemaRefusalTx,
-  isInternalVerifierRead,
-  isLazyMaterializationTx,
-  markLazyMaterializationTx,
-  noteSchemaRefusalTx,
-  reactivityLogFromActivities,
-  takeSchemaRefusalTx,
-  unmarkLazyMaterializationTx,
-} from "./reactivity-log.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
-import {
-  type NormalizedFullLink,
-  toMemorySpaceAddress,
-} from "../link-types.ts";
-import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
@@ -77,6 +60,7 @@ import {
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDereferenceTrace,
+  cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
@@ -115,6 +99,61 @@ import {
   type WritePolicyInput,
 } from "../cfc/mod.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../link-types.ts";
+import { ignoreReadForScheduling } from "../scheduler.ts";
+import { normalizeCellScope, scopeRank } from "../scope.ts";
+import type {
+  CommitError,
+  IAttestation,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  InactiveTransactionError,
+  INotFoundError,
+  IReadActivity,
+  IReadOptions,
+  IStorageTransaction,
+  ITransactionJournal,
+  IWriteAttempt,
+  IWriteOptions,
+  MemorySpace,
+  Metadata,
+  ReadError,
+  Result,
+  StorageTransactionFailed,
+  StorageTransactionStatus,
+  TransactionCommitOptions,
+  TransactionReactivityLog,
+  TransactionWriteDetail,
+  Unit,
+  WriteError,
+  WriterError,
+} from "./interface.ts";
+import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import {
+  clearSchemaRefusalTx,
+  isInternalVerifierRead,
+  isLazyMaterializationTx,
+  isUiInputBlindWriteTx,
+  markLazyMaterializationTx,
+  noteSchemaRefusalTx,
+  reactivityLogFromActivities,
+  takeSchemaRefusalTx,
+  unmarkLazyMaterializationTx,
+} from "./reactivity-log.ts";
+import {
+  TransactionAborted,
+  TransactionCompleteError,
+} from "./transaction-errors.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionReadActivities,
+  getTransactionWriteAttempts,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -385,6 +424,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readResultCacheHits = 0;
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
+  // Per-transaction memo for derivations that read only this snapshot -- link
+  // resolution and CFC label views, each under its own key prefix. Dropped on
+  // any write alongside the read cache above, and bounded the same way: it
+  // retains only what was derived since this transaction's last write.
+  private snapshotMemo = new Map<string, unknown>();
 
   // The seal destination (server-execution v2, serving-loop.md §3d): when
   // installed, commit() closes by sealing into it instead of committing to
@@ -985,6 +1029,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   resetNarrowestReadScope(scope: CellScope = "space"): void {
     this.narrowestReadScope = scope;
+    // The caller is about to re-read to learn the scope of what it reads. A
+    // memoized link resolution issues no reads, so it would contribute nothing
+    // to the scope taken afterwards and the answer would come out too wide.
+    this.snapshotMemo = new Map();
   }
 
   markLazyMaterialize(enabled = true): void {
@@ -995,6 +1043,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   isLazyMaterialize(): boolean {
     return isLazyMaterializationTx(this);
   }
+
+  hasWrites(): boolean {
+    return this.tx.hasWrites?.() ?? false;
+  }
+
+  issueReadEpoch(): number | undefined {
+    return this.tx.issueReadEpoch?.();
+  }
+
+  enterReadEpoch(epoch: number | undefined): number | undefined {
+    const previous = this.#readEpoch;
+    this.#readEpoch = epoch;
+    this.tx.enterReadEpoch?.(epoch);
+    return previous;
+  }
+
+  exitReadEpoch(previous: number | undefined): void {
+    this.#readEpoch = previous;
+    this.tx.exitReadEpoch?.(previous);
+  }
+
+  // Mirrors the epoch pushed down to the storage transaction, so the caches
+  // this class owns can tell whether the value they are about to keep, or
+  // hand out, describes the current state or an earlier one.
+  #readEpoch: number | undefined;
 
   noteSchemaRefusal(refusal: unknown): void {
     noteSchemaRefusalTx(this, refusal);
@@ -1027,6 +1100,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     key: string,
     variant: string,
   ): { value: unknown } | undefined {
+    // Both caches key on path and schema, not on which instant is being read,
+    // and they are dropped on write to stay level with current state. A read
+    // resolving against an earlier epoch is describing a different instant, so
+    // it neither takes from them nor adds to them — serving one across that
+    // boundary would hand a materialized read's value to a current one, or the
+    // reverse.
+    if (this.#readEpoch !== undefined) return undefined;
     const cached = this.readResultCache.get(key)?.get(variant);
     if (cached === undefined) {
       this.readResultCacheMisses++;
@@ -1041,6 +1121,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     variant: string,
     value: unknown,
   ): void {
+    if (this.#readEpoch !== undefined) return;
     let byVariant = this.readResultCache.get(key);
     if (byVariant === undefined) {
       byVariant = new Map();
@@ -1048,6 +1129,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
     byVariant.set(variant, { value });
     this.readResultCacheSets++;
+  }
+
+  getSnapshotMemo(): Map<string, unknown> | undefined {
+    // A finished transaction answers no reads, so nothing it memoized earlier
+    // may be handed out as if it had.
+    if (this.status().status !== "ready") return undefined;
+    // A read resolving against an earlier epoch describes a different instant
+    // than the memo does; see `getCachedReadResult`.
+    if (this.#readEpoch !== undefined) return undefined;
+    // Once CFC is prepared, the read path's `read-after-prepare` invalidation
+    // is load-bearing: a memoized resolution issues no reads and would leave a
+    // prepared digest standing over a read it never made.
+    if (this.#cfcState.prepare.status === "prepared") return undefined;
+    // Inside an ambient-read-meta scope the reads a derivation issues carry
+    // metadata that flow-label derivation reads. Serving one across the scope
+    // boundary — either way — would journal the wrong ones, so the scope
+    // neither reads the memo nor writes to it.
+    if (this.#ambientReadMeta !== undefined) return undefined;
+    // Same for the UI-input blind-write mode, which tags every read it sees
+    // `ignoreReadForCommit`. An entry made under it, served after it is
+    // cleared, would stand in for reads that are supposed to carry a
+    // value-equality commit precondition — and the precondition would simply
+    // not be there.
+    if (isUiInputBlindWriteTx(this)) return undefined;
+    return this.snapshotMemo;
   }
 
   getReadResultCacheStats(): {
@@ -1089,21 +1195,35 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private invalidateReadResultCache(): void {
-    // A write may have changed any value a cached read depends on. Drop the
-    // whole cache by replacing the map; this enforces
-    // the "no writes between the last read and this one" invariant the cache
-    // relies on.
+    // A write may have changed any value a cached read depends on — including
+    // the links a resolution walked, which a write can add, retarget or
+    // replace with a plain value. Drop both caches by replacing the maps; this
+    // enforces the "no writes between the last read and this one" invariant
+    // they rely on.
     this.readResultCache = new Map();
+    this.snapshotMemo = new Map();
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
     this.#noteCfcActivity();
+    const traces = this.#cfcState.dereferenceTraces;
+    // Only a dereference the transaction had not already performed can move
+    // the digest, which binds the trace SET
+    // (`canonicalizePreparedDigestInput`). Invalidating on a repeat would
+    // reject a commit the recheck in `commit()` goes on to accept, so this
+    // guard answers the same question that recheck does.
+    //
+    // The scan is the rare path, not the hot one: it runs only once prepared,
+    // and every resolution that reaches here has already probed its way down
+    // the link — a probe invalidates on its own, before the hop is recorded.
+    const changesDigest = this.#cfcState.prepare.status === "prepared" &&
+      !traces.some((recorded) => cfcDereferenceTracesEqual(recorded, trace));
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable. Mirrors the chokepoint pattern on
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
-    this.#cfcState.dereferenceTraces.push(deepFreeze(trace));
-    if (this.#cfcState.prepare.status === "prepared") {
+    traces.push(deepFreeze(trace));
+    if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }
   }
@@ -1530,7 +1650,91 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
+  // `"<space>|<hash>"` pairs this transaction has already materialized (or
+  // decided it cannot), so repeat passes never re-call writeOrThrow — a
+  // repeat write, even an elided one, would invalidate a prepared CFC
+  // digest (`write-after-prepare`).
+  #ensuredSchemaDocs = new Set<string>();
+
+  /**
+   * The write-side delivery guarantee of content-addressed schemas
+   * (`docs/specs/content-addressed-schemas.md`): every schema document a
+   * written link references travels in the same transaction, into the same
+   * space, as the reference itself. Scans this transaction's writes for
+   * link schemas carrying external refs, expands each to its closure
+   * through the realm registry (the link writer registered the documents
+   * when it stamped the reference), and blind-writes the documents at the
+   * canonical space scope. Runs before CFC prepare (so the writes are part
+   * of the prepared digest) and again at commit for transactions that
+   * never prepare; the dedupe set makes the second pass a no-op.
+   *
+   * A hash the registry cannot supply is skipped: only a hand-crafted
+   * value carries a reference its writer never registered. The commit
+   * boundary rejects such a commit outright unless the space already
+   * stores the document, and read-side assembly fails closed on whatever
+   * predates that validation.
+   */
+  #materializeReferencedSchemaDocuments(): void {
+    if (!getContentAddressedSchemasConfig()) return;
+    const log = this.getReactivityLog();
+    const spaces = new Set(
+      [...(log.writes ?? []), ...(log.attemptedWrites ?? [])].map((write) =>
+        write.space
+      ),
+    );
+    for (const space of spaces) {
+      for (const detail of this.getWriteDetails(space)) {
+        if (detail.address.id.startsWith("cid:")) continue;
+        if (detail.value === undefined) continue;
+        const hashes = new Set<string>();
+        // Link positions only: `$alias` records are binding vocabulary by
+        // CONTEXT — in a transaction's written values they are plain data,
+        // and scanning them here would treat data that merely looks like a
+        // binding as a schema carrier. Binding schemas externalized by the
+        // pattern serializer resolve through the realm registry.
+        mapLinkSchemas(detail.value, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(
+              schema as SchemaDocJSONSchema,
+            )
+          ) {
+            hashes.add(hash);
+          }
+          return schema;
+        });
+        const pending = [...hashes];
+        while (pending.length > 0) {
+          const hash = pending.pop()!;
+          const key = `${space}|${hash}`;
+          if (this.#ensuredSchemaDocs.has(key)) continue;
+          this.#ensuredSchemaDocs.add(key);
+          const document = lookupSchemaDocument(hash);
+          if (document === undefined) {
+            logger.warn("schema-doc-materialize", () => [
+              "A written link references a schema document the registry cannot supply:",
+              `cid:${hash}`,
+            ]);
+            continue;
+          }
+          this.#runPrivilegedSystemWrite(() => {
+            this.writeOrThrow(
+              {
+                space,
+                id: `cid:${hash}` as URI,
+                type: "application/json",
+                path: [],
+              },
+              { value: document },
+            );
+          });
+          pending.push(...collectExternalSchemaRefHashes(document));
+        }
+      }
+    }
+  }
+
   prepareCfc(): string {
+    this.#materializeReferencedSchemaDocuments();
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -1675,7 +1879,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
-    this.noteWrite();
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
     // write. The ["cfc"]-path arm is structurally unreachable here (a
@@ -1702,7 +1905,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
     this.assertWritable("recordSqliteWrite");
-    this.noteWrite();
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",
@@ -1801,7 +2003,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
-    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1817,7 +2018,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
-    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1936,18 +2136,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
-      // Note the write per yielded write (not once up front): an empty batch
-      // must not mark the tx as written-to, for the identity or for the
-      // has-written flag lazy materialization reads.
+      // Capture the identity per yielded write, not once up front: an empty
+      // batch authored nothing, so it must not record a write for the
+      // transaction's write-identity summary.
       const noteWriteIdentity = () => this.noteWriteIdentity();
-      const noteWrite = () => this.noteWrite();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
-            noteWrite();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
@@ -2054,11 +2252,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.statusOverride?.status === "error") {
       return { error: this.statusOverride.error };
     }
+    // A transaction that is no longer open takes none of the commit-path
+    // work below. The CFC relevance probes read stored metadata through this
+    // transaction, and one whose commit is in flight, settled, or aborted
+    // admits no reads. The terminal state is reported here as the result. The
+    // underlying transaction holds a single commit verdict, and that verdict
+    // belongs to the commit that is running.
+    const openState = this.tx.status();
+    if (openState.status !== "ready") {
+      return {
+        error: openState.status === "error"
+          ? openState.error
+          : TransactionCompleteError(),
+      };
+    }
     const readOnly = this.isReadOnly();
     if (readOnly) {
       this.tx.clearReadOnly?.();
     }
     if (!readOnly) {
+      // Before the CFC probes and the prepared-digest recheck: writes added
+      // here must precede any prepare, and the dedupe set makes this a
+      // no-op for transactions prepareCfc() already covered.
+      this.#materializeReferencedSchemaDocuments();
       // Flow-label relevance is computed, not caller-marked: a tx that
       // observed or wrote a labeled doc derives labels even when nothing
       // called markCfcRelevant (S16 — value-copy laundering happens in
@@ -2447,6 +2663,18 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   hasWrites(): boolean {
     return this.wrapped.hasWrites();
+  }
+
+  issueReadEpoch(): number | undefined {
+    return this.wrapped.issueReadEpoch();
+  }
+
+  enterReadEpoch(epoch: number | undefined): number | undefined {
+    return this.wrapped.enterReadEpoch(epoch);
+  }
+
+  exitReadEpoch(previous: number | undefined): void {
+    this.wrapped.exitReadEpoch(previous);
   }
 
   noteSchemaRefusal(refusal: unknown): void {

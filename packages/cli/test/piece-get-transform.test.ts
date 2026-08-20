@@ -3,6 +3,10 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import {
+  createLLMFriendlyLink,
+  parseLLMFriendlyLink,
+} from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   CellSelectionError,
@@ -480,9 +484,13 @@ describe("cf piece get transforms", () => {
         '{"additionalProperties":{"type":"string"}}',
       )).schema,
     ).toEqual({ type: "object", additionalProperties: { type: "string" } });
+    // `required` names the container and is then consumed: the caller's
+    // constraint goes no further, because the runner acts on a `required` it
+    // is handed and a caller's would void the read around a position it
+    // narrowed.
     expect(
       (await parseSelectionProjection('{"required":["id"]}')).schema,
-    ).toEqual({ type: "object", required: ["id"], additionalProperties: true });
+    ).toEqual({ type: "object", additionalProperties: true });
     expect(
       (await parseSelectionProjection('{"items":{"properties":{"id":true}}}'))
         .schema,
@@ -1950,7 +1958,7 @@ describe("cf piece get transforms", () => {
     );
   });
 
-  it("answers an unset declared array with no addresses rather than a refusal", async () => {
+  it("returns no addresses for an unset declared array rather than refusing", async () => {
     // An unset declared array is the empty array under the runner's map
     // semantics, and the unmarked spelling already answers `[]`. A marked one
     // must agree: refusing here would tell a caller its piece is malformed
@@ -2234,13 +2242,13 @@ describe("cf piece get transforms", () => {
       };
     }
 
-    function addressOf(cell: Cell<unknown>) {
-      return {
-        id: cell.getAsNormalizedFullLink().id,
+    /** The canonical reference a marked position at `path` inside `cell`
+     * renders as: one string carrying id, scope and path. */
+    function addressOf(cell: Cell<unknown>, ...path: string[]) {
+      return createLLMFriendlyLink(
+        { ...cell.getAsNormalizedFullLink(), path },
         space,
-        scope: "space",
-        path: [],
-      };
+      );
     }
 
     const uriOf = (cell: Cell<unknown>) => cell.getAsNormalizedFullLink().id;
@@ -2309,6 +2317,65 @@ describe("cf piece get transforms", () => {
       }
       return syncs;
     }
+
+    it("writes an address as one canonical reference string", async () => {
+      // The form the whole fabric names a cell by: `--piece` reads it back,
+      // a pattern reads it back, and nothing has to be reassembled from
+      // separate fields to pass it on.
+      const { board, notes } = await seedBoard("link-marker-canonical", true);
+      const marked = await deriveSelectedValue(runtime, space, board, {
+        projection: await parseSelectionProjection('{"$link":true}'),
+      }) as { $link: string };
+      expect(marked.$link).toBe(`/${uriOf(board)}`);
+      expect(parseLLMFriendlyLink(marked.$link)).toMatchObject({
+        id: uriOf(board),
+        path: [],
+      });
+      expect(notes.length).toBe(3);
+    });
+
+    it("round-trips a marked position's path through the reference parser", async () => {
+      // The case that made a single string necessary: an address BELOW a
+      // document's root. Quoting the id alone names the root instead — a
+      // different cell — so the path has to ride in the same string, and
+      // come back out of it.
+      const { board } = await seedBoard("link-marker-round-trip", true);
+      const concise = await deriveSelectedValue(runtime, space, board, {
+        projection: parseSelectProjection("label@"),
+      }) as { label: { $link: string } };
+      expect(parseLLMFriendlyLink(concise.label.$link)).toMatchObject({
+        id: uriOf(board),
+        path: ["label"],
+      });
+      // The other projection spelling reaches the same string, so neither
+      // grammar has an address form the other lacks.
+      const json = await deriveSelectedValue(runtime, space, board, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"$link":true}}}',
+        ),
+      }) as { notes: { $link: string } };
+      expect(json.notes.$link).toBe(`/${uriOf(board)}/notes`);
+      expect(parseLLMFriendlyLink(json.notes.$link)).toMatchObject({
+        id: uriOf(board),
+        path: ["notes"],
+      });
+    });
+
+    it("prefixes an address with its space DID for a reader in another space", async () => {
+      // The space is part of the address, and a reader working in another
+      // space needs it spelled out — a bare id would resolve in the reader's
+      // own space, which is a different cell.
+      const reader = (await Identity.fromPassphrase("cf-other-space")).did();
+      const { board } = await seedBoard("link-marker-cross-space", true);
+      const marked = await deriveSelectedValue(runtime, reader, board, {
+        projection: await parseSelectionProjection('{"$link":true}'),
+      }) as { $link: string };
+      expect(marked.$link).toBe(`/@${space}/${uriOf(board)}`);
+      expect(parseLLMFriendlyLink(marked.$link)).toMatchObject({
+        id: uriOf(board),
+        space,
+      });
+    });
 
     it("returns a marked position's address instead of its contents", async () => {
       const { board, notes } = await seedBoard("link-marker-instead", true);
@@ -2396,7 +2463,7 @@ describe("cf piece get transforms", () => {
         }),
       ).toEqual({
         notes: notes.map((note) => ({
-          title: { $link: { ...addressOf(note), path: ["title"] } },
+          title: { $link: addressOf(note, "title") },
         })),
       });
     });
@@ -2413,7 +2480,7 @@ describe("cf piece get transforms", () => {
           ),
         }),
       ).toEqual({
-        title: { $link: { ...addressOf(notes[0]), path: ["title"] } },
+        title: { $link: addressOf(notes[0], "title") },
       });
     });
 
@@ -2453,7 +2520,7 @@ describe("cf piece get transforms", () => {
       ).toEqual({
         topic: {
           title: {
-            $link: { ...addressOf(note), path: ["content", "title"] },
+            $link: addressOf(note, "content", "title"),
           },
         },
       });
@@ -2605,7 +2672,7 @@ describe("cf piece get transforms", () => {
         "link-marker-linked-collection",
       );
       const titleAddresses = notes.map((note) => ({
-        title: { $link: { ...addressOf(note), path: ["title"] } },
+        title: { $link: addressOf(note, "title") },
       }));
       let value: unknown;
 
@@ -2657,12 +2724,7 @@ describe("cf piece get transforms", () => {
         }),
       ).toEqual({
         topic: {
-          $link: {
-            id: read.getAsNormalizedFullLink().id,
-            space,
-            scope: "space",
-            path: ["topic"],
-          },
+          $link: addressOf(read, "topic"),
         },
       });
     });
@@ -2677,12 +2739,7 @@ describe("cf piece get transforms", () => {
         }),
       ).toEqual({
         label: {
-          $link: {
-            id: board.getAsNormalizedFullLink().id,
-            space,
-            scope: "space",
-            path: ["label"],
-          },
+          $link: addressOf(board, "label"),
         },
       });
     });
@@ -2897,7 +2954,7 @@ describe("cf piece get transforms", () => {
             ),
           }),
         ).toEqual({
-          notes: { $link: { ...addressOf(board), path: ["notes"] } },
+          notes: { $link: addressOf(board, "notes") },
         });
       });
 
@@ -2919,7 +2976,7 @@ describe("cf piece get transforms", () => {
         ).toEqual({
           notes: notes.map((note) => ({
             $link: addressOf(note),
-            title: { $link: { ...addressOf(note), path: ["title"] } },
+            title: { $link: addressOf(note, "title") },
           })),
         });
       });
@@ -2927,7 +2984,7 @@ describe("cf piece get transforms", () => {
       it("marks a position below an array for each of its elements", async () => {
         const { board, notes } = await seedBoard("at-suffix-elements", true);
         const titleAddresses = notes.map((note) => ({
-          title: { $link: { ...addressOf(note), path: ["title"] } },
+          title: { $link: addressOf(note, "title") },
         }));
 
         expect(
@@ -2980,7 +3037,7 @@ describe("cf piece get transforms", () => {
           ),
         ).toEqual({
           comments: [{
-            body: { $link: { ...addressOf(comment), path: ["body"] } },
+            body: { $link: addressOf(comment, "body") },
           }],
         });
       });
@@ -3222,7 +3279,7 @@ describe("cf piece get transforms", () => {
       return { value, cell: outputCell!.getAsNormalizedFullLink().id };
     }
 
-    it("answers the repeat from the cell the first read set up", async () => {
+    it("returns the repeat from the cell the first read set up", async () => {
       const source = await seededSource(runtime, "repeat-identical-source", [
         { id: 1, title: "First" },
         { id: 2, title: "Second" },
@@ -3239,7 +3296,7 @@ describe("cf piece get transforms", () => {
       expect(second.cell).toBe(first.cell);
     });
 
-    it("answers the repeat with a source change made between the reads", async () => {
+    it("returns the repeat with a source change made between the reads", async () => {
       const source = await seededSource(runtime, "repeat-restated-source", [
         { id: 1, title: "First" },
       ]);
@@ -3262,7 +3319,7 @@ describe("cf piece get transforms", () => {
       expect(second.cell).toBe(first.cell);
     });
 
-    it("answers each differing selection from its own cell", async () => {
+    it("returns each differing selection from its own cell", async () => {
       const source = await seededSource(runtime, "repeat-distinct-source", [
         { id: 1, title: "First" },
         { id: 2, title: "Second" },
@@ -3300,7 +3357,7 @@ describe("cf piece get transforms", () => {
       expect(repeat.cell).toBe(ids.cell);
     });
 
-    it("answers a repeat whose source changed root kind between the reads", async () => {
+    it("returns a repeat whose source changed root kind between the reads", async () => {
       // A source whose schema names no root kind has its array-ness read off
       // the value, and the projection's shape follows it. So the two reads
       // below ask the same thing of two different shapes, and answering the
@@ -3327,7 +3384,7 @@ describe("cf piece get transforms", () => {
         .toEqual({ id: 9 });
     });
 
-    it("answers a second runtime's identical read over the same session", async () => {
+    it("returns a second runtime's identical read over the same session", async () => {
       const source = await seededSource(runtime, "repeat-two-hosts-source", [
         { id: 1, title: "First" },
       ]);

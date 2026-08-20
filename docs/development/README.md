@@ -11,18 +11,22 @@ mapped in [`../README.md`](../README.md).
 ## Start here
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — coding standards, design principles,
-  and the build and test workflow. Read this first
+  the word choice all prose here standardizes on, and the build and test
+  workflow. Read this first
 - [`code-comment-style.md`](code-comment-style.md) — how a comment is written:
   what earns one, the rule that a comment describes the system as it stands and
   the shapes that break it, the Markdown markup comments and error messages
   share, and what a doc comment carries
+- [`imports.md`](imports.md) — why a file's dependencies belong in its import
+  list, the two lint rules that keep them there, and what earns a deferred
+  `import()` the ignore directive that keeps it
 - [`LOCAL_DEV_SERVERS.md`](LOCAL_DEV_SERVERS.md) — starting the local servers,
   and what to do when they misbehave. Use `dev-local` for the shell, not `dev`
 - [`TESTING.md`](TESTING.md) — running the test suites, and how unit and
   integration tests are structured. This is the hub that links the other
   testing documents
 - [`debugging/`](debugging/README.md) — the error reference and the debugging
-  workflows, including a large catalogue of specific gotchas
+  workflows, including a large catalog of specific gotchas
 
 ## Dependencies and configuration
 
@@ -66,6 +70,12 @@ mapped in [`../README.md`](../README.md).
   rebalancing jobs
 - [`COVERAGE.md`](COVERAGE.md) — the two coverage mechanisms, which job
   collects which, and how to read the resulting numbers
+- [`test-records.md`](test-records.md) — the record of every test execution:
+  what gets recorded, the environment surface, opting a workstation in with
+  a personal key, and reading the public store
+- [`test-records-adoption.md`](test-records-adoption.md) — implementing the
+  test-run record system in another repository of the organization: what is
+  shared, what the repository adds, and the rules that are not optional
 - [`deno-coverage-guard-line-artifact.md`](deno-coverage-guard-line-artifact.md)
   — why `deno coverage` reports a one-line guard as uncovered whenever its
   branch is not taken

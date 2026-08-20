@@ -11,13 +11,15 @@
  * Run: deno run -A packages/runner/test/manual-compile-wedge.ts
  */
 
-import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { Engine } from "../src/harness/engine.ts";
 import * as path from "@std/path";
+
+import { Identity } from "@commonfabric/identity";
+import { resolveLocalProgram } from "../src/harness/local-program.deno.ts";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
+
+import type { Engine } from "../src/harness/engine.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const repoRoot = path.resolve(
   path.dirname(path.fromFileUrl(import.meta.url)),
@@ -42,8 +44,9 @@ const entry = path.join(
   "default-app.tsx",
 );
 const root = path.join(repoRoot, "packages", "patterns");
-const program = await engine.resolve(
-  new FileSystemProgramResolver(entry, root),
+const program = await resolveLocalProgram(
+  (resolver) => engine.resolve(resolver),
+  { main: entry, root },
 );
 console.log(`resolved files: ${program.files.length}`);
 

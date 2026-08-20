@@ -1,9 +1,9 @@
 import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface EpisodeSegmentInput {
-  id?: unknown;
-  title?: unknown;
-  duration?: unknown;
+  id?: string;
+  title?: string;
+  duration?: number;
 }
 
 interface EpisodeSegment {
@@ -126,7 +126,7 @@ const clampIndex = (value: unknown, length: number): number => {
 const updateSegmentDetails = handler(
   (
     event:
-      | { id?: unknown; title?: unknown; duration?: unknown }
+      | { id?: string; title?: string; duration?: number }
       | undefined,
     context: { segments: Cell<EpisodeSegmentInput[]> },
   ) => {
@@ -159,7 +159,7 @@ const updateSegmentDetails = handler(
 
 const reorderSegments = handler(
   (
-    event: { from?: unknown; to?: unknown } | undefined,
+    event: { from?: number; to?: number } | undefined,
     context: { segments: Cell<EpisodeSegmentInput[]> },
   ) => {
     const segments = ensureSegments(context.segments);

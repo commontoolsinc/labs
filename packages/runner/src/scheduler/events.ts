@@ -270,6 +270,7 @@ function readyQueuedEvent(args: {
   readonly handler: EventHandler;
   readonly retries: boolean;
   readonly onCommit?: QueuedEvent["onCommit"];
+  readonly eventId?: string;
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
@@ -278,6 +279,7 @@ function readyQueuedEvent(args: {
 }): QueuedEvent {
   return {
     id: args.id,
+    ...(args.eventId !== undefined ? { callerSuppliedId: true } : {}),
     enqueueSeq: nextEnqueueSeq++,
     time: args.time,
     originTx: args.originTx,
@@ -361,6 +363,17 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     // collapse the newest into the last pending entry (last-wins) instead of
     // growing the backlog, so a pattern cannot observe an unbounded post-block
     // event count.
+    //
+    // Caller-supplied durable ids are excluded from that merge in BOTH
+    // directions. The handling's receipt address derives from the delivery id
+    // (spec §7.6), so collapsing such an event away would leave its receipt
+    // address never written — a later same-pair retry would find no receipt
+    // and re-execute instead of deduplicating — and rewriting a queued
+    // caller-id entry's payload would durably record a result its owner never
+    // sent. At the cap a caller-id send coalesces onto an already-queued entry
+    // with the SAME delivery id (the same invocation; first payload wins,
+    // matching the create-only receipt arbitration the pair gets after
+    // dispatch) and is otherwise refused loudly before dispatch.
     if (
       // The matching (stream, handler) count can only reach the cap once the
       // whole queue is at it, so this O(queue) scan runs only after a backlog
@@ -376,18 +389,53 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     ) {
       let pending = 0;
       let lastSameOrigin: QueuedEvent | undefined;
+      let sameDeliveryId: QueuedEvent | undefined;
       for (const q of state.eventQueue) {
         if (
           q.handler === handler &&
           areNormalizedLinksSame(q.eventLink, args.eventLink)
         ) {
           pending++;
+          if (args.eventId !== undefined && q.id === id) sameDeliveryId = q;
           // Collapse only within the same origin transaction. Coalescing an
           // event from a different origin would misattribute speculation
           // lineage: the surviving entry keeps its original originTx, so the
-          // single dispatch-time release would key off the wrong origin.
-          if (q.originTx === args.originTx) lastSameOrigin = q;
+          // single dispatch-time release would key off the wrong origin. A
+          // caller-id entry is never the survivor either — last-wins would
+          // rewrite the payload its receipt is about to witness.
+          if (q.originTx === args.originTx && q.callerSuppliedId !== true) {
+            lastSameOrigin = q;
+          }
         }
+      }
+      if (
+        pending >= MAX_EVENT_BACKLOG_PER_STREAM && args.eventId !== undefined
+      ) {
+        if (
+          sameDeliveryId !== undefined &&
+          sameDeliveryId.originTx === args.originTx
+        ) {
+          // The same invocation is already pending: ride it rather than refuse
+          // it. First payload wins — after dispatch, a differing retry payload
+          // would lose the create-only receipt race and read the original back
+          // anyway — and both senders settle on that one outcome.
+          sameDeliveryId.onCommit = chainOnCommit(
+            sameDeliveryId.onCommit,
+            args.onCommit,
+          );
+          state.queueExecution();
+          return;
+        }
+        notifyEventDropped(
+          state,
+          args,
+          `Event backlog for this stream is full ` +
+            `(${MAX_EVENT_BACKLOG_PER_STREAM} pending), so this send was ` +
+            `refused before dispatch: nothing executed, no receipt was ` +
+            `created, and the same invocation id is safe to send again once ` +
+            `the backlog drains.`,
+        );
+        return;
       }
       if (
         pending >= MAX_EVENT_BACKLOG_PER_STREAM &&
@@ -1272,6 +1320,10 @@ export async function dispatchQueuedEvent(state: {
   const requeueForNameResolution = () => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // The flag rides every requeue with the id it describes: dropping it
+      // would let a later same-origin send select this entry as a collapse
+      // survivor and rewrite the payload its receipt is about to witness.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
       enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,
@@ -1303,6 +1355,10 @@ export async function dispatchQueuedEvent(state: {
   ) => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // Same as the name-resolution requeue above: the flag travels with the
+      // id, or the collapse-survivor exclusion silently ends at the first
+      // retry.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
       enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+# This sectionless script is one recorded test.
+source "$SCRIPT_DIR/test-records.sh"
+cf_test_record_script "acl.sh"
+
 error () {
   >&2 echo "ERROR: $1"
   exit 1

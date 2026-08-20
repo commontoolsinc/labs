@@ -7,7 +7,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -16,15 +16,15 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * string encoding the bigint's two's-complement big-endian byte representation.
  * Wire format: `{ "/BigInt@1": "<base64>" }`.
  *
- * The byte encoding is the same one used by the hash (Section 3.7 of the
- * byte-level spec): minimal two's-complement big-endian, with sign extension
+ * The byte encoding is the same one used by the hash
+ * (`2-hash-byte-format.md` Section 4.5): minimal two's-complement big-endian, with sign extension
  * as needed.
  *
  * `BigInt` is a non-`new`-able pseudo-constructor, so it is cast to
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
+export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue, string> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
@@ -36,23 +36,21 @@ export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
-  encode(value: bigint): JsonCodecValue {
+  encode(value: bigint): string {
     return bigintToUnpaddedBase64url(value);
+  }
+
+  /** @inheritDoc */
+  canDecode(state: JsonCodecValue): state is string {
+    return typeof state === "string";
   }
 
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: JsonCodecValue,
-    _context: ReconstructionContext,
+    state: string,
+    _env: LiveEnvironment,
   ): FabricValue {
-    if (typeof state !== "string") {
-      return new ProblematicValue(
-        typeTag,
-        state,
-        `bigint: expected string state, got ${typeof state}`,
-      );
-    }
     try {
       return bigintFromUnpaddedBase64url(state);
     } catch {

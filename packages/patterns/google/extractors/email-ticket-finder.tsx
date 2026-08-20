@@ -22,6 +22,7 @@ import {
   pattern,
   TILE_UI,
   UI,
+  type VNode,
   wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -550,13 +551,15 @@ interface PatternInput {
 
 /** Email ticket finder for tracking upcoming events. #emailTickets */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   tickets: TrackedTicket[];
   todayTickets: TrackedTicket[];
   upcomingTickets: TrackedTicket[];
   pastTickets: TrackedTicket[];
   todayCount: number;
   upcomingCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

@@ -47,6 +47,7 @@ on the Common Fabric runtime.
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults
+- [concepts/types-and-schemas/unknown.md](concepts/types-and-schemas/unknown.md) — `unknown` for a reference you compare but never read through
 - [concepts/glossary.md](concepts/glossary.md) — definitions of pattern, piece, cell, space, etc.
 
 ### patterns/ — authoring recipes
@@ -87,8 +88,19 @@ on the Common Fabric runtime.
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
-- [verbs-over-the-cli.md](verbs-over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
-- [verb-session-walkthrough.md](verb-session-walkthrough.md) — a whole session driven through `cf`: discovery, help, completion, and carrying an address from one call into the next, with each step marked for what works today and what is still blocked
+
+### verbs/ — driving a deployed piece through `cf`
+
+Start with the tour if the vocabulary is new; it assumes nothing. Arriving
+without a piece id, start with the agent's entry instead. The other three
+answer narrower questions, and the README says which is which.
+
+- [verbs/README.md](verbs/README.md) — which of the five to read, by the question you are asking
+- [verbs/the-verb-session.md](verbs/the-verb-session.md) — the tour: what a pattern, piece, space and verb are, and a whole session driven through `cf` in thirteen acts. Assumes nothing; read it first
+- [verbs/agents-over-the-cli.md](verbs/agents-over-the-cli.md) — reaching a piece with no id in hand: the discovery surfaces and what bounds each, orienting on an unfamiliar piece, and the conclusions an empty answer does not support
+- [verbs/session-walkthrough.md](verbs/session-walkthrough.md) — the same session priced: byte measurements, the code behind each answer, the caveats, and what the surface still owes. Its companion script under `packages/cli/integration/` runs every step
+- [verbs/over-the-cli.md](verbs/over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
+- [verbs/prose-over-the-cli.md](verbs/prose-over-the-cli.md) — how an author's doc comments reach a caller, and which of the two documents `cf` reads carries what
 
 [INTRODUCTION.md](INTRODUCTION.md) is a stub kept for older links; this README
 replaces it.

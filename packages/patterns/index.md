@@ -61,11 +61,12 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 `self-improving-classifier.tsx`, `shopping-list.tsx`, `store-mapper.tsx`,
 `text-swapper.tsx`.
 
-App and integration directories: `activity-log/`, `agent/`, `airtable/`,
-`auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
-`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
-explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
+App and integration directories: `activity-log/`, `agent/`,
+`agent-sessions-debug/`, `airtable/`, `auth/`, `base/`, `battleship/`,
+`budget-tracker/`, `calendar/`, `card-piles/`, `contacts/`, `cozy-poll/`,
+`examples/`, `experimental/` (explicitly unhardened explorations),
+`github-activity/`, `google/` (the `core/` tree; `google/WIP/` is legacy),
+`habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
@@ -83,13 +84,14 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `scope-bug-computed-vnode-blank/`,
-`scope-bug-ct1597-forward/`, `scope-bug-ct1597-reduce/`, `cell-link.tsx`
-(suggestion tester), `nested-map-ifelse-test.tsx`, `render-test.tsx`,
-`self-reference-test.tsx`, and every `*.test.ts(x)` file anywhere in this
-package. (The blanket `*.test.ts(x)` rule is about pattern-authoring idioms —
-test _style_ is governed by `docs/common/workflows/pattern-testing.md`, and the
-exemplars' own test files remain good references for it.)
+`gideon-tests/`, `integration/`, `test/`, `plain-array-callback-locals/`,
+`scope-bug-computed-vnode-blank/`, `scope-bug-ct1597-forward/`,
+`scope-bug-ct1597-reduce/`, `cell-link.tsx` (suggestion tester),
+`nested-map-ifelse-test.tsx`, `render-test.tsx`, `self-reference-test.tsx`, and
+every `*.test.ts(x)` file anywhere in this package. (The blanket `*.test.ts(x)`
+rule is about pattern-authoring idioms — test _style_ is governed by
+`docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
+remain good references for it.)
 
 ## legacy
 
@@ -189,15 +191,22 @@ addPiece.send({ piece: ann });
 **Topics — a multi-user tracker over #topic pieces** (durable units of shared
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
-assignees. The board derives the corpus's prose reference graph (topic fids
-pasted in bodies/comments/link URLs → navigable crossref chips, never
-persisted). Demonstrates: reading-list-style piece-in-list composition,
-`PerUser` display-name on a shared piece, mergeable comment appends,
-session-scoped drafts, read-side derived backlinks over sibling pieces
-(`resolveAsCell().entityId` for piece identity), `multiUserTest` coverage.
+assignees. The board publishes a bounded discovery index — the topics
+themselves, declared through a narrow row schema of summary scalars, so a row's
+address IS its topic's and a survey and the follow-up read name one document.
+`addTopic` returns the piece it created, so a caller addresses a new topic
+straight from the create. Topics reference each other by CELL: the board derives
+the whole graph once by scanning what each topic points at with `equals`, and
+each topic reads its own inbound edges out of that pivot. Demonstrates:
+reading-list-style piece-in-list composition, `PerUser` display-name on a shared
+piece, mergeable comment appends, session-scoped drafts, bounding a whole-list
+derivation with a narrow declared `lift` parameter, passing topics through a
+sort so an activity-ordered list keeps the identity its elements already have,
+`multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable, backlinks, crossrefs, references, graph
+PerUser, mergeable, index, discovery, bounded read, row identity, references,
+backlinks, cell identity, equals, mentions
 
 ### Input Schema
 
@@ -206,10 +215,9 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
-// the board's own list, wired at creation, for detail-page Connections.
-// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
-// describes its siblings without recursing over the whole board.
+// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
+// board's own list, wired at creation, as the @-mention universe for the
+// topic's body editor.
 ```
 
 ### Output Schema
@@ -219,9 +227,14 @@ interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
-  crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
+  // The topics, read through { title, createdAt, createdBy, commentCount,
+  //   lastActivityAt } — a row addresses the topic it describes
+  index: TopicIndexRow[];
+  // { topic, mentionedBy } per topic — the reference graph, derived once here
+  crossrefs: TopicCrossrefRow[];
   myName: string;
-  addTopic: Stream<{ title: string }>;
+  // Returns { topic } — the piece it created
+  addTopic: Stream<AddTopicEvent, AddTopicResult>;
   setMyName: Stream<{ name: string }>;
 }
 ```
@@ -309,6 +322,20 @@ self.markIdle.send({
   learned: "## 2026-04-07\nNew observation",
 });
 ```
+
+---
+
+## `agent-sessions-debug/main.tsx`
+
+A read-only operations view for the agent connector host. It receives direct
+links to the recent index, complete index, health, command, and receipt cells.
+It shows source lifecycle, collection state, session metadata, Git context,
+command payloads, receipts, bounded host activity, top-level cell IDs, and raw
+cell values. Tab and filter state are session-scoped. The pattern does not write
+to connector data.
+
+**Keywords:** agents, connector, sessions, debug, health, commands, receipts,
+activity, operations, Fabric cells
 
 ---
 
@@ -1350,7 +1377,10 @@ inputs and produces a focused output.
 
 ## `suggestable/summary.tsx`
 
-Generates a concise summary of provided context using an LLM.
+Generates a concise summary of provided context using an LLM. The topic is what
+asks for the summary: with none given the pattern holds the request back, so
+`pending` stays `false` and `summary` stays empty until a caller names a
+subject.
 
 **Keywords:** summary, generateText, suggestion-fuel
 
@@ -1375,7 +1405,9 @@ type SummaryOutput = {
 
 ## `suggestable/checklist.tsx`
 
-Generates a checklist of actionable steps from a topic and context.
+Generates a checklist of actionable steps from a topic and context. The topic is
+what asks for the steps: with none given the pattern holds the request back, so
+`pending` stays `false` and `items` stays empty until a caller names a subject.
 
 **Keywords:** checklist, generateObject, suggestion-fuel
 
@@ -1405,7 +1437,10 @@ type ChecklistOutput = {
 
 ## `suggestable/question.tsx`
 
-Generates a clarifying question with optional multiple-choice options.
+Generates a clarifying question with optional multiple-choice options. The topic
+is what asks for the question: with none given the pattern holds the request
+back, so `pending` stays `false` and both `question` and `options` stay empty
+until a caller names a subject.
 
 **Keywords:** question, generateObject, suggestion-fuel
 
@@ -1433,7 +1468,9 @@ type QuestionOutput = {
 ## `suggestable/diagram.tsx`
 
 Generates an ASCII diagram illustrating relationships, flows, or structures.
-Rendered in a `<pre>` tag with monospace styling.
+Rendered in a `<pre>` tag with monospace styling. The topic is what asks for the
+diagram: with none given the pattern holds the request back, so `pending` stays
+`false` and `diagram` stays empty until a caller names a subject.
 
 **Keywords:** diagram, ASCII, generateText, suggestion-fuel
 
@@ -1459,7 +1496,10 @@ type DiagramOutput = {
 ## `suggestable/svg-diagram.tsx`
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
-Rendered via `<cf-svg>` web component for scalable vector output.
+Rendered via `<cf-svg>` web component for scalable vector output. The topic is
+what asks for the diagram: with none given the pattern holds the request back,
+so `pending` stays `false` and `diagram` stays empty until a caller names a
+subject.
 
 **Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
 
@@ -1485,7 +1525,10 @@ type SvgDiagramOutput = {
 ## `suggestable/budget-planner.tsx`
 
 Generates a budget breakdown with editable amounts for each category. The LLM
-suggests spending categories that sum to the given budget ceiling.
+suggests spending categories that sum to the given budget ceiling. The topic is
+what asks for the breakdown: with none given the pattern holds the request back
+and shows an empty budget, so building one costs nothing until a caller says
+what the money is for.
 
 **Keywords:** budget, generateObject, suggestion-fuel
 

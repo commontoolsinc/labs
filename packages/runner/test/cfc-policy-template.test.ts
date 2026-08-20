@@ -5,6 +5,7 @@ import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   buildCfcPolicyArtifactManifest,
+  buildCfcPolicySnapshot,
   lowerCfcPolicyTemplateRules,
   validateCfcPolicyArtifactManifest,
 } from "../src/cfc/policy.ts";
@@ -477,8 +478,7 @@ describe("CFC module policy templates", () => {
     ).toThrow("policyDigest must be a non-empty string");
   });
 
-  it("keeps legacy deployment-record digest bytes unchanged", async () => {
-    const { buildCfcPolicySnapshot } = await import("../src/cfc/policy.ts");
+  it("keeps legacy deployment-record digest bytes unchanged", () => {
     const input = [{
       id: "legacy",
       selection: "referenced" as const,

@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import { InMemoryProgram } from "@commonfabric/js-compiler";
 import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
-import { InMemoryProgram } from "@commonfabric/js-compiler";
-import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
+import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cli fabric deps test");
@@ -83,6 +85,33 @@ describe("cli fabric deps", () => {
     ]);
   });
 
+  it("leaves an attached data file's bytes alone while pinning", async () => {
+    await writePatternSlug("dep");
+    // The data file's text reads as a mutable fabric import. Storing it
+    // verbatim is the whole point of attaching it, so pinning must not touch
+    // it — a rewrite here would be silent data corruption.
+    const dataContents = `import dep from "cf:dep";\nnot code at all`;
+    const result = await pinProgramFabricImports(runtime, space, {
+      main: "/main.tsx",
+      dataFiles: ["/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import dep from "cf:dep";\nexport default dep;`,
+        },
+        { name: "/data/notes.txt", contents: dataContents },
+      ],
+    });
+
+    expect(
+      result.program.files.find((file) => file.name === "/data/notes.txt")
+        ?.contents,
+    ).toBe(dataContents);
+    expect(result.rewrites.map((rewrite) => rewrite.file)).toEqual([
+      "/main.tsx",
+    ]);
+  });
+
   it("pins fabric imports across every file of a program", async () => {
     await writePatternSlug("dep");
     const result = await pinProgramFabricImports(runtime, space, {
@@ -156,6 +185,37 @@ describe("cli fabric deps", () => {
     await expect(
       collectLocalProgram(resolver, { fabricImports: "allow" }),
     ).rejects.toThrow("compiler-internal namespaces");
+  });
+
+  it("collectLocalProgram refuses an import that escapes the program root", async () => {
+    // No compile stands behind this walk, so an unrefused escape is a
+    // silently collected wrong file in `cf check` and `cf deps`.
+    const resolver = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `import { x } from "../outside.ts";\nexport default x;`,
+      "/outside.ts": "export const x = 1;",
+    });
+
+    await expect(
+      collectLocalProgram(resolver, { fabricImports: "allow" }),
+    ).rejects.toThrow(
+      'Import "../outside.ts" in "/main.tsx" escapes the program root.',
+    );
+  });
+
+  it("collectLocalProgram collects a parent import that stays inside", async () => {
+    const resolver = new InMemoryProgram("/core/main.tsx", {
+      "/core/main.tsx":
+        `import { x } from "../util/mod.ts";\nexport default x;`,
+      "/util/mod.ts": "export const x = 1;",
+    });
+
+    const program = await collectLocalProgram(resolver, {
+      fabricImports: "allow",
+    });
+    expect(program.files.map((f) => f.name).toSorted()).toEqual([
+      "/core/main.tsx",
+      "/util/mod.ts",
+    ]);
   });
 
   it("exposes deps update help", async () => {

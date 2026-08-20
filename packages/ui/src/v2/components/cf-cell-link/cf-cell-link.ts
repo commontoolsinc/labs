@@ -1,8 +1,13 @@
+import { consume } from "@lit/context";
 import { css, html, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-chip/index.ts";
+
+import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   CellRef,
@@ -11,15 +16,14 @@ import {
   parseLLMFriendlyLink,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import type { DID } from "@commonfabric/identity";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
+
 import {
   createDragPreview,
   endDrag,
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 
 /**
  * CFCellLink - Renders a link or cell as a clickable, draggable pill

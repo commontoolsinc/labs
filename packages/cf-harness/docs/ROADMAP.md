@@ -1,7 +1,7 @@
 # cf-harness Roadmap
 
 Status: live, non-normative\
-Last reviewed: 2026-08-13
+Last reviewed: 2026-08-18
 
 This document lists remaining work. Shipped milestones belong in
 [CURRENT_STATE.md](CURRENT_STATE.md), tests, and history rather than in a
@@ -37,9 +37,7 @@ permanently growing implementation plan.
 
 ## 4. Tighten delegation and artifacts
 
-- Cover denial-path tool messages with the session handle table's swapping, and
-  define cross-agent handle semantics for `delegate_task` arguments, whose
-  tokens currently reach a child verbatim as inert text.
+- Cover denial-path tool messages with the session handle table's swapping.
 - Add value handles (`cfh:v:`, reserved in the token grammar) with a
   materialization story, and an explicit release/readback mechanism for
   parent/model-facing artifact references.
@@ -64,12 +62,20 @@ permanently growing implementation plan.
 - Give each `run_pattern` invocation a resource ceiling and deadline, aligned
   with the hosted-pattern-authoring prerequisite that an agent session runs
   under configured limits on model tokens, tool invocations, CPU, memory, and
-  disk; today only the abort signal bounds an invocation.
-- Define a retention and deletion story for the unlisted pieces `run_pattern`
-  persists and for the run-state handle table. Each invocation leaves a
+  disk. What bounds an invocation today is the run's abort signal, plus the
+  scheduler's own convergence budget, which defers a reactive graph whose pass
+  exhausted its budget — converging-but-slow and never-settling alike — and
+  reports each deferring pass through the `scheduler.non-settling` telemetry
+  marker. That covers reactive non-convergence only: a loop inside a single
+  computation body, or an async builtin that never resolves, is bounded by
+  neither.
+- Define a retention and deletion story for the pieces `run_pattern` persists
+  and for the run-state handle table. Each invocation leaves a
   stopped-but-never-deleted piece whose source-history revision is a
-  storage-retention root invisible to the piece list, and handle-table entries
-  accumulate per run with no expiry.
+  storage-retention root the piece list does not reveal — a piece `register`
+  named is as retained as one it did not, so registration changes findability
+  and not retention — and handle-table entries accumulate per run with no
+  expiry.
 - Add an outbound CFC flow check on compiled pattern source. The current
   space-equality gate covers inbound input links only; nothing checks what a
   compiled pattern's own code sends out of the session space.

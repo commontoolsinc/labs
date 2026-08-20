@@ -9,6 +9,7 @@
  * doctored `Document` so the natural card/structure machinery lands in the
  * defensive state being exercised.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
@@ -101,12 +102,12 @@ const useB = base;`;
 });
 
 // ===========================================================================
-// Behavioural anchor near revealMatch (580).
+// Behavioral anchor near revealMatch (580).
 // ===========================================================================
 // revealMatch reads matches[currentMatch] and guards `!m`. Every public caller
 // (runSearch, refreshSearchMatches, stepMatch) checks for an empty match set
 // before reaching it, so the no-match return is unreachable from the public
-// API; this test asserts the surrounding reveal behaviour stays correct.
+// API; this test asserts the surrounding reveal behavior stays correct.
 Deno.test("session: a committed search reveals its single match", () => {
   const doc = parseDocument("// transformed: /m.ts\nconst tokenz = 1;");
   const s = new Session(
@@ -341,10 +342,10 @@ Deno.test("filepickercov2: paging the picker up to the top keeps the scroll non-
 });
 
 // ===========================================================================
-// Behavioural anchors for the reachable structure-tree edges near 288/377/380.
+// Behavioral anchors for the reachable structure-tree edges near 288/377/380.
 // ===========================================================================
 // These do not force the unreachable defensive returns, but assert the
-// surrounding navigation/card behaviour stays correct from a real session.
+// surrounding navigation/card behavior stays correct from a real session.
 
 Deno.test("session: card down then up across a multi-target card stays consistent", () => {
   const doc = parseDocument(SAMPLE);

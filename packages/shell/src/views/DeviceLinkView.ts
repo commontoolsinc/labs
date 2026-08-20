@@ -9,7 +9,7 @@ import { property, state } from "lit/decorators.js";
 // attacker, so everything they then write lands in the attacker's space and
 // their own session is gone. Scanning steals nothing directly (there is no
 // exfiltration channel; the payload gives away the attacker's own key), which
-// makes this screen the entire defence. Hence the DID shown prominently for
+// makes this screen the entire defense. Hence the DID shown prominently for
 // cross-checking against the Pair screen, and copy naming where the code was
 // supposed to have come from.
 //
@@ -26,9 +26,9 @@ import { property, state } from "lit/decorators.js";
 /**
  * How long the accept button stays inert after the dialog appears.
  *
- * The overlay materialises mid-boot on a phone the user has just pointed at a
+ * The overlay materializes mid-boot on a phone the user has just pointed at a
  * QR code, and the accept button is the primary control — a tap already in
- * flight would land on it. For the screen that is the only defence against a
+ * flight would land on it. For the screen that is the only defense against a
  * donated-identity link, that is worth a beat.
  */
 export const TAP_THROUGH_GUARD_MS = 500;

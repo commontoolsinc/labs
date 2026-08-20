@@ -1,15 +1,15 @@
+import type { ReadonlyCell } from "@commonfabric/api";
+import { MetaField } from "@commonfabric/api";
 import {
-  type Immutable,
-  isFunction,
-  isObjectNotArray,
-  isObjectOrArray,
-  isPlainContainer,
-} from "@commonfabric/utils/types";
+  type EntityRef,
+  entityRefFromString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
 import {
   cloneIfNecessary,
+  type FabricConvertibleValue,
   fabricFromNativeValue,
   FabricInstance,
-  type FabricOrConvertibleNativeValue,
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
@@ -19,41 +19,37 @@ import {
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import {
-  type EntityRef,
-  entityRefFromString,
-  linkRefFrom,
-} from "@commonfabric/data-model/cell-rep";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { ReadonlyCell } from "@commonfabric/api";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
   type SqliteDbRef,
   type SqliteParamsWire,
   streamEntriesDocId,
   type StreamLinkRef,
 } from "@commonfabric/memory/v2";
-import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
-import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
-import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
-import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
-import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
-import { mintEventId, scopeCallerEventId } from "./scheduler/event-identity.ts";
-import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
-import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
-import { cfcLabelViewForCell } from "./cfc/label-view.ts";
-import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  type Immutable,
+  isFunction,
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainContainer,
+} from "@commonfabric/utils/types";
+
+import { toCell } from "./back-to-cell.ts";
+import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
+import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
   type AnyCell,
   type AnyCellWrapping,
@@ -66,6 +62,7 @@ import {
   type Frame,
   type HKT,
   type ICell,
+  isReactiveMarker,
   isStreamValue,
   type IsThisObject,
   type IStreamable,
@@ -81,74 +78,12 @@ import {
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
-import { toCell } from "./back-to-cell.ts";
-import { isReactiveMarker } from "./builder/types.ts";
-import {
-  type CellResult,
-  createQueryResultProxy,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { diffAndUpdate } from "./data-updating.ts";
-import { type LastNode, resolveLink } from "./link-resolution.ts";
-import {
-  type Action,
-  ignoreReadForScheduling,
-  txToReactivityLog,
-} from "./scheduler.ts";
-import {
-  allowMutableTransactionRead,
-  internalVerifierRead,
-  markReadAsAttemptedWrite,
-  mergeableOpRead,
-} from "./storage/reactivity-log.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
+import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
+import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
+import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import {
-  type CellViewRef,
-  processDefaultValue,
-  resolveSchema,
-  schemaHasIfc,
-  validateAndTransform,
-} from "./schema.ts";
-import {
-  readStoredCfcMetadata,
-  storedCfcMetadataAppliesToPath,
-} from "./cfc/metadata.ts";
-import { toURI } from "./uri-utils.ts";
-import { createRef } from "./create-ref.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import {
-  type SigilLink,
-  type SigilWriteRedirectLink,
-  type URI,
-} from "./sigil-types.ts";
-import type { Runtime } from "./runtime.ts";
-import {
-  dataUriFromValueWithResolvedLinks,
-  findAndInlineDataUriLinks,
-} from "./data-uri.ts";
-import {
-  areLinksSame,
-  createSigilLinkFromParsedLink,
-  isCellLink,
-  KeepAsCell,
-  type NormalizedFullLink,
-  type NormalizedLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "./link-utils.ts";
-import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
-import type {
-  ChangeGroup,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  IReadOptions,
-} from "./storage/interface.ts";
-import {
-  createChildCellTransaction,
-  createNonReactiveTransaction,
-} from "./storage/extended-storage-transaction.ts";
-import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
@@ -159,15 +94,81 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
-import { listResultSchema } from "./builtins/list-result-schema.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
+import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import {
   isRendererTrustedEvent,
   propagateRendererTrustedEvent,
 } from "./cfc/ui-contract.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { MetaField } from "@commonfabric/api";
+import { createRef } from "./create-ref.ts";
+import { diffAndUpdate } from "./data-updating.ts";
+import {
+  dataUriFromValueWithResolvedLinks,
+  findAndInlineDataUriLinks,
+} from "./data-uri.ts";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { type LastNode, resolveLink } from "./link-resolution.ts";
+import {
+  areLinksSame,
+  createSigilLinkFromParsedLink,
+  isCellLink,
+  KeepAsCell,
+  type NormalizedFullLink,
+  type NormalizedLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "./link-utils.ts";
+import {
+  type CellResult,
+  createQueryResultProxy,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  txToReactivityLog,
+} from "./scheduler.ts";
+import { mintEventId, scopeCallerEventId } from "./scheduler/event-identity.ts";
+import {
+  type CellViewRef,
+  processDefaultValue,
+  resolveSchema,
+  schemaHasIfc,
+  validateAndTransform,
+} from "./schema.ts";
+import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
+import {
+  type SigilLink,
+  type SigilWriteRedirectLink,
+  type URI,
+} from "./sigil-types.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+} from "./storage/extended-storage-transaction.ts";
+import type {
+  ChangeGroup,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
+} from "./storage/interface.ts";
+import {
+  allowMutableTransactionRead,
+  internalVerifierRead,
+  markReadAsAttemptedWrite,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
+import { fromURI, toURI } from "./uri-utils.ts";
+
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -485,7 +486,6 @@ declare module "@commonfabric/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
-      writable?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
@@ -2183,7 +2183,7 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
       // and assigning that back to `currentValue` would discard the narrowing
       // this block exists to establish.
       const created: FabricValue[] =
@@ -2266,7 +2266,7 @@ export class CellImpl<T extends FabricValue>
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
       // Annotated for the same reason as in `push()`: `processDefaultValue()`
-      // answers `any`, which would discard the narrowing on assignment.
+      // returns `any`, which would discard the narrowing on assignment.
       const created: FabricValue[] =
         isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
@@ -2505,7 +2505,7 @@ export class CellImpl<T extends FabricValue>
     const array = got as ElemT[];
     // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
     // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and answers `false` when either is not one — so a
+    // operands as links and returns `false` when either is not one — so a
     // fabric-valued ref matches only by reference identity, never by value,
     // and the call otherwise silently no-ops. The sibling `removeByValue`
     // has the right shape: link comparison for cells, `valueEqual` (which
@@ -2867,7 +2867,6 @@ export class CellImpl<T extends FabricValue>
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
-    writable?: boolean,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
@@ -2879,7 +2878,6 @@ export class CellImpl<T extends FabricValue>
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
       0,
-      writable,
       rebaseCfcLabelView(
         this._cfcLabelView,
         subPath.map((p) => p.toString()),
@@ -3876,14 +3874,14 @@ export function frameAnchorIds(
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
- * `FabricOrConvertibleNativeValue` is an arm rather than something restated, so
+ * `FabricConvertibleValue` is an arm rather than something restated, so
  * this stays true of whatever that comes to admit. The container arms are here
  * as well, and they are not redundant with it: theirs hold only what is already
  * fabric or convertible, where a cell may sit at any depth in what a pattern
  * produced. Replacing a nested one is the whole of what this conversion is for.
  */
 export type CellLinkInput =
-  | FabricOrConvertibleNativeValue
+  | FabricConvertibleValue
   | readonly CellLinkInput[]
   | { readonly [key: string]: CellLinkInput }
   | Cell<any>;
@@ -3919,8 +3917,9 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  *
  * `ancestors` holds the ancestors of the value being converted, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
- * it is shared, and each position gets its own conversion. Answering a shared
- * reference with a back-link would rewrite one of its positions into a pointer
+ * it is shared, and each position gets its own conversion. Returning a
+ * back-link for a shared reference would rewrite one of its positions into a
+ * pointer
  * at the other -- and a graph holds plenty of shared structure that is nobody's
  * cycle, an empty `path: []` array reachable from every alias in it being the
  * common case.
@@ -3956,10 +3955,10 @@ export function convertCellsToLinks(
   ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
-  // out clears the ancestor just recorded -- the exits that answer a value
+  // out clears the ancestor just recorded -- the exits that return a value
   // without descending into it as much as the ones that recur. An exit that
   // skipped the clearing would leave the value an ancestor of all the rest of
-  // the walk, and the next position holding it would be answered as a cycle.
+  // the walk, and the next position holding it would be taken for a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
     // arrays it returns. That symbol is machinery, not content, and an array

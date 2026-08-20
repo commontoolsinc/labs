@@ -1,6 +1,7 @@
 /**
  * Interaction handling for cf-chart: hover, click, crosshair, tooltip.
  */
+
 import { svg, type TemplateResult } from "lit";
 // @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";

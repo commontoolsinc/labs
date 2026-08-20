@@ -1,6 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
 import type { DID } from "@commonfabric/identity";
+import {
+  createRuntimeClientOptions,
+  defaultRenderConfidentialityCeiling,
+  RuntimeInternals,
+} from "@commonfabric/lib-shell";
 
 type MockRuntimeClientEvents = {
   console: [unknown];
@@ -117,7 +123,6 @@ type NavigationDetail = {
 
 describe("RuntimeInternals", () => {
   it("reads a piece's source state through the client", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
     const space = "did:key:z6Mk-source-space" as DID;
@@ -137,7 +142,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("resolves named spaces through the worker client", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
     try {
@@ -151,7 +155,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("exposes page slug metadata", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     client.slugByPageId.set("piece-789", "demo");
@@ -167,7 +170,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("guards removePage after dispose", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
@@ -180,7 +182,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("uses the default navigation event when no navigation callback is injected", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
@@ -217,7 +218,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("uses an injected navigation callback", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const nextSpace = "did:key:z6Mk-lib-shell-runtime-next" as DID;
     const client = new MockRuntimeClient();
     const navigationReceived = deferred<NavigationDetail>();
@@ -250,7 +250,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("logs a navigation-convergence failure without escaping as unhandled", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const space = "did:key:z6Mk-lib-shell-nav-fail" as DID;
     const client = new MockRuntimeClient();
     client.synced = () => Promise.reject(new Error("convergence failed"));
@@ -284,7 +283,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("abandons navigation convergence silently when disposed mid-flight", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const space = "did:key:z6Mk-lib-shell-nav-dispose" as DID;
     const client = new MockRuntimeClient();
     let rejectSynced!: (error: unknown) => void;
@@ -322,13 +320,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("defaults worker runtime options to shell-compatible CFC policy and principal trust", async () => {
-    const { createRuntimeClientOptions } = await import(
-      "@commonfabric/lib-shell"
-    );
-    const { createSession, Identity } = await import(
-      "@commonfabric/identity"
-    );
-
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
@@ -365,12 +356,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("populates the §8.10.6 render ceiling when cfcRenderCeiling is on", async () => {
-    const { createRuntimeClientOptions, defaultRenderConfidentialityCeiling } =
-      await import("@commonfabric/lib-shell");
-    const { createSession, Identity } = await import(
-      "@commonfabric/identity"
-    );
-
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
@@ -425,13 +410,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("allows hosts to override CFC policy and trust snapshot", async () => {
-    const { createRuntimeClientOptions } = await import(
-      "@commonfabric/lib-shell"
-    );
-    const { createSession, Identity } = await import(
-      "@commonfabric/identity"
-    );
-
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
@@ -464,10 +442,6 @@ describe("RuntimeInternals", () => {
   });
 
   it("carries the worker-console flag onto the client options", async () => {
-    const { createRuntimeClientOptions } = await import(
-      "@commonfabric/lib-shell"
-    );
-    const { createSession, Identity } = await import("@commonfabric/identity");
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
@@ -505,9 +479,6 @@ describe("RuntimeInternals", () => {
     };
 
     it("includes forwardWorkerConsole, concurrentWatchRefresh, and the render ceiling in the Initialize request", async () => {
-      const { RuntimeInternals, defaultRenderConfidentialityCeiling } =
-        await import("@commonfabric/lib-shell");
-      const { Identity } = await import("@commonfabric/identity");
       const identity = await Identity.generate({ implementation: "noble" });
 
       const initRequests: Array<{ data: CapturedInitData }> = [];
@@ -581,8 +552,6 @@ describe("RuntimeInternals", () => {
         useDefaultWorkerUrl?: boolean;
       },
     ): Promise<URL> {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
-      const { Identity } = await import("@commonfabric/identity");
       const identity = await Identity.generate({ implementation: "noble" });
 
       const capturedUrls: string[] = [];
@@ -689,15 +658,14 @@ describe("RuntimeInternals", () => {
   describe("getPattern start semantics", () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-pattern" as DID;
 
-    async function makeRuntime() {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    function makeRuntime() {
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       return { client, runtime };
     }
 
     it("starts by default (display path)", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1");
         expect(client.getPageCalls).toEqual([
@@ -709,7 +677,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("does not start when start: false (name listings)", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
@@ -721,7 +689,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("upgrades a non-started cache entry when a starting caller asks", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1");
@@ -735,7 +703,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("serves started entries from cache for both kinds of callers", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1");
         await runtime.getPattern(spaceDid, "piece-1");
@@ -749,7 +717,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("serves repeated non-started requests from cache", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
@@ -766,7 +734,6 @@ describe("RuntimeInternals", () => {
   // cell's space, not any notion of a current space.
   describe("registerNavigatedPiece", () => {
     it("targets the navigated cell's space", async () => {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       const cellSpace = "did:key:z6Mk-lib-shell-runtime-foreign" as DID;
@@ -786,7 +753,6 @@ describe("RuntimeInternals", () => {
 
   describe("lifetime signal", () => {
     it("exposes the client's lifetime signal", async () => {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       try {
@@ -799,7 +765,6 @@ describe("RuntimeInternals", () => {
 
   describe("trackRecentPiece", () => {
     it("absorbs a failed root-pattern lookup and logs once while alive", async () => {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       const space = "did:key:z6Mk-lib-shell-runtime-recent" as DID;
@@ -820,7 +785,6 @@ describe("RuntimeInternals", () => {
     });
 
     it("stays silent when the lookup fails after disposal", async () => {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       const space = "did:key:z6Mk-lib-shell-runtime-recent-disposed" as DID;
@@ -855,15 +819,14 @@ describe("RuntimeInternals", () => {
     const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
     const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
 
-    async function makeRuntime() {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    function makeRuntime() {
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
       return { client, runtime };
     }
 
     it("passes the space through to the client", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(otherDid, "piece-1");
         expect(client.getPageCalls).toEqual([
@@ -875,7 +838,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("caches per (space, id) — same id in two spaces are distinct", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(homeDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");
@@ -890,7 +853,7 @@ describe("RuntimeInternals", () => {
     });
 
     it("invalidates per space", async () => {
-      const { client, runtime } = await makeRuntime();
+      const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(homeDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");

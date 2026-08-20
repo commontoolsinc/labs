@@ -1,27 +1,28 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
-import { acl } from "./acl.ts";
-import { ingest } from "./ingest.ts";
-import { check } from "./dev.ts";
-import { completion } from "./completion.ts";
-import { deps } from "./deps.ts";
-import { exec } from "./exec.ts";
-import { fuse } from "./fuse.ts";
-import { init } from "./init.ts";
-import { inspect } from "./inspect.ts";
-import { invocationSession } from "./invocation-session.ts";
-import { piece } from "./piece.ts";
-import { space } from "./space.ts";
-import { identity } from "./identity.ts";
-import { test } from "./test-command.ts";
-import { view } from "./view.ts";
-import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
+
 import { cliName, cliText } from "../lib/cli-name.ts";
 import {
   hasJsonArgument,
   reservesStdoutForCommandOutput,
 } from "../lib/json-output.ts";
+import { acl } from "./acl.ts";
+import { completion } from "./completion.ts";
+import { deps } from "./deps.ts";
+import { check } from "./dev.ts";
+import { exec } from "./exec.ts";
+import { fuse } from "./fuse.ts";
+import { identity } from "./identity.ts";
+import { ingest } from "./ingest.ts";
+import { init } from "./init.ts";
+import { inspect } from "./inspect.ts";
+import { invocationSession } from "./invocation-session.ts";
+import { piece, pieceDataCommand } from "./piece.ts";
+import { space } from "./space.ts";
+import { test } from "./test-command.ts";
+import { view } from "./view.ts";
+import { wish } from "./wish.ts";
 
 function envStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
@@ -129,6 +130,9 @@ export const main = new Command()
           this.showHelp();
           return;
         }
+        // The FUSE module graph is large and only the mount subcommands
+        // reach it, so every other `cf` invocation skips loading it.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { main } = await import("@commonfabric/fuse");
         await main(daemonArgs);
       }),
@@ -146,6 +150,9 @@ export const main = new Command()
       .useRawArgs()
       .action(async (_options: unknown, ...rawArgs: unknown[]) => {
         const supervisorArgs = rawArgs.map((arg) => String(arg));
+        // The flag parser sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { parseSupervisorArgs, supervisorHelp } = await import(
           "../lib/fuse-mount-flags.ts"
         );
@@ -161,6 +168,9 @@ export const main = new Command()
           console.log(supervisorHelp());
           return;
         }
+        // The supervisor sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { runFuseSupervisor } = await import(
           "../lib/fuse-supervisor.ts"
         );
@@ -172,4 +182,14 @@ export const main = new Command()
   .command("init", init)
   .command("invocation-session", invocationSession)
   .command("test", test)
-  .command("wish", wish);
+  .command("wish", wish)
+  // The top-level spellings of the piece data commands: the same builders
+  // the `piece` chain mounts under the same names, so `cf get` and
+  // `cf piece get` are one definition parsed two ways
+  // (docs/plans/cli-surface-shape.md, step 5).
+  // @ts-ignore for the above type issue
+  .command("get", pieceDataCommand("get"))
+  // @ts-ignore for the above type issue
+  .command("set", pieceDataCommand("set"))
+  // @ts-ignore for the above type issue
+  .command("call", pieceDataCommand("call"));

@@ -25,7 +25,7 @@ export interface FabricUrlOptions {
 }
 
 /**
- * Percent-decoding that answers rather than throws. A malformed escape is a
+ * Percent-decoding that returns rather than throws. A malformed escape is a
  * URL this cannot read, and the contract is that such a URL names no cell —
  * not that asking about it fails.
  */

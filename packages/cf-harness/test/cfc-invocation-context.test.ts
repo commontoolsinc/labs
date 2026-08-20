@@ -1,4 +1,7 @@
 import { assertEquals } from "@std/assert";
+
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
+
 import {
   CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
   createHarnessCfcInvocationContext,
@@ -6,7 +9,6 @@ import {
   summarizeCfcInvocationText,
 } from "../src/contracts/cfc-invocation-context.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inputs without raw values", async () => {
   // Spec: specs/cfc/18-runtime-implementation-profiles.md §18.2.4.1

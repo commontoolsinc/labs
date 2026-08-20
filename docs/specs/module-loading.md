@@ -112,8 +112,17 @@ this work and is out of scope.
 ### Compilation
 
 [`Engine.compileToRecordGraph`][c1] receives a `RuntimeProgram` =
-`{ main, files[] }`, where `files` is the entry file plus its resolved import
-closure, and produces a graph of per-module records. It:
+`{ main, files[], mainExport?, sourceRoots?, dataFiles? }`, where `files` is the
+entry file plus its resolved import closure, plus whatever else the source
+package carries. `sourceRoots` names attached entry points that are resolved and
+compiled but never executed, such as tests. `dataFiles` names members of `files`
+that are not code at all: they are split out before the pipeline below runs, so
+nothing prefixes, parses, transforms, or compiles them, and they rejoin only at
+the identity and persistence steps. Their bytes are carried on the resulting
+graph, keyed by stored path, and bound into the runtime-module namespaces this
+load registers, so a module's `dataFile` read is a lookup against the same
+closure its code came from. The result is a graph of per-module records.
+It:
 
 1. Derives a per-load program id and prefixes every file path with it
    ([`pretransformProgramForModules`][c2]). The prefix is a per-load namespace
@@ -528,7 +537,19 @@ identity. Their link sets are different. A source document stores internal
 authored-import links, including links to authored declarations. It omits fabric
 edges so one program's source closure does not absorb another program.
 Synthetic retention links may keep other source roots alive, but they are
-excluded from the identity hash and executable graph traversal. A compiled
+excluded from the identity hash and executable graph traversal. Separately, an
+entry source document stores one identity-only link per member of its source
+package that no import reaches: [`SOURCE_ROOT_SPECIFIER`][c7]
+(`cf:source-root/`) for an attached source entry point such as a test, and
+[`DATA_FILE_SPECIFIER`][c7] (`cf:data-file/`) for an attached data file. Unlike
+a retention link, these participate in the entry module's identity, so changing
+the package changes the revision. Neither resolves a module record. A data
+document is hashed as a leaf over its own bytes and filename rather than through
+a parse of its contents, which is what lets a data file hold bytes that are not
+TypeScript. Both namespaces are reserved against authored imports. The compiled
+set carries the same data documents under `kind: "data"`, with the authored
+bytes as their `code`, so a warm load has everything the pattern needs without
+reading the source set. A compiled
 document stores runtime edges only between emitted modules. It includes fabric
 edges needed by the self-contained compiled closure. The entry compiled
 document also uses synthetic [`ROOT_LINK_SPECIFIER`][c14] (`cf:cache-root/`)

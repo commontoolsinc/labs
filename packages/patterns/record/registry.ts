@@ -274,7 +274,7 @@ export function getDefinition(
 // Used for import/restore functionality
 export function createSubPiece(
   type: string,
-  initialValues?: Record<string, unknown>,
+  initialValues?: { label?: string; [key: string]: unknown },
 ): unknown {
   const def = getDefinition(type);
   if (!def) {

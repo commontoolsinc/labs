@@ -650,6 +650,18 @@ and a per-origin sequence number. The id orders events within a lane,
 carries speculation lineage, derives receipt ids (§7.6), and names the
 event in telemetry.
 
+An external ingress id never enters the queue raw. The send surface binds
+the caller's `{id, session}` pair to the resolved stream link with a
+type-tagged content hash (`scopeCallerEventId`,
+`packages/runner/src/scheduler/event-identity.ts`), and the scoped result is
+the durable delivery id. The session is required — a send naming an id
+without one is refused — because the id is the caller's own word and only
+the pair names one invocation: the same pair on the same stream is the same
+invocation (a retry deduplicates on the receipt, §7.6), while that id under
+another session, or on another stream, is a different one. The receipt
+address a caller can be handed is therefore a function of the pair, which is
+what makes it safe to publish before the outcome exists.
+
 Per pass, for each lane's head event:
 
 1. **Preflight.** Compute the handler's read closure in a read-only,
@@ -716,6 +728,20 @@ Implemented behavior:
   their handler's piece must load asynchronously. The event and any
   handler-result pieces are recorded under the sending transaction's
   speculation lineage.
+- The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
+  collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
+  last-wins into the last pending same-origin entry, so a same-origin flood
+  cannot grow an unbounded post-block event count. Events carrying a
+  **caller-supplied durable id** are excluded from that merge in both
+  directions, because the receipt address derives from the id: at the cap
+  such a send coalesces onto an already-queued entry with the same delivery
+  id (the same invocation — first payload wins, matching the receipt
+  arbitration), and is otherwise refused before dispatch, settling its
+  commit callback errored with nothing executed and no receipt created, so
+  the same pair is safe to send again. A minted-id send with no safe
+  survivor — the pending entries carry other origins, or durable ids — still
+  enqueues past the cap; whether such an event should instead be refused is
+  an open scheduler-policy question, not something this section decides.
 - A failed origin cancels every undispatched descendant through one terminal
   drop path, settles its internal commit callback exactly once, and stops
   locally started descendant pieces. Same-space descendants additionally carry
@@ -853,7 +879,13 @@ write inlines it, so the receipt holds that value rather than a link to it, and
 the description is taken after the same inlining. None of this constrains a
 later write: the create-only mark means the value the schema describes is the
 only value that document ever holds. A verb's *declared* result type is a
-separate question, settled at the type layer and never reaching the runtime.
+separate question: lowered onto `module.resultSchema`, it reaches the runtime —
+a launched result pattern carries it as its result schema, which `setupInternal`
+records as that receipt's stored schema, and the CLI serves it from the
+compiled graph (`cf piece verbs`, `cf call <verb> --help`). What it never
+enters is the pattern's own durable schema — the shape the update gate compares
+across versions — and whichever source a receipt's stored schema came from, it
+describes one handling and constrains nothing written later.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -950,10 +982,18 @@ work order is archived with the migration records.
 - Exhaustion (iterations or budget): remaining runnable nodes keep
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
-  scheduled; `scheduler.non-settling` telemetry and one author-facing warning
-  fire per episode. The warning names the deferred actions, points to
-  `commonfabric.detectNonIdempotent()`, and does not turn the bounded retry into
-  an action error.
+  scheduled; a `scheduler.non-settling` telemetry marker fires for every such
+  episode, carrying the busy-window summary along with `deferredActions` (the
+  labels of the actions the pass held back, first ten) and
+  `deferredActionCount`, observable through `runtime.telemetry`. A marker says
+  a pass exhausted its budget, which a wave that needs several passes to
+  converge also does; it is not on its own a report that the graph will never
+  converge. The author-facing warning naming those actions and pointing to
+  `commonfabric.detectNonIdempotent()` is emitted at most once per run of
+  settle passes — the latch lives on the settling tracker, which a new
+  continuation replaces, and is the same boundary `scheduler.isNonSettling()`
+  reports — so a permanently non-converging graph does not flood the log.
+  Neither signal turns the bounded retry into an action error.
 
 No node is force-run or force-cleaned. A non-converging subgraph degrades to
 rate-limited convergence attempts while the rest of the system stays
@@ -997,10 +1037,15 @@ skipped by `collectWorkSet`, and nothing downstream of them runs early
 
 At pass end, if no work is runnable now but some `invalid ∧ live` node (or
 parked head event) has a future `eligibleAt`, set a single timer for the
-minimum. `idle()` resolves when: no run in flight, no background piece-start
-task, no tick queued, no runnable work now, and no parked event — i.e.
+minimum. `idle()` resolves when: no run in flight, no tracked background task,
+no tick queued, no runnable work now, and no parked event — i.e.
 exactly v1's contract with the special cases collapsed into the gate
-primitive. Dormant invalid computations (not live) never hold `idle()` open,
+primitive. A background task is work the runtime has undertaken off the graph
+and whose result the graph is waiting on: a piece being started so a queued
+event can be delivered, or a system pattern being fetched so a surface a
+builtin has already emitted can be filled in. Work the graph does not depend
+on — an LLM call, a pattern's outbound fetch — is not tracked here; the
+barrier for that is `runtime.settled()`. Dormant invalid computations (not live) never hold `idle()` open,
 and a shared timer belonging only to dormant work does not delay current idle
 waiters.
 
@@ -1455,7 +1500,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
     tx — value produced, but no commit, no separate `run()`, no counted run** — so
     those sites report literal 0 in `actionStats` while still computing. v2 deleted
-    that whole run-to-observe path in favour of the transformer's *declared* reads
+    that whole run-to-observe path in favor of the transformer's *declared* reads
     annotation + pure P3 demand-gating. With no collect pass there is no
     inline-fold: when the live apex render propagates `liveRefs` up to the
     computeds it reads, each becomes live → demanded → **run in its own transaction
@@ -1469,7 +1514,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     does not produce discretely. Coarsening it back inline — the only lever for the
     +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
     provenance, and rehydration. So the 2.2× is the genuine price of v2 making
-    every reactive value a persisted, independently-incremental, CFC-labelled,
+    every reactive value a persisted, independently-incremental, CFC-labeled,
     rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
 
     *Levers ruled out — do not re-try without new evidence.* The surplus is

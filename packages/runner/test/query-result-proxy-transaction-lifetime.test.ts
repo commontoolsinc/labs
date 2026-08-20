@@ -8,7 +8,7 @@
 //
 // A transaction marked for lazy materialization turns the same call into a view
 // over the state that one transaction sees, fixed at creation. Reading after
-// the transaction finishes throws instead of quietly answering from committed
+// the transaction finishes throws instead of quietly reading from committed
 // state, which is what a materialized read wants: the value it describes is the
 // value that was there when it was taken.
 
@@ -98,14 +98,92 @@ describe("query-result-proxy transaction lifetime", () => {
       expect(() => middle.leaf).toThrow("Transaction is complete");
     });
 
-    it("reads the state its transaction sees, including its own writes", async () => {
+    // An array method and an iterator hand back work that runs after the trap
+    // returned, so the instant has to travel with them rather than with the
+    // property access that produced them.
+    describe("over an array", () => {
+      const seedList = async (cause: string) => {
+        const tx = runtime.edit();
+        const cell = runtime.getCell<number[]>(space, cause, undefined, tx);
+        cell.set([1, 2, 3]);
+        await tx.commit();
+        return cell;
+      };
+
+      const pinnedList = (
+        cell: Cell<number[]>,
+        tx: IExtendedStorageTransaction,
+      ) => {
+        tx.markLazyMaterialize(true);
+        return createQueryResultProxy<number[]>(
+          runtime,
+          tx,
+          cell.getAsNormalizedFullLink(),
+        );
+      };
+
+      it("spreads the elements it was taken over", async () => {
+        const cell = await seedList("list-spread");
+        const readTx = runtime.edit();
+        const view = pinnedList(cell, readTx);
+
+        cell.withTx(readTx).set([1, 2, 3, 4]);
+
+        expect([...view]).toEqual([1, 2, 3]);
+        await readTx.commit();
+      });
+
+      it("runs the caller's callback outside the instant", async () => {
+        // The instant belongs to reading the elements, not to whatever the
+        // caller does with them. A read the callback takes — of another cell,
+        // or of one it just wrote — describes current state, exactly as it
+        // would outside the method.
+        const cell = await seedList("list-callback-scope");
+        const other = runtime.getCell<number>(space, "callback-other");
+        const setup = runtime.edit();
+        other.withTx(setup).set(10);
+        await setup.commit();
+
+        const readTx = runtime.edit();
+        const view = pinnedList(cell, readTx);
+        other.withTx(readTx).set(100);
+
+        expect(view.map(() => other.withTx(readTx).get())).toEqual([
+          100,
+          100,
+          100,
+        ]);
+        await readTx.commit();
+      });
+
+      it("maps over the elements it was taken over", async () => {
+        const cell = await seedList("list-map");
+        const readTx = runtime.edit();
+        const view = pinnedList(cell, readTx);
+
+        cell.withTx(readTx).set([9, 9, 9]);
+
+        expect(view.map((n) => n)).toEqual([1, 2, 3]);
+        await readTx.commit();
+      });
+    });
+
+    it("keeps the state it was taken over when the reader writes", async () => {
       const cell = await seed("lifetime-own-writes");
 
       const readTx = runtime.edit();
       const view = pinnedView(cell, readTx);
 
       cell.withTx(readTx).key("outer").key("middle").key("leaf").set(2);
-      expect(view.outer.middle.leaf).toBe(2);
+      expect(view.outer.middle.leaf).toBe(1);
+      // Taking the read again is how the reader sees what it wrote.
+      expect(
+        createQueryResultProxy<Nested>(
+          runtime,
+          readTx,
+          cell.getAsNormalizedFullLink(),
+        ).outer.middle.leaf,
+      ).toBe(2);
 
       await readTx.commit();
     });
@@ -149,7 +227,7 @@ describe("query-result-proxy transaction lifetime", () => {
       await readTx.commit();
 
       // The transaction it was made against is gone, and the handle still
-      // answers — from current committed state, not from a refusal.
+      // reads — from current committed state, not from a refusal.
       expect(handle.outer.middle.leaf).toBe(1);
 
       const update = runtime.edit();

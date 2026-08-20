@@ -18,7 +18,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
@@ -40,8 +40,9 @@ async function timeCapabilityErrors(rel: string): Promise<string[]> {
   });
   let cancel: (() => void) | undefined;
   try {
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(join(ROOT, rel), ROOT),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: join(ROOT, rel), root: ROOT },
     );
     // A lift-context violation is reported via onError (above) and swallowed; a
     // pattern-body or handler-setup violation instead rejects create(). Capture

@@ -11,10 +11,12 @@
 export interface MockElement {
   tagName: string;
   style: { cssText: string };
+  textContent: string;
   children: MockElement[];
   parentNode: MockElement | null;
   appendChild(child: MockElement): MockElement;
   removeChild(child: MockElement): MockElement;
+  replaceChildren(...replacements: MockElement[]): void;
   // Components assign their own properties, `cell` and `isStatic` among them.
   [key: string]: unknown;
 }
@@ -29,6 +31,7 @@ export function createMockElement(tagName: string): MockElement {
   const element: MockElement = {
     tagName,
     style: { cssText: "" },
+    textContent: "",
     children,
     parentNode: null,
     appendChild(child: MockElement) {
@@ -41,6 +44,11 @@ export function createMockElement(tagName: string): MockElement {
       if (index >= 0) children.splice(index, 1);
       child.parentNode = null;
       return child;
+    },
+    replaceChildren(...replacements: MockElement[]) {
+      for (const child of children) child.parentNode = null;
+      children.length = 0;
+      for (const child of replacements) element.appendChild(child);
     },
   };
   return element;

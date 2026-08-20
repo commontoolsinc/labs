@@ -214,6 +214,16 @@ The
 works through two real instances, and describes how to localize a group-level
 change down to the specific file and line so you know what to write a test for.
 
+Before localizing, check that the group-level change is a measurement at all. A
+group marked `excl` in the job's table under the line "Not gated, because no
+baseline counts the same base-branch code as this run does" is comparing two
+different bodies of code, because the ratchet stepped back to an older baseline
+commit; its `Change` column then reports what the base branch did in between.
+Comparing two runs directly has the same trap in a different form, since a
+pull request's runs measure the merge ref, which GitHub rebuilds whenever the
+base branch moves. Compare only files whose content is identical between the
+two commits, and read the counts per line rather than per group.
+
 ### Diagnostics that fire on wall-clock time
 
 The slow-traverse report in `packages/runner/src/traverse.ts` was one of those
@@ -271,7 +281,7 @@ condition's own count. See
 
 ### Paths reached only when something happens twice
 
-The other common shape is a line that runs only on the second occurrence of
+A second common shape is a line that runs only on the second occurrence of
 something within one process: a cache that is populated the second time it is
 asked, a guard that turns away a duplicate, a retry that only a second failure
 reaches. Whether a suite produces that second occurrence is often decided by
@@ -292,6 +302,76 @@ An assertion that only counts the outcome would pass either way and would leave
 the line's coverage exactly as environment-dependent as it was.
 [The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
 follows one such line from a group-level `+2` down to the guard and the test.
+
+### Rejection paths reached only when two writes race
+
+The third shape is a branch that runs only when one write lands on a base
+another write already changed: a merge that finds the key it removes already
+gone, a precondition only a loser fails, a replay that has to drop a layer. The
+surrounding code runs constantly. What decides whether the branch runs is the
+order frames arrive in, which nothing in an integration suite asserts, so the
+line is covered on some runs and not on others.
+
+Reaching such a line does not take a race, and that is the way out of it. What
+the branch responds to is the value the operation was handed, so a test that
+constructs that value reaches the branch directly. `applyPatch()` is a pure
+function over a value tree: its `missing object key` rejection, which the
+client's pending-layer replay reaches when a `remove` names a key a winning
+writer already dropped, is one call over a base object without the key.
+`packages/memory/test/v2-patch-errors.test.ts` is the worked example, and it
+states one case per rejection the module raises rather than only the line that
+moved — a sibling branch in the same file is the next one to flap.
+[The investigation record](../history/development/coverage-flake-patch-remove-missing-key-2026-08-17.md)
+follows that line from a group-level `+2` down to the two integration hits that
+covered it in one run and not the next.
+
+### Checks the layer below already makes
+
+Not every line that moves deserves a test. Sometimes a line decides nothing:
+every observable consequence is the same whether it is there or not, because
+the code it calls makes the same check on its own. Opening a remote memory
+session had three abort checks, one before connecting, one after connecting,
+and one after mounting. The memory client refuses an aborted signal on entry to
+both the connect and the mount, raising the signal's own reason, which the
+caller's own catch clause converts exactly as its own check would. Only the
+third check decides anything: an abort landing after the mount resolves has
+already shut the client, and without the check the method would hand that dead
+client back.
+
+A test cannot distinguish such a line, which is exactly what makes it a
+problem: any test written for it passes with the line deleted, so it protects
+nothing and satisfies the tool. Delete the line instead, and write the test
+that states what the surviving code does at that point. That test is what makes
+the deletion safe — the check now lives one layer down, and the test fails if
+that layer stops making it.
+
+Reachability is not the test here. Both removed checks were reached in CI, on
+the runs where an abort happened to land in the microtask between one library
+call returning and the next line running. What decides the question is whether
+any input tells the two versions apart.
+
+### A branch only some of the corpus reaches
+
+`packages/ts-transformers` and `packages/schema-generator` move for a reason of
+their own: their unit suites never reach parts of the analyzer and the
+formatters. What reaches them is the pattern integration jobs, compiling
+whatever the pattern corpus happens to contain, on whichever shard the pattern
+landed on. So a branch for a language construct the corpus uses rarely — a
+`Stream<T>` parameter, a numeric literal type node, the bare `object` type —
+is covered when a shard happened to compile the one pattern that spells it,
+and uncovered otherwise. The carrier artifact names a different shard from one
+run to the next for the same line.
+
+These take a unit test, not a pattern. Both packages have `*-flap-coverage`
+test files that build the type or the source they need and call the analyzer or
+the generator directly:
+`packages/ts-transformers/test/policy/capability-analysis-flap-coverage.test.ts`
+and `packages/schema-generator/test/schema-generator-flap-coverage.test.ts`.
+Each case asserts what the branch produces — that a stream argument is
+recorded opaque while a writable argument is recorded read and written, that a
+numeric literal emits a number rather than the string the node carries — so a
+branch that changed what it produced would fail rather than stay green on the
+line count.
 
 ### What the check says when the regression is not the pull request's
 
@@ -323,12 +403,52 @@ ancestor of it that has one (see "Which `main` run the ratchet compares
 against"). Debt in unchanged groups is still reported, but does not block the
 PR.
 
-Accept one metric's increase with the narrow per-metric marker in the PR
-description:
+Accept one group's increase with the narrow per-group marker in the PR
+description, on a line of its own and flush against the left margin:
 
 ```text
-ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
 ```
+
+The marker names the source group — `workspace`, a top-level directory such as
+`tasks`, or a package as `packages/runner` — rather than the metric that group's
+lines are counted in. Only `packages` splits into a second level, because that is
+where the collection stops rolling a file up; `tasks/foo` names no group.
+
+A name can have the shape of a group and still name none — a package that is not
+there, or a misspelling of one that is. Nothing would ever consult such a line,
+so rather than let it pass for an acceptance that had no effect, the check fails
+the job and lists the groups the run did measure.
+
+The number is how far above the baseline the group may rise, not the total it
+may reach. The gate passes the group when its uncovered-line count is at most
+the baseline plus that number, so a run whose baseline is 5746 accepts 5758 and
+fails at 5759. A group with no baseline yet is held to zero, and the whole of
+the accepted rise is available to it.
+
+Stating the rise is what makes the marker survive a rebase. The baseline the
+ratchet compares against is the `main` run for whatever base-branch commit the
+pull request is merged with, so it moves whenever the pull request is rebased. A
+total written for one baseline says something different against the next one:
+too generous when the base branch covered lines in the meantime, and short by the
+difference when it uncovered some, which fails the pull request for debt it did
+not add. A rise says the same thing against every baseline, so the marker keeps
+accepting exactly the debt its author accepted and no more.
+
+The check prints the line to paste, with the rise it measured already filled in,
+under `---BEGIN COPY-PASTE---` at the end of the Coverage Check job's log. A line
+that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
+job and says what form to write instead, rather than being passed over as though
+it were not there.
+
+The left margin is what tells an acceptance from a mention of one. A description
+can name the marker in a sentence, and can indent an example of it into a code
+block, without either being read as accepting anything — or as a malformed
+attempt at it. Indent the line to show the form, and write it flush to use it. A
+pull request description often starts life as a commit message body, so a line
+indented there arrives indented, and stays an example. The check names each
+indented marker it passed over in its log, so an author who indented one meaning
+it as an acceptance can see why the gate carried on without it.
 
 Use the broad reset marker only to bootstrap coverage data for the first time,
 or when the `main` baseline is known to be bogus and should be re-seeded for one
@@ -375,6 +495,31 @@ script separately checks the expected artifact names
 (`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an artifact containing no
 coverage files. A manual run without the environment variable uses the GitHub API
 download path instead.
+
+### Measuring a before/after locally
+
+The gate reports a group total rather than a per-line diff, so localizing a rise
+means measuring the same group twice: once with the branch's tree, once with the
+tree it will merge onto. Set `DENO_COVERAGE_DIR` for each run and convert with
+`tasks/write-coverage-lcov.ts`, exactly as the CI jobs do, then compare the two
+LCOV reports' zero-hit lines across the files the branch changed.
+
+Take both measurements from the same base. Rebasing between them straddles two
+trees and the delta stops meaning anything, so rebase first and measure after.
+
+A local total will not match CI's. CI sums a group over every job that loads its
+files and one local suite loads a subset, so the absolute numbers differ. The
+offset is constant between two runs of the same suite, which is what leaves the
+delta comparable when the totals are not.
+
+The baseline half checks the merge base out over the packages being measured, so
+for the length of that run the worktree holds the base's code rather than the
+branch's. A tree sampled during it reads as though the branch had been reverted.
+It has not been: the branch's work is in its commits, and anything uncommitted is
+in the stash the measurement pushed. `git stash list` and
+`git grep <symbol> <branch-sha> -- <paths>` settle that from outside the run,
+without waiting for it to finish. Restore with `git checkout HEAD -- <paths>`
+followed by `git stash pop`.
 
 ## Compile cache state and cold runs
 
@@ -473,7 +618,7 @@ The merged file carries line coverage only. LCOV identifies a function by its
 name, and `deno coverage --lcov` can emit several functions with the same name
 in one file (a free function and a method, for example), so function and branch
 records cannot be merged back together reliably from the fragments alone. Line
-coverage is what an IDE uses to colour the gutter, which is what this file is
+coverage is what an IDE uses to color the gutter, which is what this file is
 for.
 
 To download the report for a given commit:

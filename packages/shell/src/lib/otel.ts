@@ -1,14 +1,20 @@
-// Browser-side OpenTelemetry setup for the shell (Phase 3).
-//
-// This is GATED and LAZY: nothing OpenTelemetry-related is imported at module
-// load. `initBrowserOtel` only pulls in the web SDK via dynamic `import(...)`
-// when `localStorage["telemetryEnabled"] === "true"`, mirroring the server's
-// lazy-import pattern in packages/background-piece-service/src/otel.ts. With
-// telemetry disabled the default bundle is untouched and there is zero added
-// network/CPU.
-//
-// Only type-only imports appear at the top; they are erased at build time and
-// never pull the OTel packages into the default bundle.
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the OpenTelemetry
+// web SDK enters the shell's bundle only along this path, which runs when the
+// operator has switched telemetry on.
+/**
+ * Browser-side OpenTelemetry setup for the shell (Phase 3).
+ *
+ * This is GATED and LAZY: nothing OpenTelemetry-related is imported at module
+ * load. `initBrowserOtel` only pulls in the web SDK via dynamic `import(...)`
+ * when `localStorage["telemetryEnabled"] === "true"`, mirroring the server's
+ * lazy-import pattern in packages/background-piece-service/src/otel.ts. With
+ * telemetry disabled the default bundle is untouched and there is zero added
+ * network/CPU.
+ *
+ * Only type-only imports appear at the top; they are erased at build time and
+ * never pull the OTel packages into the default bundle.
+ */
+
 import type { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 
 // localStorage key that gates telemetry — the same flag the debugger controller

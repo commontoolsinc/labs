@@ -1,23 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
-  EmulatedStorageManager,
-  StorageManager,
-} from "../src/storage/cache.deno.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { isPermanentRejection } from "../src/storage/rejection.ts";
-import { Runtime } from "../src/runtime.ts";
+  resetCommitPreconditionsConfig,
+  setCommitPreconditionsConfig,
+} from "@commonfabric/memory/v2";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { preparedDigestFor } from "../src/cfc/canonical.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
-import {
-  buildCfcPolicySnapshot,
-  type ExchangeRule,
-} from "../src/cfc/policy.ts";
 import {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
@@ -29,10 +26,20 @@ import {
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import {
+  buildCfcPolicySnapshot,
+  type ExchangeRule,
+} from "../src/cfc/policy.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { Runtime } from "../src/runtime.ts";
+import {
+  EmulatedStorageManager,
+  StorageManager,
+} from "../src/storage/cache.deno.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { isPermanentRejection } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-single-use-grants");
 
@@ -752,14 +759,12 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
-    it("fails closed when the storage cannot enforce create-only (no markCreateOnly)", async () => {
+    it("fails closed when the storage cannot enforce create-only (no markCreateOnly)", () => {
       // A hand-built transaction without markCreateOnly (the optional
       // interface member): the claim's exactly-once witness cannot be
       // enforced, so staging must fail closed with a reason — never a
       // silently unguarded receipt write. The ambient flag is forced on so
       // the resolver reaches the claim path at all.
-      const { setCommitPreconditionsConfig, resetCommitPreconditionsConfig } =
-        await import("@commonfabric/memory/v2");
       setCommitPreconditionsConfig(true);
       try {
         const writes: unknown[] = [];
@@ -1298,8 +1303,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
-    it("present vs absent receipt state digests differently (pure)", async () => {
-      const { preparedDigestFor } = await import("../src/cfc/canonical.ts");
+    it("present vs absent receipt state digests differently (pure)", () => {
       const base = {
         consumedReads: [],
         attemptedWrites: [],

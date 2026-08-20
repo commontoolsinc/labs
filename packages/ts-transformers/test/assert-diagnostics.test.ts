@@ -68,6 +68,18 @@ Deno.test("assert records the operands of a comparison", async () => {
   assertEquals(recordSource(root), "a.get() + b.get() <= c.get()");
 });
 
+Deno.test("assert records through a parenthesized callback", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert((() => a.get() + b.get() <= c.get()));
+  return { check };`));
+
+  assertEquals(assertCaptures(root), [
+    { src: "a.get() + b.get()", value: "a.get() + b.get()" },
+    { src: "c.get()", value: "c.get()" },
+  ]);
+  assertEquals(recordSource(root), "a.get() + b.get() <= c.get()");
+});
+
 Deno.test("assert records the arguments of a call", async () => {
   const root = await transformed(patternSource(`
   const check = assert(() => Object.is(a.get(), b.get()));
@@ -150,7 +162,8 @@ Deno.test("assert lowers to a lift carrying a concrete record schema", async () 
   return { check };`));
 
   // The record has to reach the harness intact. An inferred `unknown` here
-  // would give the field `{ type: "unknown" }`, which reads back as undefined.
+  // would give the field `{ type: "unknown" }`, which reads back as a
+  // reference carrying none of the record's fields.
   const [, result] = callSchemas(root, "lift");
   assertEquals(result?.type, "object");
   const properties = result?.properties as Record<string, { type?: string }>;

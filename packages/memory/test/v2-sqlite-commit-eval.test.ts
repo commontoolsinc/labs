@@ -8,8 +8,16 @@
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+
 import { Database } from "@db/sqlite";
+
+import type { Operation, SqliteDbRef, SqliteParamsWire } from "../v2.ts";
 import { applyCommit, open, read } from "../v2/engine.ts";
+import {
+  applySqliteCommitWrite,
+  MAX_ROW_LABEL_EVAL_ROWS,
+  RowLabelCommitError,
+} from "../v2/sqlite/commit-eval.ts";
 import {
   aliasForDbId,
   attachDatabase,
@@ -17,8 +25,7 @@ import {
   ensureTables,
   runQuery,
 } from "../v2/sqlite/exec.ts";
-import { table } from "../v2/sqlite/schema.ts";
-import type { SqliteDbRef, SqliteParamsWire } from "../v2.ts";
+import * as sqliteBarrel from "../v2/sqlite/mod.ts";
 import {
   all,
   authoredBy,
@@ -27,13 +34,7 @@ import {
   principal,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
-import {
-  applySqliteCommitWrite,
-  MAX_ROW_LABEL_EVAL_ROWS,
-  RowLabelCommitError,
-} from "../v2/sqlite/commit-eval.ts";
-import * as sqliteBarrel from "../v2/sqlite/mod.ts";
-import type { Operation } from "../v2.ts";
+import { table } from "../v2/sqlite/schema.ts";
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
 

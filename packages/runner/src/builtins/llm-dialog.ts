@@ -1,17 +1,33 @@
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import type { CfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model/schema-utils";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMRequest,
   LLMToolCall,
 } from "@commonfabric/llm";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+} from "@commonfabric/utils/types";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
@@ -20,41 +36,9 @@ import type {
   BuiltInLLMToolCallPart,
   JSONSchema,
 } from "commonfabric";
-import type { Schema } from "@commonfabric/api/schema";
-import {
-  isNontrivialSchema,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import {
-  LLMDialogResultSchema,
-  LLMMessageSchema,
-  LLMParamsSchema,
-  LLMToolSchema,
-} from "./llm-schemas.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isBoolean,
-  isObjectNotArray,
-  isObjectOrArray,
-} from "@commonfabric/utils/types";
-import type { JSONSchemaObj } from "../builder/types.ts";
-import {
-  ARRAY_SUBSCHEMA_KEYS,
-  mapSubschemas,
-  RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
-} from "../schema-walk.ts";
 
-// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
-// Recorded as the schema write-policy input for each model-produced message's
-// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
-// exactly that message — see `pushModelMessages`.
-const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
-  ...LLMMessageSchema,
-  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
-} as JSONSchema);
+import type { JSONSchemaObj } from "../builder/types.ts";
+import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import {
   isCell,
@@ -62,45 +46,12 @@ import {
   markRuntimeInjectedEventKeys,
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
-import { resolveLinkScope } from "../scope.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
-import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
-import { getEntityId } from "../create-ref.ts";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { entityUriSchemePrefix } from "../entity-kind.ts";
-import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
-import { Runtime } from "../runtime.ts";
-import { spaceCellSchema } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
-import { schemaToTypeString } from "../schema-format.ts";
-import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import {
-  createLLMFriendlyLink,
-  getMetaLink,
-  matchLLMFriendlyLink,
-  type NormalizedFullLink,
-  parseLink,
-  parseLLMFriendlyLink,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
-import {
-  CFC_ENFORCING_STRICTNESS,
-  cfcEnforcementStrictness,
-} from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,
@@ -111,15 +62,64 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
-import { createTrustResolver } from "../cfc/trust.ts";
-import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
+import { createTrustResolver } from "../cfc/trust.ts";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "../cfc/types.ts";
+import { getEntityId } from "../create-ref.ts";
+import { entityUriSchemePrefix } from "../entity-kind.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import {
+  createLLMFriendlyLink,
+  getMetaLink,
+  matchLLMFriendlyLink,
+  type NormalizedFullLink,
+  parseLink,
+  parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
 import type { RawBuiltinResult } from "../module.ts";
+import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { Runtime, spaceCellSchema } from "../runtime.ts";
+import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
+import { schemaToTypeString } from "../schema-format.ts";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  mapSubschemas,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+} from "../schema-walk.ts";
+import { resolveLinkScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
+import {
+  LLMDialogResultSchema,
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./llm-schemas.ts";
+import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { scopedCell } from "./scope-policy.ts";
+
+// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
+// Recorded as the schema write-policy input for each model-produced message's
+// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
+// exactly that message — see `pushModelMessages`.
+const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
+  ...LLMMessageSchema,
+  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+} as JSONSchema);
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 

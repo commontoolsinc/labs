@@ -33,6 +33,7 @@
  * types as plain `boolean` — syntax is the only honest signal. Conservative
  * and documented beats clever and silent.
  */
+
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
@@ -102,9 +103,9 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
 
 /**
  * The verb body: the call's single function-shaped argument. Every authored
- * form — `action(cb)`, `handler(cb)`, `handler(cb, { proxy: true })`,
- * `handler(eventSchema, stateSchema, cb)` — carries exactly one; anything
- * else is a shape this validator does not judge.
+ * form — `action(cb)`, `handler(cb)`, `handler(eventSchema, stateSchema, cb)`
+ * — carries exactly one; anything else is a shape this validator does not
+ * judge.
  */
 function verbCallback(
   call: ts.CallExpression,

@@ -27,7 +27,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // Guarded in `supportsType` by the `FabricSpecialObject` brand so an
   // unrelated user type sharing a name keeps its structural schema.
   FabricBytes: { type: "FabricBytes" },
-  FabricEpochDays: { type: "FabricEpochDays" },
+  FabricEpochDay: { type: "FabricEpochDay" },
   FabricEpochNsec: { type: "FabricEpochNsec" },
   FabricHash: { type: "FabricHash" },
   FabricRegExp: { type: "FabricRegExp" },

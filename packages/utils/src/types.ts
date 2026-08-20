@@ -233,7 +233,7 @@ export function isPlainObject(
  * user-defined classes, ...) deliberately do not qualify.
  *
  * This is a structural predicate, so it narrows in one direction only, and is
- * overloaded accordingly; see the module header. Unlike its neighbours it
+ * overloaded accordingly; see the module header. Unlike its neighbors it
  * narrows to a *mutable* pair of types, because its callers are the ones that
  * go on to write through the result.
  *
@@ -282,13 +282,30 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
 /** Standard type meaning constructor function, a/k/a "class object." */
 export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
+// TODO(danfuzz): The wire formats accept a plain object with any keys, that
+// being the rule a cross-language format has to hold to. This implementation
+// refuses these names instead. Closing that gap means carrying such records
+// rather than refusing them, and code that does will read this list too, to
+// know which names need the care. `unsafeObjectKeyIn()` below states what
+// makes each name awkward.
+//
+// `then` is deliberately absent, and belongs here less than it looks. A
+// callable `then` is adopted by promise resolution, and a layer that answers a
+// property with a function can make a data key callable -- which is why the
+// value proxies in `runner` guard the name. But JSON Schema uses `if` / `then`
+// / `else`, and this system's schemas are themselves fabric values, so
+// reserving the name would stop an ordinary schema being one. The hazard is
+// real and is handled where a property becomes callable, not here.
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 
 /**
- * Indicates whether `key` must never be copied onto an object from untrusted
- * input, because assigning it can pollute the prototype chain. Use at
- * boundaries where external data enters the system (deserialization,
- * structural copying).
+ * Indicates whether `key` is one this implementation refuses to copy onto an
+ * object from untrusted input. Use at boundaries where external data enters
+ * the system (deserialization, structural copying).
+ *
+ * The reservation belongs to this implementation and not to the data model:
+ * see {@link unsafeObjectKeyIn} for which names are refused, why each one is,
+ * and what would let it be accepted.
  */
 export function isUnsafeObjectKey(key: string): boolean {
   return UNSAFE_OBJECT_KEYS.has(key);
@@ -300,8 +317,8 @@ export function isUnsafeObjectKey(key: string): boolean {
  * This asks about this implementation, not about the data model. A property
  * name is data like any other, and an implementation on a host that does not
  * route property assignment through a prototype chain -- which is most of them
- * -- would reserve no names at all. The two here are refused for two different
- * local reasons, and neither is a limit of the language:
+ * -- would reserve no names at all. Each name here is refused for its own
+ * local reason, and neither is a limit of the language:
  *
  * * `__proto__` cannot be rebuilt by the copying this system actually does.
  *   Records are reconstructed by assignment (`target[key] = value`) and
@@ -316,12 +333,15 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
  *
- * Both are therefore removable, by rebuilding the copy loops on a faithful
- * mechanism and revisiting the boundaries that filter these names. Until then
- * the reservation is what keeps a record from being corrupted in transit.
+ * Refusing them is what this implementation does today. The format asks that
+ * such records be carried instead, which is work this implementation has to
+ * grow, and which will read this list too, to know which names need the care.
+ * Until then, refusal is what keeps a record from being corrupted in transit
+ * or quietly consumed after it.
  *
- * The check is two `Object.hasOwn()` calls rather than a key walk, so it costs
- * nothing per property and can sit on a hot validation path.
+ * The check is one `Object.hasOwn()` call per reserved name rather than a walk
+ * over the object's own keys, so it costs nothing per property and can sit on
+ * a hot validation path.
  *
  * @param value The object to check.
  * @returns The offending property name, or `undefined` if there is none.

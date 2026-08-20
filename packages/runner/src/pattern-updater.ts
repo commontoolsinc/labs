@@ -1,7 +1,14 @@
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+
+import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  normalizePatternSource,
+  resolveSystemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
 import {
   applyPieceSourceTransition,
   getPatternIdentityRef,
@@ -14,19 +21,13 @@ import {
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
 } from "./runner.ts";
-import type { Pattern } from "./builder/types.ts";
+import type { Runtime } from "./runtime.ts";
 import {
   parseFabricRef,
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
-import {
-  normalizePatternSource,
-  resolveSystemPatternSource,
-  systemPatternSourceForModuleName,
-} from "./pattern-source-scheme.ts";
-import type { Runtime } from "./runtime.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   isConflictRejection,
   isStorageTransactionInconsistent,

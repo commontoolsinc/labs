@@ -19,7 +19,7 @@ import type {
   Cell,
   ComparableCell,
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -187,7 +187,7 @@ type SchemaCore<
   : T extends { type: "boolean" } ? boolean
   : T extends { type: "null" } ? null
   : T extends { type: "FabricBytes" } ? FabricBytes
-  : T extends { type: "FabricEpochDays" } ? FabricEpochDays
+  : T extends { type: "FabricEpochDay" } ? FabricEpochDay
   : T extends { type: "FabricEpochNsec" } ? FabricEpochNsec
   : T extends { type: "FabricHash" } ? FabricHash
   : T extends { type: "FabricRegExp" } ? FabricRegExp
@@ -279,7 +279,7 @@ type SchemaInner<
  * - $ref resolution (both "#" and "#/path/to/def")
  * - anyOf unions
  * - Primitive types (string, number, boolean, null)
- * - Fabric-primitive types ("FabricBytes", "FabricEpochDays",
+ * - Fabric-primitive types ("FabricBytes", "FabricEpochDay",
  *   "FabricEpochNsec", "FabricHash", "FabricRegExp"), each inferring the
  *   corresponding `FabricPrimitive` interface from this package
  * - Arrays with typed items

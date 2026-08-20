@@ -6,6 +6,7 @@
  * the guards are exercised by invoking the private method directly with the
  * edge input and asserting the method declines gracefully.
  */
+
 import { assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";

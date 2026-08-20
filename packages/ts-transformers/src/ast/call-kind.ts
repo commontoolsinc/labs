@@ -29,12 +29,15 @@
  * syntax family but require separate ownership classification; consumers
  * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
+
 import ts from "typescript";
 
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
+import { unwrapExpression } from "../utils/expression.ts";
+import { getCallArgumentPosition } from "./call-arguments.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   builderNameForExportName,
@@ -49,6 +52,7 @@ import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts"
 import {
   getTypeAtLocationWithFallback,
   getVariableInitializer,
+  isSyntheticNode,
 } from "./utils.ts";
 import { isCollectionType } from "./type-inference.ts";
 
@@ -468,7 +472,7 @@ export function getCapabilitySummaryCallbackArgument(
  * if `call` doesn't have the lift-applied shape (no inner call expression).
  *
  * Uses `stripWrappers` so a parenthesized or as-cast callee is still
- * recognised, matching how `getLiftAppliedInputAndCallback` reads the same
+ * recognized, matching how `getLiftAppliedInputAndCallback` reads the same
  * shape. Use this in preference to bare `ts.isCallExpression(call.expression)`
  * at all sites that need the inner call — TS rarely emits parens around
  * synthesized calls today, but routing through one helper makes any future
@@ -491,7 +495,7 @@ export function getLiftAppliedInnerCall(
  * handler-applied call continues to classify as `{ kind: "builder",
  * builderName: "handler" }` so handler-specific dispatchers (stream causes in
  * ReactiveVariableFor, capture-schema injection, write-authorization, etc.) are
- * unaffected. This predicate exists solely so the hoisting stage can recognise
+ * unaffected. This predicate exists solely so the hoisting stage can recognize
  * the unit to relocate without minting a new kind or widening the lift-applied
  * gate.
  *
@@ -659,7 +663,15 @@ function isCallbackFunctionExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function resolveCallbackFunctionExpression(
+/**
+ * The function-like expression `expression` resolves to, following wrapper
+ * strips, the hardening helper, and — unlike schema-injection's local
+ * direct-only resolver — an identifier to its variable initializer through
+ * the checker. The resolver a caller wants when "is this argument the
+ * callback?" must answer the same for `handler(es, ss, cb)` and
+ * `handler(es, ss, myCb)`.
+ */
+export function resolveCallbackFunctionExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen = new Set<ts.Node>(),
@@ -748,9 +760,21 @@ export function getLoweredArrayMethodName(
   return `${family}WithPattern`;
 }
 
+/**
+ * The `options` reach the receiver's provenance walk. Passing
+ * `syntheticReactiveCollectionRegistry` is how a stage that runs after the
+ * closure stage sees the collections that stage created rather than derived —
+ * a local whose initializer is site-lifted has no structural provenance to
+ * walk, so without the registry its ownership reads "plain" and the caller
+ * re-lowers a call the closure stage already rewrote. Callers that must NOT
+ * see those registrations — standalone-function validation, where the eager
+ * `<cell>.get().filter(...)` idiom is the supported spelling — stay on the
+ * bare form deliberately.
+ */
 export function classifyArrayMethodCallSite(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  options: ReactiveCollectionProvenanceOptions = {},
 ): ArrayMethodCallSiteInfo | undefined {
   const access = classifyArrayMethodCall(call);
   if (!access) {
@@ -770,6 +794,7 @@ export function classifyArrayMethodCallSite(
     ownership: hasReactiveCollectionProvenance(
         target.expression,
         checker,
+        options,
       )
       ? "reactive"
       : "plain",
@@ -810,6 +835,75 @@ export function classifyArrayCallbackContainerCall(
   return (returnType.flags & ts.TypeFlags.Void) === 0
     ? "plain-array-value"
     : "plain-array-void";
+}
+
+/**
+ * Array methods that merely collect what the callback returns. `map` stores
+ * each result in the output array without reading it, so a result that is a
+ * reactive cell stays a reactive cell.
+ *
+ * The other callback-taking Array methods interpret the result while they run:
+ * `filter`, `find`, `some`, and `every` read it as a boolean, `sort` reads it
+ * as a number, `flatMap` asks whether it is an array, and `reduce` feeds it
+ * back as the next accumulator. A cell reaching any of those is an object, so
+ * the method's own semantics change.
+ */
+const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
+
+/**
+ * True when `callback` is the callback of an ordinary eager Array method that
+ * collects results rather than interpreting them — the one shape whose body may
+ * carry pattern-owned wrapper sites, because a lifted callback-local can be
+ * returned from it without changing what the method does.
+ *
+ * Three things must hold, and each rules out a shape that would otherwise slip
+ * through method-name matching alone: the callback is argument zero, so a
+ * comparator or an `initialValue` in another position does not qualify; the
+ * resolved owner symbol includes the configured default-library
+ * `Array`/`ReadonlyArray` declaration, so a same-named source or ambient type
+ * and a `map` of some other type do not qualify; and the receiver is a plain
+ * array that no reactive lowering owns, so the reactive collection operators
+ * keep their own structural treatment.
+ */
+export function isCollectingPlainArrayMethodCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  const position = getCallArgumentPosition(callback);
+  if (!position || position.index !== 0) {
+    return false;
+  }
+
+  const call = position.call;
+  const callSite = classifyArrayMethodCallSite(call, checker);
+  if (!callSite || callSite.ownership !== "plain" || callSite.lowered) {
+    return false;
+  }
+
+  const declaration = checker.getResolvedSignature(call)?.declaration;
+  if (!declaration) {
+    return false;
+  }
+
+  const owner = findOwnerDeclaration(declaration);
+  if (!owner?.name || !ARRAY_OWNER_NAMES.has(owner.name.text)) {
+    return false;
+  }
+
+  const ownerSymbol = checker.getSymbolAtLocation(owner.name);
+  if (
+    !ownerSymbol ||
+    !(ownerSymbol.declarations ?? []).some((candidate) =>
+      isSourceFileDefaultLibrary(candidate.getSourceFile())
+    )
+  ) {
+    return false;
+  }
+
+  const { name } = declaration as { readonly name?: ts.Node };
+  return !!name && ts.isIdentifier(name) &&
+    COLLECTING_ARRAY_METHOD_NAMES.has(name.text);
 }
 
 export function classifyArrayMethodResultSinkCall(
@@ -1365,8 +1459,26 @@ function resolveExpressionKind(
     const name = target.name.text;
     if (isKnownArrayMethodName(name)) {
       // Fallback path: when symbol resolution doesn't already identify the
-      // array-method family, only treat it as such for reactive receivers.
-      if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
+      // array-method family. A synthetic, symbol-less `*WithPattern`
+      // spelling needs no receiver check: the closure stage emits these
+      // calls against receivers whose static type is still the plain array
+      // type, so the method never resolves to a symbol and provenance walks
+      // see a plain binding — the emitted spelling itself testifies to the
+      // provenance the rewritten tree can no longer show structurally. The
+      // synthetic-node requirement is what scopes that testimony to calls
+      // the transformer actually produced: an AUTHORED `*WithPattern`
+      // spelling keeps its author's semantics whether its method resolves
+      // (their own declaration) or not (an untyped receiver). Authored
+      // spellings of every family stay gated on reactive receivers — a
+      // `.map`-named call whose symbol did not resolve is otherwise not
+      // evidence of the family.
+      if (
+        (
+          !symbol && isSyntheticNode(target) &&
+          getArrayMethodAccessKindByName(name)?.lowered
+        ) ||
+        isReactiveArrayMethodReceiverExpression(target.expression, checker)
+      ) {
         const result = { kind: "array-method" } as const;
         cache.set(expression, result);
         return result;
@@ -1423,26 +1535,22 @@ function isMultiApplicationChain(outerCall: ts.CallExpression): boolean {
   return ts.isCallExpression(innerCalleeCallee);
 }
 
+/**
+ * Peels the non-semantic wrappers that can stand between a call site and the
+ * expression it is really about — parentheses, `as T`, `<T>x`, `satisfies T`,
+ * and `!`. Classification asks what an expression *is*, and none of these
+ * change that, so all of them come off before any node-kind test runs.
+ *
+ * Delegates to the shared {@link unwrapExpression} so the wrapper list has a
+ * single definition and a wrapper spelling cannot be handled in one resolver
+ * and missed in another. It takes that helper's full wrapper set, including
+ * PartiallyEmittedExpression: the pipeline runs over authored source through
+ * `ts.transform`, never as part of TypeScript's emit, so a partially emitted
+ * node cannot reach classification and there is nothing here for a narrower
+ * set to protect.
+ */
 function stripWrappers(expression: ts.Expression): ts.Expression {
-  let current: ts.Expression = expression;
-
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    break;
-  }
-
-  return current;
+  return unwrapExpression(expression);
 }
 
 function stripInitializerAccess(expression: ts.Expression): ts.Expression {
@@ -2199,7 +2307,14 @@ function isMethodDeclarationOwnedBy(
   return !!owner && ownerNames.has(owner);
 }
 
-function findOwnerName(node: ts.Node): string | undefined {
+/** Finds the nearest named type declaration containing `node`. */
+function findOwnerDeclaration(
+  node: ts.Node,
+):
+  | ts.InterfaceDeclaration
+  | ts.ClassDeclaration
+  | ts.TypeAliasDeclaration
+  | undefined {
   let current: ts.Node | undefined = node.parent;
   while (current) {
     if (
@@ -2207,12 +2322,16 @@ function findOwnerName(node: ts.Node): string | undefined {
       ts.isClassDeclaration(current) ||
       ts.isTypeAliasDeclaration(current)
     ) {
-      if (current.name) return current.name.text;
+      return current;
     }
     if (ts.isSourceFile(current)) break;
     current = current.parent;
   }
   return undefined;
+}
+
+function findOwnerName(node: ts.Node): string | undefined {
+  return findOwnerDeclaration(node)?.name?.text;
 }
 
 function hasIdentifierName(

@@ -1,7 +1,18 @@
-import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+
+import type { FabricPlainObject } from "@commonfabric/api";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+
+import {
+  aclDocId,
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+  isCapable,
+} from "../acl.ts";
 import {
   canResolveScopeKey,
   type CellScope,
@@ -65,29 +76,7 @@ import {
 } from "../v2.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
-import {
-  aclDocId,
-  ANYONE_USER,
-  type Capability,
-  hasConcreteOwner,
-  isACL,
-  isCapable,
-} from "../acl.ts";
-import {
-  aliasForDbId,
-  attachDatabase,
-  detachDatabase,
-  ensureTables,
-} from "./sqlite/exec.ts";
-import { assertReadOnly } from "./sqlite/guard.ts";
-import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
-import type { TableSchema } from "./sqlite/schema.ts";
-import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
-import { ReadConnectionPool } from "./sqlite/read-pool.ts";
-import {
-  columnOriginUnavailableReason,
-  ensureColumnOriginAvailable,
-} from "./sqlite/column-origin.ts";
+import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -122,10 +111,26 @@ import {
   toWireUpsert,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  columnOriginUnavailableReason,
+  ensureColumnOriginAvailable,
+} from "./sqlite/column-origin.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+} from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -539,7 +544,9 @@ class Connection {
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
     const audience = this.server.sessionOpenAudience();
-    const invocation = isRecord(message.invocation) ? message.invocation : null;
+    const invocation = isObjectNotArray(message.invocation)
+      ? message.invocation
+      : null;
     if (invocation === null || typeof invocation.aud !== "string") {
       throw authorizationError("memory session.open requires audience");
     }
@@ -941,12 +948,32 @@ class Connection {
         }
       }
       processed += 1;
-      const effect = await this.server.syncSessionForConnection(
-        space,
-        sessionId,
-        dirtyIds,
-        dirtyOrigins,
-      );
+      let effect: SessionEffectMessage | null;
+      try {
+        effect = await this.server.syncSessionForConnection(
+          space,
+          sessionId,
+          dirtyIds,
+          dirtyOrigins,
+        );
+      } catch (error) {
+        // A refresh evaluation failure means one of two things: a bad
+        // commit was accepted (the safeguards belong at the commit
+        // boundary) or an administrator altered the database, which has
+        // no reasonable handling. Log it — the diagnostic is the whole
+        // response — skip this session's frame, and keep fanning out.
+        // The failed pass may have partially advanced the session's
+        // incremental tracking state (an earlier graph's entities, a
+        // partly rebuilt tracker), so the session is marked for a full
+        // re-evaluation: the next successful pass re-diffs everything
+        // rather than trusting increments computed over the failure.
+        console.error(
+          `memory v2: watch refresh evaluation failed for session ${sessionId} in space ${space}; frame skipped`,
+          error,
+        );
+        this.server.markSessionForFullResync(space, sessionId);
+        continue;
+      }
       if (this.#closed) {
         // Evaluation already advanced the session cache past this content;
         // roll the delivery state back so a later pass (or a resumed
@@ -1522,6 +1549,18 @@ export class Server {
     this.#sessions.detach(space, sessionId, ownerConnectionId);
   }
 
+  /**
+   * Marks a session so its next evaluation runs the full path instead of
+   * an incremental refresh — the recovery for incremental tracking state
+   * a failed pass may have partially advanced.
+   */
+  markSessionForFullResync(space: string, sessionId: string): void {
+    const session = this.#sessions.get(space, sessionId);
+    if (session !== null) {
+      session.forceFullResync = true;
+    }
+  }
+
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     await this.#refreshing;
@@ -1614,10 +1653,17 @@ export class Server {
         // (protocol.md §1's third row — the memory server itself as producer).
         commitClass: "system",
       });
-      this.markSpaceDirty(space, [toDirtyKey(id)]);
+      // An elided direct write changed nothing, and unlike a session
+      // transact it owes no catch-up marker — skip the flush entirely.
+      if (commit.revisions.length > 0) {
+        this.markSpaceDirty(space, [toDirtyKey(id)]);
+      }
       // The feed carries system commits too (the loop classifies by class;
       // a system write is ordinary non-authored input — it does not trigger
       // plane (b)'s AUTHORED activation rule, which the host enforces).
+      // Notified even when every op elided: the commit was RECORDED (the
+      // space log advanced), and the feed carries admitted commits, not
+      // novelty — the elision only suppresses the watcher fan-out above.
       this.#notifyCommitAdmitted({
         space,
         seq: commit.seq,
@@ -2700,8 +2746,16 @@ export class Server {
           // decides the flush-time echo shape.
           const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> = [];
           const dirtyOps = new Map<string, DirtyOp>();
-          for (const operation of message.commit.operations) {
+          const elided = new Set(commit.elidedOpIndexes ?? []);
+          for (
+            const [opIndex, operation] of message.commit.operations.entries()
+          ) {
             if (operation.op === "sqlite") continue;
+            // An elided content-addressed re-set changed nothing — no head
+            // moved, so there is no novelty to fan out or classify (it is
+            // excluded from the dirty keys AND from the admitted-commit
+            // feed's write list below: activation follows novelty).
+            if (elided.has(opIndex)) continue;
             const scopeKey = resolveScopeKey(operation.scope, {
               principal: session.principal,
               sessionId: message.sessionId,
@@ -2709,17 +2763,28 @@ export class Server {
             committedWrites.push({ id: operation.id, scopeKey });
             dirtyOps.set(toDirtyKey(operation.id, scopeKey), operation.op);
           }
-          this.markSpaceDirty(message.space, dirtyOps.keys(), {
-            sessionId: message.sessionId,
-            seq: commit.seq,
-            ops: dirtyOps,
-          });
+          if (dirtyOps.size > 0) {
+            this.markSpaceDirty(message.space, dirtyOps.keys(), {
+              sessionId: message.sessionId,
+              seq: commit.seq,
+              ops: dirtyOps,
+            });
+          } else {
+            // Every operation elided: nothing was written, so no document
+            // turns dirty — but the accept still owes this session its
+            // catch-up marker, and the marker rides the batched flush.
+            // Schedule the pass without dirtying anything.
+            this.markSpaceDirty(message.space);
+          }
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded. An
           // event-append commit carries its declarations so the serving
           // loop classifies it (serving-loop.md §3) and the host's
           // undelivered-events activation criterion fires even with no
-          // live session (serving-loop.md §1).
+          // live session (serving-loop.md §1). Fires even when every op
+          // elided: the commit was RECORDED (the space log advanced) —
+          // the feed carries admitted commits; `writes` names only the
+          // non-elided ops, so activation still follows novelty.
           const admittedEventAppends = (message.commit.eventAppends ?? []).map((
             decl,
           ) => ({
@@ -3198,6 +3263,10 @@ export class Server {
         },
       };
     } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester —
+      // a malformed or unevaluable query is the caller's diagnostic, not
+      // a reason to tear the connection down.
       return respondTypedError<WatchSetResult>(
         message.requestId,
         toError(
@@ -3415,6 +3484,10 @@ export class Server {
         },
       };
     } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester —
+      // a malformed or unevaluable query is the caller's diagnostic, not
+      // a reason to tear the connection down.
       return respondTypedError<WatchAddResult>(
         message.requestId,
         toError(
@@ -3788,6 +3861,9 @@ export class Server {
             const identity = this.#sessionScopeIdentity(session);
             const updates = new Map<string, SessionCacheEntry>();
 
+            // Evaluation exceptions — schema-closure corruption included —
+            // propagate to refreshDirty's catch, which logs, skips this
+            // session's frame, and marks it for a full re-evaluation.
             for (const graph of session.graphs.values()) {
               const refreshed = tracer.startActiveSpan(
                 "memory.watch.refresh",
@@ -5358,7 +5434,7 @@ export const parseClientMessage = (
     return null;
   }
 
-  if (!isRecord(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return null;
   }
 
@@ -5380,7 +5456,7 @@ export const parseClientMessage = (
     parsed.type === "session.open" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    isRecord(parsed.session)
+    isObjectNotArray(parsed.session)
   ) {
     return {
       type: "session.open",
@@ -5397,7 +5473,9 @@ export const parseClientMessage = (
           ? parsed.session.sessionToken
           : undefined,
       },
-      invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
+      invocation: isObjectNotArray(parsed.invocation)
+        ? parsed.invocation
+        : undefined,
       authorization: parsed
         .authorization as SessionOpenRequest["authorization"],
     };
@@ -5408,7 +5486,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.commit)
+    isObjectNotArray(parsed.commit)
   ) {
     return {
       type: "transact",
@@ -5424,7 +5502,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query) &&
+    isObjectNotArray(parsed.query) &&
     Array.isArray(parsed.query.roots)
   ) {
     return {
@@ -5485,21 +5563,21 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
     parsed.sql.length <= 100_000 &&
-    isRecord(parsed.db) &&
+    isObjectNotArray(parsed.db) &&
     typeof parsed.db.id === "string" &&
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
-      (isRecord(parsed.db.tables) &&
+      (isObjectNotArray(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session")
   ) {
     const db = {
       id: parsed.db.id,
-      tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+      tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
-    const params = Array.isArray(parsed.params) || isRecord(parsed.params)
+    const params = isObjectOrArray(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {
