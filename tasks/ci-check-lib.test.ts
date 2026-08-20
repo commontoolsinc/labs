@@ -1224,7 +1224,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
     ],
     measurement: {
       runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
-      sha: "a".repeat(40),
+      baseSha: "a".repeat(40),
     },
   });
 
@@ -1263,15 +1263,19 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
     comment,
     "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
   );
-  assertStringIncludes(comment, `  Commit measured: ${"a".repeat(40)}`);
+  assertStringIncludes(comment, `  Base commit measured: ${"a".repeat(40)}`);
+  // The reader is handed the command that says what landed since.
+  assertStringIncludes(
+    comment,
+    `  git log ${"a".repeat(40)}.. -- <one of the files above>`,
+  );
   assertStringIncludes(
     comment,
     `  Baseline for packages/runner: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${
       "b".repeat(40)
     }`,
   );
-  assertStringIncludes(comment, "read `git log` for its file");
-  assertStringIncludes(comment, "one measurement of that commit");
+  assertStringIncludes(comment, "merged into that base commit");
   assertStringIncludes(comment, "docs/development/COVERAGE.md");
   // Repetition is not offered as evidence: the prompt asks for the new test to
   // be measured on its own instead.
@@ -1298,7 +1302,9 @@ Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not h
   // The reader is still told to check that the report has not been overtaken,
   // in the wording that names no commit.
   assertStringIncludes(local, "it may no longer describe the");
-  assertFalse(local.includes("one measurement of that commit"));
+  assertStringIncludes(local, "read");
+  assertFalse(local.includes("merged into that base commit"));
+  assertFalse(local.includes("git log "));
   assertStringIncludes(local, "since the measurement was taken");
   assertStringIncludes(local, "Affected lines:");
 
@@ -1322,10 +1328,14 @@ Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not h
   assertStringIncludes(runOnly, "Where this measurement came from:");
   assertStringIncludes(
     runOnly,
+    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+  );
+  assertStringIncludes(
+    runOnly,
     "  Baseline for tasks: run https://github.com/commontoolsinc/labs/actions/runs/900\n",
   );
-  assertFalse(runOnly.includes("Commit measured:"));
-  assertFalse(runOnly.includes("one measurement of that commit"));
+  assertFalse(runOnly.includes("Base commit measured:"));
+  assertFalse(runOnly.includes("merged into that base commit"));
   assertStringIncludes(runOnly, "since the measurement was taken");
 });
 

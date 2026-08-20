@@ -40,6 +40,7 @@ import {
   type CoverageCommentPayload,
   coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
+  type CoverageMeasurement,
   coverageMetricGroupName,
   type CoverageResolvedGroup,
   type CoverageRunIdentity,
@@ -539,6 +540,12 @@ export interface MetricBaseline {
   sample?: BaselineSample;
   /** Whether the ratchet may fail this metric against that sample. */
   comparable: boolean;
+  /**
+   * The base-branch commit the comparison was judged against: the commit this
+   * run merges the pull request into. Absent on a `main` push run, and when
+   * the commit could not be read.
+   */
+  baseSha?: string;
 }
 
 export interface SelectBaselinesOptions {
@@ -628,6 +635,7 @@ export async function selectBaselines(
     const sample = baselines.get(metric);
     resolved.set(metric, {
       sample,
+      baseSha: baseSha ?? undefined,
       comparable: isComparableBaseline({
         sample,
         metric,
@@ -1140,6 +1148,14 @@ export interface Row {
   baselineSha?: string;
   /** Id of the run that baseline came from. */
   baselineRunId?: number;
+  /** Id of the run that measured `current`. */
+  measuredRunId?: number;
+  /**
+   * The base-branch commit that run merged this pull request into. A
+   * `pull_request` run measures `refs/pull/<number>/merge`, so this is the
+   * `main` commit whose code the measurement covers.
+   */
+  baseSha?: string;
   pctIncrease?: number;
 }
 
@@ -1197,6 +1213,16 @@ export function buildCoverageRows(
   for (const [metric, currentSample] of options.currentMetrics) {
     const current = currentSample.uncoveredLines;
     const resolvedBaseline = options.baselineByMetric.get(metric);
+    // What every row for this metric carries, whatever the gate decides: the
+    // count, the run that measured it, and the base-branch commit that run
+    // merged. A comment built from these rows reads them back out to say
+    // where its numbers came from.
+    const measured = {
+      metric,
+      current,
+      measuredRunId: currentSample.runId,
+      baseSha: resolvedBaseline?.baseSha,
+    };
     const baselineSample = resolvedBaseline?.sample;
     const latestBaseline = baselineSample?.uncoveredLines;
     const acceptedRise = options.overrides.metrics.get(metric);
@@ -1215,21 +1241,20 @@ export function buildCoverageRows(
       if (
         coverageReset || (acceptedRise !== undefined && current <= acceptedRise)
       ) {
-        rows.push({ metric, status: "ovrd", current });
+        rows.push({ ...measured, status: "ovrd" });
       } else if (!shouldGateCoverage) {
-        rows.push({ metric, status: "excl", current });
+        rows.push({ ...measured, status: "excl" });
       } else if (current > 0) {
         const row: Row = {
-          metric,
+          ...measured,
           status: "OVER",
-          current,
           baseline: 0,
           pctIncrease: 100,
         };
         rows.push(row);
         failures.push(row);
       } else {
-        rows.push({ metric, status: "n/a", current });
+        rows.push({ ...measured, status: "n/a" });
       }
       continue;
     }
@@ -1245,28 +1270,28 @@ export function buildCoverageRows(
     };
 
     if (coverageReset) {
-      rows.push({ metric, status: "ovrd", current, ...stats });
+      rows.push({ ...measured, status: "ovrd", ...stats });
       continue;
     }
 
     if (
       acceptedRise !== undefined && current <= latestBaseline + acceptedRise
     ) {
-      rows.push({ metric, status: "ovrd", current, ...stats });
+      rows.push({ ...measured, status: "ovrd", ...stats });
       continue;
     }
 
     if (!shouldGateCoverage) {
-      rows.push({ metric, status: "excl", current, ...stats });
+      rows.push({ ...measured, status: "excl", ...stats });
       continue;
     }
 
     if (current > latestBaseline) {
-      const row: Row = { metric, status: "OVER", current, ...stats };
+      const row: Row = { ...measured, status: "OVER", ...stats };
       rows.push(row);
       failures.push(row);
     } else {
-      rows.push({ metric, status: "OK", current, ...stats });
+      rows.push({ ...measured, status: "OK", ...stats });
     }
   }
 
@@ -1431,7 +1456,6 @@ export async function writeCoverageComment(
   coverageRows: Row[],
   prFiles: PRFile[],
   lcov: string,
-  currentRun?: WorkflowRun,
 ): Promise<void> {
   if (coverageFailures.length > 0) {
     await writeCoverageDebtSuggestion(
@@ -1439,18 +1463,23 @@ export async function writeCoverageComment(
       coverageFailures,
       prFiles,
       lcov,
-      currentRun,
     );
   } else {
     await writeCoverageResolved(prNumber, coverageRows, prFiles);
   }
 }
 
-/** A run's identity, as far as the run context names it. */
-function runIdentity(run: WorkflowRun | undefined): CoverageRunIdentity {
+/**
+ * Where the failing counts were measured. Every row comes from the same run
+ * and the same base-branch commit, so the first row that names each speaks for
+ * all of them, and a row that names neither leaves both out.
+ */
+function measurementFromFailures(failures: Row[]): CoverageMeasurement {
+  const runId = failures.find((failure) => failure.measuredRunId !== undefined)
+    ?.measuredRunId;
   return {
-    runUrl: run?.html_url || undefined,
-    sha: run?.head_sha || undefined,
+    runUrl: runId === undefined ? undefined : workflowRunUrl(runId),
+    baseSha: failures.find((failure) => failure.baseSha)?.baseSha,
   };
 }
 
@@ -1470,8 +1499,6 @@ export interface UnattributedRegressionOptions {
   prFiles: PRFile[];
   /** LCOV from this run. */
   lcov: string;
-  /** The run that measured that LCOV; absent outside a workflow run. */
-  currentRun?: WorkflowRun;
   readBaselineLcov: (runId: number) => Promise<string | null>;
 }
 
@@ -1532,7 +1559,7 @@ export async function buildUnattributedRegressionBody(
       baseline: baselineByGroup.get(group.group),
     })),
     files,
-    measurement: runIdentity(options.currentRun),
+    measurement: measurementFromFailures(options.coverageFailures),
   });
 }
 
@@ -1548,7 +1575,6 @@ export async function writeCoverageDebtSuggestion(
   coverageFailures: Row[],
   prFiles: PRFile[],
   lcov: string,
-  currentRun?: WorkflowRun,
   readBaselineLcov: (runId: number) => Promise<string | null> =
     baselineLcovForRun,
 ): Promise<void> {
@@ -1607,7 +1633,6 @@ export async function writeCoverageDebtSuggestion(
         coverageFailures,
         prFiles,
         lcov,
-        currentRun,
         readBaselineLcov,
       })
       : null;
@@ -2108,7 +2133,6 @@ export async function main() {
       rows,
       prFiles,
       coverageLcov,
-      currentRunInfo,
     );
   }
 

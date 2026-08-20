@@ -1069,11 +1069,23 @@ export interface CoverageUnattributedFile {
 }
 
 /**
- * Which run produced a coverage measurement, and which commit it measured.
+ * Which run produced a coverage measurement, and which base-branch commit that
+ * run measured. A `pull_request` run measures the pull request merged into the
+ * base branch, so the commit worth naming is the base-branch commit: the one
+ * whose history says whether a line has been given a test since.
+ *
  * Each half is optional: a run of the checker outside GitHub Actions has no
- * run page to point at, and a run whose context never named a commit has no
- * commit to report.
+ * run page to point at, and a run that could not read the commit it merged has
+ * no commit to report.
  */
+export interface CoverageMeasurement {
+  /** The run's page on GitHub. */
+  runUrl?: string;
+  /** The base-branch commit the run merged the pull request into. */
+  baseSha?: string;
+}
+
+/** A run that measured a baseline, and the commit it measured. */
 export interface CoverageRunIdentity {
   /** The run's page on GitHub. */
   runUrl?: string;
@@ -1090,7 +1102,7 @@ export interface CoverageDebtUnattributedInput {
   groups: CoverageUnattributedGroup[];
   files: CoverageUnattributedFile[];
   /** The run whose coverage report the affected lines were read from. */
-  measurement?: CoverageRunIdentity;
+  measurement?: CoverageMeasurement;
 }
 
 /** How many affected files the comment names before it starts counting. */
@@ -1141,8 +1153,8 @@ function buildMeasurementSection(
   if (measurement.runUrl) {
     provenance.push(`  Measuring run: ${measurement.runUrl}`);
   }
-  if (measurement.sha) {
-    provenance.push(`  Commit measured: ${measurement.sha}`);
+  if (measurement.baseSha) {
+    provenance.push(`  Base commit measured: ${measurement.baseSha}`);
   }
   for (const group of input.groups) {
     const baseline = group.baseline && formatRunIdentity(group.baseline);
@@ -1156,14 +1168,18 @@ function buildMeasurementSection(
   }
   lines.push("");
   lines.push(
-    ...(measurement.sha
+    ...(measurement.baseSha
       ? [
-        "The lines above are one measurement of that commit, held against a",
-        "measurement each baseline run took of its own commit. Code moves and",
-        "tests land. Before working on a line, read `git log` for its file and",
-        "check whether the line has changed, or been given a test, since the",
-        "commit measured. If it has, the measurement has been overtaken: say so",
-        "rather than writing a second test for a line that already has one.",
+        "The run above measured the pull request merged into that base commit,",
+        "and held the result against a measurement each baseline run took of",
+        "its own commit. Code moves and tests land, so check what has reached",
+        "`main` since. On an up-to-date checkout:",
+        "",
+        `  git log ${measurement.baseSha}.. -- <one of the files above>`,
+        "",
+        "If a line has changed, or been given a test, the measurement has been",
+        "overtaken: say so rather than writing a second test for a line that",
+        "already has one.",
       ]
       : [
         "The lines above are one measurement, and it may no longer describe the",
