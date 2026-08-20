@@ -4,10 +4,11 @@ The contract of the test-run record system: what a test's identity is, what
 a record and a run context contain, how records move from a producer to the
 store, and what the store guarantees. This is the normative description of
 the shipped system; [the operating
-guide](../development/test-records.md) says how to use it,
+guide](../development/test-records.md) says how to use it, and
 [the adoption guide](../development/test-records-adoption.md) how another
-repository joins it, and [the plan](../plans/test-run-telemetry.md) carries
-the reasoning and the execution state. The shared implementation is
+repository joins it. [The plan this system came
+from](../history/plans/test-run-telemetry.md) is archived, and carries the
+reasoning that shaped what follows. The shared implementation is
 `packages/test-support/src/records/`.
 
 ## Identity

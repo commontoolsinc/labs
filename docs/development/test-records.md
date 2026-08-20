@@ -3,9 +3,9 @@
 Every execution of every test in this repository produces one record — its
 identity, outcome, and duration — shipped with the run's context to a public
 store. [The spec](../specs/test-records.md) is the contract (identity
-rules, line formats, store guarantees, trust boundaries); the design
-reasoning and execution state are in
-[the plan](../plans/test-run-telemetry.md). This document is how the
+rules, line formats, store guarantees, trust boundaries), and the
+reasoning that produced it is in [the archived
+plan](../history/plans/test-run-telemetry.md). This document is how the
 running system is operated: what gets recorded, the environment surface,
 how to opt a workstation in, and how to read the data.
 
