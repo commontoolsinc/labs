@@ -1,6 +1,7 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
+import { Identity } from "@commonfabric/identity";
 import { env, waitForCondition } from "@commonfabric/integration";
 
 import { ShellIntegration } from "../../integration/shell-utils.ts";
@@ -60,6 +61,44 @@ describe("shell login tests", () => {
     assert(!result.beforeKeyStore.hasRegister);
     assert(!result.afterKeyStore.hasLoading);
     assert(result.afterKeyStore.hasRegister);
+  });
+
+  // The shell publishes `globalThis.app` at the end of its bootstrap, after
+  // the key store opens and Navigation is installed, so a driver that
+  // navigates or reloads and logs in straight away can arrive before the app
+  // is published. The property installed below is that window with the timing
+  // taken out of it: the first read of `globalThis.app` answers `undefined`,
+  // and every read after it answers the root element. Logging in through that
+  // property means waiting for the boundary rather than reading through it.
+  it("logs in while the app is still unpublished", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: "common-knowledge" },
+    });
+
+    await page.evaluate(() => {
+      let published: unknown = globalThis.app;
+      let unread = true;
+      Object.defineProperty(globalThis, "app", {
+        configurable: true,
+        get() {
+          if (!unread) return published;
+          unread = false;
+          return undefined;
+        },
+        set(value: unknown) {
+          published = value;
+        },
+      });
+    });
+
+    await shell.login(identity);
+
+    const state = await shell.state();
+    assertEquals(state?.identity?.did(), identity.did());
   });
 
   it("can create a new user via passphrase", async () => {
