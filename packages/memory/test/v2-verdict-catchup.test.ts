@@ -879,7 +879,7 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
   }).refreshDirty = (...args) => {
     if (!failed) {
       failed = true;
-      server.markSpaceDirty(space, ["space of:doc:b"], {
+      server.markSpaceDirty(space, ["space\x00of:doc:b"], {
         sessionId: committerSessionId,
         // doc:b's ACTUAL seq: echo suppression fires only when the origin's
         // seq matches the delivered upsert's seq, so a fabricated seq would
@@ -888,7 +888,7 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
         // ("set"): a "patch" origin is delivered under CT-1965 regardless,
         // which would also let the pin pass vacuously.
         seq: 1,
-        ops: new Map([["space of:doc:b", "set" as const]]),
+        ops: new Map([["space\x00of:doc:b", "set" as const]]),
       });
       return Promise.reject(new Error("synthetic fan-out failure"));
     }

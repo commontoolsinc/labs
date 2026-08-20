@@ -94,7 +94,7 @@ function toHost(data) {
   HOST_WINDOW.postMessage(data, HOST_ORIGIN);
 }
 
-	<\/script>
+\t<\/script>
 <\/body>
 <\/html>
 <\/html>

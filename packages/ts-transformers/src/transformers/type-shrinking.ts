@@ -2005,7 +2005,7 @@ export function validateShrinkCoverage(
  * element access observed at one index matches the element position. */
 function contractPathKey(segments: readonly string[]): string {
   return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment)
-    .join(" ");
+    .join("\x00");
 }
 
 function addPrefixKeys(
