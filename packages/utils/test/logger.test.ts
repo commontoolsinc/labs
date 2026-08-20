@@ -2105,21 +2105,6 @@ describe("logger", () => {
       expect(getTimingMeasuresState().cap).toBe(5);
     });
 
-    it("takes the cap from the environment when none is passed", () => {
-      Deno.env.set("CF_TIMING_MEASURES_CAP", "4242");
-      try {
-        setTimingMeasuresEnabled(true);
-        expect(getTimingMeasuresState().cap).toBe(4242);
-        // A value that names no positive integer is ignored rather than
-        // applied, which would otherwise disable the guard from the outside.
-        Deno.env.set("CF_TIMING_MEASURES_CAP", "not-a-number");
-        setTimingMeasuresEnabled(true);
-        expect(getTimingMeasuresState().cap).toBe(4242);
-      } finally {
-        Deno.env.delete("CF_TIMING_MEASURES_CAP");
-      }
-    });
-
     it("keeps the budget across a toggle, since the entries are still there", () => {
       setTimingMeasuresEnabled(true, { cap: 2 });
       const logger = getLogger("measure-toggle");

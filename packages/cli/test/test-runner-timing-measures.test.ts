@@ -13,7 +13,9 @@ import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";
 import {
+  clearTimingMeasures,
   getTimingMeasuresState,
+  setTimingMeasuresEnabled,
   TIMING_MEASURE_PREFIX,
 } from "@commonfabric/utils/logger";
 
@@ -53,13 +55,21 @@ describe(
     });
 
     it("keeps every file's spans when several are run", async () => {
-      const single = await runCapturing(FIXTURE);
-      const double = await runCapturing([FIXTURE, FIXTURE]);
+      // Counting a phase that runs exactly once per file rather than comparing
+      // totals: a warm compile cache makes a second run of the same file much
+      // cheaper, so span counts across runs are not comparable — the phase
+      // still runs, and still reports, whether or not it hits the cache.
+      const compiles = (written: Written[]) =>
+        written.filter((entry) =>
+          entry.name.startsWith(
+            `${TIMING_MEASURE_PREFIX}runTestPattern/compile#`,
+          )
+        ).length;
 
-      // The same file twice, so the second run should hold about twice the
-      // spans. Reading the timeline once at the end instead of draining per
-      // file would leave it holding roughly the same as one.
-      expect(double.length).toBeGreaterThan(single.length * 1.5);
+      expect(compiles(await runCapturing(FIXTURE))).toBe(1);
+      // Reading the timeline once at the end instead of draining per file
+      // would report one here, because each file clears what came before it.
+      expect(compiles(await runCapturing([FIXTURE, FIXTURE]))).toBe(2);
     });
 
     it("leaves emission as it found it", async () => {
@@ -77,6 +87,29 @@ describe(
           entry.name.startsWith(TIMING_MEASURE_PREFIX)
         ),
       ).toBe(false);
+    });
+
+    it("takes its cap from the environment when none is passed", () => {
+      // This lives here rather than beside the other logger tests because
+      // `packages/utils` runs its suite with no permissions at all, and
+      // reading an environment variable needs one. The library copes — every
+      // env read there is wrapped — but a test that sets one cannot.
+      const before = getTimingMeasuresState();
+      Deno.env.set("CF_TIMING_MEASURES_CAP", "4242");
+      try {
+        setTimingMeasuresEnabled(true);
+        expect(getTimingMeasuresState().cap).toBe(4242);
+
+        // A value naming no positive integer is ignored rather than applied,
+        // which would otherwise disable the guard from outside the process.
+        Deno.env.set("CF_TIMING_MEASURES_CAP", "not-a-number");
+        setTimingMeasuresEnabled(true);
+        expect(getTimingMeasuresState().cap).toBe(4242);
+      } finally {
+        Deno.env.delete("CF_TIMING_MEASURES_CAP");
+        setTimingMeasuresEnabled(before.enabled, { cap: before.cap });
+        clearTimingMeasures();
+      }
     });
   },
 );
