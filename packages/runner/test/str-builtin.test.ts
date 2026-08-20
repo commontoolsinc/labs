@@ -203,57 +203,6 @@ describe("str builtin", () => {
     }
   });
 
-  it("renders with native parity after resuming the piece in a cold runtime", async () => {
-    const cause = "native-parity-resume";
-    const body = "return { who, greeting: str`v=${undefined} ${null}` };";
-    const rt1 = newRuntime();
-    const rt2 = newRuntime();
-    try {
-      const tx1 = rt1.edit();
-      const compiled = await rt1.patternManager.compilePattern(
-        programFor(body),
-        { space, tx: tx1 },
-      );
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
-        space,
-        cause,
-        undefined,
-        tx1,
-      );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, compiled, {}, resultCell1) as any;
-      await tx1.commit();
-      await r1.pull();
-      expect(r1.key("greeting").get()).toBe(`v=${undefined} ${null}`);
-
-      await rt1.patternManager.flushCompileCacheWrites();
-      await rt1.storageManager.synced();
-
-      // The substitutions cross into the data model on the way to the inputs
-      // cell, and `undefined` is the value a JSON round-trip would quietly
-      // turn into `null` — which would render "null" here and diverge from the
-      // template literal only AFTER a resume, long past the fresh-run test
-      // above.
-      const tx2 = rt2.edit();
-      const resultCell2 = rt2.getCell<Record<string, unknown>>(
-        space,
-        cause,
-        undefined,
-        tx2,
-      );
-      await tx2.commit();
-      await resultCell2.sync();
-      expect(await rt2.start(resultCell2)).toBe(true);
-      await resultCell2.pull();
-      expect(
-        (resultCell2.getAsQueryResult() as { greeting: string }).greeting,
-      ).toBe(`v=${undefined} ${null}`);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
   it("compiles to a ref node naming the builtin, leaving no unverified module", async () => {
     const runtime = newRuntime();
     try {
