@@ -9,7 +9,6 @@ import {
   invertPromise,
   render,
   setIframeTestHandler,
-  waitForContextValue,
   waitForEvent,
 } from "./utils.ts";
 
@@ -62,14 +61,16 @@ window.onerror = function (message, source, lineno, colno, error) {
 </script>
 `;
 
-// Writes "barrier" into the context once the guest has passed the point where
-// a case's error would already have been posted.
+// Raises a recognizable alarm once the guest has passed the point where a
+// case's error would already have been posted.
 //
-// An error leaves the guest as a postMessage to the outer frame, which forwards
-// it to the host on a second fixed pair of windows; the barrier write takes
-// that same path. Each hop preserves the order it received messages in, so a
-// barrier posted after an error arrives after it, and a test that has seen the
-// barrier has seen any error that fired.
+// It is an alarm rather than a write, and that is what makes it a barrier. An
+// error leaves the guest as a postMessage to its parent, which forwards it to
+// the host on a second fixed pair of windows; this takes that same route, and
+// each hop preserves the order it received messages in, so an alarm posted
+// after an error arrives after it. A write would not do: it rides the guest's
+// port, which is a channel of its own with no ordering against this one, and a
+// barrier that can arrive before an error already sent bounds nothing.
 //
 // The load event is the point the cases below share. It fires once the document
 // has parsed and its subresources have settled, and it lands after the
@@ -83,12 +84,22 @@ window.onerror = function (message, source, lineno, colno, error) {
 // of those shapes belongs in `unbarrierable` below rather than here.
 //
 // `barrierControls` below holds the conversions to it honest.
-const BARRIER = `
-<script type="module">
-import { connectGuestContext } from "/guest.js";
+const BARRIER_DESCRIPTION = "barrier";
 
-const guest = connectGuestContext(() => {});
-addEventListener('load', () => guest.write('barrier', true));
+const BARRIER = `
+<script>
+addEventListener('load', () => {
+  window.parent.postMessage({
+    type: 'error',
+    data: {
+      description: '${BARRIER_DESCRIPTION}',
+      source: "",
+      lineno: 0,
+      colno: 0,
+      stacktrace: "",
+    },
+  }, '*');
+});
 </script>
 `;
 
@@ -408,10 +419,20 @@ function defineTest(
     // The event bubbles and is composed, so the document sees it. Listening
     // there rather than on the element catches an error the host dispatches
     // before `render` hands the element back.
+    // The barrier arrives as an alarm like any other, and is separated from
+    // the errors a case is asserting about rather than counted among them.
     const errors: string[] = [];
+    let barrierArrived = false;
     let noticeError: (() => void) | undefined;
+    let noticeBarrier: (() => void) | undefined;
     const onError = (event: Event) => {
-      errors.push((event as CustomEvent).detail.description);
+      const description = (event as CustomEvent).detail.description as string;
+      if (description === BARRIER_DESCRIPTION) {
+        barrierArrived = true;
+        noticeBarrier?.();
+        return;
+      }
+      errors.push(description);
       noticeError?.();
     };
     document.addEventListener("common-iframe-error", onError);
@@ -429,6 +450,16 @@ function defineTest(
       return deferred.promise;
     };
 
+    // Resolves once the barrier has arrived, which the same listener records.
+    const barrierSeen = (): Promise<void> => {
+      if (barrierArrived) {
+        return Promise.resolve();
+      }
+      const deferred = defer();
+      noticeBarrier = () => deferred.resolve();
+      return deferred.promise;
+    };
+
     try {
       const context = new ContextShim();
       const body = `
@@ -436,14 +467,9 @@ function defineTest(
           ${html}
           ${BARRIER}
         `;
-      const iframe = await render(body, context);
+      await render(body, context);
       if (expected == null) {
-        await waitForContextValue(
-          context,
-          iframe,
-          "barrier",
-          (value) => value === true,
-        );
+        await barrierSeen();
         assertDeepEquals(errors, []);
       } else {
         const description = await firstErrorDescription();
@@ -470,11 +496,29 @@ function defineBarrierControl(
 ) {
   Deno.test(`barrier control: ${name}`, async () => {
     cleanupFixtures();
-    const errors: unknown[] = [];
+    const errors: string[] = [];
+    let barrierArrived = false;
+    let noticeBarrier: (() => void) | undefined;
     const onError = (event: Event) => {
-      errors.push((event as CustomEvent).detail.description);
+      const description = (event as CustomEvent).detail.description as string;
+      if (description === BARRIER_DESCRIPTION) {
+        barrierArrived = true;
+        noticeBarrier?.();
+        return;
+      }
+      errors.push(description);
     };
     document.addEventListener("common-iframe-error", onError);
+
+    const barrierSeen = (): Promise<void> => {
+      if (barrierArrived) {
+        return Promise.resolve();
+      }
+      const deferred = defer();
+      noticeBarrier = () => deferred.resolve();
+      return deferred.promise;
+    };
+
     try {
       const context = new ContextShim();
       const body = `
@@ -482,13 +526,8 @@ function defineBarrierControl(
           ${html}
           ${BARRIER}
         `;
-      const iframe = await render(body, context);
-      await waitForContextValue(
-        context,
-        iframe,
-        "barrier",
-        (value) => value === true,
-      );
+      await render(body, context);
+      await barrierSeen();
       assertDeepEquals(errors, [expected]);
     } finally {
       document.removeEventListener("common-iframe-error", onError);

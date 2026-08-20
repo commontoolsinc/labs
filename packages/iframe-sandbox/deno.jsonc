@@ -2,7 +2,9 @@
   // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/iframe-sandbox",
   "tasks": {
-    "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
+    // The first two run in Deno; the rest need a browser, so they are named
+    // for `deno-web-test` rather than swept up by a glob.
+    "test": "deno test --allow-read test/guest.test.ts test/ipc.test.ts && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/iframe.test.ts test/iframe-csp.test.ts"
   },
   "exports": {
     ".": "./src/index.ts",

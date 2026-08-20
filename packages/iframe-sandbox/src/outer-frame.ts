@@ -36,6 +36,7 @@ const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
 const HOST_WINDOW = window.parent;
 const INNER_WINDOW = iframe.contentWindow;
+let documentAsked = false;
 
 iframe.addEventListener("load", onInnerLoad);
 window.addEventListener("message", onMessage);
@@ -57,11 +58,19 @@ function onMessage(e) {
   }
 
   if (e.data && e.data.type === "load-document") {
+    documentAsked = true;
     iframe.srcdoc = e.data.data;
   }
 }
 
 function onInnerLoad(e) {
+  // The frame fires this for the empty document it starts on, before there is
+  // a guest at all. Reporting that one would announce a load the host never
+  // asked for and offer a port to nothing, so the first document the host asks
+  // for is where this starts counting.
+  if (!documentAsked) {
+    return;
+  }
   // The host takes this as its cue to hand the new document a port: a fresh
   // document is a fresh realm, and the port the previous one held died with
   // it.

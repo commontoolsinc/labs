@@ -45,14 +45,18 @@ export class CommonIframeSandboxElement extends LitElement {
   `;
 
   #src = "";
+
+  /** The host's end of the channel to the current guest, while there is one. */
   private guestPort: MessagePort | undefined;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
   private subscriptions: Map<string, Receipt> = new Map();
 
-  // Called when the outer frame emits
-  // `IPCGuestMessageType.Ready`, only once, upon
-  // the initial render.
+  /**
+   * Handles the outer frame reporting itself ready, which it does once per
+   * document it loads into that frame. Loads `src` if there is one to load;
+   * otherwise the next assignment to `src` does it.
+   */
   private onOuterReady() {
     if (this.initialized) {
       throw new Error(`common-iframe-sandbox: Already initialized.`);
@@ -63,13 +67,14 @@ export class CommonIframeSandboxElement extends LitElement {
     }
   }
 
-  // Gives the newly loaded guest one end of a fresh channel, and takes the
-  // other. Each document is its own realm, so each gets its own port and the
-  // previous one is closed rather than left to be answered by a realm that no
-  // longer exists.
+  /**
+   * Gives the newly loaded guest one end of a fresh channel and takes the
+   * other. Each document is its own realm, so each gets its own port; a
+   * previous one is already closed by the time this runs, `loadInnerDoc()`
+   * having closed it as it asked for the replacement.
+   */
   private openGuestPort() {
-    this.guestPort?.close();
-    this.guestPort = undefined;
+    this.closeGuestPort();
 
     // The guest is the inner frame, which is a frame of the outer one. A
     // cross-origin frame is unreachable for anything but this: indexed access
@@ -87,7 +92,26 @@ export class CommonIframeSandboxElement extends LitElement {
     guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
   }
 
+  /**
+   * Closes the port to the current guest, if there is one. What the guest sends
+   * afterwards reaches nothing, which is the point: the guest on the other end
+   * of a closed port is one this element is done with.
+   */
+  private closeGuestPort() {
+    this.guestPort?.close();
+    this.guestPort = undefined;
+  }
+
+  /**
+   * Handles a message on the port to the guest. A detached element ignores
+   * one: the guest may have sent it before the element left the document, and
+   * a write reaching the context handler from outside the document's lifetime
+   * is not this element's to make.
+   */
   private onGuestPortMessage = (event: MessageEvent) => {
+    if (!this.isConnected) {
+      return;
+    }
     if (!IPC.isGuestMessage(event.data)) {
       console.error(
         "common-iframe-sandbox: Malformed message from guest.",
@@ -98,7 +122,7 @@ export class CommonIframeSandboxElement extends LitElement {
     this.onGuestMessage(event.data);
   };
 
-  // Message from the outer frame.
+  /** Handles a message from the outer frame. */
   private onMessage = (event: MessageEvent) => {
     if (event.source !== this.iframeRef.value?.contentWindow) {
       return;
@@ -153,6 +177,10 @@ export class CommonIframeSandboxElement extends LitElement {
     }
   };
 
+  /**
+   * Dispatches `common-iframe-error` for an error the guest raised, by either
+   * of the routes one can arrive on.
+   */
   private dispatchGuestError(
     { description, source, lineno, colno, stacktrace }: IPC.GuestError,
   ) {
@@ -173,7 +201,7 @@ export class CommonIframeSandboxElement extends LitElement {
     );
   }
 
-  // Message from the inner frame.
+  /** Handles a message the guest sent, on whichever route carried it. */
   private onGuestMessage(message: IPC.GuestMessage) {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler == null) {
@@ -254,8 +282,16 @@ export class CommonIframeSandboxElement extends LitElement {
     }
   }
 
+  /**
+   * Asks the outer frame to load `src`, and lets go of the guest that is being
+   * replaced: its subscriptions are cancelled and its port is closed here
+   * rather than when the replacement arrives, so it cannot write over the
+   * interval in which it is still running and already superseded.
+   */
   private loadInnerDoc() {
     this.loadState = "loading";
+    this.closeGuestPort();
+
     // Remove all active subscriptions when navigating
     // to a new document.
     const IframeHandler = getIframeContextHandler();
@@ -272,30 +308,40 @@ export class CommonIframeSandboxElement extends LitElement {
     });
   }
 
+  /** Tells the guest that `key` now holds `value`. */
   private notifySubscribers(key: string, value: unknown) {
     this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
   }
 
+  /** Sends `message` to the outer frame. */
   private toOuterFrame(message: IPC.IPCHostMessage) {
     this.iframeRef.value?.contentWindow?.postMessage(message, "*");
   }
 
+  /**
+   * Sends `message` to the guest. Does nothing when there is no port, which is
+   * every moment outside a loaded guest's lifetime.
+   */
   private toGuest(message: IPC.HostMessage) {
     this.guestPort?.postMessage(message);
   }
 
+  /** The outer frame's message listener, as `globalThis` holds it. */
   private boundOnMessage = this.onMessage.bind(this);
 
+  /** @inheritDoc */
   override connectedCallback() {
     super.connectedCallback();
     globalThis.addEventListener("message", this.boundOnMessage);
   }
 
+  /** @inheritDoc */
   override disconnectedCallback() {
     super.disconnectedCallback();
     globalThis.removeEventListener("message", this.boundOnMessage);
   }
 
+  /** @inheritDoc */
   override render() {
     return html`
       <iframe

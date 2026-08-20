@@ -71,15 +71,26 @@ export function connectGuestContext(onUpdate: UpdateHandler): GuestContext {
     }
   };
 
+  // The port's far end is the host, so what arrives on it is not the open
+  // question a window message is. It is still checked before being taken
+  // apart: a shape this does not recognize is one this guest has no reading
+  // of, and guessing at it would put an unnamed key in front of `onUpdate`.
   const onPortMessage = (event: MessageEvent): void => {
     const message = event.data as HostMessage | undefined;
-    if (message?.type !== HostMessageType.Update) {
+    if (
+      message?.type !== HostMessageType.Update ||
+      !Array.isArray(message.data) || message.data.length !== 2 ||
+      typeof message.data[0] !== "string"
+    ) {
       return;
     }
     const [key, value] = message.data;
     onUpdate(key, value);
   };
 
+  // A guest window receives whatever anyone able to reach it posts, so the
+  // handoff is recognized by what it says and taken only once. A second one
+  // would replace a live port with one the host is not listening on.
   const onHandoff = (event: MessageEvent): void => {
     if (port || event.data !== GUEST_PORT_HANDOFF || !event.ports[0]) {
       return;

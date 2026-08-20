@@ -100,8 +100,11 @@ frame that propagates to the inner (untrusted) frame across browsers.
 
 ## Missing Functionality
 
-- Audit the IPC communication (`postMessage()`) with origin-bounds and ensure
-  other frames can't spoof messages.
+- Audit the remaining `postMessage()` communication with origin-bounds and
+  ensure other frames can't spoof messages. This covers the host's exchange with
+  the outer frame and the alarm route out of a guest; the key/value traffic
+  between host and guest is not among it, a port being reachable only by whoever
+  holds an end.
 - Abort on unsupported browsers.
 - Further testing.
 
