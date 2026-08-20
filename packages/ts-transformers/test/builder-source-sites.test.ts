@@ -21,6 +21,18 @@ const onLocal = (_: unknown, state: { value: Writable<number> }) => {
 };
 const localHandler = handler(onLocal);
 
+function onDeclared(_: unknown, state: { value: Writable<number> }) {
+  state.value.set(2);
+}
+const declaredHandler = handler(onDeclared);
+
+const callbacks = {
+  onProperty(_: unknown, state: { value: Writable<number> }) {
+    state.value.set(3);
+  },
+};
+const propertyHandler = handler(callbacks.onProperty);
+
 const exportedLift = lift((value: number) => value + 1);
 export { exportedLift as alpha, exportedLift as beta };
 
@@ -70,6 +82,16 @@ describe("builder-source-sites", () => {
         ...locationOf("(_: unknown, state: { value: Writable<number> }) =>"),
         bindingName: "onLocal",
       });
+      expect(sidecar?.sites.declaredHandler).toEqual({
+        ...locationOf(
+          "function onDeclared(_: unknown, state: { value: Writable<number> })",
+        ),
+        bindingName: "onDeclared",
+      });
+      expect(sidecar?.sites.propertyHandler).toEqual({
+        ...locationOf("handler(callbacks.onProperty)"),
+        bindingName: "propertyHandler",
+      });
       expect(sidecar?.sites.alpha).toEqual({
         ...locationOf("(value: number) => value + 1"),
         bindingName: "exportedLift",
@@ -89,6 +111,24 @@ describe("builder-source-sites", () => {
       expect(output).not.toContain("__cfBindVerifiedBinding");
       expect(output).not.toContain("bindingName");
       expect(output).not.toContain("formatVersion");
+    } finally {
+      transformed.dispose();
+    }
+  });
+
+  it("does not label compiler coordinates as authored without a mapper", async () => {
+    const fileName = "/main.tsx";
+    const { program } = await batchTypeCheckFixtures(
+      { [fileName]: SOURCE },
+      { types: COMMONFABRIC_TYPES },
+    );
+    const original = program.getSourceFile(fileName);
+    if (!original) throw new Error("Fixture source was not loaded.");
+
+    const pipeline = new CommonFabricTransformerPipeline();
+    const transformed = ts.transform(original, pipeline.toFactories(program));
+    try {
+      expect(pipeline.getBuilderSourceSites().get(fileName)).toBeUndefined();
     } finally {
       transformed.dispose();
     }

@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { injectCfHelpers } from "@commonfabric/ts-transformers";
 
 import type { Module, Pattern } from "../src/builder/types.ts";
 import type { Engine } from "../src/harness/engine.ts";
@@ -17,6 +18,10 @@ const SOURCE = [
   "const local = lift((n: number) => n * 2);",
   "const aliased = lift((n: number) => n + 1);",
   "export { aliased as first, aliased as second };",
+  "function declared(value: number) {",
+  "  return value - 1;",
+  "}",
+  "export const declarationLift = lift(declared);",
   "export default pattern<{ value: number }>(({ value }) => {",
   "  const hoisted = computed(() => (value as number) + 100);",
   "  return { a: local(value), b: aliased(value), hoisted };",
@@ -95,12 +100,14 @@ describe("authored source sidecar", () => {
     const { main } = await makeEngine().compileAndEvaluateModules(PROGRAM);
     const first = exportedImplementation(main, "first");
     const second = exportedImplementation(main, "second");
+    const declaration = exportedImplementation(main, "declarationLift");
+    const defaultFactory = (main as { default?: DebugAnnotated }).default;
     const local = nodeImplementation(
-      (main as { default?: unknown }).default,
+      defaultFactory,
       "n * 2",
     );
     const hoisted = nodeImplementation(
-      (main as { default?: unknown }).default,
+      defaultFactory,
       "value + 100",
     );
 
@@ -112,8 +119,16 @@ describe("authored source sidecar", () => {
       .toBe(true);
     expect(local.name).toBe("local");
     expect(
+      declaration.src?.endsWith(authoredAt(5, "function declared")),
+    ).toBe(true);
+    expect(declaration.name).toBe("declared");
+    expect(
+      defaultFactory?.src?.endsWith(authoredAt(9, "({ value }) =>")),
+    ).toBe(true);
+    expect(defaultFactory?.name).toBe("");
+    expect(
       hoisted.src?.endsWith(
-        authoredAt(6, "() => (value as number) + 100"),
+        authoredAt(10, "() => (value as number) + 100"),
       ),
     ).toBe(true);
     expect(hoisted.name).toBe("hoisted");
@@ -182,5 +197,33 @@ describe("authored source sidecar", () => {
       `cf:module/${dependency.identity}/main.tsx:2:24`,
     );
     expect(implementation.src).not.toContain("/~cf/");
+  });
+
+  it("normalizes both helper-injection offset arms", async () => {
+    const authored = [
+      "import { lift } from 'commonfabric';",
+      "export const identity = lift((value: number) => value);",
+    ].join("\n");
+    const engine = makeEngine();
+    const compileSite = async (contents: string) => {
+      const { modules } = await engine.compileResolvedToRecordGraph(
+        [{ name: "/main.tsx", contents }],
+        "/main.tsx",
+      );
+      return modules.find((module) => module.filename === "/main.tsx")
+        ?.builderSourceSites?.sites.identity;
+    };
+
+    expect(await compileSite(authored)).toEqual({
+      line: 2,
+      col: 29,
+      bindingName: "identity",
+    });
+
+    expect(await compileSite(injectCfHelpers(authored, "/main.tsx"))).toEqual({
+      line: 3,
+      col: 29,
+      bindingName: "identity",
+    });
   });
 });

@@ -107,7 +107,12 @@ export type PatternCoverageOptions = {
 
 /** Coordinate normalization for builder source-site compiler output. */
 export interface BuilderSourceSiteOptions {
-  readonly mapSite?: (
+  /**
+   * Maps a compiler-input coordinate into authored source space. Callers whose
+   * compiler input is already authored must supply the identity mapping
+   * explicitly; without a mapper the transformer emits no sidecar.
+   */
+  readonly mapSite: (
     sourceFileName: string,
     site: BuilderSourceSite,
   ) => BuilderSourceSite | undefined;

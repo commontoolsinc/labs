@@ -220,13 +220,16 @@ function hoistBuilderCalls(
     symbol: string,
     artifact: BuilderArtifact | undefined,
   ): void => {
-    if (artifact === undefined || Object.hasOwn(builderSourceSites, symbol)) {
+    const mapSite = context.options.builderSourceSites?.mapSite;
+    if (
+      mapSite === undefined || artifact === undefined ||
+      Object.hasOwn(builderSourceSites, symbol)
+    ) {
       return;
     }
     const site = resolveAuthoredSite(artifact, authoredSourceFile);
     if (site === undefined) return;
-    const mapSite = context.options.builderSourceSites?.mapSite;
-    const mapped = mapSite ? mapSite(sourceFile.fileName, site) : site;
+    const mapped = mapSite(sourceFile.fileName, site);
     if (mapped !== undefined) builderSourceSites[symbol] = mapped;
   };
 

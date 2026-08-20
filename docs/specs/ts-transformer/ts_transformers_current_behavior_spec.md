@@ -1625,11 +1625,14 @@ cannot be recovered falls back to the builder call. `bindingName`, when
 recoverable from authored syntax, is the authored declaration name rather than
 the generated hoist name.
 
-The compiler caller may provide `builderSourceSites.mapSite` to translate the
-position before it is recorded. The runner uses this at compile time to remove
-its injected helper prelude, so cached artifacts already contain authored
-coordinates and a source-free warm load needs neither source text nor a source
-map to serve them.
+The compiler caller must opt in with `builderSourceSites.mapSite`, translating
+compiler-input positions into authored coordinates before they are recorded.
+When the input already is authored source, the caller supplies an explicit
+identity mapping. Without a mapper no sidecar is produced; this fails closed
+instead of quietly labeling helper-prelude-shifted coordinates as authored.
+The runner's mapper removes its injected helper prelude, so cached artifacts
+already contain authored coordinates and a source-free warm load needs neither
+source text nor a source map to serve them.
 
 The JavaScript compiler exposes the sidecar through
 `CompiledTypeScriptModule.builderSourceSites`. Runner module artifacts persist
@@ -1641,6 +1644,11 @@ module identity, runtime symbol, and source path into
 debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
 accessors read that map. Verified provenance, authorization, scheduling, and
 artifact hardening do not read it.
+
+Because this metadata is out of band, every new compiler-artifact transport or
+cache must deliberately carry and validate it. Omitting that plumbing is safe
+for execution and authority but silently loses debug source fidelity; transport
+parity is therefore a maintenance invariant of this design.
 
 This is deliberately separate from the trusted-binding annotation in §17.3.
 `__cfBindVerifiedBinding` remains a rare authority-bearing helper emitted only
