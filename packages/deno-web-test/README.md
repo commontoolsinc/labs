@@ -31,8 +31,16 @@ export default {
   include: {
     "path/static-asset.json": "static/asset.json",
   },
+  bundle: {
+    "src/guest.ts": "guest.js",
+  },
 };
 ```
+
+`include` copies a file as it stands; `bundle` bundles a module the way a test
+module is bundled. Reach for `bundle` when the module has to run in a realm the
+test page creates -- an iframe or a worker -- which loads it by URL and so
+cannot share the test's own bundle.
 
 ## Stuck tests
 
