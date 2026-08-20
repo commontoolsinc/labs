@@ -6583,7 +6583,7 @@ export class Runner {
       // Counts increment even while the logger is disabled, so a live
       // worker's logger ledger always exposes how often unverified source is
       // executing.
-      logger.warn("unverified-source-fallback", () => [
+      logger.error("unverified-source-fallback", () => [
         "Module reached resolution with no $implRef; running SES-recompiled," +
         " CFC-unverified fallback from stringified source",
         {

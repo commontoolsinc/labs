@@ -340,7 +340,7 @@ export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
       // fallback, where module-scope references do not exist. Surfacing it
       // here catches the shape as it is written, which is the only signal for
       // graphs serialized inline rather than persisted by pattern reference.
-      serializeShapeLogger.warn("noref-body-write", () => [
+      serializeShapeLogger.error("noref-body-write", () => [
         "Serializing a function implementation with neither provenance nor a" +
         " verified entry ref (body-only, no $implRef)",
         {
