@@ -1,7 +1,8 @@
 # Bulk piece operations
 
-**Status:** proposed, unbuilt. The design for changing many pieces in one
-space as one reviewable, resumable operation.
+**Status:** proposed, unbuilt. The design and build sequence for changing
+many pieces in one space as one reviewable, resumable operation. Driven by
+recurring Topics board upgrades.
 
 ## The short version
 
@@ -16,6 +17,21 @@ two. Retarget is one source across many pieces; rollback is many pieces each
 returning to a different recorded source; repair does not go through the
 source path at all. A design that starts from "apply one source to a list of
 pieces" has already excluded two thirds of the subject.
+
+## The consumer
+
+The Topics board is upgraded on a recurring basis, and every upgrade is a
+bulk operation: a retarget of every topic piece plus the board that holds
+them, ordered children-first. Around it sit the other two — a repair when an
+upgrade exposes stored data that no current write path would produce, and a
+rollback when one goes wrong under a quiet window.
+
+That recurrence is the requirement. Tooling that is built when an upgrade is
+already looming is tooling that gets its first real exercise during the
+operation it is supposed to make safe. So the goal is not only that these
+operations exist, but that they are **known to work before anyone needs
+them** — which is what the drill below is for, and why it is a success
+criterion rather than a nicety.
 
 ## The three operations
 
@@ -152,30 +168,125 @@ unchanged. That is the point of putting batching underneath it: the plan,
 the preconditions, the stop behavior, and the verification do not change when
 the execution strategy does.
 
+## Building it
+
+Five stages. Each one leaves something usable on its own, and the order is
+chosen so that the next Topics upgrade is unblocked by the first two rather
+than by all five.
+
+### 1. The plan, and retarget
+
+A command that produces a plan from a selector, and a driver that consumes
+one: checks every row's precondition before writing, applies serially in plan
+order, stops at the first failure naming the remainder by piece, and
+recomputes what is outstanding on each invocation.
+
+- [ ] A plan is generated from a selector and checked in as an artifact.
+- [ ] Preconditions are proved for every row before the first write.
+- [ ] A retarget of a seeded board runs to completion from a checked-in plan.
+- [ ] A run interrupted partway is completed by re-invoking the same command,
+      and the pieces that landed are not rewritten.
+- [ ] A stopped run names every unattempted piece, not a count of them.
+
+### 2. Verification as its own pass
+
+A pass that reads every row's current state and reports it against what the
+plan expected, exiting nonzero while anything is outstanding. It reports; it
+does not repair.
+
+- [ ] Verification is a separate invocation from application, and applying
+      never implies it.
+- [ ] The pass distinguishes "moved as planned", "still outstanding", and
+      "moved to something the plan did not ask for".
+- [ ] It composes with the existing space-level checks rather than replacing
+      them; those remain the acceptance gate.
+
+### 3. Rollback
+
+The same plan read in the other direction — each row returning its piece to
+the source the plan recorded for it.
+
+- [ ] A completed retarget is fully reversed from its own plan, with no
+      second artifact needed.
+- [ ] Rollback checks preconditions the same way, so a piece changed by
+      something else since the retarget stops the reversal rather than being
+      overwritten.
+- [ ] A rollback is itself resumable.
+
+### 4. Repair
+
+A predicate selector and an in-place data operation, which forces the
+narrow-write decision below. The first case is data that no current write
+path would produce, found on the oldest pieces of a board.
+
+- [ ] A predicate selects pieces by stored data, not only by pattern.
+- [ ] A repair changes what it names and demonstrably leaves the rest of each
+      piece's stored document unchanged.
+- [ ] Re-running a completed repair is a no-op, decided by the same
+      precondition check.
+
+### 5. Session reuse
+
+An execution strategy under the apply step: one session serving many pieces,
+so session start-up, replica warm-up, and source resolution are paid once.
+Last, because it is an optimization over a spine that must exist first, and
+because it is the only stage gated on measurement.
+
+- [ ] Measured at the piece count a real board carries, not a sample of it —
+      wall-clock, peak memory, and whether every piece completes.
+- [ ] The spine is unchanged by the strategy: same plan, same preconditions,
+      same stop behavior, same verification.
+- [ ] A failure under the shared session degrades to the same stop report,
+      with the same remainder named.
+
+## The drill
+
+Every stage above is finished by a drill that runs in continuous integration
+against a seeded space, in the manner of the content-safety drill that
+already guards export and restore: deploy a board, seed it, take the store
+snapshot, run the operation, and assert the outcome.
+
+The drill is what converts this design from documentation into a standing
+guarantee. Its subject is the real pattern, so a change that breaks bulk
+operations should break the drill, and the answer to "does the migration
+tooling still work?" is a CI result rather than an expedition. Without it,
+each upgrade re-discovers the tooling's condition at the moment it is least
+affordable to.
+
+An interrupted run is part of what the drill exercises, not an edge case
+left to production: stopping a run midway and completing it by re-invocation
+is the property most likely to rot silently, because nothing else exercises
+it.
+
 ## Open decisions
 
-1. **Where preconditions are evaluated.** Reading a piece's current state
-   from a store file is cheap and offline, but requires filesystem access to
-   the space. The same question has to be answerable over the API for a space
-   reached only that way. Whether both are supported, or one is canonical,
-   is undecided.
-2. **Whether repair gets a narrow write.** Today the only write for stored
-   data replaces a piece's whole input document, so "change one property"
-   is a whole-document read-modify-write per piece. That is a large blast
-   radius for a small change, and it is the same path that has been observed
-   freezing a stale schema into a live board. Either repair gets a narrower
-   primitive, or the design accepts the wide one and says why.
-3. **Scope of a compatibility override.** An override that lets one refused
-   piece through is a per-piece decision today. Applied to a plan, one flag
-   covering every row turns many decisions into one, which is a different
-   risk from the same flag used many times. Per-row or per-run is a real
-   choice, not a detail.
-4. **How bulk is spelled.** Whether the existing per-piece commands grow a
-   repeatable target, or bulk operations get their own verb, decides whether
-   the word for "one piece" stays consistent across the command surface.
-   This interacts with [CLI surface shape](cli-surface-shape.md).
-5. **Whether one session is viable at the sizes that motivate it.** Open
-   until measured; see above.
+Each is named with the stage that forces it, so none of them has to be
+settled before work starts.
+
+1. **How bulk is spelled** — *stage 1*. Whether the existing per-piece
+   commands grow a repeatable target, or bulk operations get their own verb,
+   decides whether the word for "one piece" stays consistent across the
+   command surface. This interacts with
+   [CLI surface shape](cli-surface-shape.md), and it is the first decision
+   because every later stage inherits it.
+2. **Where preconditions are evaluated** — *stage 1*. Reading a piece's
+   current state from a store file is cheap and offline, but requires
+   filesystem access to the space. The same question has to be answerable
+   over the API for a space reached only that way. Whether both are
+   supported, or one is canonical, is undecided.
+3. **Scope of a compatibility override** — *stage 1*. An override that lets
+   one refused piece through is a per-piece decision today. Applied to a
+   plan, one flag covering every row turns many decisions into one, which is
+   a different risk from the same flag used many times. Per-row or per-run is
+   a real choice, not a detail.
+4. **Whether repair gets a narrow write** — *stage 4*. Today the only write
+   for stored data replaces a piece's whole input document, so "change one
+   property" is a whole-document read-modify-write per piece. That is a large
+   blast radius for a small change, and it is the same path that has been
+   observed freezing a stale schema into a live board. Either repair gets a
+   narrower primitive, or the design accepts the wide one and says why.
+5. **Whether one session is viable at the sizes that motivate it** —
+   *stage 5*, and open until measured.
 
 ## Out of scope, and where it goes
 
