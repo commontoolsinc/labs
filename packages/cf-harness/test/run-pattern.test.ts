@@ -172,6 +172,101 @@ const DEFAULT_PATTERN_SOURCE = [
   "}));",
 ].join("\n");
 
+const EXPENSE_SCHEMA = {
+  type: "object",
+  properties: {
+    description: { type: "string" },
+    amount: { type: "number" },
+  },
+} as const;
+
+/**
+ * A fabric session at enforce-strict with persisted flow labels, for the
+ * tests that pin what a pattern over labelled data leaves in the store.
+ */
+async function createStrictFabric() {
+  const storage = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("http://toolshed.test"),
+    storageManager: storage,
+    cfcEnforcementMode: "enforce-strict",
+    cfcFlowLabels: "persist",
+  });
+  const pieces = new PiecesController(
+    await createSession({
+      identity: signer,
+      spaceName: `run-pattern-strict-${crypto.randomUUID()}`,
+    }),
+    runtime,
+  );
+  await pieces.synced();
+  return {
+    runtime,
+    pieces,
+    space: pieces.getSpace(),
+    dispose: async () => {
+      await runtime.dispose();
+      await storage.close();
+    },
+  };
+}
+
+function createStrictEngine(pieces: PiecesController): CfHarnessEngine {
+  return new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: `run-pattern-strict-${crypto.randomUUID()}`,
+    cfcEnforcementMode: "disabled",
+    fabricSessionFactory: () => Promise.resolve({ pieces }),
+  });
+}
+
+/**
+ * The ids of the stored documents reachable from `rootId` whose stored form
+ * (value and metadata alike) contains `needle`, in traversal order. Documents
+ * are walked breadth-first through every id-shaped string in their stored
+ * form, so a value held only behind links is attributed to the document that
+ * actually stores it.
+ */
+function docsHolding(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  rootId: string,
+  needle: string,
+): string[] {
+  const holding: string[] = [];
+  const pending: `${string}:${string}`[] = [rootId as `${string}:${string}`];
+  const seen = new Set(pending);
+  const verify = runtime.edit();
+  try {
+    while (pending.length > 0) {
+      const id = pending.shift()!;
+      let stored: unknown;
+      try {
+        stored = verify.readOrThrow({ space, scope: "space", id, path: [] });
+      } catch {
+        continue;
+      }
+      const serialized = JSON.stringify(stored);
+      if (serialized === undefined) continue;
+      if (serialized.includes(needle)) holding.push(id);
+      for (
+        const [quoted] of serialized.matchAll(
+          /"((?:of|data|computed|raw|stream):[^"]+)"/g,
+        )
+      ) {
+        const next = JSON.parse(quoted) as `${string}:${string}`;
+        if (!seen.has(next)) {
+          seen.add(next);
+          pending.push(next);
+        }
+      }
+    }
+  } finally {
+    verify.abort();
+  }
+  return holding;
+}
+
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
     return {
@@ -630,6 +725,197 @@ describe("run-pattern", () => {
       } finally {
         await strictRuntime.dispose();
         await strictStorage.close();
+      }
+    });
+
+    it("commits no unlabelled copy when a pattern-body map reads labelled values inline", async () => {
+      // A pattern-body `.map()` runs as the built-in map, whose coordinator
+      // reads the list raw. With the labelled values inline in that list, the
+      // read carries their confidentiality, so under enforce-strict the
+      // output write is refused and nothing lands: the labelled text exists
+      // at rest only in the seeded source document. The refusal is silent
+      // today — the tool still answers ok over the absent value (CT-2037) —
+      // so the status is not part of this contract; the store's contents are.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const seed = runtime.edit();
+        const sourceCell = runtime.getCell(
+          space,
+          "body-map-inline-labelled",
+          {
+            type: "object",
+            properties: { expenses: { type: "array", items: EXPENSE_SCHEMA } },
+          },
+          seed,
+        );
+        const sourceId = sourceCell.getAsNormalizedFullLink().id;
+        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+          value: {
+            expenses: [
+              { description: "alpha-secret", amount: 1 },
+              { description: "beta-secret", amount: 2 },
+            ],
+          },
+          cfc: {
+            version: 1,
+            schemaHash: "seed-schema",
+            labelMap: {
+              version: 1,
+              entries: [
+                {
+                  path: ["expenses", "0", "description"],
+                  label: { confidentiality: ["expense-note"] },
+                },
+                {
+                  path: ["expenses", "1", "description"],
+                  label: { confidentiality: ["expense-note"] },
+                },
+              ],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const engine = createStrictEngine(pieces);
+        const result = await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: [
+            "import { pattern, Reactive } from 'commonfabric';",
+            "interface Expense { description: string; amount: number; }",
+            "interface Source { expenses: Expense[]; }",
+            "interface Input { source: Reactive<Source>; }",
+            "interface Output { notes: string[]; }",
+            "export default pattern<Input, Output>(({ source }) => ({",
+            "  notes: source.expenses.map((e) => e.description),",
+            "}));",
+            "",
+          ].join("\n"),
+          inputs: {
+            source: createLLMFriendlyLink(
+              sourceCell.getAsNormalizedFullLink(),
+              space,
+            ),
+          },
+        });
+        const pieceId = (result.output as { pieceId?: string }).pieceId;
+        expect(pieceId).toBeDefined();
+        await runtime.idle();
+        await pieces.synced();
+
+        const piece = await pieces.get(pieceId!);
+        expect(await piece.result.get([])).toBeUndefined();
+        expect(docsHolding(runtime, space, `of:${pieceId}`, "alpha-secret"))
+          .toEqual([sourceId]);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("resolves a pattern-body map over labelled documents to links, leaving the labelled text only in its sources", async () => {
+      // With each labelled value in its own document behind a link, the
+      // built-in map's coordinator reads only links, and each element result
+      // is itself a link into the labelled source path. The result reads
+      // back as the values, but no document at rest holds an unlabelled
+      // copy: a reader reaching the text does so through the source's own
+      // label map.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const expenseIds: string[] = [];
+        const elementLinks: {
+          "/": {
+            "link@1": {
+              id: string;
+              path: string[];
+              scope: string;
+              space: string;
+            };
+          };
+        }[] = [];
+        for (
+          const [i, description] of ["alpha-secret", "beta-secret"].entries()
+        ) {
+          const seed = runtime.edit();
+          const cell = runtime.getCell(
+            space,
+            `body-map-linked-expense-${i}`,
+            EXPENSE_SCHEMA,
+            seed,
+          );
+          const id = cell.getAsNormalizedFullLink().id;
+          seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+            value: { description, amount: i + 1 },
+            cfc: {
+              version: 1,
+              schemaHash: "seed-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: ["description"],
+                  label: { confidentiality: ["expense-note"] },
+                }],
+              },
+            },
+          });
+          expect((await seed.commit()).ok).toBeDefined();
+          expenseIds.push(id);
+          elementLinks.push({
+            "/": { "link@1": { id, path: [], scope: "space", space } },
+          });
+        }
+        const listSeed = runtime.edit();
+        const listCell = runtime.getCell(
+          space,
+          "body-map-linked-expense-list",
+          { type: "array", items: EXPENSE_SCHEMA },
+          listSeed,
+        );
+        listSeed.writeOrThrow(
+          {
+            space,
+            scope: "space",
+            id: listCell.getAsNormalizedFullLink().id,
+            path: [],
+          },
+          { value: elementLinks },
+        );
+        expect((await listSeed.commit()).ok).toBeDefined();
+
+        const engine = createStrictEngine(pieces);
+        const result = await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: [
+            "import { pattern } from 'commonfabric';",
+            "interface Expense { description: string; amount: number; }",
+            "interface Input { expenses: Expense[]; }",
+            "interface Output { notes: string[]; }",
+            "export default pattern<Input, Output>(({ expenses }) => ({",
+            "  notes: expenses.map((e) => e.description),",
+            "}));",
+            "",
+          ].join("\n"),
+          inputs: {
+            expenses: createLLMFriendlyLink(
+              listCell.getAsNormalizedFullLink(),
+              space,
+            ),
+          },
+        });
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        await runtime.idle();
+        await pieces.synced();
+
+        const piece = await pieces.get(output.pieceId);
+        expect(await piece.result.get(["notes"])).toEqual([
+          "alpha-secret",
+          "beta-secret",
+        ]);
+        expect(
+          docsHolding(runtime, space, `of:${output.pieceId}`, "alpha-secret"),
+        ).toEqual([expenseIds[0]]);
+        expect(
+          docsHolding(runtime, space, `of:${output.pieceId}`, "beta-secret"),
+        ).toEqual([expenseIds[1]]);
+      } finally {
+        await dispose();
       }
     });
 
