@@ -33,7 +33,10 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -382,17 +385,9 @@ export function sanitizeSchemaForLinks(
   // would carry `asCell` entries into stored link schemas the flag-off
   // sanitize removed — a reader would mint handles where values are
   // expected. The sanitized (inline) result re-externalizes at the emission
-  // site as usual. An unresolvable reference passes through unchanged.
-  {
-    const ref = (schema as JSONSchemaObj).$ref;
-    if (typeof ref === "string" && isExternalSchemaRef(ref)) {
-      const resolved = ContextualFlowControl.resolveSchemaRefs(
-        schema as JSONSchemaObj,
-      );
-      if (isObjectNotArray(resolved)) schema = resolved;
-      else return schema;
-    }
-  }
+  // site as usual; an unresolvable reference passes through unchanged (the
+  // helper returns it as it is, and a reference has nothing to strip).
+  schema = resolveExternalRootRefForStructure(schema as JSONSchemaObj);
 
   // Memoize by input identity: sanitize is a pure function of
   // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen

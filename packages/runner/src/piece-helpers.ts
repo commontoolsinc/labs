@@ -10,7 +10,10 @@ import { isObjectNotArray, isObjectOrArray } from "../../utils/src/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
@@ -25,7 +28,6 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
-import { resolveSchemaRefsCanonical } from "./traverse.ts";
 
 const logger = getLogger("piece-helpers");
 
@@ -159,16 +161,13 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 
   // A schema at rest can be a content-addressed reference
   // (`docs/specs/content-addressed-schemas.md`), which carries no structure
-  // to walk. Judge the relaxation on the resolved document, through the
-  // memoized canonical resolver traversal uses; a reference whose closure
-  // has not arrived keeps the strict schema — the same conservative
-  // fallback as a chain the resolver cannot complete.
-  let structural = schema;
-  if ("$ref" in schema) {
-    const resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj);
-    if (!isObjectNotArray(resolved)) return schema;
-    structural = resolved;
-  }
+  // to walk. Judge the relaxation on the resolved document; a reference
+  // whose closure has not arrived stays a reference, which the walk below
+  // finds nothing to relax in — the same conservative fallback as a chain
+  // the resolver cannot complete.
+  const structural = resolveExternalRootRefForStructure(
+    schema as JSONSchemaObj,
+  );
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.

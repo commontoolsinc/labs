@@ -2148,22 +2148,26 @@ function toolInputRequiredIntegrityFailure(
   if (!isObjectOrArray(schema)) {
     return undefined;
   }
-  // A reference-form schema resolves before the walk. This is a security
-  // gate, so an unresolvable reference fails CLOSED — a floor could hide
-  // behind it — unlike the schemaless degradation structural readers use.
+  // A reference-form schema resolves before the walk, through the
+  // fail-closed resolver: this is a security gate, so an unresolvable
+  // reference refuses the call — a floor could hide behind it. Deliberately
+  // NOT resolveExternalRootRefForStructure, whose reference-unchanged miss
+  // would read as nothing-to-refuse.
   let structural = schema;
   const ref = (structural as JSONSchemaObj).$ref;
   if (typeof ref === "string" && isExternalSchemaRef(ref)) {
-    const resolved = ContextualFlowControl.resolveSchemaRefs(
-      structural as JSONSchemaObj,
-    );
-    if (!isObjectOrArray(resolved)) {
+    try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        structural as JSONSchemaObj,
+      );
+      if (!isObjectOrArray(resolved)) return undefined;
+      structural = resolved;
+    } catch {
       return `field "${
         path || "(root)"
       }" carries a schema reference this session cannot resolve; ` +
         `refusing the call (fail closed)`;
     }
-    structural = resolved;
   }
   const ifc = structural.ifc;
   if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
