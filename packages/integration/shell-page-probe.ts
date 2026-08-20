@@ -146,10 +146,10 @@ export function describeShellPage(probe: ShellPageProbe): string {
  * Read `page` and render it as the detail block of a failure message,
  * reporting the reason instead when the page cannot be read at all.
  *
- * This is the whole of what a failure report needs from the page, so a caller
- * adding page context to an error uses this rather than pairing the read and
- * the render itself. A page that has closed, or a browser that has gone away,
- * must not replace the failure being reported with a second one.
+ * This is the whole of what a failure report needs from the page. A page that
+ * has closed, or a browser that has gone away, must not replace the failure
+ * being reported with a second one, so the read is guarded here rather than at
+ * each call site.
  */
 export async function readAndDescribeShellPage(page: Page): Promise<string> {
   try {

@@ -22,12 +22,12 @@ import {
 } from "@commonfabric/navigation";
 import { AppState, deserialize } from "@commonfabric/shell/app-state";
 
+import { describeThrown } from "./describe-thrown.ts";
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
 import { getPresentationSession } from "./presentation/session.ts";
-import { describeThrown } from "./describe-thrown.ts";
 import {
   assertShellDocument,
   readAndDescribeShellPage,

@@ -11,6 +11,11 @@ describe("describe-thrown", () => {
       );
     });
 
+    it("returns the name of an `Error` carrying no message", () => {
+      expect(describeThrown(new Error())).toBe("Error");
+      expect(describeThrown(new TypeError())).toBe("TypeError");
+    });
+
     it("returns the first line of a page exception's description", () => {
       // The shape the browser protocol reports an uncaught page exception in.
       const pageException = {
@@ -27,25 +32,27 @@ describe("describe-thrown", () => {
       );
     });
 
-    it("points at the cause for a value it cannot summarize", () => {
+    it("renders a value it cannot summarize on one line", () => {
       expect(describeThrown({ exceptionId: 1, text: "Uncaught" })).toBe(
-        "see the value reported as the cause below",
+        '{ exceptionId: 1, text: "Uncaught" }',
       );
-      expect(describeThrown("a bare string")).toBe(
-        "see the value reported as the cause below",
-      );
-      expect(describeThrown(undefined)).toBe(
-        "see the value reported as the cause below",
-      );
-      expect(describeThrown(null)).toBe(
-        "see the value reported as the cause below",
+      expect(describeThrown("a bare string")).toBe('"a bare string"');
+      expect(describeThrown(undefined)).toBe("undefined");
+      expect(describeThrown(null)).toBe("null");
+    });
+
+    it("renders a record whose description is empty", () => {
+      expect(describeThrown({ exception: { description: "" } })).toBe(
+        "{ exception: [Object] }",
       );
     });
 
-    it("points at the cause for an empty description", () => {
-      expect(describeThrown({ exception: { description: "" } })).toBe(
-        "see the value reported as the cause below",
-      );
+    // A caller that reports a failure it does not own — the page probe inside
+    // a state-wait report — attaches someone else's error as the cause, so a
+    // summary that deferred to "the cause" would name the wrong failure.
+    it("keeps a deeply nested value to one line", () => {
+      expect(describeThrown({ a: { b: { c: { d: 1 } } }, list: [1, 2, 3] }))
+        .toBe("{ a: [Object], list: [Array] }");
     });
   });
 });

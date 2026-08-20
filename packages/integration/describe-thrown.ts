@@ -1,18 +1,20 @@
 /**
  * A one-line summary of a thrown value, for the first line of a failure
- * message whose thrower carries the value itself as the new error's cause.
+ * message.
  *
- * An `Error` is summarized by its message. A page exception does not arrive as
- * an `Error`: the browser protocol reports it as a detail record, and the
- * `exception.description` inside that record holds what the page would have
- * printed — the error's name, its message, and its stack. Its first line is
- * the name and the message, which is the summary wanted here.
+ * An `Error` is summarized by its message, or by its name where it carries no
+ * message. A page exception does not arrive as an `Error`: the browser
+ * protocol reports it as a detail record, whose `exception.description` holds
+ * the error's name, its message, and its stack, as the page renders them. Its
+ * first line is the name and the message, which is the summary wanted here.
  *
- * Anything else points at the cause, which Deno prints below the message.
- * Stringifying such a value here would put "[object Object]" in its place.
+ * Anything else is rendered inline, its top level only, because stringifying it
+ * would read as "[object Object]". The summary stands on its own: a caller
+ * that attaches the value as its error's cause adds the full detail, and a
+ * caller reporting a failure it does not own has nowhere to defer to.
  */
 export function describeThrown(error: unknown): string {
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return error.message || error.name;
   if (typeof error === "object" && error !== null) {
     const description = (error as { exception?: { description?: unknown } })
       .exception?.description;
@@ -20,5 +22,10 @@ export function describeThrown(error: unknown): string {
       return description.split("\n")[0];
     }
   }
-  return "see the value reported as the cause below";
+  return Deno.inspect(error, {
+    colors: false,
+    compact: true,
+    depth: 0,
+    breakLength: Infinity,
+  });
 }
