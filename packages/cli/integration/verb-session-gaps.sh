@@ -443,6 +443,27 @@ AFTER=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
+step "12. the registry does not list what a handler created"
+# The claim the agent's entry is built on: `cf piece ls` reads the piece
+# registry, and nothing registers a piece on the author's behalf. The board was
+# registered when it was deployed; the item its `addItem` handler created was
+# not, because the handler never sent it to `addPiece`. Both facts have to hold
+# at once for the document to be right — an unlisted piece that also could not
+# be read would mean something else entirely.
+LS=$($CF piece ls $ARGS --json 2>/dev/null)
+check "Work tracker" \
+  "$(echo "$LS" | jq -r '[.[]? | select(.name == "Work tracker") | .name] | join(",")')" \
+  "the deployed board is registered, so the listing does find it"
+check "" \
+  "$(echo "$LS" | jq -r '[.[]? | select(.name == "Login rewrite") | .name] | join(",")')" \
+  "the item the board's handler created is absent from the registry"
+# Absence from the listing is not absence of the piece: the same item answers
+# on its own address. That is what makes an empty `ls` uninformative rather
+# than conclusive, and it is the inference the document exists to block.
+check "Login rewrite" \
+  "$($CF get --quiet --piece "$EPIC" title $ARGS 2>/dev/null | jq -r '. // empty')" \
+  "the unlisted item still reads through the address the create returned"
+
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \
   "$PASS" "$FAIL" "$GAPS" "$ELAPSED"
