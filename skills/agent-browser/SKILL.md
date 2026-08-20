@@ -16,9 +16,10 @@ Read that guide first. It is the canonical reference.
 
 When this skill is activated inside a `cf-harness` browser-profile subagent, the
 profile intentionally narrows the generic `agent-browser` capability surface
-described below. Use the leased CDP endpoint provided in the task, for example
-`agent-browser --cdp http://host.docker.internal:9362 snapshot -i`, and do not
-open or attach to any other browser endpoint.
+described below. There is no shell in that profile: page actions go through the
+harness's `browser` tool, and the harness attaches the leased CDP endpoint
+itself. Allowlisted skill scripts likewise receive the endpoint through
+`AGENT_BROWSER_CDP` in their environment; do not pass `--cdp` to them.
 
 The cf-harness browser profile allows only a small set of page commands: `open`
 for HTTP(S) URLs, `snapshot`, `get title/url/text`, bounded `wait`, and

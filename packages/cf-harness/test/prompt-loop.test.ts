@@ -3299,11 +3299,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
                     arguments: JSON.stringify({
                       skill: "agent-browser",
                       path: "scripts/capture-workflow.sh",
-                      args: [
-                        "--cdp",
-                        "http://127.0.0.1:9222",
-                        "http://localhost:8000/piece",
-                      ],
+                      args: ["http://localhost:8000/piece"],
                     }),
                   },
                 }],
@@ -3390,8 +3386,6 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       args: [
         "-s",
         "--",
-        "--cdp",
-        "http://127.0.0.1:9222",
         "http://localhost:8000/piece",
       ],
       cwd: workspace,
@@ -3403,6 +3397,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
         SKILL_DIR: skillDir,
         SKILL_SCRIPT: join(skillDir, "scripts", "capture-workflow.sh"),
         CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "host",
+        AGENT_BROWSER_CDP: "http://127.0.0.1:9222",
       },
       stdinText: scriptSource,
       timeoutMs: 60000,

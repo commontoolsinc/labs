@@ -423,6 +423,12 @@ export const browserTool: HarnessToolDefinition<
         "browser requires a host-mounted workspace to run against",
       );
     }
+    // Every string that came through the process — an error message that
+    // joins the argv, output that echoes the connection — gets the endpoint
+    // scrubbed before it can reach the model. The endpoint is harness-side
+    // state; no execution outcome is a channel for it.
+    const redactEndpoint = (text: string): string =>
+      text.replaceAll(cdpOrigin, "<lease endpoint>");
     let result;
     try {
       result = await context.hostProcessRunner.run({
@@ -437,7 +443,9 @@ export const browserTool: HarnessToolDefinition<
       return errorOutput(
         "host_unavailable",
         `agent-browser could not run: ${
-          error instanceof Error ? error.message : String(error)
+          redactEndpoint(
+            error instanceof Error ? error.message : String(error),
+          )
         }`,
       );
     }
@@ -447,15 +455,15 @@ export const browserTool: HarnessToolDefinition<
         : result.stdout;
       return errorOutput(
         "command_failed",
-        truncateHostOutput(failureText, "message"),
+        truncateHostOutput(redactEndpoint(failureText), "message"),
         result.exitCode,
       );
     }
-    const stderrText = result.stderr.trim();
+    const stderrText = redactEndpoint(result.stderr).trim();
     return {
       outputId,
       status: "ok",
-      output: truncateHostOutput(result.stdout, "output"),
+      output: truncateHostOutput(redactEndpoint(result.stdout), "output"),
       ...(stderrText !== ""
         ? { detail: truncateHostOutput(stderrText, "detail") }
         : {}),

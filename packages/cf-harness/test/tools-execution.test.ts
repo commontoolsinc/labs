@@ -1457,6 +1457,68 @@ Deno.test("browser tool reports a spawn failure as host_unavailable", async () =
   });
 });
 
+Deno.test("browser tool scrubs the lease endpoint from a timeout error", async () => {
+  const hostRunner: ProcessRunner = {
+    run(request) {
+      return Promise.reject(
+        new ProcessTimeoutError(
+          [request.command, ...request.args].join(" "),
+          request.timeoutMs ?? 0,
+        ),
+      );
+    },
+  };
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, {
+    action: "snapshot",
+    timeoutMs: 0,
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "host_unavailable",
+    message:
+      "agent-browser could not run: process timed out after 0ms: agent-browser --cdp <lease endpoint> snapshot",
+  });
+});
+
+Deno.test("browser tool scrubs the lease endpoint from what the browser prints", async () => {
+  const hostRunner = new FakeProcessRunner([
+    {
+      stdout: "connected to http://localhost:9362 for page\n",
+      stderr: "warning: http://localhost:9362 slow\n",
+      exitCode: 0,
+    },
+    {
+      stdout: "",
+      stderr: "could not reach http://localhost:9362\n",
+      exitCode: 1,
+    },
+  ]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const okOutput = await browserTool.invoke(context, { action: "console" });
+  const failedOutput = await browserTool.invoke(context, {
+    action: "console",
+  });
+
+  assertEquals(okOutput, {
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: "connected to <lease endpoint> for page\n",
+    detail: "warning: <lease endpoint> slow",
+  });
+  assertEquals(failedOutput, {
+    outputId: "run-1:browser:2",
+    status: "error",
+    code: "command_failed",
+    message: "could not reach <lease endpoint>\n",
+    exitCode: 1,
+  });
+});
+
 Deno.test("read_file tool resolves relative paths from the session currentDir", async () => {
   const sandbox = new FakeSandboxRuntime([{
     stdout: "hello",
@@ -2312,11 +2374,7 @@ Deno.test({
       const output = await runSkillScriptTool.invoke(context, {
         skill: "agent-browser",
         path: "scripts/capture-workflow.sh",
-        args: [
-          "--cdp",
-          "http://localhost:9362",
-          "http://localhost:8000/piece",
-        ],
+        args: ["http://localhost:8000/piece"],
       });
 
       assertEquals(output.status, "executed");
@@ -2332,8 +2390,6 @@ Deno.test({
         args: [
           "-s",
           "--",
-          "--cdp",
-          "http://localhost:9362",
           "http://localhost:8000/piece",
         ],
         cwd: workspace,
@@ -2345,6 +2401,7 @@ Deno.test({
           SKILL_DIR: skill.skillDir,
           SKILL_SCRIPT: join(skill.skillDir, "scripts", "capture-workflow.sh"),
           CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "host",
+          AGENT_BROWSER_CDP: "http://localhost:9362",
         },
         stdinText: scriptSource,
         timeoutMs: 60000,
@@ -2354,8 +2411,6 @@ Deno.test({
         "bash",
         "-s",
         "--",
-        "--cdp",
-        "http://localhost:9362",
         "http://localhost:8000/piece",
       ]);
 
@@ -2364,7 +2419,7 @@ Deno.test({
         path: "scripts/capture-workflow.sh",
         args: [
           "--cdp",
-          "http://localhost:9444",
+          "http://localhost:9362",
           "http://localhost:8000/piece",
         ],
       });
@@ -2372,7 +2427,7 @@ Deno.test({
       assertEquals(deniedOutput.error?.code, "permission_denied");
       assertStringIncludes(
         deniedOutput.error?.message ?? "",
-        "Browser Access lease endpoint",
+        "must not pass --cdp",
       );
       assertEquals(hostRunner.calls.length, 1);
       assertEquals(executions[1].status, "error");
@@ -2400,11 +2455,7 @@ Deno.test({
       const expiredOutput = await runSkillScriptTool.invoke(expiredContext, {
         skill: "agent-browser",
         path: "scripts/capture-workflow.sh",
-        args: [
-          "--cdp",
-          "http://localhost:9362",
-          "http://localhost:8000/piece",
-        ],
+        args: ["http://localhost:8000/piece"],
       });
       assertEquals(expiredOutput.status, "error");
       assertEquals(expiredOutput.error?.code, "permission_denied");

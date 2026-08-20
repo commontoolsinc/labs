@@ -3391,8 +3391,8 @@ Deno.test({
         "set -euo pipefail",
         'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
         'echo "skill=$SKILL_NAME"',
-        'echo "cdp=$2"',
-        'echo "url=$3"',
+        'echo "cdp=$AGENT_BROWSER_CDP"',
+        'echo "url=$1"',
         "",
       ].join("\n");
       await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
@@ -3470,11 +3470,7 @@ Deno.test({
                             arguments: JSON.stringify({
                               skill: "agent-browser",
                               path: "scripts/capture-workflow.sh",
-                              args: [
-                                "--cdp",
-                                "http://localhost:9362",
-                                "http://localhost:8000/piece",
-                              ],
+                              args: ["http://localhost:8000/piece"],
                             }),
                           },
                         }],
@@ -3521,9 +3517,11 @@ Deno.test({
       assertEquals(toolOutput.executionTarget, "host");
       assertStringIncludes(toolOutput.stdout ?? "", "target=host\n");
       assertStringIncludes(toolOutput.stdout ?? "", "skill=agent-browser\n");
+      // The script sees the lease endpoint through AGENT_BROWSER_CDP, and
+      // what it echoes back reaches the model with the endpoint scrubbed.
       assertStringIncludes(
         toolOutput.stdout ?? "",
-        "cdp=http://localhost:9362\n",
+        "cdp=<lease endpoint>\n",
       );
       assertStringIncludes(
         toolOutput.stdout ?? "",
