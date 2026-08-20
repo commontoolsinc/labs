@@ -4262,7 +4262,7 @@ export class CellBridge {
   ): Promise<void> {
     let sourceFiles: { name: string; contents: string }[] | undefined;
     try {
-      sourceFiles = await piece.getPatternSourceFiles();
+      sourceFiles = (await piece.getPatternSourceProgram())?.files;
     } catch {
       // Pattern source not always available
     }

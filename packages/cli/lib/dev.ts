@@ -157,7 +157,7 @@ export async function process(
     id,
     graph,
     mainSpecifier,
-    program.files,
+    program,
   );
   const patternJson = options.patternJson && main
     ? serializeMainExport(main, options.mainExport)

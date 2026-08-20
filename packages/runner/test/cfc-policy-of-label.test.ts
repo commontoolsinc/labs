@@ -289,7 +289,7 @@ describe("PolicyOf label-time binding", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const emittedSchema = evaluated.main?.schema as JSONSchema;
 
@@ -347,7 +347,7 @@ describe("PolicyOf label-time binding", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const emittedSchema = evaluated.main?.schema as JSONSchema;
 

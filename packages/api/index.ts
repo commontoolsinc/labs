@@ -2369,6 +2369,11 @@ export interface BuiltInGenerateTextState {
 export interface BuiltInCompileAndRunParams<T> {
   files: Array<{ name: string; contents: string }>;
   main: string;
+  /**
+   * Names of entries in `files` that carry data rather than code. A pattern
+   * reads one with `dataFile()`; nothing compiles, imports, or transforms it.
+   */
+  dataFiles?: string[];
   input?: T;
 }
 

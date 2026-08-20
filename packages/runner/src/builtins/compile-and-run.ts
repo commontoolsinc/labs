@@ -1,5 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { Program } from "@commonfabric/js-compiler";
+import type { RuntimeProgram } from "../harness/types.ts";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
 import { type BuiltInCompileAndRunParams } from "commonfabric";
 
@@ -68,7 +68,7 @@ export function compileAndRun(
     tx.resetNarrowestReadScope();
     // TODO(seefeld): Ideally, this cell already has this schema, because we set
     // it on the node itself.
-    const program: Program = inputsCell.asSchema({
+    const program: RuntimeProgram = inputsCell.asSchema({
       type: "object",
       properties: {
         files: {
@@ -84,6 +84,10 @@ export function compileAndRun(
           default: [],
         },
         main: { type: "string", default: "" },
+        // Named here or dropped: the traverser omits every key the properties
+        // map leaves out, so a field missing from this schema never reaches
+        // the compile however well the parameter type declares it.
+        dataFiles: { type: "array", items: { type: "string" } },
       },
       required: ["files", "main"],
     }).withTx(tx).get();

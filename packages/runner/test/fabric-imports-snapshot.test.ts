@@ -138,7 +138,7 @@ describe("fabric import snapshot semantics", () => {
       compiled.id,
       compiled.graph,
       compiled.mainSpecifier,
-      program.files,
+      program,
     );
     const tx = runtime.edit();
     const resultCell = runtime.getCell<{ result: number }>(

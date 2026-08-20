@@ -71,7 +71,7 @@ describe("Engine compile + evaluate", () => {
       id,
       graph,
       mainSpecifier,
-      program.files,
+      program,
     );
     expect(result.main!["default"]).toBe("hello");
   });

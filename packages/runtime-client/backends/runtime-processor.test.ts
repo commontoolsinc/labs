@@ -37,6 +37,7 @@ import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
+  type GetPatternSourcesRequest,
   RequestType,
 } from "../protocol/mod.ts";
 import {
@@ -3714,5 +3715,70 @@ describe("RuntimeProcessor.handleNotification", () => {
     expect(warnings.length).toBe(1);
     expect(events).toEqual([]);
     expect(acks).toEqual([]);
+  });
+});
+
+describe("runtime-client pattern source view", () => {
+  // `getPatternSources` reads two things: which patterns the graph is running,
+  // and each one's program. Everything else on the runtime is beside the point
+  // here, so the processor is those two answers and nothing more.
+  const processorOver = (
+    programs: Record<string, unknown>,
+  ): RuntimeProcessor =>
+    ({
+      runtime: {
+        scheduler: {
+          getGraphSnapshot: () => ({
+            nodes: Object.keys(programs).map((identity) => ({
+              patternIdentity: { identity, symbol: "default" },
+            })),
+          }),
+        },
+        patternManager: {
+          getPatternProgramBySync: (identity: string) => programs[identity],
+        },
+      },
+    }) as unknown as RuntimeProcessor;
+
+  const sourcesOf = (processor: RuntimeProcessor) =>
+    RuntimeProcessor.prototype.getPatternSources.call(processor, {
+      type: RequestType.GetPatternSources,
+    } as GetPatternSourcesRequest);
+
+  it("says which of a running pattern's files carry data", () => {
+    const { patterns } = sourcesOf(processorOver({
+      "cf:module/abc": {
+        main: "/main.tsx",
+        files: [
+          { name: "/main.tsx", contents: "export default 1;" },
+          { name: "/data/cities.json", contents: "[]" },
+        ],
+        dataFiles: ["/data/cities.json"],
+      },
+    }));
+    expect(patterns.length).toBe(1);
+    expect(patterns[0].files.map((file) => file.name)).toEqual([
+      "/main.tsx",
+      "/data/cities.json",
+    ]);
+    // Without this the view cannot tell the lookup table from the module.
+    expect(patterns[0].dataFiles).toEqual(["/data/cities.json"]);
+  });
+
+  it("omits the list for a pattern that carries no data", () => {
+    const { patterns } = sourcesOf(processorOver({
+      "cf:module/abc": {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      },
+    }));
+    expect(patterns[0].dataFiles).toBe(undefined);
+  });
+
+  it("omits a pattern whose program was never kept", () => {
+    const { patterns } = sourcesOf(
+      processorOver({ "cf:module/abc": undefined }),
+    );
+    expect(patterns).toEqual([]);
   });
 });

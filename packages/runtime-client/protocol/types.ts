@@ -544,6 +544,8 @@ export type PatternSourceInfo = {
   /** Content identity of the pattern's entry module (`cf:module/<hash>`). */
   identity: string;
   files: PatternSourceFile[];
+  /** Names among `files` that carry data rather than code. */
+  dataFiles?: string[];
 };
 
 export type PatternSourcesResponse = {
@@ -786,6 +788,8 @@ export type PieceSourceView = {
   repository?: string;
   entry?: string;
   files: PatternSourceFile[];
+  /** Names among `files` that carry data rather than code. */
+  dataFiles?: string[];
   history: PieceSourceRevisionView[];
   currentRevisionId?: string;
 };
@@ -797,6 +801,8 @@ export type PieceSourceResponse = {
 export type PieceSourceRevisionSourceView = {
   pattern: PiecePatternRefView;
   files: PatternSourceFile[];
+  /** Names among `files` that carry data rather than code. */
+  dataFiles?: string[];
 };
 
 export type PieceSourceRevisionResponse = {
