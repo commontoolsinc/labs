@@ -1123,6 +1123,70 @@ export default pattern(() => {
     !adminRowIsAdmin(s11[UI], "Carol")
   );
 
+  // Renaming or removing an admin moves or drops their role, so a user who may
+  // not change the roster may not do either — otherwise the role would end up
+  // naming a person who is not there, and no actor could hold it.
+  const action_s11_carol_renames_dave = action(() => {
+    s11.editPerson.send({
+      originalName: "Dave",
+      name: "Mallory",
+      email: "dave@co.com",
+      commuteMode: "drive",
+      priorityRank: 2,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+  const action_s11_carol_removes_dave = action(() =>
+    s11.removePerson.send({ name: "Dave" })
+  );
+
+  const assert_s11_dave_keeps_his_name = assert(() =>
+    len(s11.people.filter((p: Person) => p.name === "Mallory")) === 0 &&
+    adminRowIsAdmin(s11[UI], "Dave")
+  );
+  const assert_s11_dave_still_there = assert(() =>
+    len(s11.people.filter((p: Person) => p.name === "Dave")) === 1 &&
+    adminRowIsAdmin(s11[UI], "Dave")
+  );
+
+  // ============================================================
+  // Subject 12: A role is only ever granted to a person who exists
+  // ============================================================
+
+  const rosterErin: Person = {
+    name: "Erin",
+    email: "erin@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
+
+  const s12 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [rosterErin],
+    requests: [],
+  });
+
+  const action_s12_enable_manager = action(() => s12.enableAdminManager.send());
+  const action_s12_grant_phantom = action(() =>
+    s12.togglePersonAdmin.send({ name: "Nobody" })
+  );
+  const action_s12_grant_erin = action(() =>
+    s12.togglePersonAdmin.send({ name: "Erin" })
+  );
+
+  // A role for a name nobody answers to would fill the roster with authority
+  // no actor can hold, closing the bootstrap for good.
+  const assert_s12_phantom_refused = assert(() =>
+    !adminRowIsAdmin(s12[UI], "Erin") &&
+    s12.currentUserCanManageAdmins === true
+  );
+  const assert_s12_erin_is_admin = assert(() =>
+    adminRowIsAdmin(s12[UI], "Erin")
+  );
+
   return {
     [TESTS]: [
       // People management
@@ -1269,6 +1333,17 @@ export default pattern(() => {
       { assertion: assert_s11_carol_locked_out },
       { action: action_s11_carol_grants_self },
       { assertion: assert_s11_carol_still_member },
+      { action: action_s11_carol_renames_dave },
+      { assertion: assert_s11_dave_keeps_his_name },
+      { action: action_s11_carol_removes_dave },
+      { assertion: assert_s11_dave_still_there },
+
+      // A role is only ever granted to a person who exists
+      { action: action_s12_enable_manager },
+      { action: action_s12_grant_phantom },
+      { assertion: assert_s12_phantom_refused },
+      { action: action_s12_grant_erin },
+      { assertion: assert_s12_erin_is_admin },
     ],
     s1,
     s2,
@@ -1288,6 +1363,7 @@ export default pattern(() => {
     s9h,
     s10,
     s11,
+    s12,
     // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
     // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
     // fail-closed). Fix the schema(s), then drop this opt-out.

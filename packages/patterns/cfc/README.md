@@ -48,8 +48,6 @@ subject and integrity labels.
 
 ```ts
 import {
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
   adminRegistryEveryoneIsAdmin,
 } from "../cfc/admin/mod.ts";
@@ -57,10 +55,10 @@ import {
   type AddIntegrity,
   type RequiresIntegrity,
   Writable,
+  type WriteAuthorizedBy,
 } from "commonfabric";
 
 const PROJECT_ADMIN_INTEGRITY = "project-admin" as const;
-const PROJECT_ADMIN_MANAGER_INTEGRITY = "project-admin-manager" as const;
 
 interface ProjectAdminRoleAssignment {
   subject: { projectId: string };
@@ -73,31 +71,44 @@ type ProjectAdminRole = AddIntegrity<
 >;
 
 type ProjectAdminList = RequiresIntegrity<
-  ProjectAdminRole[],
-  readonly [typeof PROJECT_ADMIN_MANAGER_INTEGRITY]
->;
-
-type ProjectAdminManagerCredential = AdminManagerCredential<
-  typeof PROJECT_ADMIN_MANAGER_INTEGRITY
+  WriteAuthorizedBy<
+    AddIntegrity<
+      ProjectAdminRole[],
+      readonly [typeof PROJECT_ADMIN_INTEGRITY]
+    >,
+    typeof commitProjectAdminChange
+  >,
+  readonly [typeof PROJECT_ADMIN_INTEGRITY]
 >;
 
 const admins = adminRegistryEntries<ProjectAdminRole>(adminRegistry);
 const everyoneIsAdmin = adminRegistryEveryoneIsAdmin(adminRegistry);
-const canEditAdmins = adminManagerCredentialIsActive(managerCredential.get());
 ```
+
+One atom runs through the whole registry, and the list is both endorsed and
+floored with it. The next section says why each of those is there, and why a
+second atom for "who may edit the roster" does not work.
 
 Keep subject lookup and local role toggling in the pattern when the domain model
 is local, such as people, profiles, rooms, or projects.
 `adminRegistryEveryoneIsAdmin` treats an empty admin list as bootstrap mode:
 everyone is an admin until the pattern writes at least one explicit admin role
-or explicitly stores `everyoneIsAdmin: false`.
+or explicitly stores `everyoneIsAdmin: false`. That bootstrap is what answers
+"who may take the first seat" — an empty roster is open, and once a role exists
+the roster gates itself.
+
+`AdminManagerCredential` mints an atom onto a value standing for "this actor may
+edit the roster". It is for a credential the pattern is handed, not one the
+viewer switches on for itself; see "A self-granted flag is not a credential"
+below.
 
 ## Floor An Admin Registry
 
 A `requiredIntegrity` floor is a requirement on the value being written, and the
-runtime also screens the reads that fed that write. Four rules follow. A pattern
-that breaks one of them has declared a protection its own writes cannot satisfy,
-so the runtime refuses every write to the path it was meant to guard.
+runtime also screens the reads that fed that write. Five rules follow. A pattern
+that breaks one of the first four has declared a protection its own writes
+cannot satisfy, so the runtime refuses every write to the path it was meant to
+guard. The fifth is what keeps the protection from locking everyone out.
 
 **Mint on the path the floor sits on.** The floor asks what the value at that
 exact path carries. `AddIntegrity` on an array's items endorses the items; it
@@ -127,8 +138,16 @@ the list's `writeAuthorizedBy` contract, so that a write from anywhere else — 
 unreviewed action in the same pattern, or another pattern holding the same cell
 — is refused by the runtime rather than by convention.
 
+**A role names someone who is there.** Once a roster gates itself, a role
+granted to a subject no actor can be — a name nobody answers to, a profile
+nobody holds — fills the roster without giving anyone the authority to change
+it, and the bootstrap that opened the first grant never reopens. Grant only to a
+subject drawn from the pattern's own list of them, and where a subject can be
+renamed or removed, refuse the change rather than leave a role pointing at
+someone who is no longer there.
+
 `packages/patterns/factory-outputs/parking-coordinator/main.tsx` follows all
-four. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
+five. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
 handler the same way, with profiles rather than names as role subjects.
 
 ## Use Prompt-Injection Helpers

@@ -21,7 +21,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/factory-outputs/parking-coordinator/main.tsx",
-              "moduleIdentity": "9SZj8sQ8oOIM3s6s9OgT-nBQg-rPHEnaVxSRMhl5fuE",
+              "moduleIdentity": "s2AgXKM2PJyyG9_s13dD3xorYEdB47ArcGy71ynTIHg",
               "path": [
                 "commitParkingAdminChange"
               ]
@@ -337,7 +337,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/factory-outputs/parking-coordinator/main.tsx",
-              "moduleIdentity": "9SZj8sQ8oOIM3s6s9OgT-nBQg-rPHEnaVxSRMhl5fuE",
+              "moduleIdentity": "s2AgXKM2PJyyG9_s13dD3xorYEdB47ArcGy71ynTIHg",
               "path": [
                 "commitParkingAdminChange"
               ]

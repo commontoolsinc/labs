@@ -343,6 +343,9 @@ const currentParkingAdminRole = (
     currentActorName(selectedPersonName, people),
   );
 
+const peopleIncludeName = (people: PeopleCell, personName: string): boolean =>
+  (people.get() ?? []).some((person) => person.name === personName);
+
 // The roster confers parking-admin authority, so only someone who already holds
 // it may change it. An empty roster is the bootstrap case: the first grant is
 // open, and from then on the roster gates itself.
@@ -431,16 +434,28 @@ export const commitParkingAdminChange = handler<
   const personName = (event?.name ?? "").trim();
   const newName = (event?.newName ?? "").trim();
   if (managerMode.get() !== true || personName === "") return;
-  if (kind === "rename" && newName === "") return;
 
-  // `editPerson` writes the people list before sending the rename, so the
-  // acting person may already answer to their new name; the name they are
-  // being renamed from still identifies them in the roster.
-  const actorName = currentActorName(selectedPersonName, people);
-  const rosterActorName = kind === "rename" && actorName === newName
-    ? personName
-    : actorName;
-  if (!actorMayChangeParkingAdmins(adminRegistry, rosterActorName)) return;
+  if (kind === "toggle") {
+    // A role is a grant to a person on the roster of people. Granting one to a
+    // name nobody answers to would fill the roster with a role no actor can
+    // hold, and the bootstrap that opens the first grant would never reopen.
+    if (!peopleIncludeName(people, personName)) return;
+    if (
+      !actorMayChangeParkingAdmins(
+        adminRegistry,
+        currentActorName(selectedPersonName, people),
+      )
+    ) return;
+  } else {
+    // `rename` and `remove` arrive after the people list already changed, so
+    // the acting person cannot be identified against it any more. Neither
+    // grants authority — each keeps a role from pointing at someone who is no
+    // longer there — and `editPerson` and `removePerson` refuse the change
+    // outright when the acting user may not move a role, which is the check
+    // that decides who may do this.
+    if (!personIsParkingAdmin(adminRegistry, personName)) return;
+    if (kind === "rename" && (newName === "" || newName === personName)) return;
+  }
 
   const roles = parkingAdminRolesValue(adminRegistry);
   const nextRoles = kind === "toggle"
@@ -449,13 +464,6 @@ export const commitParkingAdminChange = handler<
     ? renameParkingAdminRole(roles, personName, newName)
     : roles.filter((role) => role.subject.personName !== personName);
 
-  // A rename or a removal for someone who holds no role leaves the roster
-  // exactly as it was; skip the write rather than rewrite it unchanged.
-  const unchanged = nextRoles.length === roles.length &&
-    nextRoles.every((role, index) =>
-      role.subject.personName === roles[index].subject.personName
-    );
-  if (unchanged) return;
   adminRegistry.key("admins").set(nextRoles as ParkingAdminList);
 });
 
@@ -843,6 +851,21 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         trimName !== originalName && current.some((p) => p.name === trimName)
       ) return;
 
+      // A role names its holder, so renaming an admin moves their authority to
+      // the new name. Refuse the whole edit when the acting user may not move
+      // it: renaming anyway would leave the role pointing at a person who no
+      // longer exists, and nobody could reach the roster to repair it.
+      if (
+        trimName !== originalName &&
+        personIsParkingAdmin(adminRegistry, originalName) &&
+        !currentUserCanManageParkingAdmins(
+          adminManagerMode,
+          adminRegistry,
+          selectedPersonName,
+          people,
+        )
+      ) return;
+
       people.set(current.map((p) => {
         if (p.name !== originalName) return p;
 
@@ -880,6 +903,22 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const removePerson = action<{ name: string }>(({ name }) => {
+      // Removing an admin drops their role with them. Refuse the whole removal
+      // when the acting user may not drop it, rather than leave a role for a
+      // person who is gone — which a later person of the same name would
+      // inherit, and which no actor could hold in the meantime.
+      if (
+        personIsParkingAdmin(adminRegistry, name) &&
+        !currentUserCanManageParkingAdmins(
+          adminManagerMode,
+          adminRegistry,
+          selectedPersonName,
+          people,
+        )
+      ) {
+        removePersonConfirmTarget.set(null);
+        return;
+      }
       people.set(people.get().filter((p) => p.name !== name));
       removePersonAdmin.send({ name });
       if (selectedPersonName.get() === name) {
