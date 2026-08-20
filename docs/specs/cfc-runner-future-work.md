@@ -46,8 +46,9 @@ defaults `cfcEnforcementMode` to `enforce-explicit`
 ([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
 bare-transaction fallback. What *is* dormant: flow-labels default `off`
 ([`types.ts:331`](../../packages/runner/src/cfc/types.ts)) everywhere, the render
-confidentiality ceiling is plumbed end-to-end but no host populates it, and
-`enforce-strict` has no distinct behavior. So the flow-taint and display
+confidentiality ceiling is plumbed end-to-end but no host populates it, and no
+host runs at `enforce-strict`, leaving the one reject that rung adds — the
+writer-fit misfit — unexercised in deployment. So the flow-taint and display
 protections below are *built but dormant* until a host turns them on — see Epic H.
 
 ---
@@ -242,7 +243,7 @@ collaborative-doc model as a downgraded/future area. Ref: §14.4.8, §3.1.6.
 
 ## Epic H — Enforcement & flow activation (smaller than the engines, high leverage)
 
-**Size: medium. Partly just flipping defaults + finishing the ladder — do early.**
+**Size: medium. Mostly flipping defaults onto conforming states — do early.**
 
 Not new machinery so much as turning the system on:
 
@@ -250,11 +251,21 @@ Not new machinery so much as turning the system on:
   (§10's own worked example) is not stamped by default. Move deployments to
   propagation `persist`; note trigger-read confidentiality (SC-3) currently never
   reaches the enforcement side or the egress ceiling even when the dial is on.
-- **`enforce-strict` undifferentiated.** The effective deployment default is
-  already `enforce-explicit` (Runtime + lib-shell; the types-level `disabled` is
-  the bare-transaction fallback), but the strict rung is rankable with no
-  additional reject behavior in the commit gate (SC-13). Finish the ladder and
-  pick conforming default deployment states.
+- **`enforce-strict` default deployment states.** The effective deployment
+  default is `enforce-explicit` (Runtime + lib-shell; the types-level `disabled`
+  is the bare-transaction fallback). The strict rung carries one differentiated
+  reject: the SC-18b writer-fit misfit. The per-transaction flow join landing on
+  a written document must fit that document's declared store policy; under
+  strict a misfit rejects the commit, and under every mode below it persists the
+  measurement and flags a diagnostic. Implemented in `prepareBoundaryCommit`
+  ([`prepare.ts`](../../packages/runner/src/cfc/prepare.ts)), contract in
+  [`cfc-enforcement-matrix.md`](./cfc-enforcement-matrix.md) §4, asserted under
+  both modes in
+  [`cfc-writer-fit.test.ts`](../../packages/runner/test/cfc-writer-fit.test.ts).
+  What remains is picking the conforming default deployment states from that
+  matrix's §3 progression and moving the shipped hosts onto them; strict
+  presupposes `cfcFlowLabels: persist`, since the writer-fit measurement exists
+  only where the flow join is stamped.
 - **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
   **no host populates it**, and it admits atoms by raw structural equality rather
   than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).
@@ -375,7 +386,7 @@ Epic A (CNF clauses)  ──┬──►  Epic B (exchange-rule evaluator)  ─�
 
 Epic C (observation classes)   — independent, start any time
 Epic D (write/agent integrity) — independent (D1 wants B's matcher); highest security urgency
-Epic H activation (flip defaults, finish ladder) — do early, cheap, high leverage
+Epic H activation (flip defaults onto conforming states) — cheap, high leverage
 Epic F (range-scoped integrity) — last of the big epics; most speculative
 ```
 
