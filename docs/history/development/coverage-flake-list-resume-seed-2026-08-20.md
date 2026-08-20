@@ -70,25 +70,32 @@ reached one of them.
 The recovery moved into
 `packages/runner/src/builtins/list-result-container-seed.ts` as
 `seedResultContainerWhenPullSettles()`, which the three builtins now call.
-It takes the runtime, the container the coordinator still holds, the pull to
-wait on, and the logger to report through, so a test can hand it a pull that
-rejects and a runtime whose commits are refused.
+It takes the runtime, the container the deferral is about, a predicate saying
+whether the coordinator still holds that container, the pull to wait on, and
+the logger to report through, so a test can hand it a pull that rejects and a
+runtime whose commits are refused.
 
 `packages/runner/test/list-result-container-seed.test.ts` drives both failure
 reports along with the recovery's ordinary outcomes: a container the pull left
 absent is seeded, a container that arrived during the pull keeps the value it
 arrived with, a coordinator that no longer holds a container writes nothing, a
-rejected pull is reported and seeds anyway, and a seed the storage layer
-refuses is reported. Each case asserts the message key and the error carried
-with it, so a report that changed which failure it named would fail rather than
-stay green on the line count.
+rejected pull is reported and seeds anyway, a container released between a
+refused commit and its retry is not written on the retry, and a seed the
+storage layer refuses is reported. Each failure case asserts the message key
+and the error carried with it, so a report that changed which failure it named
+would fail rather than stay green on the line count.
 
 That takes every line of the recovery to a nonzero count from the new test file
 alone, and removes the two duplicate copies of it from the package's uncovered
 total.
 
-The dead line inside the recovery went with it. The seed re-read the
-coordinator's `active` flag inside the transaction body, after testing it
-immediately before opening the transaction, and `editWithRetry()` calls that
-body synchronously — so the inner test could never see a different answer than
-the outer one. It read as uncovered on every run.
+The liveness check inside the transaction body is what a reader is most likely
+to mistake for a dead line, and the first draft of this change deleted it on
+that reading. `editWithRetry()` runs the body synchronously on the first
+attempt, immediately after the caller has just asked the same question, so the
+two can never disagree there. They can on a retry: a retryable rejection is
+followed by an `await` of the conflict's catch-up gate and then a fresh call
+that runs the body again, which is exactly the window a coordinator's teardown
+lands in. The check stays, and the case that releases the container from inside
+the catch-up gate is what covers it — the only reason it read as uncovered
+before is that nothing drove a retry.

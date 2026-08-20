@@ -341,10 +341,12 @@ export function filter(
       // re-triggers this reconcile (the read above is journaled). A container
       // that was never persisted has nothing to stream in, so the seed below
       // ends the wait once the pull settles.
+      const container = result;
       seedResultContainerWhenPullSettles(
         runtime,
-        () => active ? result : undefined,
-        result.sync(),
+        container,
+        () => active && result === container,
+        container.sync(),
         logger,
       );
       return;

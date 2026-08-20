@@ -345,11 +345,21 @@ Reaching such a branch takes a failing operation, not a failing environment, so
 give the recovery its operation as a parameter.
 `seedResultContainerWhenPullSettles()` in
 `packages/runner/src/builtins/list-result-container-seed.ts` takes the runtime,
-the container, the pull to wait on, and the logger to report through.
+the container, a predicate saying whether the coordinator still holds it, the
+pull to wait on, and the logger to report through.
 `packages/runner/test/list-result-container-seed.test.ts` then hands it a pull
-that rejects and a runtime whose commits are refused. Each case asserts the
-message key and the error carried with it, so a report that changed which
+that rejects and a runtime whose commits are refused. Each failure case asserts
+the message key and the error carried with it, so a report that changed which
 failure it named fails rather than staying green on the line count.
+
+A guard reached only on a retry takes the same treatment. `editWithRetry()`
+runs its action synchronously on the first attempt, so a liveness check inside
+the action reads as unable to disagree with the one the caller just made — and
+as a dead line. It is not: a retryable rejection is followed by an `await` of
+the conflict's catch-up gate and then a fresh call that runs the action again.
+A test reaches it by refusing the first commit with a `ConflictError` whose
+`readyToRetry` gate flips the liveness answer, and asserts the commit count so
+that a version which stopped retrying fails rather than passing vacuously.
 
 Extracting it also settled where the branch lives. The same recovery had been
 written out three times, once each in `map.ts`, `filter.ts` and `flatmap.ts`, so

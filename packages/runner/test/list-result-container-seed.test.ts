@@ -93,13 +93,39 @@ describe("list-result-container-seed", () => {
     };
   }
 
+  /**
+   * Refuse this runtime's first commit with `rejection` and let every later one
+   * through, reporting how many commits were attempted. `ConflictError` is a
+   * retryable rejection, so `editWithRetry` awaits the rejection's catch-up gate
+   * and runs the action again.
+   */
+  function refuseFirstCommit(
+    rejection: { name: string; message: string; readyToRetry?: () => unknown },
+  ): () => number {
+    const openTransaction = runtime.edit.bind(runtime);
+    let commits = 0;
+    (runtime as any).edit = () => {
+      const tx: IExtendedStorageTransaction = openTransaction();
+      const commit = tx.commit.bind(tx);
+      (tx as any).commit = () => {
+        commits++;
+        if (commits > 1) return commit();
+        tx.abort(rejection);
+        return Promise.resolve({ error: rejection });
+      };
+      return tx;
+    };
+    return () => commits;
+  }
+
   describe("seedResultContainerWhenPullSettles()", () => {
     it("writes an empty array to a container the pull left absent", async () => {
       const container = newContainer("absent-after-pull");
       expect(valueOf(container)).toBeUndefined();
       await seedResultContainerWhenPullSettles(
         runtime,
-        () => container,
+        container,
+        () => true,
         Promise.resolve(),
         logger,
       );
@@ -112,7 +138,8 @@ describe("list-result-container-seed", () => {
       const pull = Promise.withResolvers<void>();
       const seeded = seedResultContainerWhenPullSettles(
         runtime,
-        () => container,
+        container,
+        () => true,
         pull.promise,
         logger,
       );
@@ -130,7 +157,8 @@ describe("list-result-container-seed", () => {
       const container = newContainer("coordinator-torn-down");
       await seedResultContainerWhenPullSettles(
         runtime,
-        () => undefined,
+        container,
+        () => false,
         Promise.resolve(),
         logger,
       );
@@ -146,7 +174,8 @@ describe("list-result-container-seed", () => {
       // nothing left to report it.
       await seedResultContainerWhenPullSettles(
         runtime,
-        () => container,
+        container,
+        () => true,
         Promise.reject(pullFailure),
         logger,
       );
@@ -154,6 +183,33 @@ describe("list-result-container-seed", () => {
       expect(logger.warnings.length).toBe(1);
       expect(logger.warnings[0].key).toBe("resume-pull");
       expect(logger.reportedError(0)).toBe(pullFailure);
+    });
+
+    it("writes nothing on a retry the coordinator released the container before", async () => {
+      const container = newContainer("released-between-attempts");
+      let held = true;
+      // The catch-up gate runs between the refused attempt and the retry, which
+      // is the window a coordinator's teardown lands in.
+      const commits = refuseFirstCommit({
+        name: "ConflictError",
+        message: "stale confirmed read: of:test at seq 0 conflicted with seq 9",
+        readyToRetry: () => {
+          held = false;
+          return Promise.resolve();
+        },
+      });
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => held,
+        Promise.resolve(),
+        logger,
+      );
+      // The retry ran, and wrote nothing: a seed that only asked once would
+      // have re-written the container on this attempt.
+      expect(commits()).toBe(2);
+      expect(valueOf(container)).toBeUndefined();
+      expect(logger.warnings).toEqual([]);
     });
 
     it("reports a seed whose commit the storage layer refused", async () => {
@@ -165,7 +221,8 @@ describe("list-result-container-seed", () => {
       rejectEveryCommit(rejection);
       await seedResultContainerWhenPullSettles(
         runtime,
-        () => container,
+        container,
+        () => true,
         Promise.resolve(),
         logger,
       );

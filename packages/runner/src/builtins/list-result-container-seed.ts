@@ -16,13 +16,20 @@ import type { Runtime } from "../runtime.ts";
  * would have written, which re-triggers the reconcile the same way a durable
  * value would have.
  *
- * `liveContainer` reports the container the coordinator holds when the pull
- * settles, not the one it held when it deferred. It reports `undefined` once
- * the coordinator has been torn down or has swapped in a different container,
- * and either way there is nothing here to seed: a torn-down coordinator owns no
- * container to write to, and a replacement container defers and seeds through
- * its own reconcile. Asking before the transaction opens is what keeps a
- * torn-down coordinator from reaching into a runtime that is shutting down.
+ * The seed belongs to the deferral that started it, so it writes to `container`
+ * and to nothing else. `stillHeld` reports whether the coordinator is still
+ * holding that same container: a coordinator that has been torn down holds
+ * nothing, and one that has swapped in a replacement defers and seeds for the
+ * replacement through its own reconcile, which is what confirms the
+ * replacement's own state before anything writes to it.
+ *
+ * `stillHeld` is asked once before the transaction opens, so that a torn-down
+ * coordinator does not reach into a runtime that is shutting down, and again
+ * inside the transaction body, which `editWithRetry` re-runs per attempt after
+ * awaiting a conflict's catch-up gate. A commit already in flight is beyond
+ * either question, since `editWithRetry` takes no cancellation, so the window
+ * that remains is the span between an attempt's writes and its commit
+ * landing.
  *
  * The seed runs whether the pull resolved or rejected, because a rejected pull
  * leaves the container as absent as a resolved one does. A rejected pull and a
@@ -31,14 +38,15 @@ import type { Runtime } from "../runtime.ts";
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
-  liveContainer: () => Cell<any[]> | undefined,
+  container: Cell<any[]>,
+  stillHeld: () => boolean,
   pull: Promise<unknown>,
   logger: Logger,
 ): Promise<void> {
   const seedIfStillAbsent = (): Promise<void> => {
-    const container = liveContainer();
-    if (!container) return Promise.resolve();
+    if (!stillHeld()) return Promise.resolve();
     return runtime.editWithRetry((seedTx) => {
+      if (!stillHeld()) return;
       const scoped = container.withTx(seedTx);
       if (scoped.getRaw() === undefined) scoped.set([]);
     }).then(({ error }) => {
