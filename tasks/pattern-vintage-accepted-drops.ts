@@ -62,6 +62,12 @@ export interface AcceptedStateDrop {
   capturedThrough: string;
   /** Why the removal was accepted. */
   reason: string;
+  /**
+   * Repo-relative path of the decision record under `docs/history/` — shared
+   * with the matching Tier 1 entry where there is one. Existence is enforced
+   * when either gate runs (`pattern-break-registry-guards.ts`).
+   */
+  record: string;
 }
 
 export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
@@ -98,6 +104,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "`referencedBy` instead of deriving its own edge row, so the old row is " +
       "gone from every child the board lists. The index rows became the topics " +
       "themselves, which is what retires their copied address and reference.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
   {
     pattern: "topics/topic.tsx",
@@ -111,12 +118,31 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
       "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
       "retired per-topic row is listed here.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
 ];
 
 /** One `(pattern, path)` drop, for reporting which entries were needed. */
 export const acceptedDropKey = (pattern: string, path: string): string =>
   `${pattern} ${path}`;
+
+/**
+ * Whether a registry key addresses the pattern a manifest names.
+ *
+ * A manifest entry names its pattern by repo-relative path
+ * (`/packages/patterns/topics/topic.tsx`) or by the route the toolshed serves
+ * it at, while a registry key is written relative to `packages/patterns`. So
+ * a key is matched as a path SUFFIX rather than a bare one: `endsWith` alone
+ * would also claim a `subtopics/main.tsx` that no entry mentions, and the
+ * leading `/` is what makes the segment boundary part of the test.
+ *
+ * Exported because the guards that hold these registries to a floor have to
+ * ask the same question this asks, and a floor that judged membership by its
+ * own rule would let a spelling this accepts walk straight around it.
+ */
+export function patternKeyClaims(patternPath: string, key: string): boolean {
+  return patternPath === key || patternPath.endsWith(`/${key}`);
+}
 
 /**
  * The paths accepted as dropped for one pattern, in one vintage.
@@ -137,8 +163,7 @@ export function acceptedDropsFor(
   drops: readonly AcceptedStateDrop[] = ACCEPTED_STATE_DROPS,
 ): { paths: ReadonlySet<string>; pattern: string } | undefined {
   const entry = drops.find((drop) =>
-    (patternPath === drop.pattern ||
-      patternPath.endsWith(`/${drop.pattern}`)) &&
+    patternKeyClaims(patternPath, drop.pattern) &&
     stamp <= drop.capturedThrough
   );
   return entry === undefined

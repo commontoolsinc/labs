@@ -68,6 +68,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Shipped or superseded designs and decision records
 
+- [topics-crossref-identity-break.md](topics-crossref-identity-break.md) — decision record for the topics reference-graph contract break shipped in #5921, the first accepted break in the pattern-update registries; backfilled when the registries gained their `record` linkage.
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md) — per-instance action identity.
 - [projection-key-classification.md](plans/projection-key-classification.md) — the four-tier classification of `--schema` projection keywords, the rule that the projection reader never hands the read boundary a schema it did not construct, and the survival rule for a source-derived `required`, August 2026.
 - [declared-verb-results-case.md](plans/declared-verb-results-case.md) — the case for carrying a verb's declared result on `module.resultSchema` in the interim rather than waiting for the Fabric-types stream; decided yes, conditionally, August 2026.

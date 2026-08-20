@@ -118,6 +118,11 @@ import {
   HOME_PATTERN_SOURCE,
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
+  deriveRequiredPatternKeys,
+  recordExistsUnder,
+  reportBreakRegistryFindings,
+} from "./pattern-break-registry-guards.ts";
+import {
   armVerdictGuard,
   type CommandOutput,
   describeCaptureOutcome,
@@ -129,12 +134,9 @@ import {
   reportReplaySummary,
   reportUncovered,
   reportUnknownFlags,
-  reportUnmappedUrls,
   reportUpdateNeedsATestKey,
-  requiredPatternKeys,
   uncoveredRequiredPatterns,
   unknownFlags,
-  unmappedPatternUrls,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
@@ -193,23 +195,30 @@ async function main() {
     vintagesRoot: `${REPO_ROOT}/${VINTAGES_DIR}`,
     signer: FIXTURE_SIGNER,
   };
-  // The required set comes from the runtime's OWN constants, so the gate
-  // cannot drift from what actually auto-updates. A constant that stops
-  // deriving a key would leave the gate requiring nothing, so that is checked
-  // rather than absorbed.
-  const systemUrls = [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE];
-  const unmapped = unmappedPatternUrls(systemUrls);
-  if (unmapped.length > 0) {
-    console.error(reportUnmappedUrls(unmapped));
-    Deno.exit(1);
-  }
-  const required = requiredPatternKeys(systemUrls);
 
   // Before anything else: a flag this task does not know is a MISTAKE, not a
   // no-op. Unhandled, it falls through to the plain gate and exits 0 having
   // answered a question nobody asked.
   const unknown = unknownFlags(Deno.args);
   if (unknown.length > 0) emit({ err: reportUnknownFlags(unknown), code: 1 });
+
+  // The required set comes from the runtime's OWN constants, so the gate
+  // cannot drift from what actually auto-updates, and a constant that stopped
+  // deriving a key would leave it requiring nothing.
+  //
+  // Below the unknown-flag check on purpose. A record typo and a mistyped flag
+  // are both ordinary authoring slips, and whichever runs first is the one
+  // reported — so the flag, which decides what this invocation even does, is
+  // answered before the registries are judged. Still ahead of every replay.
+  const required = deriveRequiredPatternKeys(
+    [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE],
+  );
+  if ("error" in required) emit({ err: required.error, code: 1 });
+  const registryReport = reportBreakRegistryFindings({
+    requiredPatternKeys: required.keys,
+    recordExists: recordExistsUnder(REPO_ROOT),
+  });
+  if (registryReport !== undefined) emit({ err: registryReport, code: 1 });
 
   if (Deno.args.includes("--update")) {
     // A capture NAMES the test to run. There is no default set, and deriving
@@ -270,7 +279,10 @@ async function main() {
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
-  const uncovered = uncoveredRequiredPatterns(required, replay.covered);
+  const uncovered = uncoveredRequiredPatterns(
+    [...required.keys],
+    replay.covered,
+  );
 
   if (uncovered.length > 0) {
     console.error(reportUncovered(

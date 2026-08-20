@@ -11,7 +11,10 @@
  *
  * So the list is debt, made visible. The gate fails on an evaluation error
  * that is NOT listed here, and fails when a listed entry starts evaluating
- * again — so the list can only shrink, never quietly grow.
+ * again — so the list can only shrink, never quietly grow. It also fails on
+ * an entry naming a required pattern: an unevaluable pattern is exempt from
+ * the gate entirely, which the aggressively auto-updating roots may never be
+ * (`pattern-break-registry-guards.ts`).
  *
  * An entry is the pattern key (path relative to `packages/patterns`). An
  * entry may name a real `export default pattern(...)` rather than a helper
