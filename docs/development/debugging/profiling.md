@@ -229,6 +229,33 @@ the level that introduced the multiplication — that is the caller to fix, and 
 is frequently not the
 function the profile ranked first.
 
+## 4b. Ask where the elapsed time went, which is a different question
+
+Everything above sums spans. Every measure is an elapsed start-to-end duration,
+so that sum is cumulative elapsed span time — useful, and not CPU: it already
+contains whatever a span waited through, and a nested span counts the same
+interval again inside its parent, so the total can exceed the run itself. CPU
+attribution is what step 3's sampling profile is for.
+
+Wall time asks about coverage instead — the union of the intervals beneath a
+span against that span's own duration:
+
+```bash
+deno run --allow-read skills/perf-investigation/scripts/wall-time.ts /tmp/measures.json
+```
+
+What is left over is time the span was open and nothing instrumented was
+running. That is the shape of waiting: for a server, a timer, a lock, or work
+nobody has wrapped. It is invisible to every view that sums, because summing
+attributes only what ran.
+
+Two things the output cannot tell you, and one it can. It cannot distinguish a
+blocking round trip from uninstrumented compute — both are simply absence — and
+a gap is not automatically a problem. What it can say is where the absence is
+and how much is at stake. A stretch that keeps following the same span is the
+one to chase: that span handed off to something nobody wrapped, and wrapping
+what follows is what turns the question into an answer.
+
 ## 5. Isolate, then pin it with a benchmark
 
 You are done narrowing when you can write a benchmark. That is the honest test:

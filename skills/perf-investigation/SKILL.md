@@ -168,6 +168,17 @@ run, and whatever finished immediately before them is a caller nobody wrapped �
 `attribute-measures.ts --roots` reads both out of the capture you already have,
 and names where the next span would attribute the most.
 
+A measure is an elapsed duration, so summing measures gives cumulative elapsed
+span time and never CPU — the sum already contains whatever was waited through,
+and a nested span counts the same interval again inside its parent. Only the
+sampling profile attributes CPU. Wall time needs the other arithmetic again:
+spans must be unioned rather than summed, because concurrent ones overlap and a
+parent's elapsed time is not the total of its children's. What the union leaves
+uncovered is time something was open and nothing instrumented was running —
+waiting, in whatever form — and `skills/perf-investigation/scripts/wall-time.ts`
+is what reports it. Absence looks the same whether it is a round trip or
+unwrapped compute, so that view says where to look rather than what it found.
+
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
 hypothesis. Confirm it correlates — that it moves with the real measurement
