@@ -777,6 +777,47 @@ describe("parseExecArgs edge cases", () => {
       .toEqual({ fooBar: 5 });
   });
 
+  it("reads a $ref's siblings the way the payload door resolves them", () => {
+    // 2020-12 lets a `$ref` carry siblings, and the runtime's own
+    // `resolveCfcSchemaRefs` merges the ref site over its target. Jumping
+    // straight to the target instead would name `query` here — a flag the
+    // validator refuses as an additional property — while hiding `limit`,
+    // the one it accepts. Which fields exist is the validator's answer to
+    // give; this door's job is to report the same one.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/AddEvent",
+      asCell: ["stream"],
+      properties: { limit: { type: "number" } },
+      additionalProperties: false,
+      $defs: {
+        AddEvent: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--limit", "5"]).input).toEqual({ limit: 5 });
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/<event> takes "--limit"/);
+  });
+
+  it("falls back to the single-value vocabulary for an unresolvable $ref", () => {
+    // A dangling ref describes nothing, so there is no fields position to
+    // read and the scalar flags are all that remain — where such a schema
+    // sat before any of this resolved.
+    const spec = makeSpec("handler", {
+      $ref: "#/$defs/Missing",
+      asCell: ["stream"],
+      $defs: {},
+    } as unknown as JSONSchema);
+
+    expect(parseExecArgs(spec, ["--value", "Milk"]).input).toBe("Milk");
+    expect(() => parseExecArgs(spec, ["--query", "Milk"]))
+      .toThrow(/This verb takes a single value/);
+  });
+
   it("derives flags from fields behind a top-level $ref", () => {
     // The shape a stream's event is routinely written in. Its fields sit in
     // the definition, and a caller should not have to know that to name them.

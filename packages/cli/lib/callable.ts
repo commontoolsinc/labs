@@ -8,7 +8,10 @@ import {
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
-import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
+import {
+  cfcSchemaChildRoot,
+  resolveCfcSchemaRefs,
+} from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   type NormalizedLLMFriendlyRef,
@@ -754,8 +757,20 @@ export function declaredEventFields(
   // the two doors disagreeing about the same schema: the verb's fields were
   // judged on arrival while every flag surface reported none, leaving the
   // caller a `--value` whose string could not satisfy the object it named.
+  //
+  // `resolveCfcSchemaRefs` rather than `localRefTarget`, because a `$ref` may
+  // carry SIBLINGS and 2020-12 says they apply: `{$ref, properties: {...}}`
+  // declares the target's fields and its own. Jumping to the target returns
+  // the definition alone and drops them, which would put this door back in
+  // disagreement with the validator — reading fewer fields than a payload is
+  // judged against, rather than none. Merging is also what carries the two
+  // `$defs` scopes, which a ref site and its target do not share.
+  //
+  // It answers `undefined` where a ref dangles or cycles, which fails toward
+  // "not a fields position" — the scalar vocabulary, exactly where an
+  // unresolvable event schema sat before.
   const scopeRoot = cfcSchemaChildRoot(schema, schema);
-  const target = localRefTarget(schema, scopeRoot);
+  const target = resolveCfcSchemaRefs(schema, scopeRoot);
   if (!isSchemaObject(target)) return null;
   const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
   // The gate the flag surfaces have always applied, widened by exactly one
@@ -853,8 +868,13 @@ export function eventSchemaJudgesRootFields(
   schema: JSONSchema | undefined,
 ): boolean {
   if (!isSchemaObject(schema)) return false;
+  // Resolved the same way `declaredEventFields` resolves it, and for the same
+  // reason: these two answer about one position — which fields it has, and
+  // whether it judges them — and the flag door asks both. Reading a `$ref`
+  // one way here and another way there would let an `additionalProperties`
+  // written beside the ref go unseen while the fields it governs are named.
   const scopeRoot = cfcSchemaChildRoot(schema, schema);
-  const target = localRefTarget(schema, scopeRoot);
+  const target = resolveCfcSchemaRefs(schema, scopeRoot);
   if (!isSchemaObject(target)) return false;
   if (target.anyOf !== undefined || target.oneOf !== undefined) return false;
   const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
