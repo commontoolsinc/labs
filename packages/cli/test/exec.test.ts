@@ -907,6 +907,20 @@ describe("parseExecArgs edge cases", () => {
       expect(parseExecArgs(makeSpec("handler", inputSchema), []).input)
         .toBeUndefined();
     }
+
+    // The stream marker is still what makes a bare position schema-less, and
+    // following the ref must not take it out of the question. A $ref to a
+    // scalar with no marker is a single-value verb, and owes its caller the
+    // flags and the input type that go with one.
+    const scalarTool = makeSpec("tool", {
+      $ref: "#/$defs/Target",
+      $defs: { Target: { type: "string" } },
+    } as unknown as JSONSchema);
+    expect(parseExecArgs(scalarTool, ["--value", "Milk"]).input).toBe("Milk");
+    const help = renderExecHelp("/tmp/x.tool", scalarTool);
+    expect(help).toContain("--value");
+    expect(help).toContain("Input type:\n  string");
+    expect(help).not.toContain("Input type:\n  void");
   });
 
   it("counts a defaulted field as supplied rather than owed", () => {

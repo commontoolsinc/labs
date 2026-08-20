@@ -634,13 +634,16 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
   // no sign that the fields the parser accepts exist at all.
   //
   // What settles it is where the ref LANDS, not that one is written. A ref
-  // reaching a fields position describes an event and the verb is not
-  // schema-less; a ref to a scalar, to a position naming nothing, or one that
-  // does not resolve describes no fields to derive, and the classification
-  // stays where it was — a verb that invoked bare goes on doing so rather
-  // than being refused for an event nothing could name.
-  if (typeof schema.$ref === "string") {
-    return objectProperties(schema) === null;
+  // reaching a fields position describes an event, and only that answers
+  // here. Every other ref — to a scalar, to a position naming nothing, or one
+  // that does not resolve — carries no fields to derive and is left to the
+  // marker check below, which is the classification it had before any ref was
+  // followed. Answering for those directly would take the marker out of the
+  // question: a `$ref` to a scalar with no stream marker is a single-value
+  // verb, and calling it schema-less costs it both `--value` and its input
+  // type on the page.
+  if (typeof schema.$ref === "string" && objectProperties(schema) !== null) {
+    return false;
   }
   return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
 }
