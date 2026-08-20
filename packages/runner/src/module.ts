@@ -1,5 +1,6 @@
 import { createNodeFactory } from "./builder/module.ts";
 import {
+  type CellScope,
   type JSONSchema,
   Module,
   type ModuleFactory,
@@ -77,11 +78,32 @@ export class ModuleRegistry {
     this.moduleMap.set(ref, target);
   }
 
-  getModule(ref: string): Module {
+  /**
+   * The module registered under `ref`.
+   *
+   * A `defaultScope` is applied to a COPY: the registered module is shared by
+   * every node that names the ref, while a scope belongs to the one call site
+   * that declared it (`.asScope("user")`, or the `PerUser<>` annotation the
+   * transformer lowers to it).
+   *
+   * The copy restates `debugName`, which is what proves the module's
+   * `{ kind: "builtin", builtinId }` policy identity to
+   * `resolvePolicyFacingImplementationIdentity`. `addModuleByRef` defines it
+   * non-enumerable, so that it stays out of `moduleToEncodableForm`'s key set
+   * and off every content-derived id built from a module; nothing copies it
+   * implicitly, and a scoped module with no name on it writes unattributed.
+   */
+  getModule(ref: string, defaultScope?: CellScope): Module {
     if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
     const module = this.moduleMap.get(ref);
     if (!module) throw new Error(`Unknown module ref: ${ref}`);
-    return module;
+    if (defaultScope === undefined) return module;
+    const scoped: Module = { ...module, defaultScope };
+    Object.defineProperty(scoped, "debugName", {
+      value: ref,
+      configurable: true,
+    });
+    return scoped;
   }
 
   clear(): void {
