@@ -48,14 +48,14 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import {
+  type FabricConvertibleValue,
   FabricInstance,
-  type FabricOrConvertibleNativeValue,
   type FabricValue,
 } from "@/interface.ts";
 import {
   fabricFromNativeValue,
-  isConvertibleNativeInstance,
-  isFabricCompatible,
+  isValidFabricConvertibleValue,
+  isValidFabricNativeObject,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -67,7 +67,7 @@ import {
  * `fabricFromNativeValue()` and decodes it back to native form via
  * `nativeFromFabricValue()`.
  */
-function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
+function roundTrip(value: FabricValue): FabricConvertibleValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
@@ -338,33 +338,41 @@ describe("native-conversion", () => {
     });
   });
 
-  describe("isConvertibleNativeInstance()", () => {
+  describe("isValidFabricNativeObject()", () => {
     it("returns `true` for all convertible types", () => {
-      expect(isConvertibleNativeInstance(new Error("e"))).toBe(true);
-      expect(isConvertibleNativeInstance(new TypeError("e"))).toBe(true);
-      expect(isConvertibleNativeInstance(new Map())).toBe(true);
-      expect(isConvertibleNativeInstance(new Set())).toBe(true);
-      expect(isConvertibleNativeInstance(new Date())).toBe(true);
-      expect(isConvertibleNativeInstance(new Uint8Array())).toBe(true);
+      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new Map())).toBe(true);
+      expect(isValidFabricNativeObject(new Set())).toBe(true);
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
+      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
     });
 
     it("returns `true` for exotic `Error` subclass", () => {
       class WeirdError extends RangeError {}
-      expect(isConvertibleNativeInstance(new WeirdError("weird"))).toBe(true);
+      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
     });
 
     it("returns `true` for `RegExp`", () => {
-      expect(isConvertibleNativeInstance(/abc/)).toBe(true);
+      expect(isValidFabricNativeObject(/abc/)).toBe(true);
     });
 
     it("returns `false` for non-convertible types", () => {
-      expect(isConvertibleNativeInstance({})).toBe(false);
-      expect(isConvertibleNativeInstance([])).toBe(false);
-      expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
+      expect(isValidFabricNativeObject({})).toBe(false);
+      expect(isValidFabricNativeObject([])).toBe(false);
+      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
     });
 
     it("returns `false` for objects with `toJSON()`", () => {
-      expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
+      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+    });
+
+    it("returns `false` for a non-object", () => {
+      expect(isValidFabricNativeObject(null)).toBe(false);
+      expect(isValidFabricNativeObject(undefined)).toBe(false);
+      expect(isValidFabricNativeObject(1)).toBe(false);
+      expect(isValidFabricNativeObject("a")).toBe(false);
+      expect(isValidFabricNativeObject(() => {})).toBe(false);
     });
   });
 
@@ -1786,8 +1794,8 @@ describe("native-conversion", () => {
       it("throws on a top-level unique symbol (freeze default)", () => {
         // A unique symbol is not a `FabricValue`; conversion rejects it
         // regardless of the `freeze` flag -- the deep-frozen fast-path
-        // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
-        // validation that `freeze=false` performs (see below).
+        // (`isValidDeepFrozenFabricValue`) must not admit it and short-circuit
+        // the validation that `freeze=false` performs (see below).
         expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
           "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
@@ -1893,146 +1901,166 @@ describe("native-conversion", () => {
     });
   });
 
-  describe("isFabricCompatible()", () => {
+  describe("isValidFabricConvertibleValue()", () => {
     describe("primitives", () => {
       it("returns `true` for `null`", () => {
-        expect(isFabricCompatible(null)).toBe(true);
+        expect(isValidFabricConvertibleValue(null)).toBe(true);
       });
 
       it("returns `true` for booleans", () => {
-        expect(isFabricCompatible(true)).toBe(true);
-        expect(isFabricCompatible(false)).toBe(true);
+        expect(isValidFabricConvertibleValue(true)).toBe(true);
+        expect(isValidFabricConvertibleValue(false)).toBe(true);
       });
 
       it("returns `true` for numbers (including `-0`, `NaN`, and infinities)", () => {
-        expect(isFabricCompatible(42)).toBe(true);
-        expect(isFabricCompatible(0)).toBe(true);
-        expect(isFabricCompatible(-0)).toBe(true);
-        expect(isFabricCompatible(-3.14)).toBe(true);
-        expect(isFabricCompatible(NaN)).toBe(true);
-        expect(isFabricCompatible(Infinity)).toBe(true);
-        expect(isFabricCompatible(-Infinity)).toBe(true);
+        expect(isValidFabricConvertibleValue(42)).toBe(true);
+        expect(isValidFabricConvertibleValue(0)).toBe(true);
+        expect(isValidFabricConvertibleValue(-0)).toBe(true);
+        expect(isValidFabricConvertibleValue(-3.14)).toBe(true);
+        expect(isValidFabricConvertibleValue(NaN)).toBe(true);
+        expect(isValidFabricConvertibleValue(Infinity)).toBe(true);
+        expect(isValidFabricConvertibleValue(-Infinity)).toBe(true);
       });
 
       it("returns `true` for strings", () => {
-        expect(isFabricCompatible("hello")).toBe(true);
-        expect(isFabricCompatible("")).toBe(true);
+        expect(isValidFabricConvertibleValue("hello")).toBe(true);
+        expect(isValidFabricConvertibleValue("")).toBe(true);
       });
 
       it("returns `true` for `undefined`", () => {
-        expect(isFabricCompatible(undefined)).toBe(true);
+        expect(isValidFabricConvertibleValue(undefined)).toBe(true);
       });
 
       it("returns `true` for `bigint`", () => {
-        expect(isFabricCompatible(42n)).toBe(true);
-        expect(isFabricCompatible(0n)).toBe(true);
+        expect(isValidFabricConvertibleValue(42n)).toBe(true);
+        expect(isValidFabricConvertibleValue(0n)).toBe(true);
       });
 
       it("returns `true` for interned symbols", () => {
-        expect(isFabricCompatible(Symbol.for("k"))).toBe(true);
-        expect(isFabricCompatible(Symbol.for(""))).toBe(true);
+        expect(isValidFabricConvertibleValue(Symbol.for("k"))).toBe(true);
+        expect(isValidFabricConvertibleValue(Symbol.for(""))).toBe(true);
       });
 
       it("returns `false` for unique (uninterned) symbols", () => {
-        expect(isFabricCompatible(Symbol("test"))).toBe(false);
+        expect(isValidFabricConvertibleValue(Symbol("test"))).toBe(false);
       });
     });
 
     describe("functions", () => {
       it("returns `false` for a bare function", () => {
-        expect(isFabricCompatible(() => 42)).toBe(false);
+        expect(isValidFabricConvertibleValue(() => 42)).toBe(false);
       });
 
       it("returns `false` for a function carrying members", () => {
-        expect(isFabricCompatible(Object.assign(() => 1, { x: 1 }))).toBe(
-          false,
-        );
+        expect(isValidFabricConvertibleValue(Object.assign(() => 1, { x: 1 })))
+          .toBe(
+            false,
+          );
       });
 
       it("returns `false` for a function nested in a container", () => {
-        expect(isFabricCompatible({ fn: () => 1 })).toBe(false);
-        expect(isFabricCompatible([() => 1])).toBe(false);
+        expect(isValidFabricConvertibleValue({ fn: () => 1 })).toBe(false);
+        expect(isValidFabricConvertibleValue([() => 1])).toBe(false);
       });
     });
 
     describe("native object types", () => {
       it("returns `true` for `Error` instances", () => {
-        expect(isFabricCompatible(new Error("test"))).toBe(true);
-        expect(isFabricCompatible(new TypeError("test"))).toBe(true);
+        expect(isValidFabricConvertibleValue(new Error("test"))).toBe(true);
+        expect(isValidFabricConvertibleValue(new TypeError("test"))).toBe(true);
       });
 
       it("returns `true` for `Map` instances", () => {
-        expect(isFabricCompatible(new Map())).toBe(true);
+        expect(isValidFabricConvertibleValue(new Map())).toBe(true);
       });
 
       it("returns `true` for `Set` instances", () => {
-        expect(isFabricCompatible(new Set())).toBe(true);
+        expect(isValidFabricConvertibleValue(new Set())).toBe(true);
       });
 
       it("returns `true` for `Date` instances", () => {
-        expect(isFabricCompatible(new Date())).toBe(true);
+        expect(isValidFabricConvertibleValue(new Date())).toBe(true);
       });
 
       it("returns `true` for `Uint8Array` instances", () => {
-        expect(isFabricCompatible(new Uint8Array([1, 2, 3]))).toBe(true);
+        expect(isValidFabricConvertibleValue(new Uint8Array([1, 2, 3]))).toBe(
+          true,
+        );
       });
 
       it("returns `false` for a class instance", () => {
         class Foo {
           x = 1;
         }
-        expect(isFabricCompatible(new Foo())).toBe(false);
+        expect(isValidFabricConvertibleValue(new Foo())).toBe(false);
       });
     });
 
     describe("fabric values", () => {
       it("returns `true` for `FabricInstance` (e.g. `FabricError`) values", () => {
         expect(
-          isFabricCompatible(FabricError.fromNativeError(new Error("test"))),
+          isValidFabricConvertibleValue(
+            FabricError.fromNativeError(new Error("test")),
+          ),
         ).toBe(true);
       });
 
       it("returns `true` for `FabricPrimitive` (e.g. `FabricBytes`) values", () => {
-        expect(isFabricCompatible(new FabricBytes(new Uint8Array([1, 2, 3]))))
+        expect(
+          isValidFabricConvertibleValue(
+            new FabricBytes(new Uint8Array([1, 2, 3])),
+          ),
+        )
           .toBe(true);
       });
     });
 
     describe("containers", () => {
       it("returns `true` for plain objects with fabric values", () => {
-        expect(isFabricCompatible({ a: 1, b: "hello", c: null })).toBe(true);
+        expect(isValidFabricConvertibleValue({ a: 1, b: "hello", c: null }))
+          .toBe(true);
       });
 
       it("returns `true` for arrays with fabric values", () => {
-        expect(isFabricCompatible([1, "hello", null, true])).toBe(true);
+        expect(isValidFabricConvertibleValue([1, "hello", null, true])).toBe(
+          true,
+        );
       });
 
       it("returns `true` for nested structures", () => {
-        expect(isFabricCompatible({
+        expect(isValidFabricConvertibleValue({
           users: [{ name: "Alice", age: 30 }],
           meta: { version: 1 },
         })).toBe(true);
       });
 
       it("returns `true` for objects containing `Error` values", () => {
-        expect(isFabricCompatible({ error: new Error("test"), code: 500 }))
+        expect(
+          isValidFabricConvertibleValue({
+            error: new Error("test"),
+            code: 500,
+          }),
+        )
           .toBe(true);
       });
 
       it("returns `true` for arrays containing `Error` values", () => {
-        expect(isFabricCompatible([1, new Error("test"), "hello"])).toBe(true);
+        expect(isValidFabricConvertibleValue([1, new Error("test"), "hello"]))
+          .toBe(true);
       });
 
       it("returns `false` for objects with non-fabric nested values", () => {
-        expect(isFabricCompatible({ a: 1, b: Symbol("bad") })).toBe(false);
+        expect(isValidFabricConvertibleValue({ a: 1, b: Symbol("bad") })).toBe(
+          false,
+        );
       });
 
       it("returns `false` for arrays with non-fabric elements", () => {
-        expect(isFabricCompatible([1, Symbol("bad")])).toBe(false);
+        expect(isValidFabricConvertibleValue([1, Symbol("bad")])).toBe(false);
       });
 
       it("returns `false` for deeply nested non-fabric values", () => {
-        expect(isFabricCompatible({
+        expect(isValidFabricConvertibleValue({
           a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
         })).toBe(false);
       });
@@ -2040,39 +2068,42 @@ describe("native-conversion", () => {
       it("returns `false` for circular references", () => {
         const obj: Record<string, unknown> = { a: 1 };
         obj.self = obj;
-        expect(isFabricCompatible(obj)).toBe(false);
+        expect(isValidFabricConvertibleValue(obj)).toBe(false);
       });
 
       it("returns `false` for an array with extra named properties", () => {
         const arr = [1, 2, 3] as number[] & { extra?: string };
         arr.extra = "nope";
-        expect(isFabricCompatible(arr)).toBe(false);
+        expect(isValidFabricConvertibleValue(arr)).toBe(false);
       });
 
       it("returns `false` for an object with a symbol-keyed property", () => {
         const obj = { a: 1 } as Record<string | symbol, unknown>;
         obj[Symbol("s")] = 2;
-        expect(isFabricCompatible(obj)).toBe(false);
+        expect(isValidFabricConvertibleValue(obj)).toBe(false);
       });
 
       it("returns `false` for an object with a non-enumerable string-keyed property", () => {
         const obj = { a: 1 };
         Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
-        expect(isFabricCompatible(obj)).toBe(false);
+        expect(isValidFabricConvertibleValue(obj)).toBe(false);
       });
 
       it("returns `false` for an array with named properties nested inside an object", () => {
         const arr = [1] as number[] & { extra?: string };
         arr.extra = "nope";
-        expect(isFabricCompatible({ list: arr })).toBe(false);
+        expect(isValidFabricConvertibleValue({ list: arr })).toBe(false);
       });
 
       it("returns `false` for a property name this runtime reserves", () => {
-        expect(isFabricCompatible({ ["__proto__"]: 1 })).toBe(false);
-        expect(isFabricCompatible({ ["constructor"]: 1 })).toBe(false);
-        expect(isFabricCompatible({ nested: { ["__proto__"]: 1 } })).toBe(
+        expect(isValidFabricConvertibleValue({ ["__proto__"]: 1 })).toBe(false);
+        expect(isValidFabricConvertibleValue({ ["constructor"]: 1 })).toBe(
           false,
         );
+        expect(isValidFabricConvertibleValue({ nested: { ["__proto__"]: 1 } }))
+          .toBe(
+            false,
+          );
       });
     });
 
@@ -2081,25 +2112,26 @@ describe("native-conversion", () => {
         class Sub extends Array {}
         const sub = new Sub();
         sub.push(1, 2);
-        expect(isFabricCompatible(sub)).toBe(false);
-        expect(isFabricCompatible({ data: sub })).toBe(false);
+        expect(isValidFabricConvertibleValue(sub)).toBe(false);
+        expect(isValidFabricConvertibleValue({ data: sub })).toBe(false);
       });
 
       it("returns `false` for an array whose prototype was severed", () => {
         const severed: unknown[] = [1, 2];
         Object.setPrototypeOf(severed, null);
-        expect(isFabricCompatible(severed)).toBe(false);
+        expect(isValidFabricConvertibleValue(severed)).toBe(false);
       });
     });
 
     describe("`toJSON()` is intentionally not supported", () => {
       it("returns `false` for an object whose only member is `toJSON`", () => {
-        expect(isFabricCompatible({ toJSON: () => ({ x: 1 }) })).toBe(false);
+        expect(isValidFabricConvertibleValue({ toJSON: () => ({ x: 1 }) }))
+          .toBe(false);
       });
 
       it("returns `false` for a function carrying `toJSON()`", () => {
         const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
-        expect(isFabricCompatible(fn)).toBe(false);
+        expect(isValidFabricConvertibleValue(fn)).toBe(false);
       });
 
       it("returns `false` for a class instance carrying `toJSON()`", () => {
@@ -2108,7 +2140,7 @@ describe("native-conversion", () => {
             return { x: 1 };
           }
         }
-        expect(isFabricCompatible(new WithToJSON())).toBe(false);
+        expect(isValidFabricConvertibleValue(new WithToJSON())).toBe(false);
       });
     });
   });

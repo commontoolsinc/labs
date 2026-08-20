@@ -25,11 +25,11 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
-  isFabricCompatible,
+  isValidFabricConvertibleValue,
   shallowFabricFromNativeValue,
 } from "@/fabric-value.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { isConvertibleNativeInstance } from "@/native-conversion.ts";
+import { isValidFabricNativeObject } from "@/native-conversion.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -350,19 +350,19 @@ describe("FabricRegExp", () => {
       expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("`isConvertibleNativeInstance()` returns `true` for `RegExp`", () => {
-      expect(isConvertibleNativeInstance(/abc/)).toBe(true);
-      expect(isConvertibleNativeInstance(new RegExp("test", "gi"))).toBe(true);
+    it("`isValidFabricNativeObject()` returns `true` for `RegExp`", () => {
+      expect(isValidFabricNativeObject(/abc/)).toBe(true);
+      expect(isValidFabricNativeObject(new RegExp("test", "gi"))).toBe(true);
     });
   });
 
-  describe("isFabricCompatible()", () => {
+  describe("isValidFabricConvertibleValue()", () => {
     it("returns `true` for a plain `RegExp`", () => {
-      expect(isFabricCompatible(/abc/gi)).toBe(true);
+      expect(isValidFabricConvertibleValue(/abc/gi)).toBe(true);
     });
 
     it("returns `true` for a `RegExp` nested in objects", () => {
-      expect(isFabricCompatible({ pattern: /abc/gi })).toBe(true);
+      expect(isValidFabricConvertibleValue({ pattern: /abc/gi })).toBe(true);
     });
   });
 
