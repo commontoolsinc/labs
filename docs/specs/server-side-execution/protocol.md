@@ -653,6 +653,44 @@ the target's `eventWatermark` makes processing exactly-once.
   consequences committed AND all DEMANDED derivations current through
   W (demand per serving-loop.md §1/§3b — undemanded derivations stay
   dirty-unmaterialized without holding W back).
+- **The drain-settle quiescence advance (RULED 2026-08-19 — owner, on
+  the coordinator's S1 recommendation from the swatch-stall root-cause
+  report: "S1 sounds good"):** the definition above quantifies over
+  AUTHORED commits, so mid-stream the input-driven advance stops at the
+  input batch head and the wave's own derived commits sit above W — and
+  before this ruling nothing ever lifted W over them on a then-quiet
+  space, which stranded every client retirement predicate gated on
+  `W ≥ floor` whose floor includes a pushed derived commit's seq (the
+  swatch stall:
+  `docs/history/plans/server-execution-v2/stage-c/swatch-stall-rootcause.md`
+  §3 — a diverged speculation layer with no reachable retirement until
+  the next authored commit anywhere in the space). Amendment: at
+  drain-settle — the serving loop reaching TRUE quiescence for a space
+  (a settled, non-exhausted cycle; no contributions, no pending
+  events, the drain empty) — W additionally advances over the space's
+  committed TAIL DERIVATIONS: the loop's own derived commits whose
+  seqs lie contiguously above the input coverage point. Reading taken,
+  stated because the pre-amendment text was silent on it: W may sit
+  above seqs that are not authored commits — the definition's
+  quantifier ranges over authored commits only, and the tail
+  derivations are already committed and delivered, so the advance
+  asserts nothing new about coverage; it closes the quiescence gap
+  ("each new input lifts the previous generation" now holds without
+  requiring a next input). Bounds, normative: the advance covers only
+  COMMITTED seqs — no speculative advance; it fires at most once per
+  quiescence transition (armed by content-carrying wave commits,
+  consumed on seal); its own advance-only commit is NEVER chased — the
+  one derived commit W does not cover at quiescence is the final
+  advance-carrying bookkeeping commit itself, definitionally (covering
+  it would mint a successor — the commit-storm class the input-driven
+  rule existed to prevent); and any non-own seq above the coverage
+  point (an in-flight authored notice, a foreign commit) is a hole the
+  advance stops below, fail-closed — its coverage arrives on the
+  ordinary input-driven path. Counted as `settleAdvances` (count, last
+  delta, series) so §4 amplification arithmetic and settle metrics can
+  subtract the advance-only waves. Seat:
+  `packages/runner/src/executor/space-server.ts` (the wave cycle's
+  advance computation); pins: `executor-settle-advance.test.ts`.
 - Carried: in every `derived` commit's metadata (`derivedThrough: W`) and
   in one well-known doc per space (updated in the same transaction; never
   its own commit). *(RULED 2026-08-05: "never its own commit" is the

@@ -338,9 +338,30 @@ export class SpaceServer implements TransactionSealDestination {
    * and must not count as coverage-owed input, or every wave commit
    * would trigger a watermark-only successor chasing its own seq — a
    * self-inflicted commit storm (the v1 failure class §7's
-   * amplification budget exists to catch). */
+   * amplification budget exists to catch). S1 (RULED 2026-08-19,
+   * protocol.md §4) covers the same tail WITHOUT the storm: the
+   * drain-settle quiescence advance below fires at most once per
+   * quiescence transition — armed only by CONTENT-carrying wave
+   * commits, never by its own bookkeeping-only commit. */
   #coverageHead = 0;
   #watermark = 0;
+  /** S1 (RULED 2026-08-19): this loop's own committed wave seqs still
+   * ABOVE the watermark — the drain-settle quiescence advance's
+   * contiguity domain. The advance walks upward from its coverage base
+   * strictly over seqs in this set (engine seqs are dense — MAX(seq)+1
+   * inside the insert transaction — so an in-flight authored notice, a
+   * late-authored record, or any foreign commit above the base is a
+   * hole the walk stops at: fail-closed, never covering a seq the loop
+   * has not accounted). Pruned as W advances. */
+  readonly #ownWaveSeqs = new Set<number>();
+  /** S1's once-per-quiescence-transition latch: armed when a wave with
+   * CONTENT contributions (derivation/event-handler kinds — commits
+   * whose seq can enter a client read basis) lands; consumed when the
+   * quiescence advance seals. A bookkeeping-only commit (the advance
+   * itself, the input-driven advance-only wave) never arms it — the
+   * #coverageHead comment's commit-storm class stays structurally
+   * unreachable. */
+  #settleAdvanceOwed = false;
   #active = false;
   #loopRunning = false;
   #parkRequested = false;
@@ -3190,10 +3211,9 @@ export class SpaceServer implements TransactionSealDestination {
     const inputVisibleHead = shadowFloor === undefined
       ? batchHead
       : Math.min(batchHead, shadowFloor - 1);
-    const advanceTo = exhausted
+    const inputAdvanceTo = exhausted
       ? this.#watermark
       : Math.max(this.#watermark, inputVisibleHead);
-    const shouldAdvance = !exhausted && advanceTo > this.#watermark;
     if (
       !exhausted && inputVisibleHead < batchHead &&
       batchHead > this.#watermark
@@ -3212,11 +3232,58 @@ export class SpaceServer implements TransactionSealDestination {
       this.#options.stats.watermarkClamped += 1;
       logger.info?.("watermark-clamped", () => [
         `space ${this.#options.space}: W advance clamped to ` +
-        `${advanceTo} (batchHead ${batchHead}, shadow floor ` +
+        `${inputAdvanceTo} (batchHead ${batchHead}, shadow floor ` +
         `${shadowFloor}) — foreign novelty parked behind an own ` +
         "sealed commit (settle input barrier)",
       ]);
     }
+
+    // S1 — THE DRAIN-SETTLE QUIESCENCE ADVANCE (RULED 2026-08-19;
+    // protocol.md §4's amendment; the swatch-stall fix seat,
+    // stage-c/swatch-stall-rootcause.md §4): at drain-settle — a TRUE
+    // settle with no contributions, no pending events, the drain
+    // empty — W additionally advances over the space's own committed
+    // DERIVED TAIL: the wave commits above the input coverage point.
+    // Without it, W froze below any client retirement floor that
+    // includes a pushed derived commit's seq (a re-derivation that
+    // read a served value — the stall's diverged tombstone) until the
+    // next authored commit anywhere in the space; the sweep's "each
+    // new input lifts the previous generation" now holds WITHOUT
+    // requiring the next input. The advance asserts nothing new about
+    // coverage — the tail derivations are already committed and
+    // delivered; it closes the quiescence gap.
+    //
+    // Bounded by construction, three ways: (a) the LATCH — armed only
+    // by content-carrying wave commits, consumed on seal — makes it
+    // once per quiescence transition, never per wave, and its own
+    // bookkeeping-only commit never re-arms it (the #coverageHead
+    // commit-storm class); (b) the CONTIGUITY WALK covers only seqs in
+    // #ownWaveSeqs — an in-flight authored notice, a late-authored
+    // record, or any foreign commit above the base is a hole the walk
+    // stops at (fail-closed: W never claims a seq whose consequences
+    // this loop has not accounted; such a seq's coverage arrives on
+    // the ordinary input-driven path); (c) OFF is structurally
+    // unreached — the OFF arm constructs no SpaceServer, so no serving
+    // loop runs this cycle at all. A failed seal keeps the latch armed;
+    // the idle-wait timeout wakes a retry cycle (bounded by
+    // idleParkMs), matching the existing advance-seal-failure posture.
+    let advanceTo = inputAdvanceTo;
+    let settleAdvanceFrom: number | undefined;
+    if (
+      !exhausted && this.#settleAdvanceOwed &&
+      !haveContributions && !havePendingEffects &&
+      this.#feed.length === 0 && this.#pendingWaveSeals === 0 &&
+      !this.#eventScanOwed && !this.#effectsRetirementOwed
+    ) {
+      const base = Math.max(this.#watermark, inputAdvanceTo);
+      let tail = base;
+      while (this.#ownWaveSeqs.has(tail + 1)) tail += 1;
+      if (tail > base) {
+        advanceTo = Math.max(inputAdvanceTo, tail);
+        settleAdvanceFrom = base;
+      }
+    }
+    const shouldAdvance = !exhausted && advanceTo > this.#watermark;
 
     if (!haveContributions && !shouldAdvance && !havePendingEffects) {
       // Nothing sealed and no watermark movement: no commit (the
@@ -3449,9 +3516,50 @@ export class SpaceServer implements TransactionSealDestination {
       // structural-growth landing for the attributed input (checked
       // BEFORE this wave's own coverage rewrites #lastCovered).
       this.#recordGrowthLanding();
+      // S1: every committed own wave enters the quiescence advance's
+      // contiguity domain (the advance-only commits included — a later
+      // walk must cross them to reach a newer content tail); only a
+      // wave that carried CONTENT contributions arms the latch — a
+      // bookkeeping-only commit (this advance itself, an input-driven
+      // advance-only wave) is never chased.
+      this.#ownWaveSeqs.add(outcome.seq);
+      if (closing.contentContributionCount > 0) {
+        this.#settleAdvanceOwed = true;
+      }
       if (!exhausted && advanceSealed) {
+        const advancedFrom = this.#watermark;
         this.#watermark = advanceTo;
         this.#recordSettleCoverage(advanceTo);
+        for (const seq of this.#ownWaveSeqs) {
+          if (seq <= advanceTo) this.#ownWaveSeqs.delete(seq);
+        }
+        if (settleAdvanceFrom !== undefined) {
+          // The quiescence advance SEALED: consume the latch (a failed
+          // seal above kept it armed for the idle-wait retry).
+          this.#settleAdvanceOwed = false;
+          stats.settleAdvances.count += 1;
+          stats.settleAdvances.lastDelta = advanceTo - settleAdvanceFrom;
+          stats.settleAdvances.series.push({
+            space: String(this.#options.space),
+            from: settleAdvanceFrom,
+            to: advanceTo,
+            at: performance.now(),
+          });
+          if (stats.settleAdvances.series.length > 4000) {
+            stats.settleAdvances.dropped += stats.settleAdvances.series.length -
+              4000;
+            stats.settleAdvances.series.splice(
+              0,
+              stats.settleAdvances.series.length - 4000,
+            );
+          }
+          logger.debug?.("settle-advance", () => [
+            `space ${this.#options.space}: drain-settle quiescence ` +
+            `advance W ${advancedFrom} → ${advanceTo} (S1, RULED ` +
+            "2026-08-19) — tail derivations covered without an " +
+            "authored input",
+          ]);
+        }
       }
       // The wave commit entered the store on the co-hosted engine plane,
       // not through any session: report it so push fires (M4 — derived

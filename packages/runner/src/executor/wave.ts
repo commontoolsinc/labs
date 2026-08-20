@@ -822,6 +822,22 @@ export class WaveAccumulator
     return this.#contributions.length;
   }
 
+  /** Contributions whose run kind is anything but the loop's own
+   * "bookkeeping" stamps — the wave carried real derivation/handler
+   * CONTENT whose commit seq can enter a client read basis. S1 (RULED
+   * 2026-08-19, protocol.md §4): only such waves owe a drain-settle
+   * quiescence advance; a bookkeeping-only wave (the watermark advance
+   * itself, a notice-only seal) is never chased, or every advance
+   * would mint a successor covering its own commit — the
+   * #coverageHead commit-storm class. */
+  get contentContributionCount(): number {
+    let count = 0;
+    for (const contribution of this.#contributions) {
+      if (contribution.context.kind !== "bookkeeping") count += 1;
+    }
+    return count;
+  }
+
   /** Whether this wave has been committed or abandoned — nothing may
    * seal into it, and effects handed over for it are stragglers (the
    * SpaceServer's park-race drop). */

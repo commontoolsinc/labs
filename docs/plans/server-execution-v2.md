@@ -274,8 +274,11 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   floor 72; f1: W 67 vs 68) until ANY authored commit advances it —
   probe-verified: one keystroke in an unrelated input healed the
   stalled browser within one 500 ms poll, while two explicit settles
-  did nothing. Classification: the builder's 5/5 reds plus 7
-  instrumented reproductions are ONE class — delivered-but-masked; 0
+  did nothing. Classification: the builder's 5/5 reds plus 8
+  instrumented reproductions (arm A i6/i7/i10/i15 + arm B
+  f1/f7/f9/f10; the digit was recorded as 7 here and in the register
+  when the row was minted — corrected by W3.1 per the report's own
+  tables) are ONE class — delivered-but-masked; 0
   never-delivered; 0 B1; F1 tested and ORTHOGONAL (4/10 on the F1
   arm vs 5/13 builder / 4/15 arm A — no movement). Named defect: **a
   diverged speculation layer with no reachable retirement on a quiet
@@ -418,16 +421,27 @@ landing; its register trigger now names the stall;
 (9) **the lunch ON-skip lift — PENDING on evidence**: lift = the
 swatch stall resolved + 3/3 green on the train tip (the register's
 W2.1 row carries the blocker-class flag);
-(10) **the S1 watermark ruling — REQUESTED 2026-08-19** (the
-swatch-stall report's fix seat S1; register OW43): amend the RULED
+(10) **the S1 watermark ruling — RULED 2026-08-19** (the swatch-stall
+report's fix seat S1; register OW43). The request: amend the RULED
 "W covers inputs" sentence so the space-server's watermark also
 covers the TAIL DERIVATIONS at drain-settle on a quiet space —
 advance/emit W past the settled tail's derived seqs, making "each new
 input lifts the previous generation" hold without requiring a NEXT
 input; server-local and small, the CLASS fix for the diverged-layer
 retirement hole (and it makes W honest at quiescence, which W4's
-`waitForSettled` metric needs); recommendation on file: rule it and
-build S1 now.
+`waitForSettled` metric needs). The owner, in chat, responding to the
+coordinator's recommendation of S1:
+
+> S1 sounds good.
+
+— owner (Berni), 2026-08-19. That rules seat S1 and nothing else
+(α1b's ratification (7) and flag 9 (6) stay pending; shape (b) (8)
+stays the flagged follow-on; S3 not taken). Landed by W3.1: the
+protocol.md §4 quiescence-advance amendment (the governing sentence
+quoted there, the extension dated and attributed), the serving-loop
+§3 drain-settle step, the space-server seat with `settleAdvances`
+counters, and the `executor-settle-advance.test.ts` pins (red-first
+on the pre-S1 tip; register OW43 CLOSED).
 
 ## Phase 0 — Rulings and guardrails
 

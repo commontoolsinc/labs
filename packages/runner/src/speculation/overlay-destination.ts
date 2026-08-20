@@ -1712,16 +1712,24 @@ export class SpeculationOverlayDestination
         // wave with `derivedThrough >= floor` has authoritatively
         // derived over everything this speculation consumed. The
         // CURRENT confirmed seq of a doc is deliberately NOT the floor:
-        // the server's own derived write bumps it ABOVE any reachable W
-        // on a quiet space (W covers inputs, never the derived commit's
-        // own seq), which would strand the entry forever. The SEAL-TIME
-        // read basis has a milder cousin of the same trap, accepted:
-        // a re-speculation whose run READ a pushed derived value
-        // carries that derived commit's seq in its confirmed basis, so
-        // its floor exceeds every reachable W until the NEXT authored
-        // input — the entry lingers on a then-quiet space (values
-        // converge, rendering stays correct; each new input lifts the
-        // previous generation).
+        // the server's own derived write bumps it above the INPUT
+        // coverage W holds mid-stream, which would strand the entry
+        // for the wave's whole busy stretch. The SEAL-TIME read basis
+        // has a milder cousin of the same shape: a re-speculation
+        // whose run READ a pushed derived value carries that derived
+        // commit's seq in its confirmed basis, so its floor exceeds
+        // the input-driven W until either the next authored input OR —
+        // since S1 (RULED 2026-08-19, protocol.md §4) — the server's
+        // DRAIN-SETTLE QUIESCENCE ADVANCE, which covers the space's
+        // committed derived tail once the space goes quiet. Before S1
+        // this text accepted the lingering under the premise "values
+        // converge, rendering stays correct" — FALSE under a
+        // regressed-base re-derivation (the swatch stall's diverged
+        // tombstone, verification-coverage.md OW43): a diverged layer
+        // masked a delivered healed value until the next authored
+        // commit anywhere in the space. With S1 every floor is
+        // reachable on a quiet space; each new input still lifts the
+        // previous generation mid-stream.
         let floor = entry.confirmedFloor;
         let blocked = false;
         for (const origin of entry.originLocalSeqs) {

@@ -234,6 +234,25 @@ export type ServingLoopStats = {
     }>;
     dropped: number;
   };
+  /** S1 — DRAIN-SETTLE QUIESCENCE ADVANCES (RULED 2026-08-19,
+   * protocol.md §4's amendment; stage-c/swatch-stall-rootcause.md §4):
+   * W covering the space's own committed derived tail at quiescence,
+   * with no authored input. Split from the per-input `settle` series
+   * so W4's settle metric and §4's amplification arithmetic can
+   * subtract the advance-only waves these mint — one derived commit
+   * per quiescence transition, latch-bounded, never chasing its own
+   * bookkeeping commit. */
+  settleAdvances: {
+    count: number;
+    /** The last advance's step: advancedTo − the coverage it advanced
+     * from (how many tail-derivation seqs the quiescence covered). */
+    lastDelta: number;
+    /** Bounded series (same discipline as settle.series): one row per
+     * quiescence advance, so W4 can split advance-only waves out of
+     * the per-input settle timings. */
+    series: Array<{ space: string; from: number; to: number; at: number }>;
+    dropped: number;
+  };
   events: {
     appended: number;
     processed: number;
@@ -343,6 +362,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     watchWakes: 0,
   },
   settle: { series: [], dropped: 0 },
+  settleAdvances: { count: 0, lastDelta: 0, series: [], dropped: 0 },
   events: {
     appended: 0,
     processed: 0,

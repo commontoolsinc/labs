@@ -298,6 +298,20 @@ at true quiescence. Crash recovery stays sound because the basis index
 re-marks the truncated dirty frontier (§3b, §6) and memo hits suppress
 effect re-fires.
 
+on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
+contributions, no pending events, the drain empty — S1, RULED
+2026-08-19; protocol.md §4's quiescence-advance amendment):
+  additionally advance W over the space's own committed derived tail
+  (the wave commits contiguously above the input coverage point),
+  sealed as an advance-only wave and pushed through the ordinary
+  watermark-doc channel — client retirement floors that include a
+  pushed derived commit's seq become reachable on a quiet space (the
+  swatch-stall class fix). At most once per quiescence transition
+  (latched by content-carrying wave commits, consumed on seal); the
+  advance's own bookkeeping commit is never chased; any non-own seq
+  above the coverage point stops the advance below it (fail-closed —
+  its coverage arrives input-driven). Counted: settleAdvances.
+
 on idle (no dirty work, no queued events) for IDLE_PARK_MS:
   park per activation policy
 ```
@@ -1197,7 +1211,8 @@ watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
 demand: {demandedRows, demandedInstances, demandedInstancesMax,
 demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
 demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
-pushGrowthWakes, watchWakes}, settle: {series, dropped}, events:
+pushGrowthWakes, watchWakes}, settle: {series, dropped},
+settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
 drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
 orphanDeliveriesRefused}, memo:
@@ -1233,7 +1248,13 @@ foreign-engine resolutions that failed and were isolated per space —
 a growing count names a foreign store that persistently cannot open,
 never a home-space outage) (`effectAcks` counts
 effect-channel ack writes, so the
-§3 amplification metric is computable from counters alone;
+§3 amplification metric is computable from counters alone —
+`settleAdvances` counts S1's drain-settle quiescence advances (RULED
+2026-08-19, protocol.md §4; count, lastDelta, bounded series of
+{space, from, to, at}) and is what amplification/settle arithmetic
+subtracts, since each advance mints one designed advance-only wave at
+a quiescence transition, split from the per-input `settle` series so
+W4's settle metric can exclude those waves;
 `outbox.budgetDeferrals` counts Phase-6 budget dispatch holds — §5;
 the `push` block is the memory server's Phase-6 push-priority
 counters (protocol.md §3), nested under `servingLoop` in the health

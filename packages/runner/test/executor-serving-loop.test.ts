@@ -309,6 +309,17 @@ describe("stage F serving loop", () => {
 
     // Self-echo (§3): the loop's own derived commits return on the feed
     // and are skipped — the wave count stabilizes rather than looping.
+    // FLAGGED EDIT (W3.1 S1, RULED 2026-08-19): since the drain-settle
+    // quiescence advance, a content wave is followed by ONE designed
+    // trailing advance-only wave at quiescence; sampling before it
+    // lands would count its arrival inside the stability window as a
+    // loop. Wait for the advance first — the pin's meaning (the count
+    // STABILIZES; no self-chase) is unchanged and now also covers the
+    // advance's own no-successor guarantee.
+    await waitUntil(
+      () => host!.stats().settleAdvances.count >= 1,
+      "the drain-settle quiescence advance to land (S1)",
+    );
     const wavesAfter = host.stats().waves;
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(host.stats().waves).toBe(wavesAfter);

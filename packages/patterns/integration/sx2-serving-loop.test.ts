@@ -60,6 +60,9 @@ type ServingLoopStats = {
   effectAcks: number;
   derivedCommits: number;
   structureLoadFailures: number;
+  /** S1 (RULED 2026-08-19): drain-settle quiescence advances — the
+   * advance-only waves the budgets below subtract. */
+  settleAdvances: { count: number };
 };
 
 const fetchServingLoopStats = async (): Promise<
@@ -227,24 +230,45 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     const derived = stats1.derivedCommits - stats0.derivedCommits;
     const acks = stats1.effectAcks - stats0.effectAcks;
     const waves = stats1.waves - stats0.waves;
+    // FLAGGED EDIT (W3.1 S1, RULED 2026-08-19): the drain-settle
+    // quiescence advance mints ONE advance-only wave per quiescence
+    // transition (a bookkeeping-only derived commit carrying the
+    // watermark over the tail derivations — the swatch-stall class
+    // fix). Those waves are counted in `settleAdvances` precisely so
+    // budget arithmetic can subtract them: they are latch-bounded by
+    // design (never per-wave, never self-chasing — pinned in
+    // executor-settle-advance.test.ts), so including them would make
+    // these TRIGGER budgets fire on designed behavior, not runaway
+    // amplification. Both budgets below measure the CONTENT waves.
+    const advances = stats1.settleAdvances.count -
+      stats0.settleAdvances.count;
     assert(derived >= 1, "the loop must have derived at least one wave");
     // ONE authoritative run per upstream change, coalescing allowed:
     // waves stay in the ballpark of authored input batches
     // (testing.md §4's single-run gate).
     assert(
-      waves <= authored + 2,
-      `waves delta ${waves} must stay in the ballpark of ` +
-        `${authored} authored batches`,
+      waves - advances <= authored + 2,
+      `waves delta ${waves} (minus ${advances} quiescence advances) ` +
+        `must stay in the ballpark of ${authored} authored batches`,
     );
     // The §4 amplification budget — a TRIGGER, not a silent gate: a
     // breach fails WITH the numbers so a human inspects the why.
     const logicalWrites = authored - acks;
-    const ratio = derived / Math.max(1, logicalWrites);
+    const ratio = (derived - advances) / Math.max(1, logicalWrites);
     assert(
       ratio <= 2,
-      `amplification ${derived}/${logicalWrites} = ${ratio.toFixed(2)} ` +
+      `amplification (${derived}−${advances})/${logicalWrites} = ` +
+        `${ratio.toFixed(2)} ` +
         "exceeds the ≤2 pure-workload budget (testing.md §4) — inspect " +
         "before re-baselining",
+    );
+    // The advances themselves stay latch-bounded: at most one per
+    // quiescence transition — a small constant over three inputs, far
+    // below one-per-wave (the executor pins carry the exact guarantee).
+    assert(
+      advances <= authored + 1,
+      `quiescence advances ${advances} exceed the once-per-transition ` +
+        `bound over ${authored} inputs — the S1 latch is broken`,
     );
   });
 

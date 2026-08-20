@@ -50,6 +50,11 @@ installFakeClock({
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.
     "speculation-overlay",
+    // Stage C W3.1 (S1): the drain-settle quiescence-advance pins drive
+    // a live ExecutorHost under the same wall-clock policies (flush
+    // deadline, renew cadence), and pins 3/5 assert QUIET-window
+    // behavior (nothing further commits) over real elapsed time.
+    "executor-settle-advance",
     // The Phase-3 client event-append suite drives a live memory server
     // plus the queue's real-time discharge pacing (retry backoff is a
     // wall-clock policy, and the tests wait on transport edges with

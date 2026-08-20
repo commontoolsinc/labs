@@ -152,6 +152,12 @@ export class ExecutorHost {
         series: this.#stats.settle.series.map((entry) => ({ ...entry })),
         dropped: this.#stats.settle.dropped,
       },
+      settleAdvances: {
+        ...this.#stats.settleAdvances,
+        series: this.#stats.settleAdvances.series.map((entry) => ({
+          ...entry,
+        })),
+      },
       memo: { ...this.#stats.memo },
       outbox: { ...this.#stats.outbox },
       lease: { ...this.#stats.lease },
