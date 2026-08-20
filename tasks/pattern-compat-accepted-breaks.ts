@@ -150,4 +150,35 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "inert.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
+  {
+    // The parking coordinator's admin roster declared a `requiredIntegrity`
+    // floor that nothing in the pattern could satisfy: no `addIntegrity` mint
+    // on the roster path, and the roles' own mint does not reach the path the
+    // floor sits on. Under `cfcWriteFloor: "enforce"` every write to the
+    // roster is refused, so the floor had to gain the mint that satisfies it,
+    // and the roster had to name the same atom the spot list is floored on —
+    // a write may only consume reads that all carry one witness for its floor,
+    // and checking a spot write reads the roster. The floor also gained a
+    // `writeAuthorizedBy` binding, so the roster is written by one reviewed
+    // handler rather than by any action that happens to hold the cell.
+    pattern: "factory-outputs/parking-coordinator/main.tsx",
+    baselines: [
+      "20260729T022742Z-ZaBTuPX0s1ITifoj",
+      "20260804T003803Z-xkP59lcpdOUTy_M1",
+    ],
+    // `ifc` is compared for exact equality, so any correction to an
+    // unsatisfiable floor reads as a break. Both roles name the same one
+    // path: the roster's own.
+    paths: [
+      "argument.adminRegistry.admins",
+      "result.adminRegistry.admins",
+    ],
+    reason:
+      "The admin roster's integrity floor was unsatisfiable, so no write to " +
+      "it could be accepted once the write floor is enforced. Correcting the " +
+      "declaration changes the `ifc` at that path, which no shape of the " +
+      "pattern avoids. A piece holding a roster keeps its stored roles; what " +
+      "it loses is the ability to be updated in place to the corrected " +
+      "contract.",
+  },
 ];

@@ -92,6 +92,45 @@ is local, such as people, profiles, rooms, or projects.
 everyone is an admin until the pattern writes at least one explicit admin role
 or explicitly stores `everyoneIsAdmin: false`.
 
+## Floor An Admin Registry
+
+A `requiredIntegrity` floor is a requirement on the value being written, and the
+runtime also screens the reads that fed that write. Four rules follow. A pattern
+that breaks one of them has declared a protection its own writes cannot satisfy,
+so the runtime refuses every write to the path it was meant to guard.
+
+**Mint on the path the floor sits on.** The floor asks what the value at that
+exact path carries. `AddIntegrity` on an array's items endorses the items; it
+says nothing about the array, so a floor on the array path still rejects. Wrap
+the list in `AddIntegrity` of the atom its floor names.
+
+**Endorse the entries too.** A value written into an endorsed location is stored
+as its own document, and moving that entry later writes a link the runtime has
+to label from the entry's own stored label. An entry with no label of its own
+cannot be re-linked, so rewriting a list around a removal fails. Endorse both:
+the entries, so each keeps a label of its own, and the list, so it satisfies its
+floor.
+
+**One atom per authority.** A floored write may only consume reads that share a
+single witness atom for the floor. Checking whether the acting person may write
+one protected path usually means reading another — the role registry — so both
+paths have to name the same atom. Two atoms in one flow, such as an `admin` atom
+and a separate `admin-manager` atom, make every such write unsatisfiable: the
+registry read carries one, the floor demands the other, and nothing carries
+both.
+
+**A self-granted flag is not a credential.** A per-user cell any viewer can set
+for themselves must carry no integrity. Give it one and every protected write
+that consults it inherits an endorsement its own user granted. Authority belongs
+in the role registry, and the registry belongs to one reviewed handler named in
+the list's `writeAuthorizedBy` contract, so that a write from anywhere else — an
+unreviewed action in the same pattern, or another pattern holding the same cell
+— is refused by the runtime rather than by convention.
+
+`packages/patterns/factory-outputs/parking-coordinator/main.tsx` follows all
+four. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
+handler the same way, with profiles rather than names as role subjects.
+
 ## Use Prompt-Injection Helpers
 
 Use `prompt-injection/` when building a CFC demo or workflow that separates
