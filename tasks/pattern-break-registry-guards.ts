@@ -69,7 +69,7 @@ export interface BreakRegistryFinding {
 const RECORD_PREFIX = "docs/history/";
 
 /** The history tree's own live scaffolding — never a decision record. */
-const RECORD_SCAFFOLDING = new Set(["README.md", "INDEX.md"]);
+const RECORD_SCAFFOLDING = new Set(["readme.md", "index.md"]);
 
 /**
  * Why `record` cannot name a decision record, or `undefined` when its shape
@@ -94,7 +94,14 @@ function recordPathProblem(record: string): string | undefined {
   }
   // The tree root's own two files; a NESTED file by either name is an
   // ordinary indexed document.
-  if (segments.length === 1 && RECORD_SCAFFOLDING.has(segments[0])) {
+  // Compared case-insensitively because the existence probe resolves the live
+  // README.md/INDEX.md for alternate casing on common macOS and Windows file
+  // systems — the same platforms the separator split above exists for. The
+  // shape check must reject those spellings before the probe ever runs.
+  if (
+    segments.length === 1 &&
+    RECORD_SCAFFOLDING.has(segments[0].toLowerCase())
+  ) {
     return `is the history tree's own scaffolding, not a decision record`;
   }
   return undefined;

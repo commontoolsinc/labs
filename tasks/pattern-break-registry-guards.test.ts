@@ -94,7 +94,14 @@ describe("pattern-break-registry-guards", () => {
   it("returns a finding for the history tree's own scaffolding", () => {
     // Both live files under the tree exist and end in .md, and neither is a
     // decision record.
-    for (const record of ["docs/history/README.md", "docs/history/INDEX.md"]) {
+    for (
+      const record of [
+        "docs/history/README.md",
+        "docs/history/INDEX.md",
+        "docs/history/readme.md",
+        "docs/history/index.md",
+      ]
+    ) {
       const findings = guardBreakRegistryEntries({
         entries: [entry({ record })],
         requiredPatternKeys: new Set(),
@@ -108,11 +115,18 @@ describe("pattern-break-registry-guards", () => {
   it("accepts a nested record named like the scaffolding", () => {
     // Only the tree root's own two files are scaffolding. A nested README.md
     // is an ordinary document the index covers.
-    expect(guardBreakRegistryEntries({
-      entries: [entry({ record: "docs/history/some-break/README.md" })],
-      requiredPatternKeys: new Set(),
-      recordExists: () => true,
-    })).toEqual([]);
+    for (
+      const record of [
+        "docs/history/some-break/README.md",
+        "docs/history/some-break/readme.md",
+      ]
+    ) {
+      expect(guardBreakRegistryEntries({
+        entries: [entry({ record })],
+        requiredPatternKeys: new Set(),
+        recordExists: () => true,
+      })).toEqual([]);
+    }
   });
 
   it("reports every offending entry rather than the first", () => {
