@@ -299,12 +299,13 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // Characterized first (pre-D5, observed passing on unmodified code): this
-  // exact call dispatched — the handler ran with `$event === undefined` and
-  // its receipt spent the invocation id. The schema below is the deployed
-  // shape absence reaches dispatch through: a top-level local $ref with the
-  // stream marker, which the arg parser cannot derive flags from, so a bare
-  // call parses to `input === undefined`.
+  // The schema below is the deployed shape a stream's event is routinely
+  // written in: a top-level local $ref with the stream marker. The arg
+  // parser reads the definition's fields, so absence is refused where the
+  // caller can act on it — naming the type to supply — rather than deeper in
+  // at the payload gate. Either way nothing dispatches; what this pins is
+  // that the id survives a refusal, so the retry that does send a payload
+  // can still use it.
   it("refuses an absent payload against a verb that provably cannot run without one", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -342,7 +343,7 @@ describe("executePieceCallable", () => {
         },
       ),
     ).rejects.toThrow(
-      /Invalid input for "recordMessage": no payload was supplied.*message.*send a payload/,
+      /Handler requires input\. Expected type: \{\s*message: string\s*\}/,
     );
 
     // Nothing reached the stream, so the invocation id was never spent — the
@@ -351,12 +352,13 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // The $ref-carrying stream shape is schema-less to the arg parser, so a
-  // bare call skips the implicit-pipe read and the absence gate above
-  // decides — with stdin untouched. A rejecting reader pins the "untouched"
-  // half: piped bytes cannot reach a verb through this shape, they can only
-  // be spelled explicitly (`--json`, `--json-file -`).
-  it("refuses a bare $ref-stream verb call without reading piped stdin", async () => {
+  // A $ref-carrying stream shape declares its fields in the definition, and
+  // the arg parser reads them there — so a bare call takes the same
+  // implicit-pipe path as the identical verb written without the
+  // indirection ("infers piped stdin for object handlers", below). Piped
+  // bytes reach a verb through this shape; how the schema spells its event
+  // is not something a caller should have to know to pipe into it.
+  it("infers piped stdin for a bare $ref-stream verb call", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -375,28 +377,30 @@ describe("executePieceCallable", () => {
       } as JSONSchema,
     });
 
-    await expect(
-      executePieceCallable(
-        {
-          apiUrl: "http://localhost:8000",
-          identity: "/tmp/test-identity.pem",
-          piece: "fid1:piece-123",
-          space: "home",
-        },
-        "recordMessage",
-        [],
-        {
-          loadPieces: () => Promise.resolve(harness.pieces),
-          loadPiece: () => Promise.resolve(harness.piece),
-          isStdinTerminal: () => false,
-          readTextInput: () => Promise.reject(new Error("stdin was read")),
-        },
-      ),
-    ).rejects.toThrow(
-      /Invalid input for "recordMessage": no payload was supplied/,
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "recordMessage",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve('{"message":"Milk"}'),
+      },
     );
 
-    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["recordMessage"],
+        value: { message: "Milk" },
+      },
+    ]);
   });
 
   it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
