@@ -338,6 +338,14 @@ function parseObjectInput(
     const flagName = flagNameForKey(key);
     descriptors.set(flagName, { key, flagName, schema: propertySchema });
   }
+  // A verb with exactly one declared field is also callable through the
+  // single-value spelling: `--value X` addresses that field, so the same
+  // call works whether or not the caller's tooling derived the field list
+  // (a served root reference parses in single-value mode, where `--value`
+  // is the only spelling there is).
+  if (descriptors.size === 1 && !descriptors.has("value")) {
+    descriptors.set("value", descriptors.values().next().value!);
+  }
 
   const input: Record<string, unknown> = {};
   let directJsonInput: unknown;

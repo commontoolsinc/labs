@@ -787,9 +787,17 @@ run_piece_call_retry() {
   if [ "$ABSENT_STATUS" -eq 0 ]; then
     error "An absent payload against a required-fields verb should fail, got: $ABSENT_OUT"
   fi
+  # Two refusal layers are accepted while their reconciliation is decided:
+  # the verb-level validator ("no payload was supplied") answers when the
+  # served schema's root is a reference the flag parser does not resolve,
+  # and the flag parser ("Missing required flag") answers when the root
+  # states its fields — under content-addressed schemas the same authored
+  # schema can serve either way. Both refuse BEFORE dispatch, which is what
+  # this scenario guards: the assertions below prove the id was not spent.
   case "$ABSENT_OUT" in
     *'Invalid input for "recordNote"'*'no payload was supplied'*) ;;
-    *) error "An absent-payload refusal should say no payload was supplied, got: $ABSENT_OUT" ;;
+    *'Missing required flag --note'*) ;;
+    *) error "An absent-payload refusal should refuse before dispatch, got: $ABSENT_OUT" ;;
   esac
   assert_message_count "$RETRY_PIECE_6" 0 \
     "A refused absent-payload call must not record a message"
