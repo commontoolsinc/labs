@@ -11,6 +11,8 @@ import { cliCommand } from "./cli-name.ts";
 import {
   declaredEventFields,
   eventSchemaJudgesRootFields,
+  requiredEventFieldsOwed,
+  verbRunsWithoutPayload,
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
@@ -103,10 +105,6 @@ function objectProperties(
   schema: JSONSchema,
 ): Record<string, JSONSchema> | null {
   return declaredEventFields(schema)?.properties ?? null;
-}
-
-function requiredFlags(schema: JSONSchema): Set<string> {
-  return declaredEventFields(schema)?.required ?? new Set();
 }
 
 function schemaType(schema: JSONSchema): string | undefined {
@@ -486,8 +484,13 @@ function parseObjectInput(
 
   // Only enforce required fields for schema-derived flags.
   // JSON input validation is deferred to the runner.
+  //
+  // What is enforced is what the caller is OWED to supply, not what the
+  // schema marks required: a field carrying a default is answered by the
+  // pattern, and demanding it here refuses a call the runtime would have
+  // filled in and dispatched.
   if (!usedJson) {
-    for (const key of requiredFlags(schema)) {
+    for (const key of requiredEventFieldsOwed(schema)) {
       if (!(key in input)) {
         throw new Error(`Missing required flag --${flagNameForKey(key)}`);
       }
@@ -622,6 +625,24 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
     return false;
   }
   if (schema.type !== undefined || schema.properties !== undefined) {
+    return false;
+  }
+  // A `$ref` beside the stream marker describes the event — in the definition
+  // rather than at the root, which is where a pattern routinely puts it. The
+  // root looks bare either way, so reading it alone called such a verb
+  // schema-less and rendered its page as `void`: no input type, no flags, and
+  // no sign that the fields the parser accepts exist at all.
+  //
+  // What settles it is where the ref LANDS, not that one is written. A ref
+  // reaching a fields position describes an event, and only that answers
+  // here. Every other ref — to a scalar, to a position naming nothing, or one
+  // that does not resolve — carries no fields to derive and is left to the
+  // marker check below, which is the classification it had before any ref was
+  // followed. Answering for those directly would take the marker out of the
+  // question: a `$ref` to a scalar with no stream marker is a single-value
+  // verb, and calling it schema-less costs it both `--value` and its input
+  // type on the page.
+  if (typeof schema.$ref === "string" && objectProperties(schema) !== null) {
     return false;
   }
   return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
@@ -846,7 +867,7 @@ function specificFlagLines(schema: JSONSchema): string[] {
     ];
   }
 
-  const required = requiredFlags(schema);
+  const required = requiredEventFieldsOwed(schema);
   const descriptors = Object.entries(properties).map(
     ([key, propertySchema]) => {
       const flagName = flagNameForKey(key);
@@ -1040,7 +1061,7 @@ function usageLine(
     return `${prefix} ${verb} --value ${valuePlaceholder(spec.inputSchema)}`;
   }
 
-  const required = requiredFlags(spec.inputSchema);
+  const required = requiredEventFieldsOwed(spec.inputSchema);
   const requiredUsages = Object.entries(properties)
     .filter(([key]) => required.has(key))
     .map(([key, propertySchema]) =>
@@ -1086,8 +1107,7 @@ function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
   if (isSchemaLessHandlerInput(schema)) {
     return true;
   }
-  const properties = objectProperties(schema);
-  return properties !== null && requiredFlags(schema).size === 0;
+  return verbRunsWithoutPayload(schema);
 }
 
 export function parseExecArgs(
