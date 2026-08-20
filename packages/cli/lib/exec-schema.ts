@@ -119,37 +119,6 @@ function flagNameForKey(key: string): string {
   return key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
-/**
- * The flag name a verb's single argument property answers to besides its own.
- *
- * A verb declaring exactly one field has nothing to disambiguate, so naming
- * the field and naming "the value" are the same act — `--title Milk` and
- * `--value Milk` carry one payload, and this is what makes the second spell
- * the first. The value is parsed against the FIELD's schema either way, so
- * the two spellings cannot diverge on type.
- *
- * `null` for every other shape. Two fields or more and there is a choice to
- * make, so `--value` names nothing and is refused; none at all and the
- * position is not a fields position, which is the separate scalar vocabulary
- * in {@link SCALAR_INPUT_FLAGS}. A verb whose one field is already spelled
- * `--value` needs no alias and gets none — the name it would add is the name
- * it already has.
- *
- * On a schema that welcomes undeclared fields the alias still wins, which is
- * the one case where it takes a name a payload could otherwise have used for
- * a field of its own. `--json` carries such a payload whole and is the door
- * for it.
- */
-function soleFieldAlias(schema: JSONSchema): FlagDescriptor | null {
-  const properties = objectProperties(schema);
-  if (!properties) return null;
-  const entries = Object.entries(properties);
-  if (entries.length !== 1) return null;
-  const [key, propertySchema] = entries[0];
-  if (flagNameForKey(key) === "value") return null;
-  return { key, flagName: "value", schema: propertySchema };
-}
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -317,25 +286,10 @@ const HELP_TAKES_NO_ARGUMENTS =
 function undeclaredFlagError(
   rawFlag: string,
   descriptors: Map<string, FlagDescriptor>,
-  alias: FlagDescriptor | null,
 ): string {
   const declared = [...descriptors.keys()];
   const opening = `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field ` +
     "this verb declares. ";
-
-  // `--value` against a verb that declares more than one field is a caller
-  // carrying over the spelling a single-field verb accepts, not a misspelling
-  // of any name here. The near miss cannot say that — it would offer whichever
-  // declared name is closest to "value", which is a coincidence of letters
-  // rather than the answer. Only the field count explains the refusal, so it
-  // is what the message leads with.
-  if (rawFlag === "value" && alias === null && declared.length > 1) {
-    return opening +
-      `"--value" spells the sole field of a verb that declares one, and ` +
-      `this verb declares ${declared.length}: ${
-        declared.map((name) => `"--${name}"`).join(", ")
-      }`;
-  }
 
   // A caller who wrote `--no-something` is asking to negate, and only a
   // boolean can be negated. Both halves of the answer narrow accordingly:
@@ -361,25 +315,14 @@ function undeclaredFlagError(
         }`);
   }
 
-  // The alias is a name that works, so a slip toward it deserves the same
-  // near miss a field name does — `--valu` on a single-field verb is the same
-  // slip as `--titel`. It stays out of the vocabulary sentence's list, which
-  // answers what the verb DECLARES; the clause after it says the field
-  // answers to a second spelling, which is a different claim.
-  const nearest = nearestName(
-    rawFlag,
-    alias === null ? declared : [...declared, alias.flagName],
-  );
-  const alsoSpells = alias === null
-    ? ""
-    : `, which this verb's sole field also spells "--${alias.flagName}"`;
+  const nearest = nearestName(rawFlag, declared);
   return opening +
     (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
     (declared.length === 0
       ? `${EVENT_ROOT_POSITION} declares no fields at all`
       : `${EVENT_ROOT_POSITION} takes ${
         declared.map((name) => `"--${name}"`).join(", ")
-      }${alsoSpells}`);
+      }`);
 }
 
 function parseObjectInput(
@@ -392,15 +335,6 @@ function parseObjectInput(
     const flagName = flagNameForKey(key);
     descriptors.set(flagName, { key, flagName, schema: propertySchema });
   }
-  // Held beside the declared names rather than inside them. Everything that
-  // reads `descriptors` is answering "what does this verb declare" — the
-  // refusal vocabulary, the help page — and the alias is not a declaration.
-  // Resolution is the one place the two are the same, which is what
-  // `resolveFlag` is.
-  const alias = soleFieldAlias(schema);
-  const resolveFlag = (name: string): FlagDescriptor | undefined =>
-    descriptors.get(name) ??
-      (alias !== null && name === alias.flagName ? alias : undefined);
 
   const input: Record<string, unknown> = {};
   let directJsonInput: unknown;
@@ -470,9 +404,9 @@ function parseObjectInput(
     const inlineValue = inlineSplit.length === 2 ? inlineSplit[1] : undefined;
 
     let negated = false;
-    let descriptor = resolveFlag(rawFlag);
+    let descriptor = descriptors.get(rawFlag);
     if (!descriptor && rawFlag.startsWith("no-")) {
-      descriptor = resolveFlag(rawFlag.slice(3));
+      descriptor = descriptors.get(rawFlag.slice(3));
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
@@ -483,7 +417,7 @@ function parseObjectInput(
       // accepted as a silent alias, when what the caller needs is the near
       // miss naming the spelling that works.
       if (eventSchemaJudgesRootFields(schema)) {
-        throw new Error(undeclaredFlagError(rawFlag, descriptors, alias));
+        throw new Error(undeclaredFlagError(rawFlag, descriptors));
       }
       // A schema judging nothing says nothing about the value either, so the
       // flag is taken as the string the caller typed: there is no declared
@@ -964,19 +898,6 @@ function specificFlagLines(schema: JSONSchema): string[] {
     },
   );
 
-  // The alias earns a line of its own rather than a mention on the field's,
-  // because the page is read to find out what may be typed and a spelling
-  // buried in another line's prose is not found that way. Its detail names
-  // the field it fills, which is the whole of what distinguishes it.
-  const alias = soleFieldAlias(schema);
-  if (alias) {
-    descriptors.push({
-      usage: fullFlagUsage(alias.flagName, alias.schema),
-      detail: `The same field as --${flagNameForKey(alias.key)}, ` +
-        "spelled for a verb that declares only the one.",
-    });
-  }
-
   const maxUsage = descriptors.reduce(
     (width, descriptor) => Math.max(width, descriptor.usage.length),
     0,
@@ -1166,19 +1087,8 @@ function helpUsageLines(
   );
   const verb = optionalVerbUsage(spec);
   const properties = objectProperties(spec.inputSchema);
-  const alias = soleFieldAlias(spec.inputSchema);
-  // The usage block names what a call must carry, so the alias belongs in it
-  // on exactly the terms its field does: beneath the line naming the field
-  // when that field is required, and nowhere when it is not. Listing it for
-  // an optional field would put "--value" in a block that never mentions
-  // "--title", which reads as the alias being the primary spelling.
-  const aliasUsage = alias !== null &&
-      requiredFlags(spec.inputSchema).has(alias.key)
-    ? [`  ${prefix} ${verb} ${primaryFlagUsage(alias.flagName, alias.schema)}`]
-    : [];
   return [
     `  ${usageLine(mountedFilePath, spec, invocationStyle, commandPrefix)}`,
-    ...aliasUsage,
     ...(!properties ? [`  ${prefix} ${verb} --value-file <path>`] : []),
     `  ${prefix} ${verb} --json`,
     `  ${prefix} ${verb} --json-file <path>`,
