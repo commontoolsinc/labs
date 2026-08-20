@@ -231,9 +231,11 @@ function the profile ranked first.
 
 ## 4b. Ask where the elapsed time went, which is a different question
 
-Everything above sums spans, which is the right arithmetic for CPU and the
-wrong one for wall time: concurrent spans overlap, so a parent's elapsed time is
-not the total of its children's, and adding them up can exceed the run itself.
+Everything above sums spans. Every measure is an elapsed start-to-end duration,
+so that sum is cumulative elapsed span time — useful, and not CPU: it already
+contains whatever a span waited through, and a nested span counts the same
+interval again inside its parent, so the total can exceed the run itself. CPU
+attribution is what step 3's sampling profile is for.
 
 Wall time asks about coverage instead — the union of the intervals beneath a
 span against that span's own duration:

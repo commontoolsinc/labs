@@ -1,12 +1,15 @@
 #!/usr/bin/env -S deno run --allow-read
 /**
- * Where a run's elapsed time went, as opposed to where its CPU went.
+ * Where a run's elapsed time went, and how much of it nothing accounts for.
  *
- * `aggregate-measures.ts` sums spans, which is the right arithmetic for CPU and
- * the wrong one for wall time: concurrent spans overlap, so a parent's elapsed
- * time is not the total of its children's, and adding them up can exceed the
- * run itself. Wall time asks a different question — how much of a span's
- * elapsed time is accounted for by anything at all?
+ * Every measure is an elapsed start-to-end duration, so summing them — which is
+ * what `aggregate-measures.ts` does — gives cumulative elapsed span time. That
+ * is a useful figure and it is not CPU: it already contains whatever a span
+ * waited through, and a nested span counts the same interval again inside its
+ * parent. CPU attribution comes from a sampling profile, not from these.
+ *
+ * Wall time asks the question summing cannot: how much of a span's elapsed time
+ * is accounted for by anything at all?
  *
  * The answer is coverage: the UNION of the intervals beneath a span, against
  * that span's own duration. What is left over is time the span was open and
@@ -62,19 +65,22 @@ export function childrenOf(spans: readonly Span[]): Map<number, number[]> {
   return children;
 }
 
-export function descendants(
+/**
+ * What a span's children cover between them — which is what its whole subtree
+ * covers.
+ *
+ * `buildForest` only makes a span a parent when it contains the child, so each
+ * child already covers everything beneath it and the grandchildren add nothing
+ * to the union. Walking the subtree would recompute that for every span and
+ * make this quadratic on exactly the deep captures it exists to read.
+ */
+export function coveredBy(
+  spans: readonly Span[],
   children: Map<number, number[]>,
   index: number,
-): number[] {
-  const out: number[] = [];
-  const stack = [...(children.get(index) ?? [])];
-  while (stack.length > 0) {
-    const next = stack.pop()!;
-    out.push(next);
-    const kids = children.get(next);
-    if (kids) stack.push(...kids);
-  }
-  return out;
+): number {
+  const kids = children.get(index);
+  return kids === undefined ? 0 : unionLength(kids.map((i) => spans[i]));
 }
 
 /**
@@ -89,8 +95,8 @@ export function gapsIn(
   children: Map<number, number[]>,
   index: number,
 ): { start: number; end: number }[] {
-  const inner = descendants(children, index);
-  if (inner.length === 0) return [];
+  const inner = children.get(index);
+  if (inner === undefined || inner.length === 0) return [];
   const sorted = inner.map((i) => spans[i]).sort((a, b) => a.start - b.start);
   const gaps: { start: number; end: number }[] = [];
   let cursor = spans[index].start;
@@ -118,18 +124,18 @@ if (import.meta.main) {
   const children = childrenOf(spans);
 
   const measurable: number[] = [];
-  for (const index of children.keys()) {
-    if (focus === undefined || spans[index].key === focus) {
-      measurable.push(index);
-    }
+  const leaves: number[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    if (focus !== undefined && spans[i].key !== focus) continue;
+    if (children.has(i)) measurable.push(i);
+    else leaves.push(i);
   }
 
-  if (measurable.length === 0) {
+  if (measurable.length === 0 && leaves.length === 0) {
     console.error(
       focus === undefined
-        ? "No span in this capture has children, so nothing can be accounted for."
-        : `No span named ${focus} has children. Only a span with children has a` +
-          ` gap: a leaf's whole duration is itself.`,
+        ? "This capture holds no spans."
+        : `No span named ${focus} is in this capture.`,
     );
     Deno.exit(1);
   }
@@ -137,9 +143,7 @@ if (import.meta.main) {
   const rows = measurable
     .map((index) => {
       const wall = spans[index].end - spans[index].start;
-      const covered = unionLength(
-        descendants(children, index).map((i) => spans[i]),
-      );
+      const covered = coveredBy(spans, children, index);
       return { index, wall, covered, gap: wall - covered };
     })
     .filter((row) => row.gap >= minMs)
@@ -195,6 +199,34 @@ if (import.meta.main) {
     }
   }
   stretches.sort((a, b) => b.ms - a.ms);
+
+  // A leaf has no gap to compute — nothing is nested inside it — but that does
+  // not make it busy. A span wrapping a single request, timer, or lock emits no
+  // children and is pure waiting, which is exactly what this view hunts, so
+  // suppressing leaves would hide the clearest case of all.
+  if (leaves.length > 0) {
+    const longest = leaves
+      .map((i) => ({ i, ms: spans[i].end - spans[i].start }))
+      .filter((row) => row.ms >= minMs)
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 10);
+    if (longest.length > 0) {
+      console.log(
+        "\nlongest spans with nothing nested inside them:",
+      );
+      console.log("       ms  key");
+      for (const row of longest) {
+        console.log(
+          `${row.ms.toFixed(0).padStart(9)}  ${spans[row.i].key}`,
+        );
+      }
+      console.log(
+        "\nNothing here distinguishes one that computed for that long from " +
+          "one that\nwaited. A span wrapping a request looks identical to a " +
+          "tight loop; what\nseparates them is a span inside it.",
+      );
+    }
+  }
 
   if (stretches.length > 0) {
     console.log("\nlongest stretches with nothing instrumented running:");
