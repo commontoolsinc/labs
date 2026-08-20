@@ -161,6 +161,39 @@ describe("ProcessModuleByteCache", () => {
     expect(cache.get(RT, "ok")).toEqual({ js: "GOOD" });
     expect(cache.stats().entries).toBe(1);
   });
+
+  it("restore rejects malformed builder source sidecars", () => {
+    const malformedSidecars: unknown[] = [
+      null,
+      [],
+      { formatVersion: 2, sites: {} },
+      { formatVersion: 1, sites: null },
+      { formatVersion: 1, sites: [] },
+      { formatVersion: 1, sites: { "": { line: 1, col: 0 } } },
+      { formatVersion: 1, sites: { named: null } },
+      { formatVersion: 1, sites: { named: { line: 1.5, col: 0 } } },
+      { formatVersion: 1, sites: { named: { line: 0, col: 0 } } },
+      { formatVersion: 1, sites: { named: { line: 1, col: 0.5 } } },
+      { formatVersion: 1, sites: { named: { line: 1, col: -1 } } },
+      {
+        formatVersion: 1,
+        sites: { named: { line: 1, col: 0, bindingName: 42 } },
+      },
+      {
+        formatVersion: 1,
+        sites: { named: { line: 1, col: 0, bindingName: "" } },
+      },
+    ];
+    const cache = new ProcessModuleByteCache();
+
+    cache.restore(malformedSidecars.map((builderSourceSites, index) => ({
+      key: `${RT}\0bad-sidecar-${index}`,
+      js: "NO",
+      builderSourceSites,
+    })));
+
+    expect(cache.stats().entries).toBe(0);
+  });
 });
 
 describe("createCompileByteCache", () => {
