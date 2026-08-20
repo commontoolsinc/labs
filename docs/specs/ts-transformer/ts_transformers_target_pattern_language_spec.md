@@ -215,6 +215,45 @@ Why:
 - `.get()` on ordinary opaque/reactive values is still not part of the
   language, even inside a computation callback
 
+### Where A Builder's Callback May Come From
+
+A trusted builder's callback is written at the call, or named by a binding the
+same module declares. Those are the two shapes the module verifier can follow,
+and a module that uses any other is refused at load
+(`docs/specs/sandboxing/SES_SANDBOXING_SPEC.md`, goal 3 "Direct Callback
+Builders"), so the compiler rejects them instead.
+
+**Good here**
+
+```ts
+// Shown at module scope.
+const atTheCall = lift((n: number) => n + 1);
+const double = (n: number) => n * 2;
+const byName = lift(double);
+function triple(n: number) {
+  return n * 3;
+}
+const byDeclaration = lift(triple);
+```
+
+**Still unsupported here**
+
+```ts
+// Shown at module scope.
+declare const callbacks: { double: (n: number) => number };
+declare const importedDouble: (n: number) => number;
+const viaProperty = lift(callbacks.double);
+const viaImport = lift(importedDouble);
+```
+
+Why:
+
+- the verifier reads one module at a time, so a callback whose body it cannot
+  see at this call is indistinguishable from a computed one
+- naming the function in this module costs one line and keeps the callback
+  where every later stage — schema injection, hoisting, and the verifier —
+  already looks for it
+
 ### Event Handler JSX Attributes
 
 Event handlers are an explicit callback boundary for imperative UI logic.
