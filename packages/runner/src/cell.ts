@@ -1069,9 +1069,7 @@ export class CellImpl<T extends FabricValue>
     // The link's schema may ride as a content-addressed reference; the
     // stream marker lives on the resolved document.
     const streamSchema = isObjectNotArray(resolvedToValueLink.schema)
-      ? resolveExternalRootRefForStructure(
-        resolvedToValueLink.schema as JSONSchemaObj,
-      )
+      ? resolveExternalRootRefForStructure(resolvedToValueLink.schema)
       : resolvedToValueLink.schema;
     if (
       ContextualFlowControl.getAsCellValues(streamSchema).at(0) === "stream"
@@ -3705,7 +3703,7 @@ export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
   if (!isObjectNotArray(schema)) return undefined;
-  schema = resolveExternalRootRefForStructure(schema as JSONSchemaObj);
+  schema = resolveExternalRootRefForStructure(schema);
   return isCellScope(schema.scope) ? schema.scope : undefined;
 }
 

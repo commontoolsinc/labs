@@ -2154,11 +2154,11 @@ function toolInputRequiredIntegrityFailure(
   // NOT resolveExternalRootRefForStructure, whose reference-unchanged miss
   // would read as nothing-to-refuse.
   let structural = schema;
-  const ref = (structural as JSONSchemaObj).$ref;
+  const ref = structural.$ref;
   if (typeof ref === "string" && isExternalSchemaRef(ref)) {
     try {
       const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
-        structural as JSONSchemaObj,
+        structural,
       );
       if (!isObjectOrArray(resolved)) return undefined;
       structural = resolved;

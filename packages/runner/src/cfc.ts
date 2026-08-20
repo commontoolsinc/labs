@@ -884,10 +884,10 @@ export function resolveExternalRootRefForStructure(
     Object.keys(resolved.$defs).length === 0 &&
     !hasLocalSchemaRef(resolved)
   ) {
-    const { $defs: _empty, ...rest } = resolved as JSONSchemaObj;
+    const { $defs: _empty, ...rest } = resolved;
     return internSchema(rest) as JSONSchemaObj;
   }
-  return resolved as JSONSchemaObj;
+  return resolved;
 }
 
 /** Whether the schema's body (its `$defs` excluded) names a local `#/...`. */

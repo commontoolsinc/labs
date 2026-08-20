@@ -1610,7 +1610,7 @@ class TransformObjectCreator
       // reference; an unresolvable one behaves as the schemaless
       // degradation (a plain proxy read, no handle, no defaults).
       const structuralSchema = isObjectNotArray(link.schema)
-        ? resolveExternalRootRefForStructure(link.schema as JSONSchemaObj)
+        ? resolveExternalRootRefForStructure(link.schema)
         : link.schema;
       const schema = asCellCompoundSchemaForValue(structuralSchema, value) ??
         structuralSchema;

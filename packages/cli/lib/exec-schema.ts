@@ -806,7 +806,7 @@ function expandSchemaReference(
   if (schema === undefined || schema === true || !isSchemaObject(schema)) {
     return schema;
   }
-  const ref = (schema as { $ref?: unknown }).$ref;
+  const ref = schema.$ref;
   if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
     return schema;
   }

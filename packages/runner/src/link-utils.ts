@@ -248,7 +248,7 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
 ): T {
   return mapLinkSchemas(value, (schema) => {
     if (!isObjectNotArray(schema)) return schema;
-    const ref = (schema as JSONSchemaObj).$ref;
+    const ref = schema.$ref;
     if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
     try {
       // Recomposition never mints an empty `$defs` (a closure of one
@@ -387,7 +387,7 @@ export function sanitizeSchemaForLinks(
   // expected. The sanitized (inline) result re-externalizes at the emission
   // site as usual; an unresolvable reference passes through unchanged (the
   // helper returns it as it is, and a reference has nothing to strip).
-  schema = resolveExternalRootRefForStructure(schema as JSONSchemaObj);
+  schema = resolveExternalRootRefForStructure(schema);
 
   // Memoize by input identity: sanitize is a pure function of
   // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen

@@ -2299,7 +2299,7 @@ function expandServedSchemaReference(
   served: JSONSchema & object,
   declared: JSONSchema | undefined,
 ): JSONSchema {
-  const ref = (served as { $ref?: unknown }).$ref;
+  const ref = served.$ref;
   if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
     return served;
   }

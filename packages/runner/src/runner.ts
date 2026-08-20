@@ -276,7 +276,7 @@ function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
   if (!isObjectNotArray(schema)) return undefined;
-  schema = resolveExternalRootRefForStructure(schema as JSONSchemaObj);
+  schema = resolveExternalRootRefForStructure(schema);
   return isCellScope(schema.scope) ? schema.scope : undefined;
 }
 

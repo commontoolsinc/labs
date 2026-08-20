@@ -139,9 +139,7 @@ const scopedLinkForPath = (
   // readers in cfc.ts.
   const declaredScope = (candidate: JSONSchema | undefined) => {
     if (!isObjectNotArray(candidate)) return undefined;
-    const structural = resolveExternalRootRefForStructure(
-      candidate as JSONSchemaObj,
-    );
+    const structural = resolveExternalRootRefForStructure(candidate);
     return isCellScope(structural.scope) ? structural.scope : undefined;
   };
 

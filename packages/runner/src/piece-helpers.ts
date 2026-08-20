@@ -165,9 +165,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   // whose closure has not arrived stays a reference, which the walk below
   // finds nothing to relax in — the same conservative fallback as a chain
   // the resolver cannot complete.
-  const structural = resolveExternalRootRefForStructure(
-    schema as JSONSchemaObj,
-  );
+  const structural = resolveExternalRootRefForStructure(schema);
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.
