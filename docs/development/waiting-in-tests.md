@@ -1020,6 +1020,26 @@ instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
 its own fetch to the shell dev server fails. Without the check, every test in
 the run waits out the full minute and reports nothing that names the cause.
 
+`login()` reports the same block, for the same reason. It waits on
+`waitForCondition` for the shell to publish `globalThis.app`, and a document
+that is not the shell never publishes it, so that wait reaches the
+stuck-condition net five minutes later saying only that it did. The runtime
+handshake after it names which of its two stages ran out and nothing about the
+page it ran against. Both are wrapped, so any login failure names the identity
+being logged in as and what the page held. `readAndDescribeShellPage` is the
+whole of what a report needs from a page — it reads the probe, renders it, and
+reports a page it could not read at all rather than replacing the failure being
+reported with a second one. Reach for it, rather than pairing the read and the
+render, when adding page context to an error of your own.
+
+The first line of each of these messages comes from `describeThrown` in
+`packages/integration/describe-thrown.ts`, because a failure inside the page
+does not arrive as an `Error`. The browser protocol reports an uncaught page
+exception as a detail record, and stringifying one yields `[object Object]`.
+`describeThrown` takes an `Error`'s message, the first line of a page
+exception's description, and for anything else points at the cause, which the
+thrower attaches and Deno prints below the message.
+
 ### A human-in-the-loop flow that no CI lane runs
 
 `packages/patterns/google/core/integration/google-calendar-importer.test.ts`
