@@ -1,6 +1,6 @@
 # Naming in collections
 
-A collection may give its members names of its own: `top-42` for member 42 of a
+A collection may give its members names of its own: `top/42` for member 42 of a
 board that calls itself `top`. This document defines how such a name is
 addressed and resolved, how a spelling is chosen for a given reader, and what
 has to be in place before a collection can offer one.
@@ -32,7 +32,7 @@ Only the first is guaranteed to exist.
 | Layer | Example | Who states the guarantee |
 | --- | --- | --- |
 | Identity | `fid1:…` | the fabric: immutable, never reused, never retargeted |
-| Member name | `top-42` | the collection that owns it |
+| Member name | `top/42` | the collection that owns it |
 | Space-level name | `verb-contract-arc` | the space: mutable, non-unique, retargetable |
 
 A **member name** is a collection's name for one of its members, and the term
@@ -229,7 +229,8 @@ things.
 
 A short form is then an assertion that the reader's vocabulary and the target's
 agree, which the resolver verifies. Expansion is total and single-candidate:
-`p-n` expands to `p/p-n`, resolves, or fails. It never selects among candidates.
+`#p/n` expands to `#p/p/n` — the binding named `p`, and the prefix `p` that its
+target declares — and then resolves or fails. It never selects among candidates.
 
 Two properties follow. At most one binding per prefix can be elided, because
 only one binding can carry that name — a default expressed as a naming act
@@ -255,9 +256,15 @@ the space-level slug grammar already requires
 (`packages/runner/src/slugs.ts`). A name is compared by exact string equality,
 which keeps the elision rule total and cheap.
 
-This is a decision with a cost, taken deliberately: it makes names in other
-scripts second-class, and widening it later reaches every stored name. The
-widening is not only a grammar change. Admitting other scripts admits
+`/` is the only structural separator. A name's own characters cannot carry
+structure: hyphens are legal inside a name, and a collection chooses what its
+members are called, so nothing about a name's shape says where one name ends and
+the next begins. Separating segments with a character no name may contain is
+what keeps parsing independent of naming.
+
+Fixing the character set is a decision with a cost, taken deliberately: it makes
+names in other scripts second-class, and widening it later reaches every stored
+name. The widening is not only a grammar change. Admitting other scripts admits
 confusables, and a confusable prefix is a spoofing vector — so a normalization
 and confusable policy has to exist before the first non-ASCII name, not after.
 
@@ -267,17 +274,26 @@ and confusable policy has to exist before the first non-ASCII name, not after.
 
 ## Prose and URLs
 
-A URL has segments to separate scope from name. Prose does not, so prose uses a
-sigil, and the sigil is what lets a short form be safely compressed:
+Both forms separate scope from name with `/`, and a segment means the same thing
+in each. Two things differ.
 
-> Compress where there is a sigil; keep segments where there is not.
+A prose reference carries a sigil, which marks where the reference begins and
+ends in running text. A URL needs no such mark, because the whole string is the
+reference.
+
+A prose reference may lean on the reader's own bindings. A URL may not: it
+travels, and whoever receives it has no access to the bindings that made it
+short.
+
+> Compress against what the reader already has; qualify whenever the reference
+> travels.
 
 | Form | Means |
 | --- | --- |
 | `#42` | member 42 of the collection being read through |
-| `#top-42` | member 42 of the collection bound to `top` in scope |
-| `#work/top-42` | the same, with the binding named explicitly |
-| `#@<space>/top-42` | fully qualified; depends on no binding |
+| `#top/42` | member 42 of the collection bound to `top` in scope |
+| `#work/top/42` | the same, with the binding named explicitly |
+| `#@<space>/top/42` | fully qualified; depends on no binding |
 
 A leading `@` marks a space segment, matching what `asSpaceSegment`
 (`packages/runner/src/fabric-url.ts`) already recognizes, and it keeps a binding
@@ -307,8 +323,8 @@ stores the result, so the bare form never has to be re-decided later.
 
 A stored reference is canonical, so its spelling is free. **A renderer computes
 the spelling from the reader's context and never stores it.** The same reference
-renders as `#42` inside its own collection, `#top-42` where the reader's `top`
-binds there, `#work/top-42` where it binds elsewhere, and fully qualified where
+renders as `#42` inside its own collection, `#top/42` where the reader's `top`
+binds there, `#work/top/42` where it binds elsewhere, and fully qualified where
 the reader has no binding at all.
 
 This is what makes a curated set of prefixes safe. Brevity is earned by the
@@ -330,7 +346,7 @@ spelling safe for a collection whose names may move: a spelling that no longer
 round-trips is not shown.
 
 The default display is prefix-qualified rather than bare. A screenshot of `#42`
-is unrecoverable; `#top-42` is recoverable by anyone who knows one prefix.
+is unrecoverable; `#top/42` is recoverable by anyone who knows one prefix.
 
 ### Two modes, chosen by destination
 
@@ -446,7 +462,8 @@ thing *as of* something, and this is not hypothetical: memory carries causal
 chains, point-in-time reads, and a branching spec
 (`docs/specs/memory-v2/06-branching.md`). The characters are crowded — `:` is a
 scheme, `/` separates segments, `@` marks a space, `#` is the fragment delimiter
-and the prose sigil, `-` joins a prefix to a name, and `~` is already taken by
+and the prose sigil, `-` is a word separator inside names and so cannot carry
+structure, and `~` is already taken by
 the JSON Pointer escaping that `parseFabricUrl` performs on path segments. A
 later answer that needs a character will have to take one from this list or
 overload position.
