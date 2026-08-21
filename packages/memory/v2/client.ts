@@ -55,6 +55,12 @@ export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
+  /** The session-level delegated READ binding (OW31; see the wire
+   * `SessionDescriptor.actingAs`): only the serving plane's loopback
+   * managers set it; the server admits it for delegating-class
+   * principals only. Carried on reopen so a route replacement keeps
+   * the binding. */
+  actingAs?: "space-owner";
 };
 
 export type SessionOpenAuth = {
@@ -256,6 +262,7 @@ export class Client {
       result.serverSeq,
       openAuthFactory,
       signal,
+      options.actingAs,
     );
     this.#spaces.add(session);
     return session;
@@ -642,6 +649,7 @@ export class SpaceSession {
     serverSeq: number,
     private readonly openAuthFactory?: SessionOpenAuthFactory,
     private readonly routeSignal?: AbortSignal,
+    private readonly actingAs?: "space-owner",
   ) {
     this.#sessionId = sessionId;
     this.#sessionToken = sessionToken;
@@ -1277,6 +1285,9 @@ export class SpaceSession {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
+      // The delegated READ binding survives a route replacement (OW31):
+      // a reopen without it would silently drop to envelope-only READ.
+      ...(this.actingAs !== undefined ? { actingAs: this.actingAs } : {}),
     };
     const auth = await runWithAbortSignal(
       this.routeSignal,
@@ -1292,11 +1303,7 @@ export class SpaceSession {
       this.routeSignal,
       "memory session route cancelled",
       () =>
-        this.client.openSession(this.space, {
-          sessionId: this.#sessionId,
-          seenSeq: this.#serverSeq,
-          sessionToken: this.#sessionToken,
-        }, auth),
+        this.client.openSession(this.space, session, auth),
     );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;

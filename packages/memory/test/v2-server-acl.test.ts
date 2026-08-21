@@ -82,6 +82,7 @@ const createAclServer = (
   acl?: {
     mode: "off" | "observe" | "enforce";
     serviceDids?: readonly string[];
+    delegatingDids?: readonly string[];
   },
 ) =>
   new Server({
@@ -1732,6 +1733,225 @@ Deno.test("acl default: absent acl option behaves like off", async () => {
     const opened = await openSession(bob, space, BOB);
     assertExists(opened.ok);
     assertEquals(opened.ok.serverSeq, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// OW31 (WRITE ruled 2026-08-18, READ ruled 2026-08-19): the delegated READ
+// binding. A session opened `actingAs: "space-owner"` by a DELEGATING-class
+// principal has its READ-class decisions resolved as the space's ACL OWNER
+// (the server dereferences the ACL — the ruled service-identity ACL read);
+// WRITE/OWNER requirements keep resolving against the ENVELOPE, so the
+// binding grants no write path; a delegating principal is NOT a service
+// principal and cannot initialize a genesis.
+
+Deno.test("OW31 acl enforce: a delegating principal acting as space-owner READS an owner-only space; its writes and ACL-doc writes stay refused", async () => {
+  const server = createAclServer("memory://acl-ow31-binding", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-1";
+  await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+  const plainHarness = await connect(server);
+  const service = await connect(server);
+  try {
+    // WITHOUT the binding: the blanket is gone — the serving identity
+    // lacks READ on an owner-only space. (Fresh connection: a denied
+    // open still consumes the connection's one challenge.)
+    const plain = await openSession(plainHarness, space, SERVICE);
+    assertExists(plain.error, "envelope-only open must be denied");
+    assertEquals(plain.error?.name, "AuthorizationError");
+
+    // WITH the binding: session.open runs under the acting user (the
+    // owner) and is admitted; queries read as the owner.
+    const bound = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(bound.ok, bound.error?.message);
+    const read = await graphQuery(service, space, bound.ok.sessionId, "of:x");
+    assertExists(read.ok, read.error?.message);
+
+    // WRITE-class requirements resolve against the ENVELOPE: the
+    // serving identity cannot write into a user's space over the
+    // session plane (the ruled write posture — served writes ride the
+    // wave's delegated carriage instead).
+    const write = await transactSet(
+      service,
+      space,
+      bound.ok.sessionId,
+      "of:ow31-session-write",
+      { denied: true },
+      1,
+    );
+    assertExists(write.error, "session-plane write must be refused");
+    assertEquals(write.error?.name, "AuthorizationError");
+
+    // ACL-doc writes need OWNER — envelope again: refused.
+    const aclWrite = await transactSet(
+      service,
+      space,
+      bound.ok.sessionId,
+      `of:${space}`,
+      { [SERVICE]: "OWNER" },
+      2,
+    );
+    assertExists(aclWrite.error, "ACL mutation must be refused");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl enforce: the actingAs marker from a NON-delegating principal is refused loudly", async () => {
+  const server = createAclServer("memory://acl-ow31-nondelegating", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-2";
+  await initializeSpaceAcl(server, space, {
+    [ALICE]: "OWNER",
+    "*": "WRITE",
+  });
+  const bob = await connect(server);
+  try {
+    // Even on a space where BOB holds "*" WRITE on his own: the MARKER
+    // is an admission-validity claim only a delegating principal may
+    // make.
+    const refused = await openSession(bob, space, BOB, {
+      actingAs: "space-owner",
+    });
+    assertExists(refused.error, "non-delegating actingAs must be refused");
+    assertEquals(refused.error?.name, "AuthorizationError");
+    assert(
+      (refused.error?.message ?? "").includes("delegating"),
+      refused.error?.message,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl enforce: a delegating principal cannot initialize a fresh space's genesis (not a service DID)", async () => {
+  const server = createAclServer("memory://acl-ow31-genesis", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-3";
+  const service = await connect(server);
+  try {
+    // Fresh space, actingAs resolves NO binding (no ACL): the envelope's
+    // own fresh-space READ floor admits the open.
+    const opened = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(opened.ok, opened.error?.message);
+    assertEquals(opened.ok.serverSeq, 0);
+    // The genesis ACL write is refused: only the space identity or an
+    // OWNER-class service DID may initialize (the delegating class is
+    // deliberately NOT one — verification-coverage.md OW31's guard
+    // against creep).
+    const genesis = await transactSet(
+      service,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+      { [SERVICE]: "OWNER" },
+      1,
+    );
+    assertExists(genesis.error, "delegating genesis must be refused");
+    assert(
+      (genesis.error?.message ?? "").includes("initialize"),
+      genesis.error?.message,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl enforce: an ACL change that removes the bound owner revokes the delegating session", async () => {
+  const server = createAclServer("memory://acl-ow31-revoke", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-4";
+  await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+  const service = await connect(server);
+  const alice = await connect(server);
+  try {
+    const bound = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(bound.ok, bound.error?.message);
+
+    // ALICE transfers ownership wholly to BOB: the session bound to
+    // acting-as-ALICE loses READ and is revoked; the serving plane's
+    // next mount re-resolves the new owner.
+    const aliceSession = await openSession(alice, space, ALICE);
+    assertExists(aliceSession.ok);
+    const transferred = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      `of:${space}`,
+      { [BOB]: "OWNER" },
+      1,
+    );
+    assertExists(transferred.ok, transferred.error?.message);
+
+    // The bound session was revoked in place: the service connection
+    // received the terminal session/revoked for it (the registry entry
+    // is gone; the serving plane's next mount re-resolves the owner).
+    const revoked = service.messages.find((message) =>
+      message.type === "session/revoked"
+    );
+    assertExists(revoked, "the bound session must be revoked");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl observe: a bound session's envelope write is a counted would-deny (the canary's mechanism)", async () => {
+  const server = createAclServer("memory://acl-ow31-observe", {
+    mode: "observe",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-5";
+  await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+  const service = await connect(server);
+  try {
+    const bound = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(bound.ok, bound.error?.message);
+    const before = server.aclStats.wouldDeny;
+    const write = await transactSet(
+      service,
+      space,
+      bound.ok.sessionId,
+      "of:ow31-observe-write",
+      { observed: true },
+      1,
+    );
+    // Observe mode allows the write but counts it: a non-zero
+    // process-identity write would-deny names a residual session-plane
+    // write to re-route (verification-coverage.md OW31's canary).
+    assertExists(write.ok, write.error?.message);
+    assertEquals(server.aclStats.wouldDeny, before + 1);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl off: the actingAs marker is inert (off preserves historical behavior)", async () => {
+  const server = createAclServer("memory://acl-ow31-off", { mode: "off" });
+  const space = "did:key:z6Mk-acl-ow31-space-6";
+  const bob = await connect(server);
+  try {
+    const opened = await openSession(bob, space, BOB, {
+      actingAs: "space-owner",
+    });
+    assertExists(opened.ok, opened.error?.message);
   } finally {
     await server.close();
   }

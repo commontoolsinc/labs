@@ -30,6 +30,7 @@ import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
+  URI,
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { selectForeignStaleInstances } from "../src/executor/space-server.ts";
@@ -389,6 +390,79 @@ describe("Phase 5 cross-space serving", () => {
     } finally {
       await serving.dispose();
       await manager.close();
+    }
+  });
+
+  it("OW31 read posture under enforce: a serving manager reads an OWNER-ONLY home space through the acting-as-owner binding; a non-serving manager as the same identity is denied", async () => {
+    const enforceServer = new MemoryV2Server.Server({
+      subscriptionRefreshDelayMs: 0,
+      authorizeSessionOpen(message) {
+        const principal = (message.authorization as { principal?: unknown })
+          ?.principal;
+        return typeof principal === "string" ? principal : undefined;
+      },
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+      acl: {
+        mode: "enforce",
+        // The OW31 posture: the process identity is DELEGATING, never
+        // OWNER-class.
+        delegatingDids: [serviceSigner.did()],
+      },
+    });
+    const aliceHome = aliceSigner.did() as MemorySpace;
+    // Alice's own client claims her home space privately (the home-arm
+    // genesis: principal === space, owner-only ACL — no wildcard).
+    const aliceManager = SharedServerStorageManager.connectTo(enforceServer, {
+      as: aliceSigner,
+    });
+    const aliceRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: aliceManager,
+    });
+    try {
+      const acl = new ACLManager(aliceRuntime, aliceHome);
+      await acl.set(aliceSigner.did(), "OWNER");
+      await aliceRuntime.storageManager.synced();
+
+      // The SERVING manager (the loopback plane): its mounts carry the
+      // acting-as-owner binding, so its session on alice's OWNER-ONLY
+      // home space opens and reads AS ALICE — the R2 shape that failed
+      // `lacks READ` under the removed blanket.
+      const servingManager = SharedServerStorageManager.connectTo(
+        enforceServer,
+        {
+          as: serviceSigner,
+          servingHomeSpace: homeSpace,
+        },
+      );
+      try {
+        const sync = await servingManager.open(aliceHome).sync(
+          `of:${aliceHome}` as URI,
+        );
+        expect(sync.error).toBeUndefined();
+      } finally {
+        await servingManager.close();
+      }
+
+      // The same identity WITHOUT the serving marker (the toolshed's own
+      // non-serving runtimes): no binding, envelope-only — denied. The
+      // retired blanket stays retired.
+      const plainManager = SharedServerStorageManager.connectTo(
+        enforceServer,
+        { as: serviceSigner },
+      );
+      try {
+        const denied = await plainManager.open(aliceHome).sync(
+          `of:${aliceHome}` as URI,
+        );
+        expect(denied.error).toBeDefined();
+      } finally {
+        await plainManager.close();
+      }
+    } finally {
+      await aliceRuntime.dispose();
+      await aliceManager.close();
+      await enforceServer.close();
     }
   });
 

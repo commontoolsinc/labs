@@ -1010,6 +1010,24 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * The delegated READ binding a SERVING manager's ordinary session
+   * mounts carry (OW31, READ side RULED 2026-08-19): `actingAs:
+   * "space-owner"` asks the memory server to resolve the session's
+   * READ-class capability as the space's ACL OWNER — the user whose
+   * space it is — admitted only for the delegating-class process
+   * identity (the flag-gated list). Only serving managers
+   * (`servingHomeSpace` set) send it; clients and the toolshed's own
+   * non-serving runtimes never do, and the fresh-space BOOTSTRAP
+   * session (which signs as the SPACE identity, an implicit owner)
+   * never does either.
+   */
+  #servingActingAs(): { actingAs?: "space-owner" } {
+    return this.#servingHomeSpace !== undefined
+      ? { actingAs: "space-owner" }
+      : {};
+  }
+
+  /**
    * The manager's own authenticated session identity (IStorageManager
    * contract): every provider session authenticates as `this.as` and mounts
    * with `#sessionId`, so this pair is exactly what the memory server
@@ -1079,6 +1097,7 @@ export class StorageManager implements IStorageManager {
           : (_routeGeneration, routeSignal) =>
             this.#sessionFactory.create(space, signer, {
               sessionId: this.#sessionId,
+              ...this.#servingActingAs(),
             }, routeSignal),
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
@@ -1154,7 +1173,7 @@ export class StorageManager implements IStorageManager {
         await this.#sessionFactory.create(
           space,
           signer,
-          { sessionId: this.#sessionId },
+          { sessionId: this.#sessionId, ...this.#servingActingAs() },
           routeSignal,
         ),
       );
@@ -1199,6 +1218,7 @@ export class StorageManager implements IStorageManager {
         ...(normal.session.sessionToken !== undefined
           ? { sessionToken: normal.session.sessionToken }
           : {}),
+        ...this.#servingActingAs(),
       };
       activeClients.delete(normal.client);
       await normal.client.close();

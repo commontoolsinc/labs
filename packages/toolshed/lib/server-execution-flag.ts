@@ -23,53 +23,53 @@ export function serverExecutionEnabledFromEnv(envGet: EnvReader): boolean {
 }
 
 /**
- * The memory-server service principals for this process (protocol.md §2b's
- * "read a foreign doc — free" row; serving-loop.md §3b's cross-space read
- * "under the piece's granted authority"): the operator-configured
- * `MEMORY_SERVICE_DIDS` list, PLUS — under the flag — this process's own
- * identity. The serving loop's per-space runtimes read foreign co-hosted
- * spaces (a served `#profile` wish reads the DEMANDING user's home space)
- * on the loopback plane as the process identity, and that plane's
- * sessions are admitted by the memory server's ordinary ACL. The
- * co-hosted SpaceServer is ALREADY the party the memory server trusts to
- * derive every space (its derived commits land through the engine-direct
- * sink; protocol.md §1's trust footing, FP2's read-row ruling), so under
- * the flag its identity is a service principal for the loopback plane's
- * reads too — the posture every deployment checklist already requires of
- * the operator DID (docs/plans/ingest-channels-journal-sink.md), made
- * automatic where the loop actually runs. OFF the flag: the configured
- * list verbatim (byte-identical).
+ * The memory-server ACL principal lists for this process (OW31, RULED
+ * 2026-08-18/19; protocol.md §2b's "read a foreign doc" row):
  *
- * WHAT THIS WIDENS, honestly (P7 independent review finding 6; the P7
- * build's "not a write widening" was overstated): a memory service
- * principal is implicit OWNER for its sessions on EVERY space
- * (`packages/memory/v2/server.ts` — transact, queries, watches, ACL-doc
- * writes, fresh-space genesis; the ACL policy has no read-only service
- * class). So under the flag the process identity's ORDINARY session
- * traffic — its own `productionServer` runtime (ingest / webhooks) and
- * the loopback plane's authored/bookkeeping commits — gains OWNER
- * everywhere, wherever `MEMORY_SERVICE_DIDS` did not already list it.
- * Bounded by process trust (the same process already derives every
- * space), and NOT widened at the wave's foreign-write accept gate, which
- * checks the ACTING identity's structural grant and deliberately ignores
- * the service-DID blanket (`foreignWriteAuthorityFor`). The wish's own
- * bootstrap needs only READ on the demanding user's home space; a
- * read-only service class in the memory ACL would be the narrower shape,
- * but that is a memory-ACL policy addition and depends on what the
- * served create handler's `.inSpace()` provisioning needs at genesis —
- * FLAGGED as a ruled-posture item for the owner (verification-coverage.md
- * OW31), not narrowed here.
+ * - `serviceDids` — the operator-configured `MEMORY_SERVICE_DIDS` list,
+ *   VERBATIM on both arms. The OWNER-class semantics of that list are
+ *   untouched and stay operator-only: the process identity is NOT added
+ *   to it under the flag. (The Phase-7 posture — the process identity as
+ *   an implicit-OWNER memory service principal wherever the operator
+ *   had not listed it — is RETIRED by the OW31 ruling: the serving
+ *   identity is not an implicit owner of users' spaces. If a future
+ *   stage needs the process identity to WRITE over the session plane,
+ *   the answer is a wave-stamped path or an explicit grant — never
+ *   re-adding it to this list.)
+ * - `delegatingDids` — under the flag, this process's own identity; OFF
+ *   the flag, empty. A delegating principal's loopback sessions may
+ *   carry the session-level READ binding (`actingAs: "space-owner"`):
+ *   the memory server resolves the space's ACL OWNER — the user whose
+ *   space it is — and the session's READ-class capability decisions run
+ *   as that user (session.open on an owner-only home space included),
+ *   mirroring the write posture's delegated carriage. The service
+ *   identity itself reads a space's ACL ONLY (the server dereferences
+ *   it during that resolution); WRITE/OWNER requirements keep resolving
+ *   against the envelope, so the binding grants no write path. The
+ *   trust footing is LT5's: the co-hosted process is already trusted
+ *   for carried actor claims on the write plane (the engine-direct
+ *   sink), so binding its READS to the attributed user grants nothing
+ *   the process does not structurally hold — it ATTRIBUTES what was
+ *   ambient.
+ *
+ * If the operator ALSO listed the process identity in
+ * `MEMORY_SERVICE_DIDS`, verbatim wins — it is then an OWNER-class
+ * service principal by explicit configuration (scope report flag F1)
+ * and the delegating listing is moot; the memory route logs that
+ * combination rather than refusing it.
  */
-export function memoryServiceDidsFor(options: {
+export function memoryAclPrincipalsFor(options: {
   configured: readonly string[];
   processIdentityDid: string;
   serverExecution: boolean;
-}): readonly string[] {
-  const dids = [...options.configured];
-  if (
-    options.serverExecution && !dids.includes(options.processIdentityDid)
-  ) {
-    dids.push(options.processIdentityDid);
-  }
-  return dids;
+}): {
+  serviceDids: readonly string[];
+  delegatingDids: readonly string[];
+} {
+  return {
+    serviceDids: [...options.configured],
+    delegatingDids: options.serverExecution
+      ? [options.processIdentityDid]
+      : [],
+  };
 }
