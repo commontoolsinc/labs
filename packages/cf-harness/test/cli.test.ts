@@ -3819,27 +3819,31 @@ Deno.test("runCfHarnessCli refuses a run that selected no model provider", async
   // No store is injected, so the run reads the harness home the CLI resolves
   // for itself — the one place an operator's persisted selection would be.
   const home = await Deno.makeTempDir({ prefix: "cf-harness-no-provider-" });
-  const { io, stdout, stderr } = createIoBuffers();
-  const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello"],
-    {
-      io,
-      env: {
-        CF_HARNESS_HOME: home,
-        CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for",
+  try {
+    const { io, stdout, stderr } = createIoBuffers();
+    const exitCode = await runCfHarnessCli(
+      ["--prompt", "hello"],
+      {
+        io,
+        env: {
+          CF_HARNESS_HOME: home,
+          CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for",
+        },
+        createModelClient: () => {
+          throw new Error("unselected provider must not reach a model client");
+        },
       },
-      createModelClient: () => {
-        throw new Error("unselected provider must not reach a model client");
-      },
-    },
-  );
+    );
 
-  assertEquals(exitCode, 1);
-  assertEquals(stdout, []);
-  assertEquals(stderr, [
-    "No model provider is selected; choose one with --model-provider, " +
-    "CF_HARNESS_MODEL_PROVIDER, or `config set`\n",
-  ]);
+    assertEquals(exitCode, 1);
+    assertEquals(stdout, []);
+    assertEquals(stderr, [
+      "No model provider is selected; choose one with --model-provider, " +
+      "CF_HARNESS_MODEL_PROVIDER, or `config set`\n",
+    ]);
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
 });
 
 Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", async () => {
