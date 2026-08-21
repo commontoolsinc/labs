@@ -53,6 +53,9 @@ const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined
 
 type EventStats = {
   derivedCommits: number;
+  /** Per-space attribution (#6158): lets the logged ratio name THIS
+   * test's space instead of the host-global total. */
+  derivedCommitsBySpace?: Record<string, number>;
   events: {
     appended: number;
     processed: number;
@@ -266,9 +269,12 @@ describe("sx2 events (Phase 3 gates)", () => {
     // stays LOGGED here for the record; this surface's gates are the
     // two deterministic asserts (processed ≥ N above; the final-only
     // value at the waitForValue + assertEquals).
+    const spaceDelta = (statsAfter.derivedCommitsBySpace?.[space] ?? 0) -
+      (statsBefore.derivedCommitsBySpace?.[space] ?? 0);
     console.log(
       `[sx2-events] rapid-fire: ${N} events -> ${derivedDelta} derived ` +
-        `commit(s), processed +${
+        `commit(s) host-wide (${spaceDelta} in this space — ` +
+        `derivedCommitsBySpace, #6158), processed +${
           statsAfter.events.processed - statsBefore.events.processed
         }`,
     );

@@ -122,20 +122,22 @@ call. Evaluated:
    assert. Concurring with the writeup: it does not fix the flake.
 3. **Replace the raced ratio with a CONSTRUCTED-queue-depth pin —
    FEASIBLE, and the recommendation.** The runner suite already has
-   the exact lever: `executor-events-down.test.ts`'s
-   `GatedStorageManager` `syncGate`/`syncGateWhen` parks the serving
-   DRAIN at the sidecar-doc sync, deterministically, before any
-   entry's guard check (built for the seal→outcome-window pin). The
-   pin: park the drain, commit K=10 event appends (K durable entries
-   accumulate pending), release — the drain scans all K in one pass;
-   assert (i) K completed runs, one consequence naming each
-   (exactly-once, deterministic), and (ii) the K consequences land in
-   ≪K derived commits. The premise the current test races
-   ("faster than wave time") becomes CONSTRUCTED ("K entries queued
-   ahead of one drain"), so a red means batching is actually broken
-   (one commit per queued handler run — the v1 failure shape), never
-   that the server was fast. The criterion RE-TENSES instead of
-   retiring.
+   the levers: `executor-events-down.test.ts` can accumulate K
+   durable, unconsequenced entries AHEAD of any drain and then hand
+   them to the serving loop at once. (At evaluation time this text
+   cited the `GatedStorageManager` `syncGate` drain-park; the BUILD
+   below uses the suite's even simpler construction — fire K with NO
+   serving host, then bring the host up, the restart pin's
+   activation-scan shape — same constructed premise, fewer moving
+   parts.) The pin: K=10 events queued durably before dispatch, one
+   drain scans them all; assert (i) K completed runs, one consequence
+   naming each (exactly-once, deterministic), and (ii) the K
+   consequences land in ≪K derived commits. The premise the current
+   test races ("faster than wave time") becomes CONSTRUCTED
+   ("K entries queued ahead of one drain"), so a red means batching
+   is actually broken (one commit per queued handler run — the v1
+   failure shape), never that the server was fast. The criterion
+   RE-TENSES instead of retiring.
 
 **Recommendation: (3) + (1)-at-the-sx2-surface — RULED AND BUILT
 (2026-08-21).** The owner, on these dispositions:
@@ -189,8 +191,11 @@ deterministic pin:
    (an idle bench here logged exactly 7, your CI-passing value; the
    owner's census added an occurrence at 15:25Z on #6136,
    same-commit rerun green). And `derivedCommits` was host-global; a
-   concrete cross-space pollution path (a quiescence-advance commit
-   from an earlier test's space) was directly observed.
+   concrete cross-space pollution path exists — an advance-only
+   quiescence commit minted for an EARLIER test's space with no
+   client input, recorded with its store evidence in the committed
+   OW52 report (`ow52-storm-loss-report.md` §3's advance-only
+   bullet: sole write the watermark doc, no `consequence_of`).
 2. **What landed.** (a) `derivedCommitsBySpace` — per-space
    derived-commit attribution on the health route (bounded, conserved
    against the global total; #6158) — so future ratio observations
@@ -207,6 +212,15 @@ deterministic pin:
    live-surface ratio to a log), as dispositioned in §3. The Phase-3
    acceptance criterion (testing.md §5 row 3) is re-tensed
    accordingly with the RULED marker.
+4. **The CI-visible effect, in CI terms.** The intermittent red of
+   `Pattern Integration Tests / server-execution ON` on
+   `sx2-events.test.ts`'s "rapid-fire coalescing" assert — the flake
+   your writeup reported, which cleared on same-commit rerun —
+   CANNOT RECUR: the assert no longer exists (the ratio only logs).
+   Its replacement red, should batching ever actually break, appears
+   in the `Test` (runner unit) lanes as the deterministic
+   `executor-events-down.test.ts` constructed-depth step — same
+   commit, every run, no rerun-clears-it ambiguity.
 
 Status: claims verified; §2 landed (#6158); the ruling BUILT — pin +
 demotion + criterion re-tense in one PR.
