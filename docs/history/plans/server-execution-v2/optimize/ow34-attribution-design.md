@@ -121,14 +121,22 @@ from the build report.
   `represents-principal` with the SERVING runtime's snapshot — the service
   DID — which is precisely the observed `did:key:z6MksHnZ…` ×6 on Alice's
   message commit and on the profile entity's labelMap.
-- Structural note that bounds the blast radius: because the non-owner
-  placeholder arm requires BOTH `writeAuthorizedBy` and `uiContract`
-  (prepare.ts:2458-2467), and `uiContract` satisfaction requires a
-  renderer-trusted EVENT (the OW34 sister-mark carriage, events.md §2),
-  **current-principal labels can only ever mint inside trusted-event
-  handler transactions and builtin-authored owner writes** — never from a
-  plain derivation. This is what makes the derivation arm of this design
-  behaviorally inert today (§2, §10 Q2).
+- Structural note that bounds the blast radius: the non-owner placeholder
+  arm requires BOTH `writeAuthorizedBy` and `uiContract`
+  (prepare.ts:2458-2467), and the owner arm requires `writeAuthorizedBy`
+  (prepare.ts:2425-2427); `uiContract` satisfaction requires a
+  renderer-trusted EVENT (the OW34 sister-mark carriage, events.md §2) —
+  **with two deliberate carve-outs**: `verifyTrustedEventRequirements`
+  skips the trusted-event match for setup projections and for writes that
+  install an INITIAL SCHEMA DEFAULT (prepare.ts:3719-3732,
+  `setupProjectionSourceMatchesValue` / `writeInstallsInitialSchemaDefault`).
+  So current-principal labels mint from exactly three places: trusted-event
+  handler transactions, builtin-authored owner writes, and
+  setup/defaults materialization — never from a plain derivation. The
+  first two carry a per-run acting user under this design; the third is
+  the actor-less candidate Q3 names (a serving-side setup restage mints
+  with whatever snapshot the tx carries). This is also what makes the
+  derivation arm of this design behaviorally inert today (§2, §10 Q2).
 
 ### 1c. Other consumers of the tx snapshot (the full set)
 
@@ -576,9 +584,13 @@ NAMED OUT, with its home:
      before the run's first read; prepare and the commit-time recheck see
      the same value; the `trust-snapshot-changed` invalidation stays as
      the tripwire and never fires on the sanctioned path. (§9-2.)
-   - **INV-D (no service-authored labels under ON):** no durable `["cfc"]`
-     labelMap entry carries an authored-by / represents-principal atom
-     whose subject is the service DID. (§9-6's store-dump audit.)
+   - **INV-D (no service-authored labels from ACTING runs):** no durable
+     `["cfc"]` labelMap entry minted by a run that CARRIES an acting
+     principal (handler / delegated / demanded) names the service DID in
+     an authored-by / represents-principal atom — and the group-chat gate
+     run's store audits to ZERO such atoms overall (§9-6). The
+     deliberately-unclaimed remainder is Q3's actor-less setup path,
+     whose disposition the audit arbitrates.
    - **INV-E (forge-resistance unchanged):** literal-DID current-principal
      claims stay rejected; the only path to a user-named label remains a
      run actually carrying that user's acting identity. (Existing pins +
@@ -598,8 +610,11 @@ NAMED OUT, with its home:
    `AuthoredByCurrentUser` / `RepresentsCurrentUser` schemas persists
    labelMap atoms whose subject is the entry's `firedAt.user` — WATCHED
    RED at base, where the subject is the service DID (the rootcause §2a
-   store shape). Negative arm: a payload-smuggled literal-DID claim still
-   refuses (INV-E).
+   store shape). Negative arms (INV-E, both already-pinned behaviors
+   re-asserted under the serving stack): a SCHEMA-authored literal-DID
+   current-principal claim still refuses ("subject must be runtime
+   resolved"), and an unprivileged direct `["cfc"]` write is still the
+   S18 fail-closed reason.
 2. **Per-wave multi-principal pin.** Two handler runs for two users in one
    wave: each run's docs carry that run's user; both prepared digests
    recheck clean at commit (INV-C; no cross-run contamination, no
@@ -653,12 +668,23 @@ NAMED OUT, with its home:
    undefined (fail-closed placeholder minting)?** Recommendation: **keep
    the service snapshot** — zero behavior change for paths that today
    work (structure loads, watermark, pattern-swap setup, factory-time
-   loads), aligned with protocol.md §1's "the SpaceServer's own writes";
-   the gated mint families are already unreachable from those paths
-   (uiContract requires a trusted event — 1b). The fail-closed
-   alternative is one line if the owner prefers the tighter posture and
-   accepts hunting any latent bookkeeping path that relied on snapshot
-   presence (writeAuthorizedBy's presence floor — 1c).
+   loads), aligned with protocol.md §1's "the SpaceServer's own writes".
+   The honest caveat, flagged rather than filled: 1b's third mint family
+   (setup/defaults materialization, via the initial-schema-default
+   carve-out) IS reachable from an actor-less serving-side path — a
+   system-pattern swap restage of an owner-gated pattern would mint
+   `represents-principal: <service>` under keep-service, and would REFUSE
+   under clear-to-undefined ("ownerPrincipal requires an acting
+   principal"), i.e. break serving-side system-pattern updates of such
+   patterns. Neither arm is right for that path; the semantically-correct
+   principal is the space's OWNER, which OW31's ACL owner resolution can
+   supply — but that is its own small ruling. Arbitration: §9-6's
+   store-dump audit. The group-chat lift does not exercise this path (the
+   gate deploys its own piece; profile patterns are not in its flow), so
+   the lift does not wait on it; if the audit or the flip-train live
+   gates surface a service-named mint from this path, dispose of it THEN
+   — owner-resolved snapshot or a threaded carriage — as a named
+   follow-up, not silently here.
 4. **Spec home.** Recommendation: one binding sentence in
    serving-loop.md §3c (where per-run CFC is already normative), shaped
    like: *"The run's CFC trust snapshot carries the run's ACTING
