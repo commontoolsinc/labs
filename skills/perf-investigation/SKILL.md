@@ -94,6 +94,82 @@ measurement: it is shared, its timings carry whatever else is happening to it,
 and its client sits idle for most of a read, so it settles whether a cost is
 real long before it says how large.
 
+**The server's own stats.** `/api/health/stats` on whichever toolshed the rungs
+above are talking to reports that process's timing statistics, log counts and
+slow queries, and — when it is serving — the serving loop's counters. One
+request, no harness, and under the `serverExecution` ON arm it reaches where
+most of the work now is. "The server side" in
+`docs/development/debugging/profiling.md` has the requests and the fields; the
+next section here is what to know before making them.
+
+## Which process is doing the work
+
+`serverExecution` decides where a derivation runs, and a measurement taken
+without knowing which arm it was on describes neither. Under the ON arm servers
+do the compute that is stored, clients commit only intent, and a client's own
+derivation runs divert into a process-local speculation overlay — an echo. The
+registry entry in `docs/development/EXPERIMENTAL_OPTIONS.md` defines both arms;
+`docs/specs/server-side-execution/testing.md` binds how they are measured. What
+follows is what to have in mind before pointing an instrument anywhere, the
+walkthrough's server section being where the requests and their fields live.
+
+**The posture is a fact you check, not one you set.** Which arm a server is on,
+and which arm the browser shell was _built_ for, are both one request away — and
+a client declares its own posture from its own environment, so a `cf` or a
+harness left at its default against a serving toolshed is a mixed posture that
+measures neither arm. Probe both ends before the run and record what they said
+beside the number, the way a board size is recorded.
+
+**Read the server's instruments before adding any.** The health route already
+reports the serving process's own logger statistics, under the same key names
+the pattern-test rung prints and the same ones the client records. So
+`scheduler/run/action` and `traverse` exist in both processes and mean different
+halves of one interaction, and which process a row came from is the only thing
+that distinguishes them. Say which, in every number you report.
+
+**A counter says how often; only a span says by how much.** A counter that fires
+when something hits a deadline is a censored measurement: every wave that
+overruns the flush budget reports that same budget, however far past it the wave
+ran, so the count cannot separate a loop barely over from one an order of
+magnitude over. The wave's phases are timed alongside the counters for that
+reason, and reading them together is what shows a deadline enforced by a timer
+failing to cut synchronous work. Neither replaces the other — the count for
+frequency, the span for width.
+
+**Frames are the sync point.** `waitForSettled` in
+`packages/runner/src/executor/watermark.ts` resolves when the space's watermark
+covers a given commit, riding the ordinary subscription, so it waits on a frame
+rather than polling for a rendered consequence. It is what "the server is done"
+means under ON, and `runtime.idle()` is not: a flag-ON client goes idle over its
+own echo while the durable result is still a wave away, so a harness that timed
+a write by awaiting idle is timing the speculation. Every such harness needs
+re-reading against the ON arm before its numbers mean anything.
+
+Frames are also a queue, with the two costs any queue has — waiting behind what
+is already in flight, and the work itself — and the memory server times them
+apart on both directions of the socket. Only the second is a frame's own cost. A
+queue time that dwarfs every handle time is head-of-line blocking, and it is
+fixed at the frame in front rather than at the one that reported it.
+
+That watermark helper wants a `Runtime`, so it is the Deno-side test process's
+instrument rather than the browser's. On the browser rung the equivalent is
+already in `collectBrowserLoadSummary`, whose flag-ON rows account for the echo:
+how many overlay entries were dropped late, and how many retired on the
+watermark backstop rather than on their own consequence mark. The backstop is
+the later of the two signals by construction, so its share is a read on how long
+the client held a value it had already been told about — which is the half of an
+interaction's latency that no server-side counter can see.
+
+**The workload stays uninstrumented.**
+`docs/specs/server-side-execution/testing.md` §1 makes this binding for v2
+measurement, and it is the one rule here that cuts against the rest of this
+skill: probes added to the measured path warm it and understate its cost, which
+is how v1 measured itself faster than it was. Under ON the reach is longer than
+it looks, because the server runs the same pattern code — a probe added for the
+client arm is now also running inside the wave it is timing. Instrument the
+runtime and the serving loop, which every arm shares; leave the workload
+byte-identical across arms and read the difference from outside.
+
 ## The logger names it; the profiler weighs it
 
 Use both, because neither is sufficient and the failure is asymmetric.
@@ -322,6 +398,13 @@ inferring per-operation cost by dividing the time to build one — building is a
 different curve, and the number you want for a regression is what one more costs
 at a given size.
 
+Under the `serverExecution` ON arm the pair becomes a triple, because the write
+no longer completes where it was issued: the writer's own settle is over its
+echo, the durable result lands a wave later on the server, and the render
+follows that. Split the measurement at each handover — write to echo, echo to
+watermark coverage, coverage to painted — or the one number hides which of the
+three moved.
+
 ## What your harness holds live
 
 A harness that holds more live than its subject does measures itself. This is
@@ -349,6 +432,14 @@ read turned out to be what the `cf` CLI does against the real board, at sixteen
 times the scale — which is why the deployed rung exists above. A rig that
 exaggerates a real cost and a rig that invents one look identical from inside
 the rig.
+
+Under the ON arm the stakes rise, because demand is what makes the server run
+anything at all: what a client holds live decides which derivations a wave has
+to make current before it can commit. So an over-wide sink no longer costs its
+own process alone — it enlarges every wave in that space, for every client. The
+`servingLoop.demand` counters are the server's account of it, and
+`demandedInstancesMax` against what the product would actually demand is the
+same question this section asks, answered from the other side.
 
 ## Measuring honestly
 

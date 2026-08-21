@@ -93,7 +93,9 @@ matches the capture:
   parent's total is its own span rather than the sum of its children's. Run the
   process under `--inspect` and the marks and timestamps land on the DevTools
   timeline beside the samples, so zooming to the phase is a drag rather than
-  arithmetic.   Deno has no `--cpu-prof`: V8 rejects the flag, which is Node's rather than
+  arithmetic.
+
+  Deno has no `--cpu-prof`: V8 rejects the flag, which is Node's rather than
   V8's. To get a `.cpuprofile` out of the `cf test` process, drive V8's profiler
   from inside it with `node:inspector`, which Deno implements — connect a
   `Session`, `Profiler.enable`, `Profiler.start` around the phase, and
@@ -300,7 +302,75 @@ has often stopped early.
 
 ## The server side
 
-Not covered here yet. A toolshed is a Deno process, so `--inspect` and the
-DevTools profiler reach it, and OTEL spans exist behind `OTEL_ENABLED` with a
-collector to receive them. Whoever profiles the server first should write the
-concrete steps into this document, the way the steps above are written.
+A toolshed carries the same timing machinery as everything above, and reports it
+over HTTP. Start there; a CPU profile of the server is step 3 here as much as it
+is above.
+
+### Which arm is this?
+
+Under the `serverExecution` ON arm the server runs the derivations, so where you
+point the instruments changes. Two probes settle it, and both belong in the
+record beside any number:
+
+```bash
+curl -s "$API_URL/api/health/stats" | jq 'has("servingLoop")'
+```
+
+```bash
+curl -s "$API_URL/api/meta" | jq .shellServerExecutionDefine
+```
+
+The first is true exactly when that process is serving. The second says what the
+browser shell was *built* with — the define is baked at build time, so a
+source-run toolshed serves the OFF-arm shell whatever its own environment says.
+Clients declare their own posture from their own environment too: `cf` and the
+integration harnesses announce `serverExecution=false` unless
+`EXPERIMENTAL_SERVER_EXECUTION=true` is set for them as well, and a client on
+the other arm from its server measures neither.
+
+### Read `/api/health/stats`
+
+One request, no harness, and it answers most of step 0 and step 1 for the server
+process:
+
+- `timingStats` — the process's logger timing statistics, keyed exactly as the
+  `cf test` rows are and carrying `count`, `totalTime`, `min`/`max`, `p50` and
+  `p95`. A serving toolshed runs the runtime, so `scheduler/run/action`,
+  `traverse` and `runner/start/*` appear here meaning the *server's* work.
+- `logCounts` — the same per-logger counts, which is how a warning storm shows
+  up as a number rather than as a log to grep.
+- `slowQueries` — the last hundred query or watch operations over 100 ms, with
+  the space and the root and watch counts.
+- `servingLoop` — the serving loop's counters
+  ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
+  present only when this process serves. `settle.series` is a ready-made
+  per-authored-input latency series: admission to watermark coverage, with the
+  wave and cycle counts behind each entry.
+
+Two things to know before quoting any of it. Everything accumulates for the
+process's whole life, across every space it has served, so capture before and
+after a phase and diff rather than reading an absolute. And each timing row
+carries a full CDF, which makes the response hundreds of kilobytes after even a
+single deploy — sample it at phase boundaries; polling it is its own load.
+
+The serving loop's own phases are wrapped as `executor/wave/cycle`, `/drain` and
+`/settle`. Read them against `wavesBudgetExhausted`, which is a censored
+measurement: a wave that overruns the flush deadline reports that deadline
+however far past it the wave ran, so the counter says how often and the
+span says by how much. `memory/frame/queue` against `memory/frame/handle` splits
+a connection's frame time into waiting behind earlier frames and doing its own
+work, and `memory/flush/queue` against `memory/flush/refresh` does the same for
+the push side. In each pair, only the second is the frame's own cost — a queue
+time far above every handle time is head-of-line blocking, and the fix is at the
+frame in front.
+
+### Profile the process
+
+A toolshed is a Deno process, so the recipes in step 2 apply to it: run it under
+`--inspect` and attach DevTools, or drive V8's profiler from inside it with
+`node:inspector`. Take the profile over a bracketed phase — the marks have to be
+in this process, which for a server means the health-stats capture either side
+rather than a mark in the test that provoked it.
+
+OTEL spans exist behind `OTEL_ENABLED` with a collector to receive them, and are
+the right instrument for a deployed server rather than a local investigation.
