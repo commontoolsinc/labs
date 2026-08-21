@@ -61,7 +61,8 @@ permissions via [UCAN]s and [ACL]s.
 > its state.
 
 Space can be queried and updated using [memory protocol], which describes state
-in terms of [fact](../../development/runtime-glossary.md#fact)s.
+in terms of
+[entity document](../../development/runtime-glossary.md#entity-document)s.
 
 ## [did:key]
 
@@ -155,8 +156,9 @@ turns into rendered HTML.
 
 ---
 
-Storage internals (Fact, Memory, Storage Cache / Heap / Nursery) are documented
-in the [Runtime Glossary](../../development/runtime-glossary.md).
+Storage internals (entity documents, seq, scope, commits, and the confirmed
+and pending tiers) are documented in the
+[Runtime Glossary](../../development/runtime-glossary.md).
 
 [pattern]: #pattern
 [cell]: #cell

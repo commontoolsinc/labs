@@ -1,6 +1,5 @@
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -50,7 +49,6 @@ function makeDoc(
     the: type,
     of: entity,
     is: { value },
-    cause: hashOf({ the: type, of: entity }),
     since: 1,
   };
   store.set(`${revision.of}/${revision.the}`, revision);

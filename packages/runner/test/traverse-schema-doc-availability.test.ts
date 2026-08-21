@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type {
   Entity,
@@ -49,7 +48,6 @@ const addDoc = (
     the: TYPE,
     of: entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: entity }),
     since: 1,
   });
 };

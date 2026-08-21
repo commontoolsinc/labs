@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -52,7 +51,6 @@ const putDoc = (
     the: type,
     of: entity,
     is: { value },
-    cause: hashOf({ the: type, of: entity }),
     since,
   });
 };

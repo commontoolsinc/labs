@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type { SchemaPathSelector } from "@commonfabric/api";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import type {
   MIME,
@@ -92,10 +91,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     const docValue2 = {
@@ -122,10 +117,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: docValue2 },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 
@@ -195,10 +186,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     const testCell2 = runtime.getCell<
@@ -225,10 +212,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: docValue2 },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 
@@ -325,10 +308,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
     store.set(`${assert1.of}/${assert1.the}`, assert1);
@@ -407,7 +386,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({ the: "application/json", of: testCell1.sourceURI }),
       since: 1,
     };
 
@@ -428,7 +406,6 @@ describe("Query", () => {
           },
         },
       },
-      cause: hashOf({ the: "application/json", of: testCell2.sourceURI }),
       since: 2,
     };
 
@@ -514,10 +491,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId1}`,
       is: { value: testCell1.get() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId1}`,
-      }),
       since: 1,
     };
 
@@ -552,10 +525,6 @@ describe("Query", () => {
       the: "application/json",
       of: `of:${entityId2}`,
       is: { value: testCell2.getRaw() },
-      cause: hashOf({
-        the: "application/json",
-        of: `of:${entityId2}`,
-      }),
       since: 2,
     };
 

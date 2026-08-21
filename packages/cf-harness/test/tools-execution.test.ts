@@ -23,7 +23,7 @@ import {
 } from "../src/tools/bash.ts";
 import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
-import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
+import { browserTool } from "../src/tools/browser.ts";
 import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
@@ -1180,263 +1180,17 @@ Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout
   assertEquals(output.stdout, `raw public\n${cwdMarker}/workspace/repo`);
 });
 
-Deno.test("bash-no-sandbox tool executes the command through the host process runner", async () => {
-  const hostRunner = new FakeProcessRunner([{
-    stdout: "host ok\n",
-    stderr: "",
-    exitCode: 0,
-  }]);
-  const sandbox = new FakeSandboxRuntime();
-  const context = createContext(sandbox, "/workspace", hostRunner);
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --help",
-    cwd: "browser",
-    timeoutMs: 1000,
-  });
+const BROWSER_LEASE = {
+  type: "cf-harness.chat.browser-access-lease",
+  leaseId: "lease-1",
+  cdpUrl: "http://localhost:9362",
+} as const;
 
-  assertEquals(output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "host ok\n",
-    stderr: "",
-    exitCode: 0,
-    cwd: "/workspace/browser",
-  });
-  assertEquals(sandbox.calls, []);
-  assertEquals(hostRunner.calls, [{
-    command: "agent-browser",
-    args: ["--help"],
-    cwd: "/tmp/cf-harness-workspace/browser",
-    clearEnv: true,
-    env: { PATH: hostRunner.calls[0]!.env!.PATH },
-    timeoutMs: 1000,
-  }]);
-  assertEquals(context.currentDir, "/workspace/browser");
-});
-
-Deno.test("bash-no-sandbox defaults and caps host command timeouts", async () => {
-  const hostRunner = new FakeProcessRunner();
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-
-  await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --help",
-  });
-  await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --help",
-    timeoutMs: 999_999,
-  });
-
-  assertEquals(hostRunner.calls.map((call) => call.timeoutMs), [
-    30_000,
-    120_000,
-  ]);
-});
-
-Deno.test("bash-no-sandbox caps returned host output", async () => {
-  const hostRunner = new FakeProcessRunner([{
-    stdout: "x".repeat(20_010),
-    stderr: "y".repeat(20_001),
-    exitCode: 0,
-  }]);
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --help",
-  });
-
-  assertEquals(
-    output.stdout,
-    `${"x".repeat(20_000)}\n[cf-harness truncated stdout: 10 chars omitted]`,
-  );
-  assertEquals(
-    output.stderr,
-    `${"y".repeat(20_000)}\n[cf-harness truncated stderr: 1 chars omitted]`,
-  );
-});
-
-Deno.test("bash-no-sandbox keeps currentDir at the command cwd", async () => {
-  const hostRunner = new FakeProcessRunner([{
-    stdout: "",
-    stderr: "",
-    exitCode: 0,
-  }]);
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --help",
-  });
-
-  assertEquals(output.cwd, "/workspace/repo");
-  assertEquals(context.currentDir, "/workspace/repo");
-});
-
-Deno.test("bash-no-sandbox translates command -v agent-browser to direct argv", async () => {
-  const hostRunner = new FakeProcessRunner([{
-    stdout: "/usr/local/bin/agent-browser\n",
-    stderr: "",
-    exitCode: 0,
-  }]);
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "command -v agent-browser",
-  });
-
-  assertEquals(output.stdout, "/usr/local/bin/agent-browser\n");
-  assertEquals(hostRunner.calls, [{
-    command: "which",
-    args: ["agent-browser"],
-    cwd: "/tmp/cf-harness-workspace/repo",
-    clearEnv: true,
-    env: { PATH: hostRunner.calls[0]!.env!.PATH },
-    timeoutMs: 30_000,
-  }]);
-});
-
-Deno.test("bash-no-sandbox lets allowed host commands handle missing workspace paths", async () => {
-  const hostRunner = new FakeProcessRunner([{
-    stdout: "",
-    stderr: "ls: missing.txt: No such file or directory\n",
-    exitCode: 1,
-  }]);
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-  context.isHostPathWithinWorkspace = (
-    path: string,
-    options?: { allowMissing?: boolean },
-  ) =>
-    Promise.resolve(
-      path === "/tmp/cf-harness-workspace/repo" ||
-        (path.endsWith("/missing.txt") && options?.allowMissing === true),
-    );
-
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "ls missing.txt",
-  });
-
-  assertEquals(hostRunner.calls, [{
-    command: "ls",
-    args: ["missing.txt"],
-    cwd: "/tmp/cf-harness-workspace/repo",
-    clearEnv: true,
-    env: { PATH: hostRunner.calls[0]!.env!.PATH },
-    timeoutMs: 30_000,
-  }]);
-  assertEquals(output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr: "ls: missing.txt: No such file or directory\n",
-    exitCode: 1,
-    cwd: "/workspace/repo",
-  });
-});
-
-Deno.test("bash-no-sandbox denies ls and find paths that realpath outside the workspace", async () => {
-  const hostRunner = new FakeProcessRunner();
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-  context.isHostPathWithinWorkspace = (path: string) =>
-    Promise.resolve(!path.endsWith("/outside-link"));
-
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "ls outside-link",
-  });
-
-  assertEquals(hostRunner.calls, []);
-  assertEquals(output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr:
-      "bash-no-sandbox command denied: path outside-link must resolve within or below the workspace",
-    exitCode: 126,
-    cwd: "/workspace/repo",
-  });
-});
-
-Deno.test("bash-no-sandbox denies ls and find paths that intersect artifact roots", async () => {
-  const hostRunner = new FakeProcessRunner();
-  const artifactRootHostPath =
-    "/tmp/cf-harness-workspace/.cf-harness-artifacts";
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace",
-    hostRunner,
-    "observe",
-    artifactRootHostPath,
-  );
-
-  const lsOutput = await bashNoSandboxTool.invoke(context, {
-    command: "ls .cf-harness-artifacts",
-  });
-  const findOutput = await bashNoSandboxTool.invoke(context, {
-    command: "find . -maxdepth 2 -type f -print",
-  });
-
-  assertEquals(hostRunner.calls, []);
-  assertEquals(lsOutput, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr:
-      "bash-no-sandbox command denied: path .cf-harness-artifacts is reserved for cf-harness artifacts",
-    exitCode: 126,
-    cwd: "/workspace",
-  });
-  assertEquals(findOutput, {
-    outputId: "run-1:bash-no-sandbox:2",
-    stdout: "",
-    stderr:
-      "bash-no-sandbox command denied: path . is reserved for cf-harness artifacts",
-    exitCode: 126,
-    cwd: "/workspace",
-  });
-});
-
-Deno.test("bash-no-sandbox denies host commands outside the browser policy", async () => {
-  const hostRunner = new FakeProcessRunner();
-  const context = createContext(
-    new FakeSandboxRuntime(),
-    "/workspace/repo",
-    hostRunner,
-  );
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "git status",
-    cwd: "browser",
-  });
-
-  assertEquals(hostRunner.calls, []);
-  assertEquals(output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr:
-      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
-    exitCode: 126,
-    cwd: "/workspace/repo/browser",
-  });
-  assertEquals(context.currentDir, "/workspace/repo/browser");
-});
-
-Deno.test("bash-no-sandbox denies expired Browser Access leases", async () => {
-  const hostRunner = new FakeProcessRunner();
-  const context = createContext(
+const createBrowserContext = (
+  hostRunner: ProcessRunner,
+  browserAccess?: HarnessBrowserAccessLease,
+): HarnessToolContext =>
+  createContext(
     new FakeSandboxRuntime(),
     "/workspace/repo",
     hostRunner,
@@ -1449,25 +1203,319 @@ Deno.test("bash-no-sandbox denies expired Browser Access leases", async () => {
     undefined,
     [],
     "sandbox",
-    {
-      type: "cf-harness.chat.browser-access-lease",
-      leaseId: "lease-1",
-      cdpUrl: "http://localhost:9362",
-      expiresAt: "2000-01-01T00:00:00.000Z",
-    },
+    browserAccess,
   );
 
-  const output = await bashNoSandboxTool.invoke(context, {
-    command: "agent-browser --cdp http://localhost:9362 snapshot -i",
+Deno.test("browser tool runs one agent-browser action attached to the lease endpoint", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: '- heading "Example"\n',
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, {
+    action: "snapshot",
+    interactive: true,
+    timeoutMs: 1000,
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: '- heading "Example"\n',
+  });
+  assertEquals(hostRunner.calls, [{
+    command: "agent-browser",
+    args: ["--cdp", "http://localhost:9362", "snapshot", "-i"],
+    cwd: "/tmp/cf-harness-workspace",
+    clearEnv: true,
+    env: { PATH: hostRunner.calls[0]!.env!.PATH },
+    timeoutMs: 1000,
+  }]);
+});
+
+Deno.test("browser tool surfaces success-path stderr as detail", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "https://example.com/\n",
+    stderr: "warning: slow page\n",
+    exitCode: 0,
+  }]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, {
+    action: "get",
+    kind: "url",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: "https://example.com/\n",
+    detail: "warning: slow page",
+  });
+});
+
+Deno.test("browser tool refuses an action when the run has no Browser Access lease", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createBrowserContext(hostRunner, undefined);
+
+  const output = await browserTool.invoke(context, {
+    action: "open",
+    url: "https://example.com/",
   });
 
   assertEquals(hostRunner.calls, []);
   assertEquals(output, {
-    outputId: "run-1:bash-no-sandbox:1",
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "lease_unavailable",
+    message: "browser requires a Browser Access lease, and this run has none",
+  });
+});
+
+Deno.test("browser tool refuses an expired Browser Access lease", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createBrowserContext(hostRunner, {
+    ...BROWSER_LEASE,
+    expiresAt: "2000-01-01T00:00:00.000Z",
+  });
+
+  const output = await browserTool.invoke(context, {
+    action: "snapshot",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "lease_unavailable",
+    message: "Browser Access lease has expired",
+  });
+});
+
+Deno.test("browser tool refuses a lease whose CDP endpoint is not a local origin", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createBrowserContext(hostRunner, {
+    ...BROWSER_LEASE,
+    cdpUrl: "http://browser.example.com:9362",
+  });
+
+  const output = await browserTool.invoke(context, {
+    action: "snapshot",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "lease_unavailable",
+    message: "configured Browser Access CDP endpoint is invalid",
+  });
+});
+
+Deno.test("browser tool refuses input outside its action vocabulary before touching the host", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const evalOutput = await browserTool.invoke(context, {
+    action: "eval",
+  });
+  const mixedOutput = await browserTool.invoke(context, {
+    action: "snapshot",
+    url: "https://example.com/",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(evalOutput.status, "error");
+  assertEquals(
+    (evalOutput as { code?: string }).code,
+    "invalid_input",
+  );
+  assertEquals(mixedOutput, {
+    outputId: "run-1:browser:2",
+    status: "error",
+    code: "invalid_input",
+    message: "url does not apply to the snapshot action",
+  });
+});
+
+Deno.test("browser tool defaults and caps host timeouts", async () => {
+  const hostRunner = new FakeProcessRunner([
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  await browserTool.invoke(context, { action: "snapshot" });
+  await browserTool.invoke(context, {
+    action: "snapshot",
+    timeoutMs: 999_999,
+  });
+
+  assertEquals(hostRunner.calls.map((call) => call.timeoutMs), [
+    30_000,
+    120_000,
+  ]);
+});
+
+Deno.test("browser tool caps returned output", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "x".repeat(20_010),
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, { action: "console" });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: `${
+      "x".repeat(20_000)
+    }\n[cf-harness truncated output: 10 chars omitted]`,
+  });
+});
+
+Deno.test("browser tool reports a nonzero exit as command_failed with the failure text", async () => {
+  const hostRunner = new FakeProcessRunner([{
     stdout: "",
-    stderr: "bash-no-sandbox command denied: Browser Access lease has expired",
-    exitCode: 126,
-    cwd: "/workspace/repo",
+    stderr: "error: ref @e5 not found\n",
+    exitCode: 1,
+  }]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, {
+    action: "click",
+    ref: "@e5",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "command_failed",
+    message: "error: ref @e5 not found\n",
+    exitCode: 1,
+  });
+});
+
+Deno.test("browser tool falls back to resolving the current dir when no workspace host path is known", async () => {
+  const hostRunner = new FakeProcessRunner([{
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = {
+    ...createBrowserContext(hostRunner, BROWSER_LEASE),
+    workspaceHostPath: undefined,
+    resolveHostPath: () => "/host/resolved",
+  };
+
+  const output = await browserTool.invoke(context, { action: "errors" });
+
+  assertEquals(output.status, "ok");
+  assertEquals(hostRunner.calls[0]?.cwd, "/host/resolved");
+});
+
+Deno.test("browser tool reports a missing host mount as host_unavailable", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = {
+    ...createBrowserContext(hostRunner, BROWSER_LEASE),
+    workspaceHostPath: undefined,
+    resolveHostPath: (): string => {
+      throw new Error("host execution requires a host mount path");
+    },
+  };
+
+  const output = await browserTool.invoke(context, { action: "errors" });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "host_unavailable",
+    message: "browser requires a host-mounted workspace to run against",
+  });
+});
+
+Deno.test("browser tool reports a spawn failure as host_unavailable", async () => {
+  const hostRunner: ProcessRunner = {
+    run() {
+      return Promise.reject(new Error("No such file or directory"));
+    },
+  };
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, { action: "snapshot" });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "host_unavailable",
+    message: "agent-browser could not run: No such file or directory",
+  });
+});
+
+Deno.test("browser tool scrubs the lease endpoint from a timeout error", async () => {
+  const hostRunner: ProcessRunner = {
+    run(request) {
+      return Promise.reject(
+        new ProcessTimeoutError(
+          [request.command, ...request.args].join(" "),
+          request.timeoutMs ?? 0,
+        ),
+      );
+    },
+  };
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const output = await browserTool.invoke(context, {
+    action: "snapshot",
+    timeoutMs: 0,
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "host_unavailable",
+    message:
+      "agent-browser could not run: process timed out after 0ms: agent-browser --cdp <lease endpoint> snapshot",
+  });
+});
+
+Deno.test("browser tool scrubs the lease endpoint from what the browser prints", async () => {
+  const hostRunner = new FakeProcessRunner([
+    {
+      stdout: "connected to http://localhost:9362 for page\n",
+      stderr: "warning: http://localhost:9362 slow\n",
+      exitCode: 0,
+    },
+    {
+      stdout: "",
+      stderr: "could not reach http://localhost:9362\n",
+      exitCode: 1,
+    },
+  ]);
+  const context = createBrowserContext(hostRunner, BROWSER_LEASE);
+
+  const okOutput = await browserTool.invoke(context, { action: "console" });
+  const failedOutput = await browserTool.invoke(context, {
+    action: "console",
+  });
+
+  assertEquals(okOutput, {
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: "connected to <lease endpoint> for page\n",
+    detail: "warning: <lease endpoint> slow",
+  });
+  assertEquals(failedOutput, {
+    outputId: "run-1:browser:2",
+    status: "error",
+    code: "command_failed",
+    message: "could not reach <lease endpoint>\n",
+    exitCode: 1,
   });
 });
 
@@ -2326,11 +2374,7 @@ Deno.test({
       const output = await runSkillScriptTool.invoke(context, {
         skill: "agent-browser",
         path: "scripts/capture-workflow.sh",
-        args: [
-          "--cdp",
-          "http://localhost:9362",
-          "http://localhost:8000/piece",
-        ],
+        args: ["http://localhost:8000/piece"],
       });
 
       assertEquals(output.status, "executed");
@@ -2346,8 +2390,6 @@ Deno.test({
         args: [
           "-s",
           "--",
-          "--cdp",
-          "http://localhost:9362",
           "http://localhost:8000/piece",
         ],
         cwd: workspace,
@@ -2359,6 +2401,7 @@ Deno.test({
           SKILL_DIR: skill.skillDir,
           SKILL_SCRIPT: join(skill.skillDir, "scripts", "capture-workflow.sh"),
           CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "host",
+          AGENT_BROWSER_CDP: "http://localhost:9362",
         },
         stdinText: scriptSource,
         timeoutMs: 60000,
@@ -2368,8 +2411,6 @@ Deno.test({
         "bash",
         "-s",
         "--",
-        "--cdp",
-        "http://localhost:9362",
         "http://localhost:8000/piece",
       ]);
 
@@ -2378,7 +2419,7 @@ Deno.test({
         path: "scripts/capture-workflow.sh",
         args: [
           "--cdp",
-          "http://localhost:9444",
+          "http://localhost:9362",
           "http://localhost:8000/piece",
         ],
       });
@@ -2386,7 +2427,7 @@ Deno.test({
       assertEquals(deniedOutput.error?.code, "permission_denied");
       assertStringIncludes(
         deniedOutput.error?.message ?? "",
-        "Browser Access lease endpoint",
+        "must not pass --cdp",
       );
       assertEquals(hostRunner.calls.length, 1);
       assertEquals(executions[1].status, "error");
@@ -2414,11 +2455,7 @@ Deno.test({
       const expiredOutput = await runSkillScriptTool.invoke(expiredContext, {
         skill: "agent-browser",
         path: "scripts/capture-workflow.sh",
-        args: [
-          "--cdp",
-          "http://localhost:9362",
-          "http://localhost:8000/piece",
-        ],
+        args: ["http://localhost:8000/piece"],
       });
       assertEquals(expiredOutput.status, "error");
       assertEquals(expiredOutput.error?.code, "permission_denied");

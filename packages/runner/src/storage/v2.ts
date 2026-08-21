@@ -6,17 +6,16 @@ import {
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { aclDocId } from "@commonfabric/memory/acl";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
-import type {
-  AuthorizationError as IAuthorizationError,
-  ConflictError as IConflictError,
-  ConnectionError as IConnectionError,
-  Entity,
-  MemorySpace,
-  MIME,
-  Signer,
-  TransactionError,
-  URI,
+import type { Entity } from "@commonfabric/memory/interface";
+import {
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  type MemorySpace,
+  type MIME,
+  type Signer,
+  type TransactionError,
+  type URI,
 } from "@commonfabric/memory/interface";
 import {
   canResolveScopeKey,
@@ -282,6 +281,27 @@ export function dataURISyncKey(identity: {
 
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+/**
+ * Placeholder entity for a conflict descriptor that names no entity. A
+ * retrier compares against it rather than pulling it.
+ */
+export const UNKNOWN_CONFLICT_ENTITY = "of:unknown" as URI;
+
+/**
+ * Names the entity a commit's conflict descriptor is about: the first
+ * operation that addresses one. A SQLite operation carries no entity
+ * identifier, so a commit of nothing but SQLite writes names
+ * {@link UNKNOWN_CONFLICT_ENTITY} instead.
+ */
+export const conflictEntityOf = (commit: ClientCommit): URI => {
+  for (const operation of commit.operations) {
+    if (operation.op !== "sqlite") {
+      return operation.id as URI;
+    }
+  }
+  return UNKNOWN_CONFLICT_ENTITY;
+};
 
 const activeCommitPreconditions = (
   preconditions: readonly CommitPrecondition[] | undefined,
@@ -5448,13 +5468,6 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     threshold: number,
   ): StorageTransactionRejected {
-    let firstId: URI | undefined;
-    for (const operation of commit.operations) {
-      if (operation.op !== "sqlite") {
-        firstId = operation.id as URI;
-        break;
-      }
-    }
     return {
       name: "ConflictError",
       message:
@@ -5463,11 +5476,7 @@ class SpaceReplica implements ISpaceReplica {
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
-        of: firstId ?? "of:unknown",
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
+        of: conflictEntityOf(commit),
       },
       // The catch-up that clears `threshold` is already in flight from the
       // earlier conflict; gate the retry directly on it (no provider round trip
@@ -5489,13 +5498,6 @@ class SpaceReplica implements ISpaceReplica {
     message: string,
     readyToRetry: () => Promise<void> = () => Promise.resolve(),
   ): StorageTransactionRejected {
-    let firstId: URI | undefined;
-    for (const operation of commit.operations) {
-      if (operation.op !== "sqlite") {
-        firstId = operation.id as URI;
-        break;
-      }
-    }
     return {
       name: "ConflictError",
       message,
@@ -5503,11 +5505,7 @@ class SpaceReplica implements ISpaceReplica {
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
-        of: firstId ?? "of:unknown",
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
+        of: conflictEntityOf(commit),
       },
       readyToRetry,
     };
@@ -6103,12 +6101,9 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return {
-      ...assert({
-        the: DOCUMENT_MIME,
-        of: id,
-        is: value,
-        cause: null,
-      }),
+      the: DOCUMENT_MIME,
+      of: id,
+      is: value,
       scope: normalizeCellScope(scope),
       // The explicit instance rides the state ONLY when the caller named
       // one, so the differential keys and addresses it per instance; an
@@ -6248,7 +6243,8 @@ const snapshotState = (
     ...(scopeKey !== undefined ? { scopeKey } : {}),
   }) ??
     ({
-      ...unclaimed({ of: id, the: DOCUMENT_MIME }),
+      the: DOCUMENT_MIME,
+      of: id,
       scope: normalizeCellScope(scope),
       ...(scopeKey !== undefined ? { scopeKey } : {}),
     } as State);
@@ -6334,17 +6330,13 @@ const toRejectedError = (
       transaction: commit,
       // Conflict descriptor: for stale-read conflicts `of` is authoritative
       // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running (CT-1824).
-      // `the`/`expected`/`actual` remain placeholders.
+      // retrier can pull exactly that doc before re-running. `the` remains a
+      // placeholder.
       conflict: {
         space,
         the: DOCUMENT_MIME,
         of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
           firstOperationId ?? "of:unknown") as Entity,
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
       },
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq

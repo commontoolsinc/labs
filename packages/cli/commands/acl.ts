@@ -1,6 +1,6 @@
 import { Command } from "@cliffy/command";
 import { Table } from "@cliffy/table";
-import { isCapability } from "@commonfabric/memory";
+import { isCapability } from "@commonfabric/memory/acl";
 
 import { getAcl, removeAclEntry, setAclEntry } from "../lib/acl.ts";
 import { cliText } from "../lib/cli-name.ts";

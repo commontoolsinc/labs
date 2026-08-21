@@ -793,7 +793,7 @@ export interface TransactionCommitOptions {
 }
 
 /**
- * Representation of a storage transaction, which can be used to query facts and
+ * Representation of a storage transaction, which can be used to query state and
  * assert / retract while maintaining consistency guarantees. Storage ensures
  * that transactions retain consistent view of the whole storage through it's
  * lifetime by notifying pending transaction of every change that is integrated
@@ -1215,7 +1215,7 @@ export interface IStorageTransaction {
 
   /**
    * Optional native commit draft hook for storage backends that can consume a
-   * more direct representation than legacy fact archives.
+   * more direct representation than a change archive.
    */
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 
@@ -1910,7 +1910,7 @@ export interface IStorageTransactionAborted extends IStorageError {
 
 /**
  * Error indicates that transaction consistency guarantees have being
- * invalidated - some fact has changed while transaction was in progress.
+ * invalidated - some state has changed while transaction was in progress.
  */
 export interface IStorageTransactionInconsistent extends IStorageError {
   readonly name: "StorageTransactionInconsistent";
@@ -2028,7 +2028,7 @@ export interface IStorageTransactionComplete extends IStorageError {
 
 /**
  * Represents adddress within the memory space which is like pointer inside the
- * fact value in the memory.
+ * value held in the memory.
  */
 export type IMemoryAddress = {
   /**
@@ -2036,8 +2036,8 @@ export type IMemoryAddress = {
    */
   id: URI;
   /**
-   * Protocol fact type. Document addresses omit this; storage boundaries use
-   * application/json.
+   * Media type of the addressed value. Document addresses omit this; storage
+   * boundaries use application/json.
    */
   type?: MediaType;
   /**
@@ -2066,7 +2066,8 @@ export type IMemoryAddress = {
   scopeKey?: ScopeKey;
   /**
    * Intra-value path to the {@link FabricValue} being referenced by this
-   * address. It is a path within the `is` field of the fact in memory protocol.
+   * address. It is a path within the `is` field of the state in the memory
+   * protocol.
    */
   path: readonly MemoryAddressPathComponent[];
 };

@@ -2367,10 +2367,10 @@ function followPointer(
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
     if (error.name === "NotFoundError" && error.path.length === 0) {
-      // If the object we're pointing to is a retracted fact, just return undefined.
+      // If the address we're pointing to holds no value, just return undefined.
       logger.info(
         "traverse",
-        () => ["followPointer found missing/retracted fact", valueEntry],
+        () => ["followPointer found missing document", valueEntry],
       );
       // A target absent from the replica may simply never have been pulled —
       // report it for an async load. This read still resolves notFound; the
@@ -2433,7 +2433,7 @@ function followPointer(
       const lastValue = tx.readOrThrow(partialTarget)!;
       // We can continue with the target, but provide the top level target doc
       // to getAtPath.
-      // An assertion fact.is will be an object with a value property, and
+      // A stored document's `is` is an object with a value property, and
       // that's what our schema is relative to.
       const partialTargetDoc = {
         address: partialTarget,
@@ -2454,7 +2454,7 @@ function followPointer(
 
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
-  // An assertion fact.is will be an object with a value property, and
+  // A stored document's `is` is an object with a value property, and
   // that's what our schema is relative to.
   const targetDoc = {
     address: target,
@@ -2479,7 +2479,8 @@ function trackVisitedDoc(
       internPathSelector(selector),
     );
   }
-  // Load the metadata-linked docs recursively unless we're a retracted fact.
+  // Load the metadata-linked docs recursively unless the address holds no
+  // value.
   if (context.includeMeta) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(

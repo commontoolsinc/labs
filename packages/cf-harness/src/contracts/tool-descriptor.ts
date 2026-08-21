@@ -2,7 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 
 export type BuiltinToolId =
   | "bash"
-  | "bash-no-sandbox"
+  | "browser"
   | "read_file"
   | "view_image"
   | "web_fetch"

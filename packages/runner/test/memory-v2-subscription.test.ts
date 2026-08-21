@@ -141,10 +141,6 @@ const syntheticConflict = (
     space,
     the: "application/json",
     of: uri,
-    expected: null,
-    actual: null,
-    existsInHistory: false,
-    history: [],
   },
   readyToRetry,
 });
