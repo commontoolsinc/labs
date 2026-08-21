@@ -4,25 +4,37 @@ A collection gives each of its items a short name that a person can remember,
 type, say out loud, and cite: `top-42` for item 42 of a board that calls itself
 `top`. This document defines where such a name lives, how it resolves, how a
 renderer chooses which spelling to show, and what has to be in place before a
-collection can mint one.
+collection can offer one.
 
 It governs any collection that wants short names for its children, not one
 kind of board. Topics is the first customer; nothing here is specific to it.
 
+**This standardizes the edges, not the policies.** A collection chooses its own
+child-naming mechanism and its own rules about what those names mean over time.
+What is standardized is the boundary around that choice: how a collection
+declares itself, how its children are addressed and resolved, how a reference
+is stored, and how a spelling is rendered — so that any consumer in the fabric
+can name and cite a child without knowing how the collection arrived at the
+name.
+
 ## Three layers of name
 
 An item carries up to three names at once, and they are not interchangeable.
+Only the first is guaranteed to exist.
 
-| Layer | Example | Guarantee |
+| Layer | Example | Who states the guarantee |
 | --- | --- | --- |
-| Identity | `fid1:…` | immutable, never reused, never retargeted |
-| Handle | `top-42` | short and citable; minted by a collection, never reused |
-| Name | `verb-contract-arc` | human-chosen; mutable, non-unique, retargetable |
+| Identity | `fid1:…` | the fabric: immutable, never reused, never retargeted |
+| Handle | `top-42` | the collection that owns it |
+| Space-level name | `verb-contract-arc` | the space: mutable, non-unique, retargetable |
 
-The identity is what a stored reference resolves to. The handle is what a
-person cites. The name is a convenience that may move. Conflating the second
-and third is what makes a citation unreliable: a reader handed a link cannot
-tell whether it is permanent.
+A **handle** is a collection's name for one of its children, and the word
+carries no policy: it says who assigned the name, not what the name promises.
+The identity is what a stored reference resolves to. A handle is what a person
+cites. A space-level name is a convenience that may move. The layers differ in
+who owns the guarantee rather than in how strong it is: a collection may hold
+its child names to something stronger than a space holds its slugs, or to
+something weaker, and a consumer learns which by asking rather than by assuming.
 
 ## Names resolve through collections
 
@@ -30,7 +42,7 @@ A space is the root namespace. Any collection inside it may host a namespace of
 its own, and a name resolves by walking segments:
 
 ```text
-<space>/top/42                  a handle in a numeric collection
+<space>/top/42                  a handle in a collection that numbers
 <space>/docs/getting-started    a string-named child
 <space>/verb-arc                a space-level slug
 ```
@@ -53,8 +65,8 @@ path.
 
 A tempting alternative gives handles a reserved shape inside the flat
 space-level namespace — a segment ending in hyphen-digits is a handle, anything
-else is a slug — so that `<space>/top-42` resolves without a collection
-segment. It does not generalize. A flat namespace hosts exactly one unreserved
+else is a slug — so that `<space>/top-42` resolves without a collection segment.
+ It does not generalize. A flat namespace hosts exactly one unreserved
 naming scheme; every additional scheme has to claim a distinguishable shape,
 and shapes are scarce. The second collection wanting string-named children has
 nothing left to claim, because "hyphenated words" is the entire slug grammar.
@@ -65,56 +77,104 @@ in one namespace would break reads in another.
 Segment walking costs one path segment in a URL and leaves the slug grammar
 untouched.
 
-## Minted children and chosen children
+## What a collection owes, and what it decides
 
-A collection may allocate its children's names or accept them from a person.
-The mechanics are identical; the guarantees are not.
+**Naming children is optional.** Every item already has an identity, and that
+identity addresses it on its own, from anywhere, with no collection involved. A
+collection whose members are reached by identity alone needs nothing from this
+document. What follows applies only when a collection wants its members
+addressable *through it*, under a name a person can hold — and a collection may
+want that for some of its members and not others.
 
-| | Minted | Chosen |
-| --- | --- | --- |
-| Allocated by | the collection | a person |
-| Unique | by construction | requires claim-if-absent |
-| Stable | permanent, never reused | renameable, retargetable |
-| Is | an identifier | a slug scoped to a collection |
+A collection that does want it declares four things, and beyond them it is
+free.
 
-Which a collection mints is part of what it promises about its children, and it
-belongs in the collection rather than in the resolution grammar. `top/42` is
-citable forever; `docs/getting-started` is a name that may move.
+1. **A prefix** — the name other things bind to in order to reach it.
+2. **A resolution** — given a child name, the link it currently names.
+3. **Child names that fit the shared grammar**, so that each survives a URL
+   segment and a prose citation.
+4. **The policy it holds those names to**, published rather than implied.
 
-### Minted handles are numeric
+The fabric adds one constraint, and only one: **at any moment, a child name
+resolves to at most one child.** A resolver returns a target or nothing; it
+does not return a set, because a URL and a citation each address one thing.
+That constraint says nothing about what happens across moments.
 
-Digits beat a short random code on every axis that matters for a name a person
-handles. `42` is one chunk over an alphabet automatized in childhood;
-a four-character alphanumeric code is four unrelated chunks, plus a case
-question and homoglyph confusion between `0`/`O` and `1`/`l`. Spoken, a number
-survives a hallway conversation and a code does not. A dense sequence also
-locates itself in time — a low number is old, a high one recent — which no
-random name can do. And it stays short: per-collection numbering keeps a
-working collection at two or three digits for years, while an uncoordinated
-scheme is opaque from its first item and can never shrink.
+### Policies a collection owns
 
-The price is a coordination point, and it is small at collection scale.
+What a name means over time belongs to the collection, and different
+collections will decide differently for good reasons:
 
-### Allocation is lazy
+- whether a name is unique across the collection's whole history, or only
+  among its current children
+- whether a name is permanent, or may be retired, reassigned, or reused
+- whether a retired name forwards to a successor, errors, or goes quiet
+- whether a name is mutable, and who may change it
+- who allocates — the collection, or the person creating the child
+- when allocation happens — at creation, on first sight, or on request
+- what a name is made of — a sequence, a random code, a human string, a
+  derivation from content
 
-An item receives its identity when it is created and its handle when the
-collection first sees it. The handle is a label, not the identity, so
-allocation may be retroactive and can never be wrong: an item without a handle
-still exists, still links, and still opens. This removes any dependence on
-allocation being available at creation time.
+None of these is settled here, and a collection need not give every child it
+holds the same answers.
 
-Numbers are never reused and never reassigned. An item that moves to another
-collection keeps its identity, gains a handle there, and keeps resolving under
-the old one. Burned numbers are harmless.
+### What a consumer may assume
 
-### Contention
+Only what the collection declares. Absent a declaration a consumer assumes
+nothing: it stores the identity rather than the name, and it re-resolves a short
+spelling before showing it. Both of those are required elsewhere in this
+document for their own reasons, which is what makes an undeclared policy safe
+rather than merely unknown — the conservative path is already the default path.
+
+A consumer that needs to hold a name rather than an identity — a printed
+citation, an external system, a message leaving the fabric — needs the
+collection to promise permanence, and should say so plainly when it cannot get
+one.
+
+### Choosing a mechanism
+
+Non-normative, for a collection author deciding.
+
+A **monotonic sequence** is the strongest choice for a name people handle. `42`
+is one chunk over an alphabet automatized in childhood; a four-character
+alphanumeric code is four unrelated chunks, plus a case question and homoglyph
+confusion between `0`/`O` and `1`/`l`. Spoken, a number survives a hallway
+conversation and a code does not. A dense sequence also locates itself in time
+— a low number is old, a high one recent — and it stays short, holding a
+working collection at two or three digits for years where an uncoordinated
+scheme is opaque from its first item and can never shrink. The price is an
+allocation point.
+
+A **random code** buys allocation without coordination, which suits a
+collection whose children are created offline, or at a rate that makes a shared
+allocator unattractive. It pays in memorability, and its density has to be
+chosen against the collection's expected size rather than against aesthetics.
+Widening on collision beats lengthening by default.
+
+A **human string** suits a collection whose children are things people name
+rather than count — pages, documents, entries with titles. It inherits the
+questions a space-level name already faces: what a rename does, and what
+happens when two people want the same word.
+
+A **derivation from the child's own content or identity** needs no allocation
+and is stable by construction, at the cost of being unmemorable and of needing
+prefix-expansion behavior on collision.
+
+**Allocating on first sight rather than at creation** is worth weighing
+whichever mechanism is chosen. A child receives its identity when it is
+created; if its name may arrive later, allocation never blocks creation and can
+be retroactive, and a child without a name yet still exists, still links, and
+still opens.
+
+### If the mechanism needs a shared allocator
 
 Appends to a collection merge: Tier-2 conflict detection is path-aware, so
 concurrent writes to distinct keys of the same container do not collide
-(`docs/specs/memory-v2/08-conflict-granularity.md`). A handle map keyed by
-number inherits that. An allocation counter does not — it is a same-path read
-and write, so concurrent allocations serialize through one retry under
-`editWithRetry`. That is the whole cost, and it is paid once per creation.
+(`docs/specs/memory-v2/08-conflict-granularity.md`). A map keyed by child name
+inherits that. A shared counter does not — it is a same-path read and write, so
+concurrent allocations serialize through one retry under `editWithRetry`. That
+is the whole cost, and a collection that finds it too high has the uncoordinated
+mechanisms above.
 
 ## Resolution scope
 
@@ -250,6 +310,11 @@ reader's bindings, so two people whose bindings disagree cannot break each
 other's links. The short form is an input and display convenience at both ends,
 and the middle is always qualified.
 
+Canonicalizing to the identity rather than to a qualified name is the safe
+default, and it is what lets a consumer store a reference into a collection
+whose name policy it has not read. A qualified name is the right thing to store
+only where the collection promises the name outlives the reference.
+
 ## Authority
 
 Space ACLs are space-granular: a principal is evaluated against the space ACL
@@ -261,8 +326,9 @@ write the space. Per-document authority arrives with UCAN-authorized commands.
 This design therefore does not prevent a name from being taken; it makes taking
 one impossible by accident and detectable when deliberate.
 
-- Handles live in the collection that mints them, so a person choosing a name
-  cannot land on one. Retargeting a handle means writing the collection's own
+- A handle lives in the collection that assigned it, so a person choosing a
+  space-level name cannot land on one. Retargeting one means writing that
+  collection's own
   cell through its own actions — a visible edit, not a silent redirect on an
   invisible document.
 - The prefix binding is the one name that remains exposed, and it fails loudly:
@@ -284,8 +350,8 @@ further gaps close here: the entry is never cleared from a previous target when
 a name is retargeted, and `setPieceSlug` writes target metadata only for piece
 roots, so a collection-targeted name has no reverse entry at all. The map needs
 a structured form that distinguishes handle from name and designates one as
-canonical. **This is a prerequisite: minting handles before it lands makes URL
-rewriting nondeterministic.**
+canonical. **This is a prerequisite: giving collections handles before it lands
+makes URL rewriting nondeterministic.**
 
 **2. Make name assignment refuse by default.** `setSlugLink` does not read the
 slug cell before writing it, so assigning an assigned name overwrites it
@@ -295,12 +361,13 @@ body on a retryable rejection, so the check is a claim rather than a
 time-of-check race. Confirm that a synced read inside the transaction becomes a
 commit precondition before relying on it.
 
-**3. Give collections child namespaces.** A collection declares its prefix,
-holds a map from child name to link, and allocates lazily. Minting collections
-add a counter; accepting collections reuse the claim from step 2 at collection
-scope. Widen `resolvePieceAddress` (`packages/piece/src/slugs.ts`), which
-rejects a name whose target has no pattern identity, so that a name pointing at
-a collection nested in a piece is not treated as an error.
+**3. Give collections child namespaces.** A collection declares its prefix, its
+name policy, and a resolution from child name to link. Whatever allocator it
+needs is its own; a collection that accepts names from people can reuse the
+claim from step 2 at collection scope. Widen `resolvePieceAddress`
+(`packages/piece/src/slugs.ts`), which rejects a name whose target has no
+pattern identity, so that a name pointing at a collection nested in a piece is
+not treated as an error.
 
 **4. Walk segments in the URL layer.** `parseFabricUrl`
 (`packages/runner/src/fabric-url.ts`) reads a trailing segment as a slug and
@@ -316,7 +383,9 @@ and the clipboard flavors.
 
 - Whether a synced read inside an `editWithRetry` body becomes a commit
   precondition, which is what step 2 rests on.
-- Whether a collection accepting chosen names reuses the space-level claim path
-  or needs its own.
+- Whether a collection accepting names from people reuses the space-level claim
+  path or needs its own.
+- Whether a collection's name policy is declared in a form a consumer can
+  branch on, or is documentation that a consumer's author reads.
 - Whether the scope chain admits bindings from a collection to its siblings, or
   stops at the containing collection and the reader's own bindings.
