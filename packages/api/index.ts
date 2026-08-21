@@ -216,6 +216,53 @@ export interface FabricRegExpConstructor {
 export declare const FabricRegExp: FabricRegExpConstructor;
 
 /**
+ * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
+ * a primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * An instance either holds handles -- two `CryptoKey`s, whose material this
+ * realm may have no way to reach -- or holds material, the two keys as bytes.
+ * `hasMaterial` says which, and every accessor belonging to the other arm
+ * throws.
+ */
+export interface FabricKeyPair extends FabricPrimitive {
+  readonly algorithm: string;
+  readonly hasMaterial: boolean;
+
+  /**
+   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
+   * object on each call, so a caller may do as it likes with it; the two
+   * `CryptoKey`s within it are this instance's own, and are the same two
+   * objects on every call. Throws when this instance holds material.
+   */
+  readonly cryptoKeyPair: CryptoKeyPair;
+
+  /** The public key's handle. Throws when this instance holds material. */
+  readonly publicCryptoKey: CryptoKey;
+
+  /** The private key's handle. Throws when this instance holds material. */
+  readonly privateCryptoKey: CryptoKey;
+
+  /** The public key's bytes. Throws when this instance holds handles. */
+  readonly publicKeyBytes: FabricBytes;
+
+  /** The private key's bytes. Throws when this instance holds handles. */
+  readonly privateKeyBytes: FabricBytes;
+}
+
+export interface FabricKeyPairConstructor {
+  new (pair: CryptoKeyPair): FabricKeyPair;
+  new (
+    algorithm: string,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
+  ): FabricKeyPair;
+  prototype: FabricKeyPair;
+}
+
+export declare const FabricKeyPair: FabricKeyPairConstructor;
+
+/**
  * Structured state for constructing a `FabricError`. The fixed-schema slots
  * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
  * whose keys must not collide with the slot names.
@@ -1829,6 +1876,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricEpochDay",
     "FabricEpochNsec",
     "FabricHash",
+    "FabricKeyPair",
     "FabricRegExp",
   ] as const,
 );

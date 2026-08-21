@@ -79,7 +79,44 @@ on a single line keeps the artifact to one line per guard rather than three (the
 lines are tracked here rather than chased with contrived error-injection tests,
 since the branches are unreachable by construction.
 
-A guard line is the one case where an uncovered line is expected to stay
-uncovered. Everywhere else, a line whose coverage moves between runs or between
-shard layouts is a defect in the tests — see
-[COVERAGE.md](COVERAGE.md) for what to do about it.
+A guard line is one of two cases where an uncovered line is expected to stay
+uncovered; a block that is never invoked at all is the other, below. Everywhere
+else, a line whose coverage moves between runs or between shard layouts is a
+defect in the tests — see [COVERAGE.md](COVERAGE.md) for what to do about it.
+
+## A block that is never invoked: `deno-coverage-ignore`
+
+A guard line's condition at least runs. A block that is never entered at all is
+a different case, and `deno` has a directive for it. The
+`FabricKeyPair` / `@commonfabric/api` constructor drift guard is the worked
+example: a closure that is built, discarded, and never called, whose body
+exists only so that the compiler checks each construct form the api
+declaration promises.
+
+Four spellings exist — `deno-coverage-ignore`,
+`deno-coverage-ignore-start`, `deno-coverage-ignore-stop`, and
+`deno-coverage-ignore-file`. **The bare form takes only the line that follows
+it**, which is easy to get wrong: applied to the head of a six-line closure it
+removes one line and leaves five. A block wants the `-start` / `-stop` pair.
+
+```ts
+// Shown for illustration only.
+// deno-coverage-ignore-start
+(() => {
+  neverCalled();
+})();
+// deno-coverage-ignore-stop
+```
+
+The directive reaches the lcov report and not merely the terminal one, which
+is what makes it usable here: the ignored lines carry no `DA:` records at all,
+so `LF` drops with `LH` and the CI ratchet sees nothing uncovered rather than
+seeing a gap it has been told to forgive.
+
+**What this is not for.** It suppresses a measurement, so it is only honest
+where the measurement is meaningless — code that *cannot* execute, by
+construction, in any test. A branch that is merely hard to reach, expensive to
+set up, or currently untested is a gap, and marking it ignored converts a
+number someone would have chased into silence. The bar is that no test could
+cover the lines without changing what they are: if a test could reach them,
+write the test.
