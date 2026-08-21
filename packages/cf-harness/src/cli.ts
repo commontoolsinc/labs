@@ -140,6 +140,7 @@ const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
+  "handle-value-origin",
   "workspace",
   "cwd",
   "focus-root",

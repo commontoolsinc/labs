@@ -781,6 +781,29 @@ describe("browser", () => {
       expect(runner.calls).toEqual([]);
     });
 
+    it("refuses a malformed handle action before reading the fabric", async () => {
+      // A fill carrying a valid handle but no ref cannot execute. Resolving
+      // first would read the value and arm the run's scrub on behalf of a call
+      // that never ran, so the whole shape is checked before anything is read.
+      const ref = await seedRef("secret-name", "Ada Lovelace");
+      const runner = new FakeProcessRunner();
+      const register = createHarnessResolvedValueRegister();
+      const engine = createEngine(runner, {
+        resolvedValueRegister: register,
+      });
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        valueHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("invalid_input");
+      expect(register.size).toBe(0);
+      expect(runner.calls).toEqual([]);
+    });
+
     it("names a bare disallowed origin a urlHandle resolved to", async () => {
       // The value is its own origin, so a register that recorded it before
       // the refusal was written would scrub the refusal down to a placeholder
