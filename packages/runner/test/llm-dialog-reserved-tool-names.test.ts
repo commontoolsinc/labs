@@ -52,6 +52,13 @@ describe("llmDialog reserved tool names", () => {
 
       expect(catalog.llmTools[name].description).toBe("the pattern's own tool");
       expect(catalog.dynamicToolCells.has(name)).toBe(true);
+
+      // The flattened list releases the name on the same terms; a name freed
+      // in one description and refused in the other would be the divergence
+      // reserving it is meant to rule out.
+      expect(flattenTools(toolsCell as any, false)[name].description).toBe(
+        "the pattern's own tool",
+      );
     });
   }
 
