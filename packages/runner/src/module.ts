@@ -19,13 +19,6 @@ import type { NormalizedFullLink } from "./link-types.ts";
  * - dependencies: Optional static scheduler dependencies for first-run demand/ordering.
  * - useDeclaredReadsAsDependencies: Register binding links as static read evidence.
  * - debounce/throttle/noDebounce: Optional scheduler timing controls.
- * - resumeMode "always-run": never rehydrate this action clean on resume.
- *   Declared by builtins whose run STARTS child runs (map/filter/flatMap):
- *   their durable outputs may validate, but the live side effect —
- *   instantiating the per-element children — only re-establishes by running,
- *   so a clean skip would strand the children unregistered. The children
- *   themselves rehydrate per piece doc
- *   (docs/specs/scheduler-v2/per-doc-rehydration.md §3.3).
  */
 export interface RawBuiltinResult {
   action: Action;
@@ -35,7 +28,6 @@ export interface RawBuiltinResult {
   debounce?: number;
   noDebounce?: boolean;
   throttle?: number;
-  resumeMode?: "always-run";
   /**
    * Receives the Action the runner actually registers with the scheduler —
    * a wrapper around `action`, so `action`'s own identity is not the

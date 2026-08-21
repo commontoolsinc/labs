@@ -2,7 +2,6 @@
 
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-
 import { render } from "@commonfabric/html/client";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
@@ -23,6 +22,8 @@ import {
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { defer } from "@commonfabric/utils/defer";
 
@@ -36,6 +37,39 @@ const keyConfig: IdentityCreateConfig = {
 };
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// declared from the environment — the CI ON lane sets
+// EXPERIMENTAL_SERVER_EXECUTION=true — so the worker below really runs the
+// ON client arm; unset = OFF (the first-party default while Phase 7 is
+// landed dark). An undeclared worker resolves OFF and made the ON lane a
+// MIXED posture (P7 review finding 7).
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+/**
+ * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+ * a step listed there for this file is skipped ONLY when this process runs
+ * the ON posture, loudly (the entry's reason is printed), and only while
+ * the entry exists — the OFF arm and an unlisted step always run. Never a
+ * silent filter: the CI step prints every entry, and the validator
+ * requires this file to name each listed step and call this guard.
+ */
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "runtime-client",
+    "integration/client.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] runtime-client: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
@@ -1006,8 +1040,14 @@ export default pattern<State>(({ value }) => {
       cancel();
     });
 
-    it("renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)", async () => {
-      const scopedHeaderPattern = `import {
+    it({
+      name:
+        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      ...onArmStepSkip(
+        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      ),
+      fn: async () => {
+        const scopedHeaderPattern = `import {
   computed,
   Default,
   NAME,
@@ -1050,57 +1090,58 @@ export default pattern<Input, Output>(({ question, myName }) => {
   };
 });`;
 
-      const scopedHeaderProgram: Program = {
-        main: "/main.tsx",
-        files: [{
-          name: "/main.tsx",
-          contents: scopedHeaderPattern,
-        }],
-      };
+        const scopedHeaderProgram: Program = {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: scopedHeaderPattern,
+          }],
+        };
 
-      const session = await createTestSession();
-      await using rt = await createRuntimeClient(session);
+        const session = await createTestSession();
+        await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(scopedHeaderProgram, session.space, {
-        run: true,
-      });
-      const cell = page.cell() as CellHandle<VNode>;
-      const nameCell = (page.cell() as any).key("myName").asSchema({
-        type: "string",
-        scope: "user",
-      });
-      const mock = new MockDoc(
-        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
-      );
-      const { document, renderOptions } = mock;
-      const root = document.getElementById("root")!;
-
-      const cancel = render(root, cell, renderOptions);
-
-      try {
-        await waitFor(
-          () => {
-            const html = root.innerHTML;
-            return Promise.resolve(
-              html.includes("Where should we eat?") &&
-                html.includes("me is: &quot;&quot;") &&
-                html.includes("body renders"),
-            );
-          },
-          { timeout: 15000 },
+        const page = await rt.createPage(scopedHeaderProgram, session.space, {
+          run: true,
+        });
+        const cell = page.cell() as CellHandle<VNode>;
+        const nameCell = (page.cell() as any).key("myName").asSchema({
+          type: "string",
+          scope: "user",
+        });
+        const mock = new MockDoc(
+          `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
         );
+        const { document, renderOptions } = mock;
+        const root = document.getElementById("root")!;
 
-        await nameCell.set("Alex");
-        await waitFor(
-          () =>
-            Promise.resolve(
-              root.innerHTML.includes("me is: &quot;Alex&quot;"),
-            ),
-          { timeout: 5000 },
-        );
-      } finally {
-        cancel();
-      }
+        const cancel = render(root, cell, renderOptions);
+
+        try {
+          await waitFor(
+            () => {
+              const html = root.innerHTML;
+              return Promise.resolve(
+                html.includes("Where should we eat?") &&
+                  html.includes("me is: &quot;&quot;") &&
+                  html.includes("body renders"),
+              );
+            },
+            { timeout: 15000 },
+          );
+
+          await nameCell.set("Alex");
+          await waitFor(
+            () =>
+              Promise.resolve(
+                root.innerHTML.includes("me is: &quot;Alex&quot;"),
+              ),
+            { timeout: 5000 },
+          );
+        } finally {
+          cancel();
+        }
+      },
     });
 
     it("dispatches click events through rendered page handlers", async () => {
@@ -1334,9 +1375,15 @@ export default pattern<Record<string, never>>(() => {
       cancel();
     });
 
-    it("dispatches one navigateTo when a rendered handler changes local state", async () => {
-      const navigatePattern =
-        `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
+    it({
+      name:
+        "dispatches one navigateTo when a rendered handler changes local state",
+      ...onArmStepSkip(
+        "dispatches one navigateTo when a rendered handler changes local state",
+      ),
+      fn: async () => {
+        const navigatePattern =
+          `import { Default, computed, handler, NAME, navigateTo, pattern, UI, Writable } from "commonfabric";
 
 interface ChildState {
   label: Default<string, "target">;
@@ -1370,50 +1417,51 @@ export default pattern<Record<string, never>>(() => {
   };
 });`;
 
-      const navigateProgram: Program = {
-        main: "/main.tsx",
-        files: [{
-          name: "/main.tsx",
-          contents: navigatePattern,
-        }],
-      };
+        const navigateProgram: Program = {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: navigatePattern,
+          }],
+        };
 
-      const session = await createTestSession();
-      await using rt = await createRuntimeClient(session);
+        const session = await createTestSession();
+        await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(navigateProgram, session.space, {
-        run: true,
-      });
-      const mock = new MockDoc(
-        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
-      );
-      const { document, renderOptions } = mock;
-      const root = document.getElementById("root")!;
-      const navigations: string[] = [];
-      const gotNavigation = defer<void>();
-      rt.on("navigaterequest", ({ cell }) => {
-        navigations.push(cell.id());
-        if (navigations.length > 0) gotNavigation.resolve();
-      });
+        const page = await rt.createPage(navigateProgram, session.space, {
+          run: true,
+        });
+        const mock = new MockDoc(
+          `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+        );
+        const { document, renderOptions } = mock;
+        const root = document.getElementById("root")!;
+        const navigations: string[] = [];
+        const gotNavigation = defer<void>();
+        rt.on("navigaterequest", ({ cell }) => {
+          navigations.push(cell.id());
+          if (navigations.length > 0) gotNavigation.resolve();
+        });
 
-      const cancel = render(root, page.cell() as any, renderOptions);
+        const cancel = render(root, page.cell() as any, renderOptions);
 
-      await waitFor(
-        () => Promise.resolve(root.innerHTML.length > 0),
-        { timeout: 5000 },
-      );
+        await waitFor(
+          () => Promise.resolve(root.innerHTML.length > 0),
+          { timeout: 5000 },
+        );
 
-      const button = root.getElementsByTagName("button")[0] as any;
-      assertExists(button);
+        const button = root.getElementsByTagName("button")[0] as any;
+        assertExists(button);
 
-      button.dispatchEvent({ type: "click", target: button });
+        button.dispatchEvent({ type: "click", target: button });
 
-      await gotNavigation.promise;
-      await rt.idle();
+        await gotNavigation.promise;
+        await rt.idle();
 
-      assertEquals(navigations.length, 1);
+        assertEquals(navigations.length, 1);
 
-      cancel();
+        cancel();
+      },
     });
   });
 
@@ -1654,6 +1702,13 @@ async function createRuntimeClient(
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
+    // The HOST declares the worker's posture (runtime-client's posture
+    // agreement; the worker refuses to initialize on a mismatch). Only the
+    // server-execution flag is declared: the other experimental keys keep
+    // the worker's own defaults.
+    experimental: SERVER_EXECUTION_FROM_ENV === undefined
+      ? {}
+      : { serverExecution: SERVER_EXECUTION_FROM_ENV },
     ...extraOptions,
   });
 

@@ -12,6 +12,35 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { aclDocId } from "@commonfabric/memory/acl";
+import {
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type INotFoundError,
+  type IReadActivity,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type IWriteAttempt,
+  type IWriteOptions,
+  type MemorySpace,
+  type Metadata,
+  type ReadError,
+  type Result,
+  type StorageTransactionFailed,
+  type StorageTransactionStatus,
+  toThrowable,
+  type TransactionCommitOptions,
+  type TransactionReactivityLog,
+  type TransactionSealDestination,
+  type TransactionWriteDetail,
+  type Unit,
+  type WriteError,
+  type WriterError,
+} from "./interface.ts";
 import type {
   CommitPrecondition,
   SqliteOperation,
@@ -76,33 +105,6 @@ import {
 } from "../link-types.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
-import type {
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  INotFoundError,
-  IReadActivity,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  IWriteAttempt,
-  IWriteOptions,
-  MemorySpace,
-  Metadata,
-  ReadError,
-  Result,
-  StorageTransactionFailed,
-  StorageTransactionStatus,
-  TransactionCommitOptions,
-  TransactionReactivityLog,
-  TransactionWriteDetail,
-  Unit,
-  WriteError,
-  WriterError,
-} from "./interface.ts";
-import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   clearSchemaRefusalTx,
@@ -138,6 +140,10 @@ const createOnlyMarkKey = (
 
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
+  /** Stage C tuning T1: one flow-label probe was evaluated (`computed`) or
+   * answered from the memoized negative verdict (`memo`). Measurement
+   * only. */
+  onFlowLabelProbe?(outcome: "computed" | "memo"): void;
   onPreparedTx?(): void;
   onPrepareReject?(reasons: readonly string[]): void;
   onDigestInvalidation?(reason: string): void;
@@ -397,10 +403,112 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // retains only what was derived since this transaction's last write.
   private snapshotMemo = new Map<string, unknown>();
 
+  // The seal destination (server-execution v2, serving-loop.md §3d): when
+  // installed, commit() closes by sealing into it instead of committing to
+  // the store — one abstraction, two destinations. ECMAScript-private with a
+  // write-once pin, same shape as #cfcPolicySnapshotPinned: the Runtime
+  // configures every tx exactly once in edit() (usually with `undefined` —
+  // every client, and the OFF arm always), and that state must be just as
+  // write-once as an installed destination, or handler code reaching the
+  // concrete tx via `(cell.tx as any)` could hijack the commit path.
+  #sealDestination: TransactionSealDestination | undefined;
+  #sealDestinationPinned = false;
+
+  // Stage C tuning T1 (see IExtendedStorageTransaction.probeFlowLabelWork):
+  // the activity epoch counts every journaled read, write, dereference
+  // trace and trigger read; the memo holds the last NEGATIVE probe verdict
+  // with the epoch it was taken at (stamped AFTER the probe, whose own
+  // metadata reads are internal-verifier reads that never change the
+  // verdict but do move the epoch).
+  #cfcActivityEpoch = 0;
+  #flowLabelProbeMemo: { epoch: number } | undefined;
+
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {}
+
+  /** Stage C tuning T1: any transaction activity that could change the
+   * flow-label probe's answer moves the epoch. */
+  #noteCfcActivity(): void {
+    this.#cfcActivityEpoch += 1;
+  }
+
+  probeFlowLabelWork(): boolean {
+    if (this.#flowLabelProbeMemo?.epoch === this.#cfcActivityEpoch) {
+      this.cfcInstrumentation.onFlowLabelProbe?.("memo");
+      return false;
+    }
+    this.cfcInstrumentation.onFlowLabelProbe?.("computed");
+    const verdict = flowLabelWorkExists(this);
+    // Only the negative verdict is worth remembering: a positive one makes
+    // the caller mark the tx relevant, and a relevant tx is never probed
+    // again. Stamped with the epoch as it stands AFTER the probe (its own
+    // metadata reads moved it).
+    this.#flowLabelProbeMemo = verdict
+      ? undefined
+      : { epoch: this.#cfcActivityEpoch };
+    return verdict;
+  }
+
+  /**
+   * One-shot configuration of the seal destination, called by the Runtime
+   * in edit() for every transaction it creates — with `undefined` on every
+   * client and in the OFF arm, and with the wave accumulator's destination
+   * on a serving runtime under EXPERIMENTAL_SERVER_EXECUTION.
+   */
+  configureSealDestination(
+    destination: TransactionSealDestination | undefined,
+  ): void {
+    if (this.#sealDestinationPinned) {
+      throw new Error(
+        "Seal destination is already configured for this transaction",
+      );
+    }
+    this.#sealDestinationPinned = true;
+    this.#sealDestination = destination;
+  }
+
+  /**
+   * Authoritative writes for effect-COMPLETION transactions (F2, the
+   * completion-visibility wedge; serving-loop.md §4): gated on a
+   * configured seal destination. Since Phase 2 that is NOT synonymous
+   * with the serving posture — the speculation overlay is every
+   * flag-ON client's default destination too (see the inline note
+   * below) — but the gate still holds where it matters: the serving
+   * runtime is where the replica's optimistic view layers sealed wave
+   * overlays a later wave-commit can supersede-drop, making the
+   * ordinary no-op elision destructive (a completion that diffs its
+   * `inputHash` write against a doomed overlay durably lands `result
+   * present + inputHash stale`; the next run's memo guard then wipes
+   * the served value), and no client-side path reaches
+   * `markEffectCompletion` under the flag (egress is dropped at the
+   * overlay). In the OFF arm this is a no-op, so
+   * `markEffectCompletion` keeps its documented byte-identical
+   * behavior there — the accepted client-side corner (a completion
+   * eliding against an in-flight optimistic overlay that later
+   * rejects) costs one redundant refetch and self-heals, per the
+   * recorded OFF-arm acceptance in verification-coverage.md.
+   */
+  markAuthoritativeWrites(): void {
+    // Phase-2 truth update on the gate above: since the speculation
+    // overlay became every flag-ON client's DEFAULT destination, "a
+    // configured seal destination" no longer implies the SERVING
+    // posture. Today this stays correct because no client-side path
+    // reaches `markEffectCompletion` under the flag (egress is dropped
+    // at the overlay, so effectful writebacks never run client-side) —
+    // but a future client-side completion producer would silently get
+    // authoritative (elision-skipping) writes here. Gate on the
+    // destination's posture (or the runtime's `servingPosture`) before
+    // adding one; flagged in the Phase-2 review (F11).
+    if (this.#sealDestination !== undefined) {
+      this.tx.markAuthoritativeWrites?.();
+    }
+  }
+
+  isAuthoritativeWrites(): boolean {
+    return this.tx.isAuthoritativeWrites?.() === true;
+  }
 
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
@@ -639,6 +747,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
+    this.#noteCfcActivity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trigger-reads-after-prepare");
     }
@@ -908,10 +1017,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return isLazyMaterializationTx(this);
   }
 
-  hasWrites(): boolean {
-    return this.tx.hasWrites?.() ?? false;
-  }
-
   issueReadEpoch(): number | undefined {
     return this.tx.issueReadEpoch?.();
   }
@@ -953,6 +1058,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private prepareRead(address: Pick<IMemorySpaceAddress, "scope">): void {
+    this.#noteCfcActivity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
@@ -1037,6 +1143,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
+  hasWrites(): boolean {
+    // Union of both accountings: this class's own write-path bit (set by
+    // noteWrite — covers mergeable ops and folded SQLite writes that never
+    // touch the inner tx's flag) and the inner storage transaction's flag
+    // (the materialized-read epoch fast path's authority). Either signal
+    // alone risks a false negative for the other consumer.
+    return this.#hasWrites || (this.tx.hasWrites?.() ?? false);
+  }
+
+  #hasWrites = false;
+
+  /**
+   * Record that this transaction has written.
+   *
+   * Called from every write path rather than inferred from one of their side
+   * effects: a mergeable op and a folded SQLite write are both writes, and
+   * neither drops the read-result cache — the value write a mergeable op
+   * annotates has already done that, and a SQLite op changes no cell value
+   * locally. Deriving "has written" from cache invalidation would miss both.
+   */
+  private noteWrite(): void {
+    this.#hasWrites = true;
+    this.#noteCfcActivity();
+  }
+
   private invalidateReadResultCache(): void {
     // A write may have changed any value a cached read depends on — including
     // the links a resolution walked, which a write can add, retarget or
@@ -1048,6 +1179,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    this.#noteCfcActivity();
     const traces = this.#cfcState.dereferenceTraces;
     // Only a dereference the transaction had not already performed can move
     // the digest, which binds the trace SET
@@ -1666,14 +1798,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reactivityLogFromActivities(this.tx.journal.activity());
   }
 
-  setSchedulerObservation(observation: FabricValue): void {
-    this.tx.setSchedulerObservation?.(observation);
-  }
-
-  getSchedulerObservation(): FabricValue {
-    return this.tx.getSchedulerObservation?.();
-  }
-
   addCommitPrecondition(
     space: MemorySpace,
     precondition: CommitPrecondition,
@@ -2131,12 +2255,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // exactly the txs nobody marked). Probe only while unprepared: the
       // probe reads metadata, and a read after prepare would invalidate the
       // digest of a transaction that already did its flow work.
+      // Stage C tuning T1: `Runtime.prepareTxForCommit` usually asked the
+      // same question a moment ago on this very transaction; the memoized
+      // negative verdict answers here unless the tx journaled anything
+      // since (see probeFlowLabelWork).
       if (
         !this.#cfcState.relevant &&
         this.#cfcState.prepare.status === "unprepared" &&
         this.#cfcState.flowLabelsMode !== "off" &&
         this.#cfcState.enforcementMode !== "disabled" &&
-        flowLabelWorkExists(this)
+        this.probeFlowLabelWork()
       ) {
         this.markCfcRelevant("flow-labels");
       }
@@ -2207,7 +2335,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
     }
 
-    const promise = this.tx.commit(options);
+    // The destination switch (serving-loop.md §3d): with a seal destination
+    // installed — a serving runtime under EXPERIMENTAL_SERVER_EXECUTION —
+    // this action tx SEALS into the wave accumulator instead of committing
+    // to the store. Everything above (the per-action-run CFC gates, §3c)
+    // and below (commit callbacks, post-commit side effects) fires for both
+    // destinations: sealing fires everything commit fires today. Sealed
+    // means accepted into the wave, not durable: a later withdrawal
+    // (superseded, requeued, lease lost) surfaces on the wave's verdict
+    // channel, AFTER the callbacks and side effects here observed "ok" —
+    // the serving loop (stage F) and the effect channel (stage G) must
+    // consume dispositions from the wave outcome, never from this result.
+    const promise = this.#sealDestination !== undefined
+      ? this.#sealDestination.seal(this)
+      : this.tx.commit(options);
 
     // Two callback layers with two timelines (CT-1950):
     //
@@ -2236,6 +2377,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       async (result) => {
         this.runVerdictCallbacks(result);
         if (result.ok && !readOnly) {
+          // The effect handoff (server-execution v2 stage G, serving-loop.md
+          // §3/§5; Phase 2 speculation.md §2): a SEALED transaction's "ok"
+          // means accepted into a wave — or into the speculation overlay —
+          // not durable. A seal destination that owns an outbox takes the
+          // effects here and flushes them only after the wave commit landed
+          // the contribution; the Phase-2 speculation overlay takes a
+          // derivation run's effects to enact the reversible kinds and DROP
+          // egress (the client never performs external effects under the
+          // flag). Everything else (the OFF arm's store commit, non-diverted
+          // ON-arm runs, bare test accumulators) keeps today's inline flush.
+          const deferred = this.#sealDestination !== undefined &&
+            this.#cfcState.outbox.length > 0 &&
+            this.#sealDestination.deferSealedEffects?.(
+                this,
+                [...this.#cfcState.outbox],
+              ) === true;
+          if (deferred) {
+            this.clearPostCommitOutbox();
+            return;
+          }
           for (const effect of this.#cfcState.outbox) {
             try {
               await effect.flush(this);
@@ -2380,8 +2541,33 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.options.childCellTx ?? this.wrapped;
   }
 
+  /**
+   * The wrapped transaction, for side-table lookups keyed on tx object
+   * identity (review thread r3739139477): the wave run context is a
+   * WeakMap keyed on the ORIGINAL transaction, so a scoped read through
+   * a `sample()`/`sink()` wrapper missed the served run's
+   * demand-supplied identity and resolved against the service session.
+   * `waveRunContextOf` walks this chain.
+   */
+  get wrappedTransaction(): IExtendedStorageTransaction {
+    return this.wrapped;
+  }
+
   get tx(): IStorageTransaction {
     return this.wrapped.tx;
+  }
+
+  // Effect-completion writebacks can be marked through a wrapper
+  // (markEffectCompletion calls these on whatever tx shape it is
+  // handed). Forward both, or a wrapped completion silently skips
+  // authoritative mode and the F2 no-op-elision wedge reopens for
+  // exactly those paths (stage-G round-2 thread 18).
+  markAuthoritativeWrites(): void {
+    this.wrapped.markAuthoritativeWrites?.();
+  }
+
+  isAuthoritativeWrites(): boolean {
+    return this.wrapped.isAuthoritativeWrites?.() === true;
   }
 
   getCfcState(): Readonly<CfcTxState> {
@@ -2426,6 +2612,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
+  }
+
+  probeFlowLabelWork(): boolean {
+    return this.wrapped.probeFlowLabelWork?.() ??
+      flowLabelWorkExists(this.wrapped);
   }
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
@@ -2601,14 +2792,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReactivityLog(): TransactionReactivityLog {
     return this.wrapped.getReactivityLog?.() ??
       reactivityLogFromActivities(this.wrapped.journal.activity());
-  }
-
-  setSchedulerObservation(observation: FabricValue): void {
-    this.wrapped.setSchedulerObservation?.(observation);
-  }
-
-  getSchedulerObservation(): FabricValue {
-    return this.wrapped.getSchedulerObservation?.();
   }
 
   addCommitPrecondition(

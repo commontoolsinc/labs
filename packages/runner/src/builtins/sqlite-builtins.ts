@@ -20,8 +20,29 @@
 // this read path.
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { parseLink } from "../link-utils.ts";
+import {
+  computeRowLabelRead,
+  resolveCeilingPlaceholders,
+} from "./sqlite/row-label-read.ts";
+import type { Action } from "../scheduler.ts";
+import type { RawBuiltinResult } from "../module.ts";
+import type { Runtime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { CellScope } from "../builder/types.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
+import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
+import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
@@ -30,26 +51,9 @@ import {
 } from "@commonfabric/memory/v2";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-import type { CellScope } from "../builder/types.ts";
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
-import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { stripEntityUriScheme } from "../entity-kind.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import { parseLink } from "../link-utils.ts";
-import { type RawBuiltinResult } from "../module.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { type Runtime } from "../runtime.ts";
-import { type Action } from "../scheduler.ts";
-import { isCellScope, narrowestScope } from "../scope.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { computeInputHashFromValue } from "./fetch-utils.ts";
-import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
-import {
-  computeRowLabelRead,
-  resolveCeilingPlaceholders,
-} from "./sqlite/row-label-read.ts";
-
 // The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
 // own `SqliteDbRef`; only `rev` is added here.
 type SqliteDbRef = WireSqliteDbRef & {
@@ -606,6 +610,49 @@ type QueryState = {
   withheld?: number;
 };
 
+/**
+ * The memo decision for one sqliteQuery evaluation against the COMMITTED
+ * result state (server-execution v2 stage G, serving-loop.md §4 — the
+ * one effectful builtin whose memo KEY commits AHEAD of its result: the
+ * claim marker `{pending: true, requestHash}` rides the requesting
+ * run's own commit, so a dropped effect leaves a durable claim with no
+ * result behind it).
+ *
+ * - `"hit"`: the stored key matches AND a result/error landed — the
+ *   stored result IS the value (§4's hit rule; a bare claim is NOT a
+ *   hit).
+ * - `"dedupe"`: a pending claim for this key stands and either this
+ *   node instance has the RPC in flight, or the run is NOT a served
+ *   (stamped) run — the OFF arm keeps today's committed-state dedupe
+ *   byte for byte (its inline flush leaves no routine dropped-effect
+ *   path; the reload-orphaned-claim residue there is a pre-existing
+ *   main behavior, out of stage-G scope).
+ * - `"issue"`: no stored key for this hash — or, under the SERVING
+ *   posture, an ORPHANED claim: a pending marker with no in-flight
+ *   work in this process means the effect was dropped after its wave
+ *   committed (park, crash, discarded batch) and nothing else will
+ *   ever re-issue it — §6 step 3's re-miss premise, restored for the
+ *   one builtin whose key alone cannot carry it. Re-issuing a READ is
+ *   side-effect-free.
+ *
+ * Exported for unit testing only — not part of the builtin surface.
+ */
+export function sqliteQueryMemoDecision(options: {
+  stored: { pending?: boolean; requestHash?: string } | undefined;
+  hash: string;
+  /** This node instance holds the RPC in flight right now. */
+  inFlightHere: boolean;
+  /** The evaluation runs as a stamped serving run (a wave run context
+   * is present — the serving loop's signature; ON-arm client
+   * speculation and the OFF arm are unstamped). */
+  servedRun: boolean;
+}): "hit" | "dedupe" | "issue" {
+  if (options.stored?.requestHash !== options.hash) return "issue";
+  if (options.stored.pending !== true) return "hit";
+  if (options.inFlightHere) return "dedupe";
+  return options.servedRun ? "issue" : "dedupe";
+}
+
 /** sqliteQuery: reactive server-side read. */
 export function sqliteQuery(
   inputsCell: Cell<any>,
@@ -619,6 +666,9 @@ export function sqliteQuery(
   let initialized = false;
   let result: Cell<QueryState>;
   let resultScope: CellScope | undefined;
+  /** Hashes whose RPC this node instance currently has in flight — the
+   * in-process half of the memo decision above. */
+  const inFlightIssues = new Set<string>();
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
@@ -705,199 +755,227 @@ export function sqliteQuery(
         ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
         : null,
     });
-    // Dedup against COMMITTED state: if the result cell already records this
-    // request hash, the call was issued (and survives an abort+retry, unlike an
-    // in-memory flag — see fetch.ts). Re-issue otherwise.
-    if (result.withTx(tx).get()?.requestHash === hash) return;
+    // Dedup against COMMITTED state (and, stage G, against this node's
+    // own in-flight RPC): the claim marker commits with the REQUESTING
+    // run, so it survives an abort+retry — but under the serving
+    // posture a dropped effect leaves it orphaned, and only re-issuing
+    // heals that (sqliteQueryMemoDecision above; serving-loop.md §4,
+    // §6 step 3).
+    const decision = sqliteQueryMemoDecision({
+      stored: result.withTx(tx).get(),
+      hash,
+      inFlightHere: inFlightIssues.has(hash),
+      servedRun: waveRunContextOf(tx) !== undefined,
+    });
+    if (decision === "hit") {
+      // The §4 memo hit (server-execution v2): the committed result records
+      // this request hash AND carries a settled result — the stored result
+      // is the value, no re-issue. A bare pending claim is never a hit.
+      runtime.effectMemoObserver?.({ kind: "hit", id: `sqliteQuery:${hash}` });
+      return;
+    }
+    if (decision === "dedupe") return;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
+    // Per-target dedupe key (stage-G round-2 headline): the bare
+    // `sqliteQuery:<hash>` collides across DISTINCT nodes issuing the
+    // same query, and the dropped second closure would leave that
+    // node's result cell pending forever.
+    const effectKey = effectTargetKey(`sqliteQuery:${hash}`, result);
     tx.enqueuePostCommitEffect({
       id: `sqliteQuery:${hash}`,
-      idempotencyKey: `sqliteQuery:${hash}`,
+      idempotencyKey: effectKey,
       kind: "sqlite-query",
       async flush() {
-        // Write an error result for THIS request, guarded against a newer query
-        // (different inputs -> different hash) that superseded it mid-flight.
-        const failQuery = (error: string) =>
-          runtime.editWithRetry((wtx) => {
-            if (result.withTx(wtx).get()?.requestHash !== hash) return;
-            result.withTx(wtx).set({
-              pending: false,
-              error,
-              requestHash: hash,
-            });
-          });
-        const provider = runtime.storageManager.open(space);
+        inFlightIssues.add(hash);
         try {
-          if (!provider.sqliteQuery) {
-            throw new Error(
-              "sqlite: storage provider does not support queries " +
-                "(sqliteQuery unavailable)",
-            );
-          }
-          const res = await provider.sqliteQuery(db, sql, params);
-          // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
-          // OBJECTS so a typed consumer's asCell schema rehydrates them to live
-          // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
-          const rows = decodeRowLinkColumns(res.rows, linkCols);
-          // CFC read-labeling (per-column static `ifc`): when the db declares
-          // `ifc`, the server returns each result column's TRUE origin; map it to
-          // the column's confidentiality and write the rows under a schema that
-          // carries it, so a consumer reading `q.result[i].<col>` inherits the
-          // label (re-establishing propagation across the opaque SQLite boundary).
-          // Fail closed (refuse) on an unattributable column. The labeled write
-          // is CFC-relevant; `editWithRetry` runs `prepareTxForCommit` before the
-          // commit, so the label persists.
-          let labelSchema: Record<string, unknown> | undefined;
-          if (res.columns) {
-            const { schema, error } = labelResultSchema(
-              res.columns,
-              db.tables as Parameters<typeof labelResultSchema>[1],
-            );
-            if (error) {
-              await failQuery(error);
-              return;
-            }
-            labelSchema = schema;
-          }
-          // CFC Phase 3: per-row data-derived labels + the declared output
-          // ceiling. The pure half (row-label-read.ts) re-validates the wire
-          // spec, locates rule inputs by TRUE origin, evaluates the rule per
-          // row, and decides fail/skip under the ceiling — every unresolvable
-          // case refuses the query (fail closed), never under-labels.
-          const rowSchemaCeiling = (inputs.rowSchema as {
-            ifc?: { maxConfidentiality?: CfcConfClause[] };
-          } | undefined)?.ifc?.maxConfidentiality;
-          if (
-            inputs.maxConfidentiality !== undefined &&
-            rowSchemaCeiling !== undefined
-          ) {
-            await failQuery(
-              "sqlite: declare the output ceiling once — either the Row " +
-                "schema's MaxConfidentiality or the query's maxConfidentiality " +
-                "option, not both",
-            );
-            return;
-          }
-          let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
-          if (ceiling !== undefined) {
-            const resolved = resolveCeilingPlaceholders(ceiling, {
-              actingPrincipal: runtime.trustSnapshotProvider()
-                ?.actingPrincipal,
-              owner: db.owner,
+          // Write an error result for THIS request, guarded against a newer query
+          // (different inputs -> different hash) that superseded it mid-flight.
+          const failQuery = (error: string) =>
+            runtime.editWithRetry((wtx) => {
+              markEffectCompletion(wtx, effectKey);
+              if (result.withTx(wtx).get()?.requestHash !== hash) return;
+              result.withTx(wtx).set({
+                pending: false,
+                error,
+                requestHash: hash,
+              });
             });
-            if ("error" in resolved) {
-              await failQuery(resolved.error);
-              return;
+          const provider = runtime.storageManager.open(space);
+          try {
+            if (!provider.sqliteQuery) {
+              throw new Error(
+                "sqlite: storage provider does not support queries " +
+                  "(sqliteQuery unavailable)",
+              );
             }
-            ceiling = resolved.atoms;
-          }
-          const rowLabels = computeRowLabelRead({
-            tables: db.tables,
-            columns: res.columns,
-            rows,
-            owner: db.owner,
-            staticConfidentiality: staticConfidentialityOf(labelSchema),
-            ceiling,
-            onExceed: inputs.onExceed,
-            // Phase 3.b read-time clearance: the reader is the acting principal
-            // (same identity the ceiling placeholders resolve against).
-            readClearance: inputs.readClearance
-              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
-              : undefined,
-          });
-          if ("error" in rowLabels) {
-            await failQuery(rowLabels.error);
-            return;
-          }
-          const withheld = rowLabels.withheld;
-          // onExceed:"skip" — drop rows the declared ceiling does not admit
-          // (a declared, observable existence release; 06-cfc.md ceiling).
-          const keep = rowLabels.keep;
-          const keptRows = keep ? rows.filter((_, i) => keep[i]) : rows;
-          const perRow = keep
-            ? rowLabels.labels.filter((_, i) => keep[i])
-            : rowLabels.labels;
-          const anyPerRow = perRow.some((l) => l !== undefined);
-          // On the labeled path, write the rows UNDER the label schema: the
-          // schema-aware write is what attaches the per-path `ifc` to each row's
-          // entity doc (recording the policy alone does not). The provider rows
-          // are deep-frozen and reach this write through a proxy; the
-          // schema-aware diff would trip "ownKeys … non-extensible", so write a
-          // plain extensible JSON copy. `editWithRetry` runs
-          // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
-          // the label persists.
-          const resultRows = ((labelSchema || anyPerRow)
-            ? cloneIfNecessary(
-              keptRows as Parameters<typeof cloneIfNecessary>[0],
-              { frozen: false },
-            )
-            : keptRows) as unknown[];
-          const wrote = await runtime.editWithRetry((wtx) => {
-            // Stale-writeback guard: a newer query (different inputs -> different
-            // hash) may have superseded this one while the RPC was in flight.
-            // Only write back if the result cell still records THIS request.
-            if (result.withTx(wtx).get()?.requestHash !== hash) return;
-            const target = labelSchema
-              ? result.asSchema(labelSchema).withTx(wtx)
-              : result.withTx(wtx);
-            target.set({
-              pending: false,
-              result: resultRows,
-              requestHash: hash,
-              ...(withheld !== undefined ? { withheld } : {}),
-            });
-            // Per-row label attachment (CFC Phase 3): each row split into its
-            // own entity doc above; write each labeled row doc DIRECTLY (its
-            // own id, root path) under a root-`ifc` schema. Keyed by the row
-            // doc's id, so there is no collision with the array write's items
-            // schema, and the per-row root label coexists with the per-column
-            // field labels on the same doc (06-cfc.md "Read — re-derive per
-            // row, attach, ceiling").
-            if (anyPerRow) {
-              const base = result.getAsNormalizedFullLink();
-              for (let i = 0; i < resultRows.length; i++) {
-                const ifc = perRow[i];
-                if (!ifc) continue;
-                const raw = result.key("result").key(i).withTx(wtx).getRaw();
-                const link = parseLink(raw);
-                if (!link?.id) {
-                  // Fail closed: a labeled row MUST carry its label; aborting
-                  // the tx surfaces as wrote.error -> q.error below.
-                  throw new Error(
-                    `sqlite: result row ${i} did not split into its own ` +
-                      "entity doc — cannot attach its per-row label",
-                  );
-                }
-                createCell(
-                  runtime,
-                  {
-                    ...link,
-                    space: link.space ?? base.space,
-                    scope: link.scope ?? base.scope,
-                    path: [],
-                  },
-                  wtx,
-                ).asSchema(
-                  {
-                    type: "object",
-                    additionalProperties: true,
-                    ifc,
-                  } as Parameters<Cell<unknown>["asSchema"]>[0],
-                ).withTx(wtx).set(resultRows[i]);
+            const res = await provider.sqliteQuery(db, sql, params);
+            // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
+            // OBJECTS so a typed consumer's asCell schema rehydrates them to live
+            // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
+            const rows = decodeRowLinkColumns(res.rows, linkCols);
+            // CFC read-labeling (per-column static `ifc`): when the db declares
+            // `ifc`, the server returns each result column's TRUE origin; map it to
+            // the column's confidentiality and write the rows under a schema that
+            // carries it, so a consumer reading `q.result[i].<col>` inherits the
+            // label (re-establishing propagation across the opaque SQLite boundary).
+            // Fail closed (refuse) on an unattributable column. The labeled write
+            // is CFC-relevant; `editWithRetry` runs `prepareTxForCommit` before the
+            // commit, so the label persists.
+            let labelSchema: Record<string, unknown> | undefined;
+            if (res.columns) {
+              const { schema, error } = labelResultSchema(
+                res.columns,
+                db.tables as Parameters<typeof labelResultSchema>[1],
+              );
+              if (error) {
+                await failQuery(error);
+                return;
               }
+              labelSchema = schema;
             }
-          });
-          // Surface a write-back failure as `q.error` rather than leaving the
-          // query stuck `pending` (editWithRetry returns the error, not throws).
-          if (wrote.error) {
-            await failQuery(
-              wrote.error.message ?? "sqlite: result write failed",
-            );
+            // CFC Phase 3: per-row data-derived labels + the declared output
+            // ceiling. The pure half (row-label-read.ts) re-validates the wire
+            // spec, locates rule inputs by TRUE origin, evaluates the rule per
+            // row, and decides fail/skip under the ceiling — every unresolvable
+            // case refuses the query (fail closed), never under-labels.
+            const rowSchemaCeiling = (inputs.rowSchema as {
+              ifc?: { maxConfidentiality?: CfcConfClause[] };
+            } | undefined)?.ifc?.maxConfidentiality;
+            if (
+              inputs.maxConfidentiality !== undefined &&
+              rowSchemaCeiling !== undefined
+            ) {
+              await failQuery(
+                "sqlite: declare the output ceiling once — either the Row " +
+                  "schema's MaxConfidentiality or the query's maxConfidentiality " +
+                  "option, not both",
+              );
+              return;
+            }
+            let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
+            if (ceiling !== undefined) {
+              const resolved = resolveCeilingPlaceholders(ceiling, {
+                actingPrincipal: runtime.trustSnapshotProvider()
+                  ?.actingPrincipal,
+                owner: db.owner,
+              });
+              if ("error" in resolved) {
+                await failQuery(resolved.error);
+                return;
+              }
+              ceiling = resolved.atoms;
+            }
+            const rowLabels = computeRowLabelRead({
+              tables: db.tables,
+              columns: res.columns,
+              rows,
+              owner: db.owner,
+              staticConfidentiality: staticConfidentialityOf(labelSchema),
+              ceiling,
+              onExceed: inputs.onExceed,
+              // Phase 3.b read-time clearance: the reader is the acting principal
+              // (same identity the ceiling placeholders resolve against).
+              readClearance: inputs.readClearance
+                ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+                : undefined,
+            });
+            if ("error" in rowLabels) {
+              await failQuery(rowLabels.error);
+              return;
+            }
+            const withheld = rowLabels.withheld;
+            // onExceed:"skip" — drop rows the declared ceiling does not admit
+            // (a declared, observable existence release; 06-cfc.md ceiling).
+            const keep = rowLabels.keep;
+            const keptRows = keep ? rows.filter((_, i) => keep[i]) : rows;
+            const perRow = keep
+              ? rowLabels.labels.filter((_, i) => keep[i])
+              : rowLabels.labels;
+            const anyPerRow = perRow.some((l) => l !== undefined);
+            // On the labeled path, write the rows UNDER the label schema: the
+            // schema-aware write is what attaches the per-path `ifc` to each row's
+            // entity doc (recording the policy alone does not). The provider rows
+            // are deep-frozen and reach this write through a proxy; the
+            // schema-aware diff would trip "ownKeys … non-extensible", so write a
+            // plain extensible JSON copy. `editWithRetry` runs
+            // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
+            // the label persists.
+            const resultRows = ((labelSchema || anyPerRow)
+              ? cloneIfNecessary(
+                keptRows as Parameters<typeof cloneIfNecessary>[0],
+                { frozen: false },
+              )
+              : keptRows) as unknown[];
+            const wrote = await runtime.editWithRetry((wtx) => {
+              markEffectCompletion(wtx, effectKey);
+              // Stale-writeback guard: a newer query (different inputs -> different
+              // hash) may have superseded this one while the RPC was in flight.
+              // Only write back if the result cell still records THIS request.
+              if (result.withTx(wtx).get()?.requestHash !== hash) return;
+              const target = labelSchema
+                ? result.asSchema(labelSchema).withTx(wtx)
+                : result.withTx(wtx);
+              target.set({
+                pending: false,
+                result: resultRows,
+                requestHash: hash,
+                ...(withheld !== undefined ? { withheld } : {}),
+              });
+              // Per-row label attachment (CFC Phase 3): each row split into its
+              // own entity doc above; write each labeled row doc DIRECTLY (its
+              // own id, root path) under a root-`ifc` schema. Keyed by the row
+              // doc's id, so there is no collision with the array write's items
+              // schema, and the per-row root label coexists with the per-column
+              // field labels on the same doc (06-cfc.md "Read — re-derive per
+              // row, attach, ceiling").
+              if (anyPerRow) {
+                const base = result.getAsNormalizedFullLink();
+                for (let i = 0; i < resultRows.length; i++) {
+                  const ifc = perRow[i];
+                  if (!ifc) continue;
+                  const raw = result.key("result").key(i).withTx(wtx).getRaw();
+                  const link = parseLink(raw);
+                  if (!link?.id) {
+                    // Fail closed: a labeled row MUST carry its label; aborting
+                    // the tx surfaces as wrote.error -> q.error below.
+                    throw new Error(
+                      `sqlite: result row ${i} did not split into its own ` +
+                        "entity doc — cannot attach its per-row label",
+                    );
+                  }
+                  createCell(
+                    runtime,
+                    {
+                      ...link,
+                      space: link.space ?? base.space,
+                      scope: link.scope ?? base.scope,
+                      path: [],
+                    },
+                    wtx,
+                  ).asSchema(
+                    {
+                      type: "object",
+                      additionalProperties: true,
+                      ifc,
+                    } as Parameters<Cell<unknown>["asSchema"]>[0],
+                  ).withTx(wtx).set(resultRows[i]);
+                }
+              }
+            });
+            // Surface a write-back failure as `q.error` rather than leaving the
+            // query stuck `pending` (editWithRetry returns the error, not throws).
+            if (wrote.error) {
+              await failQuery(
+                wrote.error.message ?? "sqlite: result write failed",
+              );
+            }
+          } catch (error) {
+            await failQuery(errMsg(error));
           }
-        } catch (error) {
-          await failQuery(errMsg(error));
+        } finally {
+          inFlightIssues.delete(hash);
         }
       },
     });

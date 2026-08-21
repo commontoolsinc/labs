@@ -479,6 +479,14 @@ Deno.test("prepareWorkspace writes the fingerprint; revertWorkspace restores the
       await Deno.readTextFile(cliCompiledPath),
       await Deno.readTextFile(compiledPath),
     );
+    // The marker records the server-execution posture the shell bakes
+    // from this environment (unset here → null: the shell follows the
+    // first-party default); toolshed surfaces it on /api/meta.
+    const marker = JSON.parse(await Deno.readTextFile(compiledPath));
+    assertEquals(
+      marker.shellServerExecutionDefine,
+      Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") ?? null,
+    );
 
     await revertWorkspace(config);
 

@@ -16,6 +16,7 @@ import {
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resumeSettleRunKind } from "../src/builtins/resume-republish.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
@@ -605,4 +606,18 @@ describe("cross-space link load kick", () => {
       await rt1.dispose();
     }
   });
+});
+
+Deno.test("resume-settle run kind: bookkeeping ONLY on the serving posture; derivation on clients (r3756175819 — the shared decision all three list builtins stamp)", () => {
+  // The settle writes DERIVED content (result := f(input)): stamped
+  // bookkeeping on a flag-ON client it committed authored-class — a
+  // by-construction violation of the client derivation-commit removal.
+  // The serving posture keeps the sanctioned internal bookkeeping kind
+  // (serving-loop.md §3d) so the wave admits the recovery write.
+  expect(
+    resumeSettleRunKind({ servingPosture: true } as unknown as Runtime),
+  ).toBe("bookkeeping");
+  expect(
+    resumeSettleRunKind({ servingPosture: false } as unknown as Runtime),
+  ).toBe("derivation");
 });

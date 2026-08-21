@@ -30,7 +30,10 @@ import { seedResultContainerWhenPullSettles } from "./list-result-container-seed
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import { createResumeRepublisher } from "./resume-republish.ts";
+import {
+  createResumeRepublisher,
+  resumeSettleRunKind,
+} from "./resume-republish.ts";
 import {
   narrowestCellScope,
   outputSpotFromBinding,
@@ -92,6 +95,13 @@ export function filter(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+  // The containing piece's root: every element sub-piece this coordinator
+  // starts is that piece's structure, so its actions' demand roots carry
+  // the parent's chain (server-execution v2 Phase 7's demand-root chain;
+  // RunnerRunOptions.parentPieceRootId) — a serving runtime resolves the
+  // element's demanded instances through the OUTER root a client watches
+  // instead of falling to the service identity (P7 review finding 4).
+  const parentPieceRootId = parentCell.getAsNormalizedFullLink().id;
 
   // Whether the writes that make `result` reachable are owed. The coordinator
   // keeps the container across reconciles, so one that stages those writes and
@@ -175,6 +185,14 @@ export function filter(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
+            // Out-of-band recovery write; the kind decision (bookkeeping
+            // on the serving posture, derivation on clients — the settle
+            // writes DERIVED content) is shared across map/filter/flatMap
+            // in resumeSettleRunKind (r3756175819).
+            runtime.stampServerRun(settleTx, {
+              actionId: `filter/resume-settle/${parentCell.sourceURI}`,
+              kind: resumeSettleRunKind(runtime),
+            });
             const { list } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
               .withTx(settleTx).get();
             if (
@@ -340,7 +358,10 @@ export function filter(
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the read above is journaled). A container
       // that was never persisted has nothing to stream in, so the seed below
-      // ends the wait once the pull settles.
+      // ends the wait once the pull settles. The id names the seed's
+      // out-of-band recovery write; the helper stamps it with the sanctioned
+      // bookkeeping kind (serving-loop.md §3d) so a SERVING runtime's wave
+      // accepts the seal. Same shape in map.ts/flatmap.ts.
       const container = result;
       seedResultContainerWhenPullSettles(
         runtime,
@@ -348,6 +369,7 @@ export function filter(
         () => active && result === container,
         container.sync(),
         logger,
+        `filter/resume-seed/${parentCell.sourceURI}`,
       );
       return;
     }
@@ -441,6 +463,7 @@ export function filter(
               {
                 doNotUpdateOnPatternChange: true,
                 awaitSyncBeforeInitialRun: elementAwaitSync,
+                parentPieceRootId,
               },
             );
             // The whole setup, every time, because issuing it takes the debt
@@ -475,6 +498,7 @@ export function filter(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            parentPieceRootId,
           },
         );
         linkElementCell(boundResultCell);
@@ -522,13 +546,10 @@ export function filter(
     probeScoped(() => resultWithLog.set(newArrayValue));
   };
 
-  // Child-starting coordinator: never rehydrates clean on resume — the
-  // reconcile must run to re-attach the per-element children (which then
-  // rehydrate their own persisted state). See
-  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  // Child-starting coordinator: its reconcile must run on resume to
+  // re-attach the per-element children.
   return {
     action: reconcile,
-    resumeMode: "always-run",
     onActionRegistered: (action) => {
       registeredAction = action;
     },

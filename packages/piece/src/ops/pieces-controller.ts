@@ -286,6 +286,7 @@ export class PiecesController<T = unknown> {
       deferSpaceCellSync,
       moduleByteCache,
       patternCoverage,
+      navigateCallback,
       cfcEnforcementMode,
       cfcFlowLabels,
     }: {
@@ -309,6 +310,14 @@ export class PiecesController<T = unknown> {
       // coverage against the same space warm-loads them instead of recompiling
       // every pattern for itself.
       patternCoverage?: PatternCoverageCollector;
+      // Optional navigation enactment surface (the remoteClient preset's
+      // existing delta): test code passes one to observe navigateTo
+      // enactments — under EXPERIMENTAL_SERVER_EXECUTION the
+      // client-effect channel enacts served intents through it
+      // (server-execution v2 Phase 4, protocol.md §5).
+      navigateCallback?: Parameters<
+        typeof runtimePresets.remoteClient
+      >[0]["navigateCallback"];
       // Host-controlled CFC rollout dials, passed through to the remoteClient
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
@@ -342,8 +351,10 @@ export class PiecesController<T = unknown> {
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
-      navigateCallback: (target) =>
-        registerNavigatedPiece(piecesRef.current!, target),
+      // A caller-supplied surface (the client-effect channel's test hook,
+      // server-execution v2 Phase 4) overrides the registry default.
+      navigateCallback: navigateCallback ??
+        ((target) => registerNavigatedPiece(piecesRef.current!, target)),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),

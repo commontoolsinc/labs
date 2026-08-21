@@ -239,6 +239,38 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
 }
 
 /**
+ * Worker/host server-execution posture agreement (review 2026-08-11
+ * m7). The host declares its flag posture in
+ * `InitializationData.experimental.serverExecution` (typed since this
+ * fix — it previously rode as an untyped excess property, and
+ * `data.experimental ?? {}` silently reverted an undeclared worker to
+ * OFF while a flag-ON host diverted handler commits: F10 alive in one
+ * realm and dead in the other). The worker asserts the CONSTRUCTED
+ * runtime's resolved posture matches the declaration and refuses
+ * initialization loudly on divergence — in either direction (a worker
+ * whose realm-ambient default flipped ON under a host that declared
+ * nothing is the same divergence mirrored). OFF-arm-neutral: a host
+ * that declares nothing and a worker that resolves OFF agree, which is
+ * every pre-existing deployment. Exported for testing.
+ */
+export function assertServerExecutionPostureAgreement(
+  declared: InitializationData["experimental"],
+  runtime: { experimental: { serverExecution?: boolean | undefined } },
+): void {
+  const hostOn = declared?.serverExecution === true;
+  const workerOn = runtime.experimental.serverExecution === true;
+  if (hostOn !== workerOn) {
+    throw new Error(
+      "worker/host server-execution posture mismatch: the host declared " +
+        `${hostOn ? "ON" : "OFF (or absent)"} but the worker runtime ` +
+        `resolved ${workerOn ? "ON" : "OFF"} — a divergent posture runs ` +
+        "the F10 client contract in one realm and not the other " +
+        "(review 2026-08-11 m7; docs/specs/server-side-execution/)",
+    );
+  }
+}
+
+/**
  * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params (CT-1814): the shared first-party posture (CFC pins,
  * patternEnvironment from apiUrl) lives in the preset; this function only
@@ -676,6 +708,10 @@ export class RuntimeProcessor {
 
       errorHandlers: [postContextualRuntimeError],
     }));
+
+    // Fail LOUD on a worker/host flag divergence (review 2026-08-11
+    // m7) — see assertServerExecutionPostureAgreement.
+    assertServerExecutionPostureAgreement(data.experimental, runtime);
 
     if (!await runtime.healthCheck()) {
       throw new Error(`Could not connect to "${data.apiUrl}"`);

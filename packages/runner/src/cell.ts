@@ -27,7 +27,13 @@ import {
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
-import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
+import {
+  type SqliteDbRef,
+  type SqliteParamsWire,
+  streamEntriesDocId,
+  type StreamLinkRef,
+} from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -40,6 +46,8 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toCell } from "./back-to-cell.ts";
+import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
@@ -94,7 +102,10 @@ import {
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
-import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
+import {
+  isRendererTrustedEvent,
+  propagateRendererTrustedEvent,
+} from "./cfc/ui-contract.ts";
 import { createRef } from "./create-ref.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -125,7 +136,7 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
-import { scopeCallerEventId } from "./scheduler/event-identity.ts";
+import { mintEventId, scopeCallerEventId } from "./scheduler/event-identity.ts";
 import {
   type CellViewRef,
   processDefaultValue,
@@ -157,6 +168,7 @@ import {
   mergeableOpRead,
 } from "./storage/reactivity-log.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
+
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -335,12 +347,65 @@ const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
  * is ignored and the closed-world gate judges the key like any other
  * undeclared field.
  */
+/** An error-status VIEW of a transaction (the durable-ack coupling;
+ * verdict blocker, 2026-08-12): everything passes through except
+ * `status()`, which reports the append/consequence failure — so a
+ * caller that reads the settle callback's tx as the durable
+ * acknowledgment (the CLI verb dispatch's verb-contract Settlement
+ * read) sees the authoritative failure instead of the speculative
+ * echo's local state. */
+const errorStatusTxView = (
+  tx: IExtendedStorageTransaction,
+  message: string,
+): IExtendedStorageTransaction => {
+  const status = () => {
+    const real = tx.status();
+    return {
+      ...real,
+      status: "error" as const,
+      error: Object.assign(new Error(message), {
+        name: "EventDeliveryError",
+      }),
+    };
+  };
+  return new Proxy(tx, {
+    get(target, prop, receiver) {
+      if (prop === "status") return status;
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as IExtendedStorageTransaction;
+};
+
 export function markRuntimeInjectedEventKeys(
   keys: readonly string[],
 ): readonly string[] {
   const minted = Object.freeze([...keys]);
   mintedRuntimeInjectedKeys.add(minted);
   return minted;
+}
+
+/**
+ * Validate PERSISTED runtime-injected-key carriage before re-minting
+ * (verdict blocker, 2026-08-12): engine admission refuses malformed
+ * carriage at the door, but rows persisted before that guard (or by a
+ * corrupted store) can still surface here — and a non-array value
+ * would throw inside `markRuntimeInjectedEventKeys`'s spread on EVERY
+ * drain pass, churning the serving loop forever on one poisoned
+ * entry. Malformed carriage degrades to ABSENT: the closed-world gate
+ * then judges the payload keys strictly, exactly as it already treats
+ * an unminted (spoofed) array.
+ */
+export function sanitizeRuntimeInjectedEventKeys(
+  value: unknown,
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    Array.isArray(value) && value.every((key) => typeof key === "string")
+  ) {
+    return value as readonly string[];
+  }
+  return undefined;
 }
 
 const mintedRuntimeInjectedEventKeys = (
@@ -1472,6 +1537,9 @@ export class CellImpl<T extends FabricValue>
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
+      const mintedKeys = mintedRuntimeInjectedEventKeys(
+        sendOptions?.runtimeInjectedEventKeys,
+      );
       // The caller's key is opaque and unscoped; queueEvent expects a durable
       // delivery id. Binding it to the session that chose it and to this
       // stream is what keeps one caller's id from addressing another caller's
@@ -1499,7 +1567,364 @@ export class CellImpl<T extends FabricValue>
         );
       }
 
-      // Trigger on fully resolved link
+      // Server-execution v2 Phase 3 (events-down; events.md §1, §7): on a
+      // flag-ON CLIENT, a fire from OUTSIDE the scheduler — the tx is
+      // absent or unstamped: a DOM/renderer fire, an imperative send —
+      // commits THE EVENT as its one authored act: an append to the
+      // stream's sidecar doc, queued for fired-order delivery (offline
+      // queue, events.md §5/LT9). The local run below is the speculative
+      // ECHO. A send from WITHIN a scheduler-stamped run (a handler
+      // cascade, echo-side) commits nothing — the scheduler tell
+      // (protocol.md §1): only scheduler-driven work moved to the server,
+      // and the server's authoritative run produces the durable cascade.
+      let firedEventId: string | undefined;
+      if (
+        this.runtime.experimental.serverExecution === true &&
+        this.runtime.servingPosture !== true &&
+        (this.tx === undefined ||
+          speculationRunContextOf(this.tx) === undefined)
+      ) {
+        firedEventId = deliveryEventId ??
+          mintEventId(resolvedToValueLink, this.tx ?? undefined);
+        const stream: StreamLinkRef = {
+          id: resolvedToValueLink.id,
+          path: [...resolvedToValueLink.path],
+          ...(resolvedToValueLink.scope !== undefined
+            ? { scope: resolvedToValueLink.scope }
+            : {}),
+        };
+        const sidecarId = streamEntriesDocId(stream);
+        const space = resolvedToValueLink.space;
+        const replica = this.runtime.storageManager.open(space).replica;
+        if (replica.enqueueEventAppend === undefined) {
+          // Fail CLOSED (the cross-space arm's posture): a flag-ON
+          // fire that cannot commit its event would silently lose the
+          // user's intent — refuse loudly instead (events.md §1, §7).
+          throw new Error(
+            "event fire refused: the storage provider does not support " +
+              "event appends, and a flag-ON fire commits ONLY the event " +
+              "(events.md §7)",
+          );
+        }
+        {
+          const overlay = this.runtime.speculationOverlay;
+          overlay?.trackIntent(space, sidecarId, firedEventId);
+          const eventId = firedEventId;
+          const outcome = replica.enqueueEventAppend({
+            sidecarId,
+            stream,
+            eventId,
+            payload: event as never,
+            ...(mintedKeys !== undefined
+              ? { runtimeInjectedEventKeys: [...mintedKeys] }
+              : {}),
+            // The renderer-trust attestation (fan-out stage B, OW34):
+            // the runtime — never the pattern — records that the sent
+            // event carried the process-local renderer-trust mark, so the
+            // SERVED handler run can re-mark the payload and record the
+            // trusted-event policy input its UI-contract-gated writes
+            // need. The sister of the injected-keys carriage above, same
+            // trust argument (see StreamEventEntry.rendererTrusted).
+            ...(isRendererTrustedEvent(event) ? { rendererTrusted: true } : {}),
+          }).then((delivery) => {
+            if (!delivery.delivered) {
+              // Deterministic admission refusal: the intent is dead —
+              // un-render the echo and signal (events.md §5).
+              overlay?.resolveIntent(space, sidecarId, eventId, {
+                kind: "refused",
+                reason: delivery.refused,
+              });
+            }
+            return delivery;
+          });
+          // The durability barrier (`synced()`) covers undischarged
+          // intents: an event queued offline is an unacked write.
+          this.runtime.storageManager.trackPendingCommit(
+            outcome as Promise<unknown>,
+          );
+          // The durable-ack coupling (verdict blocker, 2026-08-12): the
+          // caller's settle callback must NEVER settle from the
+          // speculative local run — under events-down the local
+          // handling is the diverted ECHO and its tx commits nothing
+          // durable, yet unchanged callers (the CLI verb dispatch, the
+          // webhook forwarder) read the callback's tx as the durable
+          // acknowledgment. The callback now settles from the APPEND
+          // outcome + the intent's authoritative CONSEQUENCE: refusal,
+          // a server-side handler error, or the dropped-event notice
+          // present an error-status view of the tx; only a delivered
+          // append whose handling consequenced (or a bare teardown,
+          // reported as such) passes the tx through untouched.
+          if (onCommit !== undefined) {
+            const callerOnCommit = onCommit;
+            onCommit = (echoTx: IExtendedStorageTransaction) => {
+              void outcome.then(async (delivery) => {
+                if (!delivery.delivered) {
+                  callerOnCommit(errorStatusTxView(
+                    echoTx,
+                    `event append refused: ${delivery.refused}`,
+                  ));
+                  return;
+                }
+                const consequence = overlay === undefined
+                  ? { kind: "consequenced" as const }
+                  : await overlay.waitForIntentConsequence(space, eventId);
+                if (
+                  consequence.kind === "errored" ||
+                  consequence.kind === "dropped" ||
+                  consequence.kind === "refused"
+                ) {
+                  callerOnCommit(errorStatusTxView(
+                    echoTx,
+                    `event handling ${consequence.kind}: ${
+                      consequence.reason ?? consequence.kind
+                    }`,
+                  ));
+                  return;
+                }
+                callerOnCommit(echoTx);
+              });
+            };
+          }
+        }
+      }
+
+      // Server-execution v2 Phase 3, the SERVING arm (events.md §2): a
+      // send from a wave-stamped run — a handler cascade, a demanded
+      // derivation's emission — is a SERVER-ORIGINATED event carrying
+      // the run's INHERITED actor. Same-space targets get their durable
+      // stream entry as a WRITE WITHIN the current transaction (LT1's
+      // wave carriage: the entry commits with — and rolls back with —
+      // the emitting run; the committed entry is durable input the next
+      // wave's drain processes, LT1's budget-exhausted fallback).
+      // Cross-space targets stage onto the wave's outbox (FP1's durable
+      // rows; delivery is post-commit, the loop never awaits another
+      // space). Neither queues locally — the drain is the one
+      // processing path (events.md §2's "one path, two producers").
+      if (
+        this.runtime.experimental.serverExecution === true &&
+        this.runtime.servingPosture === true &&
+        this.tx !== undefined
+      ) {
+        const context = waveRunContextOf(this.tx);
+        if (context !== undefined) {
+          const stream: StreamLinkRef = {
+            id: resolvedToValueLink.id,
+            path: [...resolvedToValueLink.path],
+            ...(resolvedToValueLink.scope !== undefined
+              ? { scope: resolvedToValueLink.scope }
+              : {}),
+          };
+          const sidecarId = streamEntriesDocId(stream);
+          const emittedId = mintEventId(resolvedToValueLink, this.tx);
+          // Fan-out stage B (design §F's point of use, RULED 2026-08-16):
+          // a demanded DERIVATION's actor derives from the scope it has
+          // discovered SO FAR (never broader than the node's known-scope
+          // ratchet for this principal), and the scope used is recorded
+          // on the run context so an emission the run later out-narrows
+          // is refused at the seal — the early-emit guard, fail-closed.
+          // Handler runs (explicit `firedAt` actor) are unchanged.
+          const acting = actingForEmission(context, this.tx);
+          if (resolvedToValueLink.space === this.space) {
+            // LT1 same-space carriage: the entry rides the current tx.
+            // The engine stamps its stream `seq` at the wave commit
+            // (the batch declares it); `firedAt` is the inherited
+            // actor, written here — producer and admitter are one
+            // trust environment (events.md §2). RAW tx write, not
+            // Cell.push: a frame-anchored push cellifies the pushed
+            // object into a linked child doc, and a LINK where the
+            // entry should be is exactly the shape admission refuses.
+            // The mergeable-append record keeps the commit
+            // tail-relative (concurrent appends merge, never clobber).
+            const entriesLink = {
+              space: resolvedToValueLink.space,
+              id: sidecarId,
+              scope: "space",
+              path: ["entries"],
+            } as unknown as NormalizedFullLink;
+            // The tail read is APPEND MECHANICS, not a semantic input
+            // (adjudicated coordinator 2026-08-11, VETOABLE — review
+            // M3): a sender does not re-send because someone else
+            // sent. Unmarked, this read put the target sidecar in the
+            // EMITTING run's dependency log and basis rows, so a
+            // demanded derivation emitter RE-RAN (and re-emitted,
+            // fresh eventId) on any neighbor's append to the same
+            // stream. Classified with the existing machinery-read
+            // boundary: `ignoreReadForScheduling` keeps it out of the
+            // reactivity log (no re-run subscription), and
+            // `mergeableOpRead` — the Cell.push precedent, paired
+            // with the recorded mergeable append below — keeps it out
+            // of the commit's conflict read set, and with it out of
+            // the sealed reads that feed wave basis rows (§3b).
+            const currentEntries = this.tx.readValueOrThrow(entriesLink, {
+              meta: { ...ignoreReadForScheduling, ...mergeableOpRead },
+            });
+            const emittedEntry = {
+              eventId: emittedId,
+              stream,
+              payload: event,
+              firedAt: {
+                ...(acting?.user !== undefined ? { user: acting.user } : {}),
+                session: acting?.session ?? "server",
+              },
+              // A served cascade forwarding a renderer-trusted event
+              // object keeps its attestation (in-process propagation's
+              // durable twin; fan-out stage B, OW34).
+              ...(isRendererTrustedEvent(event)
+                ? { rendererTrusted: true as const }
+                : {}),
+            };
+            this.tx.writeValueOrThrow(entriesLink, [
+              ...(Array.isArray(currentEntries) ? currentEntries : []),
+              emittedEntry,
+            ] as never);
+            this.tx.recordMergeableOp?.(entriesLink, {
+              op: "append",
+              count: 1,
+            });
+            // Same-wave processing (LT1, D-v2-2: "the loop is simply
+            // not idle until all events are processed"): queue the
+            // emitted event in-process too. Its handler runs in THIS
+            // wave; the batch build marks the entry consequenced IFF
+            // that run's contribution SURVIVED the wave (wave.ts) — a
+            // requeued run leaves the entry unmarked and the next
+            // wave's drain re-runs it (C8b), and an emitter that
+            // requeues withdraws the entry with its own contribution
+            // (C8d). No streamEntry on the stamp: the entry has no
+            // durable index yet — the batch owns the mark. The
+            // EMITTER's eventId rides as the cascade's parentEventId
+            // (review 2026-08-11 M2): the C8d fold keys on it, and
+            // without the thread a cascade child COMMITTED while its
+            // requeued parent re-emitted under a fresh id — the
+            // orphan-consequence double. The EMITTER's transaction rides
+            // as `lt1.emitterTx` (stage C build W3, (α); events.md §4's
+            // RULED sentence): its seal chooses the wave that carries
+            // the entry, and this copy completes in THAT wave or not at
+            // all — a copy the flush deadline leaves queued is purged at
+            // the deadline, a copy still running at the deadline is
+            // refused at the seal (it would commit unmarked in the next
+            // wave beside the drain's marked copy — the lunch gate's
+            // vote-toggle double); either way the durable entry is the
+            // truth and the drain delivers it ONCE, with a streamEntry.
+            this.runtime.scheduler.queueEvent(
+              resolvedToValueLink,
+              event,
+              false,
+              undefined,
+              false,
+              {
+                eventId: emittedId,
+                served: {
+                  firedAt: {
+                    ...(acting?.user !== undefined
+                      ? { user: acting.user }
+                      : {}),
+                    session: acting?.session ?? "server",
+                  },
+                  ...(context.eventId !== undefined
+                    ? { parentEventId: context.eventId }
+                    : {}),
+                  lt1: { emitterTx: this.tx },
+                },
+              },
+            );
+          } else {
+            // Cross-space: the outbox's durable row (FP1), carrying the
+            // acting identity — actor inheritance crosses spaces
+            // through exactly this carriage (events.md §2) — and the
+            // OW15 declaration when the chain has no actor. The
+            // capabilityRef is structural presence (grant RESOLUTION
+            // is the OW13 owed hardening; no per-doc grant store
+            // exists yet).
+            // DEPENDENCY MARKER (the scheduler-instance follow-up,
+            // OW17/P2-F): today every derivation run carries NO acting
+            // identity, so `acting === undefined` truthfully means "a
+            // chain with no actor anywhere" and the OW15 declaration
+            // below is sound. The day per-instance demanded runs
+            // supply acting identities (LT6: a user-instance run's
+            // emission carries the user), this derivation must keep
+            // reading the RUN's acting identity — deriving
+            // userlessness from a MISSING supply would misdeclare a
+            // user's emission sessionless-space-scope and destroy the
+            // actor at delivery.
+            const userless = acting?.user === undefined;
+            const row: OutboxAppendRow = {
+              targetSpace: resolvedToValueLink.space,
+              targetStream: sidecarId,
+              targetStreamLink: stream,
+              eventId: emittedId,
+              payload: event as never,
+              ...(userless ? {} : { actingPrincipal: acting!.user }),
+              ...(acting?.session !== undefined
+                ? { actingSession: acting.session }
+                : {}),
+              ...(userless && acting?.session === undefined
+                ? { sessionlessSpaceScope: true }
+                : {}),
+              capabilityRef: `stream-append:${sidecarId}`,
+              ...(context.streamEntry !== undefined &&
+                  context.eventId !== undefined
+                ? {
+                  sourceEvent: {
+                    sidecarId: context.streamEntry.sidecarId,
+                    eventId: context.eventId,
+                  },
+                }
+                : {}),
+            };
+            const destination = this.runtime.installedSealDestination as
+              | {
+                stageOutboundAppend?: (
+                  tx: IExtendedStorageTransaction,
+                  row: OutboxAppendRow,
+                ) => void;
+              }
+              | undefined;
+            if (destination?.stageOutboundAppend === undefined) {
+              throw new Error(
+                "cross-space event emission requires the serving loop's " +
+                  "outbox (events.md §2; serving-loop.md §5) — no seal " +
+                  "destination with outbound staging is installed",
+              );
+            }
+            destination.stageOutboundAppend(this.tx, row);
+          }
+          this.cleanup?.();
+          const [cancel, addCancel] = useCancelGroup();
+          this.cleanup = cancel;
+          this.listeners.forEach((callback) => addCancel(callback(event)));
+          return this as unknown as Cell<T>;
+        }
+      }
+
+      // The client-echo cascade thread (independent review M1,
+      // 2026-08-11): a send from WITHIN a speculation-stamped handler
+      // run is the echo of a same-wave cascade — the queued event's id
+      // is minted fresh for THIS attempt, diverging from the server's
+      // own mint, so the dispatch stamp must mark downstream navigate
+      // captures ATTEMPT-MINTED (navigate-context.ts). Thread the
+      // emitter's eventId the same way the serving arm's carriage does
+      // (cell.ts's LT1 branch above); root fires (unstamped sends)
+      // thread nothing and keep their durable-id capture.
+      const clientEmitterContext = this.tx !== undefined
+        ? speculationRunContextOf(this.tx)
+        : undefined;
+      const clientCascadeParent =
+        clientEmitterContext?.kind === "event-handler" &&
+          clientEmitterContext.eventId !== undefined
+          ? clientEmitterContext.eventId
+          : undefined;
+
+      // Trigger on fully resolved link. The origin transaction below is
+      // the LT6 carriage (events.md §2, stage P2-F): on a serving
+      // runtime, the dispatch choke point reads the emitting run's
+      // stamped identity off this tx and hands it to the handler run —
+      // an event emitted by ANY run carries that run's acting identity,
+      // so a demanded (user, session) derivation's emissions no longer
+      // classify userless. Everywhere else the tx carries no wave stamp
+      // and the carriage is inert. (Under Phase 3's serving arm the
+      // wave-stamped emission paths above intercept first and carry the
+      // same actor explicitly, as the entry's `firedAt`; this carriage
+      // covers the remaining in-process queueEvent shapes.)
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
         event,
@@ -1507,16 +1932,20 @@ export class CellImpl<T extends FabricValue>
         onCommit,
         false,
         {
-          eventId: deliveryEventId,
+          // Under events-down the COMMITTED append's id is the one the
+          // echo must carry (overlay origin `intent(eventId)`,
+          // speculation.md §1) — the same session-scoped id, one mint.
+          eventId: firedEventId ?? deliveryEventId,
+          ...(clientCascadeParent !== undefined
+            ? { parentEventId: clientCascadeParent }
+            : {}),
           originTx: this.tx ?? undefined,
           // Forward injection provenance only when it carries the mint (see
           // markRuntimeInjectedEventKeys): a plain array here — the shape any
           // in-process or sandboxed caller could pass — is dropped, and the
           // closed-world gate then judges the key like any other undeclared
           // field.
-          runtimeInjectedEventKeys: mintedRuntimeInjectedEventKeys(
-            sendOptions?.runtimeInjectedEventKeys,
-          ),
+          runtimeInjectedEventKeys: mintedKeys,
         },
       );
 
@@ -1579,11 +2008,14 @@ export class CellImpl<T extends FabricValue>
       // above an op's array poisons it.
       this.tx.poisonMergeableOp?.(writeLink);
 
-      // Register commit callback if provided.
-      if (onCommit) {
+      // Register commit callback if provided. (Bound to a local: the
+      // stream branch above reassigns `onCommit` for the durable-ack
+      // coupling, which widens the parameter's narrowing.)
+      const settleCallback = onCommit;
+      if (settleCallback) {
         this.tx.addCommitCallback((committedTx) => {
           try {
-            onCommit(committedTx);
+            settleCallback(committedTx);
           } catch (error) {
             console.error("Error in cell onCommit callback:", error);
           }
@@ -2370,7 +2802,19 @@ export class CellImpl<T extends FabricValue>
   sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);
-    return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
+    // The runner's explicit-instance read (server-execution v2 stage A —
+    // OW17's tx→replica seam): a cell read inside a SERVED per-instance
+    // run — its transaction carries the demand-supplied identity — loads
+    // THAT principal's instance of a scoped doc, keyed apart in the
+    // serving replica; a cell with no run identity (every client, the OFF
+    // arm) loads exactly as before. The manager decides whether the
+    // identity names anything (own identity and space scope name
+    // nothing).
+    const identity = this.tx?.tx?.scopeKeyIdentity;
+    return this.runtime.storageManager.syncCell<T>(
+      this as unknown as Cell<T>,
+      identity !== undefined ? { scopeKeyIdentity: identity } : undefined,
+    );
   }
 
   sinkMeta(

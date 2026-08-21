@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   BACKOFF_BASE_MS,
@@ -160,6 +161,8 @@ export type SchedulerSettleResult = {
 };
 
 export interface SchedulerSettleLoopState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly getCollectSettleStats: () => boolean;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
@@ -187,6 +190,12 @@ export interface SchedulerSettleLoopState {
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly isLiveAction: (action: Action) => boolean;
   readonly runAction: (action: Action) => Promise<unknown>;
+  /** The serving posture's cooperative macrotask yield between runs
+   * (server-execution v2 stage C tuning T3, cooperative-yield.ts):
+   * returns a promise to await when the current slice is spent, else
+   * undefined. Installed only on a serving runtime — absent (inert) on
+   * the OFF arm and on flag-ON clients. */
+  readonly yieldBetweenRuns?: () => Promise<void> | undefined;
 }
 
 export function recordSettleActionRun(

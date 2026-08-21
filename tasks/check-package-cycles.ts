@@ -80,7 +80,8 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
       "memory's v2 query planner drives runner's schema traversal through " +
       "@commonfabric/runner/graph-query, and reaches runner's schema-document " +
       "registry, while runner's storage and ACL layers are written against " +
-      "memory's interfaces.",
+      "memory's interfaces and runner's traversal takes the shared scope_key " +
+      "vocabulary (resolveScopeKey) from @commonfabric/memory/v2.",
   },
   {
     packages: ["html", "runtime-client"],

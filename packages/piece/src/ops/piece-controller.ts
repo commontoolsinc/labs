@@ -3148,36 +3148,152 @@ class PiecePropIo implements PieceCellIo {
             }
           }
         } else {
-          const validationRoot = replaceMaterializedValueAtPath(
-            // Result projections contain aliases for optional outputs whose
-            // targets may not exist yet. Untyped materialization turns those
-            // missing aliases into present `undefined` properties, which can
-            // make an unrelated path write fail (for example, optional array
-            // output -> present undefined). The durable schema-aware view
-            // keeps missing optional projections absent while preserving
-            // explicit undefined wherever the schema accepts it.
-            omitMissingProjectionAliases(
-              targetCell.asSchema(undefined).withTx(tx).get(),
-              targetCell.withTx(tx).getRawUntyped(),
-              targetCell.withTx(tx).get(),
-              targetCell.withTx(tx),
-              pieces,
-              true,
-              [writePath],
-            ),
-            writePath,
-            materializedValue,
-          );
-          const issue = validateSchemaValue(
-            schema,
-            validationRoot,
-            schema,
-            { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-          );
-          if (issue !== undefined) {
-            throw new Error(
-              `updated result does not match its schema: ${issue}`,
+          // Validate the WRITTEN SUBTREE against the schema contract at
+          // `writePath` (RULED 2026-08-07, narrowing the #4717 guard):
+          // the whole-result validation over-reached — it validated
+          // against the replica's instantaneous view with no
+          // convergence step, so under EXPERIMENTAL_SERVER_EXECUTION a
+          // fresh client's property write raced server-derived-late
+          // UNRELATED required properties ($NAME et al) and failed on
+          // state it did not touch; the OFF arm carried the same
+          // latent over-reach. What #4717 protects still binds: the
+          // written value's schema-compatibility (and the
+          // supplied-link compatibility above, unchanged). The sibling
+          // stream branch has always validated exactly this way, for
+          // the same reason — "unrelated result projections … cannot
+          // invalidate an otherwise valid event" — extended here to
+          // property writes.
+          let pathContracts:
+            | ReturnType<typeof linkPathContracts>
+            | undefined;
+          try {
+            pathContracts = linkPathContracts(
+              [{ schema, root: schema }],
+              writePath,
             );
+          } catch {
+            // The one shape path contracts cannot decompose: an anyOf
+            // whose branch selection CORRELATES the written field with
+            // its parent value. For exactly those paths the pre-ruling
+            // whole-result validation is the sound fallback — the
+            // union cannot be judged without the siblings — so the
+            // over-reach (and its server-derived-late hazard) returns
+            // only where the schema itself demands the correlation.
+            pathContracts = undefined;
+          }
+          if (pathContracts !== undefined) {
+            for (const contract of pathContracts) {
+              const issue = validateSchemaValue(
+                contract.schema,
+                materializedValue,
+                contract.root,
+                { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+              );
+              if (issue !== undefined) {
+                throw new Error(
+                  `updated value does not match its schema at ${
+                    JSON.stringify(writePath)
+                  }: ${issue}`,
+                );
+              }
+            }
+            // Ancestor container CARDINALITY (review thread
+            // r3739139515): the path-only contract validates the
+            // written leaf, so a nested write could still persist an
+            // array violating an ancestor's minItems/maxItems (a write
+            // to index N extends the array past maxItems unseen).
+            // Re-validate each array ancestor that carries cardinality
+            // keywords against its POST-WRITE value, with content
+            // keywords stripped: cardinality only — never the
+            // unrelated-sibling validation the 2026-08-07 ruling
+            // removed. Reading the touched container's own current
+            // value is the write's own placement basis, not the
+            // server-derived-late sibling race the ruling closed.
+            for (let depth = writePath.length - 1; depth >= 0; depth--) {
+              const ancestorPath = writePath.slice(0, depth);
+              let ancestorContracts:
+                | ReturnType<typeof linkPathContracts>
+                | undefined;
+              try {
+                ancestorContracts = linkPathContracts(
+                  [{ schema, root: schema }],
+                  ancestorPath,
+                );
+              } catch {
+                // Undecomposable (correlated anyOf): the whole-result
+                // fallback branch below owns those paths.
+                continue;
+              }
+              for (const contract of ancestorContracts) {
+                const ancestorSchema = contract.schema;
+                if (
+                  typeof ancestorSchema !== "object" ||
+                  ancestorSchema === null ||
+                  (!("maxItems" in ancestorSchema) &&
+                    !("minItems" in ancestorSchema))
+                ) {
+                  continue;
+                }
+                const cardinality: Record<string, unknown> = {
+                  type: "array",
+                };
+                if ("maxItems" in ancestorSchema) {
+                  cardinality.maxItems = ancestorSchema.maxItems;
+                }
+                if ("minItems" in ancestorSchema) {
+                  cardinality.minItems = ancestorSchema.minItems;
+                }
+                const postWrite = replaceMaterializedValueAtPath(
+                  getValueAtPath(
+                    targetCell.asSchema(undefined).withTx(tx).get(),
+                    ancestorPath,
+                  ),
+                  writePath.slice(depth),
+                  materializedValue,
+                );
+                const issue = validateSchemaValue(
+                  cardinality as JSONSchema,
+                  postWrite,
+                  cardinality as JSONSchema,
+                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+                );
+                if (issue !== undefined) {
+                  throw new Error(
+                    `updated value does not match its container at ${
+                      JSON.stringify(ancestorPath)
+                    }: ${issue}`,
+                  );
+                }
+              }
+            }
+          } else {
+            const validationRoot = replaceMaterializedValueAtPath(
+              // See omitMissingProjectionAliases: missing optional
+              // projections stay absent while explicit undefined is
+              // preserved wherever the schema accepts it.
+              omitMissingProjectionAliases(
+                targetCell.asSchema(undefined).withTx(tx).get(),
+                targetCell.withTx(tx).getRawUntyped(),
+                targetCell.withTx(tx).get(),
+                targetCell.withTx(tx),
+                pieces,
+                true,
+                [writePath],
+              ),
+              writePath,
+              materializedValue,
+            );
+            const issue = validateSchemaValue(
+              schema,
+              validationRoot,
+              schema,
+              { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+            );
+            if (issue !== undefined) {
+              throw new Error(
+                `updated result does not match its schema: ${issue}`,
+              );
+            }
           }
         }
         setTerminalValue(value);

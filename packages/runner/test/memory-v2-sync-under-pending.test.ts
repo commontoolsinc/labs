@@ -25,9 +25,6 @@ import {
 
 const signer = await Identity.fromPassphrase("memory-v2-sync-under-pending");
 const space = signer.did();
-const foreignSpace = (await Identity.fromPassphrase(
-  "memory-v2-sync-under-pending-foreign",
-)).did();
 const DOCUMENT_MIME = "application/json" as const;
 
 type TestProvider = IStorageProvider & {
@@ -262,31 +259,6 @@ Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sy
       provider.sync(docA, { path: [], schema: false }),
       provider.sync(docB, { path: [], schema: false }),
     ]);
-    const addressA = { space, id: docA, scope: "space" as const, path: [] };
-    const addressB = { space, id: docB, scope: "space" as const, path: [] };
-    const missingAddress = {
-      space,
-      id: "of:sync-under-pending-missing" as URI,
-      scope: "space" as const,
-      path: [],
-    };
-    const foreignAddress = { ...addressA, space: foreignSpace };
-    assertEquals(
-      provider.areSchedulerAddressesCurrentAtOrBelow?.([addressA], 1),
-      true,
-    );
-    assertEquals(
-      provider.areSchedulerAddressesCurrentAtOrBelow?.([addressA], 0),
-      false,
-    );
-    assertEquals(
-      provider.areSchedulerAddressesCurrentAtOrBelow?.([missingAddress], 1),
-      false,
-    );
-    assertEquals(
-      provider.areSchedulerAddressesCurrentAtOrBelow?.([foreignAddress], 1),
-      false,
-    );
     assertEquals(getObjectValue(provider, docA), {
       color: "red",
       note: "seed",
@@ -320,17 +292,6 @@ Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sy
       color: "green",
       note: "seed",
     });
-    assertEquals(
-      provider.schedulerHasPendingWriteOverlapping?.([
-        foreignAddress,
-        addressA,
-      ]),
-      true,
-    );
-    assertEquals(
-      provider.schedulerHasPendingWriteOverlapping?.([addressB]),
-      false,
-    );
 
     // The wire shape must match a blind CellSet's: the tx's own reads carry no
     // value-equality precondition (they were tagged ignoreReadForCommit and
@@ -377,10 +338,6 @@ Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sy
     transport.releaseTransact(3);
     const result = await commitPromise;
     assert(!result.error, `commit should confirm cleanly: ${result.error}`);
-    assertEquals(
-      provider.schedulerHasPendingWriteOverlapping?.([addressA]),
-      false,
-    );
     assertEquals(getObjectValue(provider, docA), {
       color: "green",
       note: "remote",

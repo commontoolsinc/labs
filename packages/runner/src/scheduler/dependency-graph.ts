@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
@@ -12,6 +13,8 @@ import type {
 } from "./types.ts";
 
 export interface DependencyGraphState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly triggerIndex: TriggerIndexState;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
@@ -52,7 +55,14 @@ function isDemandRoot(
 ): boolean {
   return state.nodes.isEffect(node.action) ||
     node.provisionalDemand ||
-    state.materializerIndex.isMaterializer(node.action);
+    state.materializerIndex.isMaterializer(node.action) ||
+    // (d′) — the standing `demandedWriters` root kind (design
+    // §2.4; serving-loop.md §8's positive tripwire): a writer of an
+    // instance a client session tracks holds demand while any session
+    // tracks it. Every transition into and out of the set is bracketed
+    // with the liveness notifications (facade.enterDemandedEntity /
+    // leaveDemandedEntity / the write-index registration hook).
+    state.nodes.isDemandedWriter(node.action);
 }
 
 export function isLive(
@@ -78,6 +88,54 @@ export function resetLivenessWork(): void {
 }
 
 /**
+ * Every-mutation equivalence verifier, disabled unless
+ * `SCHEDULER_LIVENESS_EQUIVALENCE=1`. With it on, every exit from the four
+ * liveness mutators asserts the incrementally maintained refcounts equal a
+ * full rebuild from the demand roots ({@link recomputeLiveRefs}), which is
+ * the definition they implement. The rebuild overwrites in place, so state
+ * is canonical after the check either way; drift throws with the mutation
+ * site and the drifted nodes. Run it across the whole runner suite after
+ * changes that touch liveness maintenance, registration ordering, or edge
+ * derivation — the original pass over this suite is what caught
+ * `unregisterDependentEdge` dropping a decrement for root writers (see
+ * docs/history/development/performance/2026-08-scheduler-liveness-maintenance.md).
+ * Off by default: the check costs the full-graph walk the incremental path
+ * exists to avoid.
+ */
+const LIVENESS_EQUIVALENCE_CHECK: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env.get("SCHEDULER_LIVENESS_EQUIVALENCE") === "1";
+  } catch {
+    return false; // no env permission: stay disabled
+  }
+})();
+
+function assertLivenessEquivalence(
+  state: SchedulerLivenessState,
+  site: string,
+): void {
+  if (!LIVENESS_EQUIVALENCE_CHECK) return;
+  const records = [...state.nodes.nodes()];
+  const incremental = records.map((record) => record.liveRefs);
+  recomputeLiveRefs(state);
+  const drift: string[] = [];
+  records.forEach((record, i) => {
+    if (record.liveRefs !== incremental[i]) {
+      const name = (record.action as { name?: string }).name || "<anonymous>";
+      drift.push(
+        `${name}: incremental=${incremental[i]} rebuilt=${record.liveRefs}`,
+      );
+    }
+  });
+  if (drift.length > 0) {
+    throw new Error(
+      `liveness drift after ${site}: ${drift.join("; ")}`,
+    );
+  }
+}
+
+/**
  * Take account of a node whose root status or registration changed underneath
  * the graph — it became an effect, gained or lost materializer envelopes, or
  * (re-)registered.
@@ -88,6 +146,15 @@ export function resetLivenessWork(): void {
  * when the node still holds demand of its own, so the common case stays cheap.
  */
 export function notifyNodeLivenessChange(
+  state: SchedulerDemandState,
+  action: Action,
+  wasLive: boolean,
+): void {
+  notifyNodeLivenessChangeImpl(state, action, wasLive);
+  assertLivenessEquivalence(state, "notifyNodeLivenessChange");
+}
+
+function notifyNodeLivenessChangeImpl(
   state: SchedulerDemandState,
   action: Action,
   wasLive: boolean,
@@ -121,6 +188,16 @@ export function notifyNodeLivenessChange(
 }
 
 export function setNodeProvisionalDemand(
+  state: SchedulerDemandState,
+  node: SchedulerNode,
+  provisionalDemand: boolean,
+  passId?: number,
+): void {
+  setNodeProvisionalDemandImpl(state, node, provisionalDemand, passId);
+  assertLivenessEquivalence(state, "setNodeProvisionalDemand");
+}
+
+function setNodeProvisionalDemandImpl(
   state: SchedulerDemandState,
   node: SchedulerNode,
   provisionalDemand: boolean,
@@ -253,10 +330,11 @@ function withdrawDemandFrom(
 
 export function groupReadsByEntity(
   reads: readonly IMemorySpaceAddress[],
+  identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, IMemorySpaceAddress[]> {
   const readsByEntity = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
   for (const read of reads) {
-    const entity = entityKey(read);
+    const entity = entityKey(read, identity);
     let entityReads = readsByEntity.get(entity);
     if (!entityReads) {
       entityReads = [];
@@ -316,6 +394,7 @@ export function hasInvalidUpstream(
 }
 
 export function collectDirectWritersForLog(state: {
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   readonly getSchedulingWrites: (
@@ -346,6 +425,7 @@ export function collectDirectWritersForLog(state: {
 
 export function collectReverseDependenciesForLog(
   state: {
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity;
     readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
     readonly getSchedulingWrites: (
       action: Action,
@@ -399,6 +479,16 @@ export function updateDependentEdgesForLog(
 }
 
 export function registerDependentEdge(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): boolean {
+  const changed = registerDependentEdgeImpl(state, writer, dependent);
+  assertLivenessEquivalence(state, "registerDependentEdge");
+  return changed;
+}
+
+function registerDependentEdgeImpl(
   state: DependencyGraphState,
   writer: Action,
   dependent: Action,
@@ -462,6 +552,16 @@ export function unregisterDependentEdge(
   writer: Action,
   dependent: Action,
 ): boolean {
+  const changed = unregisterDependentEdgeImpl(state, writer, dependent);
+  assertLivenessEquivalence(state, "unregisterDependentEdge");
+  return changed;
+}
+
+function unregisterDependentEdgeImpl(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): boolean {
   livenessWork.operations++;
   const dependents = state.dependents.get(writer);
   const hadDependent = dependents?.delete(dependent) ?? false;
@@ -515,7 +615,8 @@ export function recomputeLiveRefs(state: SchedulerLivenessState): void {
     if (
       state.nodes.isEffect(record.action) ||
       record.provisionalDemand ||
-      state.materializerIndex.isMaterializer(record.action)
+      state.materializerIndex.isMaterializer(record.action) ||
+      state.nodes.isDemandedWriter(record.action)
     ) {
       reachable.add(record.action);
       stack.push(record.action);

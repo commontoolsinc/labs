@@ -3,20 +3,35 @@ import {
   type CellScope,
   type EntitySnapshot,
   type GraphQuery,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
   type SessionSync,
+  type SessionSyncRemove,
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
+import { toDirtyKey } from "./query.ts";
 
-export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
+/**
+ * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
+ * server-internal (the wire upsert keeps the scope NAME — a client's
+ * instances resolve from its session, protocol.md §1): it keys the cache
+ * and the tracked-id set per instance (scopes.md §7 M4, stage F), so two
+ * principals' instances of one doc never collapse to one entry.
+ */
+export type SessionCacheEntry = SessionSyncUpsert & {
+  scope: CellScope;
+  scopeKey: ScopeKey;
+};
 
 const DEFAULT_SCOPE: CellScope = "space";
 
 export const cacheKeyForEntity = (
   branch: string,
   id: string,
-  scope: CellScope = DEFAULT_SCOPE,
-): string => `${branch}\0${scope}\0${id}`;
+  scopeKey: ScopeKey = "space",
+): string => `${branch}\0${scopeKey}\0${id}`;
 
 export const sameSnapshot = (
   left: SessionCacheEntry | undefined,
@@ -27,7 +42,7 @@ export const sameSnapshot = (
   }
   return left.branch === right.branch &&
     left.id === right.id &&
-    left.scope === right.scope &&
+    left.scopeKey === right.scopeKey &&
     left.seq === right.seq &&
     left.deleted === right.deleted;
 };
@@ -35,14 +50,26 @@ export const sameSnapshot = (
 export const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0;
 
+/**
+ * Build a session cache entry for one tracked instance. The instance key
+ * is the TRACKED one — passed by callers that walked a graph state's
+ * instance-keyed entries — falling back to the session identity's own
+ * resolution for the entity's declared scope (the two agree everywhere a
+ * root did not name an explicit foreign instance).
+ */
 export const toCacheEntry = (
   entity: EntitySnapshot,
+  identity: ScopeKeyIdentity,
+  scopeKey?: ScopeKey,
 ): SessionCacheEntry => {
+  const scope = entity.scope ?? DEFAULT_SCOPE;
+  const instanceKey = scopeKey ?? resolveScopeKey(scope, identity);
   if (entity.document === null) {
     return {
       branch: entity.branch,
       id: entity.id,
-      scope: entity.scope ?? DEFAULT_SCOPE,
+      scope,
+      scopeKey: instanceKey,
       seq: entity.seq,
       deleted: true,
     };
@@ -50,7 +77,8 @@ export const toCacheEntry = (
   return {
     branch: entity.branch,
     id: entity.id,
-    scope: entity.scope ?? DEFAULT_SCOPE,
+    scope,
+    scopeKey: instanceKey,
     seq: entity.seq,
     doc: entity.document,
   };
@@ -61,10 +89,65 @@ export const trackedIdsFromEntries = (
 ): Set<string> => {
   const ids = new Set<string>();
   for (const entry of entries) {
-    ids.add(`${entry.scope}\0${entry.id}`);
+    ids.add(toDirtyKey(entry.id, entry.scopeKey));
   }
   return ids;
 };
+
+/**
+ * The wire form of a cache entry: the server-internal `scopeKey` is
+ * STRIPPED — the wire carries scope NAMES, and a client's instances
+ * resolve from its authenticated session (protocol.md §1; clients never
+ * receive keys). Every path that puts cache entries into a `SessionSync`
+ * frame goes through this, so the instance keying stays server-internal
+ * and the OFF-arm wire is byte-identical.
+ *
+ * `keyed` (server-execution v2 stage A, OW17's wire leg): a frame to a
+ * session whose lease-holder read exemption is LIVE keeps the instance
+ * key on every entry — that session may hold two instances of one
+ * (branch, id, scope) at once (its explicit-instance reads name them),
+ * and the scope name alone cannot tell them apart. The field is added
+ * AFTER the pre-existing fields, so a keyed frame is the byte-identical
+ * unkeyed frame plus one field per entry; an unkeyed frame is unchanged.
+ */
+export const toWireUpsert = (
+  entry: SessionCacheEntry,
+  keyed = false,
+): SessionSyncUpsert => {
+  // Field order matches the pre-instance-keying cache entry exactly
+  // (branch, id, scope, seq, then deleted|doc), so serialized frames are
+  // byte-identical to before the re-key.
+  if (entry.deleted === true) {
+    return {
+      branch: entry.branch,
+      id: entry.id,
+      scope: entry.scope,
+      seq: entry.seq,
+      deleted: true,
+      ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+    };
+  }
+  return {
+    branch: entry.branch,
+    id: entry.id,
+    scope: entry.scope,
+    seq: entry.seq,
+    ...(entry.doc === undefined ? {} : { doc: entry.doc }),
+    ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+  };
+};
+
+/** The wire form of a removed cache entry — `keyed` as on
+ * {@link toWireUpsert}. */
+export const toWireRemove = (
+  entry: SessionCacheEntry,
+  keyed = false,
+): SessionSyncRemove => ({
+  branch: entry.branch,
+  id: entry.id,
+  scope: entry.scope,
+  ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+});
 
 const compareSyncAddress = (
   left: { branch: string; id: string; scope?: CellScope },
@@ -112,6 +195,12 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
     root.selector.schema === undefined
       ? ""
       : internSchemaAsTaggedHashString(root.selector.schema),
+    // The explicit INSTANCE is query semantics like scope and path
+    // (protocol.md §2's read row): a changed `entityScopeKey` on the
+    // same watch id must compare as a CHANGED spec, or watch.add keeps
+    // silently tracking the old instance. `null` for the (universal)
+    // keyless case, so OFF-arm identities stay pairwise-identical.
+    root.entityScopeKey ?? null,
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>
@@ -135,20 +224,19 @@ export const buildFullSync = (
   next: ReadonlyMap<string, SessionCacheEntry>,
   fromSeq: number,
   toSeq: number,
+  // Lease-holder frames carry instance keys (see toWireUpsert).
+  keyed = false,
 ): SessionSync => {
   const removes = [...previous.values()]
     .filter((entry) =>
       !next.has(
-        cacheKeyForEntity(entry.branch, entry.id, entry.scope),
+        cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
       )
     )
-    .map((entry) => ({
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-    }))
+    .map((entry) => toWireRemove(entry, keyed))
     .sort(compareSyncAddress);
-  const upserts = [...next.values()].sort(compareSyncAddress);
+  const upserts = [...next.values()].sort(compareSyncAddress)
+    .map((entry) => toWireUpsert(entry, keyed));
   return {
     type: "sync",
     fromSeq,
@@ -163,6 +251,17 @@ export const buildDiffSync = (
   next: ReadonlyMap<string, SessionCacheEntry>,
   fromSeq: number,
   toSeq: number,
+  // Delivery-state out-parameter (CT-1927 family): the wire frame strips
+  // instance keys, so a caller that must be able to ROLL BACK this
+  // frame's delivery (the push path) collects the internal instance-keyed
+  // entries here — the only exact record of which instances the frame
+  // carried.
+  delivered?: {
+    upserts: SessionCacheEntry[];
+    removes: SessionCacheEntry[];
+  },
+  // Lease-holder frames carry instance keys (see toWireUpsert).
+  keyed = false,
 ): SessionSync => {
   const upserts: SessionCacheEntry[] = [];
   for (const [key, current] of next.entries()) {
@@ -170,19 +269,23 @@ export const buildDiffSync = (
       upserts.push(current);
     }
   }
-  const removes = [...previous.entries()]
+  const removedEntries = [...previous.entries()]
     .filter(([key]) => !next.has(key))
-    .map(([, entry]) => ({
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-    }))
+    .map(([, entry]) => entry);
+  const removes = removedEntries
+    .map((entry) => toWireRemove(entry, keyed))
     .sort(compareSyncAddress);
+  if (delivered !== undefined) {
+    delivered.upserts.push(...upserts);
+    delivered.removes.push(...removedEntries);
+  }
   return {
     type: "sync",
     fromSeq,
     toSeq,
-    upserts: upserts.toSorted(compareSyncAddress),
+    upserts: upserts.toSorted(compareSyncAddress).map((entry) =>
+      toWireUpsert(entry, keyed)
+    ),
     removes,
   };
 };

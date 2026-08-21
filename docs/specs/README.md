@@ -48,7 +48,6 @@ decision is reversed or superseded).
 - [Memory v2](memory-v2/README.md)
 - [FUSE filesystem](fuse-filesystem/README.md)
 - [SQLite builtins](sqlite-builtin/README.md)
-- [Persistent scheduler state](persistent-scheduler-state.md)
 - [Runner child-run ownership](runner-child-run-ownership.md)
 - [Scheduler v2](scheduler-v2/README.md)
 - [Server-primary execution](server-side-execution/README.md)

@@ -31,11 +31,45 @@ implemented as the gates below. Method inherited from the v1 learning run
 
 From the first PR with testable behavior: the integration suites run
 twice — `EXPERIMENTAL_SERVER_EXECUTION` OFF (must be byte-identical
-to today; any OFF-arm diff is a Phase-gate failure by itself) and
+to today up to the recorded acceptances — key-vocabulary §5's, and
+the verification-coverage register's recorded-acceptance rows (RULED
+2026-08-05, widened for stage G's claim-guard delta the same day);
+any other OFF-arm diff is a Phase-gate failure by
+itself) and
 ON. The ON arm is allowed to skip
 not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
 went through CI at all.)
+
+*Phase 7 landed FLIP-READY, DARK (owner ruling 2026-08-16;
+`SERVER_EXECUTION_DEFAULT_ENABLED = false`; the flip is its own later
+one-line PR). The arms today: the DEFAULT lanes (flag unset = the
+first-party default, OFF) are the regression guard — a posture PROBE
+before each suite pins server-not-serving (`/api/health/stats` carries no
+`servingLoop`) and shell define unset (`/api/meta`'s
+`shellServerExecutionDefine` null), so a silent flip of the default
+cannot move the REQUIRED lanes onto ON; the explicit
+`EXPERIMENTAL_SERVER_EXECUTION=true` lanes are the ON arm in the FULL
+posture — the toolshed serves, the test processes DECLARE the posture
+from the env (the runner integration tests that talk to the lane's
+toolshed; the runtime-client worker — never a bare/undeclared client, the
+mixed posture the Phase-7 review found), and the binary's baked browser
+shell is ON-built (`build-toolshed-on`, the define `true`) — VERIFIED
+by the same probe (`shellServerExecutionDefine === "true"`,
+`servingLoop` present) before the suite runs. Skips only via
+`tasks/server-execution-on-skips.ts` (file entries; STEP entries for a
+one-file suite, guarded in-file and bound to the register), printed
+loudly — and, since 2026-08-16, actually EFFECTIVE: `deno test --ignore`
+binds only to files deno discovers itself, so the package `integration`
+tasks hand deno a quoted glob and the pattern shards filter their file
+list through the script (`--filter`); until then every listed skip ran.
+When the flip PR lands the roles invert (default = ON with the skip list,
+which must be EMPTY by then; explicit `false` = the OFF guard on an
+OFF-built binary), and both lanes stay until the OFF path is removed
+(the post-soak PR). Single-process suites (the unit suites, `cf test`,
+the runner integration files that serve toolshed's `app.ts` in-process)
+are not arms of this contract: they have no serving host and run the
+derive-and-commit model by construction (EXPERIMENTAL_OPTIONS.md).*
 
 ## 3. The watermark replaces polling
 
@@ -94,12 +128,12 @@ exists, then the properties become the implementation's oracle.
 | phase | gate tests |
 | --- | --- |
 | 1 | stages A–G land dark: OFF arm byte-identical per stage (§2), stage E's instance re-keying included (OFF-arm neutral by construction); ON arm runs in CI with explicit skip lists (no ON gates — the first ON milestone is Phase 2's) |
-| 2 | `sx2-serving-loop` (counters, amplification, restart-memo) and `sx2-speculation` (echo latency, overlay retirement, zero client derived commits); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm; byte-identical suite both arms |
+| 2 | `sx2-serving-loop` (counters, amplification, restart-memo) and `sx2-speculation` (echo latency, overlay retirement; the client-side overlay diagnostic witnesses "commits nothing for derivations" — the zero-client-derived STORE-ATTRIBUTION query needs engine access and is pinned, both halves, in `packages/runner/test/speculation-overlay.test.ts`, not duplicated into the browser gate); existing `counter`, `cfc-group-chat-demo-multi-runtime` in ON arm; byte-identical suite both arms |
 | 3 | `sx2-events` (two-user lunch poll via server handlers; kill-between-event-and-consequence restart; duplicate-submit rejection; rapid-fire coalescing: N events fired faster than wave time yield ≪N derived commits and final-only values); propagation ≤300 ms p50 measured on `lunch-poll-vote` UNMODIFIED |
-| 4 | `sx2-effect-channel` (navigate intent/ack; reload between intent and ack; optimistic-enact reconcile); existing `topics-navigation` ON |
+| 4 | `sx2-effect-channel` (navigate intent/ack; reload between intent and ack; optimistic-enact reconcile); existing `topics-navigation` ON — ON-SKIP-LISTED since Phase 4 (red under the full ON posture: OW30's controller write-destination class; not ON coverage until it lifts) |
 | 5 | existing `shared-profile`, `profile-embed`, `sqlite-read-clearance-multi-runtime` green ON — the v1 stragglers are the acceptance tests |
 | 6 | `sx2-scale` (cf-checkbox in-suite ≈ isolated; budget: hostile LLM fan-out in space A leaves space B's propagation in budget); no poll-loops left in the suite |
-| 7 | full suites ON-only; propagation beats OFF-arm baseline on byte-identical workloads |
+| 7 | full suites ON-only; propagation beats OFF-arm baseline on byte-identical workloads — NEITHER met at the flip-ready landing (2026-08-16): the ON lanes are green only with six `phase-7` skip entries (verification-coverage OW30/OW32/OW33) and the benchmark is unmeasured (its harness is the two-browsers gate, red on OW32) |
 
 ## 6. The two standing baselines
 

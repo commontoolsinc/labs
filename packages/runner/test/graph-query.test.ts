@@ -19,6 +19,18 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const SPACE = "did:key:graph-query-test" as MemorySpace;
 
+// The acting identity a walk's tracker keys resolve scoped addresses
+// against (key-vocabulary.md §1 sites 5-6); these fixtures use
+// space-scoped docs, whose keys are identity-independent.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
+/** Tracker key under the test identity. */
+const keyFor = (id: string) =>
+  schemaTrackerKey(SPACE, id, undefined, TEST_SCOPE_IDENTITY);
+
 /**
  * Serves documents from a map keyed by tracker key, and records every address
  * a walk asked for.
@@ -29,7 +41,12 @@ class StubObjectManager implements ObjectStorageManager {
   constructor(private readonly documents: Map<string, FabricValue>) {}
 
   load(address: BaseMemoryAddress): IAttestation | null {
-    const key = schemaTrackerKey(SPACE, address.id, address.scope);
+    const key = schemaTrackerKey(
+      SPACE,
+      address.id,
+      address.scope,
+      TEST_SCOPE_IDENTITY,
+    );
     this.requested.push(key);
     const value = this.documents.get(key);
     if (value === undefined) {
@@ -67,6 +84,7 @@ const walkOver = (
     manager,
     space: SPACE,
     schemaTracker,
+    identity: TEST_SCOPE_IDENTITY,
     ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     ...(overrides.stats === undefined ? {} : { stats: overrides.stats }),
   });
@@ -78,14 +96,25 @@ const trackedKeys = (tracker: MapSetStringToPathSelectors): string[] =>
 
 describe("graph-query", () => {
   describe("schemaTrackerKey()", () => {
-    it("returns the space, scope, and identifier joined by slashes", () => {
-      expect(schemaTrackerKey("did:key:space", "of:doc", "session")).toBe(
-        "did:key:space/session/of:doc",
+    it("keys a scoped address by its resolved scope INSTANCE", () => {
+      expect(
+        schemaTrackerKey(
+          "did:key:space",
+          "of:doc",
+          "session",
+          TEST_SCOPE_IDENTITY,
+        ),
+      ).toBe(
+        "did:key:space/session:did%3Atest%3Aalice:session-1/of:doc",
       );
     });
 
     it("returns a space-scoped key when no scope is given", () => {
-      expect(schemaTrackerKey("did:key:space", "of:doc")).toBe(
+      expect(
+        schemaTrackerKey("did:key:space", "of:doc", undefined, {
+          principal: "did:test:someone-else",
+        }),
+      ).toBe(
         "did:key:space/space/of:doc",
       );
     });
@@ -95,7 +124,7 @@ describe("graph-query", () => {
     describe("visit()", () => {
       it("records the visited document under its tracker key", () => {
         const documents = new Map<string, FabricValue>([
-          [schemaTrackerKey(SPACE, "of:root"), { title: "Glazed" }],
+          [keyFor("of:root"), { title: "Glazed" }],
         ]);
         const { manager, schemaTracker, walk } = walkOver(documents);
 
@@ -108,17 +137,45 @@ describe("graph-query", () => {
         );
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:root"),
+          keyFor("of:root"),
+        ]);
+      });
+
+      it("records under the caller's explicit instance key when one is given", () => {
+        // A query root naming an explicit scope instance (protocol.md §2's
+        // read row) records under THAT instance rather than one resolved
+        // from the walk's own identity. Traversal beyond that entry still
+        // resolves under the acting identity — including the traverser's
+        // own read-track of the root document (per-run deep threading is
+        // the Phase 2 fan-out work) — so both keys appear.
+        const documents = new Map<string, FabricValue>([
+          [keyFor("of:root"), { title: "Glazed" }],
+        ]);
+        const { manager, schemaTracker, walk } = walkOver(documents);
+        const explicitKey = `${SPACE}/user:did%3Atest%3Abob/of:root` as const;
+
+        walk.visit(
+          documentFor(manager, "of:root"),
+          {
+            path: ["value"],
+            schema: true,
+          } satisfies SchemaPathSelector,
+          explicitKey,
+        );
+
+        expect(trackedKeys(schemaTracker)).toEqual([
+          keyFor("of:root"),
+          explicitKey,
         ]);
       });
 
       it("records a linked document the schema reaches", () => {
         const documents = new Map<string, FabricValue>([
           [
-            schemaTrackerKey(SPACE, "of:root"),
+            keyFor("of:root"),
             { glaze: linkTo("of:glaze", ["value"]) },
           ],
-          [schemaTrackerKey(SPACE, "of:glaze"), { flavor: "maple" }],
+          [keyFor("of:glaze"), { flavor: "maple" }],
         ]);
         const { manager, schemaTracker, walk } = walkOver(documents);
 
@@ -131,21 +188,21 @@ describe("graph-query", () => {
         );
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:glaze"),
-          schemaTrackerKey(SPACE, "of:root"),
+          keyFor("of:glaze"),
+          keyFor("of:root"),
         ]);
       });
 
       it("leaves a document the schema excludes out of the tracker", () => {
         const documents = new Map<string, FabricValue>([
           [
-            schemaTrackerKey(SPACE, "of:root"),
+            keyFor("of:root"),
             {
               flavor: "maple",
               glaze: linkTo("of:glaze", ["value"]),
             },
           ],
-          [schemaTrackerKey(SPACE, "of:glaze"), { flavor: "maple" }],
+          [keyFor("of:glaze"), { flavor: "maple" }],
         ]);
         const { manager, schemaTracker, walk } = walkOver(documents);
 
@@ -162,13 +219,13 @@ describe("graph-query", () => {
         );
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:root"),
+          keyFor("of:root"),
         ]);
       });
 
       it("counts a skip and records nothing when the tracker already covers the selector", () => {
         const documents = new Map<string, FabricValue>([
-          [schemaTrackerKey(SPACE, "of:root"), { title: "Glazed" }],
+          [keyFor("of:root"), { title: "Glazed" }],
         ]);
         const { manager, schemaTracker, walk } = walkOver(documents);
         const selector = {
@@ -184,7 +241,7 @@ describe("graph-query", () => {
         expect(walk.stats.coveredSelectorSkips).toBe(1);
         expect(manager.requested.length).toBe(afterFirst);
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:root"),
+          keyFor("of:root"),
         ]);
       });
 
@@ -205,15 +262,15 @@ describe("graph-query", () => {
         );
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:missing"),
+          keyFor("of:missing"),
         ]);
         expect(walk.stats.schemaTraversals).toBe(0);
       });
 
       it("accumulates traversal counters into the caller's stats", () => {
         const documents = new Map<string, FabricValue>([
-          [schemaTrackerKey(SPACE, "of:one"), { title: "Glazed" }],
-          [schemaTrackerKey(SPACE, "of:two"), { title: "Jelly" }],
+          [keyFor("of:one"), { title: "Glazed" }],
+          [keyFor("of:two"), { title: "Jelly" }],
         ]);
         const stats = createGraphQueryWalkStats();
         const { manager, walk } = walkOver(documents, { stats });
@@ -234,11 +291,11 @@ describe("graph-query", () => {
       it("terminates on a cycle of documents that link to each other", () => {
         const documents = new Map<string, FabricValue>([
           [
-            schemaTrackerKey(SPACE, "of:a"),
+            keyFor("of:a"),
             { peer: linkTo("of:b", ["value"]) },
           ],
           [
-            schemaTrackerKey(SPACE, "of:b"),
+            keyFor("of:b"),
             { peer: linkTo("of:a", ["value"]) },
           ],
         ]);
@@ -250,22 +307,22 @@ describe("graph-query", () => {
         );
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:a"),
-          schemaTrackerKey(SPACE, "of:b"),
+          keyFor("of:a"),
+          keyFor("of:b"),
         ]);
       });
 
       it("records the same reach whether two roots share one walk or take one each", () => {
         const documents = new Map<string, FabricValue>([
           [
-            schemaTrackerKey(SPACE, "of:one"),
+            keyFor("of:one"),
             { glaze: linkTo("of:glaze", ["value"]) },
           ],
           [
-            schemaTrackerKey(SPACE, "of:two"),
+            keyFor("of:two"),
             { glaze: linkTo("of:glaze", ["value"]) },
           ],
-          [schemaTrackerKey(SPACE, "of:glaze"), { flavor: "maple" }],
+          [keyFor("of:glaze"), { flavor: "maple" }],
         ]);
         const selector = {
           path: ["value"],
@@ -283,9 +340,9 @@ describe("graph-query", () => {
         second.walk.visit(documentFor(second.manager, "of:two"), selector);
 
         expect(trackedKeys(shared.schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:glaze"),
-          schemaTrackerKey(SPACE, "of:one"),
-          schemaTrackerKey(SPACE, "of:two"),
+          keyFor("of:glaze"),
+          keyFor("of:one"),
+          keyFor("of:two"),
         ]);
         expect(trackedKeys(separateTracker)).toEqual(
           trackedKeys(shared.schemaTracker),
@@ -294,8 +351,8 @@ describe("graph-query", () => {
 
       it("adds to a schema tracker shared with an earlier walk", () => {
         const documents = new Map<string, FabricValue>([
-          [schemaTrackerKey(SPACE, "of:one"), { title: "Glazed" }],
-          [schemaTrackerKey(SPACE, "of:two"), { title: "Jelly" }],
+          [keyFor("of:one"), { title: "Glazed" }],
+          [keyFor("of:two"), { title: "Jelly" }],
         ]);
         const schemaTracker = new MapSetStringToPathSelectors(true);
         const selector = {
@@ -309,22 +366,22 @@ describe("graph-query", () => {
         second.walk.visit(documentFor(second.manager, "of:two"), selector);
 
         expect(trackedKeys(schemaTracker)).toEqual([
-          schemaTrackerKey(SPACE, "of:one"),
-          schemaTrackerKey(SPACE, "of:two"),
+          keyFor("of:one"),
+          keyFor("of:two"),
         ]);
       });
 
       it("reports a memo hit when a later walk sharing the memo re-reaches a document", () => {
         const documents = new Map<string, FabricValue>([
           [
-            schemaTrackerKey(SPACE, "of:one"),
+            keyFor("of:one"),
             { glaze: linkTo("of:glaze", ["value"]) },
           ],
           [
-            schemaTrackerKey(SPACE, "of:two"),
+            keyFor("of:two"),
             { glaze: linkTo("of:glaze", ["value"]) },
           ],
-          [schemaTrackerKey(SPACE, "of:glaze"), { flavor: "maple" }],
+          [keyFor("of:glaze"), { flavor: "maple" }],
         ]);
         const memo = createSchemaMemo();
         const selector = {

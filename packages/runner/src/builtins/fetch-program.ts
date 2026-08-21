@@ -5,6 +5,10 @@ import type { CellScope } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
@@ -175,6 +179,18 @@ export function fetchProgram(
     const tx = runtime.edit();
 
     try {
+      // Teardown tx on piece stop — no scheduler run stamps it;
+      // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+      // serving runtime releases this replica's claims instead of
+      // refusing the unstamped seal. No-op off the serving posture.
+      // INSIDE the try (review thread r3756175831): a throwing stamper
+      // must route through the abort path below like any other failure
+      // here, not leak the manually-opened tx and skip claim release.
+      runtime.stampServerRun(tx, {
+        actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
       const updates: Record<string, FetchCacheEntry> = {};
@@ -311,9 +327,13 @@ export function fetchProgram(
 
     if (!resolvingHere && (state.type === "idle" || claimAbandoned)) {
       // Try to transition to fetching. The claim id names this replica; the
-      // outbox id stays the input hash, which is what makes it an idempotency
-      // key for the same request from anywhere.
+      // outbox/dedupe key is the input hash WIDENED BY THIS NODE's cache-cell
+      // identity (effectTargetKey): the per-node cache doc is the writeback
+      // target, so a DISTINCT node with the same URL must keep its own
+      // effect — a shared bare-hash key dropped the second node's closure
+      // and left its cache entry `fetching` forever (round-2 headline).
       const requestId = `${runtime.id}:${inputHash}`;
+      const effectKey = effectTargetKey(`fetchProgram:${inputHash}`, cache);
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
@@ -343,6 +363,7 @@ export function fetchProgram(
               inputHash,
               url,
               abortController.signal,
+              effectKey,
             ).finally(() => {
               if (inFlight.get(inputHash) === requestId) {
                 inFlight.delete(inputHash);
@@ -351,6 +372,7 @@ export function fetchProgram(
             parentCell,
           );
         },
+        { idempotencyKey: effectKey },
       );
     }
 
@@ -390,6 +412,7 @@ async function startFetch(
   inputHash: string,
   url: string,
   abortSignal: AbortSignal,
+  effectKey: string,
 ) {
   try {
     // Create HTTP program resolver
@@ -415,6 +438,11 @@ async function startFetch(
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
+        // Marked on the arm that writes (round-2 thread 12): a
+        // suppressed writeback (the entry already resolved by a
+        // competing resolution) must not commit as a spurious no-op
+        // effect-completion for an already-completed key.
+        markEffectCompletion(tx, effectKey);
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,
@@ -437,6 +465,9 @@ async function startFetch(
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
+        // Marked on the arm that writes — see the success path above
+        // (round-2 thread 12).
+        markEffectCompletion(tx, effectKey);
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,

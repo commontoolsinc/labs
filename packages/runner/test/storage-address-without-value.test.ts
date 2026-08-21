@@ -21,6 +21,14 @@ import type {
 const TYPE = "application/json" as const;
 const ENTITY = "of:address-without-value" as const;
 
+// The identity of the session the checkout batch belongs to — `checkout`'s
+// third argument since the differential keys changes per scope INSTANCE, and
+// a batch's scope names resolve through its owning session's identity.
+const IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 const addressKey = (address: IMemoryAddress) =>
   `${address.scope ?? "space"}:${address.type}:${address.id}`;
 
@@ -46,7 +54,7 @@ describe("state for an address that holds no value", () => {
         is: { value: "written" },
       };
 
-      const before = Differential.checkout(memory, [written]);
+      const before = Differential.checkout(memory, [written], IDENTITY);
       held.set(
         addressKey({ id: ENTITY, type: TYPE, path: [] }),
         written,
@@ -72,7 +80,7 @@ describe("state for an address that holds no value", () => {
         is: { value: "written" },
       } as State & { scope: "user" };
 
-      const before = Differential.checkout(memory, [written]);
+      const before = Differential.checkout(memory, [written], IDENTITY);
       held.set(
         addressKey({ id: ENTITY, type: TYPE, scope: "user", path: [] }),
         written,
@@ -90,7 +98,11 @@ describe("state for an address that holds no value", () => {
         get: (address: IMemoryAddress) => held.get(addressKey(address)),
       };
 
-      const before = Differential.checkout(memory, [{ the: TYPE, of: ENTITY }]);
+      const before = Differential.checkout(
+        memory,
+        [{ the: TYPE, of: ENTITY }],
+        IDENTITY,
+      );
 
       expect([...before.compare(memory)].length).toBe(0);
     });

@@ -65,6 +65,7 @@ import {
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { createTrustResolver } from "../cfc/trust.ts";
 import {
   CFC_ENFORCING_STRICTNESS,
@@ -2510,6 +2511,12 @@ async function safelyPerformUpdate(
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
+      // Marked on the arm that writes (round-2 thread 6): a bail-out
+      // (pending=false or a superseded requestId) writes nothing and
+      // must not commit as a spurious no-op effect-completion for
+      // `llmDialog:<requestId>` on every canceled/superseded turn. The
+      // marker still precedes every write of this arm.
+      markEffectCompletion(tx, `llmDialog:${requestId}`);
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
       return true;
@@ -2525,13 +2532,44 @@ async function safelyPerformUpdate(
 }
 
 /**
+ * `editWithRetry` bound to the turn's abort signal (round-2 thread 14):
+ * a stopped or replaced turn must not persist pin/unpin/argument state
+ * from a tool call that was mid-flight when the cancel landed. Checked
+ * before starting AND inside the callback (a retry attempt after the
+ * cancel aborts too — the throw makes editWithRetry abort the tx and
+ * return the error without committing).
+ */
+function editWithRetryUnlessAborted(
+  runtime: Runtime,
+  abortSignal: AbortSignal | undefined,
+  fn: (tx: IExtendedStorageTransaction) => void,
+): ReturnType<Runtime["editWithRetry"]> {
+  if (abortSignal?.aborted) {
+    return Promise.resolve({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "Tool call cancelled",
+        reason: new Error("turn-aborted"),
+      },
+    });
+  }
+  return runtime.editWithRetry((tx) => {
+    if (abortSignal?.aborted) {
+      throw new Error("Tool call cancelled");
+    }
+    fn(tx);
+  });
+}
+
+/**
  * Handles the pin tool call.
  */
-function handlePin(
+async function handlePin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
 
   // Check if already pinned
@@ -2542,14 +2580,51 @@ function handlePin(
     };
   }
 
-  // Add new pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Add new pinned cell using a transaction. AWAITED and surfaced (the
+  // stage-G review's Flag 4): fire-and-forget discarded the outcome, so
+  // ON-arm the serving posture's unstamped-seal refusal (serving-loop.md
+  // §3d) vanished as an unhandled rejection while the tool reported
+  // success. Classification (RULED 2026-08-05; IMPLEMENTED with
+  // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state — the mark
+  // routes the commit through the effect-completion path (its own
+  // derived-class commit under the serving posture; a no-op elsewhere).
+  // The lifecycle subkey is deliberately NOT the turn's own effect key:
+  // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
+  // in-flight dedupe entry.
+  // NOTE (review 2026-08-11; T17 pinned 2026-08-14): the completion
+  // path's identity annotations fall back to the WAVE-LEVEL identity
+  // when no outbox carriage is live (space-server.ts's
+  // effect-completion comment) — and these lifecycle subkeys carry no
+  // carriage by construction. Sound while `pinnedCells` is
+  // space-scope. If it is ever SCOPED (per-user/per-session), this
+  // commit would resolve against the serving session's identity, not
+  // the acting user's instance — the T17 lifecycle-carriage pin in
+  // executor-serving-loop.test.ts binds exactly that fallback (scoped
+  // op under the wave key, no attribution) and is the test such a
+  // change must flip. Applies to unpin below identically.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:pin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
       ...currentInTx,
       { path: resolved.path, name: resolved.name },
     ]);
   });
+  if (committed.error !== undefined) {
+    logger.warn("pin-commit-failed", () => [
+      `pin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Pin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2557,11 +2632,12 @@ function handlePin(
 /**
  * Handles the unpin tool call.
  */
-function handleUnpin(
+async function handleUnpin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
   const filtered = current.filter((p) => p.path !== resolved.path);
 
@@ -2572,12 +2648,31 @@ function handleUnpin(
     };
   }
 
-  // Remove pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Remove pinned cell using a transaction. Awaited and surfaced — see
+  // handlePin (Flag 4). Classification (RULED 2026-08-05;
+  // IMPLEMENTED with Phase 3): unpin is COMPLETION-CLASS
+  // turn-lifecycle state.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:unpin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
     pinnedCells.withTx(tx).set(filteredInTx);
   });
+  if (committed.error !== undefined) {
+    logger.warn("unpin-commit-failed", () => [
+      `unpin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Unpin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2652,10 +2747,11 @@ async function handleRead(
 /**
  * Handles the update Argument tool call.
  */
-function handleUpdateArgument(
+async function handleUpdateArgument(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
-): { type: string; value: any } {
+  abortSignal?: AbortSignal,
+): Promise<{ type: string; value: any }> {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
 
@@ -2675,8 +2771,30 @@ function handleUpdateArgument(
     updates,
   );
 
-  // Apply updates to argument fields
-  runtime.editWithRetry((tx) => {
+  // Apply updates to argument fields. Awaited and surfaced — see
+  // handlePin (Flag 4): the discarded outcome silently swallowed the
+  // ON-arm unstamped-seal refusal while reporting success.
+  // Classification (RULED 2026-08-05; IMPLEMENTED with Phase 3):
+  // updateArgument is a HANDLER-CLASS consequence — the stamp seals it
+  // into the wave as a non-re-derivable event-handler contribution
+  // (§3d's rebase-don't-drop class). No eventId: the mutation is a
+  // tool-call consequence, not a stream event — a raced rebase that
+  // conflicts semantically rolls it back with nothing to requeue,
+  // which is the class's inherent no-event corner.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
+    runtime.stampServerRun(tx, {
+      // Keyed per TARGET instance (round-2 thread T28): one global id
+      // made the wave's §3b overwrite unit treat CONCURRENT
+      // updateArgument calls against different targets as re-runs of
+      // one action — a later contribution's basis/rebase rows replaced
+      // an earlier unrelated one's as a set. The argument doc id is
+      // durable and retry-stable.
+      actionId:
+        `llm-dialog/update-argument:${argumentCell.getAsNormalizedFullLink().id}`,
+      kind: "event-handler",
+    });
     if (
       isObjectNotArray(cellifiedValue) &&
       !isCell(cellifiedValue)
@@ -2686,6 +2804,19 @@ function handleUpdateArgument(
       argumentCell.withTx(tx).set(cellifiedValue);
     }
   });
+  if (committed.error !== undefined) {
+    logger.warn("update-argument-commit-failed", () => [
+      "updateArgument failed to commit",
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Argument update failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return {
     type: "json",
@@ -3023,14 +3154,14 @@ async function invokeToolCall(
   // Handle pinned cell tools
   if (resolved.type === "pin") {
     return {
-      result: handlePin(runtime, resolved, pinnedCells!),
+      result: await handlePin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
 
   if (resolved.type === "unpin") {
     return {
-      result: handleUnpin(runtime, resolved, pinnedCells!),
+      result: await handleUnpin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3063,7 +3194,7 @@ async function invokeToolCall(
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
     return {
-      result: handleUpdateArgument(runtime, resolved),
+      result: await handleUpdateArgument(runtime, resolved, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3139,6 +3270,14 @@ export function llmDialog(
     if (!cellsInitialized) return;
 
     const tx = runtime.edit();
+    // Teardown tx on piece stop — no scheduler run stamps it;
+    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+    // serving runtime releases the claim instead of refusing the
+    // unstamped seal. No-op off the serving posture.
+    runtime.stampServerRun(tx, {
+      actionId: `llmDialog/teardown/${parentCell.sourceURI}`,
+      kind: "bookkeeping",
+    });
 
     // If the pending request is ours, set pending to false and clear the requestId.
     if (internal.withTx(tx).key("requestId").get() === requestId) {
@@ -3666,6 +3805,7 @@ async function startRequest(
 
   // Write to result cell using editWithRetry since we're outside handler tx
   await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, `llmDialog:${requestId}`);
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 

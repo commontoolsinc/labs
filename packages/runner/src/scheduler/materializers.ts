@@ -1,12 +1,15 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { entityKey } from "./keys.ts";
+import { entityNameKey } from "./keys.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
 export interface MaterializerIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly materializersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   getMaterializerWriteEnvelopes(
@@ -29,6 +32,8 @@ export class SchedulerMaterializers implements MaterializerIndexState {
 
   constructor(
     readonly effects: ReadonlySet<Action>,
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
   ) {}
 
   register(
@@ -55,8 +60,13 @@ export class SchedulerMaterializers implements MaterializerIndexState {
     this.writeEnvelopes.set(action, writes);
 
     const entities = new Set<SpaceScopeAndURI>();
+    // Reader→writer TOPOLOGY, keyed by scope NAME (server-execution v2
+    // stage A; see entityNameKey): a materializer's envelope covers every
+    // instance of its declared surface, so a reader running as any
+    // principal must find it. Overlap is decided by name (readsOverlapWrites)
+    // as before; only the index key stops resolving an instance.
     for (const write of writes) {
-      const entity = entityKey(write);
+      const entity = entityNameKey(write);
       entities.add(entity);
       let materializers = this.materializersByEntity.get(entity);
       if (!materializers) {
@@ -103,7 +113,9 @@ export function collectMaterializerWritersForLog(
   const writers = new Set<Action>();
   const reads = [...log.reads, ...log.shallowReads];
   for (const read of reads) {
-    const candidates = state.materializersByEntity.get(entityKey(read));
+    const candidates = state.materializersByEntity.get(
+      entityNameKey(read),
+    );
     if (!candidates) continue;
 
     for (const candidate of candidates) {

@@ -58,9 +58,19 @@ export const searchPattern = pattern<
     if (!query || query.trim() === "") return entries;
     const lowerQuery = query.toLowerCase().trim();
     return entries.filter(
-      (entry) =>
-        entry.get().summary.toLowerCase().includes(lowerQuery) ||
-        entry.get().name.toLowerCase().includes(lowerQuery),
+      (entry) => {
+        // Guard partially-hydrated entries: `entries` is caller-supplied,
+        // and a snapshot can surface an entry whose summary/name are not
+        // (yet) strings — reachable under serving-order execution, where
+        // `.toLowerCase()` on undefined crashed the lift and the failed
+        // action was rescheduled without backoff (worker storm). Match
+        // extractSummary's typeof discipline above.
+        const value = entry.get();
+        const summary = typeof value?.summary === "string" ? value.summary : "";
+        const name = typeof value?.name === "string" ? value.name : "";
+        return summary.toLowerCase().includes(lowerQuery) ||
+          name.toLowerCase().includes(lowerQuery);
+      },
     );
   });
 });

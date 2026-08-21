@@ -26,6 +26,9 @@ env:
   CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
   CLI_FUSE_WORK_TIMEOUT_MINUTES: &cli-fuse-work-timeout 15
   CLI_JOB_TIMEOUT_MINUTES: &cli-job-timeout 25
+  # The server-execution posture probes (two curls against a server that is
+  # already up) take this one; sized for a probe, not a suite.
+  POSTURE_PROBE_TIMEOUT_MINUTES: &posture-probe-timeout 5
 
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
@@ -508,6 +511,48 @@ jobs:
           path: ./dist/toolshed
           if-no-files-found: error
 
+  # The ON-arm toolshed binary (server-execution v2, Phase 7 landed
+  # flip-READY with the first-party default OFF — docs/specs/
+  # server-side-execution/testing.md §2): the browser shell's flag is an
+  # esbuild define burned in at build time (unset = the first-party default,
+  # OFF today), so the explicit-`true` ON lanes need a binary whose shell was
+  # built with EXPERIMENTAL_SERVER_EXECUTION=true — an ON lane on the default
+  # binary above would run an OFF shell against an ON server, the MIXED
+  # posture Phases 4–6's ON lanes actually ran (which is why two two-browser
+  # gates were "green ON" before Phase 7). Same source, same commit; only
+  # the shell define differs, and the ON lanes VERIFY the posture the binary
+  # carries (/api/meta's `shellServerExecutionDefine`, written by
+  # tasks/build-binaries.ts from this same environment) before they test.
+  # When the flip PR lands the roles invert: this job bakes `false` for the
+  # explicit-false OFF regression-guard lanes and the default binary is ON.
+  build-toolshed-on:
+    name: "Build Binary (toolshed, server-execution ON shell)"
+    runs-on: ubuntu-latest
+    timeout-minutes: *job-timeout
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build toolshed binary (ON-arm shell)
+        timeout-minutes: *work-timeout
+        run: deno task build-binaries toolshed
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          EXPERIMENTAL_SERVER_EXECUTION: "true"
+
+      - name: 📤 Upload toolshed binary (ON-arm shell)
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-toolshed-on
+          path: ./dist/toolshed
+          if-no-files-found: error
+
   build-bg-piece-service:
     name: "Build Binary (bg-piece-service)"
     runs-on: ubuntu-latest
@@ -721,6 +766,30 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
+      # This is the DEFAULT-posture lane (server-execution v2: flag unset =
+      # the first-party default, OFF while Phase 7 is landed dark;
+      # testing.md §2) — the regression guard for today's behavior. The
+      # explicit-`true` ON arm is the `-server-execution-on` lane below; the
+      # probe here pins that this lane really is OFF (server not serving,
+      # shell define unset), so a silent flip of the default cannot move the
+      # REQUIRED lanes onto the ON posture unnoticed.
+      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
+        timeout-minutes: *posture-probe-timeout
+        env:
+          TOOLSHED_PORT: 8000
+        run: |
+          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
+          STATS=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/health/stats")
+          echo "$META"
+          echo "$META" | jq -e '.shellServerExecutionDefine == null' > /dev/null || {
+            echo "::error::binary-toolshed carries a shell built with an explicit EXPERIMENTAL_SERVER_EXECUTION define; the default lane must run the default-built shell"
+            exit 1
+          }
+          echo "$STATS" | jq -e '.servingLoop == null' > /dev/null || {
+            echo "::error::the toolshed started the serving loop in the DEFAULT lane; the first-party default is OFF (Phase 7 landed dark) — flip the CI lane roles with the flip PR, never silently"
+            exit 1
+          }
+
       - name: 🧪 Run ${{ matrix.step_name }}
         timeout-minutes: *work-timeout
         working-directory: ${{ matrix.package_dir }}
@@ -768,6 +837,138 @@ jobs:
           job: Package Integration Tests (${{ matrix.suite_name }})
           junit: >-
             kind=integration,scope=${{ matrix.suite_name }},prefix=${{ matrix.package_dir }},glob=test-results/${{ matrix.junit_name }}.xml
+  # The server-execution v2 ON arm (docs/specs/server-side-execution/testing.md
+  # §2): the same package integration suites, byte-identical workloads, with
+  # EXPERIMENTAL_SERVER_EXECUTION=true on the toolshed server, on the test
+  # processes (the runner integration harness and the runtime-client worker
+  # declare the posture from the env — the ON lane is UNIFORM, not the mixed
+  # posture the P7 independent review found), AND in the binary's baked
+  # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
+  # probe below before the suite runs. Skips happen only through the explicit
+  # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
+  # step — never by silent filtering. No coverage collection: the default lane
+  # owns coverage, and this arm exists to prove behavior under the flag. When
+  # the flip PR lands the roles invert (default = ON with the skip list;
+  # explicit-`false` = the OFF regression guard on an OFF-built binary).
+  package-integration-test-server-execution-on:
+    name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: *job-timeout
+    needs: ["build-toolshed-on"]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: runner
+            package_dir: packages/runner
+            junit_name: runner-server-execution-on
+            step_name: runner integration tests
+            headless: false
+          - suite_name: runtime-client
+            package_dir: packages/runtime-client
+            junit_name: runtime-client-server-execution-on
+            step_name: runtime-client integration tests
+            headless: false
+          - suite_name: shell
+            package_dir: packages/shell
+            junit_name: shell-server-execution-on
+            step_name: shell integration tests
+            headless: true
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 📥 Download toolshed binary (ON-arm shell)
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-toolshed-on
+          path: common-binaries
+
+      - name: 🔌 Start Toolshed server for testing (flag ON)
+        env:
+          TOOLSHED_PORT: 8000
+        run: |
+          chmod +x ./common-binaries/toolshed
+          # --background spawns the server, waits until it has bound its port,
+          # then returns, so the test steps never race a not-yet-listening
+          # server. The server logs to --log-file, which the launcher prints on
+          # success and dumps if the server exits before binding.
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      # The posture the binary ACTUALLY carries: the shell define is baked at
+      # build time, so an ON lane on a default-built binary would silently be
+      # the mixed posture; and the server must really be serving.
+      - name: ✅ Verify the server-execution posture (server ON, shell ON-built)
+        timeout-minutes: *posture-probe-timeout
+        env:
+          TOOLSHED_PORT: 8000
+        run: |
+          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
+          STATS=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/health/stats")
+          echo "$META"
+          echo "$META" | jq -e '.shellServerExecutionDefine == "true"' > /dev/null || {
+            echo "::error::binary-toolshed-on does not carry an ON-built shell (EXPERIMENTAL_SERVER_EXECUTION=true must reach tasks/build-binaries.ts and the shell build); the ON lane would run a MIXED posture"
+            exit 1
+          }
+          echo "$STATS" | jq -e '.servingLoop != null' > /dev/null || {
+            echo "::error::the toolshed did not start the serving loop under EXPERIMENTAL_SERVER_EXECUTION=true; the ON lane's server posture is OFF"
+            exit 1
+          }
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
+
+      - name: 🧪 Run ${{ matrix.step_name }} (flag ON)
+        timeout-minutes: *work-timeout
+        working-directory: ${{ matrix.package_dir }}
+        env:
+          HEADLESS_ENABLED: ${{ matrix.headless }}
+          JUNIT_NAME: ${{ matrix.junit_name }}
+          TOOLSHED_PORT: 8000
+        run: |
+          mkdir -p ../../test-results
+          if [ "$HEADLESS_ENABLED" = "true" ]; then
+            export HEADLESS=1
+          fi
+          # The explicit ON-arm skip list; the script prints every skip (or
+          # that there are none) and emits the matching --ignore flag. The
+          # flag binds because the package `integration` tasks hand deno a
+          # QUOTED glob it expands itself — `deno test --ignore` filters only
+          # files deno discovers and silently ignores nothing when the same
+          # files arrive as explicit arguments (a shell-expanded glob).
+          SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
+          API_URL="http://localhost:${TOOLSHED_PORT}/" \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
+          deno task integration
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-timing-package-integration-${{ matrix.junit_name }}
+          path: test-results/${{ matrix.junit_name }}.xml
+          retention-days: 90
+          if-no-files-found: ignore
 
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
@@ -1044,6 +1245,28 @@ jobs:
       # to place the LCOV it pulls back at teardown. Absolute, because the
       # harness resolves it against a working directory that differs between the
       # two integration jobs. See docs/development/COVERAGE.md.
+      # This is the DEFAULT-posture lane (server-execution v2: flag unset =
+      # the first-party default, OFF while Phase 7 is landed dark;
+      # testing.md §2) — the regression guard for today's behavior; the
+      # explicit-`true` ON arm is the `-server-execution-on` lane below. The
+      # probe pins that this lane really is OFF (server not serving, shell
+      # define unset), so a silent flip of the default cannot move the
+      # REQUIRED lanes onto the ON posture unnoticed.
+      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
+        timeout-minutes: *posture-probe-timeout
+        run: |
+          META=$(curl -fsS "http://localhost:8000/api/meta")
+          STATS=$(curl -fsS "http://localhost:8000/api/health/stats")
+          echo "$META"
+          echo "$META" | jq -e '.shellServerExecutionDefine == null' > /dev/null || {
+            echo "::error::binary-toolshed carries a shell built with an explicit EXPERIMENTAL_SERVER_EXECUTION define; the default lane must run the default-built shell"
+            exit 1
+          }
+          echo "$STATS" | jq -e '.servingLoop == null' > /dev/null || {
+            echo "::error::the toolshed started the serving loop in the DEFAULT lane; the first-party default is OFF (Phase 7 landed dark) — flip the CI lane roles with the flip PR, never silently"
+            exit 1
+          }
+
       - name: 🧩 Run end-to-end patterns integration tests
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
@@ -1100,6 +1323,137 @@ jobs:
           shard: ${{ matrix.shard }}/${{ matrix.total }}
           junit: >-
             kind=integration,scope=patterns,prefix=packages/patterns,glob=test-results/patterns-${{ matrix.shard }}.xml
+  # The server-execution v2 ON arm of the end-to-end pattern suite
+  # (docs/specs/server-side-execution/testing.md §2): the same shards,
+  # byte-identical workloads, with EXPERIMENTAL_SERVER_EXECUTION=true on the
+  # toolshed server, on the test processes, AND baked into the binary's
+  # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
+  # probe below before the shard runs. Skips happen only through the explicit
+  # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
+  # step — never by silent filtering (three `patterns` entries today, all
+  # `phase-7`, each with its loud reason; the flip PR needs the list EMPTY).
+  # No coverage collection and no cache save-back: the default lane owns
+  # both; the compile byte cache is restored read-only (compiled bytes do not
+  # depend on the flag).
+  pattern-integration-test-server-execution-on:
+    name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: *job-timeout
+    needs: ["build-toolshed-on"]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        total: [10]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # Read-only seed from the default lane's compile byte cache (same key
+      # family): compiled module bytes are a function of sources, not of the
+      # runtime flag, so reuse is sound; only the default lane saves. The key
+      # mirrors the default lane's, including the total shard count and
+      # selector source, so the seed follows its shard topology.
+      - name: ♻️ Restore compile byte cache (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts') }}
+          restore-keys: |
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-
+
+      - name: 📥 Download toolshed binary (ON-arm shell)
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-toolshed-on
+          path: common-binaries
+
+      - name: 🔌 Start Toolshed server for testing (flag ON)
+        run: |
+          chmod +x ./common-binaries/toolshed
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          ./common-binaries/toolshed \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
+
+      # The posture the binary ACTUALLY carries (see the package ON lane).
+      - name: ✅ Verify the server-execution posture (server ON, shell ON-built)
+        timeout-minutes: *posture-probe-timeout
+        run: |
+          META=$(curl -fsS "http://localhost:8000/api/meta")
+          STATS=$(curl -fsS "http://localhost:8000/api/health/stats")
+          echo "$META"
+          echo "$META" | jq -e '.shellServerExecutionDefine == "true"' > /dev/null || {
+            echo "::error::binary-toolshed-on does not carry an ON-built shell (EXPERIMENTAL_SERVER_EXECUTION=true must reach tasks/build-binaries.ts and the shell build); the ON lane would run a MIXED posture"
+            exit 1
+          }
+          echo "$STATS" | jq -e '.servingLoop != null' > /dev/null || {
+            echo "::error::the toolshed did not start the serving loop under EXPERIMENTAL_SERVER_EXECUTION=true; the ON lane's server posture is OFF"
+            exit 1
+          }
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
+
+      - name: 🧩 Run end-to-end patterns integration tests (flag ON)
+        timeout-minutes: *work-timeout
+        working-directory: packages/patterns
+        run: |
+          mapfile -t SHARD_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' "${SHARD_FILES[@]}"
+          # The explicit ON-arm skip list, applied by FILTERING this shard's
+          # file list (the script prints every skip, and which of them it
+          # dropped from THIS list, on stderr): `deno test --ignore` binds
+          # only to files deno discovers itself and silently ignores nothing
+          # when the files arrive as explicit arguments, as they do here.
+          # Command substitution (not a process substitution) so a validation
+          # failure in the script fails this step under `bash -e` instead of
+          # reading as an empty list.
+          FILTERED_FILES=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
+          if [ -z "$FILTERED_FILES" ]; then
+            echo "Every file of this shard is skip-listed for the ON arm; nothing to run."
+            exit 0
+          fi
+          mapfile -t TEST_FILES <<< "$FILTERED_FILES"
+          mkdir -p ../../test-results
+          # --no-check: the Check job type-checks packages/patterns/integration
+          # (tasks/check.sh).
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          EXPERIMENTAL_SERVER_EXECUTION=true \
+          PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
+          CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
+          deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+            --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
+            "${TEST_FILES[@]}"
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-timing-pattern-integration-server-execution-on-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
@@ -1135,8 +1489,6 @@ jobs:
         run: |
           mkdir -p test-results
           HEADLESS=1 \
-          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
-          CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
           CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-reload" \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
           deno task integration --junit-dir=test-results patterns-reload
@@ -1360,12 +1712,15 @@ jobs:
       - test
       - runner-test
       - build-toolshed
+      - build-toolshed-on
       - build-bg-piece-service
       - build-cf
       - generated-patterns-integration-test
       - package-integration-test
+      - package-integration-test-server-execution-on
       - cli-integration-test
       - pattern-integration-test
+      - pattern-integration-test-server-execution-on
       - pattern-reload-integration-test
       - pattern-unit-test
       - coverage-check

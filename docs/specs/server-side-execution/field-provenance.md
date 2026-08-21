@@ -3,11 +3,11 @@
 **Verification instrument, NON-NORMATIVE** — the second of the pair
 (see [scenario-traces.md](scenario-traces.md), which owns the
 shared execution protocol). Traces evaluate the spec top-down along
-twelve hand-picked journeys; this audit is the bottom-up
+thirteen hand-picked journeys; this audit is the bottom-up
 complement: for each load-bearing FIELD, enumerate every producer,
 every carrier hop, every consumer, and every retirement, and check
 that the chain CLOSES on every path family — mechanically, over
-all paths, not twelve samples.
+all paths, not thirteen samples.
 
 Origin (2026-08-03): every heavyweight defect of the review week
 was one shape — *a value needed downstream, destroyed or dropped
@@ -211,7 +211,14 @@ FP1 and FP2 are the heavyweights.
   label basis, carried on the outbox entry with the identity
   carriage — an external result inherits its request's
   confidentiality, never default-unlabeled (serving-loop §4;
-  protocol §7).
+  protocol §7). RULED 2026-08-05, the basis is STRUCTURAL, not a
+  frozen snapshot: the completion's writeback transaction re-reads
+  the request inputs, so the labels derive from the basis AS IT
+  STANDS at writeback — a tightening mid-flight yields the stricter
+  label (conservative), a loosening matches today's OFF-arm
+  write-time derivation exactly, and a frozen at-seal snapshot is
+  REJECTED because it would write stale labels over a re-labeled
+  basis.
 - **FP7 — `capabilityRef` origin (B).** Grant minting/acquisition
   is never stated. If it is the existing capability system,
   deliberately not re-litigated, say so the way the ACL rows say
@@ -224,8 +231,10 @@ FP1 and FP2 are the heavyweights.
 - **FP9 — `sessionId` minting (F).** Who generates it (client or
   server), with what uniqueness guarantee — now that LT2 makes the
   same value a trusted identity component in EVERY space?
-- **FP10 — session TTL × durable offline queue (F).** The queue
-  survives a reload (LT9); the session retires by TTL. A client
+- **FP10 — session TTL × offline queue (F).** *(Re-tensed 2026-08-15:
+  the queue is process-lifetime — LT9 re-ruled — so the reload half of
+  this question is moot; the TTL half stands for a live client that
+  reconnects after TTL with queued actions.)* A client
   reconnecting after TTL with queued actions: discharge fails?
   re-authenticate under a fresh session first (whose keys then
   differ)? TTL suspended while actions are queued?
@@ -234,6 +243,10 @@ FP1 and FP2 are the heavyweights.
   nonce field, yet three passages say "reconcile by nonce")? Is
   `ackedNonce` a scalar or a set, and what happens on a stale ack
   naming an already-retired entry (candidate: defined no-op)?
+  (Ack half CLOSED 2026-08-13, RULED: a per-nonce map —
+  `acks[nonce] = true` — and a stale ack IS the defined no-op,
+  pruned by retirement as hygiene; protocol §5. The
+  enacted-nonce-record home stays open.)
 - **FP12 — dead fields (E+F).** `issuedIn` (written, pushed, never
   read) and overlay `baseSeq` (recorded, never read): name the
   intended consumer of each, or drop them from the shapes.

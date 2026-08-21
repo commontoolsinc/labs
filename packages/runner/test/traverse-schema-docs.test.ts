@@ -32,6 +32,14 @@ import { resolveSchema } from "../src/schema.ts";
 const type = "application/json" as const;
 const space = "did:null:null";
 
+// The traversal context's scope-key identity (the train's instance keying):
+// schema-doc tests run space-scoped, so any fixed identity resolves the
+// "space" scope to the space partition.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:key:test-schema-docs",
+  sessionId: "session:test-schema-docs",
+} as const;
+
 const putDoc = (
   store: Map<string, Revision<State>>,
   id: string,
@@ -66,7 +74,7 @@ const traverse = (
   const tx = new ExtendedStorageTransaction(
     new ManagedStorageTransaction(manager),
   );
-  const context = createDefaultTraversalContext();
+  const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
   const traverser = new SchemaObjectTraverser(
     tx,
     { path: ["value"], schema: selectorSchema },
@@ -282,7 +290,7 @@ describe("traverse-schema-docs", () => {
     const tx = new ExtendedStorageTransaction(
       new ManagedStorageTransaction(manager),
     );
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     for (const hash of decomposed.documents.keys()) {
       context.schemaDocsAvailable.add(`did:key:elsewhere/${hash}`);
     }
@@ -313,7 +321,7 @@ describe("traverse-schema-docs", () => {
     const tx = new ExtendedStorageTransaction(
       new ManagedStorageTransaction(manager),
     );
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const traverser = new SchemaObjectTraverser(
       tx,
       { path: ["value"], schema: { $ref: decomposed.rootRef } },

@@ -27,7 +27,6 @@ export interface WorkerOptions {
   timeoutMs?: number;
   experimental?: {
     modernCellRep?: boolean;
-    persistentSchedulerState?: boolean;
   };
 }
 
