@@ -38,12 +38,6 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * A source backed by a `SharedArrayBuffer` is likewise copied, that being a
  * buffer which cannot be detached at all.
  *
- * An `ArrayBuffer` holding a detach key -- `WebAssembly.Memory`'s is the one
- * in reach -- also cannot be detached, and does not get that copy: the key is
- * a spec-internal slot, leaving such a buffer indistinguishable from a plain
- * one by every readable property, so ceding one reaches `transfer()` and
- * surfaces that method's `TypeError`.
- *
  * A caller passing `true` must therefore treat `bytes` as consumed either way,
  * since it cannot tell which of the two happened. Passing an already-detached
  * `bytes` throws, as reading it would.
@@ -57,6 +51,11 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * Both paths give it: the copy allocates a buffer of the needed size, and the
  * take-over path is entered only for a `bytes` that already covered its whole
  * buffer.
+ *
+ * **Note**: Some `ArrayBuffer`s are not transferable but do not expose a way
+ * to detect that fact (notably the buffer associated with a
+ * `WebAssembly.Memory`). This function will `throw` when asked to cede one of
+ * these.
  *
  * @param bytes - The source bytes, as a view or as a whole buffer.
  * @param transfer - Whether the caller cedes `bytes`.
