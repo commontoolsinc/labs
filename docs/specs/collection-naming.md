@@ -242,17 +242,18 @@ Anyone can now reach member 42 as `topics-dev/top/42`, with no setup of their
 own. Written as a citation, fully qualified, that is `#@topics-dev/top/42`.
 
 A person who works with that board every day binds a name to it in their own
-home space — the same operation, in the space that is theirs:
+home space. That binding is a slug like any other, but its target lives in
+another space, and an entity id does not carry the space it belongs to:
+`setPieceSlug` (`packages/cli/lib/piece.ts`) builds its target in the space it
+was given, so this binding needs the cross-space target that step 2 of the road
+below adds. The resolver is already ready for it — a slug's redirect is followed
+into the space the target link names.
 
-```text
-cf piece set-slug --space <my-home> top fid1:<board>
-```
-
-They can now write `#top/42`, because `top` resolves at their own rung of the
-chain. Someone who bound it as `work` writes `#work/42` and reaches the same
-member. Neither has to agree with the other, and neither has to agree with the
-board's own name for itself, because what gets stored is canonical and what gets
-displayed is computed per reader.
+Once that binding exists, they write `#top/42`, because `top` resolves at their
+own rung of the chain. Someone who bound it as `work` writes `#work/42` and
+reaches the same member. Neither has to agree with the other, and neither has to
+agree with the board's own name for itself, because what gets stored is
+canonical and what gets displayed is computed per reader.
 
 Reading through the board itself, the same member is `#42`: the containing
 collection is the innermost rung, and it needs no name at all.
@@ -478,6 +479,14 @@ already bound, and take an explicit flag to steal. `editWithRetry` re-runs its
 body on a retryable rejection, so the check is a claim rather than a
 time-of-check race. Confirm that a synced read inside the transaction becomes a
 commit precondition before relying on it.
+
+The same write path needs a **cross-space target**, which personal bindings
+depend on entirely: a binding lives in the reader's home space and points at a
+collection in someone else's. `setPieceSlug` builds its target cell in the space
+it was configured with and drops the space an LLM-friendly reference carries, so
+a target outside that space cannot be written today. Resolution already handles
+it, following a slug's redirect into the space its target link names, so this is
+a writer gap rather than a model gap.
 
 **3. Give collections member namespaces.** A collection declares its prefix, its
 name policy, and forward and reverse resolutions. Whatever allocator it needs is
