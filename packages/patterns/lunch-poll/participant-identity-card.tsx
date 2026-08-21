@@ -115,9 +115,12 @@ const claimHost = handler<ClaimHostEvent, {
   users: ParticipantIdentityUsersCell;
   host: HostCell | undefined;
   profile: LunchProfileCell | undefined;
-  profileName: string;
-}>((_event, { users, host, profile, profileName }) => {
-  if (!trimmedName(profileName) || !profile || host === undefined) return;
+}>((_event, { users, host, profile }) => {
+  // No display-name gate here, unlike `joinAs`. That gate exists because a
+  // JOIN has nothing else to prove a profile resolved; a takeover has the
+  // roster, and a participant whose name is momentarily unresolved is still
+  // the participant their stored entry names by cell.
+  if (!profile || host === undefined) return;
   // Terminal cell for storage, and it must READ as present — both per the
   // joinAs comments (a truthy handle is not an identity).
   const identity = profile.resolveAsCell();
@@ -208,7 +211,7 @@ export default pattern<
       profileAvatar,
       joinMessage,
     });
-    const boundClaimHost = claimHost({ users, host, profile, profileName });
+    const boundClaimHost = claimHost({ users, host, profile });
 
     // Identity is derived, never stored per-user: compare the viewer's profile
     // cell against the roster. `equals()` follows links to the end, and a

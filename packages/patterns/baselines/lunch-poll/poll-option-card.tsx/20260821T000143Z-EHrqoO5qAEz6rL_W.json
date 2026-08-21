@@ -185,7 +185,6 @@
         "description": "Parent-owned admin stream persisting this option's generated art."
       },
       "viewerProfile": {
-        "$comment": "Conflicting docs across declarations; using first",
         "$ref": "#/$defs/LunchProfile",
         "asCell": [
           "cell"

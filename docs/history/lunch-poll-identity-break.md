@@ -43,7 +43,13 @@ the identity to read as present — and the new display field (`loggedByName`)
 carries a default. A piece holding name-keyed rows updates in place: legacy
 rows become display ghosts (they match no viewer, tally anonymously, and
 their people re-join with profiles as themselves). The Tier 2 state gate
-passes with no accepted-drop entries.
+passes with two accepted-drop entries, recorded in
+`tasks/pattern-vintage-accepted-drops.ts`: a name-keyed vintage's capture user
+matches no profile, so the name-derived membership surface (`adminName`,
+`myName`, the joined-ness they anchored, and each stored vote's `voterName`)
+does not survive on purpose, and the current-day vote views (`todaysVotes`,
+`todayVoteCount`) additionally empty because a pinned vintage is replayed long
+after its capture day. The stored votes themselves survive whole.
 
 ## Disposition of deployed pieces
 
