@@ -136,7 +136,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and two STEP entries (cellset-lww's own-write race, convergence-storm's storm step) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ONE STEP entry (convergence-storm's storm step — cellset-lww's own-write-race step LIFTED with OW47's close, the optimize pass) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
@@ -174,11 +174,16 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   }
   assertMatch(
     report,
-    /patterns: SKIP-STEP integration\/cellset-lww\.test\.ts :: end-to-end: a typed name survives the own-write race through save \(until phase-7; the rest of the file runs\)/,
-  );
-  assertMatch(
-    report,
     /patterns: SKIP-STEP integration\/convergence-storm\.test\.ts :: a non-writing session sees every concurrently-posted message \(until phase-7; the rest of the file runs\)/,
+  );
+  // The cellset-lww own-write-race step is LIFTED (verification-coverage.md
+  // OW47 closed, the optimize pass): no entry, so the step RUNS on the ON
+  // arm — the lift's CI evidence.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
+      skip.file === "integration/cellset-lww.test.ts"
+    ),
+    false,
   );
   // The two-browser gates RUN in the ON arm: cfc-group-chat-two-browsers
   // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
@@ -216,7 +221,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
-  assertEquals(gateEntries.length, 8);
+  assertEquals(gateEntries.length, 7);
   for (const entry of gateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
@@ -230,7 +235,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   // files name the steps and call the guard).
   const steps = gateEntries.filter((skip) => skip.step !== undefined);
   assertEquals(steps.map((skip) => skip.file), [
-    "integration/cellset-lww.test.ts",
     "integration/convergence-storm.test.ts",
   ]);
   for (const entry of steps) {
@@ -239,7 +243,8 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
       entry,
     );
   }
-  // Step entries never drop their file from the shard's explicit list.
+  // Step entries never drop their file from the shard's explicit list
+  // (and a lifted file passes through untouched).
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
@@ -249,7 +254,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "./integration/convergence-storm.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 9);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 8);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
