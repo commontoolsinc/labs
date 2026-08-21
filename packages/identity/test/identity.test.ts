@@ -1,4 +1,6 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
+
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
@@ -119,6 +121,24 @@ Deno.test("a native signer's key pair cannot be used to reach it", async () => {
   const record = keyPair.cryptoKeyPair;
   record.privateKey = record.publicKey;
   assertEquals(keyPair.cryptoKeyPair.privateKey, keyPair.privateCryptoKey);
+});
+
+Deno.test("fromKeyPair refuses a pair for another algorithm", async () => {
+  // A pair holding material says which algorithm it is for and is otherwise
+  // indistinguishable from an ed25519 one, both keys being 32 bytes.
+  const seed = new Uint8Array(32).fill(7);
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  const wrong = new FabricKeyPair(
+    "X25519",
+    identity.keyPair.publicKeyBytes,
+    identity.keyPair.privateKeyBytes,
+  );
+
+  await assertRejects(
+    () => Identity.fromKeyPair(wrong),
+    Error,
+    "X25519",
+  );
 });
 
 Deno.test("a signer copies the key material it is constructed from", async () => {
