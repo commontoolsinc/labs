@@ -157,6 +157,17 @@ deno task test-records-key uninstall
 removes what setup put there — the key file, the delivery identity, the
 export it added, and the entry in each harness's configuration —
 leaving any line or value a person set themselves alone.
+
+Both commands write a profile the way a profile should be written. A
+profile that is a symbolic link, which is what a dotfiles repository
+leaves behind, is followed: the link stays a link and the file it points
+at is what changes. A file's permissions carry over, so one kept
+readable only by its owner comes back that way, and a file either of
+them creates is readable only by its owner. Each replacement happens in
+one step, because a shell startup file left half written is a shell that
+will not start. And a file whose state cannot be read — permissions
+withdrawn, a directory closed off — is reported and left alone rather
+than guessed at.
 Records that were spooled and never shipped stay where they are, since a
 later key ships them; the command says where they sit and what removing
 them would throw away.
