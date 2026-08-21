@@ -1184,9 +1184,9 @@ export class FabricBytes extends FabricPrimitive {
 
 Unlike the previous `FabricUint8Array` (which was a `FabricInstance` wrapping
 `Uint8Array` via `FabricNativeWrapper`), `FabricBytes` is a `FabricPrimitive`.
-It does not implement the `FabricInstance` members; like every fabric
-primitive, it hosts its own `[JSON_CODEC]` (tag `Bytes@1`), the same shape as
-`FabricEpochNsec` and `FabricEpochDay`. The hashing system uses the
+It does not implement the `FabricInstance` members; like every
+`FabricPrimitive`, it hosts its own `[JSON_CODEC]` (tag `Bytes@1`), the same
+shape as `FabricEpochNsec` and `FabricEpochDay`. The hashing system uses the
 dedicated `TAG_BYTES` primitive tag (Section 6.3).
 
 #### 1.4.11 `FabricKeyPair`
@@ -1792,15 +1792,15 @@ codec is the **single source of truth** for how instances of that class are
 encoded; nothing about encoding lives on the instances themselves.
 
 `Encoded` is the domain a codec's essential state lives in, and it divides
-codecs into two kinds. A **nonterminal** codec's state is made of fabric
-values, which the walker goes on to expand in turn; the sense is the one formal
-grammars give the word, a state that is not yet an answer. A **terminal**
+codecs into two kinds. A **nonterminal** codec's state is made of
+`FabricValue`s, which the walker goes on to expand in turn; the sense is the one
+formal grammars give the word, a state that is not yet an answer. A **terminal**
 codec's state is already in one wire format's own domain, and the walker passes
 it through. `FabricError` is the clearest nonterminal case — its state carries
 `cause` and every extra entry, so it can hold arbitrary nested values, and only
-the walker can know what to do with them. `FabricBytes` is the clearest
-terminal one: JSON's codec produces a base64url string, where a format carrying
-bytes natively wants the bytes themselves.
+the walker can know what to do with them. `FabricBytes` is the clearest terminal
+one: JSON's codec produces a base64url string, where a format carrying bytes
+natively wants the bytes themselves.
 
 Which kind a codec is cannot be read off its signature, because the domains
 overlap — an all-string record satisfies `FabricValue` and JSON's value type
