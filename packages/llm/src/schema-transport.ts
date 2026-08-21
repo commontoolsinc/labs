@@ -11,7 +11,7 @@ import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
  * provider: the request is sent as ordinary JSON (`JSON.stringify`), so any
  * value it carries that plain JSON cannot represent faithfully reaches the
  * provider altered, dropped, or not at all -- or crashes the serialization.
- * The Common Fabric value model is a superset of JSON, so a generated schema
+ * The `FabricValue` model is a superset of JSON, so a generated schema
  * (a `generateObject` schema, or a tool's `inputSchema`) may legitimately hold
  * values JSON cannot carry. Those are fine internally. Crossing to a provider,
  * they are not. The generic detection of JSON-unfaithful values lives in
@@ -32,7 +32,7 @@ export function assertJsonTransportSafe(value: unknown, label: string): void {
   throw new Error(
     `${label} holds ${problems.length} value(s) that ordinary JSON ` +
       `serialization would not carry faithfully:\n${lines.join("\n")}\n` +
-      `These are valid Common Fabric values, but the request reaches the ` +
+      `These are valid \`FabricValue\`s, but the request reaches the ` +
       `provider as ordinary JSON. Remove or replace the value(s) above.`,
   );
 }

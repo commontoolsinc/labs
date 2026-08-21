@@ -293,7 +293,7 @@ export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 // callable `then` is adopted by promise resolution, and a layer that answers a
 // property with a function can make a data key callable -- which is why the
 // value proxies in `runner` guard the name. But JSON Schema uses `if` / `then`
-// / `else`, and this system's schemas are themselves fabric values, so
+// / `else`, and this system's schemas are themselves `FabricValue`s, so
 // reserving the name would stop an ordinary schema being one. The hazard is
 // real and is handled where a property becomes callable, not here.
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);

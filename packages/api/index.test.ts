@@ -19,7 +19,7 @@ Deno.test("api module loads and re-exports the CFC canonical alias names", () =>
   }
 });
 
-Deno.test("isFabricPrimitiveSchemaType accepts exactly the fabric-primitive vocabulary", () => {
+Deno.test("isFabricPrimitiveSchemaType accepts exactly the `FabricPrimitive` vocabulary", () => {
   expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBeGreaterThan(0);
   for (const name of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
     expect(isFabricPrimitiveSchemaType(name)).toBe(true);
