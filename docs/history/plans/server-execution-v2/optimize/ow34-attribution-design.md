@@ -448,3 +448,266 @@ client-process-local trust attestation server-side at the
 injected-keys trust level; resolving the current-principal placeholder
 against the carried actor is the same move on the label plane, with the
 same explicitly-ruled footing to cite (LT5, owner 2026-08-03).
+
+## 5. Replay / idempotency × (α)
+
+The invariant, stated once: **a served run's trust snapshot is a pure
+function of the run's DURABLE inputs — the stream entry's server-stamped
+`firedAt` for a handler, the demanded instance identity for a derivation,
+the delegated carriage for a sanctioned bookkeeping crossing — never of
+process-ambient state.** Everything else follows:
+
+- A re-drain of the same event (the wave IS the retry cadence; kill/replay
+  included) resolves the same `firedAt.user` from the same durable entry,
+  mints the same snapshot, and `derivePersistedLabel` — deterministic in
+  (schema, snapshot, source labels) — produces byte-identical `["cfc"]`
+  atoms. The re-applied labelMap write is a CAS no-op against an identical
+  prior application, exactly like the consequence writes it rides with.
+  This composes with (α) untouched: exactly-once is keyed by `eventId` at
+  admission and by the consequenced mark in the run's own tx
+  (`ServerRunInfo.streamEntry`); labels are CONTENT of the consequence,
+  not part of its identity.
+- Labels do NOT enter any consequence's IDENTITY: doc ids are
+  creation-derived (CT-1650), never content hashes; the prepared digest
+  binds the snapshot but is tx-local and unpersisted (§3). So per-run
+  snapshots cannot fork replay identity. What they CAN change is doc
+  CONTENT across a VERSION boundary — a store written pre-fix (service
+  atoms) re-derived post-fix (user atoms) is a value change, which is §6's
+  migration question, not a replay hazard.
+- The one ordering fact worth restating (from 1d): retries re-mint the tx
+  and re-stamp (both scheduler choke points and the `editWithRetry`
+  writeback loops stamp inside the retried fn), so no retry can carry a
+  stale snapshot from a previous attempt's tx.
+- Today's behavior, for honesty: the SERVICE snapshot is also
+  replay-deterministic (a constant is pure too). The purity invariant is
+  not what FIXES the bug; it is what the fix must PRESERVE while changing
+  which durable input the snapshot is a function of.
+
+## 6. OFF-invisibility + migration
+
+**OFF is byte-identical by construction.** The entire change sits behind
+the stamper, which exists only where a wave seal destination is installed —
+a serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` (runtime.ts:
+1991-2033; `stampServerRun` is one undefined check on the OFF arm,
+runtime.ts:2091-2104). Clients — OFF and ON alike — keep the ambient
+provider, which on a client IS the user: no client path changes. The §9
+acceptance carries the per-site OFF-neutrality pin in the
+`storage-instance-keying` style.
+
+**Migration: none owed; fresh stores are the ruling posture's own
+evidence.** Production runs the flag OFF and holds no service-labeled rows
+(the #6173/OW45 correction: the broken spaces lived in ephemeral test
+stores). The ON lanes and local ON repros run fresh stores per run. So
+existing service-labeled rows exist only in disposable test stores, and
+the disposition is **ignore (fresh stores)** — no relabel pass, no
+tolerate-both verifier arm. Two consequences stated so nobody builds them
+by reflex: (i) do NOT teach `cf-cfc-authorship` to accept service-authored
+rows "for compatibility" — that is §4(c)'s collapse through the back door;
+(ii) a long-lived ON dogfood store that predates the fix, should one
+exist, is re-created rather than migrated (its labels are wrong about
+authorship; keeping them wrong-but-tolerated has negative value). If the
+owner later wants heal-on-rewrite (a served re-derivation naturally
+replaces the label on the next overwrite of each row), that falls out of
+the mechanism for free for rows that get rewritten, and is NOT a
+completeness claim for rows that never do.
+
+## 7. Scope discipline — the flip needs exactly the group-chat lift
+
+In scope: the serving runtime's per-run trust snapshot (option A), label
+semantics (a), the pins of §9, one binding spec sentence + the SC entry
+(Q4), the skip-entry lift, and the register re-tense. Everything below is
+NAMED OUT, with its home:
+
+- **OW53 — the sqlite identity pair.** The db-owner mint and
+  clearance-reader keying read the RUNTIME provider directly (1c). This
+  design's tx-attached snapshot is the substrate a fix would re-point them
+  at (`tx.getCfcState().trustSnapshot` instead of
+  `runtime.trustSnapshotProvider()`), but WHO owns a db handle under
+  served execution is an identity-model decision that row already owns.
+  Untouched here; both sqlite ON skips stay.
+- **llm-dialog's provider read** (llm-dialog.ts:2371) — same shape, same
+  disposition: named, untouched.
+- **OW13 / FLAG-7 — per-demander read isolation and grant resolution.**
+  The session-level acting-as-owner READ binding stays as OW31 built it;
+  nothing here touches the memory plane. FLAG-7's attributed-ambient-
+  authority tightening remains future.
+- **The space-scoped-derivation trust-closure narrowing** (1b structural
+  note's cousin): under per-run snapshots, an actor-less derivation
+  evaluates concept floors with no acting principal (deployment-root
+  delegations only), where the OFF client evaluated them under its owner.
+  Unobservable today — serving runtimes configure no trust config (1a), so
+  `conceptSatisfied` is uniformly false there — recorded as a stated
+  consequence for whenever a deployment first configures serving-side
+  trust, not solved here.
+- **Label option (b) — the served-provenance mark** and option C's
+  delegation-aware snapshot field: future, on product need, with its own
+  spec sentence (§4b).
+- **OW49** (divergent-anyOf at /result) — the OTHER CFC-owner seam in this
+  phase; separate blocker for `profile-embed`, zero mechanism overlap
+  (schema-merge, not trust), separate ruling.
+- **OW54/OW56 and the events seal path** — untouched (1g).
+
+## 8. The recommended design, in one piece
+
+1. **Mechanism.** `Runtime` gains
+   `trustSnapshotForPrincipal(principal): TrustSnapshot` — `{ id:
+   "principal:<did>", actingPrincipal: <did>, revision: <the runtime's
+   trust revision> }` — and the constructor's default provider is
+   refactored onto the same revision composition (one site folds the
+   config digest). The SpaceServer's `#stampRun` attaches a per-run
+   snapshot via `tx.setCfcTrustSnapshot(...)` using its existing identity
+   precedence: `delegated.acting.user`, else `info.acting.user`, else a
+   demanded derivation's `scopeKeyIdentity.principal` (Q2), else it leaves
+   the ambient snapshot in place (Q3). No other file's behavior changes;
+   prepare.ts is untouched.
+2. **Semantics.** Label option (a): a served run's current-principal
+   mints name the acting user, indistinguishable from the client-authored
+   row — the memory plane's carried actor and the label plane's resolved
+   subject are the same principal on the same commit.
+3. **Invariants, as testable pins.**
+   - **INV-A (OFF-equivalence of the mint):** the `["cfc"]` labels a
+     served handler run persists are byte-identical to those the same
+     handler run mints on the acting user's own client. (Pinned as §9-1's
+     equality against a client-runtime control.)
+   - **INV-B (purity/replay):** the served snapshot is a pure function of
+     the run's durable inputs; an idempotent re-dispatch mints
+     byte-identical labels. (§9-3.)
+   - **INV-C (one snapshot per tx):** set at most once, after `edit()`,
+     before the run's first read; prepare and the commit-time recheck see
+     the same value; the `trust-snapshot-changed` invalidation stays as
+     the tripwire and never fires on the sanctioned path. (§9-2.)
+   - **INV-D (no service-authored labels under ON):** no durable `["cfc"]`
+     labelMap entry carries an authored-by / represents-principal atom
+     whose subject is the service DID. (§9-6's store-dump audit.)
+   - **INV-E (forge-resistance unchanged):** literal-DID current-principal
+     claims stay rejected; the only path to a user-named label remains a
+     run actually carrying that user's acting identity. (Existing pins +
+     §9-1's negative arm.)
+   - **INV-F (OFF byte-identity):** flag OFF, no site changes behavior.
+     (§9-5.)
+   - **INV-G (revision covers config, per-run included):** a trust-config
+     change invalidates served runs' prepared digests exactly as it does
+     client ones — the helper composes the same revision. (Unit pin on the
+     helper.)
+
+## 9. Acceptance criteria
+
+1. **Red-first executor pin (the FLAG-5 shape as a failing assert).** In
+   the runner executor family (real SpaceServer + live wave, the
+   OW31-pin style): a served event-handler run whose written docs carry
+   `AuthoredByCurrentUser` / `RepresentsCurrentUser` schemas persists
+   labelMap atoms whose subject is the entry's `firedAt.user` — WATCHED
+   RED at base, where the subject is the service DID (the rootcause §2a
+   store shape). Negative arm: a payload-smuggled literal-DID claim still
+   refuses (INV-E).
+2. **Per-wave multi-principal pin.** Two handler runs for two users in one
+   wave: each run's docs carry that run's user; both prepared digests
+   recheck clean at commit (INV-C; no cross-run contamination, no
+   `cfc-prepared-digest-mismatch`).
+3. **Replay pin.** Re-dispatch of the same durable entry (the existing (α)
+   idempotency harness) mints byte-identical labels (INV-B).
+4. **Delegated-writeback pin.** An S-A carriage bookkeeping writeback tx
+   carries the delegated acting's snapshot; a carriage-less foreign
+   writeback stays refused exactly as OW31 pinned it (unchanged).
+5. **OFF-arm neutrality.** Per-site OFF pins in the
+   `storage-instance-keying` style: no stamper ⇒ no snapshot call; client
+   ON speculation unchanged (INV-F).
+6. **The live lift (the skip entry's own condition).**
+   `integration/cfc-group-chat-demo.test.ts` greens under the true ON
+   topology (lane-shaped toolshed, fresh store), including both
+   authorship checks across the `shell.login` switch — and the ON-skip
+   entry is REMOVED in the same train (the flip needs the list EMPTY).
+   Store-dump audit on the run's store: zero authored-by /
+   represents-principal atoms naming the service DID (INV-D), the §2a
+   evidence query inverted.
+7. **No digest-keying regression.** The full runner executor + cross-space
+   + serving-loop + memory suites green; ON-lane toolshed logs carry no
+   new `cfc-prepared-digest-mismatch` / `trust-snapshot-changed`
+   occurrences in the gate runs.
+8. **OFF untouched at the suite level.** The default-posture lanes run
+   byte-identical (no reason text, snapshot shape, or label change
+   reachable OFF).
+
+## 10. Open questions for the owner (numbered; each with a recommendation)
+
+1. **Label semantics: (a) acting user only, or (b) acting user + a
+   served-provenance mark?** Recommendation: **(a)** for this lift. (b)
+   re-opens the client/durable label divergence the fix exists to close,
+   costs a new gated atom family, and duplicates an audit trail the memory
+   plane already records per-commit; if a product surface later needs
+   value-plane served-execution audit, option C's snapshot field is the
+   prepared extension point, with its own spec sentence then.
+2. **Does the derivation arm ship now?** Attaching the demanded
+   `scopeKeyIdentity.principal` to derivation-run snapshots is
+   behaviorally inert today (derivations cannot mint current-principal
+   labels — 1b's structural note; concept floors are inert on serving
+   runtimes — §7), but it is the OFF-faithful direction and the substrate
+   OW53 wants. Recommendation: **include it**, explicitly severable to
+   handlers+delegated-only if review surfaces a consumer I missed; the
+   eager-at-stamp principal knowingly diverges from the seal-settled
+   memory-plane attribution for runs that discover a broader scope, and
+   §8's design records that divergence as consequence-free for labels
+   (prepare precedes seal — 1d).
+3. **Actor-less stamped runs (plain bookkeeping, wave-fallback
+   derivations): keep the ambient service snapshot, or clear it to
+   undefined (fail-closed placeholder minting)?** Recommendation: **keep
+   the service snapshot** — zero behavior change for paths that today
+   work (structure loads, watermark, pattern-swap setup, factory-time
+   loads), aligned with protocol.md §1's "the SpaceServer's own writes";
+   the gated mint families are already unreachable from those paths
+   (uiContract requires a trusted event — 1b). The fail-closed
+   alternative is one line if the owner prefers the tighter posture and
+   accepts hunting any latent bookkeeping path that relied on snapshot
+   presence (writeAuthorizedBy's presence floor — 1c).
+4. **Spec home.** Recommendation: one binding sentence in
+   serving-loop.md §3c (where per-run CFC is already normative), shaped
+   like: *"The run's CFC trust snapshot carries the run's ACTING
+   principal — the event's server-stamped actor, the demanded instance's
+   principal, or the delegated carriage's actor — never the serving
+   runtime's ambient identity; a run with no acting principal keeps the
+   service snapshot and cannot mint current-principal claims."* Plus an
+   SC entry in `docs/specs/cfc-spec-changes.md` (next free number —
+   SC-38 at this writing) recording the served-execution reading of the
+   current-principal family, and the register re-tense (OW31 residual
+   (iii) → closed-by, the OW34-family note updated). The build lands
+   spec + code together per the standing rule.
+5. **The direct provider reads (sqlite, llm-dialog): re-point now or
+   leave to OW53?** Recommendation: **leave** — they are OW53's identity-
+   model decision (db ownership, clearance keying), not label attribution;
+   this design only guarantees the tx snapshot they would re-point at is
+   right. Re-pointing them here would smuggle an OW53 ruling in through a
+   label fix.
+6. **`TrustSnapshot.id` shape for served runs.** Recommendation:
+   `principal:<acting user>` — uniform with every client snapshot; `id`
+   is presence-checked and digest-bound but nothing branches on its text,
+   so uniformity beats a `served:` marker (which would be option (b)'s
+   distinction smuggled into a field nothing should read).
+7. **Register row for the build.** The residual currently lives inside
+   OW31's row (iii) with "OW34's family" as its name. Recommendation: the
+   implementation train mints its own row at the then-next free OW number
+   (OW56 is being taken by open #6173) titled "OW34-family: per-run CFC
+   trust attribution", carrying this document as the design of record,
+   and re-tenses OW31 (iii) + the group-chat skip reason to point at it;
+   this doc deliberately does not claim a number in advance.
+
+## Verification inventory (what was probed, what was not)
+
+| claim | how verified |
+|---|---|
+| snapshot default + edit() attach + single writer | code read: runtime.ts:1318-1326,1945; grep over src for `setCfcTrustSnapshot` (one production caller + the wrapper) |
+| serving runtimes get no provider/config | toolshed/lib/server-execution.ts:144-183 |
+| placeholder mint mechanics + gates + literal-DID rejection | prepare.ts:345-412, 2371-2469, 3881-3937 |
+| digest binds snapshot verbatim; no cross-tx digest state | ext-tx:1558, canonical.ts:437,499-500; prepare state on tx (ext-tx:1782-1795) |
+| per-tx snapshot override is a supported surface | profile-owner-cfc.test.ts:134-149,408-447 (public setter, exercised) |
+| stamp precedes first read at both choke points; retries re-stamp | scheduler/events.ts:1187-1268, scheduler/run.ts:508-542, pattern-manager.ts:2074-2098,2183-2200 |
+| mid-run snapshot consumer exists (forces pre-run seam) | writeCfcGrant, ext-tx:1354-1357 |
+| seal-time attribution settles AFTER prepare | wave.ts:898-989 (settle at 938) vs ext-tx commit path 2270-2387 |
+| verifier compares authored-by.subject vs represents-principal.subject | cf-cfc-authorship.ts:268-374,610-624,752-792; test waitForAuthorshipState |
+| two-browsers file asserts no authorship state (why it passes ON) | grep over cfc-group-chat-demo-two-browsers.test.ts |
+| service-DID labels on served rows (the defect) | NOT re-probed live in this pass — carried from rootcause §2a's store dump + first-on-ci-gate row 2, both same-day evidence; the §9-1 red-first pin re-establishes it at build time |
+| OW50 totality landed; adjacent open PRs disjoint | ext-tx:1710-1801; `gh pr list` + git log sweep 2026-08-21 |
+
+No scratch code probes were needed: every mechanism claim resolved by
+reading, and the one live claim (the store shape) has same-day archived
+evidence plus a red-first pin in the acceptance path. The worktree carries
+this document only.
