@@ -5598,6 +5598,32 @@ supply; OW29/OW32/OW34 closed):
       `docs/development/EXPERIMENTAL_OPTIONS.md` line claiming
       auto-update is "off server-side" is corrected in this PR;
       `serving-loop.md` §3e already stated it correctly.)
+  - **OW57 — the (α3)-family held-wave probe's gate race (a
+    PRE-EXISTING test flake in `executor-events-down.test.ts`, filed
+    2026-08-21 by the #6170 review's G1 so the constructed-depth
+    pin's PR is not blamed when the lane first flakes; renumbered
+    OW56 → OW57 pre-merge for the parallel-mint collision with the
+    durability train's #6173, which keeps OW56 for server-owned
+    program compilation).** The
+    "(α3) + a same-eventId SIBLING tx" step's held-wave construction
+    (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
+    probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
+    wave is still HELD (its "ping" entry not yet durable). The gate
+    engages at the settle's `inputSynced` barrier, and the
+    when-predicate flips only once a seal is visible through the
+    sealed overlay — so a commit whose settle pass checked the gate
+    BEFORE the predicate flipped can complete in that same cycle,
+    landing the ping before the probe: measured 2/15 full-suite reds
+    at #6170's head vs 0/10 on main's version (the pin inserted
+    ahead plausibly shifts timing into the window;
+    fresh-server-per-step rules out state coupling). An event-driven
+    closure is NOT cheap: an unconditional gate starves the drain
+    the step needs (the step's own comment), and holding reliably
+    means restructuring the construction to re-arm on a lost race.
+    Owed: the hardened construction (or an owner call to
+    accept-and-retry the step); until then a red of THIS step with
+    the ping already durable at the probe is this race, not a
+    product regression. No lift trigger (test-harness item).
 
 ## 4. Standing rule
 

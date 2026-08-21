@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "The sx2-events rapid-fire coalescing gate (derivedDelta < N) flake: both read claims from the danfuzz-side writeup VERIFIED (the append queue serializes arrivals, so the ratio is a load observation the test cannot control; derivedCommits is host-global). Per-space derivedCommitsBySpace landed as observability. Three dispositions evaluated; recommendation (owner ruling required): constructed-queue-depth pin in the runner suite + demote the sx2 ratio assert to the logged line."
+reason: "The sx2-events rapid-fire coalescing gate (derivedDelta < N) flake: both read claims from the danfuzz-side writeup VERIFIED (the append queue serializes arrivals, so the ratio is a load observation the test cannot control; derivedCommits is host-global). Per-space derivedCommitsBySpace landed as observability (#6158). RULED 2026-08-21 (owner: i like (3) as well) AND BUILT: constructed-queue-depth pin in the runner suite (exactly one consequence-carrying derived commit for K queued events; mutation-verified failable), sx2 ratio assert demoted to its log line, testing.md row 3 re-tensed. §4 carries the self-contained relay summary."
 ---
 
 # The sx2-events rapid-fire coalescing gate — verification and dispositions
@@ -103,7 +103,7 @@ host-global; per-space rows make that accounting possible against the
 shared lane toolshed. It does NOT fix the flake — claim 1's load-ratio
 sensitivity is untouched.
 
-## 3. The gate: three dispositions (owner ruling required)
+## 3. The gate: three dispositions (RULED 2026-08-21 — see the recommendation block)
 
 The bound is named in the Phase-3 acceptance criterion (testing.md §5
 row 3: "rapid-fire coalescing: N events fired faster than wave time
@@ -122,31 +122,105 @@ call. Evaluated:
    assert. Concurring with the writeup: it does not fix the flake.
 3. **Replace the raced ratio with a CONSTRUCTED-queue-depth pin —
    FEASIBLE, and the recommendation.** The runner suite already has
-   the exact lever: `executor-events-down.test.ts`'s
-   `GatedStorageManager` `syncGate`/`syncGateWhen` parks the serving
-   DRAIN at the sidecar-doc sync, deterministically, before any
-   entry's guard check (built for the seal→outcome-window pin). The
-   pin: park the drain, commit K=10 event appends (K durable entries
-   accumulate pending), release — the drain scans all K in one pass;
-   assert (i) K completed runs, one consequence naming each
-   (exactly-once, deterministic), and (ii) the K consequences land in
-   ≪K derived commits. The premise the current test races
-   ("faster than wave time") becomes CONSTRUCTED ("K entries queued
-   ahead of one drain"), so a red means batching is actually broken
-   (one commit per queued handler run — the v1 failure shape), never
-   that the server was fast. The criterion RE-TENSES instead of
-   retiring.
+   the levers: `executor-events-down.test.ts` can accumulate K
+   durable, unconsequenced entries AHEAD of any drain and then hand
+   them to the serving loop at once. (At evaluation time this text
+   cited the `GatedStorageManager` `syncGate` drain-park; the BUILD
+   below uses the suite's even simpler construction — fire K with NO
+   serving host, then bring the host up, the restart pin's
+   activation-scan shape — same constructed premise, fewer moving
+   parts.) The pin: K=10 events queued durably before dispatch, one
+   drain scans them all; assert (i) K completed runs, one consequence
+   naming each (exactly-once, deterministic), and (ii) the K
+   consequences land in ≪K derived commits. The premise the current
+   test races ("faster than wave time") becomes CONSTRUCTED
+   ("K entries queued ahead of one drain"), so a red means batching
+   is actually broken (one commit per queued handler run — the v1
+   failure shape), never that the server was fast. The criterion
+   RE-TENSES instead of retiring.
 
-**Recommendation (not decided here): (3) + (1)-at-the-sx2-surface.**
-Land the constructed-depth pin in the runner suite as the criterion's
-coalescing assert; demote sx2's `derivedDelta < N` to its already-
-present logged line (the browser-facing surface keeps processed ≥ N
-and the final-only value as its asserts). With §2 landed, the sx2 log
-can also scope its reported delta to the test's own space. The
-testing.md row change ships only after the ruling; the replacement
-pin can be prepared on a branch meanwhile.
+**Recommendation: (3) + (1)-at-the-sx2-surface — RULED AND BUILT
+(2026-08-21).** The owner, on these dispositions:
 
-Status here: claims verified, §2 landed, dispositions written. The
-option-3 pin is NOT built in this pass (the OW51 investigation is the
-queue's remaining mandated item); its feasibility evidence is the
-existing gate machinery cited above.
+> i like (3) as well
+
+— owner (Berni), 2026-08-21. Built in the same pass:
+
+- **The constructed-queue-depth pin** (runner suite,
+  `packages/runner/test/executor-events-down.test.ts`, the
+  "rapid-fire coalescing under CONSTRUCTED queue depth" step): K=10
+  events fired with NO serving host (each append commits durably;
+  nothing processes them), then the host comes up with a flush
+  deadline far above the batch's work and an authored poke activates
+  the space — the activation reprocess scan (serving-loop.md §6 step
+  4) finds all K pending at once. (§3's disposition cited the
+  syncGate drain-park lever; the build uses the even simpler
+  no-host/activation-scan construction — the same constructed
+  premise, fewer moving parts, and the shape the restart pin already
+  proves deterministic.) Asserts, all deterministic and
+  load-independent: K completed runs (the non-idempotent value
+  reaches exactly K, and never overshoots), each eventId consequenced
+  by exactly one derived commit, and **exactly ONE
+  consequence-carrying derived commit for the whole batch** — the
+  premise the live surface could only race is CONSTRUCTED, so a red
+  means batching is actually broken. Failability mutation-checked:
+  with the flush deadline mutated to 1 ms (every cycle cuts — the
+  per-run-commit shape the criterion exists to catch) the pin goes
+  RED; restored, all 19 steps green.
+- **The sx2-surface demotion**: `sx2-events.test.ts`'s
+  `derivedDelta < N` assert is now its console.log line only, with
+  the ruling cited in place; the two deterministic asserts
+  (processed ≥ N; the final-only value) stay untouched as that
+  surface's gates.
+- **The criterion re-tensed**: testing.md §5 row 3 now names the
+  runner-suite pin as rapid-fire coalescing's discriminating half and
+  the live surface's ratio as a logged load observation, with the
+  RULED marker and attribution.
+
+## 4. Relay summary (self-contained, for the danfuzz side)
+
+Your flake report on `sx2-events`' `derivedDelta < N` assert was
+verified in full and the assert is retired, replaced by a stronger
+deterministic pin:
+
+1. **Both your read claims were confirmed in code.** The client's
+   event-append queue sends strictly one entry per commit, one
+   in-flight per space — so server-side arrival pacing equals the
+   commit round-trip time regardless of fire-loop speed, and how many
+   appends a wave coalesces is a load ratio the test cannot control
+   (an idle bench here logged exactly 7, your CI-passing value; the
+   owner's census added an occurrence at 15:25Z on #6136,
+   same-commit rerun green). And `derivedCommits` was host-global; a
+   concrete cross-space pollution path exists — an advance-only
+   quiescence commit minted for an EARLIER test's space with no
+   client input, recorded with its store evidence in the committed
+   OW52 report (`ow52-storm-loss-report.md` §3's advance-only
+   bullet: sole write the watermark doc, no `consequence_of`).
+2. **What landed.** (a) `derivedCommitsBySpace` — per-space
+   derived-commit attribution on the health route (bounded, conserved
+   against the global total; #6158) — so future ratio observations
+   can scope to the test's own space. (b) The ratio assert is DEMOTED
+   to the existing log line; `sx2-events` keeps its two deterministic
+   gates (every event processed; final-only value). (c) The
+   coalescing CONTRACT moved to a runner-suite pin that CONSTRUCTS
+   the premise the live surface races: K events queued durably ahead
+   of one drain must consequence in exactly one derived commit, each
+   event exactly once — deterministic, load-independent, and
+   mutation-verified failable.
+3. **The ruling.** Owner (Berni), 2026-08-21: "i like (3) as well" —
+   option (3) (the constructed-depth pin) plus option (1) (demote the
+   live-surface ratio to a log), as dispositioned in §3. The Phase-3
+   acceptance criterion (testing.md §5 row 3) is re-tensed
+   accordingly with the RULED marker.
+4. **The CI-visible effect, in CI terms.** The intermittent red of
+   `Pattern Integration Tests / server-execution ON` on
+   `sx2-events.test.ts`'s "rapid-fire coalescing" assert — the flake
+   your writeup reported, which cleared on same-commit rerun —
+   CANNOT RECUR: the assert no longer exists (the ratio only logs).
+   Its replacement red, should batching ever actually break, appears
+   in the `Test` (runner unit) lanes as the deterministic
+   `executor-events-down.test.ts` constructed-depth step — same
+   commit, every run, no rerun-clears-it ambiguity.
+
+Status: claims verified; §2 landed (#6158); the ruling BUILT — pin +
+demotion + criterion re-tense in one PR.
