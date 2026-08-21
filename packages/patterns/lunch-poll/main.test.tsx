@@ -242,8 +242,25 @@ export default pattern(() => {
     poll.castVote.send({ optionId: "any", voteType: "green" });
   });
 
+  // The same refusal against a REAL option, from an identity that resolves
+  // but never joined — the shape a headless caller actually has once the poll
+  // is populated. Runs last so the viewer switch disturbs nothing before it.
+  const outsider = Writable.of<LunchProfile>({ name: "Outsider" });
+  const action_become_outsider = action(() => {
+    poll.overrideViewer.send({ profile: outsider, name: "Outsider" });
+  });
+  const action_outsider_votes_real_option = action(() => {
+    const first = (poll.options ?? [])[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
   const assert_no_vote_without_membership = assert(() =>
     (poll.votes ?? []).length === 0
+  );
+
+  const assert_outsider_left_the_tally_alone = assert(() =>
+    (poll.votes ?? []).every((v) => !equals(v.voter, outsider)) &&
+    (poll.users ?? []).every((u) => !equals(u.profile, outsider))
   );
 
   const action_join_as_alex = action(() => {
@@ -773,6 +790,11 @@ export default pattern(() => {
       { action: action_ghost_claims_name_only },
       { action: action_ghost_tries_join },
       { assertion: assert_name_only_claim_cannot_join },
+
+      // A resolved identity that never joined cannot vote on a real option.
+      { action: action_become_outsider },
+      { action: action_outsider_votes_real_option },
+      { assertion: assert_outsider_left_the_tally_alone },
     ],
     poll,
     stalePoll,
