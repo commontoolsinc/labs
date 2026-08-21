@@ -128,10 +128,15 @@ describe("piece-cached-result-fields", () => {
         { name: "todayDate", id: "computed:fid1:two", derivedAtCommit: 182785 },
       ], 253299);
 
-      expect(section).toContain("--- Cached Result Fields ---");
-      expect(section).toContain("Source (Inputs) stands at commit 253299.");
-      expect(section).toContain("- adminName: last derived at commit 182802");
-      expect(section).toContain("- todayDate: last derived at commit 182785");
+      expect(section).toBe(
+        [
+          "--- Cached Result Fields ---",
+          "Each field below reads a computed cell, which holds the value its last",
+          "committed derivation produced. Reading it does not re-derive it.",
+          "  - adminName: last derived at commit 182802; Source (Inputs) stands at commit 253299",
+          "  - todayDate: last derived at commit 182785; Source (Inputs) stands at commit 253299",
+        ].join("\n"),
+      );
     });
 
     it("returns `(none)` when every result field reads live state", () => {

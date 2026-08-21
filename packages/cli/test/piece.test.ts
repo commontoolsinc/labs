@@ -3925,6 +3925,8 @@ describe("cli piece parsing", () => {
 
       expect(inspected.patternRef).toEqual(patternRef);
       expect(inspected.id).toBe(PIECE);
+      expect(inspected.cachedResultFields).toEqual([]);
+      expect(inspected.sourceCommit).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

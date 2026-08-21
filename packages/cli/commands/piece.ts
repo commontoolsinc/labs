@@ -412,15 +412,16 @@ export function renderCachedResultFields(
     "Each field below reads a computed cell, which holds the value its last",
     "committed derivation produced. Reading it does not re-derive it.",
   );
-  if (sourceCommit !== undefined) {
-    lines.push(`Source (Inputs) stands at commit ${sourceCommit}.`);
-  }
   for (const field of cached) {
     lines.push(
       `  - ${field.name}: ${
         field.derivedAtCommit === undefined
           ? "the local replica holds no commit for it"
           : `last derived at commit ${field.derivedAtCommit}`
+      }${
+        sourceCommit === undefined
+          ? ""
+          : `; Source (Inputs) stands at commit ${sourceCommit}`
       }`,
     );
   }
