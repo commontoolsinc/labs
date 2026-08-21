@@ -304,10 +304,17 @@ describe("check-control-characters", () => {
     it("throws when git cannot read the objects it was given", async () => {
       // Not reachable through `scan` once `ls-files` has succeeded, and the
       // gate's trustworthiness rests on it: a read git declined must not come
-      // back as an empty tree.
+      // back as an empty tree. The id list is sized past any pipe buffer so
+      // the doomed git's exit is certain to close the pipe mid-write — the
+      // same failure lands either way, and this pins the mid-write path
+      // rather than leaving it to scheduling.
       const root = await Deno.makeTempDir({ prefix: "check-control-no-git-" });
+      const ids = Array.from(
+        { length: 50_000 },
+        () => "0000000000000000000000000000000000000000",
+      );
       await expect(
-        blobContents(root, ["0000000000000000000000000000000000000000"]),
+        blobContents(root, ids),
       ).rejects.toThrow("git cat-file failed");
     });
 

@@ -15,6 +15,7 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  inlineExternalSchemaRefsInValue,
   isAliasBinding,
   isCellLink,
   isSigilLink,
@@ -733,6 +734,25 @@ describe("link-utils", () => {
         },
         required: ["title"],
       });
+    });
+  });
+
+  describe("inlineExternalSchemaRefsInValue", () => {
+    it("carries a link whose schema is boolean through unchanged", () => {
+      // The inliner touches only object schemas carrying an external
+      // reference. A boolean schema is a valid carried schema and not a
+      // reference, so the value rides through as it is.
+      const sigil = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:boolean-schema-target",
+            path: [],
+            schema: true,
+          },
+        },
+      };
+      const value = { entry: sigil };
+      expect(inlineExternalSchemaRefsInValue(value)).toEqual(value);
     });
   });
 

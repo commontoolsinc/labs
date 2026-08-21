@@ -35,9 +35,10 @@ describe("schema-doc-writer", () => {
   let readerStorage: EmulatedStorageManager;
   let writer: Runtime;
   let space: MemorySpace;
+  let signer: Identity;
 
   beforeEach(async () => {
-    const signer = await Identity.fromPassphrase("schema-doc-writer");
+    signer = await Identity.fromPassphrase("schema-doc-writer");
     server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     writerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
     readerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
@@ -280,6 +281,89 @@ describe("schema-doc-writer", () => {
     expect(String(result.error?.message)).toContain(
       "neither included in the commit nor stored in the space",
     );
+  });
+
+  it("resolves the skip warning's message when its logger speaks", async () => {
+    // The sibling case above pins the count on a DISABLED logger; this one
+    // runs the same skip with the logger on, so the warning's lazy message
+    // resolves. A thunk is the one part of the path a silent run never
+    // executes, and one that throws would turn a warning into a crash
+    // exactly when someone turns the logger on to look.
+    const materializeLogger = getLogger("extended-storage-transaction");
+    const skipKey = "schema-doc-materialize";
+    const skipsBefore = materializeLogger.countsByKey[skipKey]?.warn ?? 0;
+    const wasDisabled = materializeLogger.disabled;
+    const wasLevel = materializeLogger.level;
+    materializeLogger.disabled = false;
+    materializeLogger.level = "warn";
+    try {
+      const absentHash = internSchemaAsTaggedHashString({
+        type: "string",
+        title: "never-registered-loud-ref",
+      });
+      const handCrafted = {
+        "/": {
+          "link@1": {
+            id: "of:unsupplied-loud-target",
+            path: [],
+            schema: { $ref: `cid:${absentHash}` },
+          },
+        },
+      };
+      const tx = writer.edit();
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: "of:unsupplied-loud-root" as URI,
+          scope: "space",
+          path: [],
+        },
+        { crafted: handCrafted },
+      );
+      const result = await tx.commit();
+      expect(result.ok).toBeUndefined();
+      expect(materializeLogger.countsByKey[skipKey]?.warn ?? 0).toBe(
+        skipsBefore + 1,
+      );
+    } finally {
+      materializeLogger.disabled = wasDisabled;
+      materializeLogger.level = wasLevel;
+    }
+  });
+
+  it("stages nothing with the flag off, so the commit boundary rejects the reference", async () => {
+    // Rollback semantics: an explicit `false` stops emission AND delivery.
+    // The reference below is one the registry could supply — the flag-on
+    // sigil stamping registered it — but the flag-off writer does not
+    // stage its closure, so the server's commit-time validation refuses
+    // the write. Turning the flag off stops the writer writing; documents
+    // already stored keep satisfying that validation on their own.
+    const schema: JSONSchemaObj = {
+      type: "string",
+      title: "flag-off-registered-ref",
+    };
+    const sigil = sigilFor(schema);
+    const offStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const offRuntime = new Runtime({
+      storageManager: offStorage,
+      apiUrl: new URL(import.meta.url),
+      experimental: { contentAddressedSchemas: false },
+    });
+    try {
+      const tx = offRuntime.edit();
+      tx.writeValueOrThrow(
+        { space, id: "of:flag-off-root" as URI, scope: "space", path: [] },
+        { person: sigil },
+      );
+      const result = await tx.commit();
+      expect(result.ok).toBeUndefined();
+      expect(String(result.error?.message)).toContain(
+        "neither included in the commit nor stored in the space",
+      );
+    } finally {
+      await offRuntime.dispose();
+      await offStorage.close();
+    }
   });
 
   it("materializes a schema document once for two links that share it", async () => {
