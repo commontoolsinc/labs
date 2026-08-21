@@ -46,7 +46,7 @@ export const test = new Command()
   )
   .option(
     "--datafile <path:string>",
-    "Attach a data file the pattern under test reads with dataFile(). Repeatable.",
+    "Attach a data file the pattern under test cannot name. Repeatable.",
     { collect: true },
   )
   .option(

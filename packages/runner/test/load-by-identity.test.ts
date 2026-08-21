@@ -259,6 +259,90 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     }
   });
 
+  it("resolves a relative data read from cached bodies alone", async () => {
+    // The warm path holds no source and no program: it builds records from
+    // cached bodies keyed by identity. A read written relative to its module
+    // therefore has to resolve from the module's own filename, which is all
+    // that path carries.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/lists/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./lists/read.ts";\n',
+        },
+        {
+          name: "/lists/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/lists/cities.json", contents: '{"cities": ["Oslo"]}' },
+      ],
+    };
+
+    const { modules, entryIdentity } = await engine.compileToRecordGraph(
+      program,
+    );
+    const cached: CachedCompiledModule[] = modules.map((m) => ({
+      identity: m.identity,
+      filename: m.filename,
+      code: m.js,
+      ...(m.isData ? { isData: true } : {}),
+      // deno-lint-ignore no-explicit-any
+      imports: m.imports as any,
+    }));
+
+    const result = await engine.evaluateCachedModules(cached, entryIdentity);
+    expect((result.main as Record<string, unknown>).cities).toEqual(["Oslo"]);
+  });
+
+  it("leaves a module's own dataFile export alone on the warm path", async () => {
+    // The two record builders each decide which namespaces carry the reader,
+    // so each needs the case where a local module exports that name itself.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data } from "commonfabric";',
+            'import { dataFile } from "./local.ts";',
+            "export const read = __cf_data(dataFile('/cities.json'));",
+          ].join("\n"),
+        },
+        {
+          name: "/local.ts",
+          contents:
+            "export const dataFile = (path: string) => `local:${path}`;\n",
+        },
+        { name: "/cities.json", contents: '{"cities": []}' },
+      ],
+    };
+
+    const { modules, entryIdentity } = await engine.compileToRecordGraph(
+      program,
+    );
+    const cached: CachedCompiledModule[] = modules.map((m) => ({
+      identity: m.identity,
+      filename: m.filename,
+      code: m.js,
+      ...(m.isData ? { isData: true } : {}),
+      // deno-lint-ignore no-explicit-any
+      imports: m.imports as any,
+    }));
+
+    const result = await engine.evaluateCachedModules(cached, entryIdentity);
+    expect((result.main as Record<string, unknown>).read).toBe(
+      "local:/cities.json",
+    );
+  });
+
   it("cold-loads an exact attached data-file package", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

@@ -2,7 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Source } from "../interface.ts";
 import {
+  assertDataFileInsideProgramRoot,
   importEscapesProgramRoot,
+  resolveDataFilePath,
   resolveImportSpecifier,
 } from "../specifier.ts";
 
@@ -91,6 +93,92 @@ describe("specifier", () => {
       expect(
         resolveImportSpecifier("commonfabric", from("/main.tsx")),
       ).toBe("commonfabric");
+    });
+  });
+
+  describe("resolveDataFilePath", () => {
+    it("joins a sibling path against the reader's directory", () => {
+      expect(
+        resolveDataFilePath("./words.txt", "/scrabble/scrabble.tsx"),
+      ).toBe("/scrabble/words.txt");
+    });
+
+    it("joins a path in a directory beneath the reader", () => {
+      expect(
+        resolveDataFilePath("./data/cities.json", "/examples/reader.tsx"),
+      ).toBe("/examples/data/cities.json");
+    });
+
+    it("climbs out of the reader's directory for a parent path", () => {
+      expect(
+        resolveDataFilePath("../shared/words.txt", "/scrabble/scrabble.tsx"),
+      ).toBe("/shared/words.txt");
+    });
+
+    it("resolves a bare path against the reader, as `./` does", () => {
+      // `./` contributes nothing to a directory walk, and a data file has no
+      // bare-package namespace for the prefix-free spelling to mean instead.
+      expect(resolveDataFilePath("data/cities.json", "/examples/reader.tsx"))
+        .toBe(
+          resolveDataFilePath("./data/cities.json", "/examples/reader.tsx"),
+        );
+      expect(resolveDataFilePath("words.txt", "/scrabble/scrabble.tsx"))
+        .toBe("/scrabble/words.txt");
+    });
+
+    it("returns a grounded path unchanged", () => {
+      expect(
+        resolveDataFilePath("/data/cities.json", "/deep/nested/reader.tsx"),
+      ).toBe("/data/cities.json");
+    });
+
+    it("gives the same answer for the same reader under any root", () => {
+      // The whole point: one source, rooted three ways, naming one file.
+      expect(resolveDataFilePath("./words.txt", "/words-game/main.tsx"))
+        .toBe("/words-game/words.txt");
+      expect(
+        resolveDataFilePath("./words.txt", "/patterns/words-game/main.tsx"),
+      ).toBe("/patterns/words-game/words.txt");
+      expect(resolveDataFilePath("./words.txt", "/main.tsx"))
+        .toBe("/words.txt");
+    });
+  });
+
+  describe("assertDataFileInsideProgramRoot", () => {
+    it("refuses a path that climbs above the root", () => {
+      expect(() =>
+        assertDataFileInsideProgramRoot(
+          "../../outside.txt",
+          from("/scrabble/scrabble.tsx"),
+        )
+      ).toThrow('Data file "../../outside.txt" read in');
+    });
+
+    it("accepts a climb that stays inside the root", () => {
+      assertDataFileInsideProgramRoot(
+        "../shared/words.txt",
+        from("/scrabble/scrabble.tsx"),
+      );
+    });
+
+    it("accepts a grounded path, which climbs nowhere", () => {
+      assertDataFileInsideProgramRoot("/data/cities.json", from("/main.tsx"));
+    });
+
+    it("refuses a bare path that climbs out through its own segments", () => {
+      expect(() =>
+        assertDataFileInsideProgramRoot(
+          "sub/../../../outside.txt",
+          from("/scrabble/scrabble.tsx"),
+        )
+      ).toThrow("escapes the program root");
+    });
+
+    it("accepts a bare path, which starts inside the reader's directory", () => {
+      assertDataFileInsideProgramRoot(
+        "data/cities.json",
+        from("/examples/reader.tsx"),
+      );
     });
   });
 });

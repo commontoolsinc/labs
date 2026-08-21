@@ -48,7 +48,6 @@ import {
   RuntimeModuleIdentifiers,
   SESRuntime,
 } from "../sandbox/mod.ts";
-import { freezeSandboxValue } from "../sandbox/hardening.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
@@ -704,6 +703,9 @@ export class Engine extends EventTarget {
         // Reuse the identities already computed above (cache-hit check); avoids
         // a second hashing/import-resolution pass over the module set.
         identityByPath,
+        // A `dataFile()` path resolves against the reading module's stored
+        // name, so a read lands in the same space `dataFiles` is keyed by.
+        storedNameFor: (name) => storedFilenameFor(name, id, mounts),
       });
       if (options.patternCoverage) {
         this.patternCoverageByGraph.set(graph, options.patternCoverage);
@@ -717,11 +719,7 @@ export class Engine extends EventTarget {
           unknown
         >;
       }
-      for (
-        const [spec, record] of runtimeModuleRecords(
-          bindDataFileReader(runtimeRecordExports, graph.dataByPath),
-        )
-      ) {
+      for (const [spec, record] of runtimeModuleRecords(runtimeRecordExports)) {
         graph.records.set(spec, record as VirtualModuleRecord);
       }
 
@@ -1684,11 +1682,7 @@ export class Engine extends EventTarget {
         unknown
       >;
     }
-    for (
-      const [spec, record] of runtimeModuleRecords(
-        bindDataFileReader(runtimeRecordExports, graph.dataByPath),
-      )
-    ) {
+    for (const [spec, record] of runtimeModuleRecords(runtimeRecordExports)) {
       graph.records.set(spec, record as VirtualModuleRecord);
     }
 
@@ -1855,48 +1849,6 @@ function validatePolicyManifestsForModule(
     }
     return artifact;
   });
-}
-
-/**
- * Bind this load's attached data files into the runtime-module namespaces that
- * expose `dataFile`.
- *
- * The shared namespaces are process-global and carry only a placeholder, since
- * which data files exist is a property of the program being loaded rather than
- * of the runtime. Each load therefore hands its own graph's data to the records
- * it registers, so a module's `dataFile` reads the bytes that travelled in the
- * same content-addressed closure as its code.
- *
- * The read is a plain map lookup: the closure is fully loaded before any module
- * executes, so this needs no storage access and cannot be asynchronous.
- */
-function bindDataFileReader(
-  runtimeRecordExports: Record<string, Record<string, unknown>>,
-  dataByPath: ReadonlyMap<string, string>,
-): Record<string, Record<string, unknown>> {
-  const read = (path: string): string => {
-    const bytes = dataByPath.get(path);
-    if (bytes !== undefined) return bytes;
-    const attached = [...dataByPath.keys()].sort();
-    // The message states what is attached and stops there. How a caller
-    // attaches one differs by the surface driving the compile — a CLI flag, a
-    // scenario field, an argument to `resolveLocalProgram` — and the runtime
-    // knows none of that, so naming any single mechanism would misdirect
-    // every caller reaching it by another route.
-    throw new Error(
-      `No attached data file "${path}". ` +
-        (attached.length === 0
-          ? "This pattern has no attached data files."
-          : `Attached: ${attached.join(", ")}.`),
-    );
-  };
-  const bound: Record<string, Record<string, unknown>> = {};
-  for (const [name, namespace] of Object.entries(runtimeRecordExports)) {
-    bound[name] = namespace !== undefined && "dataFile" in namespace
-      ? freezeSandboxValue({ ...namespace, dataFile: read })
-      : namespace;
-  }
-  return bound;
 }
 
 function computeId(program: RuntimeProgram): string {
