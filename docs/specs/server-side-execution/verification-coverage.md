@@ -5154,17 +5154,36 @@ supply; OW29/OW32/OW34 closed):
     schema default not applied, or arrival ordering) and fix at the
     producer or the lift contract. Trigger: lifts the
     `integration/default-app.test.ts` ON skip.
-  - **OW52 — the convergence-storm ON loss (landed 23/40).** Under
-    the TRUE ON topology the storm step (2×20 pipelined `post` events,
-    `idle:false`, per writer) leaves the non-writing observer at
-    landed=23/40 — a REAL loss (the pre-fix mixed posture refused all
-    40, masking it); the file's 3 element-schema tests are green.
-    WHERE the 17 die — append admission, queue, dispatch, or
-    consequence commit under pipelined contention — is UNTRIAGED; the
-    (α) exactly-once invariants say nothing about append-side loss
-    under storm depth. Owed: the triage and the fix. Trigger: lifts
-    the `integration/convergence-storm.test.ts` step entry (green
-    5/5).
+  - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
+    (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The
+    full 40-event accounting (serving-loop counters + the space's
+    sqlite commit log) cleared every candidate seam: append admission
+    40/40 (`events.appended`), drain/dispatch 40/40
+    (`events.processed`, `skippedIdempotent` 0, purge/orphan counters
+    0), consequences EXACTLY-ONCE (all 40 eventIds across 10 derived
+    commits, zero duplicates — the (α) invariant held at storm depth),
+    all 40 array appends durable, and the observer CONVERGES to 40/40
+    (~2–3 s of serving drain; 16 waves, 9 deadline-cut — the honest
+    flush deadline's routine shape, serving-loop.md §3). Per-wave
+    coalescing (`coalescedPerWaveMax` 11) collapses wave boundaries
+    only, never handler runs — no coalescing-by-design ambiguity. The
+    red was the HARNESS: the served-topology `settle()` had no
+    server-drain step (the OFF arm's `server.idle()`), so a fixed
+    round count of idle/barrier hops raced the drain and the assert
+    read a mid-drain head. Fixed in the harness (test infrastructure,
+    no product semantics): `MultiRuntimeHarness.settle`'s
+    toolshed-backed arm waits, bounded, for each session's
+    outstanding-intent set to empty — speculation.md §4 step 2's
+    arrived-terminal-consequence retirement,
+    `Runtime.speculationOverlay.pendingIntentCount` — before the
+    barrier, restoring settle parity between the arms. Step green ON
+    5/5 + file 4/4 ON and OFF; the step entry LIFTED. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow52-storm-loss-report.md. Recorded, not decided (adjacent):
+    whether the PRODUCT's idle vocabulary should carry an
+    intent-quiescence barrier under ON (OFF's idle implies own-send
+    consequence visibility; ON's does not) — a spec question beside
+    OW47's pending-commit-barrier seat, surfaced in the report.
   - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
     semantic asserts under the TRUE ON topology: db-owner — a SECOND
     user's runtime re-mints itself as the sqlite db handle owner

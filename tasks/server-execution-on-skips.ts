@@ -345,24 +345,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "on-render-stall-rootcause.md §2b). Lifts when OW47 closes and " +
         "the step greens ON; the flip PR needs this list EMPTY.",
     },
-    {
-      file: "integration/convergence-storm.test.ts",
-      step: "a non-writing session sees every concurrently-posted message",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under the TRUE ON topology the 3 " +
-        "element-schema tests are green; this storm step is red with a " +
-        "REAL ON loss — 2×20 pipelined posts (idle:false), observer " +
-        "landed=23/40 (was 0/40 under the pre-fix mixed posture, which " +
-        "refused every append): a write-path loss at storm depth; WHERE " +
-        "the 17 die (append admission, queue, dispatch, or consequence " +
-        "commit under pipelined contention) is UNTRIAGED " +
-        "(verification-coverage.md OW52). NOT a demand hole — what lands " +
-        "is served and delivered to the non-writing observer. Evidence: " +
-        "docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md. Lifts when OW52 closes and the " +
-        "step greens ON 5/5; the flip PR needs this list EMPTY.",
-    },
   ],
   runner: [
     {

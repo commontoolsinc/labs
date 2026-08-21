@@ -182,4 +182,25 @@ something this fix decides.
 
 ## 6. Verification
 
-(pending — filled after the fix runs)
+All local, this worktree, against the ON toolshed on port 8891 (fresh
+store), `--no-lock` throughout:
+
+- Storm step ON (skip entry lifted): **5/5 green**, ~7–8 s per run —
+  the ~2 s over the red runs' ~5 s is exactly the serving drain the
+  settle now honestly waits for.
+- `convergence-storm.test.ts` full file: **4/4 ON**, **4/4 OFF**.
+- Harness family under the settle change:
+  `cfc-group-chat-demo-multi-runtime` 7/7 ON, 7/7 OFF;
+  `cellset-lww` 3 green + OW47 step skipped ON, 4/4 OFF;
+  `data-file-multi-runtime` 2/2 ON, 2/2 OFF;
+  `cellset-lww-lost-update` 2/2 ON, 2/2 OFF.
+- `tasks/server-execution-on-skips.ts patterns` self-run: exit 0, the
+  convergence-storm step entry gone, every remaining entry validated
+  (the cellset step guard still bound).
+- `deno check` on the harness + worker: clean.
+
+Register row OW52 CLOSED in the same change (docs-move-together);
+skip-entry status: the `integration/convergence-storm.test.ts` step
+entry LIFTED. The in-file guard wiring stays (designed binding for any
+future entry; a guard without an entry is a no-op and the validator
+only checks the other direction).
