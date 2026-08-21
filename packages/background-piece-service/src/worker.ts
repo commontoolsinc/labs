@@ -1,3 +1,5 @@
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import {
   createSession,
   type DID,
@@ -153,8 +155,14 @@ export async function initialize(
     return;
   }
 
-  const { did, toolshedUrl, rawIdentity, experimental } = data;
-  const identity = await Identity.deserialize(rawIdentity);
+  const { did, toolshedUrl, experimental } = data;
+  const keyPair = fabricFromRealmValue(data.encodedIdentity);
+
+  if (!(keyPair instanceof FabricKeyPair)) {
+    throw new Error("Initialization `encodedIdentity` is not a key pair.");
+  }
+
+  const identity = await Identity.fromKeyPair(keyPair);
   const apiUrl = new URL(toolshedUrl);
 
   // Initialize session
@@ -367,7 +375,7 @@ export function safeFormat(value: unknown): unknown {
       // we properly handle sensitive logging.
       return JSON.stringify(
         value,
-        (key, value) => key === "rawIdentity" ? "<REDACTED>" : value,
+        (key, value) => key === "encodedIdentity" ? "<REDACTED>" : value,
       );
     } catch (_e) {
       // satisfy typescript's empty block

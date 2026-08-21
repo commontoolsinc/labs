@@ -1,11 +1,17 @@
 import {
-  deserializeKeyPairRaw,
-  DID,
-  Identity,
-  serializeKeyPairRaw,
-  TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import { DID, Identity } from "@commonfabric/identity";
 import { AppView } from "@commonfabric/navigation";
+
+/**
+ * An identity as it crosses the integration-test page boundary: its key pair
+ * in the `FabricValue` JSON encoding. A string, that boundary carrying only
+ * what JSON can express.
+ */
+export type SerializedIdentity = string;
 
 // Primary application state.
 export interface AppState {
@@ -42,7 +48,7 @@ export function isAppStateConfigKey(
 }
 
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
-  identity?: TransferrableInsecureCryptoKeyPair | null;
+  identity?: SerializedIdentity | null;
   apiUrl: string;
 };
 
@@ -58,20 +64,46 @@ export interface ShellApp {
   getRuntimeSpaceDID(): DID | undefined;
   setView(view: AppView): Promise<void>;
   setIdentity(
-    id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+    id: Identity | SerializedIdentity | undefined,
   ): Promise<void>;
   setConfig(key: AppStateConfigKey, value: boolean): Promise<void>;
 }
 
-// Turns either form an identity arrives in — a live `Identity`, or the raw key
-// pair that crosses the integration-test page boundary — into the `Identity`
-// application state holds.
+// Turns either form an identity arrives in — a live `Identity`, or the encoded
+// key pair that crosses the integration-test page boundary — into the
+// `Identity` application state holds.
 export async function resolveIdentity(
-  id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+  id: Identity | SerializedIdentity | undefined,
 ): Promise<Identity | undefined> {
   if (id === undefined) return undefined;
   if (id instanceof Identity) return id;
-  return await Identity.fromRaw(deserializeKeyPairRaw(id).privateKey);
+  // From the seed rather than from the pair itself: this page picks its own
+  // ed25519 implementation, as it does for every identity it mints.
+  return await Identity.fromRaw(
+    keyPairFromSerialized(id).privateKeyBytes.slice(),
+  );
+}
+
+// Renders an identity as the page boundary carries it, or `null` where it
+// cannot be written down: a key pair holding handles has no JSON encoding,
+// `CryptoKey` material being unreachable.
+function serializeIdentity(
+  identity: Identity | undefined,
+): SerializedIdentity | null | undefined {
+  if (identity === undefined) return undefined;
+  const { keyPair } = identity;
+  return keyPair.hasMaterial ? jsonFromFabricValue(keyPair) : null;
+}
+
+// Decodes what `serializeIdentity()` produced.
+function keyPairFromSerialized(id: SerializedIdentity): FabricKeyPair {
+  const keyPair = fabricFromJsonValue(id);
+
+  if (!(keyPair instanceof FabricKeyPair)) {
+    throw new Error("Serialized identity is not a key pair.");
+  }
+
+  return keyPair;
 }
 
 // One identity replaces another only by way of a logged-out state. Clearing
@@ -107,13 +139,7 @@ export function serialize(
 ): AppStateSerialized {
   const { identity, apiUrl, ...other } = state;
   const out = other as unknown as AppStateSerialized;
-  // Identity key serialization uses array buffers and webcrypto references
-  // for JavaScript contexts. When serializing state here, its in service
-  // of transferring to astral, JSONish boundaries. Convert the key to
-  // buffers of `Array<number>`.
-  out.identity = identity
-    ? serializeKeyPairRaw(identity.serialize())
-    : undefined;
+  out.identity = serializeIdentity(identity);
   out.apiUrl = apiUrl.toString();
   return out;
 }
@@ -123,9 +149,7 @@ export async function deserialize(
 ): Promise<AppState> {
   const { identity, apiUrl, ...other } = state;
   const out = other as unknown as AppState;
-  out.identity = identity
-    ? await Identity.fromRaw(deserializeKeyPairRaw(identity).privateKey)
-    : undefined;
+  out.identity = identity ? await resolveIdentity(identity) : undefined;
   out.apiUrl = new URL(apiUrl);
   return out;
 }

@@ -14,7 +14,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { Identity, isCryptoKeyPair } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -107,13 +107,12 @@ describe("multi-runtime harness identity fidelity", () => {
   let harness: MultiRuntimeHarness;
 
   beforeAll(async () => {
-    // Every other harness test asks for `implementation: "noble"`, whose
-    // serialized form is a byte pair. The default is a real `CryptoKeyPair`,
-    // which is the arm that has key handles rather than material, and the one
-    // a realm boundary cannot carry as anything but a `FabricKeyPair`.
+    // Every other harness test asks for `implementation: "noble"`, whose key
+    // pair holds material. The default holds handles instead, and that is the
+    // arm a realm boundary cannot carry as anything but a `FabricKeyPair`.
     const identity = await Identity.fromPassphrase("fidelity-native");
     assert(
-      isCryptoKeyPair(identity.serialize()),
+      !identity.keyPair.hasMaterial,
       "the default implementation stopped producing key handles, so this " +
         "test no longer covers the arm it names",
     );

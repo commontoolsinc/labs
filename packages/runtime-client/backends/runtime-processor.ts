@@ -1,8 +1,12 @@
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import {
   fabricFromRealmValue,
   newDefaultJsonCodecEngine,
 } from "@commonfabric/data-model/codecs";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -268,6 +272,27 @@ export function assertServerExecutionPostureAgreement(
         "(review 2026-08-11 m7; docs/specs/server-side-execution/)",
     );
   }
+}
+
+/**
+ * Decodes one of `InitializationData`'s two key-pair fields, naming the field
+ * in what it throws. The encoding is ceded to the decode rather than copied
+ * for it: it arrived on a message this processor owns, so nothing else can be
+ * reading it.
+ *
+ * @throws If the field decodes to anything but a key pair.
+ */
+function keyPairFromRealm(
+  encoded: RealmEncodedValue,
+  field: string,
+): FabricKeyPair {
+  const decoded = fabricFromRealmValue(encoded);
+
+  if (!(decoded instanceof FabricKeyPair)) {
+    throw new Error(`Initialization \`${field}\` is not a key pair.`);
+  }
+
+  return decoded;
 }
 
 /**
@@ -608,9 +633,13 @@ export class RuntimeProcessor {
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
-    const identity = await Identity.deserialize(data.identity);
+    const identity = await Identity.fromKeyPair(
+      keyPairFromRealm(data.identity, "identity"),
+    );
     const spaceIdentity = data.spaceIdentity
-      ? await Identity.deserialize(data.spaceIdentity)
+      ? await Identity.fromKeyPair(
+        keyPairFromRealm(data.spaceIdentity, "spaceIdentity"),
+      )
       : undefined;
     const space = data.spaceDid;
     const telemetry = new RuntimeTelemetry();

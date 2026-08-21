@@ -46,6 +46,7 @@
  * after a marker is therefore read once, and a false value is a failure.
  */
 
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type {
@@ -228,7 +229,7 @@ export async function runMultiUserTestPattern(
       const worker = new ParticipantWorker(spec.name);
       try {
         const init = await worker.call("init", {
-          rawIdentity: identities.get(spec.user)!.serialize(),
+          identity: realmFromFabricValue(identities.get(spec.user)!.keyPair),
           spaceName,
           apiUrl: server.url.href,
           testPath,

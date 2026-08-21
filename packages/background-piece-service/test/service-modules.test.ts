@@ -6,6 +6,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { Identity } from "@commonfabric/identity";
 import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -848,7 +849,7 @@ describe("background worker", () => {
       worker.postMessage({
         msgId: 1,
         type: "initialize",
-        data: { rawIdentity: { privateKey: "secret" } },
+        data: { encodedIdentity: { privateKey: "secret" } },
       });
       const invalid = await nextMessage((message) => message.msgId === 1);
       assertStringIncludes(String(invalid.error), "<REDACTED>");
@@ -881,7 +882,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmFromFabricValue(identity.keyPair),
           experimental: { modernCellRep: true },
         },
       );
@@ -895,7 +896,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmFromFabricValue(identity.keyPair),
         },
       );
       assertEquals("error" in initializedAgain, false);

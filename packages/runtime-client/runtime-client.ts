@@ -140,8 +140,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      identity: options.identity.serialize(),
-      spaceIdentity: options.spaceIdentity?.serialize(),
+      identity: realmFromFabricValue(options.identity.keyPair),
+      spaceIdentity: options.spaceIdentity &&
+        realmFromFabricValue(options.spaceIdentity.keyPair),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,

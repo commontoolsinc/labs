@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
-import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
+import { Identity } from "@commonfabric/identity";
 import {
   AppState,
   AppStateSerialized,
@@ -79,14 +80,13 @@ describe("AppState", () => {
     assertEquals(clone(original).view, { builtin: "home" });
   });
 
-  it("resolves an identity from either an Identity or a raw key pair", async () => {
+  it("resolves an identity from either an Identity or an encoded key pair", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const raw = serializeKeyPairRaw(identity.serialize());
-    assert(raw, "Insecure keys are serializable.");
+    const encoded = jsonFromFabricValue(identity.keyPair);
 
     assertEquals(await resolveIdentity(undefined), undefined);
     assert(await resolveIdentity(identity) === identity);
-    assertEquals((await resolveIdentity(raw))?.did(), identity.did());
+    assertEquals((await resolveIdentity(encoded))?.did(), identity.did());
   });
 
   it("serialize", async () => {
@@ -120,18 +120,16 @@ describe("AppState", () => {
     assert(serialized.apiUrl === API_URL);
     assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(serialized.identity);
-    assert(
-      (await Identity.fromRaw(Uint8Array.from(serialized.identity.privateKey)))
-        .did() ===
-        state.identity.did(),
+    assertEquals(
+      (await resolveIdentity(serialized.identity))?.did(),
+      state.identity.did(),
       "Insecure keys are serializable.",
     );
   });
 
   it("deserialize", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const identityRaw = serializeKeyPairRaw(identity.serialize());
-    assert(identityRaw, "Deserialized, transferrable identity.");
+    const identityEncoded = jsonFromFabricValue(identity.keyPair);
 
     const serialized: AppStateSerialized = {
       apiUrl: API_URL,
@@ -144,7 +142,7 @@ describe("AppState", () => {
     assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(state.identity === undefined);
 
-    serialized.identity = identityRaw;
+    serialized.identity = identityEncoded;
     state = await deserialize(serialized);
     assert(state.apiUrl.toString() === API_URL.toString());
     assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);

@@ -35,7 +35,6 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
-  keyPairRawFromFabric,
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
   type WorkerRequest,
@@ -201,8 +200,8 @@ const handlers: Record<
   (args: Record<string, unknown>) => Promise<FabricValue>
 > = {
   async init({ identity: keyPair, spaceName, apiUrl, diagnostics, wsDelayMs }) {
-    const identity = await Identity.deserialize(
-      keyPairRawFromFabric(keyPair as FabricKeyPair),
+    const identity = await Identity.fromKeyPair(
+      keyPair as FabricKeyPair,
     );
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({

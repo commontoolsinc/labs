@@ -1,6 +1,19 @@
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
+import { ED25519_ALG } from "./ed25519/utils.ts";
 import { Identity } from "./identity.ts";
-import { KeyPairRaw } from "./interface.ts";
 import { once } from "./utils.ts";
+
+/**
+ * The shape a key pair is stored in. IndexedDB carries a value by structured
+ * cloning, which does not preserve a class, so the store holds the two keys
+ * directly: `CryptoKey` handles where the pair has them -- cloning carries one
+ * whole, extractability intact -- and bytes where it holds material.
+ */
+type StoredKeyPair =
+  | CryptoKeyPair
+  | { publicKey: Uint8Array; privateKey: Uint8Array };
 
 const DEFAULT_DB_NAME = "common-key-store";
 const DEFAULT_STORE_NAME = "key-store";
@@ -19,14 +32,14 @@ export class KeyStore {
   async get(name: string): Promise<Identity | void> {
     const result = await this.db.get(name);
     if (result) {
-      return Identity.deserialize(result);
+      return Identity.fromKeyPair(keyPairFromStored(result));
     }
     return result;
   }
 
   // Set the `name` keypair with `value`.
   async set(name: string, value: Identity): Promise<undefined> {
-    await this.db.set(name, value.serialize());
+    await this.db.set(name, storedFromKeyPair(value.keyPair));
   }
 
   // Clear the key store's table.
@@ -59,7 +72,7 @@ class DB {
     this.db = db;
   }
 
-  get(key: string): Promise<KeyPairRaw | void> {
+  get(key: string): Promise<StoredKeyPair | void> {
     const store = this.getStore(DEFAULT_STORE_NAME, "readonly");
     return asyncWrap(store.get(key));
   }
@@ -99,6 +112,44 @@ class DB {
     const tx = this.db.transaction(storeName, mode);
     return tx.objectStore(storeName);
   }
+}
+
+/** Converts a key pair into the form this store holds. */
+function storedFromKeyPair(keyPair: FabricKeyPair): StoredKeyPair {
+  return keyPair.hasMaterial
+    ? {
+      publicKey: keyPair.publicKeyBytes.slice(),
+      privateKey: keyPair.privateKeyBytes.slice(),
+    }
+    : keyPair.cryptoKeyPair;
+}
+
+/**
+ * Converts what this store holds back into a key pair. The algorithm is
+ * supplied for the material arm, that arm being bytes and so saying nothing
+ * about what they are for; a stored `CryptoKey` reports its own.
+ *
+ * @throws If the stored value is neither arm's shape.
+ */
+function keyPairFromStored(stored: unknown): FabricKeyPair {
+  if (!isObjectNotArray(stored)) {
+    throw new Error("common-identity: Could not read stored key.");
+  }
+
+  const { publicKey, privateKey } = stored;
+
+  if (
+    (publicKey instanceof Uint8Array) && (privateKey instanceof Uint8Array)
+  ) {
+    return new FabricKeyPair(ED25519_ALG, publicKey, privateKey);
+  } else if (
+    globalThis.CryptoKey && (publicKey instanceof globalThis.CryptoKey) &&
+    (privateKey instanceof globalThis.CryptoKey)
+  ) {
+    return new FabricKeyPair({ publicKey, privateKey });
+  }
+
+  throw new Error("common-identity: Could not read stored key.");
 }
 
 function asyncWrap<T>(request: IDBRequest<T>): Promise<T> {
