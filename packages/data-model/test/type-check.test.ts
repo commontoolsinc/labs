@@ -270,7 +270,7 @@ describe("type-check", () => {
       // spells conditional subschemas with those three keywords. So `then` is
       // a data key a schema routinely carries, and reserving it -- as a
       // defense against promise resolution adopting a callable `then` -- would
-      // stop an ordinary schema being a fabric value at all. That hazard is
+      // stop an ordinary schema being a `FabricValue` at all. That hazard is
       // handled where a property can become callable, in the value proxies,
       // rather than by refusing the name here.
       expect(isValidFabricValue({

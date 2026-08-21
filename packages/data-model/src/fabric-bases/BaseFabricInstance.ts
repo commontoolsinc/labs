@@ -1,6 +1,6 @@
 /**
  * The implementation side of the instance hierarchy: the base class that
- * concrete fabric instances extend, and the symbol-keyed protocol members by
+ * concrete `FabricInstance`s extend, and the symbol-keyed protocol members by
  * which the generic freeze and clone utilities reach an instance's interior.
  *
  * An instance holds its contents in private fields, so no walker can descend
@@ -24,11 +24,11 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 /**
- * Well-known symbol for deeply freezing a fabric instance in place. The method
+ * Well-known symbol for deeply freezing a `FabricInstance` in place. The method
  * freezes the instance's own internal slot(s) and recurses into any nested
  * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
  * member of `BaseFabricInstance`, so the generic `deepFreeze()` operates on any
- * fabric instance by gating on `instanceof` against `BaseFabricInstance` and
+ * `FabricInstance` by gating on `instanceof` against `BaseFabricInstance` and
  * invoking this member -- it does not enumerate concrete subclasses.
  * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
  * in place; `deepClone()` constructs a new instance.
@@ -36,13 +36,13 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
 
 /**
- * Well-known symbol for checking whether a fabric instance is already deeply
+ * Well-known symbol for checking whether a `FabricInstance` is already deeply
  * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
  * verifies the instance's own internal slot(s) are in canonical deep-frozen
  * form and recurses into any nested `FabricValue`s via the provided
  * `subIsDeepFrozen` callback, returning the boolean conjunction. This is an
  * abstract member of `BaseFabricInstance`, so the generic deep-frozen type
- * guard operates on any fabric instance by gating on `instanceof` against
+ * guard operates on any `FabricInstance` by gating on `instanceof` against
  * `BaseFabricInstance` and invoking this member -- it does not enumerate
  * concrete subclasses.
  *
@@ -56,19 +56,19 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol(
 );
 
 /**
- * Well-known symbol for producing a new unfrozen copy of a fabric instance with
- * the same data. This is the `protected` template-method primitive that the
- * concrete `shallowClone()` calls when it needs a fresh instance; each concrete
- * subclass implements it. Symbol-keyed as implementation plumbing (matching
- * `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`), while `shallowClone()` stays a
- * regular-named client method.
+ * Well-known symbol for producing a new unfrozen copy of a `FabricInstance`
+ * with the same data. This is the `protected` template-method primitive that
+ * the concrete `shallowClone()` calls when it needs a fresh instance; each
+ * concrete subclass implements it. Symbol-keyed as implementation plumbing
+ * (matching `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`), while `shallowClone()` stays
+ * a regular-named client method.
  */
 export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
   "data-model.shallowUnfrozenClone",
 );
 
 /**
- * Well-known symbol for producing a new deep clone of a fabric instance,
+ * Well-known symbol for producing a new deep clone of a `FabricInstance`,
  * cloning nested `FabricValue`s to the requested frozenness. This is the
  * `protected` template-method primitive that the concrete `deepClone()` calls
  * when a fresh instance is needed; each concrete subclass implements it.
@@ -217,7 +217,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
   /**
    * Type guard for `BaseFabricInstance`, which also enforces the invariant that
    * every `FabricInstance` is in fact a `BaseFabricInstance`. Concrete
-   * fabric-instance classes are required to extend `BaseFabricInstance` (never
+   * `FabricInstance` classes are required to extend `BaseFabricInstance` (never
    * `FabricInstance` directly), so a value that is a `FabricInstance` but not a
    * `BaseFabricInstance` indicates a broken subclass. Use this in preference to
    * a bare `instanceof BaseFabricInstance` where dispatch relies on the members
