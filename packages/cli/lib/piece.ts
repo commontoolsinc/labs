@@ -1546,6 +1546,163 @@ export async function checkPiecePattern(
   );
 }
 
+/** Per-piece outcome of {@link setPiecePatternBatch}. */
+export interface BatchPieceOutcome {
+  /** The resolved piece id (slug and scoped spellings resolved). */
+  piece: string;
+}
+
+/** Per-piece verdict of {@link checkPiecePatternBatch}. */
+export interface BatchPieceCheck {
+  /** The resolved piece id (slug and scoped spellings resolved). */
+  piece: string;
+  report: PatternCompatibilityReport;
+}
+
+/**
+ * Progress callbacks for {@link setPiecePatternBatch}. `onOutcome` fires as
+ * each piece lands, so a caller can print one line per piece while the batch
+ * is still running; `onFailure` fires once, before the failing piece's error
+ * propagates, with everything that had already landed.
+ */
+export interface BatchPieceProgress {
+  onOutcome?: (
+    outcome: BatchPieceOutcome,
+    index: number,
+    total: number,
+  ) => void;
+  onFailure?: (context: {
+    /** The piece whose update failed, as configured (possibly unresolved). */
+    piece: string;
+    index: number;
+    total: number;
+    /** The outcomes that landed before the failure, in order. */
+    outcomes: BatchPieceOutcome[];
+  }) => void;
+}
+
+/**
+ * The session config a batch opens once: the shared space fields of the
+ * per-piece configs, with every embedded space DID collected so the deferred
+ * check in `loadPieces` covers each piece reference that carried one.
+ */
+function batchSessionConfig(configs: PieceConfig[]): SpaceConfig {
+  const [first] = configs;
+  const embedded = [
+    ...new Set(configs.flatMap((config) => config.embeddedSpaces ?? [])),
+  ];
+  return embedded.length === 0 ? first : { ...first, embeddedSpaces: embedded };
+}
+
+/**
+ * Apply one pattern source to several pieces through a single session.
+ *
+ * Serial and stop-on-first-failure: pieces are processed strictly in the
+ * order given, and a failure propagates after `onFailure` reports what had
+ * already landed — the pieces before the failure keep their update.
+ *
+ * Per-piece semantics are `setPiecePattern`'s: the same `setPattern` call,
+ * with the same compatibility enforcement, dangerous-flag scope, and
+ * concurrency behavior. What the batch amortizes is everything around it —
+ * the session open and replica warm-up happen once, the source package is
+ * resolved and pinned once, and each piece's own compile inside `setPattern`
+ * rides the content-addressed compile cache warmed by the first. The
+ * per-piece compile is kept (rather than hoisted) deliberately: it derives
+ * and persists that piece's predecessor update-authority delegations, which
+ * a shared precompiled pattern would silently drop.
+ *
+ * Every piece still goes through `setPattern`, even when it is already
+ * running the candidate pattern. Pattern identity alone does not capture the
+ * source transition, revision history, or repository metadata that
+ * `setPattern` owns, so skipping that call would make the batch path differ
+ * from serial `setsrc`.
+ */
+export async function setPiecePatternBatch(
+  configs: PieceConfig[],
+  entry: EntryConfig,
+  options: SetPiecePatternOptions = {},
+  deps: PieceOperationDependencies & BatchPieceProgress = {},
+): Promise<BatchPieceOutcome[]> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(
+    batchSessionConfig(configs),
+  );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
+  const outcomes: BatchPieceOutcome[] = [];
+  for (const [index, config] of configs.entries()) {
+    try {
+      const resolvedConfig = await resolvePieceConfigWithPieces(
+        config,
+        pieces,
+        deps.resolvePieceAddress,
+      );
+      const piece = await pieces.get(
+        resolvedConfig.piece,
+        false,
+        undefined,
+        resolvedConfig.pieceScope,
+      );
+      await piece.setPattern(program, {
+        repository: entry.repository,
+        ...(options.dangerouslyAllowIncompatibleSchema
+          ? { dangerouslyAllowIncompatibleSchema: true }
+          : {}),
+      });
+      const outcome: BatchPieceOutcome = { piece: resolvedConfig.piece };
+      outcomes.push(outcome);
+      deps.onOutcome?.(outcome, index, configs.length);
+    } catch (error) {
+      deps.onFailure?.({
+        piece: config.piece,
+        index,
+        total: configs.length,
+        outcomes: [...outcomes],
+      });
+      throw error;
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Run `checkPattern`'s aggregate review for one source against several
+ * pieces, through a single session. Applies nothing; the verdicts come back
+ * in the order given so a caller can report them grouped by piece. A hard
+ * error (an unresolvable piece, an unusable argument) propagates rather than
+ * becoming a verdict — an incompatibility is a finding, a failure to review
+ * is not.
+ */
+export async function checkPiecePatternBatch(
+  configs: PieceConfig[],
+  entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<BatchPieceCheck[]> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(
+    batchSessionConfig(configs),
+  );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
+  const checks: BatchPieceCheck[] = [];
+  for (const config of configs) {
+    const resolvedConfig = await resolvePieceConfigWithPieces(
+      config,
+      pieces,
+      deps.resolvePieceAddress,
+    );
+    const piece = await pieces.get(
+      resolvedConfig.piece,
+      false,
+      undefined,
+      resolvedConfig.pieceScope,
+    );
+    checks.push({
+      piece: resolvedConfig.piece,
+      report: await piece.checkPattern(program),
+    });
+  }
+  return checks;
+}
+
 export async function savePiecePattern(
   config: PieceConfig,
   outPath: string,
