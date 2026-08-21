@@ -1,9 +1,9 @@
 # Naming in collections
 
-A collection may give its members names of its own: `top/42` for member 42 of a
-board that calls itself `top`. This document defines how such a name is
-addressed and resolved, how a spelling is chosen for a given reader, and what
-has to be in place before a collection can offer one.
+A collection may give its members names of its own: `42` for a member of a board
+that calls itself `top`, written together as `top/42`. This document defines how
+such a name is addressed and resolved, how a spelling is chosen for a given
+reader, and what has to be in place before a collection can offer one.
 
 It governs any collection that wants named members, not one kind of board.
 Topics is the first customer; nothing here is specific to it.
@@ -32,17 +32,17 @@ Only the first is guaranteed to exist.
 | Layer | Example | Who states the guarantee |
 | --- | --- | --- |
 | Identity | `fid1:…` | the fabric: immutable, never reused, never retargeted |
-| Member name | `top/42` | the collection that owns it |
+| Member name | `42` | the collection that owns it |
 | Space-level name | `verb-contract-arc` | the space: mutable, non-unique, retargetable |
 
 A **member name** is a collection's name for one of its members, and the term
 carries no policy: it says who assigned the name, not what the name promises.
 The identity is what a stored reference resolves to. A member name is what a
-person cites. A space-level name is a convenience that may move. The layers
-differ in who owns the guarantee rather than in how strong it is: a collection
-may hold its member names to something stronger than a space holds its slugs, or
-to something weaker, and a consumer learns which by asking rather than by
-assuming.
+person cites, paired with the name of the collection that assigned it. A
+space-level name is a convenience that may move. The layers differ in who owns
+the guarantee rather than in how strong it is: a collection may hold its member
+names to something stronger than a space holds its slugs, or to something
+weaker, and a consumer learns which by asking rather than by assuming.
 
 ## Naming members is optional
 
@@ -58,7 +58,7 @@ others.
 A collection that wants named members declares five things, and beyond them it
 is free.
 
-1. **A prefix** — the name other things bind to in order to reach it.
+1. **A name for itself** — what other things bind to in order to reach it.
 2. **A forward resolution** — given a member name, the link it currently names.
 3. **A reverse resolution** — given a member, the name this collection calls it
    by. A renderer cannot shorten anything without this direction, so it is part
@@ -143,7 +143,7 @@ when two people want the same word.
 
 A **derivation from the member's own content or identity** needs no allocation
 and is stable by construction, at the cost of being unmemorable and of needing
-prefix-expansion behavior on collision.
+expanding the derivation when two collide.
 
 **Allocating on first sight rather than at creation** is worth weighing
 whichever mechanism is chosen. A member receives its identity when it is
@@ -175,12 +175,12 @@ its own, and a name resolves by walking segments:
 Slugs generalize from space-scoped to collection-scoped. The grammar, the
 derivation, and the claim semantics are the same one level down; only the scope
 of the lookup changes. A collection needs no name registry and no new document
-type. A prefix is a slug that points at a collection, and a member name is a
+type. A collection's name is a slug that points at it, and a member name is a
 name that collection resolves.
 
 **The collection resolves its own members, not the piece containing it.** A
 piece holding three collections is not one namespace with internal routing; it
-is three collections, each declaring its own prefix. A slug may point at a
+is three collections, each declaring its own name. A slug may point at a
 collection nested inside a piece rather than at a piece root, which is what
 makes this addressable without a new mechanism — `setPieceSlug`
 (`packages/cli/lib/piece.ts`) accepts a source path and links the cell at that
@@ -209,9 +209,9 @@ belongs to prose, which has a sigil and a round-trip check.
 
 ## Resolution scope
 
-A prefix is a name, and a name resolves through a scope chain, innermost first:
+A name resolves through a scope chain, innermost first:
 
-1. the containing collection's own declared prefix
+1. the containing collection's own declared name
 2. other collections bound in that scope
 3. the reader's home-space bindings
 4. space-level slugs
@@ -224,10 +224,11 @@ collection anywhere. A binding in a person's own space is also the one place
 where nobody else is renaming things
 (`docs/common/conventions/HOME_SPACE.md`).
 
-A reference carries **one** scope segment, and the scope chain is how it
-resolves. A person's own binding and a space-level slug are the same kind of
-thing reached at different rungs, so a reader who has bound a name uses it and a
-reader who has not falls through to the space.
+The chain resolves a reference's **leading** segment. Every segment after it
+resolves within whatever the one before produced, so a nested reference walks
+rather than searching again. A person's own binding and a space-level slug are
+the same kind of thing reached at different rungs, so a reader who has bound a
+name uses it and a reader who has not falls through to the space.
 
 ### A worked example
 
@@ -258,11 +259,12 @@ canonical and what gets displayed is computed per reader.
 Reading through the board itself, the same member is `#42`: the containing
 collection is the innermost rung, and it needs no name at all.
 
-### One segment for scope, one for the member
+### Scope, then member
 
-The last segment of a reference is a member name; every segment before it is
-scope. A collection name and a member name therefore never compete for a
-position, and no rule is needed to tell them apart.
+The last segment of a reference names a member; everything before it is scope,
+and only the leading segment consults the chain. A collection name and a member
+name therefore never compete for a position, and no rule is needed to tell them
+apart.
 
 ### Nothing hidden decides what a name means
 
@@ -287,7 +289,7 @@ what keeps parsing independent of naming.
 Fixing the character set is a decision with a cost, taken deliberately: it makes
 names in other scripts second-class, and widening it later reaches every stored
 name. The widening is not only a grammar change. Admitting other scripts admits
-confusables, and a confusable prefix is a spoofing vector — so a normalization
+confusables, and a confusable name is a spoofing vector — so a normalization
 and confusable policy has to exist before the first non-ASCII name, not after.
 
 ---
@@ -374,7 +376,7 @@ renders as `#42` inside its own collection, `#top/42` for a reader who has bound
 `top` to it, `#work/42` for a reader who bound it as `work`, and fully qualified
 for a reader with no binding at all.
 
-This is what makes a curated set of prefixes safe. Brevity is earned by the
+This is what makes a curated set of bindings safe. Brevity is earned by the
 reader's own bindings; a reader without them sees more qualification; nobody
 sees a wrong name.
 
@@ -392,8 +394,11 @@ it provably comes back to the same item. This is also what makes a short
 spelling safe for a collection whose names may move: a spelling that no longer
 round-trips is not shown.
 
-The default display is prefix-qualified rather than bare. A screenshot of `#42`
-is unrecoverable; `#top/42` is recoverable by anyone who knows one prefix.
+The bare form is not among the spellings a renderer reaches for on its own. A
+screenshot of `#42` is unrecoverable, while `#top/42` is recoverable by anyone
+who knows the collection's name, so the scope-qualified spelling is the shortest
+a renderer will choose. The bare form stays available to an author who types
+it.
 
 ### Two modes, chosen by destination
 
@@ -419,7 +424,7 @@ a host, so the name stays legible in pasted text and resolves where no resolver
 exists.
 
 Screenshots, speech, and retyping carry only what is visible. That residue is
-why the displayed form stays prefix-qualified by default.
+why the displayed form stays scope-qualified.
 
 ## Storage
 
@@ -450,9 +455,10 @@ one impossible by accident and detectable when deliberate.
   space-level name cannot land on one. Retargeting one means writing that
   collection's own cell through its own actions — a visible edit, not a silent
   redirect on an invisible document.
-- The prefix binding is the one name that remains exposed, and it fails loudly:
+- The binding naming a collection is the one name still exposed, and it fails
+  loudly:
   every reference through it breaks at once, and one write repairs it.
-- A collection stores its own declared prefix, so a resolver can verify that the
+- A collection stores the name it declares, so a resolver can verify that the
   binding and the target agree and report a mismatch.
 
 ## Implementation road
@@ -488,10 +494,10 @@ a target outside that space cannot be written today. Resolution already handles
 it, following a slug's redirect into the space its target link names, so this is
 a writer gap rather than a model gap.
 
-**3. Give collections member namespaces.** A collection declares its prefix, its
-name policy, and forward and reverse resolutions. Whatever allocator it needs is
-its own; a collection that accepts names from people can reuse the claim from
-step 2 at collection scope. Widen `resolvePieceAddress`
+**3. Give collections member namespaces.** A collection declares the name it
+answers to, its name policy, and forward and reverse resolutions. Whatever
+allocator it needs is its own; a collection that accepts names from people can
+reuse the claim from step 2 at collection scope. Widen `resolvePieceAddress`
 (`packages/piece/src/slugs.ts`), which rejects a name whose target has no
 pattern identity, so that a name pointing at a collection nested in a piece is
 not treated as an error.
