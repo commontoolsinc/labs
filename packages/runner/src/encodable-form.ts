@@ -160,10 +160,10 @@ type AnyFunction = (...args: never[]) => unknown;
  *
  * A builder artifact carries its serializer as a `toEncodableForm` method (see
  * `builder/module.ts` and `builder/pattern.ts`). A method is a function-valued
- * property and a fabric record has none, so an artifact has to be replaced
- * before the value crosses into the data model. An artifact sits wherever a
- * pattern author put it -- under a tool's `handler` key, in a result, inside a
- * node's `inputs` -- so finding one takes a walk.
+ * property and a `FabricPlainObject` has none, so an artifact has to be
+ * replaced before the value crosses into the data model. An artifact sits
+ * wherever a pattern author put it -- under a tool's `handler` key, in a
+ * result, inside a node's `inputs` -- so finding one takes a walk.
  *
  * The `toEncodableForm` name is what bounds the subject to _builder artifacts_.
  * An artifact carries `toJSON` as well, delegating to the same serializer (see
@@ -255,8 +255,8 @@ function replace(
     // claims it. A `Cell` is what that hook is for: the walk cannot name one
     // from here, and the conversion has no representation for it either.
     //
-    // A null-prototype object is excluded too -- hence the `false` argument
-    // to `isPlainObject()`. It is not a fabric record, so it is not the
+    // A null-prototype object is excluded too -- hence the `false` argument to
+    // `isPlainObject()`. It is not a `FabricPlainObject`, so it is not the
     // walk's to rewrite. That is not the same as the conversion refusing one:
     // `native-type-tags.ts` reports it as `Object`. Whether to accept it is the
     // conversion's question, asked of the value as it stands.
@@ -416,7 +416,7 @@ function ownEncodableFormMethod(
 
   // The `typeof` gate is what settles a value carrying a user-data key of the
   // name -- a query-result proxy satisfies `Object.hasOwn()` for any key its
-  // record holds -- since a fabric record has no function-valued member to
-  // find.
+  // record holds -- since a `FabricPlainObject` has no function-valued member
+  // to find.
   return typeof method === "function" ? method as () => unknown : undefined;
 }

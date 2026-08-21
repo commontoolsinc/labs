@@ -2916,7 +2916,7 @@ export function schemaTypeMatchesValueType(
 ): boolean {
   // Integer is a subtype of number: an integer value satisfies either schema,
   // while a fractional number only satisfies a number schema. Likewise, each
-  // fabric-primitive type is a subtype of "object": a `FabricBytes` value
+  // `FabricPrimitive` type is a subtype of "object": a `FabricBytes` value
   // satisfies both `{type: "FabricBytes"}` and `{type: "object"}`, while a
   // plain record only satisfies the latter.
   return schemaType === valueType ||
@@ -2941,7 +2941,7 @@ function narrowSubtypeIntersection(
   }
 
   // The subtype pairs mirror schemaTypeMatchesValueType: integer under
-  // number, and each fabric-primitive type under "object". An intersection
+  // number, and each `FabricPrimitive` type under "object". An intersection
   // keeps the narrower member of the pair.
   let narrowed = false;
   const intersection = new Set<JSONSchemaTypes>();
@@ -3782,8 +3782,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
-              // A fabric value's surface is class accessors, so its
-              // membership test is prototype-chain `in`; the nominal brand
+              // A `FabricSpecialObject`'s surface is class accessors, so
+              // its membership test is prototype-chain `in`; the nominal brand
               // key has no runtime existence and is satisfied by
               // construction (removable with the other brand exemptions
               // once the generator skips the brand — see
@@ -5187,8 +5187,8 @@ export function canBranchMatch(
       Array.isArray(resolved.required)
     ) {
       for (const req of resolved.required) {
-        // A fabric value's surface is class accessors, so its membership
-        // test is prototype-chain `in`; the nominal brand key has no
+        // A `FabricSpecialObject`'s surface is class accessors, so its
+        // membership test is prototype-chain `in`; the nominal brand key has no
         // runtime existence and is satisfied by construction (removable
         // with the other brand exemptions once the generator skips the
         // brand — see opaqueLeafMissesRequired's doc comment).
@@ -5228,7 +5228,7 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * is redeploy-gated: pattern update refuses the structural-to-vocabulary
  * transition (`packages/piece/src/schema-compatibility.ts`), so such a
  * schema persists until its piece is redeployed. A
- * fabric-primitive-typed schema is not gated here (its type never
+ * `FabricPrimitive`-typed schema is not gated here (its type never
  * includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
@@ -5265,7 +5265,7 @@ function getPlainJsonType(
   if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
-  // A fabric primitive reports its specific type name; a schema saying
+  // A `FabricPrimitive` reports its specific type name; a schema saying
   // `"object"` still accepts it via schemaTypeMatchesValueType's subtype rule.
   if (value instanceof FabricPrimitive) {
     return schemaTypeOfFabricPrimitive(value);

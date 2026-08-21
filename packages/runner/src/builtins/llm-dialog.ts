@@ -278,12 +278,12 @@ function resolveRefsForLLM(
 
     // Recurse into object properties (does not increment refDepth)
     //
-    // TODO(danfuzz): this rebuild recurses into every object-valued key, so
-    // it also descends into `default`/`examples` VALUES — and a fabric value
-    // there comes out as `{}` (`Object.entries` sees none of its state). The
-    // sibling `simplifySchemaForContext` carries `default` by reference via
-    // `PRESERVE_KEYS`; this walk wants the same treatment for value-bearing
-    // keys.
+    // TODO(danfuzz): this rebuild recurses into every object-valued key, so it
+    // also descends into `default`/`examples` VALUES — and a
+    // `FabricSpecialObject` there comes out as `{}` (`Object.entries` sees none
+    // of its state). The sibling `simplifySchemaForContext` carries `default`
+    // by reference via `PRESERVE_KEYS`; this walk wants the same treatment for
+    // value-bearing keys.
     const result: any = {};
     for (const [key, value] of Object.entries(nodeObj)) {
       if (key === "$defs") continue; // strip $defs from output

@@ -65,7 +65,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
 
 /**
  * Canonicalizes native leaf values while their foreign-realm identity is still
- * known. The data model only receives Fabric values or ordinary host values;
+ * known. The data model only receives `FabricValue`s or ordinary host values;
  * it does not need realm-specific dispatch.
  */
 function normalizeSandboxNativeLeaf(value: unknown): unknown {
@@ -183,10 +183,10 @@ function adaptSandboxResult(
 
   // This boundary returns canonical shapes: a fresh `Array` for anything
   // array-shaped, and an `Object.prototype`-rooted record for anything else.
-  // A prototype is not part of what a value says as data, and a fabric value
-  // has exactly one shape for a record, so a pattern that builds a result with
-  // `Object.create(null)` or `Object.groupBy()` has it re-rooted here rather
-  // than carried across only to be rejected downstream.
+  // A prototype is not part of what a value says as data, and a
+  // `FabricPlainObject` has exactly one shape, so a pattern that builds a
+  // result with `Object.create(null)` or `Object.groupBy()` has it re-rooted
+  // here rather than carried across only to be rejected downstream.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)
@@ -212,7 +212,7 @@ function adaptSandboxResult(
 
 /**
  * Produces a validation-only graph. Reactive and Cell leaves are legal result
- * placeholders but are not Fabric values, so they become `undefined` while
+ * placeholders but are not `FabricValue`s, so they become `undefined` while
  * graph structure, shared references, cycles, and invalid array properties are
  * retained for the authoritative data-model conversion check.
  */
@@ -237,7 +237,7 @@ function prepareActionResultValidation(
   // `adaptSandboxResult()`, which has already re-rooted every record -- so the
   // prototype in hand is `Object.prototype`. Anything that ran this pass
   // first, on a value straight from the sandbox, would propagate a prototype
-  // no fabric record has.
+  // no `FabricPlainObject` has.
   const valueIsArray = Array.isArray(value);
   const copy: unknown[] | Record<string, unknown> = valueIsArray
     ? new Array((value as unknown[]).length)

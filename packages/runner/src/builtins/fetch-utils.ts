@@ -67,7 +67,7 @@ export const internalSchema = internSchema(
  *     construction (e.g. `{ url, mode, options }`, or one level deeper
  *     `{ method, body }`), and the resulting hash needs to be the same
  *     regardless of whether an absent field is omitted entirely or
- *     present-but-`undefined`. The fabric-value layer preserves
+ *     present-but-`undefined`. The `FabricValue` layer preserves
  *     `undefined`-valued properties, so this function must do the
  *     JSON-style normalization itself.
  *

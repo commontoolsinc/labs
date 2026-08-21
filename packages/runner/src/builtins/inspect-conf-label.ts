@@ -108,7 +108,7 @@ export function inspectConfLabel(
     // copies by value (deep-frozen FabricValue trees — the stored-form atoms
     // and the frozen notAvailable constant — are accepted as-is, IWritable
     // contract). A JSON round-trip here would corrupt or throw on any
-    // non-JSON-safe Fabric value a stored atom might carry, breaking the
+    // non-JSON-safe `FabricValue` a stored atom might carry, breaking the
     // stored-form-verbatim promise (codex/cubic P2 on the Stage 2 PR).
     result.withTx(tx).set(outcome);
   };

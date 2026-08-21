@@ -1222,11 +1222,11 @@ export function normalizeAndDiff(
 
   // Anchor a plain object sitting in an array into an entity document of its
   // own, so mutable arrays hold links rather than inline objects. Only a
-  // writer that supplied an id source (i.e. one running under a builder
-  // frame) anchors, and the source is consumed once per eligible element in
-  // traversal order, so the derived ids do not depend on the currently stored
-  // state. Cells, links, and query results were consumed by earlier branches,
-  // and atomic fabric objects are excluded here; arrays never anchor, only
+  // writer that supplied an id source (i.e. one running under a builder frame)
+  // anchors, and the source is consumed once per eligible element in traversal
+  // order, so the derived ids do not depend on the currently stored state.
+  // Cells, links, and query results were consumed by earlier branches, and
+  // atomic `FabricSpecialObject`s are excluded here; arrays never anchor, only
   // the objects inside them.
   //
   // An element carried through UNTOUCHED from the stored array diffs to
@@ -1248,7 +1248,7 @@ export function normalizeAndDiff(
   // converted later in the recursion, so a deep comparison would inspect
   // values whose canonical form does not exist yet.
   //
-  // Atomic fabric objects are excluded from this guard: an untouched
+  // Atomic `FabricSpecialObject`s are excluded from this guard: an untouched
   // special-object prefix element re-emits its identical stored instance
   // from the instance branch below, and the mergeable invariant for those
   // elements rests on the write layer eliding that identical write from the

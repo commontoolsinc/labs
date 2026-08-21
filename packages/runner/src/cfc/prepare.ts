@@ -1058,12 +1058,12 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
 };
 
 // TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
-// meets, including schema `default` VALUES, and a fabric value rebuilds as
-// `{}` — so two schemas whose only difference is a fabric-valued default
-// compare equal here, and the candidate's default is silently discarded by
-// the merge-skip decisions this feeds. The strip wants to carry
-// value-bearing keys by reference and the comparison wants a fabric-aware
-// equality.
+// meets, including schema `default` VALUES, and a `FabricSpecialObject`
+// rebuilds as `{}` — so two schemas whose only difference is a
+// `FabricSpecialObject`-valued default compare equal here, and the candidate's
+// default is silently discarded by the merge-skip decisions this feeds. The
+// strip wants to carry value-bearing keys by reference and the comparison wants
+// a fabric-aware equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
@@ -2662,14 +2662,15 @@ const linkedWriteValueForPolicy = (
   });
 };
 
-// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates
-// on `typeof value === "object"` and then `head in value`, both true-shaped
-// for a `FabricSpecialObject` — but no key of an instance's codec contents is
-// an own (or any) property, so a pattern path into one resolves to no values
-// and the policy condition it feeds is never evaluated for that content.
+// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates on
+// `typeof value === "object"` and then `head in value`, both true-shaped for a
+// `FabricSpecialObject` — but no key of an instance's codec contents is an own
+// (or any) property, so a pattern path into one resolves to no values and the
+// policy condition it feeds is never evaluated for that content.
 // `changedValuesAtPatternPath`'s leaf case additionally compares with
-// `deepEqual`, which calls two same-class fabric values equal regardless of
-// contents, so a genuine change reads as "unchanged". Both fail open.
+// `deepEqual`, which calls two same-class `FabricSpecialObject`s equal
+// regardless of contents, so a genuine change reads as "unchanged". Both fail
+// open.
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -3044,9 +3045,9 @@ const ifcEntryAppliesToAttemptedWrite = (
     sawTargetWrite = true;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
-      // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
-      // regardless of contents, so a genuine change to a fabric-valued slot
-      // reads as "unchanged" and the ifc entry is skipped. Fails open;
+      // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
+      // equal regardless of contents, so a genuine change to a slot holding
+      // one reads as "unchanged" and the ifc entry is skipped. Fails open;
       // `valueEqual` is the fabric-aware comparison.
       return !deepEqual(write.value, write.previousValue) &&
         wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
@@ -3795,11 +3796,12 @@ const verifyExactCopyRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
-    // regardless of contents — under the modern cell rep even two
+    // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
+    // equal regardless of contents — under the modern cell rep even two
     // `FabricLink`s to different documents — so an `exactCopyOf` claim over
-    // fabric-valued state verifies for values that are not copies, and the
-    // source label is carried anyway. Fails open; wants `valueEqual`.
+    // `FabricSpecialObject`-valued state verifies for values that are not
+    // copies, and the source label is carried anyway. Fails open; wants
+    // `valueEqual`.
     if (!deepEqual(sourceValue, targetValue)) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
