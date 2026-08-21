@@ -1,9 +1,10 @@
 # Test-run records
 
-Every top-level test run with recording enabled produces one record per test —
-its identity, outcome, and duration — shipped with the run's context to a
-public store. A repository test that drives a harness as a library over fixture
-files produces its own record, not records for the fixture runs.
+When recording is enabled, a top-level test run produces one record per test.
+Each record contains the test's identity, outcome, and duration. The run ships
+those records with its context to a public store. A repository test that drives
+a harness as a library over fixture files produces its own record, not records
+for the fixture runs.
 [The spec](../specs/test-records.md) is the contract (identity
 rules, line formats, store guarantees, trust boundaries), and the
 reasoning that produced it is in [the archived
