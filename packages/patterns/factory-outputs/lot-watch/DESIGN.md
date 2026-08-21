@@ -184,7 +184,7 @@ Following `parking-coordinator`'s discipline (it uses all three scopes):
 | `knownVehicles: KnownVehicle[]`                                   | **`PerSpace`**   | shared guest + offender registries                  |
 | `spots` (input)                                                   | **`PerSpace`**   | shared with `parking-coordinator`                   |
 | `people` (input)                                                  | **`PerSpace`**   | read employee `vehicles` (the "ours" set)           |
-| `adminRegistry`                                                   | **`PerSpace`**   | shared CFC admin registry (who can edit watchlists) |
+| `adminRegistry`                                                   | **`PerSpace`**   | Lot Watch's own CFC registry (who edits watchlists) |
 | `adminManagerCredential`                                          | **`PerUser`**    | per-user manager credential (CFC pattern)           |
 | capture draft fields (`draftSpot`, in-flight image, `draftNotes`) | **`PerSession`** | transient UI state per device/tab                   |
 | `selectedTab` / report filters / confirm-dialog targets           | **`PerSession`** | ephemeral UI state                                  |
@@ -214,10 +214,14 @@ export const LOT_WATCH_ADMIN_MANAGER_INTEGRITY =
 deleting sightings, and bulk-merging duplicates. **Any employee can capture a
 sighting** — documentation must be frictionless; only curation is privileged.
 
-**Decided:** Lot Watch **reuses parking-coordinator's `adminRegistry`** (shared
-`PerSpace` input) but tags its role with a distinct `lot-watch-admin` integrity,
-so the one registry carries both role types — the admin module is already
-generic over `Role`. One admin list to manage operationally.
+**Decided:** Lot Watch keeps **its own `adminRegistry` cell**, tagging its role
+with a distinct `lot-watch-admin` integrity. The two patterns cannot share one
+registry cell. Each declares a `requiredIntegrity` floor at `/admins`, and the
+two floors name different atoms, so a roster written to satisfy one is refused
+by the other. Parking Coordinator additionally names its own commit handler in
+the list's `writeAuthorizedBy` contract, which refuses a write from any other
+code — Lot Watch's included. Sharing would mean agreeing on one atom and one
+writer, which is a larger decision than sharing a cell.
 
 ## 7. Capture Flow (mobile-first)
 
@@ -480,8 +484,9 @@ Mirror `parking-coordinator/main.test.tsx` (pattern test harness): drive
 
 ## 16. Resolved Decisions
 
-- **Admin role** — reuse parking-coordinator's `adminRegistry` with a distinct
-  `lot-watch-admin` integrity tag. (§6)
+- **Admin role** — a separate `adminRegistry` cell with a distinct
+  `lot-watch-admin` integrity tag; the two registries' floors and write bindings
+  disagree, so one cell cannot serve both. (§6)
 - **Employee plate source** — extend coordinator's `Person` with
   `vehicles?:
   Vehicle[]`; Lot Watch reads it read-only as "ours". (§3b)
