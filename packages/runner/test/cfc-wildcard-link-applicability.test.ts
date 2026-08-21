@@ -79,7 +79,7 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
   });
 });
 
-describe("CFC wildcard policy value conditions on fabric-primitive types", () => {
+describe("CFC wildcard policy value conditions on `FabricPrimitive` types", () => {
   const space = "did:key:wildcard-fabric" as const;
   const target = {
     space,
@@ -92,7 +92,7 @@ describe("CFC wildcard policy value conditions on fabric-primitive types", () =>
   } as unknown as IExtendedStorageTransaction;
   const bytesCondition = { type: "FabricBytes" } as const satisfies JSONSchema;
 
-  it("applies to a value of the named fabric-primitive class", () => {
+  it("applies to a value of the named `FabricPrimitive` class", () => {
     expect(
       wildcardPolicyMatchesValue(
         tx,
@@ -103,7 +103,7 @@ describe("CFC wildcard policy value conditions on fabric-primitive types", () =>
     ).toBe(true);
   });
 
-  it("does not apply to other values, including other fabric primitives", () => {
+  it("does not apply to other values, including other `FabricPrimitive`s", () => {
     expect(wildcardPolicyMatchesValue(tx, target, bytesCondition, { a: 1 }))
       .toBe(false);
     expect(
