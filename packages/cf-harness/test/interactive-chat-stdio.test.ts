@@ -1265,8 +1265,9 @@ Deno.test("the standalone stdio entrypoint applies the flags it advertises", asy
         "64",
       ],
       Deno.cwd(),
-      async (options) => {
+      (options) => {
         seen.push(options);
+        return Promise.resolve();
       },
     );
     assertEquals(seen.length, 1);
