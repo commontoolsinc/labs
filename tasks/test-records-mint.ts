@@ -254,10 +254,18 @@ export function isAccountNotVisible(
 
 /**
  * Mints one key and returns the key file JSON with cf_username added.
- * Every user-managed key the account held before is deleted once the new
- * one exists: a person holds one live key, so re-requesting rotates —
- * a lost or compromised key stops working the moment its replacement is
- * minted — and the account can never creep toward the key limit.
+ * Every user-managed key the account held is revoked before the new one
+ * is created: a person holds one live key, so re-requesting rotates, and
+ * a lost or compromised key stops working as early as it can rather than
+ * as late as it can.
+ *
+ * Revoking first is also what makes a failure part way through leave
+ * nothing behind. A mint that fails after creating a key would leave one
+ * nobody holds, live, counting against the ten a service account may
+ * have and visible to no one. A revoke that fails leaves the person with
+ * the key they already had, and a mint that fails after revoking leaves
+ * them with none — which their next test run tells them, and which
+ * running the setup command again fixes.
  */
 export async function mintKey(
   client: GcpClient,
@@ -280,6 +288,20 @@ export async function mintKey(
     .map((key) => key.name)
     .filter((name): name is string => typeof name === "string");
 
+  for (const name of superseded) {
+    const deleted = await gcp(client, "DELETE", `${IAM}/${name}`);
+    if (deleted.status !== 200) {
+      throw new Error(
+        `revoking the superseded key ${name} failed: HTTP ${deleted.status}` +
+          (deleted.status === 403
+            ? "; the broker's role is missing " +
+              "iam.serviceAccountKeys.delete, without which no key can be " +
+              "rotated (infra: tofu/test-records)"
+            : ""),
+      );
+    }
+  }
+
   const minted = await gcp(client, "POST", `${account}/keys`, {});
   if (minted.status !== 200) {
     throw new Error(
@@ -291,15 +313,6 @@ export async function mintKey(
   const keyData = (minted.json as { privateKeyData?: string }).privateKeyData;
   if (keyData === undefined) {
     throw new Error("the key response carried no privateKeyData");
-  }
-
-  for (const name of superseded) {
-    const deleted = await gcp(client, "DELETE", `${IAM}/${name}`);
-    if (deleted.status !== 200) {
-      throw new Error(
-        `revoking the superseded key ${name} failed: HTTP ${deleted.status}`,
-      );
-    }
   }
 
   const decoded = atob(keyData);

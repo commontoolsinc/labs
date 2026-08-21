@@ -296,7 +296,7 @@ describe("test-records-mint", () => {
       expect(log[0]?.url).toContain("keyTypes=USER_MANAGED");
     });
 
-    it("revokes every key the account held before", async () => {
+    it("revokes every key the account held before minting one", async () => {
       const log: { method: string; url: string; body?: string }[] = [];
       await mintKey(
         {
@@ -311,9 +311,9 @@ describe("test-records-mint", () => {
                 ],
               },
             },
+            { status: 200, json: {} },
+            { status: 200, json: {} },
             { status: 200, json: { privateKeyData: keyData } },
-            { status: 200, json: {} },
-            { status: 200, json: {} },
           ], log),
         },
         "sa@x",
@@ -323,9 +323,18 @@ describe("test-records-mint", () => {
       expect(deletes.length).toBe(2);
       expect(deletes[0]?.url).toContain("/keys/old1");
       expect(deletes[1]?.url).toContain("/keys/old2");
+      // The account never holds two live keys, so the new one is created
+      // only once the old ones are gone.
+      expect(log.map((entry) => entry.method)).toEqual([
+        "GET",
+        "DELETE",
+        "DELETE",
+        "POST",
+      ]);
     });
 
-    it("throws when a superseded key cannot be revoked", async () => {
+    it("throws before minting when a key cannot be revoked", async () => {
+      const log: { method: string; url: string; body?: string }[] = [];
       await expect(mintKey(
         {
           token: "t",
@@ -336,13 +345,33 @@ describe("test-records-mint", () => {
                 keys: [{ name: "projects/p/serviceAccounts/sa@x/keys/old" }],
               },
             },
-            { status: 200, json: { privateKeyData: keyData } },
+            { status: 500 },
+          ], log),
+        },
+        "sa@x",
+        "octocat",
+      )).rejects.toThrow("revoking");
+      // Nothing was created, so no key is left that nobody holds.
+      expect(log.some((entry) => entry.method === "POST")).toBe(false);
+    });
+
+    it("names the permission a refused revocation needs", async () => {
+      await expect(mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            {
+              status: 200,
+              json: {
+                keys: [{ name: "projects/p/serviceAccounts/sa@x/keys/old" }],
+              },
+            },
             { status: 403 },
           ], []),
         },
         "sa@x",
         "octocat",
-      )).rejects.toThrow("revoking");
+      )).rejects.toThrow("iam.serviceAccountKeys.delete");
     });
   });
 

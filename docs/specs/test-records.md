@@ -144,8 +144,9 @@ service accounts (`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
-previous keys once the new one exists — a person holds one live key, and
-re-requesting is how a lost or compromised key is rotated — and a daily
+previous keys before the new one exists — a person holds one live key,
+never two, and re-requesting is how a lost or compromised key is
+rotated — and a daily
 janitor disables accounts after a month without pull-request activity
 and re-enables them on return. The **compactor**, when provisioned,
 holds create on `aggregated/` and rewrites each closed day of raw
