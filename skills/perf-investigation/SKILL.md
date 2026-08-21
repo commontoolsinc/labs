@@ -284,11 +284,13 @@ code that resolves them.
   growing array is free, and so is appending a piece to one. Appending a piece
   whose declared shape is wide re-walks every element already there, once per
   append, with no reactive fan-out at all — the scheduler run count stays flat
-  while the traversal count climbs per element. The cost is a function of the
-  element schema's width and depth, not of the array's length, which is why a
-  narrow element looks flat at the size where a wide one bends. An A/B cannot
-  separate those; a ladder can — hold the append fixed and vary only what the
-  element is, from a plain value up to the real thing, until the curve bends.
+  while the traversal count climbs per element. The cost is the list's length
+  times what one element's schema costs to walk, and it is the second factor
+  that decides whether you can see it: a narrow element looks flat at the size
+  where a wide one bends, because both grow with the list and only one has a
+  coefficient large enough to notice. An A/B cannot separate those; a ladder can
+  — hold the append fixed and vary only what the element is, from a plain value
+  up to the real thing, until the curve bends.
 - **The work is fine but keeps being thrown away.** Mapped sub-patterns track
   their elements by normalized link address, which is stable across position
   changes for a cell and includes the positional index for an inline value — so

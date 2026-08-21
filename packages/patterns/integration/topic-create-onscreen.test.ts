@@ -47,8 +47,16 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-/** Topics per board. Small by default; an investigation asks for more. */
-const SIZE = Number(Deno.env.get("CF_TOPICS_ONSCREEN_SIZE") ?? "10");
+/**
+ * Topics per board. Small by default; an investigation asks for more.
+ *
+ * The default is what CI pays on every pull request, and this scenario is
+ * superlinear by construction — ten per board is 24 seconds of measured steps
+ * on an M3 Max, against a sixty-second per-test budget that a slower runner has
+ * to fit inside too. Five keeps the pair and the shape of the curve well inside
+ * it.
+ */
+const SIZE = Number(Deno.env.get("CF_TOPICS_ONSCREEN_SIZE") ?? "5");
 
 /**
  * Whether the browser is routed at the first board at all.
@@ -165,6 +173,14 @@ describe("Topics create, on screen against off screen", () => {
       );
       await cc.runtime.idle();
       const onWriteMs = performance.now() - onStart;
+      // `waitForText` rather than `waitForSettledText`, and the difference is
+      // the measurement: this waits for the card to appear, where the settling
+      // variant would drive the page until it did. The board is mounted here,
+      // so the shell holds its own subscription and renders the remote write
+      // without help — which is the property under test. A wait that had to
+      // drive the page would report a render tail no reader would ever see, and
+      // would hide a live view that had stopped updating itself.
+      //
       // Nothing renders this board in the control, so there is no card to wait
       // for and the two halves of the measurement collapse into one.
       if (RENDER) await waitForText(page, "body", onTitle);
