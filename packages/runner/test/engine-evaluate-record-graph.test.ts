@@ -327,6 +327,193 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(main?.default).toEqual(["Oslo", "Lima"]);
   });
 
+  it("resolves a relative read against the module that makes it", async () => {
+    // The reading module sits two directories down and names the file beside
+    // it. Nothing in the program spells the path the file is stored under, so
+    // the read has to work it out from where the reader is.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/lists/nordic/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./lists/nordic/read.ts";\n',
+        },
+        {
+          name: "/lists/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        {
+          name: "/lists/nordic/cities.json",
+          contents: '{"cities": ["Oslo", "Bergen"]}',
+        },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual([
+      "Oslo",
+      "Bergen",
+    ]);
+  });
+
+  it("resolves a bare read against the module that makes it", async () => {
+    // No leading `./`. A data file has no bare-package namespace, so a path
+    // that is not grounded at the package root is relative to the reader.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/lists/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./lists/read.ts";\n',
+        },
+        {
+          name: "/lists/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/lists/cities.json", contents: '{"cities": ["Rio"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual(["Rio"]);
+  });
+
+  it("climbs out of the reading module's directory for a parent read", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/shared/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { cities } from "./nordic/read.ts";\n',
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("../shared/cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/shared/cities.json", contents: '{"cities": ["Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).cities).toEqual(["Lima"]);
+  });
+
+  it("gives two modules at different depths their own sibling file", async () => {
+    // Both modules read `./cities.json`, and each gets the one beside it.
+    // A read resolved anywhere but at the reader would hand both the same
+    // file.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/nordic/cities.json", "/andean/deep/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'export { cities as nordic } from "./nordic/read.ts";',
+            'export { cities as andean } from "./andean/deep/read.ts";',
+          ].join("\n"),
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        {
+          name: "/andean/deep/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            "export const cities = __cf_data(",
+            '  JSON.parse(dataFile("./cities.json")).cities,',
+            ");",
+          ].join("\n"),
+        },
+        { name: "/nordic/cities.json", contents: '{"cities": ["Oslo"]}' },
+        { name: "/andean/deep/cities.json", contents: '{"cities": ["Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as Record<string, unknown>).nordic).toEqual(["Oslo"]);
+    expect((main as Record<string, unknown>).andean).toEqual(["Lima"]);
+  });
+
+  it("leaves a module's own export named dataFile alone", async () => {
+    // Only the runtime's `dataFile` reads attached data. A local module is free
+    // to export a value under that name, and an importer gets the one it
+    // imported.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data } from "commonfabric";',
+            'import { dataFile } from "./local.ts";',
+            'export default __cf_data(dataFile("/cities.json"));',
+          ].join("\n"),
+        },
+        {
+          name: "/local.ts",
+          contents:
+            "export const dataFile = (path: string) => `local:${path}`;\n",
+        },
+        { name: "/cities.json", contents: '{"cities": []}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect(main?.default).toBe("local:/cities.json");
+  });
+
+  it("names the path a failed relative read resolved to", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/nordic/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'export { text } from "./nordic/read.ts";\n',
+        },
+        {
+          name: "/nordic/read.ts",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            'export const text = __cf_data(dataFile("./absent.json"));',
+          ].join("\n"),
+        },
+        { name: "/nordic/cities.json", contents: "[]" },
+      ],
+    };
+
+    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
+      'No attached data file "/nordic/absent.json". ' +
+        "Attached: /nordic/cities.json.",
+    );
+  });
+
   it("names the attached data files when a path matches none", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

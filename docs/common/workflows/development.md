@@ -32,14 +32,14 @@ deno task cf piece link ... editor-id/items viewer-id/items
   entry with `cf test`, and repeat `--test` for every entry during deployment.
   Deployment packages and type-checks attached tests but does not run them.
 - A file that is not code travels with the source when the pattern reads it.
-  `dataFile(path)` from `commonfabric` names the path it is stored under, and
-  that call is the declaration: every command that builds the program from
-  local files — `setsrc`, `check`, `test`, `dev` — attaches what the source
-  names, the way it already follows what the source imports. The bytes are
-  stored verbatim, never parsed, compiled, or importable, and come back from
-  `cf piece getsrc` with the rest of the package. A file named this way must
-  be on disk under the program root, or the build refuses and says which
-  module asked for it.
+  `dataFile(path)` from `commonfabric` names the file relative to the module
+  that reads it, the way an import specifier does, and that call is the
+  declaration: every command that builds the program from local files —
+  `setsrc`, `check`, `test`, `dev` — attaches what the source names, the way it
+  already follows what the source imports. The bytes are stored verbatim, never
+  parsed, compiled, or importable, and come back from `cf piece getsrc` with
+  the rest of the package. A file named this way must be on disk where the call
+  resolves to, or the build refuses and says which module asked for it.
 - `--datafile` attaches a file the source cannot name: one read by a computed
   path, or one that ships with a program that does not read it. It is
   repeatable, and it adds to what the source declares rather than replacing

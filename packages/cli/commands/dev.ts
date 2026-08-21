@@ -163,7 +163,7 @@ function createCheckCommand(): Command<any> {
     )
     .example(
       cliText(`cf check ./pattern.tsx --datafile ./data/cities.json`),
-      "Check a pattern that reads an attached data file.",
+      "Check a pattern, attaching a data file its source cannot name.",
     )
     .option("--no-run", "Do not execute input, only type check.")
     .option("--no-check", "Do not type check input.")
@@ -200,7 +200,7 @@ function createCheckCommand(): Command<any> {
     )
     .option(
       "--datafile <path:string>",
-      "Attach a data file the pattern reads with dataFile(). Repeatable.",
+      "Attach a data file the pattern's source cannot name. Repeatable.",
       { collect: true },
     )
     .option(
