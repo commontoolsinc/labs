@@ -501,6 +501,19 @@ function recursiveStripAsCellFromSchema(
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
   if (depth > 100) return schema;
 
+  // A NESTED reference-form schema sanitizes as its resolved document, the
+  // same rule the entry point applies to the root: the referenced closure
+  // may carry `asCell`, and a reference left in place would reintroduce it
+  // the moment a reader resolves it — visibly clean, actually not. The
+  // resolution is interned, so the cycle detection below keys on stable
+  // identities, and a cyclic group arrives as its finite local-`$defs`
+  // member view rather than expanding forever. An unresolvable reference
+  // passes through unchanged, as at the root.
+  const nestedRef = (schema as { $ref?: unknown }).$ref;
+  if (typeof nestedRef === "string" && isExternalSchemaRef(nestedRef)) {
+    schema = resolveExternalRootRefForStructure(schema);
+  }
+
   // If we've already fully processed this schema, return the result
   if (context.seen.has(schema) && !context.inProgress.has(schema)) {
     return context.seen.get(schema);

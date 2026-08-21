@@ -8,6 +8,8 @@ import { enableMockMode } from "@commonfabric/llm/client";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
@@ -984,5 +986,94 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+});
+
+describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
+  // The gate's schema walk, driven directly: a literal value carries no
+  // integrity, so any reachable floor must refuse it. The runtime only
+  // participates in value cellification, which a literal never triggers.
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    cfcEnforcementMode: "enforce-explicit",
+  });
+  const gate = (schema: unknown, value: unknown) =>
+    llmToolExecutionHelpers.toolInputRequiredIntegrityFailure(
+      runtime,
+      space,
+      schema,
+      value,
+      "",
+      {},
+    );
+  const registeredRefTo = (schema: JSONSchema): string => {
+    const { rootRef, documents } = decomposeSchema(
+      schema as Parameters<typeof decomposeSchema>[0],
+    );
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+    return rootRef;
+  };
+
+  it("refuses a literal against a floor inside a referenced compound branch", () => {
+    const rootRef = registeredRefTo({
+      anyOf: [{
+        type: "string",
+        ifc: { requiredIntegrity: [KERNEL_ATOM] },
+      }],
+    } as JSONSchema);
+    expect(gate({ $ref: rootRef }, "attacker@example.com")).toContain(
+      "requires integrity",
+    );
+  });
+
+  it("refuses a literal against a floor behind a nested local reference", () => {
+    const rootRef = registeredRefTo({
+      $ref: "#/$defs/Envelope",
+      $defs: {
+        Envelope: {
+          type: "object",
+          properties: {
+            recipient: { $ref: "#/$defs/FlooredRecipient" },
+          },
+        },
+        FlooredRecipient: {
+          type: "object",
+          ifc: { requiredIntegrity: [KERNEL_ATOM] },
+          properties: {
+            parent: { $ref: "#/$defs/Envelope" },
+          },
+        },
+      },
+    } as JSONSchema);
+    expect(
+      gate({ $ref: rootRef }, { recipient: { parent: undefined } }),
+    ).toContain("requires integrity");
+  });
+
+  it("refuses a local reference it cannot resolve (fail closed)", () => {
+    expect(gate({ $ref: "#/$defs/Missing" }, "x")).toContain(
+      "cannot resolve",
+    );
+  });
+
+  it("terminates on a self-referential compound group", () => {
+    const rootRef = registeredRefTo({
+      $ref: "#/$defs/Loop",
+      $defs: {
+        Loop: { anyOf: [{ $ref: "#/$defs/Loop" }, { type: "string" }] },
+      },
+    } as JSONSchema);
+    expect(gate({ $ref: rootRef }, "plain")).toBe(undefined);
+  });
+
+  it("passes a referenced compound schema declaring no floor", () => {
+    const rootRef = registeredRefTo({
+      anyOf: [{ type: "string" }, { type: "number" }],
+    } as JSONSchema);
+    expect(gate({ $ref: rootRef }, "anything")).toBe(undefined);
   });
 });

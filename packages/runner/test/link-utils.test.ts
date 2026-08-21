@@ -29,6 +29,8 @@ import {
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -753,6 +755,39 @@ describe("link-utils", () => {
       };
       const value = { entry: sigil };
       expect(inlineExternalSchemaRefsInValue(value)).toEqual(value);
+    });
+  });
+
+  describe("sanitizeSchemaForLinks through references", () => {
+    it("strips asCell from a document nested behind a second reference", () => {
+      // Document B carries the marker; document A reaches it only by
+      // reference. A sanitize that stops at the reference looks clean and
+      // is not: the first reader to resolve B rediscovers the marker and
+      // mints a handle where a plain value is expected.
+      const documentB = {
+        type: "string",
+        asCell: ["cell"],
+      } as unknown as JSONSchema;
+      const hashB = internSchemaAsTaggedHashString(documentB);
+      registerSchemaDocument(hashB, documentB);
+      const documentA = {
+        type: "object",
+        properties: { name: { $ref: `cid:${hashB}` } },
+      } as unknown as JSONSchema;
+      const hashA = internSchemaAsTaggedHashString(documentA);
+      registerSchemaDocument(hashA, documentA);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashA}` } as unknown as JSONSchema,
+      );
+
+      const serialized = JSON.stringify(sanitized);
+      expect(serialized).not.toContain("asCell");
+      expect(serialized).not.toContain("cid:");
+      expect(
+        (sanitized as { properties: { name: { type: string } } })
+          .properties.name.type,
+      ).toBe("string");
     });
   });
 

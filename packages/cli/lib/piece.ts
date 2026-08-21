@@ -2379,6 +2379,13 @@ function expandServedSchemaReference(
  * The declared document's `$defs` names, keyed by the content hash each
  * definition decomposes to — the same hashes the served document's
  * references carry, so a recomposition can put the author's names back.
+ *
+ * Each definition maps under TWO hashes: as declared, and with every
+ * `description` stripped. Descriptions participate in schema hashing, and
+ * the served structural document may carry a definition without the prose
+ * the author declared — hashing only the prose-bearing form would miss it,
+ * and the name would fall back to a hash-derived one exactly for the
+ * definitions an author documented best.
  */
 function declaredDefNamesByHash(
   declared: JSONSchema | undefined,
@@ -2387,23 +2394,45 @@ function declaredDefNamesByHash(
   if (!isObjectOrArray(declared) || !isObjectOrArray(declared.$defs)) {
     return names;
   }
+  const defGroups = [
+    declared.$defs,
+    withoutDescriptions(declared.$defs) as typeof declared.$defs,
+  ];
   for (const name of Object.keys(declared.$defs)) {
-    try {
-      const { rootRef } = decomposeSchema(
-        {
-          $ref: encodeJsonPointer(["#", "$defs", name]),
-          $defs: declared.$defs,
-        } as Parameters<typeof decomposeSchema>[0],
-      );
-      const parsed = parseExternalSchemaRef(rootRef);
-      if (parsed !== undefined && !names.has(parsed.taggedHash)) {
-        names.set(parsed.taggedHash, name);
+    for (const defs of defGroups) {
+      try {
+        const { rootRef } = decomposeSchema(
+          {
+            $ref: encodeJsonPointer(["#", "$defs", name]),
+            $defs: defs,
+          } as Parameters<typeof decomposeSchema>[0],
+        );
+        const parsed = parseExternalSchemaRef(rootRef);
+        if (parsed !== undefined && !names.has(parsed.taggedHash)) {
+          names.set(parsed.taggedHash, name);
+        }
+      } catch {
+        // An undecomposable definition keeps its hash-derived name.
       }
-    } catch {
-      // An undecomposable definition keeps its hash-derived name.
     }
   }
   return names;
+}
+
+/**
+ * `value` with every `description` member removed, recursively — the one
+ * keyword `withDeclaredFieldProse` folds, so the stripped form is the
+ * structural shape a prose-free served document hashes to.
+ */
+function withoutDescriptions(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutDescriptions);
+  if (!isObjectOrArray(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, member] of Object.entries(value)) {
+    if (key === "description") continue;
+    result[key] = withoutDescriptions(member);
+  }
+  return result;
 }
 
 /**

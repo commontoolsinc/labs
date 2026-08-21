@@ -2176,6 +2176,8 @@ function toolInputRequiredIntegrityFailure(
   value: unknown,
   path: string,
   trust: CfcFloorTrustContext,
+  root?: unknown,
+  visited?: Set<unknown>,
 ): string | undefined {
   if (!isObjectOrArray(schema)) {
     return undefined;
@@ -2184,16 +2186,25 @@ function toolInputRequiredIntegrityFailure(
   // fail-closed resolver: this is a security gate, so an unresolvable
   // reference refuses the call — a floor could hide behind it. Deliberately
   // NOT resolveExternalRootRefForStructure, whose reference-unchanged miss
-  // would read as nothing-to-refuse.
+  // would read as nothing-to-refuse. A LOCAL reference resolves against the
+  // owning document (`root`) the recursion carries — a member of a recursive
+  // group arrives as a bare pointer with its floor behind it — and following
+  // an external reference makes the resolved document the owning root for
+  // everything under it.
   let structural = schema;
+  let structuralRoot = root ?? schema;
   const ref = structural.$ref;
-  if (typeof ref === "string" && isExternalSchemaRef(ref)) {
+  if (typeof ref === "string") {
     try {
       const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
         structural,
+        structuralRoot as JSONSchema,
       );
       if (!isObjectOrArray(resolved)) return undefined;
       structural = resolved;
+      if (isExternalSchemaRef(ref)) {
+        structuralRoot = resolved;
+      }
     } catch {
       return `field "${
         path || "(root)"
@@ -2201,6 +2212,13 @@ function toolInputRequiredIntegrityFailure(
         `refusing the call (fail closed)`;
     }
   }
+  // A compound branch recurses on the SAME value, so a self-referential
+  // group could otherwise walk forever. Everything reachable at this value
+  // position is gated the first time its (interned, identity-stable)
+  // resolution appears; a repeat is the cycle closing.
+  const seen = visited ?? new Set<unknown>();
+  if (seen.has(structural)) return undefined;
+  seen.add(structural);
   const ifc = structural.ifc;
   if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
@@ -2239,6 +2257,7 @@ function toolInputRequiredIntegrityFailure(
         value[key],
         path ? `${path}.${key}` : key,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2267,6 +2286,7 @@ function toolInputRequiredIntegrityFailure(
         value[index],
         `${path}[${index}]`,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2277,7 +2297,7 @@ function toolInputRequiredIntegrityFailure(
   // branch. For a required-integrity FLOOR, requiring the union across
   // branches is the fail-safe (over-require) direction, matching walkIfcSchema.
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-    const branches = schema[key];
+    const branches = structural[key];
     if (Array.isArray(branches)) {
       for (const branch of branches) {
         const failure = toolInputRequiredIntegrityFailure(
@@ -2287,6 +2307,8 @@ function toolInputRequiredIntegrityFailure(
           value,
           path,
           trust,
+          structuralRoot,
+          seen,
         );
         if (failure !== undefined) {
           return failure;
@@ -2506,6 +2528,7 @@ export const llmToolExecutionHelpers = {
   effectiveObservationCeiling,
   stripFrameworkProvidedFields,
   applyAutoProvidedSandboxId,
+  toolInputRequiredIntegrityFailure,
 };
 
 /**

@@ -13,6 +13,8 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // Whole-object piece reads void on scoped links (CLI `cf piece get` with no
@@ -262,6 +264,82 @@ describe("whole-object read over a session-scoped link", () => {
           container as unknown as Cell<unknown>,
         ),
       ).toBe(requiredResultSchema);
+    } finally {
+      await close();
+    }
+  });
+
+  it("relaxes a required inside a recursive group's local definition", async () => {
+    // A cyclic group stores its members as LOCAL references — the nested
+    // definition arrives as a bare pointer whose `properties` and
+    // `required` live on the owning document. The relaxation must resolve
+    // through that pointer, or strict traversal voids `nested` and, with
+    // the outer schema requiring it, the whole container.
+    const groupSchema = {
+      $ref: "#/$defs/Container",
+      $defs: {
+        Container: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            nested: { $ref: "#/$defs/Nested" },
+          },
+          required: ["question", "nested"],
+        },
+        Nested: {
+          type: "object",
+          properties: {
+            draft: { type: "string" },
+            parent: { $ref: "#/$defs/Container" },
+          },
+          required: ["draft"],
+        },
+      },
+    } as unknown as JSONSchema;
+    const { rootRef, documents } = decomposeSchema(
+      groupSchema as Parameters<typeof decomposeSchema>[0],
+    );
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+
+    const tx = writerRt.edit();
+    const draft = writerRt.getCell<string>(
+      space,
+      "group-session-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    draft.set("writer-session-only");
+    const container = writerRt.getCell(
+      space,
+      "group-container",
+      groupSchema,
+      tx,
+    );
+    container.set({
+      question: "group question",
+      nested: { draft },
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "group-container", groupSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        { $ref: rootRef } as unknown as JSONSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as {
+        required?: string[];
+        properties?: { nested?: { required?: string[] } };
+      };
+      expect(relaxed.required).toEqual(["question", "nested"]);
+      expect(relaxed.properties?.nested?.required).toEqual([]);
     } finally {
       await close();
     }

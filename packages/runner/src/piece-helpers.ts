@@ -149,6 +149,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   rawValue: unknown,
   base: Cell<unknown>,
   tx?: IExtendedStorageTransaction,
+  root?: JSONSchema,
 ): JSONSchema | undefined {
   if (
     !isObjectOrArray(schema) || !isObjectOrArray(rawValue) ||
@@ -163,8 +164,28 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   // to walk. Judge the relaxation on the resolved document; a reference
   // whose closure has not arrived stays a reference, which the walk below
   // finds nothing to relax in — the same conservative fallback as a chain
-  // the resolver cannot complete.
-  const structural = resolveExternalRootRefForStructure(schema);
+  // the resolver cannot complete. A member of a recursive group arrives as
+  // a LOCAL pointer whose definitions live on the owning document the
+  // recursion carries as `root`; resolving against it is what lets the
+  // relaxation see `properties` and `required` inside a nested definition.
+  // Either miss keeps the strict pre-existing behavior.
+  let structural = resolveExternalRootRefForStructure(schema);
+  let structuralRoot = root ?? structural;
+  if (structural !== schema) {
+    structuralRoot = structural;
+  } else {
+    const ref = (structural as { $ref?: unknown }).$ref;
+    if (typeof ref === "string" && ref.startsWith("#")) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        structural as Parameters<
+          typeof ContextualFlowControl.resolveSchemaRefs
+        >[0],
+        structuralRoot,
+      );
+      if (!isObjectOrArray(resolved)) return schema;
+      structural = resolved;
+    }
+  }
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.
@@ -245,6 +266,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         propValue,
         base,
         tx,
+        structuralRoot,
       );
       if (relaxed !== propSchema) {
         newProperties ??= { ...(properties as Record<string, JSONSchema>) };

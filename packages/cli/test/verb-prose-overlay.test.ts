@@ -376,6 +376,37 @@ describe("verb prose", () => {
         expect(result.$defs.Row.properties.label.description).toBe("L.");
       });
 
+      it("restores the declared name when the served definition dropped the prose", () => {
+        // Descriptions participate in schema hashing, so a served document
+        // whose definitions carry no prose hashes differently from the
+        // declaration that documents them. The name map must bridge that
+        // gap, or the definitions an author documented best are exactly the
+        // ones renamed def_XXXX.
+        const declared = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              description: "A household pet.",
+              properties: {
+                name: { type: "string", description: "The pet's name." },
+              },
+            },
+          },
+        });
+        const servedSource = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const rootRef = registeredRefTo(servedSource);
+        const result = fold({ $ref: rootRef } as JSONSchema, declared);
+        expect(Object.keys(result.$defs)).toEqual(["Pet"]);
+        expect(result.properties.pet.$ref).toBe("#/$defs/Pet");
+      });
+
       it("serves a reference to a boolean document as that boolean", () => {
         // A definition can be a boolean, so a document can be one too, and
         // a boolean has no siblings to keep or prose to fold.
