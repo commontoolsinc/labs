@@ -30,9 +30,10 @@ export function isValidPieceId(id: string): boolean {
 // over to using keyfiles.
 //
 // The ed25519 implementation is left to the platform, which on a supporting
-// one means Web Crypto: the private key is then a non-extractable `CryptoKey`
-// and its material never enters the JS context. A worker realm receives that
-// key as itself, structured cloning carrying a `CryptoKey` whole.
+// one means Web Crypto: the seed each form below starts from is imported into
+// a non-extractable `CryptoKey` and then dropped, so what this service holds
+// afterwards -- and what it hands a worker realm, structured cloning carrying
+// a `CryptoKey` whole -- is a key handle.
 export async function getIdentity(
   identityPath?: string,
   operatorPass?: string,

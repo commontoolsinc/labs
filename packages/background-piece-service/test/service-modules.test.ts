@@ -394,11 +394,11 @@ describe("background piece utility functions", () => {
     assertEquals(fromPassphrase.did().startsWith("did:key:"), true);
 
     // Both hold key handles rather than material, which is the point of
-    // leaving the implementation to the platform: the service's private key
-    // never enters the JS context. Asserted rather than guarded on support --
-    // this service runs on Deno, which has ed25519 in Web Crypto, and a build
-    // that quietly lost it would have this service holding its own signing
-    // secret again.
+    // leaving the implementation to the platform: what the service keeps, and
+    // what it hands a worker, is a handle. Asserted rather than guarded on
+    // support -- this service runs on Deno, which has ed25519 in Web Crypto,
+    // and a build that quietly lost it would have this service holding its own
+    // signing secret again.
     assertEquals(fromFile.keyPair.hasMaterial, false);
     assertEquals(fromPassphrase.keyPair.hasMaterial, false);
 
