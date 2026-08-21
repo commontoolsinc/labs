@@ -4,13 +4,14 @@ import { join } from "@std/path";
 import type { Environment } from "@commonfabric/test-support/records";
 
 import {
+  expandHome,
   exportFromProfiles,
   exportLine,
   homeRelative,
   MARKER,
+  parseSetting,
   profileCandidates,
   reloadHint,
-  settingLine,
   shellKind,
 } from "./test-records-shell-config.ts";
 
@@ -111,6 +112,41 @@ describe("test-records-shell-config", () => {
         `set -gx ${VARIABLE} "/k.json"`,
       );
     });
+
+    it("writes a path under the home directory through $HOME", () => {
+      expect(exportLine("zsh", VARIABLE, "/h/.config/k.json", "/h")).toBe(
+        `export ${VARIABLE}="$HOME/.config/k.json"`,
+      );
+    });
+
+    it("escapes what a shell would otherwise act on", () => {
+      expect(exportLine("zsh", VARIABLE, '/h/$(id)/`id`/"q"/b\\s/k.json', "/h"))
+        .toBe(
+          `export ${VARIABLE}=` +
+            '"$HOME/\\$(id)/\\`id\\`/\\"q\\"/b\\\\s/k.json"',
+        );
+    });
+
+    it("escapes for fish, which has no backtick", () => {
+      expect(exportLine("fish", VARIABLE, "/h/$(id)/`id`/k.json", "/h")).toBe(
+        `set -gx ${VARIABLE} "$HOME/\\$(id)/\`id\`/k.json"`,
+      );
+    });
+  });
+
+  describe("expandHome()", () => {
+    it("returns the path a value naming $HOME stands for", () => {
+      expect(expandHome("$HOME/.config/k.json", "/h")).toBe(
+        "/h/.config/k.json",
+      );
+      expect(expandHome("${HOME}/k.json", "/h")).toBe("/h/k.json");
+    });
+
+    it("returns any other value unchanged", () => {
+      expect(expandHome("/etc/k.json", "/h")).toBe("/etc/k.json");
+      expect(expandHome("$HOMEBREW/k.json", "/h")).toBe("$HOMEBREW/k.json");
+      expect(expandHome("$HOME/k.json", undefined)).toBe("$HOME/k.json");
+    });
   });
 
   describe("homeRelative()", () => {
@@ -130,24 +166,48 @@ describe("test-records-shell-config", () => {
     });
   });
 
-  describe("settingLine()", () => {
-    it("returns the line that sets the variable", () => {
-      expect(settingLine(`export ${VARIABLE}="/k.json"\n`, VARIABLE)).toBe(
-        `export ${VARIABLE}="/k.json"`,
+  describe("parseSetting()", () => {
+    it("returns the value an export carries", () => {
+      expect(parseSetting(`export ${VARIABLE}="/k.json"\n`, VARIABLE)).toEqual({
+        line: `export ${VARIABLE}="/k.json"`,
+        exported: true,
+        value: "/k.json",
+      });
+    });
+
+    it("reports an assignment that is never exported", () => {
+      expect(parseSetting(`${VARIABLE}=/k.json\n`, VARIABLE)).toEqual({
+        line: `${VARIABLE}=/k.json`,
+        exported: false,
+        value: "/k.json",
+      });
+    });
+
+    it("reads fish's set, exported only with -x", () => {
+      expect(parseSetting(`set -gx ${VARIABLE} "/k.json"\n`, VARIABLE)).toEqual(
+        {
+          line: `set -gx ${VARIABLE} "/k.json"`,
+          exported: true,
+          value: "/k.json",
+        },
       );
-      expect(settingLine(`${VARIABLE}=/k.json\n`, VARIABLE)).toBe(
-        `${VARIABLE}=/k.json`,
-      );
-      expect(settingLine(`set -gx ${VARIABLE} "/k.json"\n`, VARIABLE)).toBe(
-        `set -gx ${VARIABLE} "/k.json"`,
-      );
+      expect(parseSetting(`set -g ${VARIABLE} "/k.json"\n`, VARIABLE)?.exported)
+        .toBe(false);
+    });
+
+    it("takes one level of quoting off the value", () => {
+      expect(parseSetting(`export ${VARIABLE}='/k.json'\n`, VARIABLE)?.value)
+        .toBe("/k.json");
+      expect(
+        parseSetting(`export ${VARIABLE}="/a\\$b/k.json"\n`, VARIABLE)?.value,
+      ).toBe("/a$b/k.json");
     });
 
     it("returns undefined for a mention that sets nothing", () => {
-      expect(settingLine(`# ${VARIABLE} is the opt-in\n`, VARIABLE))
+      expect(parseSetting(`# ${VARIABLE} is the opt-in\n`, VARIABLE))
         .toBeUndefined();
-      expect(settingLine(`echo "$${VARIABLE}"\n`, VARIABLE)).toBeUndefined();
-      expect(settingLine("", VARIABLE)).toBeUndefined();
+      expect(parseSetting(`echo "$${VARIABLE}"\n`, VARIABLE)).toBeUndefined();
+      expect(parseSetting("", VARIABLE)).toBeUndefined();
     });
   });
 
@@ -190,6 +250,53 @@ describe("test-records-shell-config", () => {
         { path: join(home, ".zshrc"), outcome: "present" },
       ]);
       expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(before);
+    });
+
+    it("reports a value that only starts the same as a conflict", async () => {
+      const key = join(home, ".config", "k.json");
+      await Deno.writeTextFile(
+        join(home, ".zshrc"),
+        `export ${VARIABLE}="${key}.backup"\n`,
+      );
+
+      const updates = await exportFromProfiles(VARIABLE, key, zsh(), "darwin");
+
+      expect(updates[0]?.outcome).toBe("conflict");
+    });
+
+    it("reports an assignment that is never exported", async () => {
+      const key = join(home, ".config", "k.json");
+      await Deno.writeTextFile(
+        join(home, ".zshrc"),
+        `${VARIABLE}="$HOME/.config/k.json"\n`,
+      );
+
+      const updates = await exportFromProfiles(VARIABLE, key, zsh(), "darwin");
+
+      expect(updates).toEqual([{
+        path: join(home, ".zshrc"),
+        outcome: "unexported",
+        existing: `${VARIABLE}="$HOME/.config/k.json"`,
+      }]);
+    });
+
+    it("reports a missing login profile rather than creating one", async () => {
+      await Deno.writeTextFile(join(home, ".bashrc"), "");
+      const env = environment({ SHELL: "/bin/bash", HOME: home });
+
+      const updates = await exportFromProfiles(
+        VARIABLE,
+        join(home, "k.json"),
+        env,
+        "darwin",
+      );
+
+      expect(updates).toEqual([
+        { path: join(home, ".bash_profile"), outcome: "absent" },
+        { path: join(home, ".bashrc"), outcome: "added" },
+      ]);
+      // Creating it is what stops a login shell reading .profile.
+      await expect(Deno.stat(join(home, ".bash_profile"))).rejects.toThrow();
     });
 
     it("reports a line pointing elsewhere as a conflict", async () => {

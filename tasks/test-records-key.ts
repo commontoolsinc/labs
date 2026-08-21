@@ -45,6 +45,7 @@ import {
 import { readZip } from "./test-records-zip.ts";
 import {
   exportFromProfiles,
+  exportLine,
   type ProfileUpdate,
   reloadHint,
   shellKind,
@@ -54,6 +55,16 @@ const API = "https://api.github.com";
 
 /** How often the watch asks GitHub what the minting run is doing. */
 const POLL_INTERVAL_MS = 5_000;
+
+/** Runs per listing page; a hundred is what the API will serve. */
+const RUNS_PER_PAGE = 100;
+
+/**
+ * How far back a search looks when nothing narrower bounds it. A
+ * delivery artifact is kept for seven days, and the extra day covers the
+ * two clocks disagreeing.
+ */
+const DELIVERY_WINDOW_MS = 8 * 24 * 60 * 60 * 1_000;
 
 /**
  * A failure whose message is the whole report. Everything a person can
@@ -139,6 +150,10 @@ function configDir(env: Environment): string {
     throw new KeyToolError("Neither XDG_CONFIG_HOME nor HOME is set.");
   }
   return join(home, ".config", "common-fabric");
+}
+
+function home(env: Environment): string | undefined {
+  return readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
 }
 
 function identityPath(env: Environment): string {
@@ -255,16 +270,27 @@ async function dispatchMint(
     { ref: "main", inputs: { recipient, username } },
   );
   const at = Date.parse(dispatched.headers.get("date") ?? "");
-  await dispatched.text();
-  if (dispatched.status === 204) {
-    const result: DispatchResult = { dispatched: true, username };
-    if (!Number.isNaN(at)) result.at = at;
-    return result;
+  const body = await dispatched.text();
+  const result: DispatchResult = { dispatched: dispatched.status === 204 };
+  if (result.dispatched) result.username = username;
+  // The clock is kept whether the dispatch was taken or refused: a run
+  // that appears after this moment is this attempt's either way, and a
+  // refusal is followed by the same person starting the run themselves.
+  if (!Number.isNaN(at)) result.at = at;
+  if (result.dispatched) return result;
+  // A token that may only read is answered 401, 403, or — on a
+  // repository it cannot see — 404. Anything else is the workflow or
+  // GitHub failing, which no amount of clicking in a browser fixes.
+  if (![401, 403, 404].includes(dispatched.status)) {
+    throw new KeyToolError(
+      `Dispatching the minting workflow failed: HTTP ${dispatched.status} ` +
+        `${body.slice(0, 200)}`,
+    );
   }
   console.log(
     `This token cannot dispatch the workflow (HTTP ${dispatched.status}).`,
   );
-  return { dispatched: false };
+  return result;
 }
 
 /** What to print when the dispatch has to happen in a browser. */
@@ -322,6 +348,64 @@ interface RunSearchResult {
 }
 
 /**
+ * The runs worth examining, newest first, over as many pages as the
+ * window holds.
+ */
+async function listCandidateRuns(
+  deps: KeyToolDeps,
+  search: RunSearch,
+): Promise<{ candidates: MintRun[]; serverDate?: number }> {
+  // A delivery is kept for seven days, so a run older than that has
+  // nothing left to collect; asking GitHub for that window keeps the
+  // search to the runs that could still be answered, however many the
+  // workflow has accumulated.
+  const since = new Date(
+    search.notBefore ?? Date.now() - DELIVERY_WINDOW_MS,
+  ).toISOString();
+  const candidates: MintRun[] = [];
+  let serverDate: number | undefined;
+  for (let page = 1;; page += 1) {
+    const res = await github(
+      deps,
+      search.token,
+      "GET",
+      `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs` +
+        `?per_page=${RUNS_PER_PAGE}&page=${page}` +
+        `&created=${encodeURIComponent(`>=${since}`)}`,
+    );
+    if (!res.ok) {
+      await res.text();
+      throw new KeyToolError(`Listing minting runs failed: HTTP ${res.status}`);
+    }
+    const listed = Date.parse(res.headers.get("date") ?? "");
+    if (serverDate === undefined && !Number.isNaN(listed)) serverDate = listed;
+    const runs = (await res.json() as { workflow_runs?: MintRun[] })
+      .workflow_runs ?? [];
+    for (const run of runs) {
+      if (!isCandidate(run, search)) continue;
+      candidates.push(run);
+    }
+    if (runs.length < RUNS_PER_PAGE) break;
+  }
+  return serverDate === undefined ? { candidates } : { candidates, serverDate };
+}
+
+/** Whether a run could be the one this search is for. */
+function isCandidate(run: MintRun, search: RunSearch): boolean {
+  const mine = namesRecipient(run, search.recipient) ||
+    run.actor?.login?.toLowerCase() === search.login.toLowerCase();
+  if (!mine) return false;
+  if (search.notBefore === undefined) return true;
+  const created = Date.parse(run.created_at ?? "");
+  return !Number.isNaN(created) && created >= search.notBefore;
+}
+
+/** Whether a run says which recipient it is minting for. */
+function namesRecipient(run: MintRun, recipient: string): boolean {
+  return `${run.display_title ?? ""}\n${run.name ?? ""}`.includes(recipient);
+}
+
+/**
  * The requester's own minting run, newest first, by three tests in
  * descending order of certainty. A run whose name carries the recipient
  * is minting for it. A completed run that published this recipient's
@@ -335,35 +419,12 @@ async function findMintRun(
   deps: KeyToolDeps,
   search: RunSearch,
 ): Promise<RunSearchResult> {
-  const res = await github(
-    deps,
-    search.token,
-    "GET",
-    `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs?per_page=50`,
-  );
-  if (!res.ok) {
-    await res.text();
-    throw new KeyToolError(`Listing minting runs failed: HTTP ${res.status}`);
-  }
-  const listed = Date.parse(res.headers.get("date") ?? "");
+  const { candidates, serverDate } = await listCandidateRuns(deps, search);
   const result: RunSearchResult = {};
-  if (!Number.isNaN(listed)) result.serverDate = listed;
-  const runs = (await res.json() as { workflow_runs?: MintRun[] })
-    .workflow_runs ?? [];
-
-  const namesRecipient = (run: MintRun): boolean =>
-    `${run.display_title ?? ""}\n${run.name ?? ""}`.includes(search.recipient);
-  const candidates = runs.filter((run) => {
-    const mine = namesRecipient(run) ||
-      run.actor?.login?.toLowerCase() === search.login.toLowerCase();
-    if (!mine) return false;
-    if (search.notBefore === undefined) return true;
-    const created = Date.parse(run.created_at ?? "");
-    return !Number.isNaN(created) && created >= search.notBefore;
-  });
+  if (serverDate !== undefined) result.serverDate = serverDate;
 
   for (const run of candidates) {
-    const named = namesRecipient(run);
+    const named = namesRecipient(run, search.recipient);
     if (run.status === "completed" && run.conclusion === "success") {
       const artifact = await deliveryArtifact(
         deps,
@@ -513,6 +574,22 @@ No shell profile to update. Export the key file yourself:
       console.log(`${RECORDS_KEY_FILE_VARIABLE} exported from ${update.path}`);
     } else if (update.outcome === "present") {
       console.log(`${update.path} already exports the key file.`);
+    } else if (update.outcome === "unexported") {
+      console.log(`
+${update.path} sets ${RECORDS_KEY_FILE_VARIABLE} without exporting it:
+
+    ${update.existing}
+
+Left alone. A test run is a program the shell starts, and it sees only
+what the shell exports.`);
+    } else if (update.outcome === "absent") {
+      console.log(`
+${update.path} does not exist, and a login shell here reads it before the
+profile just written. Create it and it will be read instead of the file
+your login shells fall back to, so that one is yours to make; the line
+to put in it is:
+
+    ${exportLine(kind, RECORDS_KEY_FILE_VARIABLE, path, home(deps.env))}`);
     } else {
       console.log(`
 ${update.path} already sets ${RECORDS_KEY_FILE_VARIABLE} elsewhere:
@@ -686,26 +763,58 @@ To rotate deliberately:
   }
 
   const identity = await ensureIdentity(deps);
-  console.log(`recipient: ${identity.recipient}`);
-  const dispatch = await dispatchMint(deps, token, identity.recipient, login);
-  if (dispatch.dispatched) {
-    console.log(`Minting workflow dispatched for ${login}`);
-  } else {
-    console.log(`${browserInstructions(identity.recipient)}
-
-Waiting for that run — this command collects the key on its own once it
-finishes. Ctrl-C stops watching; rerunning picks up where it left off.
-`);
-  }
-
+  console.log(`Recipient: ${identity.recipient}`);
   const search: RunSearch = {
     token,
     recipient: identity.recipient,
     artifactName: await deliveryName(identity.recipient),
     login,
   };
-  if (dispatch.at !== undefined) search.notBefore = dispatch.at;
-  const artifact = await awaitDelivery(deps, search);
+
+  // A run already minting for this recipient is this person's own
+  // earlier attempt — a watch they stopped, or a browser dispatch — and
+  // taking it up is what makes rerunning resume rather than start
+  // again. Minting a second time would revoke the key the first is
+  // about to deliver. Rotating deliberately is the one case that wants
+  // a new run whatever is already going.
+  const inFlight = options.rotate === true
+    ? undefined
+    : (await findMintRun(deps, search)).match;
+  let artifact: number;
+  if (inFlight?.artifact !== undefined) {
+    console.log(
+      `An earlier run has the key waiting: ${runUrl(inFlight.run)}`,
+    );
+    artifact = inFlight.artifact;
+  } else {
+    if (inFlight !== undefined && inFlight.run.status !== "completed") {
+      console.log(
+        `A minting run for this recipient is already going: ${
+          runUrl(inFlight.run)
+        }`,
+      );
+      const created = Date.parse(inFlight.run.created_at ?? "");
+      if (!Number.isNaN(created)) search.notBefore = created;
+    } else {
+      const dispatch = await dispatchMint(
+        deps,
+        token,
+        identity.recipient,
+        login,
+      );
+      if (dispatch.dispatched) {
+        console.log(`Minting workflow dispatched for ${login}`);
+      } else {
+        console.log(`${browserInstructions(identity.recipient)}
+
+Waiting for that run — this command collects the key on its own once it
+finishes. Ctrl-C stops watching; rerunning picks up where it left off.
+`);
+      }
+      if (dispatch.at !== undefined) search.notBefore = dispatch.at;
+    }
+    artifact = await awaitDelivery(deps, search);
+  }
   const path = await installDelivery(deps, token, identity, login, artifact);
   console.log(`Key installed: ${path}`);
   await exportKeyFile(deps, path);

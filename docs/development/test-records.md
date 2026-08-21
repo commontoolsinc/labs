@@ -66,7 +66,7 @@ a couple of minutes. Contributing without commit access? Then keys are
 simply not part of your workflow yet, and skipping them costs you
 nothing: your local tests run identically without one, and CI records
 your pull requests' runs on its own, no key involved. The day you have
-commit access, the same two commands below are yours.
+commit access, the one command below is yours.
 
 A key takes only a GitHub identity, and one command:
 
@@ -77,8 +77,16 @@ deno task test-records-key setup
 generates a delivery identity, dispatches the minting workflow, watches
 until the run delivers, installs the key file with owner-only
 permissions, and exports `CF_TEST_RECORDS_KEY_FILE` from the login
-shell's profile — every shell opened after that records. The dispatch is
-the authorization check, which is why it takes repository write access.
+shell's profile — every shell opened after that records. A profile that
+already sets the variable is reported and left alone, whether it points
+somewhere else or sets it without exporting it, and so is a login
+profile that does not exist yet, since creating one is what stops a
+login shell reading the file it falls back to. Rerun the command and it
+takes up whatever run is already minting for you rather than starting a
+second one, which is what makes an interrupted setup resume.
+
+The dispatch is the authorization check, which is why it takes
+repository write access.
 With a token that can only read, the command prints the workflow page to
 open in a browser and the recipient string to paste into it, then keeps
 watching for the run that click starts. The wait has no bound, since a

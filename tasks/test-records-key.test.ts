@@ -507,6 +507,63 @@ describe("test-records-key", () => {
       expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
     });
 
+    it("keeps the key beside the identity under a plain home", async () => {
+      const identity = await generateIdentity();
+      await Deno.mkdir(join(home, ".config", "common-fabric"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        join(home, ".config", "common-fabric", "test-records-identity.json"),
+        JSON.stringify(identity),
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      deps.env = (name) => name === "HOME" ? home : undefined;
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, ".config", "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+    });
+
+    it("reports a profile that sets the variable without exporting it", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      const line = `CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
+        `test-records-key.json"\n`;
+      await Deno.writeTextFile(join(home, ".zshrc"), line);
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+    });
+
+    it("reports the login profile a shell reads and does not have", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/bash";
+        return inner(name);
+      };
+      await Deno.writeTextFile(join(home, ".bashrc"), "");
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(join(home, ".bashrc"))).toContain(
+        "CF_TEST_RECORDS_KEY_FILE",
+      );
+    });
+
     it("throws with nowhere to keep the identity", async () => {
       withStub({});
       deps.env = () => undefined;
@@ -694,33 +751,84 @@ describe("test-records-key", () => {
     it("ignores a run that predates the dispatch", async () => {
       const identity = await storeIdentity();
       const published = await delivery(identity);
+      const failed = mintRun(identity.recipient, {
+        id: 1,
+        conclusion: "failure",
+        created_at: "2026-08-21T02:00:00Z",
+      });
       withStub({
         dispatchDate: "Fri, 21 Aug 2026 03:00:00 GMT",
         runPages: [
-          [mintRun(identity.recipient, {
-            id: 1,
-            created_at: "2026-08-21T02:00:00Z",
-          })],
+          [failed],
           [
             mintRun(identity.recipient, {
               id: 2,
               created_at: "2026-08-21T03:00:01Z",
             }),
-            mintRun(identity.recipient, {
-              id: 1,
-              created_at: "2026-08-21T02:00:00Z",
-            }),
+            failed,
           ],
         ],
         ...published,
       });
 
+      // The failed run is the one this dispatch answers, so the watch
+      // must not report it as this attempt's outcome.
       expect(await setupCommand(deps)).toBe(0);
       expect(urls.some((line) => line.includes("/runs/2/artifacts"))).toBe(
         true,
       );
-      expect(urls.some((line) => line.includes("/runs/1/artifacts"))).toBe(
-        false,
+    });
+
+    it("takes up a run already going instead of starting another", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      const going = mintRun(identity.recipient, {
+        id: 5,
+        status: "in_progress",
+        conclusion: undefined,
+        created_at: "2026-08-21T03:00:00Z",
+      });
+      withStub({
+        runPages: [
+          [going],
+          [going],
+          [mintRun(identity.recipient, {
+            id: 5,
+            created_at: "2026-08-21T03:00:00Z",
+          })],
+        ],
+        ...published,
+      });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+    });
+
+    it("collects a delivery an earlier run left waiting", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+    });
+
+    it("raises a dispatch that failed for any other reason", async () => {
+      await storeIdentity();
+      withStub({ dispatchStatus: 500 });
+
+      await expect(setupCommand(deps)).rejects.toThrow(
+        "Dispatching the minting workflow failed: HTTP 500",
       );
     });
 
@@ -791,7 +899,7 @@ describe("test-records-key", () => {
       );
     });
 
-    it("mints again when the installed key file is not one", async () => {
+    it("installs over a key file that will not parse", async () => {
       const identity = await storeIdentity();
       await Deno.writeTextFile(
         join(home, "common-fabric", "test-records-key.json"),
@@ -801,19 +909,51 @@ describe("test-records-key", () => {
       withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
 
       expect(await setupCommand(deps)).toBe(0);
-      expect(urls.some((line) => line.includes("/dispatches"))).toBe(true);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
     });
 
     it("says it is waiting once, however long it waits", async () => {
       const identity = await storeIdentity();
       const published = await delivery(identity);
       withStub({
-        runPages: [[], [], [mintRun(identity.recipient)]],
+        runPages: [[], [], [], [mintRun(identity.recipient)]],
         ...published,
       });
 
       expect(await setupCommand(deps)).toBe(0);
-      expect(urls.filter((line) => line.includes("/runs?")).length).toBe(3);
+      expect(urls.filter((line) => line.includes("/runs?")).length).toBe(4);
+    });
+
+    it("watches a run it can only attribute by who started it", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      const going = mintRun(identity.recipient, {
+        id: 8,
+        named: false,
+        status: "in_progress",
+        conclusion: undefined,
+        created_at: "2026-08-21T03:00:01Z",
+      });
+      withStub({
+        dispatchDate: "Fri, 21 Aug 2026 03:00:00 GMT",
+        runPages: [
+          [],
+          [going],
+          [mintRun(identity.recipient, {
+            id: 8,
+            named: false,
+            created_at: "2026-08-21T03:00:01Z",
+          })],
+        ],
+        ...published,
+      });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(true);
     });
 
     it("stops examining runs from before the watch began", async () => {

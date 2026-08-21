@@ -7,8 +7,9 @@
  *
  * The lines carry a marker comment, so a second run recognizes its own
  * work and appends nothing. A line that sets the variable to something
- * else is reported and left alone: a profile is a person's file, and the
- * tool's job there is to say what it found.
+ * else, or sets it without exporting it, is reported and left alone: a
+ * profile is a person's file, and the tool's job there is to say what it
+ * found.
  */
 
 import { dirname, join } from "@std/path";
@@ -24,16 +25,37 @@ export type ShellKind = "zsh" | "bash" | "fish" | "posix";
 export type ProfileOutcome =
   /** The line was appended. */
   | "added"
-  /** The variable was already exported with this value. */
+  /** The variable is already exported with this value. */
   | "present"
   /** The variable is already set to something else; nothing was written. */
-  | "conflict";
+  | "conflict"
+  /**
+   * The variable is set to this value but never exported, so the
+   * programs the shell starts do not see it; nothing was written.
+   */
+  | "unexported"
+  /**
+   * A login shell reads this file first and it does not exist. Creating
+   * it would stop the shell reading the file it falls back to, so the
+   * person is told rather than the file written.
+   */
+  | "absent";
 
 export interface ProfileUpdate {
   path: string;
   outcome: ProfileOutcome;
-  /** The line already in the file, for a conflict. */
+  /** The line already in the file, for a conflict or an unexported set. */
   existing?: string;
+}
+
+/** An assignment of one variable found in a profile. */
+export interface ProfileSetting {
+  /** The line, as the profile carries it. */
+  line: string;
+  /** Whether the assignment reaches the programs the shell starts. */
+  exported: boolean;
+  /** The value, with one level of the shell's quoting taken off. */
+  value: string;
 }
 
 /** The login shell's family, read from SHELL. */
@@ -47,11 +69,11 @@ export function shellKind(env: Environment = Deno.env.get): ShellKind {
 }
 
 /**
- * The profile files to hold the export, in the order a shell reads them.
- * Every one of these that exists is updated, and the first is created
- * when none does: bash splits its startup between two files differently
- * on macOS than on Linux, and a person whose terminal reads only one of
- * them would otherwise get a line that never runs.
+ * The profile files to hold the export, the one a login shell reads
+ * first at the head. Every one of these that exists is updated, because
+ * bash splits its startup between two files differently on macOS than on
+ * Linux and a person whose terminal reads only one of them would
+ * otherwise get a line that never runs.
  */
 export function profileCandidates(
   env: Environment = Deno.env.get,
@@ -81,39 +103,109 @@ export function profileCandidates(
   }
 }
 
-/** A path under the home directory written through $HOME. */
-export function homeRelative(path: string, home: string | undefined): string {
-  if (home === undefined || home.length === 0) return path;
-  const root = home.endsWith("/") ? home.slice(0, -1) : home;
-  return path === root || path.startsWith(`${root}/`)
-    ? `$HOME${path.slice(root.length)}`
-    : path;
+/** A path split at the home directory, when it sits under one. */
+function splitHome(
+  path: string,
+  home: string | undefined,
+): { underHome: boolean; rest: string } {
+  if (home === undefined || home.length === 0) {
+    return { underHome: false, rest: path };
+  }
+  const separators = /[\\/]/g;
+  const root = home.replace(/[\\/]+$/, "");
+  const normalized = path.replace(separators, "/");
+  const normalizedRoot = root.replace(separators, "/");
+  if (normalized === normalizedRoot) return { underHome: true, rest: "" };
+  return normalized.startsWith(`${normalizedRoot}/`)
+    ? { underHome: true, rest: path.slice(root.length) }
+    : { underHome: false, rest: path };
 }
 
-/** The line that exports one variable in a shell's own syntax. */
+/** A path under the home directory written through $HOME. */
+export function homeRelative(path: string, home: string | undefined): string {
+  const split = splitHome(path, home);
+  return split.underHome ? `$HOME${split.rest}` : split.rest;
+}
+
+/** The path a value naming $HOME stands for. */
+export function expandHome(value: string, home: string | undefined): string {
+  if (home === undefined || home.length === 0) return value;
+  // A name only ends at $HOME when what follows cannot continue it,
+  // which is what keeps $HOMEBREW from reading as $HOME plus BREW.
+  const match = value.match(/^\$(?:\{HOME\}|HOME(?![A-Za-z0-9_]))(.*)$/);
+  return match === null ? value : `${home.replace(/[\\/]+$/, "")}${match[1]}`;
+}
+
+/**
+ * A value inside double quotes, with everything the shell would still
+ * act on there escaped, so a path holding a dollar sign, a quote, a
+ * backslash, or a backtick names the file it says.
+ */
+function escapeInDoubleQuotes(kind: ShellKind, text: string): string {
+  // Backticks open a command substitution in every shell here except
+  // fish, which has none.
+  const special = kind === "fish" ? /[\\"$]/g : /[\\"$`]/g;
+  return text.replace(special, (character) => `\\${character}`);
+}
+
+/**
+ * The line that exports one variable in a shell's own syntax, writing
+ * the home directory as $HOME so the line survives a move between
+ * machines.
+ */
 export function exportLine(
   kind: ShellKind,
   name: string,
   value: string,
+  home?: string,
 ): string {
+  const split = splitHome(value, home);
+  const escaped = escapeInDoubleQuotes(kind, split.rest);
+  const quoted = split.underHome ? `"$HOME${escaped}"` : `"${escaped}"`;
   return kind === "fish"
-    ? `set -gx ${name} "${value}"`
-    : `export ${name}="${value}"`;
+    ? `set -gx ${name} ${quoted}`
+    : `export ${name}=${quoted}`;
 }
 
-/** The line in a profile that already sets the variable, if there is one. */
-export function settingLine(
+/** One level of a shell's quoting taken off a value. */
+function unquote(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1);
+  }
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
+  }
+  return trimmed;
+}
+
+/** The assignment of a variable a profile already carries, if any. */
+export function parseSetting(
   text: string,
   name: string,
-): string | undefined {
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("#") || !trimmed.includes(name)) continue;
-    if (
-      new RegExp(`(^|\\s)(export\\s+)?${name}=`).test(trimmed) ||
-      new RegExp(`(^|\\s)set\\s+[^\\n]*\\b${name}\\s`).test(trimmed)
-    ) {
-      return trimmed;
+): ProfileSetting | undefined {
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("#")) continue;
+    const assignment = line.match(
+      new RegExp(`^(export\\s+)?${name}=(.*)$`),
+    );
+    if (assignment !== null) {
+      return {
+        line,
+        exported: assignment[1] !== undefined,
+        value: unquote(assignment[2] ?? ""),
+      };
+    }
+    const set = line.match(
+      new RegExp(`^set\\s+((?:-\\S+\\s+)*)${name}\\s+(.*)$`),
+    );
+    if (set !== null) {
+      return {
+        line,
+        exported: /-\S*x/.test(set[1] ?? ""),
+        value: unquote(set[2] ?? ""),
+      };
     }
   }
   return undefined;
@@ -133,16 +225,19 @@ async function updateOne(
   name: string,
   line: string,
   value: string,
-  literalValue: string,
+  home: string | undefined,
   create: boolean,
 ): Promise<ProfileUpdate | undefined> {
   const text = await readIfPresent(path);
   if (text === undefined && !create) return undefined;
-  const existing = settingLine(text ?? "", name);
+  const existing = parseSetting(text ?? "", name);
   if (existing !== undefined) {
-    return existing.includes(value) || existing.includes(literalValue)
+    if (expandHome(existing.value, home) !== value) {
+      return { path, outcome: "conflict", existing: existing.line };
+    }
+    return existing.exported
       ? { path, outcome: "present" }
-      : { path, outcome: "conflict", existing };
+      : { path, outcome: "unexported", existing: existing.line };
   }
   const separator = text === undefined || text.length === 0
     ? ""
@@ -158,9 +253,11 @@ async function updateOne(
 
 /**
  * Exports one variable from the login shell's profiles, returning what
- * each file's update did. The value is written through $HOME when it
- * sits under the home directory, so the line survives a move between
- * machines.
+ * each file's update did. Every profile that exists is written; when
+ * none does, the one a login shell reads first is created. A first
+ * profile that is missing while a later one exists is reported and not
+ * created, since creating it is what stops a login shell reading the
+ * file it falls back to.
  */
 export async function exportFromProfiles(
   name: string,
@@ -171,11 +268,10 @@ export async function exportFromProfiles(
   const candidates = profileCandidates(env, os);
   if (candidates.length === 0) return [];
   const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
-  const literal = homeRelative(value, home);
-  const line = exportLine(shellKind(env), name, literal);
+  const line = exportLine(shellKind(env), name, value, home);
   const updates: ProfileUpdate[] = [];
   for (const path of candidates) {
-    const update = await updateOne(path, name, line, value, literal, false);
+    const update = await updateOne(path, name, line, value, home, false);
     if (update !== undefined) updates.push(update);
   }
   if (updates.length === 0) {
@@ -184,10 +280,15 @@ export async function exportFromProfiles(
       name,
       line,
       value,
-      literal,
+      home,
       true,
     );
     if (created !== undefined) updates.push(created);
+    return updates;
+  }
+  const first = candidates[0]!;
+  if (!updates.some((update) => update.path === first)) {
+    updates.unshift({ path: first, outcome: "absent" });
   }
   return updates;
 }
