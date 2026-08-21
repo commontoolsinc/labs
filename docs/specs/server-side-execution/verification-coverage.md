@@ -5539,6 +5539,66 @@ supply; OW29/OW32/OW34 closed):
     optimize-phase-future; closing it also retires the OW45 row's
     named die-before-flush residual.
 
+    The write-topology explorer's two findings extend this row (explorer
+    map 2026-08-21, verified against main), ruled FOLLOW-UP not
+    flip-gating — owner: *"we're not in prod yet, so we can fix this as
+    follow-up."* — owner (Berni), 2026-08-21; both close with OW56, or
+    before it at the owner's discretion:
+
+    - **Finding 1 — cached transpiled code is client-writable,
+      server-executed-unverified.** The compiled-cache key
+      `compileCache:<runtimeVersion>/<sourceIdentity>` keys by SOURCE
+      identity and does NOT hash the JS bytes
+      (`docs/specs/module-loading.md` ~692-696). The serving runtime
+      reads a compiled entry and runs it with `trustedBodies: true` —
+      SES body re-verification SKIPPED — at `pattern-manager.ts`
+      :1010-1013 / :1260-1266 / :1465-1470. The only gate is the CFC
+      atom `COMPILED_INTEGRITY_ATOM` (`cf-compiled-by:cf-compiler`) read
+      from the doc's own labelMap (`cell-cache.ts` :1666-1688
+      `verifiedDoc`, :1271-1290 `cellCarriesIntegrity`) — plain unsigned
+      committed JSON, client-mintable through the honest compile-cache
+      builtin path (`prepare.ts` `gateRuntimeMintedIntegrity` returns it
+      unfiltered for `kind:"builtin"`) and writable directly at the
+      storage layer (memory has no doc-level label validation). The
+      SOURCE set IS content-verified (`cell-cache.ts` :539-670
+      `verifySourceDocs` recomputes the Merkle identity); the COMPILED
+      set is not — that asymmetry is the finding. Consequence: a client
+      can write an entry whose key claims source X with arbitrary bytes,
+      and the SpaceServer executes those bytes IN-PROCESS. This is the
+      DOCUMENTED accepted posture (`module-loading.md` :707-722,
+      "self-poisoning within a space, acceptable") — but that argument
+      was written for CLIENT-ONLY execution; under ON the poisoned bytes
+      run in the shared SpaceServer. Fail-open-to-recompile softens it:
+      a MISSING/invalid entry recompiles from verified source
+      (`tryColdLoadByIdentity` checks entryIdentity match + SES-verifies),
+      so DELETING a poisoned entry heals — OVERWRITING one does not.
+      Containment leak: closure replication copies compiled docs
+      cross-space on `.inSpace()`/content-cache-hit, re-stamping the
+      LABEL not the BYTES (`module-loading.md` :723-737). RECOMMENDED
+      follow-up fix (flagged, NOT committed): bind the bytes — make the
+      compiled key, or a co-stored digest the reader checks, a hash of
+      the JS, so honest-source/dishonest-bytes fails to a
+      recompile-from-verified-source miss; far smaller than full
+      server-only compilation and closes the forgery path. The spec's
+      named end-state (server-only compilation + real attestation,
+      `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
+    - **Finding 2 — version-update is a dual-write under ON, client AND
+      server, unarbitrated.** Both runtimes default
+      `systemPatternAutoUpdate: true` (shell `env.ts`; serving factory
+      `server-execution.ts` :160-172), so both run the pattern-updater
+      check/fetch/compile/persist and attempt the pointer swap; they
+      RACE — OCC-guarded so the loser fails clean (`pattern-updater.ts`
+      :326-338), content-addressed so double-writes converge. NOT a
+      correctness bug (freshness is safe either way); the cost is a
+      duplicated network fetch + full TS compile per piece per runtime,
+      and mismatched compiler fingerprints (shell-baked vs server
+      Deno-resolved) can land TWO compiled sets under two
+      `runtimeVersion` keys for one source. Recorded as an OW56-adjacent
+      efficiency follow-up. (The stale
+      `docs/development/EXPERIMENTAL_OPTIONS.md` line claiming
+      auto-update is "off server-side" is corrected in this PR;
+      `serving-loop.md` §3e already stated it correctly.)
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row
