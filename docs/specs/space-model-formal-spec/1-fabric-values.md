@@ -1135,6 +1135,7 @@ state that is not a record of two strings, and `decode()` produces a
  * The underlying bytes are private. Callers access them through:
  * - `length` — the byte count.
  * - `slice()` — returns an unshared copy (or sub-range).
+ * - `sliceBuffer()` — the same, as a bare `ArrayBuffer`.
  * - `copyInto()` — copies bytes into a caller-provided buffer.
  *
  * Immutable: instances are `Object.freeze()`-d at construction time, and an
@@ -1169,6 +1170,15 @@ export class FabricBytes extends FabricPrimitive {
    */
   slice(start?: number, end?: number): Uint8Array {
     return this.#bytes.slice(start, end);
+  }
+
+  /**
+   * Return a copy of the bytes (or a sub-range) as a bare `ArrayBuffer`. The
+   * returned buffer is unshared — the caller may mutate it freely. This is
+   * the form `postMessage()` can transfer.
+   */
+  sliceBuffer(start?: number, end?: number): ArrayBuffer {
+    return this.#bytes.buffer.slice(start ?? 0, end);
   }
 
   /**
@@ -4024,12 +4034,12 @@ with no fabric wrappers at any depth. Without this recursion, an Error's
 > `FabricRegExp.value`, `FabricKeyPair.cryptoKeyPair` — rather than by
 > unwrapping, so the unwrap function returns every one of them as-is.
 
-> **Why `FabricBytes` copies its input.** `FabricBytes` is a
-> `FabricPrimitive` — always frozen at construction time with its bytes
-> defensively copied. `FabricBytes` has no native equivalent to unwrap to,
+> **Why `FabricBytes` owns its input.** `FabricBytes` is a
+> `FabricPrimitive` — always frozen at construction time, holding bytes no
+> other code can reach. `FabricBytes` has no native equivalent to unwrap to,
 > so it is the byte representation rather than a wrapper around one. Callers
-> who need raw bytes use `slice()` or `copyInto()` on the instance
-> directly.
+> who need raw bytes use `slice()`, `sliceBuffer()`, or `copyInto()` on the
+> instance directly.
 
 ### 8.5 Round-Trip Guarantees
 

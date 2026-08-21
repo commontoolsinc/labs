@@ -199,6 +199,18 @@ describe("buffers", () => {
       expect(result[0]).toBe(1);
     });
 
+    it("copies rather than detaching, for a non-detachable buffer", () => {
+      // A `WebAssembly.Memory` buffer is a live, undetached `ArrayBuffer`
+      // covering itself whole, so it reaches the take-over branch and then
+      // refuses to transfer.
+      const source = new WebAssembly.Memory({ initial: 1 }).buffer;
+      const result = toOwnedUint8Array(source, true);
+
+      expect(isDetached(source)).toBe(false);
+      expect(result.byteLength).toBe(source.byteLength);
+      expect(result.buffer).not.toBe(source);
+    });
+
     it("throws for an already-detached buffer source", () => {
       const source = new ArrayBuffer(3);
       source.transfer();
