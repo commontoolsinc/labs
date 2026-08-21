@@ -84,6 +84,10 @@ export type {
  * succeeds. Measured, not inferred.
  */
 export interface TopicDemand extends TopicSummary {
+  /** The display name, which the board publishes onward as each topic's
+   * `mentionable` entry — and `cf-code-editor` requires it there. Dropping it
+   * costs no type error and silently empties every `@`-mention completion. */
+  [NAME]: string | Default<""> | undefined;
   body: string | Default<"">;
   createdByName: string | Default<"">;
   mentions: unknown[] | Default<[]>;
