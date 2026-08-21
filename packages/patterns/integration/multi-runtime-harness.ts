@@ -336,13 +336,13 @@ export class MultiRuntimeSession {
   }
 
   /**
-   * Pull every open space's replica to the server head — stronger than
+   * Re-issue this runtime's tracked watch sets as pulls — stronger than
    * `barrier()`, which only settles fan-out the server already SENT: a
    * notification that never left recovers here or nowhere. See
    * `MultiRuntimeHarness.waitFor`'s arrival-gap recovery.
    */
-  async pullToHead(): Promise<void> {
-    await this.#client.call("pullToHead");
+  async refetchWatched(): Promise<void> {
+    await this.#client.call("refetchWatched");
   }
 
   /** Capture scheduler graph, settle stats history, and action run trace. */
@@ -596,26 +596,44 @@ export class MultiRuntimeHarness {
     // fan-out delivery gap, not a loss) versus state the server never
     // durably held (still absent — the timeout below now says so).
     if (this.#server === undefined) {
-      await Promise.all(this.sessions.map((session) => session.pullToHead()));
-      await this.settle(1);
+      // Bounded by the settle quiescence budget, not the 120 s RPC
+      // ceiling: recovery runs past the caller's deadline, and a wait
+      // that timed out at 30 s must not stall for minutes more — a
+      // recovery that cannot finish inside the budget reports as the
+      // ordinary timeout below.
+      const recoveryBudget = new Promise<"budget">((resolve) =>
+        setTimeout(() => resolve("budget"), SERVED_SETTLE_QUIESCENCE_BUDGET_MS)
+      );
+      const outcome = await Promise.race([
+        (async () => {
+          await Promise.all(
+            this.sessions.map((session) => session.refetchWatched()),
+          );
+          await this.settle(1);
+          return "refetched" as const;
+        })(),
+        recoveryBudget,
+      ]);
       let recovered = false;
-      try {
-        recovered = Boolean(await predicate());
-      } catch (error) {
-        lastError = error;
+      if (outcome === "refetched") {
+        try {
+          recovered = Boolean(await predicate());
+        } catch (error) {
+          lastError = error;
+        }
       }
       if (recovered) {
         console.warn(
           `[multi-runtime-harness] waitFor("${description}") passed only ` +
-            `after an explicit pull-to-head: the server held the state and ` +
-            `a reader's replica had missed it — a subscription fan-out ` +
-            `delivery gap, not a loss.`,
+            `after an explicit watch-set refetch: the server held the ` +
+            `state and a reader's replica had missed it — a subscription ` +
+            `fan-out delivery gap, not a loss.`,
         );
         return;
       }
       throw new Error(
         `Timed out waiting for: ${description} — state absent even after ` +
-          `a pull-to-head, so this is not a reader-side arrival gap` +
+          `a watch-set refetch, so this is not a reader-side arrival gap` +
           (lastError ? ` (last error: ${lastError})` : ""),
       );
     }

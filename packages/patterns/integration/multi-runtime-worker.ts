@@ -446,19 +446,6 @@ const handlers: Record<
   // elapses — the caller's settle round proceeds and the test's own assert
   // speaks, so a wedged consequence degrades loudly instead of hanging the
   // harness. The OFF arm has no overlay and resolves immediately.
-  /**
-   * Pull every open space's replica to the server head. The recovery
-   * lever for a reader-side ARRIVAL gap — a consequence the server holds
-   * durably that this session's replica missed (a subscription
-   * notification that never landed cannot be re-requested, and the
-   * pull-kick memo suppresses re-pulls of a doc pulled once). A pull to
-   * head recovers exactly the missed update; a consequence the server
-   * never held stays absent, so recovery cannot mask loss.
-   */
-  async pullToHead() {
-    await controller().runtime.storageManager.pullOpenSpacesToHead();
-  },
-
   async eventQuiescence({ timeoutMs }) {
     const runtime = controller().runtime;
     const budget = typeof timeoutMs === "number" ? timeoutMs : 10_000;
@@ -472,6 +459,20 @@ const handlers: Record<
       // notification, so nothing here needs nudging — just time.
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
+  },
+
+  /**
+   * Re-issue every open space's tracked watch set as a pull. The
+   * recovery lever for a reader-side ARRIVAL gap — state the server
+   * holds durably that this session's replica missed: a subscription
+   * notification that never landed cannot be re-requested, an
+   * already-watched document's sync is a no-op (the superset dedupe),
+   * and the pull-kick memo suppresses re-pulls of a doc pulled once. A
+   * watch-set re-issue re-fetches exactly the missed state; state the
+   * server never held stays absent, so recovery cannot mask loss.
+   */
+  async refetchWatched() {
+    await controller().runtime.storageManager.refetchOpenSpaces?.();
   },
 
   // Force an ordered-after round trip on every open space connection, so any

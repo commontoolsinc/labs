@@ -58,6 +58,7 @@ export enum RequestType {
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
   RuntimeSynced = "runtime:synced",
+  RefetchWatched = "runtime:refetchWatched",
   ResolveSpaceName = "runtime:resolveSpaceName",
   RegisterSpaceHost = "runtime:registerSpaceHost",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
@@ -386,6 +387,17 @@ export type IdleRequest = BaseRequest & {
  */
 export type RuntimeSyncedRequest = BaseRequest & {
   type: RequestType.RuntimeSynced;
+};
+
+/**
+ * Re-issue every open space's tracked watch set as a pull (SpaceReplica.
+ * refetchWatched) — the recovery lever for a reader whose subscription
+ * fan-out went missing: an already-watched document's sync is a no-op, so
+ * only a watch-set re-issue re-fetches stale watched state. A diagnostic
+ * and test-harness surface.
+ */
+export type RefetchWatchedRequest = BaseRequest & {
+  type: RequestType.RefetchWatched;
 };
 
 /** Resolve a legacy named space inside the worker so its derived identity can
@@ -1043,6 +1055,7 @@ export type IPCClientRequest =
   | SpaceSetAclEntryRequest
   | SpaceRemoveAclEntryRequest
   | RuntimeSyncedRequest
+  | RefetchWatchedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
   | VDomMountRequest
@@ -1387,6 +1400,10 @@ export type Commands = {
   };
   [RequestType.RuntimeSynced]: {
     request: RuntimeSyncedRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.RefetchWatched]: {
+    request: RefetchWatchedRequest;
     response: EmptyResponse;
   };
   [RequestType.ResolveSpaceName]: {

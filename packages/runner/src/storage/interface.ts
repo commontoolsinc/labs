@@ -139,6 +139,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProvider;
+  /**
+   * Re-issue every open space's tracked watch set as a pull — the
+   * recovery lever for a reader whose subscription fan-out went missing
+   * (an already-watched document's sync is a no-op by the superset
+   * dedupe, so only a watch-set re-issue re-fetches stale watched
+   * state). Optional; a diagnostic and test-harness surface.
+   */
+  refetchOpenSpaces?(): Promise<void>;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the

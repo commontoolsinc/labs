@@ -1618,6 +1618,12 @@ export class RuntimeProcessor {
     );
   }
 
+  /** Every open space's watch set re-issued as a pull (see the protocol
+   * type). */
+  async handleRefetchWatched(): Promise<void> {
+    await this.runtime.storageManager.refetchOpenSpaces?.();
+  }
+
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
@@ -1920,6 +1926,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
         return await this.handleRuntimeSynced();
+      case RequestType.RefetchWatched:
+        return await this.handleRefetchWatched();
       case RequestType.ResolveSpaceName:
         return await this.handleResolveSpaceName(request);
       case RequestType.RegisterSpaceHost:

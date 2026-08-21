@@ -1399,6 +1399,15 @@ export class StorageManager implements IStorageManager {
     );
   }
 
+  /** Every open space's `refetchWatched` (see SpaceReplica). */
+  async refetchOpenSpaces(): Promise<void> {
+    await Promise.all(
+      [...this.#providers.values()].map((provider) =>
+        provider.refetchWatched()
+      ),
+    );
+  }
+
   /**
    * INBOUND settlement only (server-execution v2 stage F): the serving
    * loop's wave-settle barrier. Awaits watch refreshes and update
@@ -2262,6 +2271,10 @@ class Provider implements IStorageProvider {
     return this.followReplacement((replica) => replica.pullToServerHead());
   }
 
+  refetchWatched(): Promise<void> {
+    return this.followReplacement((replica) => replica.refetchWatched());
+  }
+
   sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -2978,6 +2991,29 @@ class SpaceReplica implements ISpaceReplica {
     // unconditional round trip (it cannot be answered from the local replica),
     // unlike the entity-id listing calls, which a server may decline by flag.
     await session.queryGraph({ roots: [] });
+  }
+
+  /**
+   * Re-issue every tracked watch as a PULL — the recovery lever for a
+   * replica whose subscription fan-out went missing. A sync against an
+   * already-registered selector is a deliberate no-op (the superset
+   * dedupe in `sync`), so nothing short of re-issuing the watch set
+   * re-fetches a stale WATCHED document; session replacement performs
+   * this same re-issue after a reconnect, and this is that recovery,
+   * callable without dropping the session. A diagnostic and
+   * test-harness surface — product readers ride subscriptions.
+   */
+  async refetchWatched(): Promise<void> {
+    const entries = this.#watchSelectorTracker.getAllSubscriptions().map((
+      { address, selector },
+    ) =>
+      [address as WatchAddress, selector] as [
+        WatchAddress,
+        SchemaPathSelector,
+      ]
+    );
+    if (entries.length === 0) return;
+    await this.refreshWatchSet(entries, "pull");
   }
 
   /**
