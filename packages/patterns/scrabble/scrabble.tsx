@@ -285,7 +285,7 @@ const BONUS_LABELS: Record<BonusType, string> = {
 };
 
 const VALID_WORDS = new Set(
-  dataFile("/scrabble/words.txt").split("\n").filter((word) => word.length > 0),
+  dataFile("words.txt").split("\n").filter((word) => word.length > 0),
 );
 
 type BoardCell = Writable<PlacedTile[] | Default<[]>>;
