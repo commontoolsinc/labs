@@ -209,7 +209,7 @@ export interface TopicInput {
    * autocompletes over. A reference to the tracker's array, wired at creation
    * like `myName` (and backfillable as a one-time link-bind on pieces created
    * before it existed). Absent, the editor simply offers no completions. */
-  mentionable?: Writable<TopicSummary[] | Default<[]>>;
+  mentionable?: Writable<TopicMentionable[] | Default<[]>>;
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
    * cell, which is what makes a mention durable and — because each entry holds
@@ -316,6 +316,21 @@ export interface TopicCrossrefRow {
  * publishes is declared at `TopicPiece`. Keeping it out of the published
  * surface is what leaves it free to shrink.
  */
+/**
+ * What the body editor's `@`-mention autocomplete needs of a sibling: the
+ * display name it lists, and the title it matches on.
+ *
+ * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
+ * `Mentionable`, whose schema carries `required: [NAME]`
+ * (`packages/ui/src/v2/core/mentionable.ts`), so a sibling projection without
+ * it silently offers no completions — the JSX prop binding is loose enough
+ * that TypeScript does not object.
+ */
+export interface TopicMentionable {
+  [NAME]: string | Default<""> | undefined;
+  title: string | Default<"">;
+}
+
 export interface TopicSummary {
   /** The topic's title. Defaulted rather than required, like every other
    * field a board card renders: the card list is a mapped sub-pattern, so
