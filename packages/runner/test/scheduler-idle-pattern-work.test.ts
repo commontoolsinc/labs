@@ -13,14 +13,16 @@
 // commit — the space then served nothing forever (rootcause §1; the
 // serving-side halves are OW31 S-A and OW46 S-D).
 //
-// Pinned here at both halves:
+// Pinned here at both levels:
 //  1. the barrier CONSULTS the pattern manager and holds until its
 //     pending work settles (and plain `idle()` — reactive quiescence
 //     only, by contract — does NOT);
 //  2. the accessors read the REAL registries those chains register
-//     into — the single-flight load slot and the persistence set — so
-//     an entry in either holds the barrier, and once the barrier
-//     resolves no pattern work is in flight.
+//     into — the in-progress compilation map (the compile-and-run
+//     floating-promise phase), the single-flight load slot, and the
+//     persistence set — so an entry in any of the three holds the
+//     barrier, and once the barrier resolves no pattern work is in
+//     flight.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -147,6 +149,36 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     writeManager.compileCacheWrites.delete(writeGate.promise);
     writeGate.resolve();
     await writeBarrier;
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
+
+    // The COMPILATION half (review finding on the first revision):
+    // `compile-and-run` launches `compileOrGetPattern` as a FLOATING
+    // promise, so during the TypeScript compile NOTHING else holds the
+    // scheduler — `inProgressCompilations` (registered synchronously at
+    // compileOrGetPattern, resolved only after persistence) is the only
+    // visibility that phase has, and the barrier must consult it.
+    const compileManager = runtime.patternManager as unknown as {
+      inProgressCompilations: Map<string, Promise<unknown>>;
+    };
+    const compileGate = Promise.withResolvers<unknown>();
+    compileManager.inProgressCompilations.set(
+      "ow45-synthetic-compile",
+      compileGate.promise as Promise<never>,
+    );
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
+    let compileBarrierResolved = false;
+    const compileBarrier = runtime.scheduler.idleWithPendingCommits().then(
+      () => {
+        compileBarrierResolved = true;
+      },
+    );
+    for (let i = 0; i < 10; i++) {
+      await clock.tick(5);
+    }
+    expect(compileBarrierResolved).toBe(false);
+    compileManager.inProgressCompilations.delete("ow45-synthetic-compile");
+    compileGate.resolve(undefined);
+    await compileBarrier;
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
   });
 });

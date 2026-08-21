@@ -5068,8 +5068,10 @@ supply; OW29/OW32/OW34 closed):
     content-addressed, idempotent writes exempt from the foreign-write
     refusal (this arm also heals already-broken spaces on next
     demand); **S-B CLOSED 2026-08-21** (optimize-on-main
-    client-durability pass; report:
-    `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`):
+    client-durability pass; its report,
+    `ow47-client-durability-report.md`, lands under
+    `docs/history/plans/server-execution-v2/optimize/` with the OW47
+    PR):
     the client durability barrier now covers program materialization —
     `Scheduler.idleWithPendingCommits` (what `waitForRuntimeIdle`
     reaches through the runtime-client's `handleIdle`) additionally

@@ -426,16 +426,21 @@ export class PatternManager {
    * OW45, seat S-B): the barrier's contract is "once it resolves,
    * tearing the page down loses no writes", and a program commit
    * issued from a post-arrival load chain is exactly a write a reload
-   * would otherwise kill (the home-profile program-write loss). Both
-   * sets register during their chain's first awaits — the
-   * single-flight load slot before any storage read, the persistence
-   * slot at `persistCompileCacheTracked` entry — and every initiator
-   * (a piece start, an event handler, an awaited IPC request) is
-   * itself covered until the registration lands, so a chain running
-   * when the barrier's fixpoint drains is visible to it.
+   * would otherwise kill (the home-profile program-write loss). Three
+   * registries cover the chains end to end: `inProgressCompilations`
+   * registers SYNCHRONOUSLY at `compileOrGetPattern` — which
+   * `compile-and-run` launches as a FLOATING promise, so nothing else
+   * holds the scheduler while TypeScript compiles — and its promise
+   * resolves only after `compilePattern` has awaited persistence; the
+   * single-flight load slot registers in the load's first awaits
+   * (before any storage read); and the persistence slot registers at
+   * `persistCompileCacheTracked` entry. A chain running when the
+   * barrier's fixpoint drains is visible through whichever registry
+   * currently holds it.
    */
   hasPendingPatternWork(): boolean {
-    return this.inProgressByIdentityLoads.size > 0 ||
+    return this.inProgressCompilations.size > 0 ||
+      this.inProgressByIdentityLoads.size > 0 ||
       this.compileCacheWrites.size > 0;
   }
 
@@ -450,6 +455,7 @@ export class PatternManager {
    */
   async pendingPatternWorkSettled(): Promise<void> {
     await Promise.allSettled([
+      ...this.inProgressCompilations.values(),
       ...this.inProgressByIdentityLoads.values(),
       ...this.compileCacheWrites,
     ]);
