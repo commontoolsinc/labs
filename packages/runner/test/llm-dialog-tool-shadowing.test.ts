@@ -6,7 +6,7 @@ import {
   llmToolExecutionHelpers,
 } from "../src/builtins/llm-dialog.ts";
 
-const { buildToolCatalog } = llmToolExecutionHelpers;
+const { buildToolCatalog, flattenTools } = llmToolExecutionHelpers;
 const { toolAllowsObservedConfidentiality } = llmDialogTestHelpers;
 
 // A pattern may supply a tool whose name is also a built-in's — `read` and
@@ -67,6 +67,17 @@ describe("llmDialog built-in tool shadowing", () => {
     for (const name of ["invoke", "pin", "unpin", "updateArgument", "schema"]) {
       expect(name in catalog.llmTools).toBe(true);
     }
+  });
+
+  it("flattens the pattern's tool, not the built-in it shadows", () => {
+    const { toolsCell } = shadowingToolsCell(patternSchema);
+
+    const flattened = flattenTools(toolsCell as any);
+
+    // `flattenedTools` is what the UI lists, and it has to name the same tool
+    // the model is offered and the runtime will run.
+    expect(flattened.read.description).toBe("the pattern's own read");
+    expect(flattened.invoke.description).toContain("Invoke a handler");
   });
 
   it("enforces the shadowing tool's confidentiality ceiling", () => {
