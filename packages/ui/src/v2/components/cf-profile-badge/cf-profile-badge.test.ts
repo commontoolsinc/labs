@@ -93,10 +93,49 @@ describe("CFProfileBadge", () => {
       // someone as somebody else.
       const el = new CFProfileBadge() as any;
       el._name = "Ada";
+      el._resolved = true;
       el.fallbackName = "Alex";
       const html = JSON.stringify(el.render());
       expect(html).toContain("Ada");
       expect(html).not.toContain("Alex");
+    });
+
+    it("refuses the fallback for a resolved profile that carries no name", () => {
+      // The sharp case: verification comes from the resolved cell's label, not
+      // from the name, so a nameless VERIFIED profile would otherwise render a
+      // caller's string beside a seal it did not earn.
+      const el = new CFProfileBadge() as any;
+      el._resolved = true;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alice";
+      const html = JSON.stringify(el.render());
+      expect(html).not.toContain("Alice");
+      expect(html).toContain("Unknown profile");
+    });
+
+    it("does not carry the seal while presenting a fallback", () => {
+      // Belt and braces on the same boundary, from the other direction: even
+      // if a stale verified state survived, caller text may not wear it.
+      const el = new CFProfileBadge() as any;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alex";
+      const html = JSON.stringify(el.render());
+      expect(html).toContain("Alex");
+      expect(html).not.toContain(identitySeal(OWNER_DID).accent);
+    });
+
+    it("presents the fallback through every variant's name and avatar", () => {
+      // `full`/`hero` label an avatar, `circle` rides aria-label and tooltip,
+      // `chip` shows the name outright. A fallback that reached only the outer
+      // path left a `?` avatar beside a real name.
+      for (const variant of ["full", "chip", "circle", "hero"] as const) {
+        const el = new CFProfileBadge() as any;
+        el.variant = variant;
+        el.fallbackName = "Alex";
+        expect(JSON.stringify(el.render())).toContain("Alex");
+      }
     });
   });
 

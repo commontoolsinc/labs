@@ -489,6 +489,17 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @state()
   private accessor _name: string | undefined = undefined;
 
+  /**
+   * Whether a profile VALUE resolved, however little it carried.
+   *
+   * Separate from `_name` because a resolved profile may simply have no name,
+   * and that case must not read as "no profile": verification is derived from
+   * the resolved cell, so a caller-supplied fallback rendered there would sit
+   * beside a seal it did not earn.
+   */
+  @state()
+  private accessor _resolved = false;
+
   @state()
   private accessor _avatar: string | undefined = undefined;
 
@@ -639,6 +650,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // re-resolve + attestation gap. `_refreshVerification` re-derives it below.
     this._state = "presented";
     this._seal = undefined;
+    this._resolved = false;
     // Drop navigation state until the (new) cell resolves — a stale link must
     // not survive a re-bind.
     this._resolvedCell = undefined;
@@ -750,6 +762,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   private _applyValue(val: unknown): void {
     const { name, avatar } = profileDisplayFromValue(val);
+    this._resolved = true;
     const { bio, pinnedCount } = profileTooltipFromValue(val);
     this._name = name;
     this._avatar = avatar;
@@ -790,7 +803,18 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   }
 
   override render() {
-    const verified = this._state === "verified" && this._seal !== undefined;
+    // The fallback stands in for a row that holds NO profile. Once a value
+    // resolves the profile is authoritative, so a nameless one reads as
+    // unknown rather than borrowing a caller-supplied string — and a
+    // fallback never renders beside the seal, which is earned by a resolved
+    // cell's label and cannot be lent to text a caller passed in.
+    const usingFallback = this._name === undefined && !this._resolved &&
+      this.fallbackName !== undefined;
+    const presentedName = this._name ??
+      (usingFallback ? this.fallbackName : undefined);
+    const displayName = presentedName ?? "Unknown profile";
+    const verified = this._state === "verified" && this._seal !== undefined &&
+      !usingFallback;
     // The aura ring layer carries the DID-derived conic gradient plus a soft glow
     // in the identity's hue, so the fingerprint reads at badge scale.
     const hue = this._seal?.hue ?? 0;
@@ -815,7 +839,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const variant = this.variant;
     const showAvatar = variant !== "chip";
     const showName = variant !== "circle";
-    const displayName = this._name ?? this.fallbackName ?? "Unknown profile";
 
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
     // (bio + pinned-piece count). Always shown for `circle` (whose name is
