@@ -216,31 +216,52 @@ A prefix is a name, and a name resolves through a scope chain, innermost first:
 3. the reader's home-space bindings
 4. space-level slugs
 
-This is ordinary lexical scope. A person subscribes to a collection by binding a
-name to it in their own home space, beside the cross-space lists the home
-default pattern already holds (`docs/common/conventions/HOME_SPACE.md`). A
-binding in a person's own space is the one place where nobody else is renaming
-things.
+This is ordinary lexical scope, and rungs three and four are the same mechanism
+in two spaces. **A person's binding is a slug in their home space.** Subscribing
+to a collection is assigning that slug; the resolver already follows a slug
+whose target lives in another space, so a name in a reader's own space reaches a
+collection anywhere. A binding in a person's own space is also the one place
+where nobody else is renaming things
+(`docs/common/conventions/HOME_SPACE.md`).
 
-### The elision rule
+A reference carries **one** scope segment, and the scope chain is how it
+resolves. A person's own binding and a space-level slug are the same kind of
+thing reached at different rungs, so a reader who has bound a name uses it and a
+reader who has not falls through to the space.
 
-> A local binding may be elided exactly when its name is identical to the name
-> its target declares for itself — and the elision is checked, not assumed.
+### A worked example
 
-A short form is then an assertion that the reader's vocabulary and the target's
-agree, which the resolver verifies. Expansion is total and single-candidate:
-`#p/n` expands to `#p/p/n` — the binding named `p`, and the prefix `p` that its
-target declares — and then resolves or fails. It never selects among candidates.
+The board lives in space `topics-dev`, and its own space carries a slug naming
+it:
 
-Two properties follow. At most one binding per prefix can be elided, because
-only one binding can carry that name — a default expressed as a naming act
-rather than as a flag. And a name that stops matching fails loudly instead of
-resolving to something else.
+```text
+cf piece set-slug --space topics-dev top fid1:<board>
+```
 
-**An alias never appears in member-name position.** A binding name appears only
-as a scope selector; a declared prefix appears only as part of a member's own
-name. The grammar therefore says which kind of name is in hand without context,
-and the two can never be substituted for one another.
+Anyone can now reach member 42 as `topics-dev/top/42`, with no setup of their
+own. Written as a citation, fully qualified, that is `#@topics-dev/top/42`.
+
+A person who works with that board every day binds a name to it in their own
+home space — the same operation, in the space that is theirs:
+
+```text
+cf piece set-slug --space <my-home> top fid1:<board>
+```
+
+They can now write `#top/42`, because `top` resolves at their own rung of the
+chain. Someone who bound it as `work` writes `#work/42` and reaches the same
+member. Neither has to agree with the other, and neither has to agree with the
+board's own name for itself, because what gets stored is canonical and what gets
+displayed is computed per reader.
+
+Reading through the board itself, the same member is `#42`: the containing
+collection is the innermost rung, and it needs no name at all.
+
+### One segment for scope, one for the member
+
+The last segment of a reference is a member name; every segment before it is
+scope. A collection name and a member name therefore never compete for a
+position, and no rule is needed to tell them apart.
 
 ### Nothing hidden decides what a name means
 
@@ -252,9 +273,9 @@ different things on different days, and nothing in the string says which.
 ## Character set
 
 Names are ASCII: lowercase letters, digits, and single hyphens between words, as
-the space-level slug grammar already requires
-(`packages/runner/src/slugs.ts`). A name is compared by exact string equality,
-which keeps the elision rule total and cheap.
+the space-level slug grammar already requires (`packages/runner/src/slugs.ts`).
+A name is compared by exact string equality, which keeps resolution total and
+cheap.
 
 `/` is the only structural separator. A name's own characters cannot carry
 structure: hyphens are legal inside a name, and a collection chooses what its
@@ -291,8 +312,7 @@ short.
 | Form | Means |
 | --- | --- |
 | `#42` | member 42 of the collection being read through |
-| `#top/42` | member 42 of the collection bound to `top` in scope |
-| `#work/top/42` | the same, with the binding named explicitly |
+| `#top/42` | member 42 of the collection named `top` in scope |
 | `#@<space>/top/42` | fully qualified; depends on no binding |
 
 A leading `@` marks a space segment, matching what `asSpaceSegment`
@@ -323,9 +343,9 @@ stores the result, so the bare form never has to be re-decided later.
 
 A stored reference is canonical, so its spelling is free. **A renderer computes
 the spelling from the reader's context and never stores it.** The same reference
-renders as `#42` inside its own collection, `#top/42` where the reader's `top`
-binds there, `#work/top/42` where it binds elsewhere, and fully qualified where
-the reader has no binding at all.
+renders as `#42` inside its own collection, `#top/42` for a reader who has bound
+`top` to it, `#work/42` for a reader who bound it as `work`, and fully qualified
+for a reader with no binding at all.
 
 This is what makes a curated set of prefixes safe. Brevity is earned by the
 reader's own bindings; a reader without them sees more qualification; nobody
