@@ -2381,6 +2381,10 @@ Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process e
   for (const name of projected) Deno.env.delete(name);
   Deno.env.set("CF_HARNESS_API_KEY", "test-key");
   Deno.env.set("CF_HARNESS_COMPACT_THRESHOLD", "9000");
+  // The projection is what this test is about, and provider selection reads it
+  // too: without a projected selection the run is refused before the threshold
+  // is ever consulted, on any machine whose harness home configured none.
+  Deno.env.set("CF_HARNESS_MODEL_PROVIDER", "openai-compatible-gateway");
   try {
     const { io } = createIoBuffers();
     let createdOptions: Record<string, unknown> | undefined;
