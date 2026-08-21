@@ -35,6 +35,16 @@ import type { Runtime } from "../runtime.ts";
  * leaves the container as absent as a resolved one does. A rejected pull and a
  * failed seed are each reported through `logger`. The returned promise resolves
  * once the pull and the seed have both settled, and rejects for neither.
+ *
+ * The chain is registered with the storage manager's settle barrier, so
+ * `Cell.pull()` and `storageManager.synced()` hold until the seed's write has
+ * settled. The pull reaches that barrier through the replica's own sync
+ * bookkeeping, and this registration carries the wait across the span between
+ * the pull settling and the seed's commit being issued.
+ * `Runtime.dispose({ closeStorage: false })` drains the runtime through
+ * `settled(Infinity)` before it tears anything down, so the store a reader is
+ * handed afterwards carries whatever the seed wrote. A caller does not register
+ * the returned promise; this function registers the chain.
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
@@ -59,7 +69,12 @@ export function seedResultContainerWhenPullSettles(
       }
     });
   };
-  return pull.finally(seedIfStillAbsent).then(() => {}, (error: unknown) => {
-    logger.warn("resume-pull", "resume container pull rejected", { error });
-  });
+  const settled = pull.finally(seedIfStillAbsent).then(
+    () => {},
+    (error: unknown) => {
+      logger.warn("resume-pull", "resume container pull rejected", { error });
+    },
+  );
+  runtime.storageManager.trackUntilSettled(settled);
+  return settled;
 }
