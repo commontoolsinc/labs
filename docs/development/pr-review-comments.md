@@ -11,7 +11,7 @@ This returns every inline review comment on a pull request, with the file and
 line each is attached to:
 
 ```bash
-gh api repos/commontoolsinc/labs/pulls/<n>/comments
+gh api --paginate repos/commontoolsinc/labs/pulls/<n>/comments
 ```
 
 A finding whose line has since changed comes back with `line` set to null. The
@@ -23,12 +23,13 @@ This reports, for each thread, whether it is resolved and whether it is
 outdated because the code beneath it moved:
 
 ```bash
-gh api graphql -f query='
-query($owner:String!,$repo:String!,$number:Int!){
+gh api graphql --paginate -f query='
+query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
-      reviewThreads(first:100){
-        nodes{ isResolved isOutdated path line comments(first:10){ nodes{ author{login} body } } }
+      reviewThreads(first:100,after:$endCursor){
+        nodes{ isResolved isOutdated path line comments(first:1){ nodes{ author{login} body } } }
+        pageInfo{ hasNextPage endCursor }
       }
     }
   }

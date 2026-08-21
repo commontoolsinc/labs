@@ -209,8 +209,8 @@ all relevant tests.
 When babysitting a PR through CI, look for review comments in addition to failed
 CI jobs. Cubic reviews nearly every PR here, and its review lands a few minutes
 after each push, so wait for it before concluding a PR has none. Read its
-findings with `gh api repos/commontoolsinc/labs/pulls/<n>/comments`; they are
-inline review comments, which `gh pr view` does not return.
+findings with `gh api --paginate repos/commontoolsinc/labs/pulls/<n>/comments`;
+they are inline review comments, which `gh pr view` does not return.
 `docs/development/pr-review-comments.md` covers the rest. When facing
 difficulties getting coverage checks to pass, consider the information in
 `docs/development/COVERAGE.md`.
