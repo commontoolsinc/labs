@@ -20,20 +20,21 @@ export function isValidPieceId(id: string): boolean {
   return !!id && id.length === 59;
 }
 
-// Derives the identity configured for this service,
-// receiving an `IDENTITY` and `OPERATOR_PASS` from the environment.
-//
-// First, uses the key path to load a key.
-// If not set, falls back to operator pass to
-// use an insecure passphrase.
-// This fallback should be removed once fully migrated
-// over to using keyfiles.
-//
-// The ed25519 implementation is left to the platform, which on a supporting
-// one means Web Crypto: the seed each form below starts from is imported into
-// a non-extractable `CryptoKey` and then dropped, so what this service holds
-// afterwards -- and what it hands a worker realm, structured cloning carrying
-// a `CryptoKey` whole -- is a key handle.
+/**
+ * Derives the identity configured for this service, from an `IDENTITY` and an
+ * `OPERATOR_PASS` taken from the environment. A key path loads a key; absent
+ * one, the operator pass stands in as an insecure passphrase identity. That
+ * fallback should be removed once fully migrated over to using keyfiles.
+ *
+ * The ed25519 implementation is left to the platform, which on a supporting
+ * one means Web Crypto: the seed each form starts from is imported into a
+ * non-extractable `CryptoKey` and then dropped, so what this service holds
+ * afterwards -- and what it hands a worker realm, structured cloning carrying
+ * a `CryptoKey` whole -- is a key handle.
+ *
+ * @throws If the key path names something unreadable, or if neither variable
+ *   is set.
+ */
 export async function getIdentity(
   identityPath?: string,
   operatorPass?: string,
