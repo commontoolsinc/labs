@@ -13,7 +13,6 @@ import {
   profileCandidates,
   profilesToInspect,
   reloadHint,
-  replaceFile,
   shellKind,
   stripMarkedBlock,
   unexportFromProfiles,
@@ -582,27 +581,6 @@ describe("test-records-shell-config", () => {
       expect(removals).toEqual([
         { path: join(home, ".zshrc"), outcome: "removed" },
       ]);
-    });
-  });
-
-  describe("replaceFile()", () => {
-    it("writes a file that is not there yet", async () => {
-      const path = join(home, "fresh.txt");
-
-      await replaceFile(path, "hello\n");
-
-      expect(await Deno.readTextFile(path)).toBe("hello\n");
-    });
-
-    it("keeps the permissions a file already had", async () => {
-      const path = join(home, "kept.txt");
-      await Deno.writeTextFile(path, "before\n");
-      await Deno.chmod(path, 0o600);
-
-      await replaceFile(path, "after\n");
-
-      expect(await Deno.readTextFile(path)).toBe("after\n");
-      expect((await Deno.stat(path)).mode! & 0o777).toBe(0o600);
     });
   });
 

@@ -14,6 +14,7 @@
  */
 
 import { dirname, join } from "@std/path";
+import { replaceFile } from "./test-records-atomic-write.ts";
 import { type Environment, readEnv } from "@commonfabric/test-support/records";
 
 /** A harness whose configuration can carry the variable. */
@@ -140,54 +141,43 @@ async function readConfig(path: string): Promise<ConfigRead> {
 }
 
 /**
- * Writes configuration through a temporary file in the same directory,
- * so what a harness reads is never a half-written file. The file's own
- * permissions carry over: a configuration somebody keeps readable only
- * by themselves stays that way, rather than taking whatever a fresh
- * file gets from the umask.
+ * Writes a configuration, in one step or not at all: the replacement
+ * itself is `replaceFile`, which keeps the file's permissions and any
+ * link leading to it.
  *
- * The text the configuration was read from is checked again before the
- * rename. A harness writing its own settings between the two is rare
- * and losing what it wrote would be silent, so the write stands down
- * and says so instead.
+ * The text the configuration was read from is checked again first. A
+ * harness writing its own settings in between is rare, and losing what
+ * it wrote would be silent, so the write stands down and says so.
+ * Between that check and the rename there is a moment this cannot
+ * account for, and no portable way to close it; what it buys is that
+ * the ordinary case of a harness writing while a person runs setup
+ * does not quietly lose a setting.
  */
 export async function writeConfig(
   path: string,
   config: Record<string, unknown>,
   before: string | undefined,
 ): Promise<boolean> {
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+  if (!await unchanged(path, before)) return false;
   await Deno.mkdir(dirname(path), { recursive: true });
-  try {
-    await Deno.writeTextFile(temporary, JSON.stringify(config, null, 2) + "\n");
-    const mode = await fileMode(path);
-    if (mode !== undefined) await Deno.chmod(temporary, mode).catch(() => {});
-    if (await readText(path) !== before) return false;
-    await Deno.rename(temporary, path);
-    return true;
-  } finally {
-    // The rename takes the temporary file's name away, so this removes
-    // one only when the write or the rename did not get that far.
-    await Deno.remove(temporary).catch(() => {});
-  }
+  await replaceFile(path, JSON.stringify(config, null, 2) + "\n");
+  return true;
 }
 
-/** The permission bits of a file that is already there. */
-async function fileMode(path: string): Promise<number | undefined> {
+/**
+ * Whether a file still holds the text it was read from. A file that
+ * cannot be read now is not a file this can say that about, so it
+ * answers no: standing down loses nothing, and writing anyway would
+ * lose whatever put it out of reach.
+ */
+async function unchanged(
+  path: string,
+  before: string | undefined,
+): Promise<boolean> {
   try {
-    const mode = (await Deno.stat(path)).mode;
-    return mode === null || mode === undefined ? undefined : mode & 0o7777;
-  } catch {
-    return undefined;
-  }
-}
-
-/** A file's text, or undefined where there is no file. */
-async function readText(path: string): Promise<string | undefined> {
-  try {
-    return await Deno.readTextFile(path);
-  } catch {
-    return undefined;
+    return await Deno.readTextFile(path) === before;
+  } catch (error) {
+    return error instanceof Deno.errors.NotFound && before === undefined;
   }
 }
 

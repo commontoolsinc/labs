@@ -13,6 +13,7 @@
  */
 
 import { dirname, join } from "@std/path";
+import { replaceFile } from "./test-records-atomic-write.ts";
 import { type Environment, readEnv } from "@commonfabric/test-support/records";
 
 /** The comment that marks the lines this tool wrote. */
@@ -443,33 +444,6 @@ export function stripMarkedBlock(
     kept.push(line);
   }
   return { text: kept.join("\n"), removed };
-}
-
-/**
- * Replaces a profile's whole text through a temporary file in the same
- * directory, keeping the file's own permissions. A shell startup file
- * left half written is a shell that fails to start, so the replacement
- * is never partial.
- */
-export async function replaceFile(
-  path: string,
-  text: string,
-): Promise<void> {
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  try {
-    await Deno.writeTextFile(temporary, text);
-    try {
-      const mode = (await Deno.stat(path)).mode;
-      if (mode !== null && mode !== undefined) {
-        await Deno.chmod(temporary, mode & 0o7777).catch(() => {});
-      }
-    } catch {
-      // No file to take permissions from; the new one keeps its own.
-    }
-    await Deno.rename(temporary, path);
-  } finally {
-    await Deno.remove(temporary).catch(() => {});
-  }
 }
 
 /**
