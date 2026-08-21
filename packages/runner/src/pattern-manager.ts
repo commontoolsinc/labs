@@ -424,6 +424,53 @@ export class PatternManager {
   }
 
   /**
+   * Whether any pattern work that produces or persists PROGRAM DOCS is
+   * in flight: a by-identity load (whose cold-load arm recompiles and
+   * RE-PERSISTS a space's program closure) or a compile-cache
+   * write-back (which IS the program-materialization commit). Consulted
+   * by the client durability barrier
+   * (`Scheduler.idleWithPendingCommits` — verification-coverage.md
+   * OW45, seat S-B): the barrier's contract is "once it resolves,
+   * tearing the page down loses no writes", and a program commit
+   * issued from a post-arrival load chain is exactly a write a reload
+   * would otherwise kill (the home-profile program-write loss). Three
+   * registries cover the chains end to end: `inProgressCompilations`
+   * registers SYNCHRONOUSLY at `compileOrGetPattern` — which
+   * `compile-and-run` launches as a FLOATING promise, so nothing else
+   * holds the scheduler while TypeScript compiles — and its promise
+   * resolves only after `compilePattern` has awaited persistence; the
+   * single-flight load slot registers in the load's first awaits
+   * (before any storage read); and the persistence slot registers at
+   * `persistCompileCacheTracked` entry. A chain running when the
+   * barrier's fixpoint drains is visible through whichever registry
+   * currently holds it.
+   */
+  hasPendingPatternWork(): boolean {
+    return this.inProgressCompilations.size > 0 ||
+      this.inProgressByIdentityLoads.size > 0 ||
+      this.compileCacheWrites.size > 0;
+  }
+
+  /**
+   * Settle every currently-registered in-progress compilation,
+   * by-identity load, and compile-cache write-back (failures SETTLE —
+   * allSettled by contract: they are the original caller's to surface,
+   * never the barrier's to hang on; the rejecting-promise pin guards
+   * the allSettled→all regression). Work registered WHILE awaiting is
+   * the caller's to re-check: the scheduler barrier re-evaluates from
+   * scratch after each settle, the same joint-fixpoint structure
+   * pending commits use, so a chain that registers its follow-on work
+   * mid-await is seen by the next pass.
+   */
+  async pendingPatternWorkSettled(): Promise<void> {
+    await Promise.allSettled([
+      ...this.inProgressCompilations.values(),
+      ...this.inProgressByIdentityLoads.values(),
+      ...this.compileCacheWrites,
+    ]);
+  }
+
+  /**
    * Attach a rehydration `program` to a hand-built pattern object (one with no
    * module-scope entry ref). The only surviving job of the old
    * `registerPattern`: source-bearing tests/builtins that construct a Pattern in

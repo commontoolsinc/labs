@@ -5171,14 +5171,44 @@ supply; OW29/OW32/OW34 closed):
     alternative was not needed; the heal-on-next-demand property
     holds for the replicate trigger — the repair path's own foreign
     case stays fail-closed, a flagged residual in OW31's row);
-    **S-B** the client pending-commit durability barrier
-    covering program materialization (`Scheduler.idleWithPendingCommits`
-    — `waitForRuntimeIdle` must not return before the program is
-    durable); **S-C** heal-on-read: re-issue program materialization
-    on adopt/open when the space lacks the program docs for a
-    referenced patternIdentity. Trigger: lifts the
+    **S-B CLOSED 2026-08-21** (optimize-on-main
+    client-durability pass; its report,
+    `ow47-client-durability-report.md`, lands under
+    `docs/history/plans/server-execution-v2/optimize/` with the OW47
+    PR):
+    the client durability barrier now covers program materialization —
+    `Scheduler.idleWithPendingCommits` (what `waitForRuntimeIdle`
+    reaches through the runtime-client's `handleIdle`) additionally
+    awaits the pattern manager's in-flight by-identity loads (whose
+    cold-load arm recompiles and re-persists a space's program
+    closure) and compile-cache write-backs (the program commit
+    itself), joint-fixpoint with pending commits; plain `idle()` stays
+    reactive-only, so serving-loop settle probes are untouched
+    (red-first pin: `scheduler-idle-pattern-work.test.ts`); **S-C**
+    heal-on-read: re-issue program materialization on adopt/open when
+    the space lacks the program docs for a referenced patternIdentity
+    — **FLAGGED OPEN, not built** (the same pass): the re-issue's
+    SOURCE is an unstated semantic — the in-memory artifact index
+    retains evaluated exports, not the module bytes a
+    re-materialization needs, so healing needs either retained
+    closure bytes (a memory-policy decision), a cross-space donor
+    probe (which spaces may donate is a policy decision), or S-A's
+    server-side heal (which the rootcause already names as healing
+    broken spaces on next demand) — routed to the owner with the
+    OW31/S-A decision rather than filled. A binding CONSTRAINT for
+    any future S-C build, from OW31's build flags (their FLAG-4):
+    the detached compile flows — the `loadPatternByIdentity` repair
+    writeback and `compilePattern`'s own persist — carry NO wave-run
+    context and hence no §2b carriage, so a foreign-target re-issue
+    routed through them is refused fail-closed; an S-C design must
+    run where carriage or the client's OWN identity write authority
+    is available (the adopting user writing their own space), or
+    stay server-side with S-A's carriage-borne trigger. Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
-    (jointly with OW31's build if S-A takes the carriage arm).
+    (S-A landed with OW31's build, carriage arm; S-B lands here — the
+    joint lift run is the remaining evidence, and the optimize pass's
+    preview run had step 1 green in ~10 s with step 2 still red on the
+    cross-space module-run residual OW31's row carries).
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
