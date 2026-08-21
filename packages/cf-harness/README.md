@@ -1147,6 +1147,20 @@ direction, so the child can neither point the browser elsewhere nor learn the
 host's topology, and a bare browser launch that would race the host's live
 browser profile has no verb to arrive through.
 
+A field that takes a value has a sibling that takes a handle: `valueHandle` for
+`fill`, `type`, and `select`, and `urlHandle` for `open`. The handle is resolved
+trusted-side at the moment of use, so the model composes the action while
+holding only a reference, and the value it stands for never enters the
+conversation. A value-bearing field and its handle sibling are alternatives —
+set together, the call is refused rather than one winning silently. Once a run
+materializes a value this way, that exact string is scrubbed out of every
+model-facing tool output for the rest of the run — at the same boundary where
+addresses become handle tokens, because both are things the model must not hold.
+The scrub is not limited to the tool that materialized the value: a value typed
+into a page can return through any tool that reads that page, so a later
+snapshot, a skill script driving the same browser, or a failing command's stderr
+all carry it back withheld.
+
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not
 inherit ambient provider tokens, developer secrets, app credentials, or other

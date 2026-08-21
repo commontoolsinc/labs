@@ -29,6 +29,10 @@ import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-mod
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import {
+  createHarnessResolvedValueRegister,
+  type HarnessResolvedValueRegister,
+} from "./contracts/resolved-value-register.ts";
+import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
   type HarnessPolicyTrace,
@@ -334,6 +338,13 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  /**
+   * Values this run has materialized from handles. In-memory and never
+   * persisted: it holds the very strings the handle design keeps out of the
+   * model's context, so putting it in run state would defeat the point.
+   */
+  readonly #resolvedValueRegister: HarnessResolvedValueRegister =
+    createHarnessResolvedValueRegister();
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -736,6 +747,14 @@ export class CfHarnessEngine {
    * The run's session-local handle table, or `undefined` while none has been
    * recorded. A defensive copy, like `getRunState()`.
    */
+  /**
+   * The run's register of values materialized from handles. The prompt loop
+   * scrubs these out of everything the model reads.
+   */
+  get resolvedValueRegister(): HarnessResolvedValueRegister {
+    return this.#resolvedValueRegister;
+  }
+
   get handleTable(): HarnessHandleTable | undefined {
     return this.#runState.handleTable === undefined
       ? undefined
@@ -1474,6 +1493,7 @@ export class CfHarnessEngine {
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
       handleTable: this.handleTable,
+      resolvedValueRegister: this.#resolvedValueRegister,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),
