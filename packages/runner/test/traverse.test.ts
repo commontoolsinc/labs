@@ -1,5 +1,4 @@
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { type CellScope, resolveScopeKey } from "@commonfabric/memory/v2";
 import { describe, it } from "@std/testing/bdd";
 
