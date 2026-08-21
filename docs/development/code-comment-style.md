@@ -410,8 +410,8 @@ a `//` block; see [Section markers](#section-markers) above.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
   whether or not the class is exported.
-- Every member of a `type` or `interface` declaration, whether or not the
-  declaration is exported.
+- Every `type` and `interface` declaration and every member of one, whether or
+  not the declaration is exported.
 - Every non-trivial internal function.
 
 Anything else may have one, and the bar is low. Err toward writing one for all
