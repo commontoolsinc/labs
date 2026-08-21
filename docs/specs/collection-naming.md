@@ -395,11 +395,12 @@ it provably comes back to the same item. This is also what makes a short
 spelling safe for a collection whose names may move: a spelling that no longer
 round-trips is not shown.
 
-The bare form is not among the spellings a renderer reaches for on its own. A
-screenshot of `#42` is unrecoverable, while `#top/42` is recoverable by anyone
-who knows the collection's name, so the scope-qualified spelling is the shortest
-a renderer will choose. The bare form stays available to an author who types
-it.
+The bare form needs no special handling here, because its own resolution rule
+already confines it: it means something only where the reader is reading through
+the collection that holds the member, which is the one context where it is also
+the shortest spelling that round trips. What keeps a reference safe once it
+leaves that context is the portable mode below, not a restriction on how short
+an in-place spelling may be.
 
 ### Two modes, chosen by destination
 
@@ -424,8 +425,12 @@ form rather than the displayed one. The canonical URL is the qualified name plus
 a host, so the name stays legible in pasted text and resolves where no resolver
 exists.
 
-Screenshots, speech, and retyping carry only what is visible. That residue is
-why the displayed form stays scope-qualified.
+Screenshots, speech, and retyping carry only what is visible, and neither a
+clipboard flavor nor a render mode reaches them. A bare `#42` lifted that way is
+unrecoverable, while a scope-qualified one is recoverable by anyone who knows
+the collection. That is a reason to copy rather than screenshot a reference
+meant to travel; it is not a reason to lengthen every spelling shown in
+place.
 
 ## Storage
 
