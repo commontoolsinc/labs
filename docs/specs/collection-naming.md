@@ -339,6 +339,32 @@ An author's context settles it the same way. Typing `#42` while reading through
 a collection resolves against that collection, and canonicalizing on write
 stores the result, so the bare form never has to be re-decided later.
 
+### The compact form
+
+A collection may offer a second spelling that joins its name to a member's with
+a hyphen — `#top-42` beside `#top/42`. It is an option, it is a spelling only,
+and it changes nothing about the resolver's grammar or the canonical form.
+
+The form exists because a single token travels where a path does not. A git
+branch name, an external tracker, a filename, a sentence read aloud: each takes
+`top-42` more readily than `top/42`, which reads as a location rather than a
+name.
+
+A collection is eligible only if it declares that its member names cannot
+contain a hyphen. A collection that numbers its members qualifies; one naming
+them `getting-started` does not, because `#docs-getting-started` has no single
+reading.
+
+Reading a compact form is a lookup rather than a parse. The candidate splits are
+tried and exactly one must resolve. Offering the form claims nothing in the
+space's namespace, so a space-level name shaped like a compact form is simply
+another candidate; where more than one resolves, the reader is asked. A person
+choosing is not a hidden rule, and nothing is at risk in the asking, because
+canonicalizing on write means an ambiguous input never becomes a stored
+reference.
+
+A renderer may prefer the compact form for a collection that offers one.
+
 ## Rendering
 
 A stored reference is canonical, so its spelling is free. **A renderer computes
@@ -501,6 +527,11 @@ with `#`. Either they are one system, in which case a tag search is the
 outermost rung of the same scope chain and the well-known targets that resolve
 by recency need reconciling with the rule that nothing hidden decides what a
 name means; or they are two systems and one of them needs a different sigil.
+
+**Which spelling a renderer prefers** when several are available and all round
+trip — a collection's compact form, its path form, and any space-level name the
+member carries of its own. Every candidate is verified before display; what is
+unsettled is the order among them.
 
 **Whether a name policy is machine-readable**, so a consumer can branch on it,
 or is documentation that a consumer's author reads.
