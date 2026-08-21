@@ -175,10 +175,10 @@ print 'null' on stdout and exit 0).`,
 export const wish = new Command()
   .name("wish")
   .description(description)
-  .env("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+  .env("CF_API_URL=<url:string>", "URL of the fabric server instance.", {
     prefix: "CF_",
   })
-  .option("-a,--api-url <url:string>", "URL of the fabric instance.")
+  .option("-a,--api-url <url:string>", "URL of the fabric server instance.")
   .env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
     prefix: "CF_",
   })
