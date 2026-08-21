@@ -100,6 +100,35 @@ export type NormalizedLink = {
    * silently lift the caps that boundary is supposed to enforce.
    */
   scopeCaps?: readonly ScopeCapAtDepth[];
+  /**
+   * Link resolution FOLLOWED at least one hop and then dead-ended at a
+   * doc the replica cannot serve (the sigil probe reported the DOC
+   * itself missing — not merely an absent path in a present doc). The
+   * chain may well continue inside that doc once it arrives, so nothing
+   * about the value at this link is knowable yet: under the lazy
+   * (action-body) read path this is an UNRESOLVED INPUT and the read
+   * refuses instead of handing `undefined` into the body (the RULED
+   * OW51 semantics, 2026-08-21 — schema.ts's lazy branch throws
+   * `UnresolvedInputError`). A dead-end at the handle's OWN root doc
+   * does not set this: a fresh cell's doc does not exist until its
+   * first write, and `get() ?? fallback` on it stays `undefined` as it
+   * always has. Read-side only, like `scopeCaps`: never serialized,
+   * never part of link identity; consumers that copy links by spread
+   * carry it inertly.
+   */
+  pendingHopDoc?: true;
+  /**
+   * This link is DATA-DERIVED: parsed from a stored sigil link, or
+   * produced by a resolution that followed at least one hop. A handle
+   * minted from such a link points at somebody else's doc — the doc's
+   * absence may be transit (not yet arrived), unlike a locally-minted
+   * cell's own doc, whose absence before its first write is knowledge
+   * (the `get() ?? fallback` idiom). Consulted only by link resolution
+   * when a walk dead-ends at a missing doc (see `pendingHopDoc`).
+   * Read-side only, like `scopeCaps`: never serialized, never part of
+   * link identity.
+   */
+  viaLinkHop?: true;
 };
 
 /**

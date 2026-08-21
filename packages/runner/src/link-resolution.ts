@@ -421,8 +421,25 @@ export function resolveLinkTracingDereferences(
   let memoizable = true;
 
   let iteration = 0;
+  // The RULED OW51 dead-end marker (link-types.ts `pendingHopDoc`): a
+  // walk that FOLLOWED at least one hop and then stopped because the
+  // current doc itself is missing may be pointing into data that has
+  // simply not arrived — the value at the returned link is unknowable,
+  // not absent. `followedHop` distinguishes that from a first-hop read
+  // of the handle's own absent doc (the ordinary first-write idiom);
+  // `deadEndDocMissing` is re-decided per iteration from the sigil
+  // probe's NotFoundError path (`[]` = the DOC is missing, anything
+  // else = a present doc without this path).
+  let followedHop = false;
+  let pendingDeadEnd = false;
+  // The input handle's own provenance (link-types.ts `viaLinkHop`): a
+  // handle minted from a stored sigil starts AT its hop target, so a
+  // first-probe dead-end there is still a dead-end behind a hop — the
+  // asCell boundary consumed the hop when it minted the handle.
+  const inputViaLinkHop = link.viaLinkHop === true;
 
   while (true) {
+    let deadEndDocMissing = false;
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
       logger.error("link-res-error", `Link resolution iteration limit reached`);
       throw new Error(`Link resolution iteration limit reached`);
@@ -477,6 +494,7 @@ export function resolveLinkTracingDereferences(
       };
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
+      if (lastValid.length === 0) deadEndDocMissing = true;
 
       if (lastValid.length > 0) {
         // remove `value` prefix
@@ -581,6 +599,7 @@ export function resolveLinkTracingDereferences(
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       traces.push(recordDereferenceHop(tx, nextHop));
+      followedHop = true;
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
@@ -624,11 +643,24 @@ export function resolveLinkTracingDereferences(
       }
       addressKey = linkAddressKey(link);
     } else {
+      // The walk stops here. When it stops because the CURRENT doc is
+      // missing AND we got here by following a hop, the chain may
+      // continue inside the unarrived doc — mark the result pending
+      // (see the declaration above; the lazy read boundary refuses on
+      // it). A stop at a PRESENT doc, or on the handle's own root doc,
+      // is an honest end.
+      if ((followedHop || inputViaLinkHop) && deadEndDocMissing) {
+        pendingDeadEnd = true;
+      }
       break;
     }
   }
 
   const result = { ...link } satisfies NormalizedFullLink;
+  if (pendingDeadEnd) result.pendingHopDoc = true;
+  // A post-hop result is itself data-derived: a handle minted from it
+  // (the asCell boundary) carries the provenance its later reads need.
+  if (followedHop || inputViaLinkHop) result.viaLinkHop = true;
 
   // Intern the schema at this single link-resolution exit so downstream
   // consumers see an identity-canonical, deep-frozen schema reference.
