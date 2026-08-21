@@ -343,6 +343,18 @@ describe("piece-describe", () => {
         schema: resultSchema,
         get: () => resultValue,
         getRaw: () => resultValue,
+        // The listing enumerates a root's stored names through `asSchema`,
+        // which answers one handle per name without materializing anything
+        // under them.
+        asSchema: (_schema: unknown) => ({
+          get: () =>
+            Object.fromEntries(
+              Object.keys(resultValue).map((name) => [
+                name,
+                resultCell.key(name),
+              ]),
+            ),
+        }),
         asSchemaFromLinks: function () {
           return this;
         },
@@ -380,6 +392,7 @@ describe("piece-describe", () => {
             Promise.resolve({
               get: () => undefined,
               getRaw: () => undefined,
+              asSchema: (_schema: unknown) => ({ get: () => undefined }),
               asSchemaFromLinks: function () {
                 return this;
               },
@@ -391,6 +404,7 @@ describe("piece-describe", () => {
         getPattern: () => Promise.resolve(compiled),
         getCell: () => ({
           get: () => resultValue,
+          asSchema: (_schema: unknown) => ({ get: () => undefined }),
           key: (key: unknown) =>
             key === NAME
               ? { pull: () => Promise.resolve("Work tracker") }
@@ -437,6 +451,7 @@ describe("piece-describe", () => {
             pieceDouble({
               getCell: () => ({
                 get: () => ({}),
+                asSchema: (_schema: unknown) => ({ get: () => undefined }),
                 key: () => ({ pull: () => Promise.reject(new Error("gone")) }),
               }),
             }) as never,
