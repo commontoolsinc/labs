@@ -41,7 +41,11 @@ import {
   replaceSchedulerBasisRows,
   selectForeignBasisRows,
 } from "@commonfabric/memory/v2/scheduler-basis";
-import { selectDocHead } from "@commonfabric/memory/v2/engine";
+import {
+  applyCommit,
+  selectDocHead,
+  serverSeq,
+} from "@commonfabric/memory/v2/engine";
 import { UI } from "../src/builder/types.ts";
 import {
   getPatternEnvironment,
@@ -390,6 +394,119 @@ describe("Phase 5 cross-space serving", () => {
     } finally {
       await serving.dispose();
       await manager.close();
+    }
+  });
+
+  it("OW31 seat S-A: a cross-space compile-cache writeback rides the triggering run's delegated carriage — carriage-less it stays refused (protocol.md §2b; the render-stall §1 class)", async () => {
+    host = newHost();
+
+    // Activate the HOME space through a client demand (the ordinary
+    // activation path — the wave and the REAL run stamper are then
+    // live on the serving runtime).
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      homeSpace,
+      "sa-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () =>
+          servingRuntime !== undefined &&
+          host!.spaceServer(homeSpace)?.active === true,
+        "home space activation",
+      );
+      const serving = servingRuntime!;
+      const compiled = await serving.patternManager.compilePattern({
+        main: "/sa.tsx",
+        files: [{
+          name: "/sa.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { out: number }>(",
+            "  ({ n }) => ({ out: computed(() => n + 1) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space: homeSpace });
+      await serving.patternManager.flushCompileCacheWrites();
+
+      // The provisioned target: its GENESIS already landed (the B4
+      // ordering — the .inSpace creation wave forces it), naming the
+      // acting user OWNER with the client-shape wildcard.
+      const pSigner = await Identity.fromPassphrase("sa provisioned space");
+      const pSpace = pSigner.did() as MemorySpace;
+      const pEngine = await server.engineForSpace(pSpace);
+      applyCommit(pEngine, {
+        sessionId: "sa-genesis",
+        space: pSpace,
+        principal: pSpace,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${pSpace}`,
+            value: {
+              value: { [aliceSigner.did()]: "OWNER", "*": "WRITE" },
+            },
+          }],
+        },
+      });
+
+      // CARRIAGE-LESS replication (the pre-fix shape, kept as the
+      // fail-closed pin): every writeback into P is refused at the
+      // wave's accept gate — the render-stall §1 refusals — and P's
+      // store stays at its genesis.
+      const refusalsBefore = host!.stats().foreignWriteRefusals;
+      serving.patternManager.replicatePatternToSpace(
+        compiled,
+        pSpace,
+        homeSpace,
+      );
+      await serving.patternManager.flushCompileCacheWrites().catch(() => {});
+      await waitUntil(
+        () => host!.stats().foreignWriteRefusals > refusalsBefore,
+        "carriage-less writeback refusal",
+      );
+      expect(selectDocHead(pEngine, { id: `of:${pSpace}`, scopeKey: "space" }))
+        .toBe(1);
+
+      // WITH the triggering run's §2b carriage (OW31 seat S-A): the
+      // writebacks seal with the acting user + capabilityRef, the
+      // accept gate grants via P's ACL, and the program docs land in
+      // P's OWN store — the served mirror of the client committing
+      // the program under the user's session.
+      serving.patternManager.replicatePatternToSpace(
+        compiled,
+        pSpace,
+        homeSpace,
+        {
+          acting: { user: aliceSigner.did(), session: "sess-sa" },
+          capabilityRef: "event-consequence:e-sa",
+        },
+      );
+      await serving.patternManager.flushCompileCacheWrites();
+      await waitUntil(
+        () => serverSeq(pEngine) > 1,
+        "delegated writeback landed in the provisioned space",
+      );
+      const meta = pEngine.database.prepare(
+        `SELECT class, acting_principal, capability_ref
+         FROM "commit" WHERE seq > 1 ORDER BY seq LIMIT 1`,
+      ).get() as Record<string, string>;
+      expect(meta.class).toBe("authored");
+      expect(meta.acting_principal).toBe(aliceSigner.did());
+      expect(meta.capability_ref).toBe("event-consequence:e-sa");
+    } finally {
+      cancel();
     }
   });
 

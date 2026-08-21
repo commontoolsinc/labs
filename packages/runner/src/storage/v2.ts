@@ -1027,6 +1027,15 @@ export class StorageManager implements IStorageManager {
       : {};
   }
 
+  /** The serving manager's HOME space (Options.servingHomeSpace) —
+   * undefined on every client manager. Consumers use it to decide
+   * whether a write target is FOREIGN to the serving loop (OW31 seat
+   * S-A: the compile-cache writeback attaches its trigger's delegated
+   * carriage only for foreign targets). */
+  get servingHomeSpace(): MemorySpace | undefined {
+    return this.#servingHomeSpace;
+  }
+
   /**
    * The manager's own authenticated session identity (IStorageManager
    * contract): every provider session authenticates as `this.as` and mounts

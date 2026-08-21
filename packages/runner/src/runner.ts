@@ -7456,10 +7456,24 @@ export class Runner {
       // pattern artifacts from `resultCell.space` (the child's own space),
       // where neither the meta nor the compiled closure exist yet. Replicate
       // them there (fire-and-forget) so the child is independently loadable.
+      // On a SERVING runtime the replication's writebacks into the child's
+      // space are FOREIGN to the home wave, so they ride the instantiating
+      // run's §2b delegated carriage (OW31 seat S-A) — the served mirror of
+      // the client committing the program under the user's own session;
+      // without it the wave's accept gate refuses the crossing and the
+      // child space's program never materializes (the render-stall class).
+      const runContext = waveRunContextOf(tx);
       this.runtime.patternManager.replicatePatternToSpace(
         patternImpl,
         childResultCell.space,
         parentResultCell.space,
+        runContext?.acting !== undefined &&
+          runContext.capabilityRef !== undefined
+          ? {
+            acting: runContext.acting,
+            capabilityRef: runContext.capabilityRef,
+          }
+          : undefined,
       );
     }
     const childRun = this.runWithStartOwnership(

@@ -1388,13 +1388,33 @@ export class SpaceServer implements TransactionSealDestination {
    * only; a space node demanded by anyone carries none. HANDLER runs are
    * unchanged (the event's server-stamped `firedAt` is their explicit
    * actor — LD1; the in-process LT6 shape inherits the origin's pair).
-   * Never for `bookkeeping`: the loop's own writes are service-identity
-   * writes that carry addressing and NO acting principal (protocol.md
-   * §1's "The SpaceServer's own writes"). */
+   * Never DERIVED for `bookkeeping`: the loop's own writes are
+   * service-identity writes that carry addressing and NO acting
+   * principal (protocol.md §1's "The SpaceServer's own writes") — with
+   * ONE explicit exception: a bookkeeping run carrying `info.delegated`
+   * (OW31 seat S-A — the compile-cache / program materialization
+   * writeback into a piece's own space) is stamped with the TRIGGERING
+   * run's carriage verbatim, so the crossing rides §2b's delegated
+   * admission instead of being refused carriage-less. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     const principal = info.scopeKeyIdentity?.principal;
     const attributionFromScope = info.kind === "derivation" &&
       info.acting === undefined && principal !== undefined;
+    // The S-A carriage (OW31; protocol.md §2b): a bookkeeping run
+    // sanctioned to cross — the compile-cache / program materialization
+    // writeback into the piece's own space — carries the TRIGGERING
+    // run's delegated carriage verbatim. Everything below that reads
+    // `info.acting`/mints a capabilityRef is bypassed for it: the
+    // carriage is the trigger's, never derived here.
+    if (info.kind === "bookkeeping" && info.delegated !== undefined) {
+      stampWaveRunContext(tx, {
+        actionId: info.actionId,
+        kind: info.kind,
+        acting: info.delegated.acting,
+        capabilityRef: info.delegated.capabilityRef,
+      });
+      return;
+    }
     const acting = info.kind !== "bookkeeping" && !attributionFromScope &&
         principal !== undefined
       ? {

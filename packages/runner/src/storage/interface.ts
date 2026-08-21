@@ -193,6 +193,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ensureSpaceInitialized?(space: MemorySpace): Promise<void>;
 
   /**
+   * The serving manager's HOME space (a serving runtime's storage
+   * manager declares it; undefined on every client manager). Consumers
+   * use it to decide whether a write target is FOREIGN to the serving
+   * loop (OW31 seat S-A).
+   */
+  readonly servingHomeSpace?: MemorySpace | undefined;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;

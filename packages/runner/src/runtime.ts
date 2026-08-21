@@ -405,6 +405,23 @@ export type ServerRunInfo = {
    * other wave (events.md §4). Absent on the drain's
    * `streamEntry`-bearing copies and on every client-side event. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
+  /** An EXPLICIT §2b delegated carriage for a `bookkeeping`-kind
+   * internal write sanctioned to cross a space boundary (OW31 seat S-A;
+   * protocol.md §2b): the compile-cache / program-materialization
+   * writeback into a piece's OWN space, riding the carriage of the
+   * provisioning or demanding run that triggered it — the served mirror
+   * of the client committing the program under the user's own session.
+   * The wave's conflict machinery still treats the contribution as
+   * bookkeeping (rebase-or-drop; the writeback's own retry re-issues);
+   * only the accept gate and the foreign batch's delegated admission
+   * read this. Never set on a HOME-space writeback (those stay plain
+   * bookkeeping, protocol.md §1's "The SpaceServer's own writes") and
+   * never derived by the stamper — the caller attributes the trigger,
+   * or the foreign write stays refused (fail-closed). */
+  delegated?: {
+    acting: { user: string; session?: string };
+    capabilityRef: string;
+  };
 };
 
 /**
