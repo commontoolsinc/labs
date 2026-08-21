@@ -262,3 +262,189 @@ is exactly the "third source of run identity" S1 forbids, one plane up.
   seam this design names (stamper + a Runtime helper + prepare untouched).
   #6173 (open, docs) mints OW56 — register numbering in §10 Q7 accounts for
   it.
+
+## 2. Snapshot granularity — options
+
+The question: per-run trust (the acting user) on a runtime whose ambient
+identity is the service. Three shapes considered; the invariant cost of
+each is stated against §3's digest machinery and §5's OFF-invisibility.
+
+**Option A — stamper-attached per-run snapshot (RECOMMENDED).** The
+SpaceServer's `#stampRun` — the seam that already lands every other piece
+of per-run identity — additionally calls `tx.setCfcTrustSnapshot(...)` with
+a snapshot for the run's acting principal, resolved with the SAME
+precedence the stamper already encodes:
+
+  1. `info.delegated.acting.user` (the S-A bookkeeping carriage) —
+  2. else `info.acting.user` (a handler's server-stamped `firedAt` actor,
+     LT6-inherited pairs included) —
+  3. else, for a `derivation` carrying a demand-supplied
+     `scopeKeyIdentity`, its `principal` (see Q2 — severable) —
+  4. else (actor-less bookkeeping, unnarrowed/wave-fallback derivations):
+     leave the tx's ambient snapshot untouched (see Q3).
+
+  The Runtime exposes one helper, e.g.
+  `trustSnapshotForPrincipal(principal: string): TrustSnapshot`, returning
+  `{ id: "principal:<did>", actingPrincipal: <did>, revision: <the
+  runtime's trust revision> }`, and the constructor's default provider
+  refactors onto the same revision composition — so the config-digest
+  folding (`<id>/trust:<digest>`) lives in exactly one place and the
+  trust.ts determinism contract ("hosts must fold their trust versioning
+  into revision") holds for per-run snapshots by construction.
+
+  Invariant costs: none new. The stamper runs before the run's first read
+  (1d), so the mid-run `writeCfcGrant` read and the prepare-time mint see
+  one stable snapshot; the tx is unprepared at stamp, so the
+  `trust-snapshot-changed` invalidation never fires; retries re-stamp their
+  fresh tx (1d); OFF and client-ON paths never reach the stamper (§5).
+
+**Option B — per-principal snapshot provider (a provider-level cache
+keyed by "the current run's principal").** Rejected on mechanism: the
+provider is consulted at `edit()` (runtime.ts:1945), and at edit() time no
+run context exists — the scheduler stamps AFTER minting the tx (1d). A
+provider-based design would need ambient current-run state mutated around
+every dispatch, i.e. a hidden global where option A uses the explicit
+per-tx seam that already exists (`setCfcTrustSnapshot` is a supported,
+test-exercised per-tx surface — 1a). The legitimate kernel of B — not
+allocating a fresh 3-field object per run — is a memoization detail INSIDE
+option A's helper (a `Map<did, TrustSnapshot>` on the runtime, frozen
+values), worth doing only if profiling ever says so.
+
+**Option C — delegation-aware snapshot (service + represents-principal
+carried distinctly).** Extend `TrustSnapshot` with the delegating service
+identity, e.g. `{ actingPrincipal: <user>, delegatedBy: <service> }`, so
+label minting (or auditing) can distinguish "the service executed this as
+X" from "X wrote this directly". The snapshot extension itself is cheap
+(the digest binds the snapshot verbatim, so a new field flows into
+invalidation for free), but it only MEANS something if some consumer reads
+it — which is label-semantics option (b) in §4, with that option's costs.
+Not needed for the lift; kept as the natural extension point if the owner
+wants the served-provenance mark later (§4b, Q1). Note the memory plane
+already durably records the delegation (the commit's `acting_principal` +
+`capabilityRef` + the derived-class producer identity), so the audit trail
+option C would duplicate exists one plane down.
+
+## 3. Trust-revision keying + prepared-digest invalidation (load-bearing)
+
+What the current machinery actually assumes — verified by reading, not
+inherited from the report:
+
+- **The prepared digest is per-transaction and binds the snapshot
+  VERBATIM.** `buildPreparedDigestInput` copies
+  `this.#cfcState.trustSnapshot` into the input (ext-tx:1558);
+  `canonicalizePreparedDigestInput` passes it through untouched
+  (canonical.ts:437); `preparedDigestFor` hashes the whole
+  (canonical.ts:499-500). `id`, `actingPrincipal`, and `revision` are all
+  decision content. There is no digest cache outside the tx: prepare state
+  (`status`/`digest`/`input`) lives on the tx (ext-tx:1782-1795), digests
+  are never persisted, never compared across transactions, and never leave
+  the process. **"One snapshot per runtime" was never a digest-machinery
+  assumption — it is purely a property of the default provider closure.**
+  Per-tx variance is therefore supported BY CONSTRUCTION: two runs in one
+  wave with different acting users produce two independent digests, each
+  bound to its own snapshot; the wave is transport (serving-loop.md §3c),
+  and no wave-level label or digest union exists to contaminate.
+- **The invalidation triggers already exist.** `setCfcTrustSnapshot` on a
+  prepared tx invalidates with `trust-snapshot-changed` (ext-tx:1212-1217)
+  — under option A this trigger is provably dead (stamp precedes first
+  read, which precedes prepare), but it stays as the tripwire against a
+  future mis-ordered caller. The commit-time recheck (ext-tx:2354-2371)
+  rebuilds the input from CURRENT tx state; since nothing re-sets the
+  snapshot after the single stamp, prepare and recheck see the same value.
+  A NEW pin makes this contractual (§9 pin 2).
+- **`revision`'s one job is config identity.** `trustConfig` is
+  deliberately NOT a digest input; `TrustSnapshot.revision` covers it
+  (types.ts:726-731; trust.ts:24-31). So the design's single hard
+  requirement here: per-run snapshots MUST carry the same
+  `<runtime id>[/trust:<digest>]` revision composition as the default
+  provider, or a trust-config change would stop invalidating exactly the
+  served runs. Option A's shared helper makes divergence structurally
+  impossible (one composition site). Serving runtimes today configure no
+  trust config (1a), so revision = the runtime id — but the helper must
+  not bake that accident in.
+- **How each rejected shape would have handled this, for the record.**
+  Keying a digest CACHE by principal: nothing to key — no such cache
+  exists. Extending digest inputs: not needed — the snapshot (with the
+  acting principal inside) is already an input. Partitioning: the only
+  partitionable state adjacent to trust is the snapshot OBJECT itself,
+  which option A memoizes per principal at most.
+- **The one real keying rule this design adds** (stated as an invariant,
+  pinned in §9): a transaction's snapshot is set at most ONCE after
+  `edit()`, before the run's first read; every consumer within the tx —
+  the mid-run grant write, the gate, the mint, prepare, the recheck —
+  reads that one value. Mirrors `stampWaveRunContext`'s
+  set-exactly-once posture for the wave context (wave.ts:285-301). A
+  second stamp on one tx is a bug, not a hand-over.
+
+## 4. Label semantics — what a served row's labels SHOULD say
+
+The constraint set, from 1e: the verifier compares authored-by.subject
+(content) against represents-principal.subject (claimed author's profile),
+both durable. From 1b: literal-DID current-principal claims are rejected at
+authoring — the ONLY path to a subject is runtime resolution against the
+tx's acting principal. From protocol.md §2: the memory plane already
+carries the acting user on the same commit, under LT5's ruled trust
+footing (servers are trusted for carried actor claims, as if the principal
+had written directly).
+
+**(a) authored-by = the acting user, indistinguishable from a
+client-authored row (RECOMMENDED).** The served mint resolves
+`__ctCurrentPrincipal` to the run's carried acting principal, producing
+byte-identical labels to what the same handler run mints on the user's own
+client under OFF.
+
+  - Soundness: this does not manufacture authority. The label plane's
+    forge-resistance is unchanged — a client still cannot self-attach a
+    literal DID (prepare.ts:2433), and the serving runtime resolving the
+    placeholder to the CARRIED actor asserts exactly what the memory plane
+    already asserts one row down (`firedAt.user`, `acting_principal`) on
+    the SAME durable commit, under the SAME LT5 ruling. A malicious
+    co-hosted server needs no label tricks — it holds the ambient write
+    path; this design narrows what an HONEST server writes.
+  - Verification: authored-by(user) vs represents-principal(user) —
+    the check regains its meaning: rows verify iff the profile's
+    represented principal actually fired the send. The demo's negative
+    arm (imported claims) is untouched: those rows carry no authored-by
+    at all (no `AuthoredByCurrentUser` wrapper), so they stay
+    unverified regardless of who acted.
+  - Client/durable agreement: the acting user's own speculative copy
+    (minted client-side with the user snapshot) and the durable served
+    copy now carry the SAME subjects, retiring the local-pass/CI-fail
+    flap of rootcause §2a (the speculative Alice-labeled copy vs the
+    durable service-labeled truth).
+
+**(b) = (a) plus a distinct served-provenance mark** (a runtime-minted
+atom on served rows, e.g. `{type: ServedExecution, service: <did>}`, fed
+by option C's snapshot). Auditable "the service executed this as X" at the
+value plane. Costs, why it is NOT recommended for this lift: a new atom
+family means registering it in `RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`
+(prepare.ts:4082+), atom-classes, field classification, and every label
+diffing surface; it re-introduces a PERMANENT client-speculative vs
+durable label divergence (the client echo cannot honestly carry the mark),
+which is the §2a flap in new clothes and would keep authorship state
+churning across arrival; and the audit fact it records is already durable
+on the memory plane per-commit (acting_principal + capabilityRef +
+derived-class producer). If a product surface later needs value-plane
+audit of served execution, mint it THEN with its own spec sentence — the
+option-C snapshot field is the prepared extension point.
+
+**(c) authored-by = service + represents-principal = user (closest to
+today's accident).** Rejected on the verification contract: the check
+compares the two subjects for EQUALITY (1e), so (c) is permanently
+"unverified" — it is the CI red, restated as a design. It also corrupts
+the vocabulary: represents-principal on a PROFILE means "this profile
+represents that user" (the claim-side anchor); making content rows carry a
+user they were not authored by while authored-by names an executor is a
+semantic the verifier, the demo, and the spec's current-principal family
+were never designed for. Teaching the verifier to accept
+service-authored-by (a service allowlist in the UI component) would make
+every service-executed row verify as ANY user — the collapsed security
+property of §Why, institutionalized.
+
+Recommendation: **(a)**, stated as the OFF-equivalence invariant (§8
+INV-A). The register's own OW34-family precedent supports the shape: the
+renderer-trust carriage (the closed OW34 row) already re-mints a
+client-process-local trust attestation server-side at the
+injected-keys trust level; resolving the current-principal placeholder
+against the carried actor is the same move on the label plane, with the
+same explicitly-ruled footing to cite (LT5, owner 2026-08-03).
