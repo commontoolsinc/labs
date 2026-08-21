@@ -18,6 +18,12 @@ returning to a different recorded source; repair does not go through the
 source path at all. A design that starts from "apply one source to a list of
 pieces" has already excluded two thirds of the subject.
 
+What the caller supplies differs by operation, and that is the whole of the
+difference: a source package for a retarget, a **fixer** for a repair, and
+nothing at all for a rollback, which reads what the plan already recorded.
+Everything else — selection, ordering, the pre-state record, the serial
+apply, the stop, resume, and verification — is the same machinery.
+
 ## The consumer
 
 The Topics board is upgraded on a recurring basis, and every upgrade is a
@@ -62,7 +68,7 @@ what changes is the deployment they name.
 | | selects | applies | reverses with |
 | --- | --- | --- | --- |
 | **Retarget** | pieces on a given pattern, or an explicit list | one source package to every selected piece | rollback |
-| **Repair** | pieces whose stored data matches a predicate | a change to each piece's own stored data | a second repair, or restore from an export |
+| **Repair** | pieces a supplied fixer would change | that fixer's output, as each piece's whole document | a second fixer, or restore from a content export |
 | **Rollback** | pieces a plan previously moved | each piece's own recorded prior source | a second retarget |
 
 They are one subject because the risky parts are identical: deciding what is
@@ -79,10 +85,11 @@ select → plan → check preconditions → apply serially → verify → resume
 ```
 
 **Select** names the set. The selector is not assumed to be pattern identity:
-it may be a pattern, a parent's membership array, a stored-data predicate, or
-an explicit list. Identity is one selector among several, and treating it as
-the axis is what makes a tool topic-shaped or migration-shaped instead of
-general.
+it may be a pattern, a parent's membership array, an explicit list, or — for
+a repair — the supplied fixer itself, since the pieces it would change are
+exactly the pieces that need it. Identity is one selector among several, and
+treating it as the axis is what makes a tool board-shaped or upgrade-shaped
+instead of general.
 
 **Plan** freezes the selection into an artifact. See below.
 
@@ -107,10 +114,10 @@ A plan is a list of rows, each naming a piece, the state it must be in, and
 what to do to it:
 
 ```text
-piece                          precondition                     operation
+piece         precondition               operation
 of:fid1:aaa…  pattern-identity=PB0Gum…   retarget=topic.tsx@<rev>
 of:fid1:bbb…  pattern-identity=PB0Gum…   retarget=topic.tsx@<rev>
-of:fid1:ccc…  stored.schema=true         repair=drop-property:schema
+of:fid1:ccc…  document-hash=9f2c…        repair=<fixer>
 ```
 
 Four properties follow from making this a file rather than a command line:
@@ -194,19 +201,26 @@ the execution strategy does.
 
 ## Building it
 
-Five stages. Each one leaves something usable on its own, and the order is
-chosen around what each kind of run needs:
+Stage 1 is the spine, and everything else is a track over it. The two tracks
+are independent after that, because they have different reversals and so
+different floors:
 
-- **Stages 1–2 are enough to rehearse.** A run against a resettable copy
-  needs a plan, preconditions, a resumable apply, and a way to judge the
-  result. If it goes wrong, the copy is reset and the pass is repeated.
-- **Stages 1–3 are the floor for a live run.** Rollback is not an
-  improvement on the live path, it is the only reversal available there, and
-  it has to be exercised on the copy before it is relied on against the real
-  board.
-- **Stages 4–5 are independent of both.** Repair answers a different need
-  than an upgrade, and session reuse only makes an existing operation
+- **Stage 1 is shared and comes first.** A plan, preconditions, a serial
+  apply, and resume. Nothing else is buildable without it and both tracks
+  need all of it.
+- **The repair track is stage 2**, and its floor is stage 1 alone. A repair's
+  reversal is a restore from a content export, which already exists and is
+  already drilled, so repair does not wait on rollback the way retarget does.
+- **The retarget track is stages 3 and 4.** Verification is enough to
+  rehearse against a resettable copy; a live run also needs rollback, which
+  is not an improvement on that path but the only reversal available there,
+  and which has to be exercised on a copy before it is relied on.
+- **Stage 5 is under both.** Session reuse only makes an existing operation
   faster.
+
+Repair is ordered ahead of the retarget track because a supplied fixer is
+useful the moment the spine exists, and because the defect it answers is
+usually found — as this one was — while doing something else.
 
 ### 1. The plan, and retarget
 
@@ -242,7 +256,60 @@ check must not have.
       test proves it: a read taken after a change reflects the change. A
       cached answer here would make resume confidently wrong.
 
-### 2. Verification as its own pass
+### 2. Repair, by a supplied fixer
+
+The caller supplies a **fixer** — a pure transform from a piece's stored
+document to the document it should hold — and the spine iterates it over the
+selected pieces. The tooling owns selection, ordering, the write, the stop,
+and resume; the fixer owns only what the change is.
+
+A vocabulary of built-in repairs is the wrong shape here. Every defect worth
+a bulk repair is particular, so a fixed vocabulary is permanently one defect
+behind, and each new one becomes a change to the tool rather than an input to
+it.
+
+**The fixer is its own predicate.** A fixer that returns a document unchanged
+means that piece needs nothing, which collapses selection, resumption, and
+verification into one mechanism:
+
+- Selection is "run the fixer, keep the pieces it would change".
+- Resume is the same question asked again — a piece already repaired is one
+  the fixer no longer changes.
+- Verification is the same question asked afterwards — a repair succeeded
+  when re-running the fixer over the stored result is a no-op.
+
+None of those needs a separate predicate language, and none of them can drift
+from what the fixer actually does, because they *are* what the fixer does.
+This is why a fixer must be a pure function of the document: a fixer that
+reads a clock or a random source makes all three questions unanswerable.
+
+**A fixer returns the whole document.** The write available for stored data
+replaces a piece's input document entirely, so a fixer that returns a
+fragment silently zeroes every field it omitted. The tooling has to hold that
+line rather than trusting it — a document that lost fields the fixer never
+mentioned is a defect, not an intent, and the run should refuse it.
+
+**A fixer must not treat a link as data.** A stored document contains
+references as well as values. Rewriting a reference as a plain value corrupts
+it and dropping one destroys it, and neither is visible in the result until
+much later. A fixer either round-trips them untouched or the run refuses the
+document, and this is the constraint most likely to be discovered the
+expensive way.
+
+- [ ] A fixer is supplied by the caller, and adding a new kind of repair
+      requires no change to the tooling.
+- [ ] Selection, resume, and verification all derive from the fixer being a
+      no-op, with no separately maintained predicate.
+- [ ] A dry run reports the exact per-piece document diff, and writes
+      nothing. For a whole-document write this is a requirement, not a
+      convenience.
+- [ ] A fixer that returns an incomplete document is refused rather than
+      applied, and a test proves the refusal.
+- [ ] References survive a repair that does not mention them, and a fixer
+      that would rewrite one as a value is refused.
+- [ ] Re-running a completed repair writes nothing.
+
+### 3. Verification as its own pass
 
 A pass that reads every row's current state and reports it against what the
 plan expected, exiting nonzero while anything is outstanding. It reports; it
@@ -255,7 +322,7 @@ does not repair.
 - [ ] It composes with the existing space-level checks rather than replacing
       them; those remain the acceptance gate.
 
-### 3. Rollback
+### 4. Rollback
 
 The same plan read in the other direction — each row returning its piece to
 the source the plan recorded for it.
@@ -269,18 +336,6 @@ the source the plan recorded for it.
 - [ ] The reversal is exercised against a copy, in the drill, before any live
       run is allowed to depend on it. A rollback path first attempted during
       the incident it exists for is not a rollback path.
-
-### 4. Repair
-
-A predicate selector and an in-place data operation, which forces the
-narrow-write decision below. The first case is data that no current write
-path would produce, found on the oldest pieces of a board.
-
-- [ ] A predicate selects pieces by stored data, not only by pattern.
-- [ ] A repair changes what it names and demonstrably leaves the rest of each
-      piece's stored document unchanged.
-- [ ] Re-running a completed repair is a no-op, decided by the same
-      precondition check.
 
 ### 5. Session reuse
 
@@ -338,13 +393,20 @@ settled before work starts.
    plan, one flag covering every row turns many decisions into one, which is
    a different risk from the same flag used many times. Per-row or per-run is
    a real choice, not a detail.
-4. **Whether repair gets a narrow write** — *stage 4*. Today the only write
+4. **Whether repair gets a narrow write** — *stage 2*. Today the only write
    for stored data replaces a piece's whole input document, so "change one
    property" is a whole-document read-modify-write per piece. That is a large
    blast radius for a small change, and it is the same path that has been
    observed freezing a stale schema into a live board. Either repair gets a
    narrower primitive, or the design accepts the wide one and says why.
-5. **Whether one session is viable at the sizes that motivate it** —
+5. **How a fixer is supplied** — *stage 2*. A module the run imports and
+   calls can be type-checked against the document shape and can be tested
+   without a space; a program the run pipes a document through is
+   language-agnostic and matches how the surrounding operational scripts
+   already work. The choice decides whether writing a fixer is a
+   repository-local task or something an operator can do from anywhere, and
+   whether the purity a fixer has to have is enforced or merely asked for.
+6. **Whether one session is viable at the sizes that motivate it** —
    *stage 5*, and open until measured.
 
 ## Out of scope, and where it goes
