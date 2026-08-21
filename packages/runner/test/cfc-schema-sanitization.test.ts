@@ -462,7 +462,7 @@ describe("cfc schema sanitization", () => {
       .toBeUndefined();
   });
 
-  it("strictly validates Common Fabric values for schema migrations", () => {
+  it("strictly validates `FabricValue`s for schema migrations", () => {
     expect(validateSchemaValue({ type: "undefined" }, undefined))
       .toBeUndefined();
     expect(validateSchemaValue({ type: "undefined" }, "not undefined"))
@@ -621,16 +621,16 @@ describe("cfc schema sanitization", () => {
     expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
   });
 
-  it("validates fabric-primitive schema types by prototype", () => {
+  it("validates `FabricPrimitive` schema types by prototype", () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2]));
 
-    // The fabric-primitive names are legal schema definitions.
+    // The `FabricPrimitive` names are legal schema definitions.
     expect(validateSchemaDefinition({ type: "FabricBytes" })).toBeUndefined();
     expect(validateSchemaDefinition({ type: ["FabricHash", "null"] }))
       .toBeUndefined();
 
     // A FabricBytes satisfies its own type, and "object" via the subtype
-    // rule (each fabric-primitive type is a subtype of "object").
+    // rule (each `FabricPrimitive` type is a subtype of "object").
     expect(validateSchemaValue({ type: "FabricBytes" }, bytes))
       .toBeUndefined();
     expect(validateSchemaValue({ type: "object" }, bytes)).toBeUndefined();
@@ -658,15 +658,16 @@ describe("cfc schema sanitization", () => {
     expect(validateSchemaValue({ type: "object", required: ["length"] }, bytes))
       .toBeUndefined();
     // The nominal brand key generated schemas require has no runtime
-    // existence; a fabric value satisfies it by construction. This is the
-    // shape the schema-generator emits for a FabricBytes-typed field today.
+    // existence; a `FabricSpecialObject` satisfies it by construction. This
+    // is the shape the schema-generator emits for a FabricBytes-typed field
+    // today.
     expect(validateSchemaValue({
       type: "object",
       required: ["length", "@commonfabric/FabricSpecialObject"],
     }, bytes)).toBeUndefined();
     expect(validateSchemaValue({ type: "object", required: [] }, bytes))
       .toBeUndefined();
-    // A fabric-primitive-typed schema is not gated by `required`.
+    // A `FabricPrimitive`-typed schema is not gated by `required`.
     expect(validateSchemaValue({ type: "FabricBytes", required: ["x"] }, bytes))
       .toBeUndefined();
   });
