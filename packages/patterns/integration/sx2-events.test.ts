@@ -252,14 +252,20 @@ describe("sx2 events (Phase 3 gates)", () => {
       statsAfter.events.processed - statsBefore.events.processed >= N,
       "all N events processed",
     );
-    // ≪N derived commits: the wave batches consequences (D-v2-2's
-    // commit-level batching). The bound is deliberately loose (waves
-    // are load-dependent); N distinct commits would be the v1 failure.
-    assert(
-      derivedDelta < N,
-      `rapid-fire coalescing: ${derivedDelta} derived commits for ${N} ` +
-        "events must stay well under N",
-    );
+    // The derived-commit RATIO is a LOAD OBSERVATION, not a gate
+    // (RULED 2026-08-21 — owner: "i like (3) as well", on the
+    // ow-sx2-coalescing-gate dispositions): this surface's append queue
+    // serializes one commit round trip per event, so how many appends a
+    // wave finds queued is round-trip time vs wave time — a fast idle
+    // server legitimately derives N commits for N events while
+    // coalescing nothing is wrong. The coalescing CONTRACT is pinned
+    // where its premise can be constructed instead:
+    // packages/runner/test/executor-events-down.test.ts's
+    // constructed-queue-depth step (K entries queued ahead of one drain
+    // → exactly one consequence-carrying derived commit). The ratio
+    // stays LOGGED here for the record; this surface's gates are the
+    // two deterministic asserts (processed ≥ N above; the final-only
+    // value at the waitForValue + assertEquals).
     console.log(
       `[sx2-events] rapid-fire: ${N} events -> ${derivedDelta} derived ` +
         `commit(s), processed +${
