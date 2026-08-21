@@ -9,7 +9,7 @@
  *
  * The remainder is what a path can mean against a structure that does not
  * already match it: whether a missing intermediate is created and in what
- * shape, where a fabric instance is allowed to sit, and which of those
+ * shape, where a `FabricInstance` is allowed to sit, and which of those
  * situations is an error carrying enough detail for a caller to act on.
  */
 

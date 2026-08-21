@@ -11,13 +11,21 @@
 
 name: Test Records Mint
 
+# The run name carries the recipient so that the requester's tool can
+# find the run minting for it, and follow that one run to its conclusion,
+# rather than inferring which of the workflow's runs is theirs. The
+# recipient is a public key, and is already visible as a dispatch input.
+run-name: >-
+  Mint reporting key for ${{ inputs.username || github.actor }}
+  (${{ inputs.recipient }})
+
 on:
   workflow_dispatch:
     inputs:
       recipient:
         description: >-
           Delivery recipient (cfr1...) printed by
-          `deno task test-records-key request`
+          `deno task test-records-key setup`
         required: true
       username:
         description: >-

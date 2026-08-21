@@ -56,7 +56,7 @@ describe("BaseCodecEngine", () => {
       const encoded = engine.encode(NONTERMINAL_HOST) as Tagged;
 
       expect(encoded.tag).toBe("N@1");
-      // The same state, expanded: `NESTED` is a fabric value, so the walk
+      // The same state, expanded: `NESTED` is a `FabricValue`, so the walk
       // went on and `XCodec` encoded it under its own tag.
       const inner = (encoded.state as { inner: ProbeValue }).inner as Tagged;
       expect(inner).toBeInstanceOf(Tagged);

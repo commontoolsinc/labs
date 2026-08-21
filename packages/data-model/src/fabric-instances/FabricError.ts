@@ -1,5 +1,5 @@
 /**
- * `Error` as a fabric value: the wrapper class, and the shape it is built
+ * `Error` as a `FabricValue`: the wrapper class, and the shape it is built
  * from.
  *
  * A native error is the wild west -- any property, any prototype -- while the

@@ -1063,8 +1063,8 @@ describe("piece schema compatibility", () => {
       .toThrow(/result\.doubled/);
   });
 
-  it("rejects removing existing argument or result fields", () => {
-    const missingArgument = pattern(
+  it("accepts dropping an argument field the pattern no longer reads", () => {
+    const droppedArgument = pattern(
       {
         type: "object",
         properties: { value: { type: "number" } },
@@ -1073,9 +1073,28 @@ describe("piece schema compatibility", () => {
       oldPattern.resultSchema,
     );
     expect(() =>
-      assertPatternSchemasBackwardCompatible(oldPattern, missingArgument)
-    ).toThrow(/argument\.format: existing argument field was removed/);
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).not.toThrow();
+  });
 
+  it("rejects dropping an argument field a closed candidate cannot hold", () => {
+    const droppedArgument = pattern(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).toThrow(
+      /argument\.format: source field is rejected by the target object/,
+    );
+  });
+
+  it("rejects removing an existing result field", () => {
     const missingResult = pattern(
       oldPattern.argumentSchema,
       {
@@ -2213,7 +2232,7 @@ describe("piece schema compatibility", () => {
   });
 
   describe("`FabricPrimitive` schema vocabulary transitions", () => {
-    // The schema generator used to describe a fabric special object
+    // The schema generator used to describe a `FabricSpecialObject`
     // structurally: an object schema whose `required` carries the
     // `FabricSpecialObject` nominal brand key. It now emits the
     // `FabricPrimitive` type name instead. That transition is refused, for

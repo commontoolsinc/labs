@@ -1,5 +1,5 @@
 /**
- * A day count as a fabric primitive: always frozen, wrapping a `bigint`, and
+ * A day count as a `FabricPrimitive`: always frozen, wrapping a `bigint`, and
  * encoded to a flat base64 string.
  *
  * Days before the epoch are the case worth keeping, a negative count being

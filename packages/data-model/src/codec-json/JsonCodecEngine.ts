@@ -124,7 +124,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * a format quietly becomes several that can drift apart.
    *
    * This is deliberately not useful outside a test. Its result is precisely a
-   * string that is _no longer_ an encoded fabric value: it has shed the very
+   * string that is _no longer_ an encoded `FabricValue`: it has shed the very
    * marker whose purpose is to say "this JSON came from here." Production code
    * that wants to recognize an encoded value should call `seemsLikeEncoded()`;
    * production code that wants the value itself should call `decode()`.

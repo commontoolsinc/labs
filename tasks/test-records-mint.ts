@@ -74,6 +74,19 @@ export function usernameOfDisplayName(displayName: string): string | undefined {
 export interface GcpClient {
   token: string;
   fetchImpl: typeof fetch;
+  /**
+   * Waits out the window in which a just-created service account is not
+   * yet visible to the other services that name it. Tests pass a no-op.
+   */
+  awaitVisibility?: () => Promise<void>;
+}
+
+/** How long a create is given to reach the services that consume it. */
+const VISIBILITY_INTERVAL_MS = 5_000;
+
+function awaitVisibility(client: GcpClient): Promise<void> {
+  if (client.awaitVisibility !== undefined) return client.awaitVisibility();
+  return new Promise((resolve) => setTimeout(resolve, VISIBILITY_INTERVAL_MS));
 }
 
 async function gcp(
@@ -200,17 +213,43 @@ export async function ensurePersonFolder(
   } else {
     bindings.push({ role, members: [member] });
   }
-  const updated = await gcp(client, "PUT", iamUrl, {
-    bindings,
-    etag: policy.etag,
-  });
-  if (updated.status !== 200) {
-    throw new Error(
-      `granting ${role} on ${folder} failed: HTTP ${updated.status} ${
-        JSON.stringify(updated.json).slice(0, 200)
-      }`,
-    );
+  // An account exists in IAM the moment its create returns, and reaches
+  // the services that consume it some time after that: Cloud Storage
+  // rejects a binding naming an account it has not seen yet, saying the
+  // account does not exist. That answer is the signal to wait, and it is
+  // the only one this loop accepts — every other status fails the mint.
+  // The wait has no bound, because the account does exist and the grant
+  // is going to work; only the moment is out of the caller's hands.
+  for (;;) {
+    const updated = await gcp(client, "PUT", iamUrl, {
+      bindings,
+      etag: policy.etag,
+    });
+    if (updated.status === 200) return;
+    if (!isAccountNotVisible(updated.status, updated.json, email)) {
+      throw new Error(
+        `granting ${role} on ${folder} failed: HTTP ${updated.status} ${
+          JSON.stringify(updated.json).slice(0, 200)
+        }`,
+      );
+    }
+    console.log(`${email} has not reached Cloud Storage yet; waiting`);
+    await awaitVisibility(client);
   }
+}
+
+/**
+ * Whether a response is a service the account has not propagated to yet,
+ * which answers a binding that names it as though it did not exist.
+ */
+export function isAccountNotVisible(
+  status: number,
+  json: unknown,
+  email: string,
+): boolean {
+  if (status !== 400 && status !== 404) return false;
+  const text = typeof json === "string" ? json : JSON.stringify(json ?? "");
+  return text.includes(email) && text.includes("does not exist");
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * The content hash of a fabric value: the same value hashing the same way
+ * The content hash of a `FabricValue`: the same value hashing the same way
  * every time, and different values hashing differently.
  *
  * Distinctness is the harder half, and is why each type contributes its own

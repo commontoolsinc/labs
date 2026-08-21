@@ -13,12 +13,84 @@ const TEST_PATTERN_REF = {
   },
 } as never;
 
+/**
+ * `asSchema()` as the lister uses it: one handle per stored name, which is
+ * what a root read through `additionalProperties: {asCell: ["cell"]}` answers.
+ * Doubling it rather than `get()` is the point — a real cell mints those
+ * handles without materializing anything under them, and the lister must not
+ * need more than that to enumerate.
+ */
+function namedHandles(
+  value: unknown,
+  child: (name: string) => unknown,
+): { get: () => unknown } {
+  const named = typeof value === "object" && value !== null &&
+      !Array.isArray(value)
+    ? Object.fromEntries(
+      Object.keys(value as Record<string, unknown>).map((
+        name,
+      ) => [name, child(name)]),
+    )
+    : undefined;
+  return { get: () => named };
+}
+
+/**
+ * A piece-root cell double, with two traps in it.
+ *
+ * `get()` throws: the lister enumerates this root through the shallow read and
+ * classifies each name off its own cell, so projecting the whole root is a
+ * defect however cheap this double makes it look.
+ *
+ * The handles the shallow read hands back answer `isStream()` TRUE for every
+ * name — the forced-cast behavior a real cell shows once a caller asserts a
+ * stream schema on it. Enumeration is all they are for. A listing that
+ * classifies from them instead of from each name's own `asSchemaFromLinks()`
+ * cell offers every stored name as a verb, which the assertions on
+ * `hiddenPing` catch.
+ */
+function pieceRootCell(value: Record<string, unknown>): {
+  get: () => unknown;
+  getRaw: () => unknown;
+  asSchema: (schema: unknown) => { get: () => unknown };
+  key: (name: string) => unknown;
+} {
+  const honestChild = (name: string) => {
+    const self = {
+      get: () => value[name],
+      getRaw: () => value[name],
+      // Nothing here is link-derived, so only a stored sentinel classifies.
+      isStream: () => false,
+      asSchemaFromLinks: () => self,
+    };
+    return self;
+  };
+  const castChild = (name: string) => {
+    const self = {
+      get: () => value[name],
+      getRaw: () => value[name],
+      isStream: () => true,
+      asSchemaFromLinks: () => self,
+    };
+    return self;
+  };
+  return {
+    get: () => {
+      throw new Error("projected the whole piece root");
+    },
+    getRaw: () => value,
+    asSchema: (_schema: unknown) => namedHandles(value, castChild),
+    key: honestChild,
+  };
+}
+
 /** Minimal schema-aware cell double: enough surface for the lister's walk —
  * value/schema access, key() descent, and asSchemaFromLinks identity. */
 function cell(value: unknown, schema?: JSONSchema): {
   schema?: JSONSchema;
   get: () => unknown;
   getRaw: () => unknown;
+  asSchema: (schema: unknown) => { get: () => unknown };
   asSchemaFromLinks: () => unknown;
   key: (name: string) => unknown;
 } {
@@ -26,6 +98,7 @@ function cell(value: unknown, schema?: JSONSchema): {
     schema,
     get: () => value,
     getRaw: () => value,
+    asSchema: (_schema: unknown) => namedHandles(value, self.key),
     asSchemaFromLinks: () => self,
     key: (name: string) => {
       const childValue =
@@ -56,6 +129,7 @@ function schemaFilteredCell(
   schema: JSONSchema;
   get: () => unknown;
   getRaw: () => unknown;
+  asSchema: (schema: unknown) => { get: () => unknown };
   asSchemaFromLinks: () => unknown;
   key: (name: string) => unknown;
 } {
@@ -74,6 +148,7 @@ function schemaFilteredCell(
     schema,
     get: () => value,
     getRaw: () => value,
+    asSchema: (_schema: unknown) => namedHandles(value, child),
     asSchemaFromLinks: function () {
       return this;
     },
@@ -91,6 +166,7 @@ function resultCellWithHiddenStreams(hidden: Record<string, JSONSchema>): {
   schema: JSONSchema;
   get: () => unknown;
   getRaw: () => unknown;
+  asSchema: (schema: unknown) => { get: () => unknown };
   asSchemaFromLinks: () => unknown;
   key: (name: string) => unknown;
 } {
@@ -113,6 +189,7 @@ function resultCellWithHiddenStreams(hidden: Record<string, JSONSchema>): {
     },
     get: () => value,
     getRaw: () => value,
+    asSchema: (_schema: unknown) => namedHandles(value, child),
     asSchemaFromLinks: function () {
       return this;
     },
@@ -230,11 +307,12 @@ describe("listPieceCallables", () => {
 
     // "hiddenPing" carries no stream signal at all — a plain object value and
     // a plain object schema — so it is data as far as anything stored can tell,
-    // and the listing must NOT include it. The forced-stream cast used to find
-    // it, by asserting a stream schema and then asking whether the schema said
-    // stream. `asSchema` below is kept for exactly that reason: the double
-    // still answers "stream" to any cast, so its presence proves the listing no
-    // longer asks. "\u00e9dit" does carry the `{$stream: true}` sentinel, which
+    // and the listing must NOT include it. A forced-stream cast finds it, by
+    // asserting a stream schema and then asking whether the schema says
+    // stream; the piece-root double answers "stream" to any cast — see
+    // `pieceRootCell` — so a listing that classifies from the handles it
+    // enumerates rather than from each name's own cell offers this row.
+    // "\u00e9dit" does carry the `{$stream: true}` sentinel, which
     // is a definite stored signal, so it stays listed — and it pins byte
     // ordering: utf8Compare puts it AFTER "setup"/"search" (0xC3 > s), where
     // locale collation would interleave it linguistically.
@@ -243,14 +321,7 @@ describe("listPieceCallables", () => {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(inputRoot) },
       getPatternRef: () => Promise.resolve(TEST_PATTERN_REF),
-      getCell: () => ({
-        get: () => pieceRootValue,
-        asSchema: (_s: unknown) => ({
-          key: (name: string) => ({
-            isStream: () => name === "hiddenPing" || name === "\u00e9dit",
-          }),
-        }),
-      }),
+      getCell: () => pieceRootCell(pieceRootValue),
     };
     const manager = { getSpace: () => "home" };
 
@@ -635,7 +706,7 @@ describe("listPieceCallables", () => {
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(inputRoot) },
-      getCell: () => ({ get: () => ({ rootOnly: { $stream: true } }) }),
+      getCell: () => pieceRootCell({ rootOnly: { $stream: true } }),
       getPattern: () => Promise.resolve(pattern),
     };
     const listing = await listPieceCallables(
@@ -666,6 +737,89 @@ describe("listPieceCallables", () => {
     expect(byName.get("rootOnly")?.inputSchema).toEqual(INPUT_SIDE_EVENT);
   });
 
+  it("lists without ever projecting a whole root", async () => {
+    // Cost, pinned as behavior: listing cost is independent of what the piece
+    // holds, so the walk must not call `get()` on a root. A projected root
+    // read walks every document the result type reaches, which would make
+    // listing a board's verbs scale with the number of rows on it — for an
+    // answer that is a handful of top-level names. Every root here refuses
+    // `get()` outright, so the walk completes only off the shallow name read
+    // and each name's own cell.
+    const trap = (name: string) => () => {
+      throw new Error(`projected the whole ${name} root`);
+    };
+    // `undeclared` is stored and absent from the schema, so it reaches the
+    // listing only through the shallow name read — which is what keeps this
+    // test honest about enumeration rather than passing on schema keys alone.
+    const storedResult: Record<string, unknown> = {
+      addTopic: { $stream: true },
+      undeclared: { $stream: true },
+      topicCount: 3,
+    };
+    const resultChild = (name: string) => {
+      const self = {
+        schema: undefined,
+        get: trap(`result/${name}`),
+        getRaw: () => storedResult[name],
+        asSchemaFromLinks: () => self,
+        key: () => self,
+      };
+      return self;
+    };
+    const resultRoot = {
+      schema: {
+        type: "object",
+        properties: {
+          addTopic: ADD_TOPIC_EVENT,
+          topicCount: { type: "number" },
+        },
+      } as JSONSchema,
+      get: trap("result"),
+      asSchema: (_s: unknown) => namedHandles(storedResult, resultChild),
+      asSchemaFromLinks: function () {
+        return this;
+      },
+      key: resultChild,
+    };
+    const emptyRoot = (label: string) => ({
+      schema: undefined,
+      get: trap(label),
+      asSchema: (_s: unknown) => namedHandles(undefined, () => undefined),
+      asSchemaFromLinks: function () {
+        return this;
+      },
+      key: () => ({
+        get: trap(`${label} child`),
+        getRaw: () => undefined,
+        asSchemaFromLinks: () => undefined,
+      }),
+    });
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(emptyRoot("input")) },
+      getCell: () => emptyRoot("piece"),
+    };
+
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-cost",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    expect(listing.verbs.map((verb) => verb.name).sort()).toEqual([
+      "addTopic",
+      "undeclared",
+    ]);
+    expect(listing.verbs.every((verb) => verb.kind === "handler")).toBe(true);
+  });
+
   it("checks the result view and the piece root for a stored signal independently", async () => {
     // Two sources of stored evidence, and neither is allowed to mask the
     // other. `notify` reads as an ordinary number through the declared result
@@ -679,7 +833,7 @@ describe("listPieceCallables", () => {
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
-      getCell: () => ({ get: () => ({ notify: { $stream: true } }) }),
+      getCell: () => pieceRootCell({ notify: { $stream: true } }),
     };
     const listing = await listPieceCallables(
       {

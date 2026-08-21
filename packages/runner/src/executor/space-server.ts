@@ -103,7 +103,7 @@ import {
 } from "./wave.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
 import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
-import type { ServingLoopStats } from "./stats.ts";
+import { bumpDerivedCommits, type ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
@@ -1782,7 +1782,7 @@ export class SpaceServer implements TransactionSealDestination {
           .then(() => replica.whenApplied!(localSeq)),
       );
     }
-    this.#options.stats.derivedCommits += 1;
+    bumpDerivedCommits(this.#options.stats, String(this.#options.space));
     // In-process dirtiness + push (the §4 injection): report like a
     // wave commit — subscribers get the derived rows, the feed carries
     // the record, and the loop skips its own echo by class + holder.
@@ -3518,7 +3518,7 @@ export class SpaceServer implements TransactionSealDestination {
       return;
     }
     if (outcome.seq !== undefined) {
-      stats.derivedCommits += 1;
+      bumpDerivedCommits(stats, String(this.#options.space));
       this.#wavesCommitted += 1;
       this.#options.onWaveCommitted?.();
       // (d′): a derived commit after a growth wake is the

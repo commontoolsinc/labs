@@ -1,22 +1,24 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-net --allow-run=gh
 /**
- * The two-invocation personal key tool, with no waiting built in.
+ * The personal key tool, in one command that finishes the job and two that
+ * split it.
+ *
+ *   deno task test-records-key setup
+ *     Generates a delivery identity, dispatches the minting workflow —
+ *     or prints the page to run it in a browser, which is the supported
+ *     minimum of a read-only token — then watches until the run delivers,
+ *     installs the key, and exports it from the login shell's profiles.
+ *     It waits as long as the run takes and stops on Ctrl-C; running it
+ *     again resumes from wherever it got to. Pass --rotate to mint a
+ *     replacement for a key that is already installed.
  *
  *   deno task test-records-key request
- *     Generates and stores a fresh delivery identity, then dispatches the
- *     minting workflow when the token allows it — and prints the exact
- *     page to open and the recipient string to paste when it does not,
- *     which is the supported minimum of a read-only token plus a web
- *     browser.
+ *     The first half alone: store the identity and dispatch the workflow.
  *
  *   deno task test-records-key collect
- *     Finds the completed minting run's delivery by the recipient's
- *     fingerprint, downloads and opens it, installs the key file with
- *     owner-only permissions, and prints the line to add to the shell.
- *     If the run has not finished, it says so and exits; running it again
- *     is the retry.
+ *     The second half alone: install the delivery of a finished run.
  *
- * Keys are a team-member workflow, and both halves are self-service. A
+ * Keys are a team-member workflow, and every part is self-service. A
  * person contributing without commit access needs no key: local tests run
  * identically without one, and CI records their pull requests' runs on
  * its own.
@@ -41,29 +43,83 @@ import {
   REPO,
 } from "./test-records-config.ts";
 import { readZip } from "./test-records-zip.ts";
+import {
+  exportFromProfiles,
+  exportLine,
+  type ProfileUpdate,
+  reloadHint,
+  shellKind,
+} from "./test-records-shell-config.ts";
 
 const API = "https://api.github.com";
 
+/** How often the watch asks GitHub what the minting run is doing. */
+const POLL_INTERVAL_MS = 5_000;
+
+/** Runs per listing page; a hundred is what the API will serve. */
+const RUNS_PER_PAGE = 100;
+
 /**
- * What the two commands reach outside the process through, injectable so
- * tests run them against stubs.
+ * How far back a search looks when nothing narrower bounds it. A
+ * delivery artifact is kept for seven days, and the extra day covers the
+ * two clocks disagreeing.
  */
+const DELIVERY_WINDOW_MS = 8 * 24 * 60 * 60 * 1_000;
+
+/**
+ * A failure whose message is the whole report. Everything a person can
+ * hit — no token, a refused dispatch, a run that failed, a delivery that
+ * expired — is raised as one of these and printed as a message; anything
+ * else keeps its stack, because a stack is the report for a bug in this
+ * tool.
+ */
+export class KeyToolError extends Error {
+  override name = "KeyToolError";
+}
+
+/** What the two commands reach outside the process through, injectable so
+ * tests run them against stubs. */
 export interface KeyToolDeps {
   env: Environment;
   fetchImpl: typeof fetch;
   githubToken: () => Promise<string | undefined>;
+  /** Waits out one polling interval. */
+  pause: () => Promise<void>;
 }
 
-function defaultGithubToken(): Promise<string | undefined> {
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Runs a command for its output; injectable so tests run no commands. */
+export type CommandRunner = (
+  command: string,
+  args: string[],
+) => Promise<{ code: number; stdout: Uint8Array }>;
+
+const runCommand: CommandRunner = async (command, args) => {
+  const { code, stdout } = await new Deno.Command(command, {
+    args,
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  return { code, stdout };
+};
+
+/**
+ * The GitHub token to work with: the environment's, and otherwise
+ * whatever the `gh` command line is signed in as. A machine with
+ * neither has no token, which each command reports in its own terms.
+ */
+export function defaultGithubToken(
+  env: Environment = Deno.env.get,
+  run: CommandRunner = runCommand,
+): Promise<string | undefined> {
   return (async () => {
-    const fromEnv = readEnv("GH_TOKEN") ?? readEnv("GITHUB_TOKEN");
+    const fromEnv = readEnv("GH_TOKEN", env) ?? readEnv("GITHUB_TOKEN", env);
     if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
     try {
-      const { code, stdout } = await new Deno.Command("gh", {
-        args: ["auth", "token"],
-        stdout: "piped",
-        stderr: "null",
-      }).output();
+      const { code, stdout } = await run("gh", ["auth", "token"]);
       if (code !== 0) return undefined;
       const token = new TextDecoder().decode(stdout).trim();
       return token.length > 0 ? token : undefined;
@@ -73,11 +129,14 @@ function defaultGithubToken(): Promise<string | undefined> {
   })();
 }
 
-function defaultDeps(): KeyToolDeps {
+/** The wiring the command line runs against. */
+export function defaultDeps(): KeyToolDeps {
   return {
     env: Deno.env.get,
     fetchImpl: fetch,
-    githubToken: defaultGithubToken,
+    githubToken: () => defaultGithubToken(),
+    pause: () =>
+      new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)),
   };
 }
 
@@ -88,9 +147,13 @@ function configDir(env: Environment): string {
   }
   const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
   if (home === undefined || home.length === 0) {
-    throw new Error("neither XDG_CONFIG_HOME nor HOME is set");
+    throw new KeyToolError("Neither XDG_CONFIG_HOME nor HOME is set.");
   }
   return join(home, ".config", "common-fabric");
+}
+
+function home(env: Environment): string | undefined {
+  return readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
 }
 
 function identityPath(env: Environment): string {
@@ -108,15 +171,21 @@ async function github(
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  return await deps.fetchImpl(`${API}${path}`, {
-    method,
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  try {
+    return await deps.fetchImpl(`${API}${path}`, {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (error) {
+    throw new KeyToolError(
+      `Cannot reach ${API}: ${reason(error)}`,
+    );
+  }
 }
 
 async function loadIdentity(
@@ -131,72 +200,626 @@ async function loadIdentity(
   }
 }
 
-export async function requestCommand(
-  deps: KeyToolDeps = defaultDeps(),
-): Promise<void> {
-  let identity = await loadIdentity(deps.env);
-  if (identity === undefined) {
-    identity = await generateIdentity();
-    await Deno.mkdir(configDir(deps.env), { recursive: true });
-    await Deno.writeTextFile(
-      identityPath(deps.env),
-      JSON.stringify(identity, null, 2) + "\n",
-      { mode: 0o600 },
-    );
-    console.log(`delivery identity stored: ${identityPath(deps.env)}`);
-  } else {
-    console.log(`delivery identity already stored: ${identityPath(deps.env)}`);
+/** Loads the stored delivery identity, generating one the first time. */
+async function ensureIdentity(
+  deps: KeyToolDeps,
+): Promise<KeyDeliveryIdentity> {
+  const stored = await loadIdentity(deps.env);
+  if (stored !== undefined) {
+    console.log(`Delivery identity: ${identityPath(deps.env)}`);
+    return stored;
   }
-  const recipient = identity.recipient;
-  console.log(`recipient: ${recipient}`);
+  const identity = await generateIdentity();
+  await Deno.mkdir(configDir(deps.env), { recursive: true });
+  await Deno.writeTextFile(
+    identityPath(deps.env),
+    JSON.stringify(identity, null, 2) + "\n",
+    { mode: 0o600 },
+  );
+  console.log(`Delivery identity stored: ${identityPath(deps.env)}`);
+  return identity;
+}
 
-  const token = await deps.githubToken();
-  let username: string | undefined;
-  if (token !== undefined) {
-    const who = await github(deps, token, "GET", "/user");
-    if (who.ok) {
-      username = (await who.json() as { login?: string }).login;
-    } else {
-      await who.text();
-    }
+/** The GitHub login a token belongs to. */
+async function githubLogin(
+  deps: KeyToolDeps,
+  token: string,
+): Promise<string | undefined> {
+  const who = await github(deps, token, "GET", "/user");
+  if (!who.ok) {
+    await who.text();
+    return undefined;
   }
-  if (token !== undefined && username !== undefined) {
-    const dispatched = await github(
-      deps,
-      token,
-      "POST",
-      `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/dispatches`,
-      { ref: "main", inputs: { recipient, username } },
+  return (await who.json() as { login?: string }).login;
+}
+
+/** The name the workflow gives this recipient's sealed delivery. */
+async function deliveryName(recipient: string): Promise<string> {
+  return `test-records-key-${await recipientFingerprint(recipient)}`;
+}
+
+/** Where a browser runs the minting workflow by hand. */
+function mintWorkflowUrl(): string {
+  return `https://github.com/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}`;
+}
+
+interface DispatchResult {
+  dispatched: boolean;
+  username?: string;
+  /** GitHub's clock at the dispatch, which bounds the run's creation. */
+  at?: number;
+}
+
+/**
+ * Asks GitHub to run the minting workflow. Dispatching takes repository
+ * write access — that call is the authorization check — so a token that
+ * can only read comes back undispatched and the caller falls back to the
+ * browser.
+ */
+async function dispatchMint(
+  deps: KeyToolDeps,
+  token: string,
+  recipient: string,
+  username: string,
+): Promise<DispatchResult> {
+  const dispatched = await github(
+    deps,
+    token,
+    "POST",
+    `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/dispatches`,
+    { ref: "main", inputs: { recipient, username } },
+  );
+  const at = Date.parse(dispatched.headers.get("date") ?? "");
+  const body = await dispatched.text();
+  const result: DispatchResult = { dispatched: dispatched.status === 204 };
+  if (result.dispatched) result.username = username;
+  // The clock is kept whether the dispatch was taken or refused: a run
+  // that appears after this moment is this attempt's either way, and a
+  // refusal is followed by the same person starting the run themselves.
+  if (!Number.isNaN(at)) result.at = at;
+  if (result.dispatched) return result;
+  // A token that may only read is answered 401, 403, or — on a
+  // repository it cannot see — 404. Anything else is the workflow or
+  // GitHub failing, which no amount of clicking in a browser fixes.
+  if (![401, 403, 404].includes(dispatched.status)) {
+    throw new KeyToolError(
+      `Dispatching the minting workflow failed: HTTP ${dispatched.status} ` +
+        `${body.slice(0, 200)}`,
     );
-    await dispatched.text();
-    if (dispatched.status === 204) {
-      console.log(
-        `minting workflow dispatched for ${username}; ` +
-          "run `deno task test-records-key collect` once it finishes.",
-      );
-      return;
-    }
-    console.log(
-      `this token cannot dispatch the workflow (HTTP ${dispatched.status}).`,
-    );
-  } else {
-    console.log("no GitHub token that identifies you was found.");
   }
-  console.log(`
-Open the minting workflow in a browser and run it with your recipient:
+  console.log(
+    `This token cannot dispatch the workflow (HTTP ${dispatched.status}).`,
+  );
+  return result;
+}
 
-    https://github.com/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}
+/** What to print when the dispatch has to happen in a browser. */
+function browserInstructions(recipient: string): string {
+  return `
+Open the minting workflow and run it with your recipient:
 
-    recipient: ${recipient}
+    ${mintWorkflowUrl()}
+
+    Recipient: ${recipient}
 
 Dispatching the workflow takes repository write access — that click is
 the authorization step. If you do not have commit access, no key is
 needed: your local tests run the same without one, and CI records your
-pull requests' runs on its own. Otherwise, once the dispatched run
-finishes:
+pull requests' runs on its own.`;
+}
+
+interface MintRun {
+  id: number;
+  status: string;
+  conclusion?: string;
+  html_url?: string;
+  created_at?: string;
+  actor?: { login?: string };
+  display_title?: string;
+  name?: string;
+}
+
+/** A minting run this requester's, and the delivery it published. */
+interface RunMatch {
+  run: MintRun;
+  /** The delivery artifact, when one identified the run. */
+  artifact?: number;
+}
+
+/** What a search for the requester's own minting run works from. */
+interface RunSearch {
+  token: string;
+  recipient: string;
+  artifactName: string;
+  login: string;
+  /**
+   * GitHub's clock at the moment this attempt began, bounding how far
+   * back a run can be and still be this attempt's. Unset examines every
+   * run listed, which is what one collection wants and a repeating watch
+   * does not.
+   */
+  notBefore?: number;
+}
+
+interface RunSearchResult {
+  match?: RunMatch;
+  /** GitHub's clock at the listing, for bounding later searches. */
+  serverDate?: number;
+}
+
+/**
+ * The runs worth examining, newest first, over as many pages as the
+ * window holds.
+ */
+async function listCandidateRuns(
+  deps: KeyToolDeps,
+  search: RunSearch,
+): Promise<{ candidates: MintRun[]; serverDate?: number }> {
+  // A delivery is kept for seven days, so a run older than that has
+  // nothing left to collect; asking GitHub for that window keeps the
+  // search to the runs that could still be answered, however many the
+  // workflow has accumulated.
+  const since = new Date(
+    search.notBefore ?? Date.now() - DELIVERY_WINDOW_MS,
+  ).toISOString();
+  const candidates: MintRun[] = [];
+  let serverDate: number | undefined;
+  for (let page = 1;; page += 1) {
+    const res = await github(
+      deps,
+      search.token,
+      "GET",
+      `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs` +
+        `?per_page=${RUNS_PER_PAGE}&page=${page}` +
+        `&created=${encodeURIComponent(`>=${since}`)}`,
+    );
+    if (!res.ok) {
+      await res.text();
+      throw new KeyToolError(`Listing minting runs failed: HTTP ${res.status}`);
+    }
+    const listed = Date.parse(res.headers.get("date") ?? "");
+    if (serverDate === undefined && !Number.isNaN(listed)) serverDate = listed;
+    const runs = (await res.json() as { workflow_runs?: MintRun[] })
+      .workflow_runs ?? [];
+    for (const run of runs) {
+      if (!isCandidate(run, search)) continue;
+      candidates.push(run);
+    }
+    if (runs.length < RUNS_PER_PAGE) break;
+  }
+  return serverDate === undefined ? { candidates } : { candidates, serverDate };
+}
+
+/** Whether a run could be the one this search is for. */
+function isCandidate(run: MintRun, search: RunSearch): boolean {
+  const mine = namesRecipient(run, search.recipient) ||
+    run.actor?.login?.toLowerCase() === search.login.toLowerCase();
+  if (!mine) return false;
+  if (search.notBefore === undefined) return true;
+  const created = Date.parse(run.created_at ?? "");
+  return !Number.isNaN(created) && created >= search.notBefore;
+}
+
+/** Whether a run says which recipient it is minting for. */
+function namesRecipient(run: MintRun, recipient: string): boolean {
+  return `${run.display_title ?? ""}\n${run.name ?? ""}`.includes(recipient);
+}
+
+/**
+ * The requester's own minting run, newest first, by three tests in
+ * descending order of certainty. A run whose name carries the recipient
+ * is minting for it. A completed run that published this recipient's
+ * delivery minted for it, whatever its name says — which is what a run
+ * from a workflow version that does not name its recipient is found by.
+ * Failing both, the newest run this person dispatched within this
+ * attempt is the one they are waiting on, which is all that can be said
+ * of a run that is still going and does not name what it is minting.
+ * That last test needs the bound this attempt sets, so a search without
+ * one answers only when it can identify the run outright.
+ */
+async function findMintRun(
+  deps: KeyToolDeps,
+  search: RunSearch,
+): Promise<RunSearchResult> {
+  const { candidates, serverDate } = await listCandidateRuns(deps, search);
+  const result: RunSearchResult = {};
+  if (serverDate !== undefined) result.serverDate = serverDate;
+
+  for (const run of candidates) {
+    const named = namesRecipient(run, search.recipient);
+    if (run.status === "completed" && run.conclusion === "success") {
+      const artifact = await deliveryArtifact(
+        deps,
+        search.token,
+        run.id,
+        search.artifactName,
+      );
+      if (artifact !== undefined) {
+        return { ...result, match: { run, artifact } };
+      }
+      // A run that named this recipient and delivered nothing is still
+      // the run to report on; one that named nothing is unidentifiable.
+      if (named) return { ...result, match: { run } };
+      continue;
+    }
+    if (named) return { ...result, match: { run } };
+  }
+
+  // Attributing a run by who started it and when takes a bound to be
+  // safe: without one, a run this person started for some other
+  // recipient, under a name that says nothing about what it is minting,
+  // cannot be told from theirs.
+  if (search.notBefore === undefined) return result;
+  const attributed = candidates[0];
+  return attributed === undefined
+    ? result
+    : { ...result, match: { run: attributed } };
+}
+
+/** The id of a run's sealed delivery, when it published an unexpired one. */
+async function deliveryArtifact(
+  deps: KeyToolDeps,
+  token: string,
+  runId: number,
+  artifactName: string,
+): Promise<number | undefined> {
+  const res = await github(
+    deps,
+    token,
+    "GET",
+    `/repos/${REPO}/actions/runs/${runId}/artifacts?per_page=100`,
+  );
+  if (!res.ok) {
+    await res.text();
+    throw new KeyToolError(
+      `Listing the artifacts of run ${runId} failed: HTTP ${res.status}`,
+    );
+  }
+  const artifacts = (await res.json() as {
+    artifacts?: { id: number; name: string; expired?: boolean }[];
+  }).artifacts ?? [];
+  return artifacts.find((artifact) =>
+    artifact.name === artifactName && artifact.expired !== true
+  )?.id;
+}
+
+/**
+ * Downloads one sealed delivery, opens it with the stored identity, and
+ * installs the key file. Decrypting proves the delivery was sealed to
+ * this identity, not that its content is a key worth installing:
+ * validate the shape — which requires exactly Google's HTTPS token
+ * endpoint, since the uploader authenticates wherever that URL points —
+ * and require the key to be for whoever collects it.
+ */
+async function installDelivery(
+  deps: KeyToolDeps,
+  token: string,
+  identity: KeyDeliveryIdentity,
+  login: string,
+  artifactId: number,
+): Promise<string> {
+  const download = await github(
+    deps,
+    token,
+    "GET",
+    `/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
+  );
+  if (!download.ok) {
+    await download.text();
+    throw new KeyToolError(
+      `Downloading the delivery failed: HTTP ${download.status}`,
+    );
+  }
+  const zip = new Uint8Array(await download.arrayBuffer());
+  const members = await readZip(zip);
+  const sealedMember = members.find((member) =>
+    member.name.endsWith(".sealed")
+  );
+  if (sealedMember === undefined) {
+    throw new KeyToolError("The delivery artifact holds no sealed key.");
+  }
+  const box = JSON.parse(
+    new TextDecoder().decode(sealedMember.data),
+  ) as SealedBox;
+  let keyFile: Uint8Array;
+  try {
+    keyFile = await openSealed(identity, box);
+  } catch (error) {
+    throw new KeyToolError(
+      `The delivery does not open with the identity at ` +
+        `${identityPath(deps.env)}: ${reason(error)}`,
+    );
+  }
+  const keyText = new TextDecoder().decode(keyFile);
+  const parsedKey = parsePersonalKeyFile(keyText);
+  if (parsedKey === undefined) {
+    throw new KeyToolError(
+      "The delivery is not a personal test-records key file.",
+    );
+  }
+  if (parsedKey.cf_username.toLowerCase() !== login.toLowerCase()) {
+    throw new KeyToolError(
+      `The delivered key was minted for ${parsedKey.cf_username}, but ` +
+        `this token belongs to ${login}; refusing to install it`,
+    );
+  }
+  await Deno.mkdir(configDir(deps.env), { recursive: true });
+  const path = keyFilePath(deps.env);
+  await Deno.writeTextFile(path, keyText, { mode: 0o600 });
+  return path;
+}
+
+/**
+ * Exports the key file from the login shell's profiles and says what
+ * each file's update did.
+ */
+async function exportKeyFile(
+  deps: KeyToolDeps,
+  path: string,
+): Promise<ProfileUpdate[]> {
+  const updates = await exportFromProfiles(
+    RECORDS_KEY_FILE_VARIABLE,
+    path,
+    deps.env,
+  );
+  if (updates.length === 0) {
+    console.log(`
+No shell profile to update. Export the key file yourself:
+
+    ${RECORDS_KEY_FILE_VARIABLE}=${path}`);
+    return updates;
+  }
+  const kind = shellKind(deps.env);
+  for (const update of updates) {
+    if (update.outcome === "added") {
+      console.log(`${RECORDS_KEY_FILE_VARIABLE} exported from ${update.path}`);
+    } else if (update.outcome === "present") {
+      console.log(`${update.path} already exports the key file.`);
+    } else if (update.outcome === "unexported") {
+      console.log(`
+${update.path} sets ${RECORDS_KEY_FILE_VARIABLE} without exporting it:
+
+    ${update.existing}
+
+Left alone. A test run is a program the shell starts, and it sees only
+what the shell exports.`);
+    } else if (update.outcome === "absent") {
+      console.log(`
+${update.path} does not exist, and a login shell here reads it before the
+profile just written. Create it and it will be read instead of the file
+your login shells fall back to, so that one is yours to make; the line
+to put in it is:
+
+    ${exportLine(kind, RECORDS_KEY_FILE_VARIABLE, path, home(deps.env))}`);
+    } else {
+      console.log(`
+${update.path} already sets ${RECORDS_KEY_FILE_VARIABLE} elsewhere:
+
+    ${update.existing}
+
+Left alone. Point it at ${path} to record from this key.`);
+    }
+  }
+  const added = updates.filter((update) => update.outcome === "added");
+  if (added.length > 0) {
+    console.log(`
+Every new shell records its test runs. For the one you are in:
+
+    ${reloadHint(added[0]!.path, kind)}`);
+  }
+  return updates;
+}
+
+/** The key already installed on this workstation, when there is one. */
+async function installedKey(
+  env: Environment,
+): Promise<{ path: string; username: string } | undefined> {
+  const path = keyFilePath(env);
+  let text: string;
+  try {
+    text = await Deno.readTextFile(path);
+  } catch {
+    return undefined;
+  }
+  const parsed = parsePersonalKeyFile(text);
+  if (parsed === undefined) return undefined;
+  return { path, username: parsed.cf_username };
+}
+
+export async function requestCommand(
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<void> {
+  const identity = await ensureIdentity(deps);
+  console.log(`Recipient: ${identity.recipient}`);
+
+  const token = await deps.githubToken();
+  const username = token === undefined
+    ? undefined
+    : await githubLogin(deps, token);
+  if (token === undefined) {
+    console.log(
+      "No GitHub token was found; set GH_TOKEN or sign in with " +
+        "`gh auth login` to dispatch from here.",
+    );
+  } else if (username === undefined) {
+    console.log("This token cannot read your GitHub login.");
+  } else {
+    const dispatch = await dispatchMint(
+      deps,
+      token,
+      identity.recipient,
+      username,
+    );
+    if (dispatch.dispatched) {
+      console.log(
+        `Minting workflow dispatched for ${username}; ` +
+          "run `deno task test-records-key collect` once it finishes.",
+      );
+      return;
+    }
+  }
+  console.log(`${browserInstructions(identity.recipient)}
+
+Once the run finishes:
 
     deno task test-records-key collect
 `);
+}
+
+/**
+ * Watches until the minting run delivers, printing what it is doing as
+ * that changes. There is no bound on the wait: a run takes as long as it
+ * takes, and Ctrl-C is how a person stops watching.
+ */
+async function awaitDelivery(
+  deps: KeyToolDeps,
+  search: RunSearch,
+): Promise<number> {
+  let said: string | undefined;
+  const say = (line: string): void => {
+    if (line === said) return;
+    said = line;
+    console.log(line);
+  };
+  for (;;) {
+    const { match, serverDate } = await findMintRun(deps, search);
+    // Once the first listing has said what time GitHub thinks it is,
+    // every later one is bounded by it, so a watch left running does not
+    // re-examine runs from before it started.
+    if (search.notBefore === undefined && serverDate !== undefined) {
+      search.notBefore = serverDate;
+    }
+    if (match === undefined) {
+      say("Waiting for the minting run to appear...");
+    } else if (match.artifact !== undefined) {
+      say(`Minting run succeeded: ${runUrl(match.run)}`);
+      return match.artifact;
+    } else if (match.run.status !== "completed") {
+      say(
+        `Minting run ${match.run.status.replace("_", " ")}: ${
+          runUrl(match.run)
+        }`,
+      );
+    } else if (match.run.conclusion === "success") {
+      throw new KeyToolError(
+        `The minting run published no delivery for this recipient, or it ` +
+          `has expired: ${runUrl(match.run)}\n` +
+          "Deliveries are kept for seven days; mint a fresh one with " +
+          "`deno task test-records-key setup --rotate`.",
+      );
+    } else {
+      throw new KeyToolError(
+        `The minting run finished as ${match.run.conclusion ?? "unfinished"}: ${
+          runUrl(match.run)
+        }\n` +
+          "Open it to see which step failed. Run " +
+          "`deno task test-records-key setup` again once the cause is fixed.",
+      );
+    }
+    await deps.pause();
+  }
+}
+
+function runUrl(run: MintRun): string {
+  return run.html_url ?? `https://github.com/${REPO}/actions/runs/${run.id}`;
+}
+
+/**
+ * The whole opt-in: identity, dispatch, watch, install, export. Rerunning
+ * it resumes — the identity is reused, and a run already under way is the
+ * one it watches.
+ */
+export async function setupCommand(
+  deps: KeyToolDeps = defaultDeps(),
+  options: { rotate?: boolean } = {},
+): Promise<number> {
+  const existing = await installedKey(deps.env);
+  if (existing !== undefined && options.rotate !== true) {
+    console.log(
+      `A reporting key for ${existing.username} is installed at ` +
+        `${existing.path}`,
+    );
+    await exportKeyFile(deps, existing.path);
+    console.log(`
+Minting another key revokes this one, on every machine holding a copy.
+To rotate deliberately:
+
+    deno task test-records-key setup --rotate
+`);
+    return 0;
+  }
+
+  const token = await deps.githubToken();
+  if (token === undefined) {
+    throw new KeyToolError(
+      "A GitHub token is needed to mint and collect a key; set GH_TOKEN " +
+        "or sign in with `gh auth login`",
+    );
+  }
+  const login = await githubLogin(deps, token);
+  if (login === undefined) {
+    throw new KeyToolError(
+      "Cannot read your GitHub login; use a token that can GET /user.",
+    );
+  }
+
+  const identity = await ensureIdentity(deps);
+  console.log(`Recipient: ${identity.recipient}`);
+  const search: RunSearch = {
+    token,
+    recipient: identity.recipient,
+    artifactName: await deliveryName(identity.recipient),
+    login,
+  };
+
+  // A run already minting for this recipient is this person's own
+  // earlier attempt — a watch they stopped, or a browser dispatch — and
+  // taking it up is what makes rerunning resume rather than start
+  // again. Minting a second time would revoke the key the first is
+  // about to deliver. Rotating deliberately is the one case that wants
+  // a new run whatever is already going.
+  const inFlight = options.rotate === true
+    ? undefined
+    : (await findMintRun(deps, search)).match;
+  let artifact: number;
+  if (inFlight?.artifact !== undefined) {
+    console.log(
+      `An earlier run has the key waiting: ${runUrl(inFlight.run)}`,
+    );
+    artifact = inFlight.artifact;
+  } else {
+    if (inFlight !== undefined && inFlight.run.status !== "completed") {
+      console.log(
+        `A minting run for this recipient is already going: ${
+          runUrl(inFlight.run)
+        }`,
+      );
+      const created = Date.parse(inFlight.run.created_at ?? "");
+      if (!Number.isNaN(created)) search.notBefore = created;
+    } else {
+      const dispatch = await dispatchMint(
+        deps,
+        token,
+        identity.recipient,
+        login,
+      );
+      if (dispatch.dispatched) {
+        console.log(`Minting workflow dispatched for ${login}`);
+      } else {
+        console.log(`${browserInstructions(identity.recipient)}
+
+Waiting for that run — this command collects the key on its own once it
+finishes. Ctrl-C stops watching; rerunning picks up where it left off.
+`);
+      }
+      if (dispatch.at !== undefined) search.notBefore = dispatch.at;
+    }
+    artifact = await awaitDelivery(deps, search);
+  }
+  const path = await installDelivery(deps, token, identity, login, artifact);
+  console.log(`Key installed: ${path}`);
+  await exportKeyFile(deps, path);
+  return 0;
 }
 
 export async function collectCommand(
@@ -204,151 +827,142 @@ export async function collectCommand(
 ): Promise<number> {
   const identity = await loadIdentity(deps.env);
   if (identity === undefined) {
-    throw new Error(
-      `no delivery identity at ${identityPath(deps.env)}; ` +
-        "run `deno task test-records-key request` first",
+    throw new KeyToolError(
+      `No delivery identity at ${identityPath(deps.env)}; ` +
+        "run `deno task test-records-key setup` first",
     );
   }
   const token = await deps.githubToken();
   if (token === undefined) {
-    throw new Error(
-      "a GitHub token is needed to download the delivery artifact; " +
+    throw new KeyToolError(
+      "A GitHub token is needed to download the delivery artifact; " +
         "set GH_TOKEN or sign in with `gh auth login`",
     );
   }
   // The collector's login is read first: the delivered key must be for
-  // whoever collects it, and listing only the collector's own dispatches
-  // keeps the delivery findable however many other minting runs happened
-  // since the request.
-  const whoAmI = await github(deps, token, "GET", "/user");
-  const login = whoAmI.ok
-    ? (await whoAmI.json() as { login?: string }).login
-    : undefined;
-  if (!whoAmI.ok) await whoAmI.text();
+  // whoever collects it.
+  const login = await githubLogin(deps, token);
   if (login === undefined) {
-    throw new Error(
-      "cannot read your GitHub login to confirm the key is yours; " +
+    throw new KeyToolError(
+      "Cannot read your GitHub login to confirm the key is yours; " +
         "use a token that can GET /user",
     );
   }
-  const fingerprint = await recipientFingerprint(identity.recipient);
-  const artifactName = `test-records-key-${fingerprint}`;
-
-  const runsRes = await github(
-    deps,
+  const { match } = await findMintRun(deps, {
     token,
-    "GET",
-    `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs` +
-      `?actor=${encodeURIComponent(login)}&per_page=100`,
+    recipient: identity.recipient,
+    artifactName: await deliveryName(identity.recipient),
+    login,
+  });
+  if (match === undefined) {
+    throw new KeyToolError(
+      "No minting run for this recipient; dispatch one with " +
+        "`deno task test-records-key setup`.",
+    );
+  }
+  if (match.artifact === undefined) {
+    if (match.run.status !== "completed") {
+      console.log(
+        `The minting run is ${match.run.status.replace("_", " ")}: ${
+          runUrl(match.run)
+        }\nRun this command again once it has finished, or wait for it ` +
+          "with `deno task test-records-key setup`.",
+      );
+      return 1;
+    }
+    if (match.run.conclusion !== "success") {
+      throw new KeyToolError(
+        `The minting run finished as ${match.run.conclusion ?? "unfinished"}: ${
+          runUrl(match.run)
+        }\n` +
+          "Open it to see which step failed, then run " +
+          "`deno task test-records-key setup` again.",
+      );
+    }
+    throw new KeyToolError(
+      `The minting run published no delivery for this recipient, or it has ` +
+        `expired: ${runUrl(match.run)}\n` +
+        "Deliveries are kept for seven days; mint a fresh one with " +
+        "`deno task test-records-key setup --rotate`.",
+    );
+  }
+  const artifact = match.artifact;
+  const path = await installDelivery(deps, token, identity, login, artifact);
+  console.log(`Key installed: ${path}`);
+  await exportKeyFile(deps, path);
+  return 0;
+}
+
+function usage(): number {
+  console.error(
+    "usage: deno task test-records-key <setup [--rotate]|request|collect>",
   );
-  if (!runsRes.ok) {
-    throw new Error(`listing minting runs failed: HTTP ${runsRes.status}`);
+  return 2;
+}
+
+/** What a stopped watch says on its way out. */
+export const INTERRUPT_NOTICE = `
+Stopped watching. The minting run carries on; pick the key up with
+
+    deno task test-records-key setup
+`;
+
+/**
+ * Reports a stop as a stop rather than as a stack, and returns the call
+ * that takes the listener back off: a live signal listener holds the
+ * event loop open, so the command would not end on its own with one
+ * still registered.
+ */
+function watchForInterrupt(): () => void {
+  const stop = () => {
+    console.log(INTERRUPT_NOTICE);
+    Deno.exit(130);
+  };
+  try {
+    Deno.addSignalListener("SIGINT", stop);
+  } catch {
+    // A platform without SIGINT delivery stops the way it always did.
+    return () => {};
   }
-  const runs = (await runsRes.json() as {
-    workflow_runs?: { id: number; status?: string; conclusion?: string }[];
-  }).workflow_runs ?? [];
-  let sawUnfinished = false;
-  for (const run of runs) {
-    if (run.status !== "completed") {
-      sawUnfinished = true;
-      continue;
-    }
-    const artifactsRes = await github(
-      deps,
-      token,
-      "GET",
-      `/repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`,
-    );
-    if (!artifactsRes.ok) {
-      await artifactsRes.text();
-      continue;
-    }
-    const artifacts = (await artifactsRes.json() as {
-      artifacts?: { id: number; name: string; expired?: boolean }[];
-    }).artifacts ?? [];
-    const delivery = artifacts.find((artifact) =>
-      artifact.name === artifactName && artifact.expired !== true
-    );
-    if (delivery === undefined) continue;
+  return () => Deno.removeSignalListener("SIGINT", stop);
+}
 
-    const download = await github(
-      deps,
-      token,
-      "GET",
-      `/repos/${REPO}/actions/artifacts/${delivery.id}/zip`,
-    );
-    if (!download.ok) {
-      throw new Error(
-        `downloading the delivery failed: HTTP ${download.status}`,
-      );
+/**
+ * Runs one command line and returns the status the process exits with.
+ * A failure a person can hit arrives here as a KeyToolError, whose
+ * message is the whole report; anything else keeps its stack, because a
+ * stack is the report for a bug in this tool.
+ */
+export async function runCli(
+  args: readonly string[],
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<number> {
+  const [command, ...rest] = args;
+  try {
+    if (command === "setup") {
+      if (rest.some((argument) => argument !== "--rotate")) return usage();
+      const stopWatching = watchForInterrupt();
+      try {
+        return await setupCommand(deps, { rotate: rest.includes("--rotate") });
+      } finally {
+        stopWatching();
+      }
     }
-    const zip = new Uint8Array(await download.arrayBuffer());
-    const members = await readZip(zip);
-    const sealedMember = members.find((member) =>
-      member.name.endsWith(".sealed")
-    );
-    if (sealedMember === undefined) {
-      throw new Error("the delivery artifact holds no sealed key");
+    if (command === "request") {
+      if (rest.length > 0) return usage();
+      await requestCommand(deps);
+      return 0;
     }
-    const box = JSON.parse(
-      new TextDecoder().decode(sealedMember.data),
-    ) as SealedBox;
-    const keyFile = await openSealed(identity, box);
-    // Decrypting proves the delivery was sealed to this identity, not that
-    // its content is a key worth installing: validate the shape — which
-    // requires exactly Google's HTTPS token endpoint, since the uploader
-    // authenticates wherever that URL points — and require the key to be
-    // for whoever collects it.
-    const keyText = new TextDecoder().decode(keyFile);
-    const parsedKey = parsePersonalKeyFile(keyText);
-    if (parsedKey === undefined) {
-      throw new Error("the delivery is not a personal test-records key file");
+    if (command === "collect") {
+      if (rest.length > 0) return usage();
+      return await collectCommand(deps);
     }
-    if (parsedKey.cf_username.toLowerCase() !== login.toLowerCase()) {
-      throw new Error(
-        `the delivered key was minted for ${parsedKey.cf_username}, but ` +
-          `this token belongs to ${login}; refusing to install it`,
-      );
-    }
-    await Deno.mkdir(configDir(deps.env), { recursive: true });
-    await Deno.writeTextFile(
-      keyFilePath(deps.env),
-      keyText,
-      { mode: 0o600 },
-    );
-    console.log(`key installed: ${keyFilePath(deps.env)}
-
-Add this line to your shell profile to opt in to test reporting:
-
-    export ${RECORDS_KEY_FILE_VARIABLE}="${keyFilePath(deps.env)}"
-`);
-    return 0;
-  }
-  if (sawUnfinished) {
-    console.log(
-      "the minting run has not finished; run this command again once it has.",
-    );
+    return usage();
+  } catch (error) {
+    if (!(error instanceof KeyToolError)) throw error;
+    console.error(`\n${error.message}\n`);
     return 1;
   }
-  throw new Error(
-    `no completed minting run delivered ${artifactName}; ` +
-      "dispatch the workflow first with `deno task test-records-key request`",
-  );
 }
 
-function usage(): never {
-  console.error("usage: deno task test-records-key <request|collect>");
-  Deno.exit(2);
-}
-
-if (import.meta.main) {
-  const command = Deno.args[0];
-  if (command === "request") {
-    await requestCommand();
-  } else if (command === "collect") {
-    const code = await collectCommand();
-    if (code !== 0) Deno.exit(code);
-  } else {
-    usage();
-  }
-}
+if (import.meta.main) Deno.exit(await runCli(Deno.args));

@@ -1,5 +1,5 @@
 /**
- * A key pair as a fabric primitive, in either of the two states it can hold:
+ * A key pair as a `FabricPrimitive`, in either of the two states it can hold:
  * handles, whose material this realm may have no way to reach, and material,
  * the two keys as bytes.
  *
@@ -491,7 +491,7 @@ describe("FabricKeyPair", () => {
     });
   });
 
-  describe("as a fabric value", () => {
+  describe("as a `FabricValue`", () => {
     // An instance in either state has to pass the vetting boundary. The
     // realm encoding does not vet what it passes through, so a value that
     // fails here can still cross and still work, right up until something

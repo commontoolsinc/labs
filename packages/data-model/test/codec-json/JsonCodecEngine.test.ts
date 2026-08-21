@@ -516,7 +516,7 @@ describe("JsonCodecEngine", () => {
 
   describe("tagged-type round-trips through the full stack", () => {
     // Representative coverage that the encode→tag-wrap→decode mechanism works
-    // for the standalone-codec and primitive Fabric types, including nesting
+    // for the standalone-codec and `FabricPrimitive` types, including nesting
     // in arrays and objects. Per-codec encode/decode detail lives in each
     // type's own unit test (e.g. `BigIntCodec.test.ts`,
     // `FabricEpochNsec.test.ts`).

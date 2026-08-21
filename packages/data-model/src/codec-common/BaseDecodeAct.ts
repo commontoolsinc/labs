@@ -52,7 +52,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
   abstract encodedFromSerializedForm(data: SerializedForm): Encoded;
 
   /**
-   * Decodes a transport tree back into fabric values.
+   * Decodes a transport tree back into `FabricValue`s.
    *
    * Whether cycles are guarded at all is the format's decision, made by
    * whether this method enters a node: a format whose input it parses for

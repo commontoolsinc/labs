@@ -264,6 +264,34 @@ function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
 }
 
 /**
+ * The `link` half of the read path's memo key.
+ *
+ * The query path keys on address plus schema alone, which is sound there
+ * because `StandardObjectCreator` ignores the `link` argument. The read path's
+ * `TransformObjectCreator` builds the value it returns OUT of that link — the
+ * cell handle it mints, the back-to-cell annotation it attaches, the CFC label
+ * view it rebases — so two visits to one address under one schema can answer
+ * differently when they arrive by different links, and the link belongs in the
+ * key.
+ *
+ * Every member that creator can reach is spelled out, not just the ones
+ * `areNormalizedLinksSame` compares: that comparison decides which cell a link
+ * NAMES, and this key decides what a traversal RETURNS, which the reading lens
+ * and the follow caps both enter into.
+ */
+function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
+  if (link === undefined) return "-";
+  const caps = link.scopeCaps === undefined || link.scopeCaps.length === 0
+    ? ""
+    : link.scopeCaps.map((cap) => `${cap.depth}:${cap.scope}`).join(",");
+  return `s${keyComponent(link.space)}c${keyComponent(link.scope ?? "space")}i${
+    keyComponent(link.id)
+  }p${pathKey(link.path)}o${link.overwrite ?? "-"}h${
+    link.schema === undefined ? "-" : hashSchema(link.schema)
+  }k${caps}`;
+}
+
+/**
  * Memoized `narrowSchema()` + `combineOptionalSchema()` for link hops
  * (`followPointer` / `isLinkedDocumentCovered`).
  *
@@ -3388,11 +3416,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private diagnostics = traverseDiagnosticsEnabled();
   private maxDepth = 0;
   private currentDepth = 0;
-  // Memoization cache for traverseWithSchema: key → result
-  // Only used when traverseCells=true (query path) where the link
-  // parameter doesn't affect the result (StandardObjectCreator ignores it).
-  // When sharedSchemaMemo is provided, it's used instead (persists across
-  // multiple traverse() calls for the same selectSchema query).
+  // Memoization cache for traverseWithSchema: key → result, scoped to one
+  // traverse() call and cleared at the start of each.
+  // The query path may instead use sharedSchemaMemo, which persists across
+  // the traverse() calls of one selectSchema query; the read path never does,
+  // because its entries are only sound within the traversal that made them.
   private schemaMemo = new Map<
     string,
     TraverseResult<FabricValue>
@@ -3461,10 +3489,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.maxDepth = 0;
     this.currentDepth = 0;
     this.schemaMemoHits = 0;
-    // Only clear private memo, not shared
-    if (!this.sharedSchemaMemo) {
-      this.schemaMemo.clear();
-    }
+    // The private memo is per-traversal on both paths — the read path holds
+    // its entries there precisely because they must not outlive the
+    // traversal that recorded their reads — so it is cleared unconditionally.
+    // The shared one belongs to the query and is left alone.
+    this.schemaMemo.clear();
     // A selector schema carrying external refs needs its schema documents
     // loaded before traversal resolves against them; a selector whose
     // closure this space does not hold selects nothing (the delivery
@@ -3650,23 +3679,32 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
     }
     try {
-      // Memoize by doc address + schema for the query path (traverseCells=true).
-      // In the query path, StandardObjectCreator ignores the link param,
-      // so the result is fully determined by address + schema.
-      if (this.traverseCells) {
-        const memo = this.activeMemo;
-        const memoKey = schemaMemoAddressKey(doc.address) + "|" +
-          hashSchema(schema);
-        const cached = memo.get(memoKey);
-        if (cached !== undefined) {
-          this.schemaMemoHits++;
-          return cached;
-        }
-        const result = this._traverseWithSchemaInner(doc, schema, link);
-        memo.set(memoKey, result);
-        return result;
+      // Both paths memoize by doc address + schema. The read path adds the
+      // link, the one input its object creator reads and the query path's
+      // ignores (see schemaMemoLinkKey).
+      //
+      // A hit skips a subtree, and with it the scheduler reads and tracker
+      // entries that subtree records. That is sound because a hit means this
+      // exact key was already traversed IN THIS TRAVERSAL: the first visit
+      // registered those reads, and registering the same addresses again adds
+      // nothing to the transaction's read set. It is also why the read path
+      // memoizes into `schemaMemo` and never into a shared one — an entry
+      // living past its traversal would answer a later traversal that never
+      // recorded its reads, under a `TransformObjectCreator` whose base link
+      // and CFC label view belong to a different materialization.
+      const memo = this.traverseCells ? this.activeMemo : this.schemaMemo;
+      const memoKey = this.traverseCells
+        ? schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema)
+        : schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema) + "|" +
+          schemaMemoLinkKey(link);
+      const cached = memo.get(memoKey);
+      if (cached !== undefined) {
+        this.schemaMemoHits++;
+        return cached;
       }
-      return this._traverseWithSchemaInner(doc, schema, link);
+      const result = this._traverseWithSchemaInner(doc, schema, link);
+      memo.set(memoKey, result);
+      return result;
     } finally {
       this.currentDepth--;
     }
