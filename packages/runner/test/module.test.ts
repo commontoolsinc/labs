@@ -1,3 +1,7 @@
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
@@ -49,6 +53,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("module", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 

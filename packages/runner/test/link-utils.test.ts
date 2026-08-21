@@ -32,6 +32,10 @@ import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -543,27 +547,34 @@ describe("link-utils", () => {
 
   describe("createSigilLinkFromParsedLink", () => {
     it("should create sigil link from normalized link", () => {
-      const normalizedLink: NormalizedLink = {
-        id: "of:test",
-        path: ["nested", "value"],
-        space: space,
-        schema: { type: "number" },
-      };
+      // Reference emission is flag-gated; this pin opts in explicitly so
+      // it holds whatever the build's default is.
+      setContentAddressedSchemasConfig(true);
+      try {
+        const normalizedLink: NormalizedLink = {
+          id: "of:test",
+          path: ["nested", "value"],
+          space: space,
+          schema: { type: "number" },
+        };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink, {
-        includeSchema: true,
-      });
+        const result = createSigilLinkFromParsedLink(normalizedLink, {
+          includeSchema: true,
+        });
 
-      expect(result).toEqual({
-        "/": {
-          [LINK_V1_TAG]: {
-            id: "of:test",
-            path: ["nested", "value"],
-            space: space,
-            schema: externalRefTo({ type: "number" }),
+        expect(result).toEqual({
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:test",
+              path: ["nested", "value"],
+              space: space,
+              schema: externalRefTo({ type: "number" }),
+            },
           },
-        },
-      });
+        });
+      } finally {
+        resetContentAddressedSchemasConfig();
+      }
     });
 
     it("serializes scoped links and parses inherited link scope from the base", () => {

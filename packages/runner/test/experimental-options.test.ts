@@ -49,7 +49,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        contentAddressedSchemas: true,
+        contentAddressedSchemas: false,
         commitPreconditions: false,
         plainResultReceipts: false,
         computedCellIds: false,
@@ -71,7 +71,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
-        contentAddressedSchemas: true,
+        contentAddressedSchemas: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
@@ -91,7 +91,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        contentAddressedSchemas: true,
+        contentAddressedSchemas: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,

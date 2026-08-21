@@ -1,6 +1,10 @@
 // Example-based schema tests: field mapping via interim cells, nested sinks
 // via asCell, and nested sinks with aliases.
 
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
@@ -21,6 +25,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("Schema - Examples", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

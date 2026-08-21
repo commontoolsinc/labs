@@ -1,4 +1,8 @@
-import { describe, it } from "@std/testing/bdd";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
@@ -8,6 +12,15 @@ import { createCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("jsx", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   describe("fragments", () => {
     it("returns a `cf-fragment` vnode for a fragment with one child", () => {
       const fragment = (

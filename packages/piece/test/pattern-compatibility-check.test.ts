@@ -528,14 +528,10 @@ describe("setsrc compatibility preflight", () => {
       );
       await freshPieces.synced();
       const reloaded = await freshPieces.get(piece.id, false);
-      // Under content-addressed schemas the forged document also fails sync
-      // delivery verification, so the fresh replica cannot load the piece's
-      // pattern identity at all — an even harder refusal than the graceful
-      // report. The guarded principle is the same: corruption never
-      // green-lights a swap.
-      await expect(reloaded.checkPattern(labelledNext())).rejects.toThrow(
-        "piece missing pattern identity",
-      );
+      const report = await reloaded.checkPattern(labelledNext());
+      expect(report.compatible).toBe(false);
+      expect(report.message).toContain("could not be read");
+      expect(report.message).toContain("hash mismatch");
     } finally {
       await freshRuntime.dispose();
       await freshStorage.close();
