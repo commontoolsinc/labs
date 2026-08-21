@@ -2004,3 +2004,36 @@ Deno.test("OW31 acl enforce: an ownership TRANSFER re-binds — the bound sessio
     await server.close();
   }
 });
+
+Deno.test("OW31 acl enforce: an unknown actingAs value is a ProtocolError; a multi-owner ACL binds the lexicographically first concrete owner", async () => {
+  const server = createAclServer("memory://acl-ow31-marker-shape", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-8";
+  // TWO concrete owners, no self-entry, no wildcard: the binding must
+  // resolve deterministically (sorted-first — ALICE before CAROL) for
+  // the session to read at all.
+  await initializeSpaceAcl(server, space, {
+    [ALICE]: "OWNER",
+    [CAROL]: "OWNER",
+  });
+  const unknown = await connect(server);
+  const bound = await connect(server);
+  try {
+    const refused = await openSession(unknown, space, SERVICE, {
+      actingAs: "space-emperor" as never,
+    });
+    assertExists(refused.error, "unknown actingAs value must be refused");
+    assertEquals(refused.error?.name, "ProtocolError");
+
+    const opened = await openSession(bound, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(opened.ok, opened.error?.message);
+    const read = await graphQuery(bound, space, opened.ok.sessionId, "of:x");
+    assertExists(read.ok, read.error?.message);
+  } finally {
+    await server.close();
+  }
+});
