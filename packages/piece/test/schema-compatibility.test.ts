@@ -83,11 +83,12 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // The identity fields excluded from the comparison are only the content
-  // hashes. The rest of the writer claim and the whole uiContract still name
-  // the real consumer-facing contract, so a change to any of them must still be
-  // rejected. These build two result schemas that differ in exactly one such
-  // field and assert the update is refused.
+  // The identity fields excluded from the comparison are the content hashes
+  // (moduleIdentity/bundleId) and the resolver-dependent file spelling. The
+  // binding path and the whole uiContract still name the real consumer-facing
+  // contract, so a change to either of them must still be rejected. These build
+  // two result schemas that differ in exactly one such field and assert the
+  // update is refused.
   const trustedWriteResult = (
     identity: Record<string, unknown>,
     uiContract: Record<string, unknown>,
@@ -130,7 +131,31 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  it("still rejects a writeAuthorizedBy binding file change", () => {
+  // A writer claim's `file` is the module's source-file spelling, and that
+  // spelling is resolver-dependent: the same module compiles to a different
+  // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
+  // while its content-addressed `moduleIdentity` agrees everywhere (labs#4772).
+  // The runtime authorizes a write on `moduleIdentity` plus the binding `path`
+  // and never on `file`, so a cross-resolver recompile that re-spells only the
+  // `file` — same `moduleIdentity`, same `path`, same `uiContract` — is the same
+  // authorization, and the update is accepted.
+  it("accepts a cross-resolver recompile that only re-spells the writeAuthorizedBy file", () => {
+    const respelled = (file: string): JSONSchema =>
+      trustedWriteResult({ ...baselineIdentity, file }, baselineUiContract);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, respelled("/api/patterns/demo/main.tsx")),
+        pattern({ type: "object" }, respelled("/patterns/demo/main.tsx")),
+      )
+    ).not.toThrow();
+  });
+
+  // `file` carries no authorization signal beyond the content-addressed
+  // `moduleIdentity` (which the runtime re-verifies live) and the binding
+  // `path`, so it is normalized out of the comparison entirely rather than made
+  // spelling-tolerant. Any `file` change is accepted while the `path` and
+  // `uiContract` are unchanged.
+  it("accepts a writeAuthorizedBy binding file change", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(
@@ -145,7 +170,7 @@ describe("piece schema compatibility", () => {
           ),
         ),
       )
-    ).toThrow(/flag: ifc changed/);
+    ).not.toThrow();
   });
 
   it("still rejects a writeAuthorizedBy binding path change", () => {

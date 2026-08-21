@@ -134,6 +134,33 @@ describe("list-result-container-seed", () => {
       expect(logger.warnings).toEqual([]);
     });
 
+    it("counts against the storage settle barrier until the seed has landed", async () => {
+      const container = newContainer("barrier-held-until-seeded");
+      const pull = Promise.withResolvers<void>();
+      const seeded = seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        pull.promise,
+        logger,
+      );
+      // The cross-space promise set is what `Cell.pull()`,
+      // `storageManager.synced()` and the `settled(Infinity)` drain in
+      // `Runtime.dispose({ closeStorage: false })` consult, so membership in it
+      // is what places the seed's write inside each of those barriers. The
+      // coordinator drops the returned promise, so this registration is the
+      // only thing holding the chain.
+      expect(storageManager.pendingCrossSpacePromiseCount()).toBe(1);
+      pull.resolve();
+      await storageManager.synced();
+      // Out of the set once the chain settles, and the container carries the
+      // seed the chain wrote.
+      expect(storageManager.pendingCrossSpacePromiseCount()).toBe(0);
+      expect(valueOf(container)).toEqual([]);
+      await seeded;
+      expect(logger.warnings).toEqual([]);
+    });
+
     it("leaves a container that arrived during the pull at the value it arrived with", async () => {
       const container = newContainer("arrived-during-pull");
       const pull = Promise.withResolvers<void>();

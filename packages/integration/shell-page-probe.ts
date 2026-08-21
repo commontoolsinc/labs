@@ -160,6 +160,14 @@ export async function readAndDescribeShellPage(page: Page): Promise<string> {
 }
 
 /**
+ * Whether the document in `page` is the shell, decided by the same
+ * `x-root-view` element {@link assertShellDocument} looks for.
+ */
+export async function isShellDocument(page: Page): Promise<boolean> {
+  return await page.evaluate(() => !!document.querySelector("x-root-view"));
+}
+
+/**
  * Fail unless the document in `page` is the shell.
  *
  * The shell's entry document carries an `x-root-view` element, so a document

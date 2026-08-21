@@ -47,7 +47,7 @@ Deno.test("Page runs the navigation hook after goto and reload", async () => {
     { timeout: 10 },
   );
   let hookCalls = 0;
-  page.setAfterNavigationHook(() => {
+  page.addAfterNavigationHook(() => {
     hookCalls++;
   });
 
@@ -56,6 +56,79 @@ Deno.test("Page runs the navigation hook after goto and reload", async () => {
 
   assertEquals(navigations, ["https://example.test/", "reload"]);
   assertEquals(hookCalls, 2);
+});
+
+Deno.test("Page runs every navigation hook, and stops one that is removed", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(options: { url: string }): Promise<{ loaderId?: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => Promise.resolve({}),
+  };
+  const astralPage = {
+    timeout: 0,
+    reload: () => Promise.resolve(),
+    unsafelyGetCelestialBindings: () => celestial,
+  };
+  const page = new Page(
+    astralPage as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+  const order: string[] = [];
+  page.addAfterNavigationHook(() => {
+    order.push("first");
+  });
+  const removeSecond = page.addAfterNavigationHook(() => {
+    order.push("second");
+  });
+
+  await page.goto("https://example.test/");
+  removeSecond();
+  await page.reload();
+
+  assertEquals(order, ["first", "second", "first"]);
+});
+
+Deno.test("Page skips a navigation hook removed while an earlier one waits", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(options: { url: string }): Promise<{ loaderId?: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => Promise.resolve({}),
+  };
+  const astralPage = {
+    timeout: 0,
+    reload: () => Promise.resolve(),
+    unsafelyGetCelestialBindings: () => celestial,
+  };
+  const page = new Page(
+    astralPage as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+  const order: string[] = [];
+  // Holds the second hook's remover, which the first hook calls while this
+  // navigation's run is between the two.
+  const second = { remove: () => {} };
+  page.addAfterNavigationHook(async () => {
+    order.push("first");
+    await Promise.resolve();
+    second.remove();
+  });
+  second.remove = page.addAfterNavigationHook(() => {
+    order.push("second");
+  });
+
+  await page.goto("https://example.test/");
+
+  assertEquals(order, ["first"]);
 });
 
 Deno.test("Page navigation does not depend on Astral's retry wrapper", async () => {
@@ -103,7 +176,7 @@ Deno.test("Page navigation does not depend on Astral's retry wrapper", async () 
     { timeout: 10 },
   );
   let hookCalls = 0;
-  page.setAfterNavigationHook(() => {
+  page.addAfterNavigationHook(() => {
     hookCalls++;
   });
 

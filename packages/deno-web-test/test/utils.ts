@@ -1,10 +1,12 @@
 import * as path from "@std/path";
+import { AssertionError } from "@std/assert";
 import { copy } from "@std/fs";
 import { parse as parseJsonc } from "@std/jsonc";
+import { decode } from "@commonfabric/utils/encoding";
 
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
-const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
+const DenoWebTestCache: Map<string, Promise<HarnessRun>> = new Map();
 const encoder = new TextEncoder();
 const STDERR_BOUNDARY_ENV = "DENO_WEB_TEST_STDERR_BOUNDARY";
 const DOWNLOAD_HTTP_PREFIX = encoder.encode("Download http://");
@@ -121,6 +123,50 @@ export function sanitizeDenoWebTestOutput(
   };
 }
 
+// One completed run of the harness against a test project: how the process
+// exited, both of its streams as bytes and as text, and an `assert` that
+// carries the whole transcript into the failure message.
+export class HarnessRun {
+  readonly projectDir: string;
+  readonly success: boolean;
+  readonly code: number;
+  readonly stdout: Uint8Array;
+  readonly stderr: Uint8Array;
+  readonly stdoutText: string;
+  readonly stderrText: string;
+
+  constructor(projectDir: string, output: Deno.CommandOutput) {
+    this.projectDir = projectDir;
+    this.success = output.success;
+    this.code = output.code;
+    this.stdout = output.stdout;
+    this.stderr = output.stderr;
+    this.stdoutText = decode(output.stdout);
+    this.stderrText = decode(output.stderr);
+  }
+
+  // Fails with `message` followed by the whole transcript. An assertion here
+  // reads one line of what the run printed, and the rest of that output is
+  // what says why the line is not the one it should be.
+  assert(condition: boolean, message: string): void {
+    if (condition) {
+      return;
+    }
+    throw new AssertionError(`${message}\n\n${this.transcript()}`);
+  }
+
+  transcript(): string {
+    return [
+      `deno-web-test in ${this.projectDir} exited with code ${this.code}.`,
+      "--- stdout ---",
+      this.stdoutText,
+      "--- stderr ---",
+      this.stderrText,
+      "--- end of transcript ---",
+    ].join("\n");
+  }
+}
+
 // Runs deno-web-test in `projectDir` and caches
 // the results for multiple test usages.
 //
@@ -130,7 +176,7 @@ export function sanitizeDenoWebTestOutput(
 // before running tests.
 export const runDenoWebTest = async (
   projectDir: string,
-): Promise<Deno.CommandOutput> => {
+): Promise<HarnessRun> => {
   const fromCache = DenoWebTestCache.get(projectDir);
   if (fromCache) {
     return fromCache;
@@ -171,7 +217,7 @@ export const runDenoWebTest = async (
   }
 
   const stderrBoundary = `deno-web-test:${crypto.randomUUID()}`;
-  const output = new Deno.Command(Deno.execPath(), {
+  const run = new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "test",
@@ -181,8 +227,11 @@ export const runDenoWebTest = async (
       [STDERR_BOUNDARY_ENV]: stderrBoundary,
     },
   }).output().then((output) =>
-    sanitizeDenoWebTestOutput(output, stderrBoundary)
+    new HarnessRun(
+      projectDir,
+      sanitizeDenoWebTestOutput(output, stderrBoundary),
+    )
   );
-  DenoWebTestCache.set(projectDir, output);
-  return output;
+  DenoWebTestCache.set(projectDir, run);
+  return run;
 };

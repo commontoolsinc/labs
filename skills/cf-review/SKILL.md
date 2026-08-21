@@ -282,6 +282,16 @@ omit the `@` if unsure) — via `gh pr review --comment`, or inline comments
 through the reviews API for Blocking / Improvements with Nits left in the
 summary. Skip posting when it isn't worth it.
 
+Anchor every finding to the context it responds to: a threaded reply
+(`gh api .../pulls/<n>/comments/<id>/replies`) when answering an existing
+thread, otherwise an inline comment on the file and line it addresses —
+`gh api repos/<owner>/<repo>/pulls/<n>/comments -F body=@file
+-f commit_id=<head-sha> -f path=<file> -F line=<n> -f side=RIGHT`.
+A top-level `gh pr comment` detaches the argument from what it argues about;
+reviewers read threads in-diff, and a floating comment is easy to miss and hard
+to answer in context. Find anchor lines by grepping the PR-head version of the
+file.
+
 ---
 
 ## Canonical references

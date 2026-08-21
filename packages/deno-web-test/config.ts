@@ -98,17 +98,27 @@ export const extractAstralConfig = (config: Config): LaunchOptions => {
   return astralConfig;
 };
 
+// Reads the project's `deno-web-test.config.ts` and applies the defaults on
+// top of it. A project with no such file runs on the defaults alone. A file
+// that is there but cannot be imported throws, naming the path and the failure
+// importing it produced, so the run ends rather than reaching the browser on
+// settings the project did not ask for.
 export const getConfig = async (projectDir: string): Promise<Config> => {
   const configPath = path.join(projectDir, "deno-web-test.config.ts");
 
-  if (await exists(configPath, { isFile: true })) {
-    // Try to evaluate it
-    try {
-      const config = (await import(configPath)).default;
-      return applyDefaults(config);
-    } catch (_) {
-      console.error(`Unable to execute deno-web-test.config.ts`);
-    }
+  if (!await exists(configPath, { isFile: true })) {
+    return applyDefaults({});
   }
-  return applyDefaults({});
+
+  let config: object;
+  try {
+    config = (await import(configPath)).default;
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `Unable to import ${configPath}: ${detail}`,
+      { cause },
+    );
+  }
+  return applyDefaults(config);
 };

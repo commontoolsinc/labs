@@ -48,6 +48,16 @@ import type { Runtime } from "../runtime.ts";
  * carries it. A no-op on the OFF arm; under client speculation bookkeeping
  * commits exactly as unstamped txs do (the overlay routes only
  * derivation-kind runs).
+ *
+ * The chain is registered with the storage manager's settle barrier, so
+ * `Cell.pull()` and `storageManager.synced()` hold until the seed's write has
+ * settled. The pull reaches that barrier through the replica's own sync
+ * bookkeeping, and this registration carries the wait across the span between
+ * the pull settling and the seed's commit being issued.
+ * `Runtime.dispose({ closeStorage: false })` drains the runtime through
+ * `settled(Infinity)` before it tears anything down, so the store a reader is
+ * handed afterwards carries whatever the seed wrote. A caller does not register
+ * the returned promise; this function registers the chain.
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
@@ -77,7 +87,12 @@ export function seedResultContainerWhenPullSettles(
       }
     });
   };
-  return pull.finally(seedIfStillAbsent).then(() => {}, (error: unknown) => {
-    logger.warn("resume-pull", "resume container pull rejected", { error });
-  });
+  const settled = pull.finally(seedIfStillAbsent).then(
+    () => {},
+    (error: unknown) => {
+      logger.warn("resume-pull", "resume container pull rejected", { error });
+    },
+  );
+  runtime.storageManager.trackUntilSettled(settled);
+  return settled;
 }

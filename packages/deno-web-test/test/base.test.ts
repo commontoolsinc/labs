@@ -1,23 +1,26 @@
-import { assert, assertEquals } from "@std/assert";
-import { decode } from "@commonfabric/utils/encoding";
+import { assertEquals } from "@std/assert";
 import { runDenoWebTest, sanitizeDenoWebTestOutput } from "./utils.ts";
 
 Deno.test("smoke test", async function () {
-  const { success, stdout, stderr } = await runDenoWebTest("success-project");
-  const stdoutText = decode(stdout);
-  const stderrText = decode(stderr);
+  const run = await runDenoWebTest("success-project");
 
-  assert(success, "test successful");
-  assert(/add-sync ... ok/.test(stdoutText), "test output ok");
-  assert(/add-async ... ok/.test(stdoutText), "test output ok");
-  assert(/ok | 2 passed | 0 failed/.test(stdoutText), "test output ok");
-  assert(/deno run/.test(stderrText), "stderr has deno task run");
-  assert(
-    !/experimentalDecorators/.test(stderrText),
+  run.assert(run.success, "test successful");
+  run.assert(/add-sync ... ok/.test(run.stdoutText), "test output ok");
+  run.assert(/add-async ... ok/.test(run.stdoutText), "test output ok");
+  run.assert(/ok | 2 passed | 0 failed/.test(run.stdoutText), "test output ok");
+  run.assert(/deno run/.test(run.stderrText), "stderr has deno task run");
+  run.assert(
+    !/experimentalDecorators/.test(run.stderrText),
     "stderr has no compiler options warning",
   );
-  assert(stderrText.split("\n").length === 2, "stderr has no other messages");
-  assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
+  run.assert(
+    run.stderrText.split("\n").length === 2,
+    "stderr has no other messages",
+  );
+  run.assert(
+    run.stderrText.split("\n")[1] === "",
+    "stderr has no other messages",
+  );
 });
 
 Deno.test("dependency downloads before the harness boundary are removed", function () {
