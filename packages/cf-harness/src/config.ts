@@ -68,6 +68,15 @@ interface HarnessCommonConfig {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+  /**
+   * Origins where a value materialized from a handle may be sent. Operator
+   * configuration, empty or absent by default: a run that names no origin
+   * cannot materialize a handle at all. The check is on the destination
+   * rather than on the value because a handle's whole point is that the run
+   * using it cannot see what it holds — only where it is going is knowable,
+   * so that is what an operator gets to decide.
+   */
+  handleValueOrigins?: readonly string[];
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
@@ -119,6 +128,7 @@ export interface ResolveHarnessConfigOptions {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+  handleValueOrigins?: readonly string[];
   artifactRoot?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
@@ -276,6 +286,9 @@ export const resolveHarnessConfig = (
     skillScriptExecutionTarget: options.skillScriptExecutionTarget ?? "sandbox",
     ...(options.browserAccess !== undefined
       ? { browserAccess: options.browserAccess }
+      : {}),
+    ...(options.handleValueOrigins !== undefined
+      ? { handleValueOrigins: options.handleValueOrigins }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

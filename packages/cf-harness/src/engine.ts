@@ -217,6 +217,14 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+  /**
+   * The register of values this run has materialized from handles. Supplied
+   * when a run shares a destination with another — a delegated browser child
+   * driving the parent's leased page — so that what one run typed is scrubbed
+   * out of what the other reads back. The engine creates its own when this is
+   * absent, which is right for a run whose reach nothing else shares.
+   */
+  resolvedValueRegister?: HarnessResolvedValueRegister;
   now?: () => string;
 }
 
@@ -339,12 +347,14 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   /**
-   * Values this run has materialized from handles. In-memory and never
-   * persisted: it holds the very strings the handle design keeps out of the
-   * model's context, so putting it in run state would defeat the point.
+   * Values materialized from handles by this run, and by any run it shares a
+   * destination with: the register follows the browser lease rather than the
+   * engine, because two runs driving one page can read each other's writes
+   * back. In-memory and never persisted — it holds the very strings the
+   * handle design keeps out of the model's context, so putting it in run
+   * state would defeat the point.
    */
-  readonly #resolvedValueRegister: HarnessResolvedValueRegister =
-    createHarnessResolvedValueRegister();
+  readonly #resolvedValueRegister: HarnessResolvedValueRegister;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -353,6 +363,8 @@ export class CfHarnessEngine {
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#resolvedValueRegister = options.resolvedValueRegister ??
+      createHarnessResolvedValueRegister();
     this.#resumedRun = options.runState !== undefined;
     this.#runModelBound = this.#resumedRun;
     const resumedLineage = options.runState?.lineage;
@@ -1492,6 +1504,7 @@ export class CfHarnessEngine {
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
+      handleValueOrigins: this.config.handleValueOrigins,
       handleTable: this.handleTable,
       resolvedValueRegister: this.#resolvedValueRegister,
       ...(this.#fabricSessionFactory !== undefined

@@ -14,7 +14,14 @@ import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { CfHarnessEngine } from "../src/engine.ts";
-import { RESOLVED_VALUE_PLACEHOLDER } from "../src/contracts/resolved-value-register.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "../src/handle-table.ts";
+import {
+  createHarnessResolvedValueRegister,
+  RESOLVED_VALUE_PLACEHOLDER,
+} from "../src/contracts/resolved-value-register.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -45,6 +52,16 @@ const BROWSER_LEASE = {
 const FOREIGN_REF = `/@did:key:z6MkforeignSpaceForBrowserToolTest/of:fid1:${
   "A".repeat(43)
 }/`;
+
+/** The one origin these runs allow a handle's value to reach. */
+const ALLOWED_ORIGIN = "https://example.com";
+
+/** What the destination probe prints: the page the leased browser shows. */
+const pageAt = (url: string) => ({
+  stdout: `${url}\n`,
+  stderr: "",
+  exitCode: 0,
+});
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -301,7 +318,13 @@ describe("browser", () => {
 
     const createEngine = (
       processRunner: ProcessRunner,
-      options: { fabricSession?: boolean } = {},
+      options: {
+        fabricSession?: boolean;
+        handleValueOrigins?: readonly string[];
+        resolvedValueRegister?: ReturnType<
+          typeof createHarnessResolvedValueRegister
+        >;
+      } = {},
     ) =>
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
@@ -310,10 +333,29 @@ describe("browser", () => {
         processRunner,
         workspaceHostPath: "/tmp/cf-harness-workspace",
         browserAccess: BROWSER_LEASE,
+        handleValueOrigins: options.handleValueOrigins ?? [ALLOWED_ORIGIN],
+        ...(options.resolvedValueRegister !== undefined
+          ? { resolvedValueRegister: options.resolvedValueRegister }
+          : {}),
         ...(options.fabricSession === false
           ? {}
           : { fabricSessionFactory: () => Promise.resolve({ pieces }) }),
       });
+
+    /**
+     * Gives `engine` a handle to each reference, which is what makes one a
+     * reference the run may resolve at all.
+     */
+    const holdHandles = async (
+      engine: CfHarnessEngine,
+      ...refs: readonly string[]
+    ): Promise<void> => {
+      let table = createHarnessHandleTable(engine.getRunState().runId);
+      for (const ref of refs) {
+        table = (await mintAddressHandle(table, ref)).table;
+      }
+      await engine.recordHandleTable(table);
+    };
 
     /** An address in the run's space holding `value`. */
     const seedRef = async (cause: string, value: unknown): Promise<string> => {
@@ -329,12 +371,12 @@ describe("browser", () => {
 
     it("passes the value behind a valueHandle to agent-browser and withholds it from the output", async () => {
       const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner([{
-        stdout: 'filled @e1 with "hunter2"\n',
-        stderr: "",
-        exitCode: 0,
-      }]);
+      const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
+        { stdout: 'filled @e1 with "hunter2"\n', stderr: "", exitCode: 0 },
+      ]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -342,8 +384,15 @@ describe("browser", () => {
         valueHandle: ref,
       });
 
-      // The value reached the page, so the action did what was asked.
+      // The destination is established first, trusted-side.
       expect(runner.calls[0]?.args).toEqual([
+        "--cdp",
+        "http://localhost:9362",
+        "get",
+        "url",
+      ]);
+      // The value reached the page, so the action did what was asked.
+      expect(runner.calls[1]?.args).toEqual([
         "--cdp",
         "http://localhost:9362",
         "fill",
@@ -361,6 +410,7 @@ describe("browser", () => {
     it("withholds a materialized value from a later action's output", async () => {
       const ref = await seedRef("passphrase", "hunter2");
       const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
         { stdout: "", stderr: "", exitCode: 0 },
         {
           stdout: '- textbox "Password": hunter2\n',
@@ -369,6 +419,7 @@ describe("browser", () => {
         },
       ]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
       await engine.invokeBuiltinTool("browser", {
         action: "fill",
         ref: "@e1",
@@ -388,12 +439,16 @@ describe("browser", () => {
 
     it("withholds a materialized value from a failing command's message", async () => {
       const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner([{
-        stdout: "",
-        stderr: "agent-browser: fill @e1 hunter2: no such element\n",
-        exitCode: 3,
-      }]);
+      const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
+        {
+          stdout: "",
+          stderr: "agent-browser: fill @e1 hunter2: no such element\n",
+          exitCode: 3,
+        },
+      ]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -413,6 +468,7 @@ describe("browser", () => {
     it("withholds a materialized value from the detail of a later success", async () => {
       const ref = await seedRef("passphrase", "hunter2");
       const runner = new FakeProcessRunner([
+        pageAt(`${ALLOWED_ORIGIN}/login`),
         { stdout: "", stderr: "", exitCode: 0 },
         {
           stdout: "https://example.com/\n",
@@ -421,6 +477,7 @@ describe("browser", () => {
         },
       ]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
       await engine.invokeBuiltinTool("browser", {
         action: "type",
         ref: "@e1",
@@ -446,6 +503,7 @@ describe("browser", () => {
         exitCode: 0,
       }]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "open",
@@ -465,6 +523,7 @@ describe("browser", () => {
       const ref = await seedRef("target-url", "file:///etc/passwd");
       const runner = new FakeProcessRunner();
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "open",
@@ -483,6 +542,7 @@ describe("browser", () => {
       const ref = await seedRef("passphrase", "hunter2");
       const runner = new FakeProcessRunner();
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -501,8 +561,9 @@ describe("browser", () => {
 
     it("refuses a valueHandle when the run has no fabric session", async () => {
       const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner();
+      const runner = new FakeProcessRunner([pageAt(`${ALLOWED_ORIGIN}/login`)]);
       const engine = createEngine(runner, { fabricSession: false });
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -515,11 +576,14 @@ describe("browser", () => {
       expect(output.message).toBe(
         "browser valueHandle requires a fabric session to resolve a handle, and this run has none",
       );
-      expect(runner.calls).toEqual([]);
+      // Reading the destination is all that ran; nothing was filled.
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
     });
 
     it("refuses a valueHandle that does not parse as an address", async () => {
-      const runner = new FakeProcessRunner();
+      const runner = new FakeProcessRunner([pageAt(`${ALLOWED_ORIGIN}/login`)]);
       const engine = createEngine(runner);
 
       const result = await engine.invokeBuiltinTool("browser", {
@@ -532,12 +596,38 @@ describe("browser", () => {
       expect(output.message).toBe(
         "browser valueHandle does not name a reference this run holds",
       );
-      expect(runner.calls).toEqual([]);
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
+    });
+
+    it("refuses a valueHandle naming a same-space address this run does not hold", async () => {
+      const held = await seedRef("held-passphrase", "hunter2");
+      const unheld = await seedRef("someone-elses-passphrase", "hunter3");
+      const runner = new FakeProcessRunner([pageAt(`${ALLOWED_ORIGIN}/login`)]);
+      const engine = createEngine(runner);
+      await holdHandles(engine, held);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: unheld,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("invalid_input");
+      expect(output.message).toBe(
+        "browser valueHandle does not name a handle this run holds",
+      );
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
     });
 
     it("refuses a valueHandle naming another space", async () => {
-      const runner = new FakeProcessRunner();
+      const runner = new FakeProcessRunner([pageAt(`${ALLOWED_ORIGIN}/login`)]);
       const engine = createEngine(runner);
+      await holdHandles(engine, FOREIGN_REF);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -549,13 +639,102 @@ describe("browser", () => {
       expect(output.message).toBe(
         "browser valueHandle can only read a reference in this run's own space",
       );
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
+    });
+
+    it("refuses to materialize a handle when the run allows no destination", async () => {
+      const ref = await seedRef("passphrase", "hunter2");
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner, { handleValueOrigins: [] });
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toContain("--handle-value-origin");
+      // Default-deny reaches the destination probe too: nothing ran at all.
       expect(runner.calls).toEqual([]);
+    });
+
+    it("refuses to materialize a handle into a page outside the allowlist", async () => {
+      const ref = await seedRef("passphrase", "hunter2");
+      const runner = new FakeProcessRunner([
+        pageAt("https://phish.example/login?next=/inbox"),
+      ]);
+      const engine = createEngine(runner);
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toContain("https://phish.example");
+      // The origin is the whole of what a refusal says about the page.
+      expect(output.message).not.toContain("/login");
+      expect(output.message).not.toContain("hunter2");
+      // Reading the destination is all that ran; nothing was filled.
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
+    });
+
+    it("refuses a urlHandle whose resolved origin is outside the allowlist", async () => {
+      const ref = await seedRef("target-url", "https://phish.example/inbox");
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner);
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "open",
+        urlHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toContain("https://phish.example");
+      expect(output.message).not.toContain("/inbox");
+      expect(runner.calls).toEqual([]);
+    });
+
+    it("scrubs a value the parent run materialized out of a child engine's output", async () => {
+      // Two browser runs share one lease and therefore one page, so the
+      // register follows the lease: what the parent typed is withheld from
+      // what the child reads back off the same page.
+      const shared = createHarnessResolvedValueRegister();
+      shared.record("hunter2");
+      const runner = new FakeProcessRunner([{
+        stdout: '- textbox "Password": hunter2\n',
+        stderr: "",
+        exitCode: 0,
+      }]);
+      const child = createEngine(runner, { resolvedValueRegister: shared });
+
+      const result = await child.invokeBuiltinTool("browser", {
+        action: "snapshot",
+        interactive: true,
+      });
+
+      expect((result.output as BrowserToolSuccessOutput).output).toBe(
+        `- textbox "Password": ${RESOLVED_VALUE_PLACEHOLDER}\n`,
+      );
     });
 
     it("refuses a valueHandle whose referent is not a string, naming the type only", async () => {
       const ref = await seedRef("structured", { account: "12345678" });
-      const runner = new FakeProcessRunner();
+      const runner = new FakeProcessRunner([pageAt(`${ALLOWED_ORIGIN}/login`)]);
       const engine = createEngine(runner);
+      await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
         action: "fill",
@@ -568,7 +747,9 @@ describe("browser", () => {
         "browser valueHandle must name a string value; the reference holds a value of type object",
       );
       expect(output.message).not.toContain("12345678");
-      expect(runner.calls).toEqual([]);
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
     });
   });
 });

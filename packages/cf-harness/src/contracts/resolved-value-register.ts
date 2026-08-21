@@ -9,12 +9,25 @@
  * that materializes a value records it here and model-facing strings are
  * scrubbed through the register.
  *
- * Read the limit honestly. This matches strings, so it catches a value
- * returned as it was written and misses one the page transformed: HTML
- * entities, JSON escaping, a case change, or a value split across two
- * elements all pass through. It raises the cost of the obvious return path;
- * it does not close the class. Containment that holds has to come from the
- * labels on the data governing the read, not from recognizing the bytes.
+ * Read the limits honestly; there are two, and both are holes rather than
+ * fussiness.
+ *
+ * The first is that this matches strings. It catches a value returned as it
+ * was written and misses one the page transformed: HTML entities, JSON
+ * escaping, a case change, or a value split across two elements all pass
+ * through. It raises the cost of the obvious return path; it does not close
+ * the class.
+ *
+ * The second is {@link MIN_SCRUBBABLE_VALUE_LENGTH}. A value shorter than
+ * that is recorded but never scrubbed, so a short secret — a PIN of three
+ * digits, a one-character answer — comes back through this boundary intact.
+ * Scrubbing it is not the alternative: a substring that short occurs in
+ * ordinary text constantly, so matching it would blank unrelated output
+ * everywhere without hiding anything an observer could not guess from the
+ * shape of the placeholder anyway.
+ *
+ * Containment that holds has to come from the labels on the data governing
+ * the read, not from recognizing the bytes.
  *
  * The register is run-scoped and in-memory only. It holds the very values the
  * design exists to keep out of the model's context, so it is never written to
@@ -22,10 +35,19 @@
  */
 export const RESOLVED_VALUE_PLACEHOLDER = "<withheld value>";
 
+/**
+ * Shortest value the register will match on. Below four characters a value is
+ * not a distinguishing string: it is a fragment of ordinary prose, of a URL,
+ * of a hash, and replacing every occurrence of it corrupts output wholesale
+ * for no gain in secrecy.
+ */
+export const MIN_SCRUBBABLE_VALUE_LENGTH = 4;
+
 export interface HarnessResolvedValueRegister {
   /**
-   * Adds a materialized value to the register. An empty string is ignored:
-   * it matches everywhere and would scrub text that never carried it.
+   * Adds a materialized value to the register. A value shorter than
+   * {@link MIN_SCRUBBABLE_VALUE_LENGTH} counts towards {@link size} but is
+   * never matched; an empty string is ignored entirely.
    */
   record(value: string): void;
   /** `text` with every registered value replaced by the placeholder. */
@@ -54,6 +76,9 @@ export const createHarnessResolvedValueRegister =
           return;
         }
         recorded += 1;
+        if (value.length < MIN_SCRUBBABLE_VALUE_LENGTH) {
+          return;
+        }
         for (const form of echoForms(value)) {
           forms.add(form);
         }
@@ -80,7 +105,11 @@ export const createHarnessResolvedValueRegister =
 
 /**
  * `value` with every registered value scrubbed out of every string it
- * contains, including object keys.
+ * contains. Object KEYS are left alone: a key names a field of a protocol
+ * this code defines — `status`, `type`, `data` — and rewriting one changes
+ * the shape of a tool result, while a secret that happens to be spelled the
+ * same as a field name is an exotic case. Corrupting every later output is
+ * the certain cost; the key channel is the speculative one.
  *
  * A tool that materializes a value can only scrub what it prints itself. The
  * value reaches a page, and any tool that later reads that page — a skill
@@ -106,7 +135,12 @@ export const scrubResolvedValuesDeep = (
     if (typeof input === "object" && input !== null) {
       const result: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(input)) {
-        result[register.scrub(key)] = walk(entry);
+        Object.defineProperty(result, key, {
+          value: walk(entry),
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
       }
       return result;
     }

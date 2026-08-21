@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 
 import {
   createHarnessResolvedValueRegister,
+  MIN_SCRUBBABLE_VALUE_LENGTH,
   RESOLVED_VALUE_PLACEHOLDER,
   scrubResolvedValuesDeep,
 } from "../src/contracts/resolved-value-register.ts";
@@ -48,6 +49,28 @@ describe("resolved-value-register", () => {
       );
     });
 
+    it("records but never matches a value below the minimum length", () => {
+      const register = createHarnessResolvedValueRegister();
+      const short = "x".repeat(MIN_SCRUBBABLE_VALUE_LENGTH - 1);
+      register.record(short);
+      // Recorded, because the run did materialize it.
+      expect(register.size).toBe(1);
+      // Not matched: a substring that short is ordinary text everywhere, and
+      // replacing it would blank output that never carried the value.
+      expect(register.scrub(`the ${short}-axis of the exit code`)).toBe(
+        `the ${short}-axis of the exit code`,
+      );
+    });
+
+    it("matches a value at exactly the minimum length", () => {
+      const register = createHarnessResolvedValueRegister();
+      const shortest = "y".repeat(MIN_SCRUBBABLE_VALUE_LENGTH);
+      register.record(shortest);
+      expect(register.scrub(`typed ${shortest}`)).toBe(
+        `typed ${RESOLVED_VALUE_PLACEHOLDER}`,
+      );
+    });
+
     it("ignores an empty value, which would otherwise match everywhere", () => {
       const register = createHarnessResolvedValueRegister();
       register.record("");
@@ -78,7 +101,7 @@ describe("scrubResolvedValuesDeep", () => {
     });
   });
 
-  it("scrubs registered values out of nested strings, arrays, and object keys", () => {
+  it("scrubs registered values out of nested strings and arrays, leaving keys alone", () => {
     const register = createHarnessResolvedValueRegister();
     register.record("hunter2");
 
@@ -93,9 +116,26 @@ describe("scrubResolvedValuesDeep", () => {
     ).toEqual({
       stdout: `typed ${RESOLVED_VALUE_PLACEHOLDER} into the field`,
       rows: ["a", `saw ${RESOLVED_VALUE_PLACEHOLDER} again`],
-      [RESOLVED_VALUE_PLACEHOLDER]: "key too",
+      hunter2: "key too",
       nested: { deep: RESOLVED_VALUE_PLACEHOLDER },
       count: 3,
+    });
+  });
+
+  it("leaves a protocol key that a materialized value happens to equal", () => {
+    // A value equal to a field name is exotic; rewriting the field names of
+    // every later tool output is not, so the shape of the output wins.
+    const register = createHarnessResolvedValueRegister();
+    register.record("status");
+
+    expect(
+      scrubResolvedValuesDeep(register, {
+        status: "error",
+        data: { type: "cf-harness.browser-output", status: "ok" },
+      }),
+    ).toEqual({
+      status: "error",
+      data: { type: "cf-harness.browser-output", status: "ok" },
     });
   });
 
