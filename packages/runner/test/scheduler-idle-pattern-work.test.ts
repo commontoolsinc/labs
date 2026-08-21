@@ -1,0 +1,152 @@
+// The client durability barrier covers pattern-manager program work
+// (verification-coverage.md OW45, seat S-B — the client half of the
+// home-profile program-write loss): `Scheduler.idleWithPendingCommits`
+// is the client's "safe to navigate or reload" checkpoint — its
+// contract is "once it resolves, tearing the page down loses no
+// writes" — but a program-materialization commit travels through the
+// pattern manager's OWN async chains: a by-identity load that
+// cold-compiles and re-persists a space's program docs, and the
+// compile-cache write-back that IS the program commit. Pre-fix those
+// chains lived outside the barrier (that is why
+// `flushCompileCacheWrites` exists as a separate call), so a client
+// that reached idle and reloaded killed the trailing create's program
+// commit — the space then served nothing forever (rootcause §1; the
+// serving-side halves are OW31 S-A and OW46 S-D).
+//
+// Pinned here at both halves:
+//  1. the barrier CONSULTS the pattern manager and holds until its
+//     pending work settles (and plain `idle()` — reactive quiescence
+//     only, by contract — does NOT);
+//  2. the accessors read the REAL registries those chains register
+//     into — the single-flight load slot and the persistence set — so
+//     an entry in either holds the barrier, and once the barrier
+//     resolves no pattern work is in flight.
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+
+const signer = await Identity.fromPassphrase("scheduler idle pattern work");
+const space = signer.did();
+
+describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("holds the commit-aware barrier while pattern work is pending; plain idle() stays reactive-only", async () => {
+    // Stub the two methods the barrier consults, gating settlement on
+    // an external promise — the scheduler half of the pin. (The
+    // accessor half — that these reflect real loads and write-backs —
+    // is the next test.)
+    const gate = Promise.withResolvers<void>();
+    let pending = true;
+    let settleCalls = 0;
+    const manager = runtime.patternManager as unknown as {
+      hasPendingPatternWork: () => boolean;
+      pendingPatternWorkSettled: () => Promise<void>;
+    };
+    manager.hasPendingPatternWork = () => pending;
+    manager.pendingPatternWorkSettled = () => {
+      settleCalls += 1;
+      return gate.promise;
+    };
+
+    // Plain idle(): reactive quiescence only, by contract — must not
+    // consult or wait for pattern work (the serving loop's settle
+    // probes ride this and must not chase client persistence).
+    await runtime.scheduler.idle();
+    expect(settleCalls).toBe(0);
+
+    let resolved = false;
+    const barrier = runtime.scheduler.idleWithPendingCommits().then(() => {
+      resolved = true;
+    });
+    // Give the barrier ample turns: it must be HELD by the pending
+    // pattern work, not resolve in a later microtask.
+    for (let i = 0; i < 20; i++) {
+      await clock.tick(5);
+    }
+    expect(resolved).toBe(false);
+    expect(settleCalls).toBeGreaterThanOrEqual(1);
+
+    pending = false;
+    gate.resolve();
+    await barrier;
+    expect(resolved).toBe(true);
+  });
+
+  it("the accessors reflect real work: a registered load holds the barrier, and after the barrier no pattern work is in flight", async () => {
+    // The LOAD half, driven at the single-flight registry the load path
+    // registers into (an in-flight load's whole lifecycle can complete
+    // inside one fake-clock drain, so probing a real load from outside
+    // is racy by construction; the registry entry IS the registration
+    // the accessor must reflect): an entry present ⇒ pattern work
+    // pending ⇒ the commit-aware barrier holds until it settles.
+    const manager = runtime.patternManager as unknown as {
+      inProgressByIdentityLoads: Map<string, Promise<unknown>>;
+    };
+    const gate = Promise.withResolvers<void>();
+    manager.inProgressByIdentityLoads.set(
+      `${space}\0ow45-synthetic-load`,
+      gate.promise,
+    );
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
+    let loadBarrierResolved = false;
+    const loadBarrier = runtime.scheduler.idleWithPendingCommits().then(() => {
+      loadBarrierResolved = true;
+    });
+    for (let i = 0; i < 10; i++) {
+      await clock.tick(5);
+    }
+    expect(loadBarrierResolved).toBe(false);
+    manager.inProgressByIdentityLoads.delete(`${space}\0ow45-synthetic-load`);
+    gate.resolve();
+    await loadBarrier;
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
+
+    // The WRITE-BACK half, driven at the same registry
+    // `persistCompileCacheTracked` registers into (`compileCacheWrites`
+    // — the pre-existing set `flushCompileCacheWrites` and shutdown
+    // replication already consume, so real persistence populating it is
+    // already load-bearing behavior): an in-flight program
+    // materialization holds the barrier until durable. (A REAL compile
+    // is not driven here: under the suite's fake clock the compiler's
+    // real I/O and the logical timers cannot be sequenced
+    // deterministically from outside.)
+    const writeManager = runtime.patternManager as unknown as {
+      compileCacheWrites: Set<Promise<unknown>>;
+    };
+    const writeGate = Promise.withResolvers<void>();
+    writeManager.compileCacheWrites.add(writeGate.promise);
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
+    let writeBarrierResolved = false;
+    const writeBarrier = runtime.scheduler.idleWithPendingCommits().then(
+      () => {
+        writeBarrierResolved = true;
+      },
+    );
+    for (let i = 0; i < 10; i++) {
+      await clock.tick(5);
+    }
+    expect(writeBarrierResolved).toBe(false);
+    writeManager.compileCacheWrites.delete(writeGate.promise);
+    writeGate.resolve();
+    await writeBarrier;
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
+  });
+});

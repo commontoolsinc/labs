@@ -5067,12 +5067,29 @@ supply; OW29/OW32/OW34 closed):
     program/compile-cache materialization docs are system-class,
     content-addressed, idempotent writes exempt from the foreign-write
     refusal (this arm also heals already-broken spaces on next
-    demand); **S-B** the client pending-commit durability barrier
-    covering program materialization (`Scheduler.idleWithPendingCommits`
-    — `waitForRuntimeIdle` must not return before the program is
-    durable); **S-C** heal-on-read: re-issue program materialization
-    on adopt/open when the space lacks the program docs for a
-    referenced patternIdentity. Trigger: lifts the
+    demand); **S-B CLOSED 2026-08-21** (optimize-on-main
+    client-durability pass; report:
+    `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`):
+    the client durability barrier now covers program materialization —
+    `Scheduler.idleWithPendingCommits` (what `waitForRuntimeIdle`
+    reaches through the runtime-client's `handleIdle`) additionally
+    awaits the pattern manager's in-flight by-identity loads (whose
+    cold-load arm recompiles and re-persists a space's program
+    closure) and compile-cache write-backs (the program commit
+    itself), joint-fixpoint with pending commits; plain `idle()` stays
+    reactive-only, so serving-loop settle probes are untouched
+    (red-first pin: `scheduler-idle-pattern-work.test.ts`); **S-C**
+    heal-on-read: re-issue program materialization on adopt/open when
+    the space lacks the program docs for a referenced patternIdentity
+    — **FLAGGED OPEN, not built** (the same pass): the re-issue's
+    SOURCE is an unstated semantic — the in-memory artifact index
+    retains evaluated exports, not the module bytes a
+    re-materialization needs, so healing needs either retained
+    closure bytes (a memory-policy decision), a cross-space donor
+    probe (which spaces may donate is a policy decision), or S-A's
+    server-side heal (which the rootcause already names as healing
+    broken spaces on next demand) — routed to the owner with the
+    OW31/S-A decision rather than filled. Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
     (jointly with OW31's build if S-A takes the carriage arm).
   - **OW46 — the silent forever-park is invisible (seat S-D;

@@ -417,6 +417,45 @@ export class PatternManager {
   }
 
   /**
+   * Whether any pattern work that produces or persists PROGRAM DOCS is
+   * in flight: a by-identity load (whose cold-load arm recompiles and
+   * RE-PERSISTS a space's program closure) or a compile-cache
+   * write-back (which IS the program-materialization commit). Consulted
+   * by the client durability barrier
+   * (`Scheduler.idleWithPendingCommits` — verification-coverage.md
+   * OW45, seat S-B): the barrier's contract is "once it resolves,
+   * tearing the page down loses no writes", and a program commit
+   * issued from a post-arrival load chain is exactly a write a reload
+   * would otherwise kill (the home-profile program-write loss). Both
+   * sets register during their chain's first awaits — the
+   * single-flight load slot before any storage read, the persistence
+   * slot at `persistCompileCacheTracked` entry — and every initiator
+   * (a piece start, an event handler, an awaited IPC request) is
+   * itself covered until the registration lands, so a chain running
+   * when the barrier's fixpoint drains is visible to it.
+   */
+  hasPendingPatternWork(): boolean {
+    return this.inProgressByIdentityLoads.size > 0 ||
+      this.compileCacheWrites.size > 0;
+  }
+
+  /**
+   * Settle every currently-registered by-identity load and
+   * compile-cache write-back (failures settle — they are the original
+   * caller's to surface, not the barrier's). Work registered WHILE
+   * awaiting is the caller's to re-check: the scheduler barrier
+   * re-evaluates from scratch after each settle, the same
+   * joint-fixpoint structure pending commits use, so a load that
+   * registers its write-back mid-await is seen by the next pass.
+   */
+  async pendingPatternWorkSettled(): Promise<void> {
+    await Promise.allSettled([
+      ...this.inProgressByIdentityLoads.values(),
+      ...this.compileCacheWrites,
+    ]);
+  }
+
+  /**
    * Attach a rehydration `program` to a hand-built pattern object (one with no
    * module-scope entry ref). The only surviving job of the old
    * `registerPattern`: source-bearing tests/builtins that construct a Pattern in

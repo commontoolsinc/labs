@@ -826,6 +826,27 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (
+        awaitPendingCommits &&
+        this.runtime.patternManager.hasPendingPatternWork()
+      ) {
+        // In-flight PATTERN work: a by-identity load (whose cold-load
+        // arm recompiles and re-persists a space's program docs) or a
+        // compile-cache write-back — the program-materialization
+        // commit itself (verification-coverage.md OW45, seat S-B).
+        // This barrier is the client's "safe to navigate or reload"
+        // checkpoint, and a program commit issued from a post-arrival
+        // load chain is exactly a write a reload would otherwise kill:
+        // the home-profile create's program commit died with the
+        // reload, nothing re-issued it, and the created space served
+        // nothing forever. Same recheck-from-scratch structure as
+        // pending commits — a load that registers its write-back
+        // mid-await is seen by the next pass, and the write-back's own
+        // storage commits land in the pending-commit branch above.
+        // Commit-aware callers only: plain idle() stays reactive-only
+        // (the serving loop's settle probes must not chase client
+        // persistence).
+        this.runtime.patternManager.pendingPatternWorkSettled().then(recheck);
       } else if (this.disposed) {
         // Every branch below parks on `idlePromises`, which only the execute
         // loop drains — and `execute()` returns immediately once disposed. So
