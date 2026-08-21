@@ -546,6 +546,113 @@ export class PatternManager {
     return identity.startsWith("keyless:");
   }
 
+  /** Heal-on-read attempts already made this session, keyed
+   * `${space}\0${entryIdentity}` — gates the HIT-path queue only (a live
+   * artifact renders on every frame; the probe must not run per render).
+   * The cold-load path's synchronous heal runs inside the single-flighted
+   * load and needs no gate. */
+  #healAttempts = new Set<string>();
+
+  /**
+   * S-C heal-on-read (verification-coverage.md OW45 seat S-C; RULED
+   * 2026-08-21 — owner: "ideally compilation happens on the server and
+   * clients just wait for it, but if that isn't the case yet, then
+   * let's mark this for a later improvement and do (b)"): when a load
+   * names a `patternIdentity` a space cannot serve, re-materialize the
+   * program docs there from the verified source closure of another
+   * space THIS CLIENT has open, under the client's OWN identity —
+   * ordinary authored writes, so no §2b carriage question arises, and
+   * the serving posture stays fail-closed (OW31 FLAG-4: a serving
+   * runtime's detached compile flows never write foreign spaces; its
+   * heal is S-A's carriage-borne replicate trigger). Content
+   * addressing makes the donor choice sound: `replicateClosures`
+   * verifies the closure and the identity pins the bytes.
+   *
+   * Returns whether the target space now holds the source closure.
+   */
+  async #healProgramDocsFromDonors(
+    entryIdentity: string,
+    space: MemorySpace,
+  ): Promise<boolean> {
+    if (this.runtime.servingPosture) return false;
+    if (PatternManager.isKeylessPatternIdentity(entryIdentity)) return false;
+    // Present already? (Also the QUEUED path's cheap truthful probe —
+    // source presence is exactly the load paths' healable test: a space
+    // holding the verified source closure recompiles on demand.)
+    const probeTx = this.runtime.edit();
+    try {
+      const present = await loadVerifiedSourceClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        probeTx,
+      );
+      if (present?.get(entryIdentity) !== undefined) return true;
+    } catch {
+      // fall through to the donor scan — an unreadable target heals too
+    } finally {
+      probeTx.abort?.("heal-on-read target probe complete");
+    }
+    const donors = (this.runtime.storageManager.openedSpaces?.() ?? [])
+      .filter((candidate) => candidate !== space);
+    for (const donor of donors) {
+      let hasDonorClosure = false;
+      const donorTx = this.runtime.edit();
+      try {
+        const docs = await loadVerifiedSourceClosure(
+          this.runtime,
+          donor,
+          entryIdentity,
+          donorTx,
+        );
+        hasDonorClosure = docs?.get(entryIdentity) !== undefined;
+      } catch {
+        hasDonorClosure = false;
+      } finally {
+        donorTx.abort?.("heal-on-read donor probe complete");
+      }
+      if (!hasDonorClosure) continue;
+      await this.replicateClosures(entryIdentity, donor, space);
+      logger.info("pattern-heal-on-read", () => [
+        `re-materialized program docs for ${entryIdentity} into ${space} ` +
+        `from ${donor} (OW45 S-C, client-side heal-on-read)`,
+      ]);
+      return true;
+    }
+    logger.debug("pattern-heal-on-read-no-donor", () => [
+      `no open space holds the source closure for ${entryIdentity}; ` +
+      `${space} stays unhealed`,
+    ]);
+    return false;
+  }
+
+  /**
+   * The HIT-path arm of the S-C heal: a load served from the in-memory
+   * artifact index still leaves the SPACE unhealed (the serving loop and
+   * every fresh runtime read the space, not this session's memory), so
+   * queue a once-per-(space, identity) background heal — tracked in
+   * `compileCacheWrites`, so the client durability barrier (OW45 S-B)
+   * covers it before a reload can kill it.
+   */
+  #queueProgramDocsHeal(entryIdentity: string, space: MemorySpace): void {
+    if (this.runtime.servingPosture) return;
+    if (PatternManager.isKeylessPatternIdentity(entryIdentity)) return;
+    const key = `${space}\0${entryIdentity}`;
+    if (this.#healAttempts.has(key)) return;
+    this.#healAttempts.add(key);
+    const heal = this.#healProgramDocsFromDonors(entryIdentity, space)
+      .then(() => {})
+      .catch((error) => {
+        logger.warn("pattern-heal-on-read-failed", () => [
+          `entry=${entryIdentity}`,
+          `space=${space}`,
+          String(error),
+        ]);
+      });
+    this.compileCacheWrites.add(heal);
+    heal.finally(() => this.compileCacheWrites.delete(heal));
+  }
+
   /**
    * Make a cross-space child piece independently loadable from its own space
    * (CT-1687). A fresh runtime navigating to a `Factory.inSpace(...)` child
@@ -1311,6 +1418,9 @@ export class PatternManager {
       !retryFailedRecovery && indexed !== undefined && isTrustedPattern(indexed)
     ) {
       this.esmCacheStats.byIdentityHits++;
+      // An in-memory hit still leaves the SPACE unhealed — queue the S-C
+      // heal-on-read so the space itself becomes loadable (OW45 S-C).
+      this.#queueProgramDocsHeal(entryIdentity, space);
       return indexed;
     }
     if (this.runtime.cfcEnforcementMode === "disabled") {
@@ -1324,6 +1434,9 @@ export class PatternManager {
       : this.patternFromEvaluatedModule(entryIdentity, symbol);
     if (live) {
       this.esmCacheStats.byIdentityHits++;
+      // Same as the indexed hit: the space may still lack the program
+      // docs (OW45 S-C).
+      this.#queueProgramDocsHeal(entryIdentity, space);
       return live;
     }
     // Check before single-flight: follower retries re-enter from the top and
@@ -1536,9 +1649,31 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
-    const entry = sourceDocs.get(entryIdentity);
-    if (entry === undefined) return undefined;
+    if (sourceDocs?.get(entryIdentity) === undefined) {
+      // The space holds no source closure for this identity — the S-C
+      // heal-on-read (OW45; RULED 2026-08-21, option (b)): re-materialize
+      // it from another open space's verified source closure, then
+      // re-read and continue the ordinary cold-load flow. Awaited (not
+      // queued) so THIS load serves the pattern — the adopt/open case.
+      // A serving runtime returns false here without scanning
+      // (fail-closed; OW31 FLAG-4).
+      if (!(await this.#healProgramDocsFromDonors(entryIdentity, space))) {
+        return undefined;
+      }
+      const healedTx = this.runtime.edit();
+      try {
+        sourceDocs = await loadVerifiedSourceClosure(
+          this.runtime,
+          space,
+          entryIdentity,
+          healedTx,
+        );
+      } finally {
+        healedTx.abort?.("heal-on-read re-read complete");
+      }
+      if (sourceDocs?.get(entryIdentity) === undefined) return undefined;
+    }
+    const entry = sourceDocs.get(entryIdentity)!;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
     const sourceRoots = sourcePackagePaths(
       entry,

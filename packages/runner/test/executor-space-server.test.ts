@@ -38,6 +38,7 @@ import {
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -974,6 +975,162 @@ describe("stage G SpaceServer recovery seams", () => {
     }
     expect(stats.structureLoadFailures).toBe(0);
     expect(stats.structureLoadTerminal).toBe(0);
+  });
+
+  it("the S-C heal-on-read un-parks a deferring root: a client's adopt/open materializes the program docs, the demand cycle loads, the deferral stops (OW45 S-C × OW46)", async () => {
+    // The full home-profile recovery shape end to end: a demanded root
+    // whose pattern identity the space cannot serve DEFERS per cycle
+    // (OW46's streak names it); then a CLIENT — not the serving
+    // runtime — opens the space, its load misses, and the S-C
+    // heal-on-read re-materializes the program docs from an open donor
+    // space under the client's own identity; the heal's commit drives
+    // the next demand cycle, the load STARTS, and the deferrals stop
+    // (the streak retires with the start — stuck never re-counts).
+    const donorSigner = await Identity.fromPassphrase("ow45-sc-donor");
+    const DONOR = donorSigner.did();
+    const clientManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const client = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    try {
+      // The donor: the client compiled this pattern into its own other
+      // space earlier in the session (the home-space shape).
+      const compiled = await client.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 11) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space: DONOR as never });
+      await client.patternManager.flushCompileCacheWrites();
+      await client.storageManager.synced();
+      const identity = getArtifactEntryRef(compiled)?.identity;
+      if (identity === undefined) throw new Error("no entry identity");
+
+      // The broken root in the SERVED space: pattern pointer present,
+      // program docs absent.
+      const rootId = "of:ow45-sc-heal-root";
+      Engine.applyCommit(engine, {
+        sessionId: "session:ow45-sc-writer",
+        space,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: rootId,
+            value: {
+              value: { n: 1 },
+              patternIdentity: { identity, symbol: "default" },
+            },
+          }],
+        },
+        commitClass: "system",
+      });
+
+      const stats = emptyServingLoopStats();
+      const created = newSpaceServer({
+        stats,
+        serverFacade: demandFacade([{ id: rootId }]),
+      });
+      expect(await created.activate()).toBe(true);
+
+      // Drive cycles until the root is provably deferring (the park).
+      for (
+        let i = 0;
+        stats.structureLoadDeferred < 3 && i < 20;
+        i++
+      ) {
+        const applied = await server.writeDocument(
+          space,
+          `of:ow45-sc-noise-${i}`,
+          { n: i },
+        );
+        created.enqueueCommit({
+          space,
+          seq: applied.seq,
+          class: "system",
+          sessionId: "session:ow45-sc-noise",
+          writes: [{ id: `of:ow45-sc-noise-${i}`, scopeKey: "space" }],
+        });
+        await waitUntil(
+          () => created.watermark >= applied.seq,
+          `pre-heal cycle ${i} to settle`,
+        );
+      }
+      expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(3);
+
+      // THE HEAL: the client's adopt/open — a plain by-identity load in
+      // the broken space — re-materializes the program docs from the
+      // donor (S-C; awaited inside the load, written as the client's
+      // ordinary authored commits).
+      const healed = await client.patternManager.loadPatternByIdentity(
+        identity,
+        "default",
+        space,
+      );
+      expect(healed).toBeDefined();
+      await client.patternManager.flushCompileCacheWrites();
+      await client.storageManager.synced();
+
+      // The heal's commits re-drive the demand cycle; the load STARTS
+      // and the deferrals STOP.
+      const healSeq = Engine.serverSeq(engine);
+      created.enqueueCommit({
+        space,
+        seq: healSeq,
+        class: "authored",
+        sessionId: "session:ow45-sc-heal",
+        writes: [{ id: rootId, scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => created.watermark >= healSeq,
+        "the heal cycle to settle",
+      );
+      const deferredAfterHeal = stats.structureLoadDeferred;
+      // Mid-materialization cycles may have THROWN on partial-closure
+      // reads (integrity verification over a half-written closure) —
+      // that is the loop's counted-and-retried FAILURE arm working as
+      // designed, and it must stop once the closure is complete.
+      const failuresAfterHeal = stats.structureLoadFailures;
+      // Further cycles re-attempt NOTHING for the (now started) root:
+      // no more deferrals, no more failures, and the started piece's
+      // demanded derivation actually lands.
+      for (let i = 0; i < 3; i++) {
+        const applied = await server.writeDocument(
+          space,
+          `of:ow45-sc-post-${i}`,
+          { n: i },
+        );
+        created.enqueueCommit({
+          space,
+          seq: applied.seq,
+          class: "system",
+          sessionId: "session:ow45-sc-noise",
+          writes: [{ id: `of:ow45-sc-post-${i}`, scopeKey: "space" }],
+        });
+        await waitUntil(
+          () => created.watermark >= applied.seq,
+          `post-heal cycle ${i} to settle`,
+        );
+      }
+      expect(stats.structureLoadDeferred).toBe(deferredAfterHeal);
+      expect(stats.structureLoadFailures).toBe(failuresAfterHeal);
+      // The compressed drive stayed under the stuck threshold and the
+      // heal resolved the park — no crossing was ever counted.
+      expect(stats.structureLoadStuck).toBe(0);
+    } finally {
+      await client.dispose();
+      await clientManager.close();
+    }
   });
 
   it("re-arms a terminal root on a commit touching it and LOADS a piece created after the terminal decision (OW19's not-yet half)", async () => {
