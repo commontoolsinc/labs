@@ -93,7 +93,7 @@ export const MAX_DEPTH_MARKER = "[Max depth exceeded]";
  * JSON.stringify that replaces circular references with "[Circular]" and
  * values nested deeper than `MAX_JSON_DEPTH` with `MAX_DEPTH_MARKER`.
  *
- * TODO(danfuzz): this is an unsafe use of `stringify()` for fabric values:
+ * TODO(danfuzz): this is an unsafe use of `stringify()` for `FabricValue`s:
  * the piece prop values this file renders are live in-process cell reads,
  * and a `FabricSpecialObject` among them (a `FabricBytes`, a `FabricError`)
  * serializes as `{}` in the mounted `.json` file contents, silently. Wants a

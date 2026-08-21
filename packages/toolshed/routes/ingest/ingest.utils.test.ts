@@ -22,7 +22,7 @@ import {
 } from "./ingest.utils.ts";
 
 // Golden cell id for cause "location/2026-07-01" — pins the cross-repo cell
-// address so a fabric hash-format change fails CI loudly (loom recomputes it).
+// address so a `FabricHash`-format change fails CI loudly (loom recomputes it).
 const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
 
 // Golden channel id — rotate-in-place is a security property, so pin the exact
@@ -226,7 +226,7 @@ describe("ingest journal sink", () => {
 
   it("day-cell id is a stable function of the cause (cross-repo golden id)", async () => {
     // loom READS by recomputing this exact id from the cause string. If the
-    // fabric hash format changes, this literal breaks CI loudly instead of
+    // `FabricHash` format changes, this literal breaks CI loudly instead of
     // silently orphaning loom's reader.
     const cell = journalCell(runtime, reg(), "2026-07-01");
     await cell.sync();

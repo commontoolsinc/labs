@@ -123,8 +123,8 @@ const CAVEAT =
 /**
  * Canonical content key for cross-space clustering. Reuses the data-model's
  * fabric-aware `hashStringOf` (key-order-insensitive, and correct for
- * BigInt/Fabric instances) instead of a hand-rolled sorted `JSON.stringify`,
- * which throws on BigInt and erases Fabric types — a value-model fork the
+ * BigInt/`FabricInstance`s) instead of a hand-rolled sorted `JSON.stringify`,
+ * which throws on BigInt and erases the fabric type — a value-model fork the
  * convergence verdict must not depend on.
  */
 function canonical(v: unknown): string {

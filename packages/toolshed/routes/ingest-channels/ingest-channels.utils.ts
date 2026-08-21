@@ -215,7 +215,8 @@ const authorize = async (
 /**
  * Rebuild revocation entries as plain objects.
  *
- * Values read back from a cell are deep-frozen fabric values, and re-embedding
+ * Values read back from a cell are deep-frozen `FabricValue`s, and
+ * re-embedding
  * one into a NEW array does not round-trip — the array reads back absent, with
  * no error. Every site that writes a stored registration back has to do this;
  * the two that matter are `persist` and `processRevoke`.
@@ -296,7 +297,7 @@ const persist = async (
   // success message. The audit trail moves to `revocations` instead, so nothing
   // is erased.
   // Rebuilt as plain objects rather than re-embedding the entries read back
-  // from storage: those are deep-frozen fabric values, and writing them back
+  // from storage: those are deep-frozen `FabricValue`s, and writing them back
   // inside a new array does not round-trip — the history silently vanishes.
   // Pinned by the re-mint-after-revoke test.
   const revocations = params.existing?.revoked !== undefined
