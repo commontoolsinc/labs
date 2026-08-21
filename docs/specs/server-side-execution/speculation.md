@@ -76,12 +76,18 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   whose schema promised a value would crash on the `undefined` (the
   OW51 `splitDefinitions` TypeError, observed on BOTH the client and
   the serving runtime because the read path is shared code). Instead
-  the lazy read REFUSES: it registers the dead-end doc's read (the
+  the lazy read REFUSES (when the reader's schema PROMISES a value —
+  see the carve-outs below): it registers the dead-end doc's read (the
   dependency that re-triggers the run when the doc arrives) and the run
   is disposed as a non-event — **output `undefined`, no action failure,
   re-triggered when any of its reads so far change, exactly like a
-  regular call whose inputs were not ready.** The owner's ruling,
-  verbatim:
+  regular call whose inputs were not ready.** Scope, precisely (#6179
+  review, item 5b): the refusal is on the SCHEMA-aware lazy read path
+  only — a SCHEMA-LESS read takes `validateAndTransform`'s
+  query-result-proxy early-out before resolution and so never reaches
+  the gate (consistent with the mismatch/refusal machinery, which has
+  always been schema-path-only; compiled patterns are schema'd). The
+  owner's ruling, verbatim:
 
   > (a), server-side should match the current client behavior exactly.
   > also note that with the lazy proxy based evaluation a lift can
