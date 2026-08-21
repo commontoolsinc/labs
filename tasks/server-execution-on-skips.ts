@@ -254,7 +254,7 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "two. The remaining blocker is OW49 — main's " +
         "`assertNoDivergentIfcBranches` (runner cfc/schema-merge.ts, " +
         "#3263) refuses the wish builtin's own /result declaration " +
-        "`anyOf[{type:\"undefined\"}, <requested schema>]` whenever the " +
+        '`anyOf[{type:"undefined"}, <requested schema>]` whenever the ' +
         "requested schema carries ifc (the profile consumer view). Under " +
         "ON the serving loop persists that envelope first, and the " +
         "browser's raw:wish, writing a changed /result link against it, " +

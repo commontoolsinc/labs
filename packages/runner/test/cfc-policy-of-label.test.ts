@@ -263,7 +263,9 @@ describe("PolicyOf label-time binding", () => {
     // OW50: crash -> recorded reason -> rejected commit (see above).
     expect(tx.prepareCfc()).toBe("");
     const result = await tx.commit();
-    expect(String(result.error?.message)).toContain("compiler-lowered PolicyOf");
+    expect(String(result.error?.message)).toContain(
+      "compiler-lowered PolicyOf",
+    );
   });
 
   it("compiles, installs, persists, and reloads a direct authored policy", async () => {

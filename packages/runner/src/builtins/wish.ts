@@ -2097,11 +2097,11 @@ export function wish(
     // envelope as-is, and the runtime-authored `error`/`$UI` fields carry
     // no policy of their own (`true` in the wish-state schema).
     errorTx.writeValueOrThrow(
-      { ...bareLink, path: ["error"] },
+      { ...bareLink, path: [...stateLink.path, "error"] },
       message,
     );
     errorTx.writeValueOrThrow(
-      { ...bareLink, path: [UI] },
+      { ...bareLink, path: [...stateLink.path, UI] },
       errorUI(message) as unknown as Parameters<
         IExtendedStorageTransaction["writeValueOrThrow"]
       >[1],
