@@ -535,6 +535,27 @@ type BrowserHandleResolution =
   | { input?: undefined; values?: undefined; error: string };
 
 /**
+ * `input` with each bound handle replaced by a placeholder standing in for the
+ * value it will resolve to, so the action's shape can be checked before
+ * anything is read. The placeholders are only ever seen by `planBrowserAction`
+ * — the real values are substituted after resolution — and the URL form is
+ * well-formed so an `open` passes its scheme check on shape rather than on
+ * the destination, which is validated separately once it is known.
+ */
+const HANDLE_SHAPE_PLACEHOLDER = "cf-harness-handle-placeholder";
+const HANDLE_SHAPE_PLACEHOLDER_URL = "https://handle.placeholder.invalid/";
+
+const withHandlePlaceholders = (input: BrowserToolInput): BrowserToolInput => ({
+  ...input,
+  ...(input.valueHandle !== undefined
+    ? { value: HANDLE_SHAPE_PLACEHOLDER, valueHandle: undefined }
+    : {}),
+  ...(input.urlHandle !== undefined
+    ? { url: HANDLE_SHAPE_PLACEHOLDER_URL, urlHandle: undefined }
+    : {}),
+});
+
+/**
  * `input` with each bound handle replaced by the value it stands for, and the
  * values that substitution produced. Returns the input unchanged when the
  * call binds no handle.
@@ -610,13 +631,18 @@ export const browserTool: HarnessToolDefinition<
     if (fields.error !== undefined) {
       return errorOutput("invalid_input", fields.error);
     }
+    // The whole action is validated before anything is read. A call that
+    // cannot execute — a fill with a valid handle but no ref — must not reach
+    // the fabric, because resolving would read the value and arm the run's
+    // scrub for a call that never happened. Handles stand in as placeholders
+    // for that check: shape is all it is asking about.
     const usesHandle = input.valueHandle !== undefined ||
       input.urlHandle !== undefined;
-    if (!usesHandle) {
-      const shape = planBrowserAction(input);
-      if (shape.error !== undefined) {
-        return errorOutput("invalid_input", shape.error);
-      }
+    const shape = planBrowserAction(
+      usesHandle ? withHandlePlaceholders(input) : input,
+    );
+    if (shape.error !== undefined) {
+      return errorOutput("invalid_input", shape.error);
     }
     const lease = context.browserAccess;
     if (lease === undefined) {
