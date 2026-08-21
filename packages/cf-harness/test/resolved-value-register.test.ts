@@ -101,30 +101,100 @@ describe("scrubResolvedValuesDeep", () => {
     });
   });
 
-  it("scrubs registered values out of nested strings and arrays, leaving keys alone", () => {
+  it("scrubs payload text fields, including nested ones, and leaves the rest", () => {
     const register = createHarnessResolvedValueRegister();
     register.record("hunter2");
 
     expect(
       scrubResolvedValuesDeep(register, {
+        outputId: "browser:1",
         stdout: "typed hunter2 into the field",
-        rows: ["a", "saw hunter2 again"],
+        output: ["a", "saw hunter2 again"],
+        detail: { note: "hunter2 once more" },
+        path: "/tmp/hunter2.txt",
         hunter2: "key too",
-        nested: { deep: "hunter2" },
         count: 3,
       }),
     ).toEqual({
+      outputId: "browser:1",
       stdout: `typed ${RESOLVED_VALUE_PLACEHOLDER} into the field`,
-      rows: ["a", `saw ${RESOLVED_VALUE_PLACEHOLDER} again`],
+      output: ["a", `saw ${RESOLVED_VALUE_PLACEHOLDER} again`],
+      detail: { note: `${RESOLVED_VALUE_PLACEHOLDER} once more` },
+      path: "/tmp/hunter2.txt",
       hunter2: "key too",
-      nested: { deep: RESOLVED_VALUE_PLACEHOLDER },
       count: 3,
     });
   });
 
+  it("scrubs a payload text field nested inside another tool result", () => {
+    const register = createHarnessResolvedValueRegister();
+    register.record("hunter2");
+
+    expect(
+      scrubResolvedValuesDeep(register, {
+        type: "cf-harness.subagent-return-output",
+        result: { status: "ok", message: "the child saw hunter2" },
+      }),
+    ).toEqual({
+      type: "cf-harness.subagent-return-output",
+      result: {
+        status: "ok",
+        message: `the child saw ${RESOLVED_VALUE_PLACEHOLDER}`,
+      },
+    });
+  });
+
+  it("scrubs a bare string, which is payload text in whole", () => {
+    const register = createHarnessResolvedValueRegister();
+    register.record("hunter2");
+
+    expect(scrubResolvedValuesDeep(register, "image at hunter2.png")).toBe(
+      `image at ${RESOLVED_VALUE_PLACEHOLDER}.png`,
+    );
+  });
+
+  it("leaves a protocol field a materialized value happens to spell", () => {
+    // Recording "browser" must not turn `outputId: "browser:1"` into a
+    // placeholder followed by `:1`: the result would no longer satisfy its
+    // tool descriptor, and status/output correlation would break with it.
+    const register = createHarnessResolvedValueRegister();
+    register.record("browser");
+
+    expect(
+      scrubResolvedValuesDeep(register, {
+        outputId: "browser:1",
+        toolId: "browser",
+        status: "ok",
+        output: "the browser tab is open",
+      }),
+    ).toEqual({
+      outputId: "browser:1",
+      toolId: "browser",
+      status: "ok",
+      output: `the ${RESOLVED_VALUE_PLACEHOLDER} tab is open`,
+    });
+  });
+
+  it("leaves a status a materialized value happens to spell", () => {
+    const register = createHarnessResolvedValueRegister();
+    register.record("error");
+
+    expect(
+      scrubResolvedValuesDeep(register, {
+        status: "error",
+        code: "command_failed",
+        message: "the page reported an error",
+      }),
+    ).toEqual({
+      status: "error",
+      code: "command_failed",
+      message: `the page reported an ${RESOLVED_VALUE_PLACEHOLDER}`,
+    });
+  });
+
   it("leaves a protocol key that a materialized value happens to equal", () => {
-    // A value equal to a field name is exotic; rewriting the field names of
-    // every later tool output is not, so the shape of the output wins.
+    // A key names a field of a protocol this code defines; rewriting one
+    // changes the shape of a tool result.
     const register = createHarnessResolvedValueRegister();
     register.record("status");
 

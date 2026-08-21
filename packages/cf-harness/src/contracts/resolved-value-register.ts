@@ -9,7 +9,7 @@
  * that materializes a value records it here and model-facing strings are
  * scrubbed through the register.
  *
- * Read the limits honestly; there are two, and both are holes rather than
+ * Read the limits honestly; there are three, and all are holes rather than
  * fussiness.
  *
  * The first is that this matches strings. It catches a value returned as it
@@ -25,6 +25,13 @@
  * ordinary text constantly, so matching it would blank unrelated output
  * everywhere without hiding anything an observer could not guess from the
  * shape of the placeholder anyway.
+ *
+ * The third belongs to {@link scrubResolvedValuesDeep}, the boundary that
+ * applies the register to a tool result. It reaches payload text fields only
+ * — `output`, `detail`, `message`, `stdout`, `stderr` — because rewriting an
+ * arbitrary field would corrupt the shape of the result whenever a
+ * materialized value happens to spell one of its protocol words. A value
+ * echoed back in a field outside that set is not scrubbed.
  *
  * Containment that holds has to come from the labels on the data governing
  * the read, not from recognizing the bytes.
@@ -104,12 +111,39 @@ export const createHarnessResolvedValueRegister =
   };
 
 /**
- * `value` with every registered value scrubbed out of every string it
- * contains. Object KEYS are left alone: a key names a field of a protocol
- * this code defines — `status`, `type`, `data` — and rewriting one changes
- * the shape of a tool result, while a secret that happens to be spelled the
- * same as a field name is an exotic case. Corrupting every later output is
- * the certain cost; the key channel is the speculative one.
+ * The keys whose values {@link scrubResolvedValuesDeep} treats as text a tool
+ * produced. Every other field of a tool result names part of a protocol this
+ * code defines, and is left alone.
+ */
+export const SCRUBBED_PAYLOAD_TEXT_FIELDS: ReadonlySet<string> = new Set([
+  "output",
+  "detail",
+  "message",
+  "stdout",
+  "stderr",
+]);
+
+/**
+ * `value` with every registered value scrubbed out of the payload text it
+ * carries. Scrubbing is confined to a fixed allowlist of keys —
+ * {@link SCRUBBED_PAYLOAD_TEXT_FIELDS}: `output`, `detail`, `message`,
+ * `stdout`, and `stderr` — which are the fields a tool result uses for text a
+ * tool produced. A string reached through one of those keys is scrubbed,
+ * including one nested inside it, and so is a bare string handed in as the
+ * whole value.
+ *
+ * Everything else is left exactly as it stands: object keys, and the values
+ * of every other field. `outputId`, `type`, `status`, `code`, `toolId`,
+ * `exitCode`, refs, and paths describe the shape of a tool result rather than
+ * carrying page-derived text, and rewriting one breaks the result against its
+ * tool descriptor — a value of `"browser"` would turn `outputId: "browser:1"`
+ * into a placeholder followed by `:1`, and a value of `"error"` would rewrite
+ * a status. The allowlist fails closed toward keeping the protocol intact.
+ *
+ * The cost is stated plainly, and it is the third hole in a mechanism already
+ * documented as a backstop: a materialized value echoed somewhere outside
+ * those fields is not scrubbed. A tool that carries page text in a field of
+ * its own naming has to add that field here.
  *
  * A tool that materializes a value can only scrub what it prints itself. The
  * value reaches a page, and any tool that later reads that page — a skill
@@ -125,18 +159,21 @@ export const scrubResolvedValuesDeep = (
   if (register === undefined || register.size === 0) {
     return value;
   }
-  const walk = (input: unknown): unknown => {
+  const walk = (input: unknown, inPayloadText: boolean): unknown => {
     if (typeof input === "string") {
-      return register.scrub(input);
+      return inPayloadText ? register.scrub(input) : input;
     }
     if (Array.isArray(input)) {
-      return input.map(walk);
+      return input.map((entry) => walk(entry, inPayloadText));
     }
     if (typeof input === "object" && input !== null) {
       const result: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(input)) {
         Object.defineProperty(result, key, {
-          value: walk(entry),
+          value: walk(
+            entry,
+            inPayloadText || SCRUBBED_PAYLOAD_TEXT_FIELDS.has(key),
+          ),
           writable: true,
           enumerable: true,
           configurable: true,
@@ -146,5 +183,5 @@ export const scrubResolvedValuesDeep = (
     }
     return input;
   };
-  return walk(value);
+  return walk(value, typeof value === "string");
 };

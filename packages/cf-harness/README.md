@@ -1173,14 +1173,21 @@ origin for a mail credential does not stop a banking credential going there too.
 Binding permitted destinations to the handle itself, at mint time, is the shape
 that closes both, and it is not what this does.
 
-Once a run materializes a value, that string is scrubbed out of model-facing
-tool output for the rest of the run, at the same boundary where addresses become
-handle tokens. The scrub is a backstop against the obvious return path — a later
-snapshot, a skill script driving the same browser, a failing command's stderr —
-and not a containment boundary. It matches strings, so a value the page
-transformed (HTML-escaped, case-changed, split across elements) passes through,
-and values below a few characters are recorded but never matched, because
-matching them would blank unrelated text without protecting anything.
+Once a run materializes a value, that string is scrubbed out of the
+text-carrying fields of model-facing tool output — `output`, `detail`,
+`message`, `stdout`, `stderr` — for the rest of the run, at the same boundary
+where addresses become handle tokens. The scrub is a backstop against the
+obvious return path — a later snapshot, a skill script driving the same browser,
+a failing command's stderr — and not a containment boundary. Three things pass
+through it. It matches strings, so a value the page transformed (HTML-escaped,
+case-changed, split across elements) is not caught. Values below a few
+characters are recorded but never matched, since matching them would blank
+unrelated text without protecting anything. And it reaches only those named
+fields, because scrubbing the whole envelope corrupts it: a value that happens
+to read `browser` would rewrite an `outputId` and the result would stop
+satisfying its own descriptor. A run that resumes starts with an empty register,
+so a value materialized before the resume is no longer recognized — persisting
+the register would mean writing the very values it exists to withhold.
 
 So what a handle buys is bounded, and worth stating exactly: the model never
 holds the value, cannot read it back through the obvious paths, and can only
