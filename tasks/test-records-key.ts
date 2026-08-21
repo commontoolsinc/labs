@@ -1039,6 +1039,10 @@ alone. Take ${RECORDS_KEY_FILE_VARIABLE} out of its "env" by hand.`);
     console.log("Nothing to remove; this workstation was not recording.");
     return 0;
   }
+  // What somebody else set stays, and so does whatever it points at, so
+  // saying recording has stopped would be saying something untrue.
+  const kept = removals.some((removal) => removal.outcome !== "removed") ||
+    configs.some((config) => config.outcome !== "removed");
 
   const root = defaultSpoolRoot(deps.env);
   const spools = root === undefined ? undefined : await spoolCount(root);
@@ -1053,7 +1057,11 @@ A later key ships them; remove that directory to throw them away.`);
   }
 
   console.log(`
-Every new shell records nothing. Two things this does not do.
+${
+    kept
+      ? "What this tool put here is gone."
+      : "Every new shell records nothing."
+  } Two things this does not do.
 
 The key still exists. This stops the machine using it, and the service
 account and the key itself are untouched; a key that has leaked stops

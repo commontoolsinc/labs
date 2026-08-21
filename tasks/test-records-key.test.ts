@@ -1313,6 +1313,28 @@ describe("test-records-key", () => {
       expect(await uninstallCommand(deps)).toBe(0);
     });
 
+    it("does not claim recording stopped when a line was kept", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.writeTextFile(
+        join(home, ".zshenv"),
+        `export CF_TEST_RECORDS_KEY_FILE="/elsewhere.json"\n`,
+      );
+      const said: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => said.push(line);
+      try {
+        expect(await uninstallCommand(deps)).toBe(0);
+      } finally {
+        console.log = log;
+      }
+
+      const report = said.join("\n");
+      expect(report).toContain("What this tool put here is gone.");
+      expect(report).not.toContain("Every new shell records nothing.");
+    });
+
     it("keeps an export the tool did not write", async () => {
       withStub({});
       const inner = deps.env;
