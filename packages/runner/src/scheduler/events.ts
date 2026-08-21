@@ -1291,6 +1291,11 @@ export async function dispatchQueuedEvent(state: {
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
           runFinalCommitCallback();
+          // A CFC-refused write is silent data loss of user intent whichever
+          // disposition carries it, and the `logger.warn` below is the opt-in
+          // scheduler logger, disabled in deployed workers. Report it here for
+          // the same reason the give-up path does.
+          reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
