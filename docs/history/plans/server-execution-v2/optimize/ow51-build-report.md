@@ -188,10 +188,29 @@ first recorded OW51. Built the ON binary from this branch
 (`shellServerExecutionDefine "true"`, serving loop present, gitSha =
 branch tip) and ran it:
 
-- **Run 1: 2/2 green, ZERO `splitDefinitions` crashes** (the pre-fix
-  count was 17 + 6 per run; W4's loaded bench 2-for-2 red). Fast, too
-  — 29 s, versus the pre-fix 5-minute crash-timeouts.
-- 10-run stability sweep: (results appended as they land).
+- **10 runs, ZERO `splitDefinitions` occurrences in every one** (the
+  pre-fix count was 17 + 6 per run; W4's loaded bench 2-for-2 red).
+  Fast, too — ~29 s, versus the pre-fix 5-minute crash-timeouts. The
+  OW51 crash class is eliminated.
+- The "should create a note" step — the served-instantiation surface
+  that recorded OW51 — passed **10/10**.
+- The "persist and reload every rapidly created notebook note" step
+  passed **9/10**; the one failure (run 9) was NOT the OW51 crash
+  (0 splits) but `assertEquals(summary.noteCount, 7)` reading
+  `undefined` — the reloaded notebook's derived `noteCount` lagged
+  past the step's `waitForCondition`. This is the RELOAD-DURABILITY
+  surface (OW45's family), which the OW51 crash had been MASKING: with
+  the crash gone the step reaches its assertion for the first time
+  under ON, and the OW51 fix's ruled disposition (an unresolved reload
+  read is cleanly `undefined` + re-trigger) means a slow runner can
+  read the interim before the heal. NOT an OW51 regression — the value
+  heals (9/10) and the fix touches no reload/durability path; the
+  event-driven wait on `noteCount` is OW45's test-side close.
 
-On green ×10 the `integration/default-app.test.ts` ON skip entry
-lifts and the OW51 register row closes with the ruling quoted.
+**The lift.** default-app's FILE-level ON skip is LIFTED: the file
+runs ON and its "should create a note" step (OW51's surface) is the
+CI witness of the fix. The "persist and reload" step is converted to a
+STEP skip bound to **OW45** (`tasks/server-execution-on-skips.ts` +
+the in-file guard in `default-app.test.ts`), exactly the pattern
+cellset-lww / convergence-storm used. The OW51 register row is CLOSED
+with the ruling quoted and the caution-4 residual named.

@@ -5223,7 +5223,14 @@ supply; OW29/OW32/OW34 closed):
     JOINTLY with OW31's cf:module cross-space run residual — S-A and
     S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
     pass's joint preview run had step 1 green in ~10 s with step 2
-    red ONLY on that residual.
+    red ONLY on that residual. Also now gates
+    `integration/default-app.test.ts`'s "persist and reload every
+    rapidly created notebook note" STEP: the OW51 fix (2026-08-21)
+    lifted that file's FILE skip and UNMASKED this same
+    reload-durability surface there — the reloaded notebook's
+    `noteCount` reads `undefined` past the step's wait (1/10 local ON);
+    an event-driven wait on `noteCount` is the test-side close, this
+    row's territory.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -5433,39 +5440,64 @@ supply; OW29/OW32/OW34 closed):
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
-    optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
-    established by elimination; the exact failing hop is inferred,
-    not traced — the report's evidence-status block draws the line);
-    the fix fork is
-    FLAGGED for the owner.** The undefined read is a scheduler lift
-    on a freshly SERVED-instantiated note (default-app's menuNewNote
-    runs authoritatively in the wave; the client's speculative child
-    is refused at piece-start commit and carries different
-    handler-frame ids per speculation.md §4 W2.1) evaluated while its
-    input's link chain — through the piece's result/process doc to
-    the schema-default-only `pendingEdit` cell — is still
-    materializing in the reading runtime's replica view: the
-    mid-chain resolution yields `undefined` and the leaf schema's
-    `default: null` is never consulted (every leaf default site is
-    null-safe; the undefined enters above the leaf). NOT client-only:
-    the toolshed's own serving runtime hits the identical TypeError
-    in its pull-settle loop (no overlay, no runtime-client protocol
-    in that stack), amid `event-view-lag` replica-view warnings.
-    Racy, load-sensitive (1/6 local browser runs; W4's loaded bench
-    2-for-2 at n=20); single-creation headless flows never hit it.
-    Not served-value vintage; "schema default not applied" only as
-    the symptom of the chain dying early. Owed: the OWNER's call on
-    the fix fork — (1) defer-on-unresolved-chain in the runner
-    (speculation.md §2's client-side PENDING sentence arguably
-    already states it; the serving-runtime equivalent is UNSTATED —
-    new spec wording + scheduler-semantics blast radius), vs (2)
-    "lifts tolerate undefined during arrival" (a pattern-contract
-    change: under OFF a schema-defaulted input never reads
-    undefined) — then the fix red-first on the ruled arm. Evidence:
-    docs/history/plans/server-execution-v2/optimize/
-    ow51-undefined-read-report.md. Trigger: lifts the
-    `integration/default-app.test.ts` ON skip.
+    ON read-semantics seam): CLOSED (2026-08-21) — the RULED
+    unresolved-input lift semantics, built.** The undefined read was
+    a scheduler lift whose input LINK CHAIN dead-ended at a doc the
+    replica could not serve yet (a note's `pendingEdit` reached
+    through the piece's result/process doc during a freshly
+    SERVED-instantiated note's materialization); the read handed
+    `undefined` into a body whose schema promised a value, crashing
+    `splitDefinitions` on BOTH the client and the toolshed's serving
+    runtime (shared read path — the "arrival ordering" root cause of
+    the triage report). The owner ruled the fix fork, option (a),
+    verbatim:
+
+    > (a), server-side should match the current client behavior
+    > exactly. also note that with the lazy proxy based evaluation a
+    > lift can throw a specific error and mark a tx aborted with that
+    > reason and that should also be handled just like an unresolved
+    > input, i.e. being retriggered when any of the reads so far
+    > change (just like a regular call), and the output being
+    > `undefined`.
+
+    — owner (Berni), 2026-08-21. Built: link resolution marks a
+    data-derived dead-end behind a hop (`pendingHopDoc` /
+    `viaLinkHop`); the LAZY read path (action bodies; eager reads
+    unchanged) refuses with `UnresolvedInputError` (a
+    `SchemaMismatchError` subclass, so the action-run boundary's
+    existing "argument did not resolve" disposal treats it
+    identically — output `undefined`, no action failure, re-triggered
+    when any registered read changes), UNLESS the reader's schema
+    declares a default (the stated absent value still flows — the
+    `get() ?? fallback` idiom and a not-yet-produced computed are
+    unchanged). A dead-end at the handle's OWN root doc is likewise
+    not this shape. The (ii) lift-throw clause holds by inheritance:
+    the refusal propagating out of a lift body takes the same
+    disposal; a pattern body MINTING the error is the FLAGGED
+    pattern-facing-export question, still with the owner. Server
+    matches client by construction (`servingPosture` gates nothing on
+    this path). Pinned: `packages/runner/test/
+    unresolved-input-lift.test.ts` (the hop-target dead-end disposes
+    and re-triggers on arrival; the stated-null control still flows),
+    the full schema-view suite green; serving-runtime match witnessed
+    by `integration/default-app.test.ts` ON 10/10 with ZERO
+    `splitDefinitions` occurrences (the pre-fix crash surface). Spec:
+    speculation.md §2's RULED unresolved-lift-input paragraph.
+    Evidence: docs/history/plans/server-execution-v2/optimize/
+    ow51-build-report.md (and ow51-undefined-read-report.md for the
+    triage). NAMED RESIDUAL (owed pin, not a reopening): the
+    optional-property refusal swallow (`createObjectView`) correctly
+    disposes an unresolved OPTIONAL read as eager-parity `undefined`
+    with the retrigger preserved (the swallow clears the note; the
+    read registration survives) — verified by mechanism, a dedicated
+    pin owed (build-report §3, caution 4). LIFT: default-app's
+    FILE-level ON skip is LIFTED — its "should create a note" step
+    (the OW51 surface) runs ON; the "persist and reload" step stays a
+    STEP skip under **OW45** (the reload-durability flake the OW51
+    crash had been masking — a reloaded notebook's `noteCount` reads
+    `undefined` past the step's wait, 1/10 local ON; the OW51 fix's
+    clean-undefined-plus-retrigger surfaces it, OW45's territory to
+    close with an event-driven wait).
   - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
     (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The
     full 40-event accounting (serving-loop counters + the space's

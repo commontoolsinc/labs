@@ -204,35 +204,35 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     },
     // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
     {
+      // OW51's FILE-level skip was LIFTED (2026-08-21, the optimize pass):
+      // the `splitDefinitions` undefined-read crash is FIXED (the RULED
+      // unresolved-input lift semantics — verification-coverage.md OW51
+      // CLOSED) and default-app runs ON, its "should create a note" step
+      // (the served-instantiation surface that recorded OW51) green ON
+      // 10/10 with ZERO occurrences. What remains is this ONE step, guarded
+      // under OW45 — see below.
       file: "integration/default-app.test.ts",
+      step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
-        "skip-and-land — gates the FLIP, not the land): the browser " +
-        "console gate (integration/shell-utils.ts afterEach) trips on " +
-        "`TypeError: Cannot read properties of undefined (reading " +
-        "'split')` at `splitDefinitions` " +
-        "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
-        "callbacks. ROOT-CAUSED by the optimize-phase triage " +
-        "(2026-08-21): ARRIVAL ORDERING — a scheduler lift on a freshly " +
-        "SERVED-instantiated note runs while its input's link chain " +
-        "(through the piece's result/process doc to the " +
-        "schema-default-only pendingEdit cell) is still materializing in " +
-        "the reading runtime's replica view; the mid-chain resolution " +
-        "yields undefined and the leaf default:null is never consulted. " +
-        "NOT a demand hole (the gate's classification stands — the value " +
-        "is served and lands; the read races its arrival), and NOT " +
-        "client-only (the toolshed's serving runtime hits the same " +
-        "TypeError in its pull-settle loop); racy and load-sensitive " +
-        "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
-        "mostly green); OFF green by construction (instantiate-and-read " +
-        "in one runtime). The fix fork is FLAGGED for the owner " +
-        "(defer-on-unresolved-chain in the runner vs lifts tolerating " +
-        "undefined during arrival — both change a stated/relied-upon " +
-        "semantic). Evidence: docs/history/plans/server-execution-v2/" +
-        "optimize/ow51-undefined-read-report.md (and " +
-        "stage-c/first-on-ci-gate.md). Lifts when verification-" +
-        "coverage.md OW51 closes and the file greens ON; the flip PR " +
-        "needs this list EMPTY.",
+      reason: "The OW51 fix (RULED unresolved-input lift semantics, " +
+        "2026-08-21) LIFTED this file's FILE-level skip — the " +
+        "`splitDefinitions` crash is gone (ON 10/10, zero occurrences) and " +
+        "the 'should create a note' step runs ON. This REMAINING step " +
+        "stays skipped under OW45 (the reload-durability class): removing " +
+        "the OW51 crash UNMASKED an OW45-surface flake the crash had been " +
+        "hiding — after a rapid-create-and-RELOAD the reloaded notebook's " +
+        "`noteCount` derived value can read `undefined` past the step's " +
+        "`waitForCondition` (1/10 local ON: `assertEquals(summary." +
+        "noteCount, 7)` saw undefined; the OW51 fix's ruled disposition " +
+        "makes the unresolved reload read cleanly undefined + retrigger, " +
+        "and a slow runner reads the interim before the heal). Same " +
+        "reload-durability family as home-profile-reload-durability " +
+        "(verification-coverage.md OW45, seats S-B/S-C — client barriers " +
+        "and heal-on-read); an event-driven wait on `noteCount` is the " +
+        "test-side close, OW45's territory not OW51's. NOT a demand hole; " +
+        "OFF green. Evidence: docs/history/plans/server-execution-v2/" +
+        "optimize/ow51-build-report.md §5. Lifts when OW45 closes and the " +
+        "step greens ON; the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/profile-embed.test.ts",

@@ -25,6 +25,38 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+// The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+// a step listed there for this file is skipped ONLY under the ON posture,
+// loudly (its reason is printed), and only while the entry exists — the OFF
+// arm and an unlisted step always run. The OW51 fix lifted this file's
+// FILE-level skip (the `splitDefinitions` crash is gone, ON 10/10 with zero
+// occurrences); the "should create a note" step — the served-instantiation
+// surface that recorded OW51 — runs ON, while the "persist and reload"
+// step stays guarded under OW45 (the reload-durability class the crash was
+// masking).
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/default-app.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] patterns: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -644,152 +676,158 @@ describe("default-app flow test", () => {
     }
   });
 
-  it("should persist and reload every rapidly created notebook note", async () => {
-    identity = await Identity.generate({ implementation: "noble" });
-    const notebookSpaceName = globalThis.crypto.randomUUID();
-    const notebookSpaceDid = await resolveSpaceDid(
-      identity,
-      notebookSpaceName,
-    );
+  it(
+    "should persist and reload every rapidly created notebook note",
+    onArmStepSkip(
+      "should persist and reload every rapidly created notebook note",
+    ),
+    async () => {
+      identity = await Identity.generate({ implementation: "noble" });
+      const notebookSpaceName = globalThis.crypto.randomUUID();
+      const notebookSpaceDid = await resolveSpaceDid(
+        identity,
+        notebookSpaceName,
+      );
 
-    const page = shell.page();
-    await disposeBrowserRuntime(page);
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: notebookSpaceName },
-      identity,
-    });
+      const page = shell.page();
+      await disposeBrowserRuntime(page);
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: notebookSpaceName },
+        identity,
+      });
 
-    // shell.goto() waits for URL state and login, while RootView resolves the
-    // named view space independently. Do not interact with the previous
-    // space's still-rendered root while that resolution is in flight.
-    await waitForActiveSpaceRoot(page, notebookSpaceDid);
+      // shell.goto() waits for URL state and login, while RootView resolves the
+      // named view space independently. Do not interact with the previous
+      // space's still-rendered root while that resolution is in flight.
+      await waitForActiveSpaceRoot(page, notebookSpaceDid);
 
-    console.log("Await runtime idle for notebook regression...");
-    await waitForRuntimeIdle(page);
-    // Runtime idle can precede the page renderer's Lit update. Wait for the
-    // freshly navigated default-app view to bind its menu handlers before the
-    // first trusted click, just as the notebook toolbar does below.
-    await waitForCondition(
-      page,
-      () => typeof globalThis.commonfabric?.viewSettled === "function",
-    );
-    await awaitViewSettled(page);
-
-    try {
-      await clickButtonWithExactText(page, "Notes ▾");
-      await awaitViewSettled(page);
-      await clickButtonWithText(page, "New Notebook");
-      try {
-        await waitForCondition(page, async () => {
-          const commonfabric = globalThis.commonfabric as
-            | { readCell?: (options: { id: string }) => Promise<unknown> }
-            | undefined;
-          const view = globalThis.app?.serialize?.()?.view;
-          const pieceId = view && typeof view === "object" &&
-              "pieceId" in view && typeof view.pieceId === "string"
-            ? view.pieceId
-            : undefined;
-          if (!pieceId || !commonfabric?.readCell) return false;
-          let current: unknown;
-          const originalLog = console.log;
-          try {
-            console.log = () => {};
-            current = await commonfabric.readCell({ id: pieceId });
-          } finally {
-            console.log = originalLog;
-          }
-          return (current as { isNotebook?: unknown } | undefined)
-            ?.isNotebook === true;
-        });
-      } catch (error) {
-        console.log(
-          "Notebook navigation diagnostics:",
-          JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-        );
-        throw error;
-      }
-
-      // Wait until the notebook toolbar is mounted and interactive before
-      // clicking. viewSettled resolves once the worker is idle and the
-      // rendered view has caught up (vdom applied, Lit updates drained), so the
-      // New Note button's handler is bound and a single click is not dropped.
+      console.log("Await runtime idle for notebook regression...");
+      await waitForRuntimeIdle(page);
+      // Runtime idle can precede the page renderer's Lit update. Wait for the
+      // freshly navigated default-app view to bind its menu handlers before the
+      // first trusted click, just as the notebook toolbar does below.
       await waitForCondition(
         page,
         () => typeof globalThis.commonfabric?.viewSettled === "function",
       );
       await awaitViewSettled(page);
-      assert(
-        await clickButtonWithTitle(page, "New Note"),
-        "Expected New Note click to succeed",
-      );
-      // Arm the event-invocation trace before the note creations, whose markers
-      // this test's failure diagnostics read. clickButtonWithTitle settled the
-      // view, so the runtime has exposed its telemetry methods and the reset
-      // runs once with its success asserted. The first "Create Another" click
-      // below settles the view and waits for the button to render, so no
-      // separate wait for the modal is needed here.
-      assert(
-        await resetEventInvocationTrace(page),
-        "Expected the event invocation trace to reset",
-      );
-
-      const noteCreates = 7;
-      for (let i = 0; i < noteCreates - 1; i++) {
-        assert(
-          await clickButtonWithText(page, "Create Another"),
-          `Expected Create Another click ${i + 1} to succeed`,
-        );
-      }
-      assert(
-        await clickButtonWithExactText(page, "Create"),
-        "Expected final Create click to succeed",
-      );
 
       try {
-        await waitForCondition(page, notebookSourceStateMatches, {
-          args: [noteCreates],
-        });
-        await waitForRuntimeSynced(page);
-      } catch (_) {
-        // Keep the final assertions below so failures include diagnostics.
-      }
+        await clickButtonWithExactText(page, "Notes ▾");
+        await awaitViewSettled(page);
+        await clickButtonWithText(page, "New Notebook");
+        try {
+          await waitForCondition(page, async () => {
+            const commonfabric = globalThis.commonfabric as
+              | { readCell?: (options: { id: string }) => Promise<unknown> }
+              | undefined;
+            const view = globalThis.app?.serialize?.()?.view;
+            const pieceId = view && typeof view === "object" &&
+                "pieceId" in view && typeof view.pieceId === "string"
+              ? view.pieceId
+              : undefined;
+            if (!pieceId || !commonfabric?.readCell) return false;
+            let current: unknown;
+            const originalLog = console.log;
+            try {
+              console.log = () => {};
+              current = await commonfabric.readCell({ id: pieceId });
+            } finally {
+              console.log = originalLog;
+            }
+            return (current as { isNotebook?: unknown } | undefined)
+              ?.isNotebook === true;
+          });
+        } catch (error) {
+          console.log(
+            "Notebook navigation diagnostics:",
+            JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+          );
+          throw error;
+        }
 
-      const summary = await collectNotebookSourceState(page);
-      if (
-        summary.argumentNotesLength !== noteCreates ||
-        summary.noteCount !== noteCreates
-      ) {
-        console.log(
-          "Notebook rapid create source diagnostics:",
-          JSON.stringify(summary, null, 2),
+        // Wait until the notebook toolbar is mounted and interactive before
+        // clicking. viewSettled resolves once the worker is idle and the
+        // rendered view has caught up (vdom applied, Lit updates drained), so the
+        // New Note button's handler is bound and a single click is not dropped.
+        await waitForCondition(
+          page,
+          () => typeof globalThis.commonfabric?.viewSettled === "function",
         );
-        console.log(
-          "Notebook rapid create render diagnostics:",
-          JSON.stringify(await collectNotebookRenderState(page), null, 2),
+        await awaitViewSettled(page);
+        assert(
+          await clickButtonWithTitle(page, "New Note"),
+          "Expected New Note click to succeed",
         );
-        console.log(
-          "Notebook rapid create event/action diagnostics:",
-          JSON.stringify(
-            await collectNotebookCreateTraceSummary(page),
-            null,
-            2,
-          ),
+        // Arm the event-invocation trace before the note creations, whose markers
+        // this test's failure diagnostics read. clickButtonWithTitle settled the
+        // view, so the runtime has exposed its telemetry methods and the reset
+        // runs once with its success asserted. The first "Create Another" click
+        // below settles the view and waits for the button to render, so no
+        // separate wait for the modal is needed here.
+        assert(
+          await resetEventInvocationTrace(page),
+          "Expected the event invocation trace to reset",
+        );
+
+        const noteCreates = 7;
+        for (let i = 0; i < noteCreates - 1; i++) {
+          assert(
+            await clickButtonWithText(page, "Create Another"),
+            `Expected Create Another click ${i + 1} to succeed`,
+          );
+        }
+        assert(
+          await clickButtonWithExactText(page, "Create"),
+          "Expected final Create click to succeed",
+        );
+
+        try {
+          await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates],
+          });
+          await waitForRuntimeSynced(page);
+        } catch (_) {
+          // Keep the final assertions below so failures include diagnostics.
+        }
+
+        const summary = await collectNotebookSourceState(page);
+        if (
+          summary.argumentNotesLength !== noteCreates ||
+          summary.noteCount !== noteCreates
+        ) {
+          console.log(
+            "Notebook rapid create source diagnostics:",
+            JSON.stringify(summary, null, 2),
+          );
+          console.log(
+            "Notebook rapid create render diagnostics:",
+            JSON.stringify(await collectNotebookRenderState(page), null, 2),
+          );
+          console.log(
+            "Notebook rapid create event/action diagnostics:",
+            JSON.stringify(
+              await collectNotebookCreateTraceSummary(page),
+              null,
+              2,
+            ),
+          );
+        }
+
+        assertEquals(summary.argumentNotesLength, noteCreates);
+        assertEquals(summary.noteCount, noteCreates);
+      } finally {
+        await waitForRuntimeIdle(page).catch(
+          (error) =>
+            console.warn(
+              "Failed to await runtime idle after notebook regression",
+              error,
+            ),
         );
       }
-
-      assertEquals(summary.argumentNotesLength, noteCreates);
-      assertEquals(summary.noteCount, noteCreates);
-    } finally {
-      await waitForRuntimeIdle(page).catch(
-        (error) =>
-          console.warn(
-            "Failed to await runtime idle after notebook regression",
-            error,
-          ),
-      );
-    }
-  });
+    },
+  );
 });
 
 async function armTriggerTrace(page: Page): Promise<boolean> {
