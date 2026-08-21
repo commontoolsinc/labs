@@ -111,6 +111,51 @@ internals — are untouched):
 2. **`link-utils.ts` `parseLink`** — a sigil-parsed link carries
    `viaLinkHop`. A locally-minted cell's own link does not, so its
    first-write `undefined` reads unchanged.
+
+   **The carrier's altitude, and why it is safe (a documented
+   tradeoff).** `viaLinkHop` rides `parseLink`'s output because that is
+   where a stored sigil becomes a normalized link, and the provenance
+   flows from there through the data layer to the read (a trace shows
+   the mark applied by `data-updating.ts`'s `normalizeAndDiff` on the
+   write path, then picked up at the read). It must be ENUMERABLE:
+   the provenance has to survive the many `{...link}` spreads between
+   parse and read, and a non-enumerable property (or a `WeakSet` mark)
+   is dropped by the first spread — verified by a red run. The cost is
+   that a deep-equal assertion of a sigil-parsed link's whole output
+   now sees the extra field. Both CORRECTNESS risks are verified
+   clean: link IDENTITY ignores it (`areNormalizedLinksSame` compares
+   only id/space/scope/path — and `normalizeAndDiff`'s self-reference
+   check goes through it, so diffing is unchanged), and it does not
+   reach STORAGE (`createSigilLinkFromParsedLink` emits a fixed field
+   set — exact parity with `scopeCaps`, the existing read-side link
+   field). So the blast radius is purely test-assertion churn on
+   deep-equals of sigil-parsed links, updated where the suite surfaces
+   them (link-utils, runner, …). A narrower carrier — an opt-in
+   `parseLink` flag threaded only through the read/bind path — was
+   considered and is a possible refinement, but the provenance's flow
+   through the write/diff layer means it has no single findable bind
+   site to thread; recorded as an owner-visible option, not taken
+   here.
+
+   **Product-code-observability audit (the decision criterion — NO
+   product path observes the field).** Swept `packages/*/src` for every
+   way a parsed link's key-set could be seen: (a) explicit reads of
+   `.viaLinkHop` — only the fix's own files; (b) link IDENTITY —
+   `areNormalizedLinksSame` compares id/space/scope/path only; (c)
+   memo / cycle / dedup KEYS — `linkAddressKey` (link-resolution.ts)
+   and `cellIdentityKey` (scope-policy.ts) list/destructure only the
+   address fields, so two resolutions identical but for the flag still
+   share a memo entry; (d) DIFFING — `normalizeAndDiff`'s self-ref
+   check routes through `areNormalizedLinksSame`; (e) SERIALIZATION —
+   `createSigilLinkFromParsedLink` / `getAsLink` emit a fixed field
+   set, so nothing reaches storage or the wire; (f) `Object.keys`
+   count-branching — the one such site (`sigilLinkAddressOnly`) reads
+   the sigil PAYLOAD, not the normalized link; (g) structural clones /
+   `deepEqual` — the `deepEqual` sites compare schema default VALUES,
+   not links. Exact parity with `scopeCaps`, the pre-existing
+   read-side link field. The blast radius is therefore TEST-ONLY, and
+   the affected assertions legitimately should now reflect that
+   sigil-parsed links carry read-side provenance.
 3. **`link-resolution.ts`** — the walk tracks `followedHop`; the
    dead-end break re-decides `deadEndDocMissing` per iteration from the
    probe's `NotFoundError` path (`[]` = the doc), and sets
