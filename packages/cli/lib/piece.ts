@@ -48,6 +48,7 @@ import {
   NAME,
   type NormalizedFullLink,
   resolveLink,
+  resolveLinkTracingDereferences,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -3656,16 +3657,26 @@ export async function generateSpaceMap(
 }
 
 /**
- * A result field whose value the runtime read out of a computed cell. Such a
- * cell holds what its last committed derivation produced, and nothing
- * re-derives it when a reader reads it, so its value can name an earlier
- * instant than the argument the derivation ran over.
+ * A result field whose resolution crosses computed state. Each computed cell
+ * holds what its last committed derivation produced, and reading the field
+ * does not re-derive it, so either a terminal value or a cached choice of link
+ * can describe an earlier instant than the current argument.
  */
 export interface CachedResultField {
   /** The field's name on the piece's result. */
   name: string;
-  /** The computed entity the field's value was read from. */
+  /** The computed documents crossed while resolving the field's value. */
+  cells: CachedResultCell[];
+}
+
+/** One computed document crossed while resolving a result field. */
+export interface CachedResultCell {
+  /** The computed entity's id. */
   id: string;
+  /** The space whose commit sequence contains `derivedAtCommit`. */
+  space: MemorySpace;
+  /** The computed entity's memory scope. */
+  scope: CellScope;
   /**
    * The commit the entity's document last stood at. Absent when the local
    * replica holds no confirmed version of that document.
@@ -3680,20 +3691,22 @@ export interface CachedResultField {
  */
 function commitOfDocument(
   runtime: Runtime,
-  link: NormalizedFullLink,
+  link: { id: string; space: MemorySpace; scope: CellScope },
 ): number | undefined {
   const provider = runtime.storageManager.open(link.space);
-  return provider.replica.get({ id: link.id, scope: link.scope })?.since;
+  return provider.replica.get({
+    id: link.id as NormalizedFullLink["id"],
+    scope: link.scope,
+  })?.since;
 }
 
 /**
- * Which of `names` a read of `resultCell` answers from a computed cell.
+ * Which of `names` a read of `resultCell` resolves through a computed cell.
  *
- * The runtime's own link resolution decides this, so the entity named is the
- * one the value came out of rather than the first link the field stores. A
- * field whose stored link crosses a computed cell on the way to live state —
- * a derived list of links into the argument, say — reads live state and is
- * left out. Every id that is not a computed one counts as live, unknown URI
+ * The runtime's own link resolution supplies every dereference. A computed
+ * document counts even when its cached value is another link and the terminal
+ * entity is live: choosing that link was itself a derivation which can be
+ * stale. Every id that is not a computed one counts as live, unknown URI
  * schemes included, which is the strict reading `entityKindOfIdString`
  * requires of its callers.
  */
@@ -3705,18 +3718,30 @@ export function cachedResultFields(
   const tx = runtime.readTx();
   const cached: CachedResultField[] = [];
   for (const name of names) {
-    const resolved = resolveLink(
+    const start = resultCell.key(name).getAsNormalizedFullLink();
+    const { link: resolved, traces } = resolveLinkTracingDereferences(
       runtime,
       tx,
-      resultCell.key(name).getAsNormalizedFullLink(),
+      start,
     );
-    if (entityKindOfIdString(resolved.id) !== "computed") continue;
-    const derivedAtCommit = commitOfDocument(runtime, resolved);
-    cached.push({
-      name,
-      id: resolved.id,
-      ...(derivedAtCommit !== undefined && { derivedAtCommit }),
-    });
+    const documents = [start, ...traces.map(({ target }) => target), resolved];
+    const cells = new Map<string, CachedResultCell>();
+    for (const document of documents) {
+      if (entityKindOfIdString(document.id) !== "computed") continue;
+      const key =
+        `${document.space}\u0000${document.scope}\u0000${document.id}`;
+      if (cells.has(key)) continue;
+      const derivedAtCommit = commitOfDocument(runtime, document);
+      cells.set(key, {
+        id: document.id,
+        space: document.space,
+        scope: document.scope,
+        ...(derivedAtCommit !== undefined && { derivedAtCommit }),
+      });
+    }
+    if (cells.size > 0) {
+      cached.push({ name, cells: [...cells.values()] });
+    }
   }
   return cached;
 }
@@ -3729,12 +3754,14 @@ export interface PieceInspection {
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   /**
-   * The commit the argument document behind `source` last stood at. It comes
-   * from the same per-space sequence as a {@link CachedResultField}'s own
-   * commit, so the two order against each other.
+   * The commit the argument document behind `source` last stood at. It can be
+   * ordered against a {@link CachedResultCell} commit only when both have the
+   * same `space`.
    */
   sourceCommit?: number;
-  /** The fields of `result` a read answers from a computed cell's cache. */
+  /** The space whose commit sequence contains `sourceCommit`. */
+  sourceSpace?: MemorySpace;
+  /** The fields of `result` whose resolution crosses a computed-cell cache. */
   cachedResultFields: CachedResultField[];
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
@@ -3784,14 +3811,12 @@ export async function inspectPiece(
   const resultCell = await piece.result.getCell();
   const inputCell = await piece.input.getCell();
   const runtime = resultCell.runtime;
-  const sourceCommit = commitOfDocument(
+  const sourceLink = resolveLink(
     runtime,
-    resolveLink(
-      runtime,
-      runtime.readTx(),
-      inputCell.getAsNormalizedFullLink(),
-    ),
+    runtime.readTx(),
+    inputCell.getAsNormalizedFullLink(),
   );
+  const sourceCommit = commitOfDocument(runtime, sourceLink);
   const cached = isObjectNotArray(result)
     ? cachedResultFields(resultCell, Object.keys(result))
     : [];
@@ -3802,6 +3827,7 @@ export async function inspectPiece(
     patternRef,
     source,
     ...(sourceCommit !== undefined && { sourceCommit }),
+    sourceSpace: sourceLink.space,
     result,
     cachedResultFields: cached,
     readingFrom,

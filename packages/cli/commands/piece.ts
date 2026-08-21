@@ -395,13 +395,14 @@ export function pieceDescribeJson(
  * The `--- Result ---` block prints a live value and a cached one the same
  * way, so this section names which of the two each field is, and says what
  * instant a cached one answers for. `sourceCommit` is the commit the argument
- * document behind `--- Source (Inputs) ---` stands at. It comes from the same
- * per-space sequence as a field's own commit, so the two order against each
- * other.
+ * document behind `--- Source (Inputs) ---` stands at. Commit numbers order
+ * only when the computed cell and source document share `sourceSpace`; the
+ * section identifies and refuses cross-space comparisons.
  */
 export function renderCachedResultFields(
   cached: readonly CachedResultField[],
   sourceCommit: number | undefined,
+  sourceSpace: string | undefined,
 ): string {
   const lines = ["--- Cached Result Fields ---"];
   if (cached.length === 0) {
@@ -409,19 +410,37 @@ export function renderCachedResultFields(
     return lines.join("\n");
   }
   lines.push(
-    "Each field below reads a computed cell, which holds the value its last",
-    "committed derivation produced. Reading it does not re-derive it.",
+    "Each field below crosses computed state holding what its last committed",
+    "derivation produced. Reading the field does not re-derive that state.",
   );
   for (const field of cached) {
+    const spaces = new Set<string>(field.cells.map((cell) => cell.space));
+    if (sourceSpace !== undefined) spaces.add(sourceSpace);
+    const crossesSpaces = spaces.size > 1;
+    const cellDescriptions = field.cells.map((cell) => {
+      const commit = cell.derivedAtCommit === undefined
+        ? "the local replica holds no commit for it"
+        : `last derived at commit ${cell.derivedAtCommit}`;
+      return crossesSpaces ? `${commit} in space ${cell.space}` : commit;
+    });
+    const cachedDescription = cellDescriptions.length === 1
+      ? cellDescriptions[0]
+      : `${cellDescriptions.length} computed cells: ${
+        cellDescriptions.join("; ")
+      }`;
     lines.push(
-      `  - ${field.name}: ${
-        field.derivedAtCommit === undefined
-          ? "the local replica holds no commit for it"
-          : `last derived at commit ${field.derivedAtCommit}`
-      }${
+      `  - ${field.name}: ${cachedDescription}${
         sourceCommit === undefined
           ? ""
-          : `; Source (Inputs) stands at commit ${sourceCommit}`
+          : `; Source (Inputs) stands at commit ${sourceCommit}${
+            crossesSpaces && sourceSpace !== undefined
+              ? ` in space ${sourceSpace}`
+              : ""
+          }`
+      }${
+        crossesSpaces
+          ? "; commits from different spaces cannot be compared"
+          : ""
       }`,
     );
   }
@@ -2227,6 +2246,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
       renderCachedResultFields(
         pieceData.cachedResultFields,
         pieceData.sourceCommit,
+        pieceData.sourceSpace,
       )
     }`;
 

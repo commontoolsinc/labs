@@ -3927,6 +3927,7 @@ describe("cli piece parsing", () => {
       expect(inspected.id).toBe(PIECE);
       expect(inspected.cachedResultFields).toEqual([]);
       expect(inspected.sourceCommit).toBeUndefined();
+      expect(inspected.sourceSpace).toBe(space);
     } finally {
       await runtime.dispose();
       await storageManager.close();

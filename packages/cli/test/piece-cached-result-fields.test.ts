@@ -14,9 +14,9 @@ import { type CachedResultField, cachedResultFields } from "../lib/piece.ts";
  * `title` hands the argument's own cell back, so a read of it lands in the
  * argument document. `shout` is derived from it, so the runtime materializes a
  * computed cell and a read of it lands there. `loud` is derived too, and its
- * result field stores a link to a computed cell — but that cell holds a link
- * on to the map's output, which is an ordinary entity, so a read of `loud`
- * lands in live state and the field is not cached.
+ * result field stores a link to a computed cell which holds a link on to the
+ * map's ordinary output entity. Resolving `loud` therefore crosses cached
+ * state even though it ends in live state.
  */
 const PROGRAM = {
   main: "/main.tsx",
@@ -104,35 +104,61 @@ describe("piece-cached-result-fields", () => {
     });
 
     it("returns the derived field and not the one linked into the argument", () => {
-      expect(report.cached.map((field) => field.name)).toEqual(["shout"]);
-      expect(report.cached[0].id.startsWith("computed:")).toBe(true);
+      expect(report.cached.map((field) => field.name)).toEqual([
+        "shout",
+        "loud",
+      ]);
+      expect(report.cached[0].cells[0].id.startsWith("computed:")).toBe(true);
     });
 
     it("returns the commit the derived field's own document last stood at", () => {
-      expect(typeof report.cached[0].derivedAtCommit).toBe("number");
+      expect(typeof report.cached[0].cells[0].derivedAtCommit).toBe("number");
     });
 
-    it("returns nothing for a field whose computed cell links on to live state", () => {
-      // The distinction this pins is between the link a field stores and the
-      // entity its value comes out of. `loud` stores a computed link and reads
-      // live state, so classifying on the stored link alone would list it.
+    it("returns a computed hop which links on to live state", () => {
       expect(report.firstHop.loud.startsWith("computed:")).toBe(true);
-      expect(report.cached.map((field) => field.name)).not.toContain("loud");
+      expect(report.cached.find((field) => field.name === "loud")?.cells)
+        .toEqual([
+          expect.objectContaining({
+            id: report.firstHop.loud,
+            derivedAtCommit: expect.any(Number),
+          }),
+        ]);
     });
   });
 
   describe("renderCachedResultFields()", () => {
     it("returns each field's own commit beside the argument's", () => {
-      const section = renderCachedResultFields([
-        { name: "adminName", id: "computed:fid1:one", derivedAtCommit: 182802 },
-        { name: "todayDate", id: "computed:fid1:two", derivedAtCommit: 182785 },
-      ], 253299);
+      const section = renderCachedResultFields(
+        [
+          {
+            name: "adminName",
+            cells: [{
+              id: "computed:fid1:one",
+              space: "did:key:source",
+              scope: "space",
+              derivedAtCommit: 182802,
+            }],
+          },
+          {
+            name: "todayDate",
+            cells: [{
+              id: "computed:fid1:two",
+              space: "did:key:source",
+              scope: "space",
+              derivedAtCommit: 182785,
+            }],
+          },
+        ],
+        253299,
+        "did:key:source",
+      );
 
       expect(section).toBe(
         [
           "--- Cached Result Fields ---",
-          "Each field below reads a computed cell, which holds the value its last",
-          "committed derivation produced. Reading it does not re-derive it.",
+          "Each field below crosses computed state holding what its last committed",
+          "derivation produced. Reading the field does not re-derive that state.",
           "  - adminName: last derived at commit 182802; Source (Inputs) stands at commit 253299",
           "  - todayDate: last derived at commit 182785; Source (Inputs) stands at commit 253299",
         ].join("\n"),
@@ -140,21 +166,55 @@ describe("piece-cached-result-fields", () => {
     });
 
     it("returns `(none)` when every result field reads live state", () => {
-      expect(renderCachedResultFields([], 253299)).toBe(
+      expect(renderCachedResultFields([], 253299, "did:key:source")).toBe(
         "--- Cached Result Fields ---\n  (none)",
       );
     });
 
     it("returns a field with no commit as one the replica holds none for", () => {
       const section = renderCachedResultFields(
-        [{ name: "myName", id: "computed:fid1:three" }],
+        [{
+          name: "myName",
+          cells: [{
+            id: "computed:fid1:three",
+            space: "did:key:source",
+            scope: "space",
+          }],
+        }],
         undefined,
+        "did:key:source",
       );
 
       expect(section).toContain(
         "- myName: the local replica holds no commit for it",
       );
       expect(section).not.toContain("Source (Inputs)");
+    });
+
+    it("does not compare commits from different spaces", () => {
+      const section = renderCachedResultFields(
+        [{
+          name: "profileName",
+          cells: [{
+            id: "computed:fid1:remote",
+            space: "did:key:remote",
+            scope: "space",
+            derivedAtCommit: 12,
+          }],
+        }],
+        900,
+        "did:key:source",
+      );
+
+      expect(section).toContain(
+        "last derived at commit 12 in space did:key:remote",
+      );
+      expect(section).toContain(
+        "Source (Inputs) stands at commit 900 in space did:key:source",
+      );
+      expect(section).toContain(
+        "commits from different spaces cannot be compared",
+      );
     });
   });
 });
