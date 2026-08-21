@@ -1,7 +1,7 @@
 # JSON Encoding for Fabric Values
 
 This document specifies the JSON-compatible wire format used to represent
-fabric values, including the `fvj1:` encoding prefix, the tagged-object
+`FabricValue`s, including the `fvj1:` encoding prefix, the tagged-object
 convention, escaping mechanisms, codec engine responsibilities, and
 the reservation rules for `/`-prefixed keys.
 
@@ -20,7 +20,7 @@ types more directly without layering on JSON.
 
 ### 1.1 Encoding Prefix
 
-Every encoded fabric value carries an unambiguous textual prefix, before the
+Every encoded `FabricValue` carries an unambiguous textual prefix, before the
 JSON itself:
 
 ```
@@ -30,7 +30,7 @@ fvj1:<json>
 The literal string `fvj1:` stands for "Fabric Value JSON, version 1". Its
 purpose is to make the encoded form distinguishable, on inspection, from
 arbitrary JSON produced by some other source — a brief peek at the start of
-a string is sufficient to tell whether it carries a fabric-value payload.
+a string is sufficient to tell whether it carries a `FabricValue` payload.
 
 - A conforming **encoder** emits the prefix exactly once, immediately before
   the JSON body, on every encoded value (including encoded primitives — e.g.,
@@ -173,7 +173,7 @@ be lossy through the JSON layer: `JSON.stringify` emits `null` for `NaN` and
 the infinities, and drops the sign of `-0`. On decoding, any other state —
 including one that is not a string — produces a `ProblematicValue`.
 
-Whether such a value reaches the encoder at all depends on the fabric-value
+Whether such a value reaches the encoder at all depends on the `FabricValue`
 conversion gate (`1-fabric-values.md` Section 4.9). The encoding above is the
 encoder's contract however the value arrived.
 
@@ -188,7 +188,7 @@ A symbol with no registry key has no portable representation, and the codec
 declines to encode one rather than coercing it to a key. On decoding, a state
 that is not a string produces a `ProblematicValue`.
 
-Whether such a value reaches the encoder at all depends on the fabric-value
+Whether such a value reaches the encoder at all depends on the `FabricValue`
 conversion gate (`1-fabric-values.md` Section 4.9). The encoding above is the
 encoder's contract however the value arrived.
 
@@ -212,7 +212,7 @@ like any other malformation: a lenient decode yields a `ProblematicValue`
 describing that decode, and a strict one raises. A well-formed record is a
 record of a *past* failure and reads back as one under either setting, this
 decode having succeeded. `state` is checked for presence rather than for type,
-because every fabric value is a valid state, `undefined` among them; filling in
+because every `FabricValue` is a valid state, `undefined` among them; filling
 an absent one would put a reshaped record back on the wire.
 
 See `1-fabric-values.md` Section 3.5.
@@ -268,7 +268,7 @@ built-in escape, or an encoding error.
 > **JS implementation note.** "Any keys" is the format's rule and this
 > implementation does not yet meet it: a plain object carrying `__proto__` or
 > `constructor` is refused rather than encoded, on both sides of the wire and
-> in the inert check that decides what a fabric value is at all. Neither name
+> in the inert check that decides what a `FabricValue` is at all. Neither name
 > is reserved by the format, and neither is a limit of JavaScript. Both are
 > about copying: this implementation rebuilds a record by assignment, which for
 > `__proto__` reaches a prototype accessor instead of creating a property, and
