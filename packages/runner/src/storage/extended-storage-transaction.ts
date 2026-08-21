@@ -1708,7 +1708,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   prepareCfc(): string {
-    this.#materializeReferencedSchemaDocuments();
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -1722,6 +1721,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // writer, so it alone is exempt.
     let reasons: string[];
     try {
+      // The schema-doc materialization is INSIDE the try on purpose: it is
+      // part of commit-prep, and a crash in it must take the same modeled
+      // refusal below rather than escaping (the totality this catch exists
+      // for).
+      this.#materializeReferencedSchemaDocuments();
       reasons = this.#runPrivilegedSystemWrite(() =>
         prepareBoundaryCommit(
           this,
@@ -1749,12 +1753,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // a prepare reason, so commit() rejects through the standard
       // pre-storage-rejection path and every observer (commit callbacks, the
       // scheduler's failed-commit machinery, error surfacing) sees the real
-      // cause. Kept loud: a crash here is still a bug in prep itself, not a
-      // policy verdict.
+      // cause.
       const message = error instanceof Error ? error.message : String(error);
-      logger.error(
-        "cfc-prepare-crash",
-        () => ["CFC commit-prep crashed; refusing the commit:", message],
+      // Reported UNCONDITIONALLY, not through this module's opt-in logger
+      // (disabled by default — utils/logger.ts early-returns): a crash here
+      // is a bug in prep itself, and before this catch existed the class
+      // escaped as an unhandled rejection, the loudest signal in the system.
+      // Converting it to a modeled refusal must not also convert it to
+      // silence — the same labs#4772 shape `reportDroppedCfcRejectedWrite`
+      // (scheduler/events.ts) exists for.
+      console.error(
+        "[cfc] commit-prep crashed; refusing the commit:",
+        message,
+        error,
       );
       reasons = [`CFC commit-prep crashed: ${message}`];
     }

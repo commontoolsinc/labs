@@ -79,7 +79,7 @@ serving one.
    The coordinates confirm it independently: pre-#6019 has the
    pattern call at profile-home.tsx:635 / home.tsx:178; the compile
    pipeline's one injected helper-import line shifts both to the
-   logged 636/179. (Current bytes would put it at 644.)
+   logged 636/179. (Current bytes — pattern call at 644 — would log 645.)
 
 4. **Where pre-#6019 bytes came from.** The failing process
    (`toolshed-on.log`) is a dev toolshed on **:8123** that logs
@@ -302,16 +302,23 @@ semantics:
 
 1. **A prep crash is a modeled refusal, not an escaped throw**
    (`storage/extended-storage-transaction.ts`, `prepareCfc`): an
-   exception escaping `prepareBoundaryCommit` — the divergence assert
-   is the live instance — is recorded as a prepare reason
-   (`CFC commit-prep crashed: <message>`, loudly logged), putting the
+   exception escaping the prep pass (the schema-doc materialization and
+   `prepareBoundaryCommit` both sit inside the try; the divergence assert
+   is the live instance) is recorded as a prepare reason
+   (`CFC commit-prep crashed: <message>`), putting the
    transaction in the same `invalidated` state as every modeled
    refusal. `commit()` then rejects through the standard
    pre-storage-rejection path: the caller gets the REAL cause (before:
    a misleading bare "relevant transaction was not prepared"), commit
    callbacks fire (rollback observers run), and observe-mode commits
    survive the crash instead of throwing. Fail-closed is preserved
-   exactly. **Deliberate contract change, flagged for review:** three
+   exactly. The crash is reported through an UNCONDITIONAL
+   `console.error` (the labs#4772 `reportDroppedCfcRejectedWrite`
+   shape): this module's opt-in logger is constructed disabled, and the
+   class this catch tames was previously an unhandled rejection — the
+   loudest signal in the system — so the conversion to a modeled
+   refusal must not also be a conversion to silence (review F9; pinned
+   by a console-interception test under the default configuration). **Deliberate contract change, flagged for review:** three
    pins in `test/cfc-policy-of-label.test.ts` asserted `prepareCfc()`
    THROWS on PolicyOf authoring errors ("is not installed",
    "malformed PolicyOf schema marker", "compiler-lowered PolicyOf");
@@ -349,7 +356,16 @@ semantics:
    single-shot "would meet whatever refused it the first time"
    assumption is corrected for the transient classes (bounded
    retries after settle) — the which-direction distinction OW50
-   flagged.
+   flagged. Two review-hardening passes (F2/F6): the observer admits
+   failures through `isSurfacableWishCommitFailure`, which excludes —
+   beside the conflict classes — deliberate control-flow aborts
+   (`RetryImmediately`: the scheduler aborts the transaction and
+   immediately re-runs the action, which lands the good state; a red
+   surface over that is the repair-manufactures-failure shape), and
+   the surfaced text comes from `wishCommitFailureMessage` (the
+   informative layer — a plain abort's cause rides `reason`; the
+   generic "Transaction was aborted" is never shown when a real cause
+   exists). Both pinned, with killing mutations watched red.
 
 Result, unit-proven on the live mechanism: the wish state that
 previously froze at its stale value now carries
@@ -408,6 +424,48 @@ modeled refusal's retry behavior — CFC-adjacent, flagged not filled).
   resolve a beat before the error surface lands — is documented at
   the launch site.
 
+### 5b. Independent adversarial review (fix round)
+
+The coordinator's independent adversarial review (verdict FIX-FIRST;
+report in the session scratchpad) confirmed the build real —
+red-first verified, mutation-resistant at all three layers, composed
+against all five sibling branches — and gated two fixes, both applied
+with pins and killing mutations watched red:
+
+- **F9 (gating):** the crash record rode this module's disabled-by-
+  default logger — "loudly logged" was false by default, and the
+  non-wish reactive prep-crash class had gone from
+  unhandled-rejection-loud to console-silent. Fixed with the
+  unconditional `console.error` (labs#4772 shape); pinned under the
+  default configuration.
+- **F2 (gating):** the failure observer surfaced BENIGN aborts —
+  `rescheduleActionForImmediateRetry` aborts with `RetryImmediately`
+  when an `inSpace("name")` target just resolved, and the abort's
+  `StorageTransactionAborted` passed the conflict-only filter, racing
+  a red error UI against the immediate re-run's good state. Fixed by
+  the `isSurfacableWishCommitFailure` exclusion; pinned.
+- **F3 (folded):** `#materializeReferencedSchemaDocuments()` sat
+  before the try — moved inside, making the totality claim true.
+- **F6 (folded):** the surfaced `error` text was the debug dump —
+  `wishCommitFailureMessage` now prefers the informative layer.
+- **F8 (folded):** the current-bytes coordinate parenthetical
+  corrected (644 source → 645 logged).
+- **F1 (recorded, not fixed here):** a served EVENT whose prep
+  crashes regresses from sealed-error-consequence (pre-PR the
+  `.catch → finalize(error)` arm called
+  `served.onFailure({kind:"error"})`) to give-up with NO consequence:
+  the durable LT1 entry re-drains every wave ("the wave IS the retry
+  cadence"), and under #6158's settle wait the unretired client
+  intent pays the full bounded quiescence timeout per settle round.
+  Deliberately NOT fixed in this PR — the events seal path is
+  (α)-critical and the poisoned class today is reactive wish docs
+  with profile-embed skipped — minted as its own owed register row
+  instead (see §4).
+- **F7 (recorded):** the API_URL pattern-fetch trust surface minted
+  as a tracked register row (see §4) instead of living only in the
+  closed OW48 row's prose.
+- **F4/F5 (recorded as residuals below).**
+
 ## 6. Flagged residuals (not filled)
 
 1. OW49's decision (§2e) — CFC owner.
@@ -420,3 +478,17 @@ modeled refusal's retry behavior — CFC-adjacent, flagged not filled).
    local-repro API_URL/MEMORY_URL default-collision hazard (§1c).
 5. The machine-local pre-existing test failures listed in §5 —
    verified identical on untouched main; not investigated further.
+6. (Review F4) The crash class shares `StorageTransactionAborted`
+   with the discarded-attempt class on `isRetryableCommitRejection`'s
+   allow-list, so `editWithRetry` retries a DETERMINISTIC prep crash
+   up to its budget (bounded, loud per attempt). Pre-existing for
+   modeled CFC refusals; the catch enrolls the crash class. A
+   distinguishable name/marker for CFC pre-storage rejections would
+   fix both classes at once — CFC-adjacent, not taken here.
+7. (Review F5) Under OBSERVE mode a mid-walk prep crash now commits
+   the transaction with PARTIAL derived label metadata (targets
+   before the crash carry label-map writes; targets after carry
+   none). Pre-PR observe crashed loudly and landed nothing.
+   Fail-open direction, observe-only, narrow — whether to drop the
+   journaled privileged label writes on a recorded crash reason is a
+   deliberate decision owed to the CFC owner.

@@ -36,6 +36,7 @@ import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
+import { RetryImmediately } from "../scheduler/retry-immediately.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
@@ -1779,6 +1780,55 @@ function wishOutputScope(
   return inputScope;
 }
 
+/**
+ * Whether a settled wish-state commit failure deserves the error surface
+ * (verification-coverage OW50, seat S-J). Excluded, because re-running
+ * converges them and a red surface would race the converged state:
+ * - conflict-class rejections (stale basis) and local inconsistencies — the
+ *   scheduler re-queues the action against fresh state;
+ * - deliberate control-flow aborts: `RetryImmediately` (an `inSpace("name")`
+ *   target just resolved; the scheduler aborts THIS transaction and
+ *   immediately re-runs the action, which then lands the good state — a red
+ *   error over that is the repair-manufactures-failure shape).
+ * Everything else — the CFC-modeled refusals and genuine crash-backstop
+ * aborts — surfaces.
+ */
+export function isSurfacableWishCommitFailure(
+  error: { name?: string; reason?: unknown },
+): boolean {
+  if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+    return false;
+  }
+  if (
+    error.name === "StorageTransactionAborted" &&
+    (error as { reason?: unknown }).reason instanceof RetryImmediately
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The text the wish surface shows for a settled commit failure: the
+ * informative layer, not the debug dump. A plain abort's own message is the
+ * generic "Transaction was aborted" — the cause rides `reason` — while a
+ * CFC-modeled rejection carries everything in `message`.
+ */
+export function wishCommitFailureMessage(
+  error: { message?: string; reason?: unknown },
+): string {
+  const message = typeof error.message === "string" ? error.message : "";
+  if (message !== "" && !message.startsWith("Transaction was aborted")) {
+    return message;
+  }
+  const reason = (error as { reason?: unknown }).reason;
+  if (reason instanceof Error && reason.message !== "") {
+    return reason.message;
+  }
+  if (message !== "") return message;
+  return toCompactDebugString(error);
+}
+
 export function wishTargetMayUseHomeSpace(
   query: unknown,
   scope?: ("~" | "." | "profile" | string)[],
@@ -2038,13 +2088,8 @@ export function wish(
     const scopeIdentity = tx.scopeKeyIdentity;
     tx.addCommitCallback((_tx, result) => {
       if (!result.error) return;
-      if (
-        isConflictRejection(result.error) ||
-        isStorageTransactionInconsistent(result.error)
-      ) {
-        return;
-      }
-      const message = toCompactDebugString(result.error);
+      if (!isSurfacableWishCommitFailure(result.error)) return;
+      const message = wishCommitFailureMessage(result.error);
       // Keyed per scoped INSTANCE: scope and identity separate user/session
       // instances of one doc id, so one demander's in-flight report cannot
       // hide another's failure.

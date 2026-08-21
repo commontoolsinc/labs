@@ -38,6 +38,11 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  isSurfacableWishCommitFailure,
+  wishCommitFailureMessage,
+} from "../src/builtins/wish.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -183,6 +188,30 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         await observeRuntime.dispose();
         await observeManager.close();
       }
+    });
+
+    it("the crash report reaches the console even with the module logger disabled (labs#4772 shape)", async () => {
+      const id = "wish-shaped-console-crash";
+      await seedStoredEnvelope(runtime, id);
+
+      // The transaction module's own logger is constructed disabled, so the
+      // crash record must NOT ride it: pin the unconditional console.error
+      // (the `reportDroppedCfcRejectedWrite` pattern) under the DEFAULT
+      // configuration.
+      const seen: string[] = [];
+      const realConsoleError = console.error;
+      console.error = (...args: unknown[]) => {
+        seen.push(args.map((a) => String(a)).join(" "));
+      };
+      try {
+        const tx = secondWriterTx(runtime, id);
+        runtime.prepareTxForCommit(tx);
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+      } finally {
+        console.error = realConsoleError;
+      }
+      expect(seen.some((line) => /commit-prep crashed/.test(line))).toBe(true);
     });
 
     it("the scheduler survives an action whose commit-prep crashes", async () => {
@@ -359,6 +388,59 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
       expect(stateB).toMatch(/divergent anyOf|commit-prep crashed/);
       expect(stateB).toContain('"error"');
       expect(stateB).toContain("$UI");
+    });
+  });
+
+  // The failure observer's admission filter and its surfaced text
+  // (verification-coverage OW50): deliberate control-flow aborts must NOT
+  // paint a red error over converging control flow — `RetryImmediately`
+  // (run.ts's rescheduleActionForImmediateRetry aborts the transaction and
+  // immediately re-runs the action, which lands the good state) is the
+  // confirmed benign class. Killing mutation: removing the RetryImmediately
+  // exclusion from `isSurfacableWishCommitFailure` flips the first pin red.
+  describe("surfacability filter", () => {
+    it("excludes RetryImmediately-reasoned aborts (benign control flow)", () => {
+      expect(isSurfacableWishCommitFailure({
+        name: "StorageTransactionAborted",
+        reason: new RetryImmediately(),
+      })).toBe(false);
+    });
+
+    it("excludes the conflict and inconsistency classes (the scheduler converges them)", () => {
+      expect(isSurfacableWishCommitFailure({ name: "ConflictError" })).toBe(
+        false,
+      );
+      expect(
+        isSurfacableWishCommitFailure({
+          name: "StorageTransactionInconsistent",
+        }),
+      ).toBe(false);
+    });
+
+    it("surfaces CFC-modeled refusals and genuine crash-backstop aborts", () => {
+      expect(isSurfacableWishCommitFailure({
+        name: "StorageTransactionAborted",
+        message: "CFC enforcement rejected commit: relevant transaction was " +
+          "not prepared: CFC commit-prep crashed: boom",
+      } as { name?: string; reason?: unknown })).toBe(true);
+      expect(isSurfacableWishCommitFailure({
+        name: "StorageTransactionAborted",
+        message: "Transaction was aborted",
+        reason: new Error("synthetic prep crash"),
+      } as { name?: string; reason?: unknown })).toBe(true);
+    });
+
+    it("surfaces the informative layer, not the debug dump", () => {
+      // A plain abort's own message is generic; the cause rides `reason`.
+      expect(wishCommitFailureMessage({
+        message: "Transaction was aborted",
+        reason: new Error("synthetic prep crash"),
+      })).toBe("synthetic prep crash");
+      // A CFC-modeled rejection carries everything in `message`.
+      const modeled = "CFC enforcement rejected commit: relevant transaction " +
+        "was not prepared: CFC commit-prep crashed: ifc inside divergent " +
+        "anyOf branches is unsupported at /result";
+      expect(wishCommitFailureMessage({ message: modeled })).toBe(modeled);
     });
   });
 
