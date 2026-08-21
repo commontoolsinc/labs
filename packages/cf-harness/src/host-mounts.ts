@@ -42,6 +42,8 @@ const normalizeSandboxMountPath = (path: string, label: string): string => {
     : normalized;
 };
 
+const HOST_MOUNT_FIELDS = new Set(["name", "source", "target", "mode"]);
+
 const parseHostMountSpecParts = (spec: string): Record<string, string> => {
   const parts: Record<string, string> = {};
   for (const segment of spec.split(",")) {
@@ -62,6 +64,15 @@ const parseHostMountSpecParts = (spec: string): Record<string, string> => {
     }
     if (parts[key] !== undefined) {
       throw new Error(`--host-mount field repeated: ${key}`);
+    }
+    // Reject unknown keys rather than ignoring them. A typo like `mdoe=writable`
+    // would otherwise fall through to the readonly default and provision a
+    // mount the caller believes is writable — a silent capability difference,
+    // which is the failure mode this whole module exists to stop.
+    if (!HOST_MOUNT_FIELDS.has(key)) {
+      throw new Error(
+        `--host-mount field unknown: ${key} (expected name, source, target, or mode)`,
+      );
     }
     parts[key] = value;
   }
@@ -146,6 +157,36 @@ export const parseHostMountSpecs = async (
     names.add(mount.name);
   }
   return mounts;
+};
+
+/**
+ * Engine options for an interactive run's provisioning flags.
+ *
+ * Both interactive entrypoints call this — the standalone stdio CLI and the
+ * Loom-local host — so neither can advertise a flag it then drops. The first
+ * version of this change wired only the Loom host, and the standalone
+ * entrypoint accepted `--host-mount`, printed it in its usage text, and ignored
+ * it: the same "second entrypoint, no provisioning" defect one layer in.
+ */
+export const resolveInteractiveProvisioning = async (
+  parsed: {
+    hostMountSpecs?: readonly string[];
+    maxModelTurns?: number;
+  },
+  cwd: string,
+): Promise<{
+  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
+  maxModelTurns?: number;
+}> => {
+  const mounts = hostMountsToAdditionalMounts(
+    await parseHostMountSpecs(parsed.hostMountSpecs, cwd),
+  );
+  return {
+    ...(mounts.length > 0 ? { additionalMounts: mounts } : {}),
+    ...(parsed.maxModelTurns !== undefined
+      ? { maxModelTurns: parsed.maxModelTurns }
+      : {}),
+  };
 };
 
 /** Engine-shaped mounts. The only supported way to get bind mounts into a run. */

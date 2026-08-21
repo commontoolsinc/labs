@@ -48,10 +48,7 @@ import {
   runHarnessInteractiveChatStdio,
   type RunHarnessInteractiveChatStdioOptions,
 } from "./interactive-chat-stdio.ts";
-import {
-  hostMountsToAdditionalMounts,
-  parseHostMountSpecs,
-} from "./host-mounts.ts";
+import { resolveInteractiveProvisioning } from "./host-mounts.ts";
 import { OpenAICodexResponsesClient } from "./model/openai-codex-responses.ts";
 
 export const LOOM_LOCAL_CREDENTIAL_OWNER = {
@@ -570,8 +567,11 @@ export const createLoomLocalCfHarnessHost = async (
       // Resolved here rather than in the option parser because resolution is
       // async (realpath + stat per source) and the parser is sync. Same parser,
       // same grammar, same validation as `cf-harness run --host-mount`.
-      const additionalMounts = hostMountsToAdditionalMounts(
-        await parseHostMountSpecs(parsed.hostMountSpecs, Deno.cwd()),
+      const provisioning = await resolveInteractiveProvisioning(
+        parsed,
+        // Same base the batch path resolves relative sources against, so a
+        // spec means the same thing on either entrypoint.
+        options.cliDependencies?.cwd ?? Deno.cwd(),
       );
       const provider = await configuredProvider();
       const binding: LoomLocalHostBinding = {
@@ -621,10 +621,7 @@ export const createLoomLocalCfHarnessHost = async (
           // these when the caller passes none. The interactive service spreads
           // this object into every turn's options, so what is set here holds
           // for the whole session.
-          ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
-          ...(parsed.maxModelTurns !== undefined
-            ? { maxModelTurns: parsed.maxModelTurns }
-            : {}),
+          ...provisioning,
           ...(provider === "openai-compatible-gateway"
             ? {
               gatewayBaseUrl: processEnv.CF_HARNESS_GATEWAY_BASE_URL,

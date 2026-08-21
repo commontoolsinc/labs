@@ -7,10 +7,7 @@ import {
   relative,
   resolve,
 } from "@std/path";
-import {
-  isAbsolute as isAbsoluteSandboxPath,
-  normalize as normalizeSandboxPath,
-} from "@std/path/posix";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -260,7 +257,6 @@ export interface CfHarnessCliConfig {
   fabricSession?: HarnessFabricSessionConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
-
 
 export interface CfHarnessStructuredResultConfig {
   path: string;

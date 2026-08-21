@@ -24,6 +24,7 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { resolveInteractiveProvisioning } from "./host-mounts.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import {
   createHarnessInteractiveChatService,
@@ -625,6 +626,11 @@ export const runHarnessInteractiveChatStdio = async (
 
 export const runHarnessInteractiveChatStdioCli = async (
   args: readonly string[] = Deno.args,
+  cwd?: string,
+  /** Seam for tests: observe the options this entrypoint actually forwards. */
+  run: (
+    options: RunHarnessInteractiveChatStdioOptions,
+  ) => Promise<void> = runHarnessInteractiveChatStdio,
 ): Promise<void> => {
   const options = parseHarnessInteractiveChatStdioCliOptions(args);
   if (options.help) {
@@ -633,7 +639,18 @@ export const runHarnessInteractiveChatStdioCli = async (
     );
     return;
   }
-  await runHarnessInteractiveChatStdio(options);
+  // Advertised flags must take effect on this entrypoint too. Resolved through
+  // the same helper the Loom-local host uses, so the two cannot drift.
+  const provisioning = await resolveInteractiveProvisioning(
+    options,
+    cwd ?? Deno.cwd(),
+  );
+  await run({
+    ...options,
+    ...(Object.keys(provisioning).length > 0
+      ? { basePromptLoopOptions: provisioning }
+      : {}),
+  });
 };
 
 if (import.meta.main) {

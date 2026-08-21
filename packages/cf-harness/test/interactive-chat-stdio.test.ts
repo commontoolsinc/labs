@@ -15,6 +15,7 @@ import {
 import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "../src/contracts/browser-access.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { DEFAULT_PARENT_TOOL_IDS } from "../src/contracts/tool-descriptor.ts";
+import { parseHostMountSpecs } from "../src/host-mounts.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -25,6 +26,7 @@ import {
   runHarnessInteractiveChatNdjsonTransport,
   runHarnessInteractiveChatStdio,
   runHarnessInteractiveChatStdioCli,
+  type RunHarnessInteractiveChatStdioOptions,
 } from "../src/interactive-chat-stdio.ts";
 import type { HarnessPromptLoopResult } from "../src/prompt-loop.ts";
 
@@ -1229,7 +1231,10 @@ Deno.test("interactive stdio CLI rejects a zero model-turn budget", () => {
   // session that cannot answer.
   assertThrows(
     () =>
-      parseHarnessInteractiveChatStdioCliOptions(["--max-model-turns", "0"], {}),
+      parseHarnessInteractiveChatStdioCliOptions(
+        ["--max-model-turns", "0"],
+        {},
+      ),
     Error,
     "requires a positive integer",
   );
@@ -1241,4 +1246,55 @@ Deno.test("interactive stdio CLI still rejects unknown arguments", () => {
     Error,
     "unsupported interactive chat stdio argument",
   );
+});
+
+Deno.test("the standalone stdio entrypoint applies the flags it advertises", async () => {
+  // The first version of this change wired only the Loom-local host, so the
+  // standalone entrypoint parsed --host-mount, printed it in its usage text and
+  // dropped it — the same "second entrypoint, no provisioning" defect this PR
+  // exists to remove, one layer in. Both entrypoints now resolve through
+  // resolveInteractiveProvisioning.
+  const source = await Deno.makeTempDir();
+  try {
+    const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+    await runHarnessInteractiveChatStdioCli(
+      [
+        "--host-mount",
+        `name=loom,source=${source},target=/loom,mode=readonly`,
+        "--max-model-turns",
+        "64",
+      ],
+      Deno.cwd(),
+      async (options) => {
+        seen.push(options);
+      },
+    );
+    assertEquals(seen.length, 1);
+    const base = seen[0].basePromptLoopOptions;
+    assertEquals(base?.maxModelTurns, 64);
+    assertEquals(base?.additionalMounts?.length, 1);
+    assertEquals(base?.additionalMounts?.[0].sandboxPath, "/loom");
+    assertEquals(base?.additionalMounts?.[0].readOnly, true);
+  } finally {
+    await Deno.remove(source, { recursive: true });
+  }
+});
+
+Deno.test("a typo in a host-mount field is refused, not silently defaulted", async () => {
+  // `mdoe=writable` used to fall through to the readonly default and provision
+  // a mount the caller believed was writable.
+  const source = await Deno.makeTempDir();
+  try {
+    await assertRejects(
+      () =>
+        parseHostMountSpecs(
+          [`name=loom,source=${source},target=/loom,mdoe=writable`],
+          Deno.cwd(),
+        ),
+      Error,
+      "--host-mount field unknown: mdoe",
+    );
+  } finally {
+    await Deno.remove(source, { recursive: true });
+  }
 });
