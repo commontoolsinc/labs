@@ -173,10 +173,8 @@ async function startServers(
     return result.code;
   }
 
-  // Wait a bit more for servers to be fully ready
-  console.log("Waiting for servers to be fully ready...");
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
+  // Successful completion means both servers have bound, passed their
+  // readiness probes, and served the shell through the toolshed.
   return 0;
 }
 
