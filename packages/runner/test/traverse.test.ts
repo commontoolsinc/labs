@@ -1922,9 +1922,9 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  it("treats the nominal brand key as present on a fabric value", () => {
+  it("treats the nominal brand key as present on a `FabricSpecialObject`", () => {
     // The generator's emitted shape for a FabricBytes-typed field: the
-    // brand has no runtime existence, so a fabric value satisfies it by
+    // brand has no runtime existence, so a `FabricSpecialObject` satisfies it
     // construction; `length` is satisfied by the class accessor.
     const branch = {
       type: "object",
