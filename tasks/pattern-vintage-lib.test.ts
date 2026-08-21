@@ -719,8 +719,7 @@ describe("stranded-state comparison", () => {
   });
 
   it("compares a `FabricValue` by its CONTENTS", () => {
-    // The quietest failure this comparison could have. A
-    // `FabricSpecialObject`
+    // The quietest failure this comparison could have. A `FabricSpecialObject`
     // keeps its state in private fields, so a structural comparison sees two
     // objects with no properties and calls them equal whatever they hold —
     // `deepEqual` documents exactly that. Reduced to a tagged content hash

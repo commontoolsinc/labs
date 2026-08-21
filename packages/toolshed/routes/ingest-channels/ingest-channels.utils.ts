@@ -215,8 +215,7 @@ const authorize = async (
 /**
  * Rebuild revocation entries as plain objects.
  *
- * Values read back from a cell are deep-frozen `FabricValue`s, and
- * re-embedding
+ * Values read back from a cell are deep-frozen `FabricValue`s, and re-embedding
  * one into a NEW array does not round-trip — the array reads back absent, with
  * no error. Every site that writes a stored registration back has to do this;
  * the two that matter are `persist` and `processRevoke`.

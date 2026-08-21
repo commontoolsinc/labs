@@ -61,8 +61,7 @@ const VALUE_DISPLAY_LEN = 600;
 
 /**
  * Canonical `FabricValue` hash, truncated for display. Returns a sentinel
- * rather
- * than throwing so a single odd op can never abort the trace.
+ * rather than throwing so a single odd op can never abort the trace.
  */
 function displayVhash(value: unknown): string {
   try {
