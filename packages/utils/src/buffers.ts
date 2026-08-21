@@ -65,6 +65,14 @@ export function toOwnedUint8Array(
   bytes: Uint8Array | ArrayBufferLike,
   transfer: boolean,
 ): Uint8Array<ArrayBuffer> {
+  // TODO(danfuzz): Take over any ceded buffer that can be detached, rather
+  // than throwing for the ones that cannot, once detachability can be tested
+  // without attempting it. Absent such a test, every new kind of
+  // non-detachable buffer becomes another one-off check here. The TC39
+  // immutable-ArrayBuffer proposal both adds such a kind and carries the
+  // suggestion to expose the test, making it the thing to watch:
+  // <https://github.com/tc39/proposal-immutable-arraybuffer>
+  // <https://github.com/tc39/proposal-immutable-arraybuffer/issues/63>
   const view = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes);
   const buffer = view.buffer;
 
