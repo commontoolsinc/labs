@@ -195,39 +195,17 @@ an item addresses one of them:
 <space>/top/42/comments/7
 ```
 
-Depth is uniform and unbounded, and it needs no second mechanism: the URL layer
-already reads segments after an addressed target as a path into it. Keeping an
-item out of the collection role is what stops two namespaces from crossing —
-otherwise an item's own fields and its members compete for the same segment, and
-a member named `attachments` collides with a collection named `attachments`.
+A collection an item holds is one of its fields, so naming the collection and
+naming the field are the same act, and the segment after an item stays what it
+already is — a path into that item. Depth is uniform and unbounded, and it needs
+no second mechanism.
 
-An item may declare one of its collections its default, and a bare segment then
-addresses that collection's members:
-
-```text
-<space>/top/42/7                member 7 of item 42's default collection
-```
-
-The default is declared, published, and editable, which is what separates it
-from a hidden rule. An item with no declared default does not accept a bare
-segment.
-
-### Why not a reserved sub-grammar
-
-A tempting alternative gives member names a reserved shape inside the flat
-space-level namespace — a segment ending in hyphen-digits is a member name,
-anything else is a slug — so that `<space>/top-42` resolves without a collection
-segment. It does not generalize, and its first cost is that it presumes a
-numeric mechanism for every collection. A flat namespace hosts exactly one
-unreserved naming scheme; every additional scheme has to claim a distinguishable
-shape, and shapes are scarce. The second collection wanting string-named members
-has nothing left to claim, because "hyphenated words" is the entire slug
-grammar. Resolving by longest-prefix match instead is worse: creating the name
-`verb-arc` would make an existing reference to `verb/arc` ambiguous, so a write
-in one namespace would break reads in another.
-
-Segment walking costs one path segment in a URL and leaves the slug grammar
-untouched.
+An item's fields and a collection's member names are different namespaces, and
+the segment after an item belongs to the fields. Keeping an item out of the
+collection role is what holds them apart: a member name never competes for that
+segment, so adding a field to an item's schema cannot change what an existing
+name resolves to. The collection segment is always written, and compression
+belongs to prose, which has a sigil and a round-trip check.
 
 ## Resolution scope
 
