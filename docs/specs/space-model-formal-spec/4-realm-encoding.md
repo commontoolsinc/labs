@@ -109,15 +109,15 @@ a payload:
   living only in encoder-private state and in the tagged forms the walk is
   building.
 
-For a value that satisfies the fabric contract, age alone settles it: a fabric
-record's own properties are enumerable data properties, an accessor-backed one
-causing rejection (Section 1.5 of
+For a value that satisfies the fabric contract, age alone settles it: a
+`FabricPlainObject`'s own properties are enumerable data properties, an
+accessor-backed one causing rejection (Section 1.5 of
 [1-fabric-values.md](./1-fabric-values.md)), so its contents are all in
 existence before the walk starts, and none of them can be the marker. **The
 confinement requirement is what makes the argument hold without resting on
-that.** An encoder is handed values by callers, not by the type system; a
-value carrying live code — an accessor that runs mid-walk, after the marker
-exists — is outside the model, and confinement means such a value still has
+that.** An encoder is handed values by callers, not by the type system; a value
+carrying live code — an accessor that runs mid-walk, after the marker exists —
+is outside the model, and confinement means such a value still has
 nowhere to read the marker from. It is stated as a requirement rather than
 left to inertness because a rule that fails open on out-of-model input is not
 worth much.
