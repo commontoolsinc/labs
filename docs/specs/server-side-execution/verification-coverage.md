@@ -2834,7 +2834,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Inherent in the ruling composed with the pre-existing shared-name
   behavior; convergence clean; SURFACED TO OWNER 2026-08-21 (the
   independent review's F2 — the wildcard residual's sharper sibling;
-  build report FLAG-8). (vi) a via-"owner" crossing into a
+  build report FLAG-8). RATIFIED by the CFC owner 2026-08-21
+  ("ratify", relayed by the coordinator with the RULING-5 batch):
+  first-creator-owns IS the shared-named-space contract — the genesis
+  race's winner holds owner power, peers hold `"*": WRITE` — a settled
+  behavior now, not a residual awaiting a fix. (vi) a via-"owner" crossing into a
   never-materialized home store is granted without genesis forcing and
   then refused forever by the sink's INV-13 mirror — a fail-closed
   livelock unreachable in sanctioned flows; its watcher signature is
@@ -5313,8 +5317,22 @@ supply; OW29/OW32/OW34 closed):
     (API_URL decides whose bytes the server compiles), and the
     historical-stored-sources × new-transformer-rules exposure.
   - **OW49 — the ifc-divergent-anyOf envelope at /result under ON
-    (seat S-I; a CFC-OWNER call — FLAGGED, not scheduled; envelope
-    DECODED 2026-08-21,
+    (seat S-I; RULED 2026-08-21 — CFC owner ("sg", relayed by the
+    coordinator; the owner confirmed CFC ownership): the narrowing is
+    APPROVED per the seat recommendation WITH the adversarial
+    reviewer's cautions as binding constraints — narrow
+    `assertNoDivergentIfcBranches` to actual ambiguity, admitting at
+    most ONE ifc-carrying branch when every ifc-free sibling is
+    syntactically type-disjoint from it (conservative SYNTACTIC
+    disjointness only — explicit scalar `type` keywords, no semantic
+    subtyping), scoped to anyOf/oneOf (allOf stays refused —
+    unsatisfiable-by-construction under the rule), the merge treating
+    the ifc branch as the policy carrier, holding at all four
+    mergeCfcSchemaEnvelopes call sites, and still recursing INTO the
+    admitted carrier. Built red-first on the seat's deterministic
+    repro (the two-writer journey flipped from crash-surfaced to
+    clean-merge; the genuinely-ambiguous class pinned refused);
+    envelope DECODED 2026-08-21,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
     §2).** Main's `assertNoDivergentIfcBranches` (cfc/schema-merge.ts,
     #3263) fires inside the `raw:wish` action's commit-prep only under
@@ -5366,7 +5384,14 @@ supply; OW29/OW32/OW34 closed):
     "would meet whatever refused it the first time" single-shot
     corrected with bounded retries for the transient classes. The
     formerly silent never-mount now shows the refusal's text in the
-    wish surface. Still open (flagged in the report §6): whether
+    wish surface. The throw-to-rejected-commit contract change (the
+    three re-pinned `cfc-policy-of-label` PolicyOf pins) is RATIFIED
+    by the CFC owner 2026-08-21 ("sg", relayed by the coordinator,
+    with the motivation question answered on the record: the change
+    was forward-motivated by the silent-never-mount and the scheduler
+    wedge, no pre-existing test was left broken — the three pins were
+    green before and after, consciously migrated with the same
+    diagnostics delivered through the rejection message). Still open (flagged in the report §6): whether
     modeled CFC refusals should be terminal-classified for the retry
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
