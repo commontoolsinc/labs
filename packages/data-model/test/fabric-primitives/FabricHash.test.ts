@@ -48,6 +48,23 @@ describe("FabricHash", () => {
       expect(cid.length).toBe(3);
     });
 
+    it("accepts a bare `ArrayBuffer` as the source", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const cid = new FabricHash(source, "fid1");
+
+      expect(cid.length).toBe(3);
+      new Uint8Array(source)[0] = 99;
+      expect(cid.bytes[0]).toBe(1);
+    });
+
+    it("consumes a bare `ArrayBuffer` source, given `transfer` as `true`", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const cid = new FabricHash(source, "fid1", true);
+
+      expect(source.detached).toBe(true);
+      expect(cid.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    });
+
     it("caches a string form agreeing with `.bytes`, given `transfer` as `true`", () => {
       const transferred = new FabricHash(
         new Uint8Array([1, 2, 3]),

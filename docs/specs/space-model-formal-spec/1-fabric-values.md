@@ -451,7 +451,7 @@ through 1.4.11.
 | `FabricEpochNsec` | `FabricPrimitive` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
 | `FabricEpochDay` | `FabricPrimitive` | `EpochDay@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
 | `FabricHash` | `FabricPrimitive` | `Hash@1` | `Uint8Array` (hash bytes, private) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<tag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). Wire state is `{ tag, hash }` (see Section 1.4.9). |
-| `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. Input bytes are copied at construction time. Callers access bytes via `slice()`, `copyInto()`, and `length`. |
+| `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. The instance owns its bytes outright: input is copied at construction time, unless the caller cedes it with `transfer`. Callers access bytes via `slice()`, `sliceBuffer()`, `copyInto()`, and `length`. |
 | `FabricKeyPair` | `FabricPrimitive` | `KeyPair@1` | Either two `CryptoKey` handles, or an algorithm name and the two keys' bytes | Asymmetric key pair. Which of the two states it holds decides what it can do: only the material state has a JSON encoding or a hash, and only the handle state can hand back a `CryptoKeyPair` (see Section 1.4.11). |
 | `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh native `RegExp` clone per call. Extra enumerable properties on a native `RegExp` cause rejection. |
 
@@ -1013,13 +1013,17 @@ export class FabricHash extends FabricPrimitive {
   readonly #fullStringForm: string;
 
   /**
-   * @param hash - The raw hash bytes.
+   * @param hash - The raw hash bytes, as a view or as a whole buffer.
    * @param tag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
    * @param transfer - Whether the caller cedes `hash` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
    *   caller must not use `hash` afterwards.
    */
-  constructor(hash: Uint8Array, tag: string, transfer: boolean = false) {
+  constructor(
+    hash: Uint8Array | ArrayBufferLike,
+    tag: string,
+    transfer: boolean = false,
+  ) {
     super();
     this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
@@ -1143,12 +1147,12 @@ export class FabricBytes extends FabricPrimitive {
   /**
    * Constructs an instance holding the given bytes, which it owns outright.
    *
-   * @param bytes - The raw bytes to wrap.
+   * @param bytes - The raw bytes to wrap, as a view or as a whole buffer.
    * @param transfer - Whether the caller cedes `bytes` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
    *   caller must not use `bytes` afterwards.
    */
-  constructor(bytes: Uint8Array, transfer: boolean = false) {
+  constructor(bytes: Uint8Array | ArrayBufferLike, transfer: boolean = false) {
     super();
     this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);

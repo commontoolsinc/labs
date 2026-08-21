@@ -142,7 +142,11 @@ export interface FabricHash extends FabricPrimitive {
 }
 
 export interface FabricHashConstructor {
-  new (hash: Uint8Array, tag: string, transfer?: boolean): FabricHash;
+  new (
+    hash: Uint8Array | ArrayBufferLike,
+    tag: string,
+    transfer?: boolean,
+  ): FabricHash;
   prototype: FabricHash;
 }
 
@@ -169,17 +173,18 @@ export declare const FabricLink: FabricLinkConstructor;
 /**
  * An immutable, frozen sequence of bytes. Extends `FabricPrimitive` --
  * treated like a primitive in the fabric type system (always frozen, passes
- * through conversion unchanged). Read the bytes with `slice()` or
- * `copyInto()`.
+ * through conversion unchanged). Read the bytes with `slice()`,
+ * `sliceBuffer()`, or `copyInto()`.
  */
 export interface FabricBytes extends FabricPrimitive {
   readonly length: number;
   slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
+  sliceBuffer(start?: number, end?: number): ArrayBuffer;
   copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
 export interface FabricBytesConstructor {
-  new (bytes: Uint8Array, transfer?: boolean): FabricBytes;
+  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
   prototype: FabricBytes;
 }
 

@@ -160,5 +160,51 @@ describe("buffers", () => {
       expect(() => toOwnedUint8Array(source, true)).toThrow(TypeError);
       expect(() => toOwnedUint8Array(source, false)).toThrow(TypeError);
     });
+
+    it("returns an array with the same contents, for a buffer source", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+
+      expect(toOwnedUint8Array(source, false)).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+    });
+
+    it("leaves a buffer source usable, without `transfer`", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const result = toOwnedUint8Array(source, false);
+
+      expect(isDetached(source)).toBe(false);
+      new Uint8Array(source)[0] = 99;
+      expect(result[0]).toBe(1);
+    });
+
+    it("detaches a buffer source, with `transfer`", () => {
+      const source = Uint8Array.from([1, 2, 3]).buffer;
+      const result = toOwnedUint8Array(source, true);
+
+      expect(isDetached(source)).toBe(true);
+      expect(result).toEqual(new Uint8Array([1, 2, 3]));
+      expect(isDetached(result)).toBe(false);
+    });
+
+    it("copies rather than detaching, for a `SharedArrayBuffer` source", () => {
+      const source = new SharedArrayBuffer(3);
+      new Uint8Array(source).set([1, 2, 3]);
+
+      const result = toOwnedUint8Array(source, true);
+
+      expect(result).toEqual(new Uint8Array([1, 2, 3]));
+      expect(result.buffer).not.toBe(source);
+      new Uint8Array(source)[0] = 99;
+      expect(result[0]).toBe(1);
+    });
+
+    it("throws for an already-detached buffer source", () => {
+      const source = new ArrayBuffer(3);
+      source.transfer();
+
+      expect(() => toOwnedUint8Array(source, true)).toThrow(TypeError);
+      expect(() => toOwnedUint8Array(source, false)).toThrow(TypeError);
+    });
   });
 });

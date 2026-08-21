@@ -26,10 +26,13 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * reach `ArrayBuffer` contents, so sole ownership of the buffer is the
  * defense.
  *
+ * `bytes` is either a view onto a buffer or a whole buffer. A whole buffer
+ * covers itself, so the partial-view case below never applies to one.
+ *
  * `transfer` states that the caller has given up its own use of `bytes`, which
  * permits taking over its buffer rather than copying it. It is a permission and
  * not a promise: what the caller cedes is `bytes`, and detaching reaches the
- * whole buffer behind it. So a `bytes` that covers only part of its buffer is
+ * whole buffer behind it. So a view that covers only part of its buffer is
  * copied even so, since the rest of that buffer may carry unrelated live views
  * -- an allocator handing out windows onto a shared block is a common shape.
  * A source backed by a `SharedArrayBuffer` is likewise copied, that being a
@@ -49,21 +52,22 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * take-over path is entered only for a `bytes` that already covered its whole
  * buffer.
  *
- * @param bytes - The source bytes.
+ * @param bytes - The source bytes, as a view or as a whole buffer.
  * @param transfer - Whether the caller cedes `bytes`.
  */
 export function toOwnedUint8Array(
-  bytes: Uint8Array,
+  bytes: Uint8Array | ArrayBufferLike,
   transfer: boolean,
 ): Uint8Array<ArrayBuffer> {
-  const buffer = bytes.buffer;
+  const view = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes);
+  const buffer = view.buffer;
 
   if (
     transfer && (buffer instanceof ArrayBuffer) && !isDetached(buffer) &&
-    (bytes.byteOffset === 0) && (bytes.byteLength === buffer.byteLength)
+    (view.byteOffset === 0) && (view.byteLength === buffer.byteLength)
   ) {
     return new Uint8Array(buffer.transfer());
   }
 
-  return new Uint8Array(bytes);
+  return new Uint8Array(view);
 }

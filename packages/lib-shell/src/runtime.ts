@@ -485,7 +485,7 @@ export class RuntimeInternals extends EventTarget {
   async uploadBlob(options: {
     space: DID;
     contentType: string;
-    body: Uint8Array;
+    body: Uint8Array | ArrayBufferLike;
     suffix?: string;
   }): Promise<{ id: string; url: string }> {
     this.#check();

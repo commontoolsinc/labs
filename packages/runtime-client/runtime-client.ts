@@ -739,13 +739,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Uploads a blob to the given space. `body` is copied into the immutable
-   * value that crosses, so the caller may keep using its array.
+   * Uploads a blob to the given space. `body` is given as a view or as a whole
+   * buffer, and is copied into the immutable value that crosses, so the caller
+   * may keep using it.
    */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
-    body: Uint8Array;
+    body: Uint8Array | ArrayBufferLike;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
