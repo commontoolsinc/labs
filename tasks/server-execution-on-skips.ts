@@ -246,17 +246,31 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "represents-principal name the service signer, not Alice — so CFC " +
         "authorship verification stays 'unverified' forever; this IS the " +
         "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence. Local " +
+        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
+        "build LANDED 2026-08-21, but the authorship labels come from " +
+        "the runtime-level CFC trust snapshot (storageManager.as), not " +
+        "the memory-plane carriage that build landed, so this shape does " +
+        "NOT lift on it alone (the flagged CFC-attribution residual in " +
+        "OW31's register row; OW34's family). Local " +
         "shape (Bob's send click): Bob's messageDraft $value binding " +
         "write into the serve-owned user-scope instance doc NEVER reaches " +
         "the store (0/4 runs incl. a 300 s probe; his session committed " +
         "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
         "never flips — the client own-write durability seam, " +
-        "verification-coverage.md OW47 (seats S-E/S-F/S-G). Mechanism + " +
-        "store/log evidence: docs/history/plans/server-execution-v2/" +
-        "stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). Lifts when OW31's build AND OW47 close and " +
-        "the file greens ON; the flip PR needs this list EMPTY.",
+        "verification-coverage.md OW47. OW47 is CLOSED (2026-08-21, " +
+        "optimize pass): the mechanism was the speculation.md §6 export " +
+        "refusal firing on a blind write's structural parent read that " +
+        "named a standing handler-echo layer; fixed in storage/v2.ts " +
+        "buildReads (excludeSpeculativeLayers) with unit + cellset-lww " +
+        "lift evidence — see optimize/ow47-client-durability-report.md. " +
+        "Mechanism + store/log evidence: docs/history/plans/" +
+        "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
+        "first-on-ci-gate.md). OW31's build and OW47 are both DONE " +
+        "(2026-08-21); what remains is the FLAG-5 CFC-attribution seam " +
+        "(the trust snapshot supplying the SERVICE identity to served " +
+        "authorship labels — OW34's family, flagged in OW31's register " +
+        "row). Lifts when that seam closes and the file greens ON; the " +
+        "flip PR needs this list EMPTY.",
     },
     {
       file: "integration/profile-embed.test.ts",
@@ -304,13 +318,18 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
         "hole — the identical demand derived the name wherever the " +
         "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half is the owed OW31/§2b build " +
-        "(S-A); the client barriers and heal-on-read are " +
+        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
+        "OW31's build — the replicate trigger's writebacks now ride the " +
+        "instantiating run's §2b carriage; the client barriers and " +
+        "heal-on-read are " +
         "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
         "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
         "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
-        "§1 (and first-on-ci-gate.md). Lifts when OW31's build AND OW45 " +
-        "close and the file greens ON; the flip PR needs this list EMPTY.",
+        "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
+        "(2026-08-21); lifts when OW45 closes and the file greens ON " +
+        "(the optimize pass's joint run had step 1 green in ~10 s and " +
+        "step 2 still red on the cross-space module-run residual OW31's " +
+        "row carries); the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",
@@ -341,30 +360,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "demand hole. Evidence: docs/history/plans/server-execution-v2/" +
         "stage-c/first-on-ci-gate.md. Lifts when OW53 closes and the " +
         "file greens ON; the flip PR needs this list EMPTY.",
-    },
-    // STEP-LEVEL entries: on the fixed (true-ON) harness topology each of
-    // these files is green but for ONE step, so the file keeps running ON
-    // and only the red step is guarded in-file (bound to these entries,
-    // exactly like the runtime-client pair).
-    {
-      file: "integration/cellset-lww.test.ts",
-      step: "end-to-end: a typed name survives the own-write race through save",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under the TRUE ON topology the other 3 " +
-        "steps are green; this end-to-end step stays red — the user's own " +
-        "typed-name write is DROPPED when its transaction is refused " +
-        "terminally (`speculative-basis-refused`): a non-re-derivable " +
-        "USER write refused/withdrawn is silently lost, because the " +
-        "'its own reads re-run it when fresh state lands' premise of " +
-        "serving-loop.md §3d does not hold for INPUTS — the clean " +
-        "reproducer of the client own-write durability seam " +
-        "(verification-coverage.md OW47, seats S-E/S-F; same cluster as " +
-        "cfc-group-chat-demo's local shape). NOT a demand hole. " +
-        "Evidence: docs/history/plans/server-execution-v2/stage-c/" +
-        "first-on-ci-gate.md (mechanism family: " +
-        "on-render-stall-rootcause.md §2b). Lifts when OW47 closes and " +
-        "the step greens ON; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

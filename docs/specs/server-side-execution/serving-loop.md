@@ -432,9 +432,11 @@ executing:
   seq (mid-wave commits are next wave's input), so a mid-run discovered
   read cannot tear.
 - **Cross-space**: the first foreign read (executed under the piece's
-  granted authority — concretely, on the loopback plane as the process
-  identity, a memory service principal under the flag since Phase 7;
-  protocol.md §2b's free-read row) registers, by being logged, a
+  granted authority — concretely, on the loopback plane over a session
+  whose READ capability resolves as the foreign space's OWNER through
+  the `actingAs: "space-owner"` delegated binding, OW31 RULED
+  2026-08-18/19; protocol.md §2b's free-read row carries the full
+  mechanism) registers, by being logged, a
   server-internal wake on that doc for the home SpaceServer. Same one-run-late soundness.
   v2 assumes spaces co-hosted on one memory server; sharding is out of
   scope. *(Phase 5 pinned the wake end to end and added NO machinery
@@ -1204,7 +1206,8 @@ escalate.
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
-structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
+structureLoadFailures, structureLoadDeferred, structureLoadStuck,
+structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
@@ -1225,6 +1228,14 @@ never-a-piece id classes are EXCLUDED from piece demand and count
 nothing, RULED 2026-08-07; `structureLoadFailures` also counts a
 piece-start commit that failed AFTER its start resolved (the §3d
 piece-start site's surfaced fire-and-forget failure, stage P2-F);
+`structureLoadStuck` counts roots whose CONSECUTIVE-deferral streak
+crossed the space server's stuck threshold — once per crossing, with a
+WARN naming the space and root at the crossing and at each doubling of
+the streak — so a forever-parked root (a demanded piece whose program
+docs never materialized, verification-coverage.md OW46) is a
+health-stats fact instead of an undifferentiated share of the
+per-attempt `structureLoadDeferred` aggregate; the streak clears when
+the root starts or terminalizes;
 `structureLoadTerminal`/`structureLoadRearmed` carry the
 demand-cycle terminal state (stage P2-F, the OW19 design): a root
 confirmed synced with no pattern meta parks TERMINAL — counted per

@@ -694,6 +694,23 @@ describe("stage G outbox + sqlite discharge", () => {
     runtime.clearSealDestination();
 
     const targetEngine = await server.engineForSpace(targetSpace);
+    // OW31 B4: a foreign data batch never lands in a fresh store ahead
+    // of its genesis ACL (the sink's INV-13 mirror) — land the genesis
+    // the production flow's commit-step forcing provides.
+    Engine.applyCommit(targetEngine, {
+      sessionId: "test-genesis-session",
+      space: targetSpace,
+      principal: targetSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${targetSpace}`,
+          value: { value: { "user:alice": "OWNER", "*": "WRITE" } },
+        }],
+      },
+    });
     const sink = new EngineWaveCommitSink({
       engineFor: (s) => (s === space ? engine : targetEngine),
       sessionId: holder,

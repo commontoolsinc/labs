@@ -123,10 +123,13 @@ accounts of people with no pull-request activity for a month and
 re-enables them when they return — the same key file simply starts
 working again.
 
-You hold one live key: minting revokes the previous ones, so
-`deno task test-records-key setup --rotate` is how a lost or leaked key
-is rotated, and a second machine gets the existing key file copied to it
-rather than a fresh mint that would kill the first machine's.
+You hold one live key: minting revokes the previous ones before it
+creates the new one, so `deno task test-records-key setup --rotate` is
+how a lost or leaked key is rotated, and a second machine gets the
+existing key file copied to it rather than a fresh mint that would kill
+the first machine's. A mint that fails after the revocation leaves you
+with no key rather than two; the next run says so, and running setup
+again mints one.
 
 ## How records move
 

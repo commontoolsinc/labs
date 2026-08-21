@@ -40,6 +40,11 @@ import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
+import {
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "../src/storage/reactivity-log.ts";
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 
@@ -727,6 +732,141 @@ describe("Phase 2 speculation overlay", () => {
     // The refused write never rendered (refusal precedes the
     // optimistic apply) — no flicker, no revert.
     expect(copyCell.get()?.copied).toBeUndefined();
+    cancelDemand();
+  });
+
+  it("a blind UI-input write into a doc carrying a speculative layer EXPORTS — user input is never terminally refused for a process-local echo (verification-coverage.md OW47; the cellset-lww own-write shape)", async () => {
+    // The OW47 client own-write durability seam (rootcause §2b; the
+    // cellset-lww end-to-end step; cfc-group-chat-demo's local shape —
+    // Bob's messageDraft): a USER's blind `$value` binding write
+    // (handleCellSet) into a doc on which one of the client's OWN
+    // speculation echoes still stands was refused TERMINALLY
+    // (`speculative-basis-refused`) and silently dropped. The blind
+    // write consumes NO overlay value — its only conflict-set read is
+    // the structural nonRecursive read at the cell's PARENT — but
+    // buildReads named every pending layer of that doc, speculative
+    // ones included, so the export refusal fired on a read that carries
+    // no value dependency. An echo's standing window is at least a full
+    // served round trip (the arrival gate holds it until every doc it
+    // wrote is confirmed), and unbounded for a never-served instance,
+    // so "user typed while an echo stood" is a routine state, not a
+    // race. The fix: the structural read bases on the doc's
+    // NON-speculative stack (speculative layers are excluded from its
+    // named layers — they are process-local render state, not a data
+    // dependency, and they never reach the wire as commits the server
+    // could sequence against). The §6 export-refusal ruling is
+    // untouched for value-consuming reads — the test above pins it.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_PATTERN }],
+    }, { space });
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "own-write-arg",
+      undefined,
+    );
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "own-write-result",
+      compiled.resultSchema,
+    );
+    await clientArg.sync();
+    await clientResult.sync();
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, clientArg, clientResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = clientResult.sink(() => {});
+    await clientRuntime.idle();
+    {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ n: 6 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "the speculative echo to render",
+    );
+    const overlay = clientRuntime.speculationOverlay!;
+    const echoEntries = overlay.entryCount(space);
+    expect(echoEntries).toBeGreaterThanOrEqual(1);
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    // The USER act, exactly handleCellSet's shape (runtime-processor.ts;
+    // the multi-runtime worker mirrors it): mark the tx blind, thread
+    // the cell's PARENT as the structural precondition, set, commit.
+    // The target doc is the one the echo wrote.
+    const totalCell = clientResult.key("total");
+    const blindTx = clientRuntime.edit();
+    markUiInputBlindWriteTx(blindTx);
+    const link = totalCell.withTx(blindTx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    setBlindStructuralTarget(blindTx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    totalCell.withTx(blindTx).set(777);
+    unmarkUiInputBlindWriteTx(blindTx);
+    clientRuntime.prepareTxForCommit(blindTx);
+    const outcome = await blindTx.commit();
+
+    // The write exports — no SpeculativeBasisError, no silent drop.
+    expect(outcome.error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+
+    // Exactly ONE new engine commit: the write landed once — the fix
+    // re-issues nothing, so it cannot double-apply (the which-direction
+    // hazard both ways: no loss, no duplicate).
+    const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
+    expect(after.length).toBe(commitsBefore + 1);
+
+    // The DURABLE truth holds the typed value: read through a fresh
+    // reader with no overlay (the writing client's own render keeps
+    // reading its echo until retirement — that is the overlay's job,
+    // not a durability property).
+    const readerManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerManager,
+    });
+    try {
+      const readerResult = readerRuntime.getCell<{ total: number }>(
+        space,
+        "own-write-result",
+        compiled.resultSchema,
+      );
+      await readerResult.sync();
+      await waitUntil(
+        () => readerResult.key("total").get() === 777,
+        "the typed value to be durable",
+      );
+    } finally {
+      await readerRuntime.dispose();
+      await readerManager.close();
+    }
+
+    // The echo itself is untouched: the exclusion is in the exported
+    // BASIS, never a withdrawal — retirement stays the overlay's
+    // arrival-gated business (speculation.md §4).
+    expect(overlay.entryCount(space)).toBe(echoEntries);
     cancelDemand();
   });
 

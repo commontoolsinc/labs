@@ -51,7 +51,14 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import type { MemorySpace, Runtime } from "./runtime.ts";
+import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
+
+/** The §2b delegated carriage a cross-space cache writeback rides (OW31
+ * seat S-A): captured verbatim from the TRIGGERING run's wave context
+ * (the provisioning handler / demanded run) at `replicatePatternToSpace`
+ * and threaded to the writeback stamps, where it applies only to writes
+ * FOREIGN to the serving manager's home space. */
+export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -417,6 +424,53 @@ export class PatternManager {
   }
 
   /**
+   * Whether any pattern work that produces or persists PROGRAM DOCS is
+   * in flight: a by-identity load (whose cold-load arm recompiles and
+   * RE-PERSISTS a space's program closure) or a compile-cache
+   * write-back (which IS the program-materialization commit). Consulted
+   * by the client durability barrier
+   * (`Scheduler.idleWithPendingCommits` — verification-coverage.md
+   * OW45, seat S-B): the barrier's contract is "once it resolves,
+   * tearing the page down loses no writes", and a program commit
+   * issued from a post-arrival load chain is exactly a write a reload
+   * would otherwise kill (the home-profile program-write loss). Three
+   * registries cover the chains end to end: `inProgressCompilations`
+   * registers SYNCHRONOUSLY at `compileOrGetPattern` — which
+   * `compile-and-run` launches as a FLOATING promise, so nothing else
+   * holds the scheduler while TypeScript compiles — and its promise
+   * resolves only after `compilePattern` has awaited persistence; the
+   * single-flight load slot registers in the load's first awaits
+   * (before any storage read); and the persistence slot registers at
+   * `persistCompileCacheTracked` entry. A chain running when the
+   * barrier's fixpoint drains is visible through whichever registry
+   * currently holds it.
+   */
+  hasPendingPatternWork(): boolean {
+    return this.inProgressCompilations.size > 0 ||
+      this.inProgressByIdentityLoads.size > 0 ||
+      this.compileCacheWrites.size > 0;
+  }
+
+  /**
+   * Settle every currently-registered in-progress compilation,
+   * by-identity load, and compile-cache write-back (failures SETTLE —
+   * allSettled by contract: they are the original caller's to surface,
+   * never the barrier's to hang on; the rejecting-promise pin guards
+   * the allSettled→all regression). Work registered WHILE awaiting is
+   * the caller's to re-check: the scheduler barrier re-evaluates from
+   * scratch after each settle, the same joint-fixpoint structure
+   * pending commits use, so a chain that registers its follow-on work
+   * mid-await is seen by the next pass.
+   */
+  async pendingPatternWorkSettled(): Promise<void> {
+    await Promise.allSettled([
+      ...this.inProgressCompilations.values(),
+      ...this.inProgressByIdentityLoads.values(),
+      ...this.compileCacheWrites,
+    ]);
+  }
+
+  /**
    * Attach a rehydration `program` to a hand-built pattern object (one with no
    * module-scope entry ref). The only surviving job of the old
    * `registerPattern`: source-bearing tests/builtins that construct a Pattern in
@@ -511,6 +565,7 @@ export class PatternManager {
     pattern: Pattern | Module,
     toSpace: MemorySpace,
     fromSpace: MemorySpace,
+    delegated?: WritebackDelegation,
   ): void {
     if (toSpace === fromSpace) return;
 
@@ -520,6 +575,8 @@ export class PatternManager {
       entryRef.identity,
       fromSpace,
       toSpace,
+      undefined,
+      delegated,
     ).catch((error) => {
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
@@ -547,6 +604,7 @@ export class PatternManager {
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
     visited = new Set<string>(),
+    delegated?: WritebackDelegation,
   ): Promise<void> {
     const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
     if (visited.has(visitKey)) return;
@@ -652,6 +710,8 @@ export class PatternManager {
         toSpace,
         modules,
         entryIdentity,
+        undefined,
+        delegated,
       );
     } else {
       await this.persistCompileCacheTracked(
@@ -659,6 +719,8 @@ export class PatternManager {
         modules,
         entryIdentity,
         { runtimeVersion },
+        undefined,
+        delegated,
       );
     }
 
@@ -668,6 +730,7 @@ export class PatternManager {
         fromSpace,
         toSpace,
         visited,
+        delegated,
       );
     }
   }
@@ -1822,12 +1885,27 @@ export class PatternManager {
    * fails the compile: refs-only pattern JSON makes a durable closure in `space`
    * part of the compilation contract.
    */
+  /** Attach the trigger's §2b carriage ONLY for a write target FOREIGN
+   * to the serving manager's home space (OW31 seat S-A): home-space
+   * writebacks and every client writeback stay plain bookkeeping —
+   * byte-identical to before. */
+  #writebackDelegationFor(
+    space: MemorySpace,
+    delegated: WritebackDelegation | undefined,
+  ): { delegated?: WritebackDelegation } {
+    const home = this.runtime.storageManager.servingHomeSpace;
+    return delegated !== undefined && home !== undefined && space !== home
+      ? { delegated }
+      : {};
+  }
+
   private async persistCompileCacheTracked(
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
     opts: { runtimeVersion: string },
     moduleDelegations: ModuleDelegationMap = new Map(),
+    delegated?: WritebackDelegation,
   ): Promise<void> {
     const persistenceSlotKey = compileCachePersistenceSlotKey(
       space,
@@ -1879,6 +1957,7 @@ export class PatternManager {
         entryIdentity,
         opts,
         moduleDelegations,
+        delegated,
       );
       this.persistedCompileCacheClosures.set(
         persistenceSlotKey,
@@ -1963,12 +2042,14 @@ export class PatternManager {
     modules: CacheableModule[],
     entryIdentity: string,
     moduleDelegations: ModuleDelegationMap = new Map(),
+    delegated?: WritebackDelegation,
   ): Promise<void> {
     const writeBack = this.writeBackSourceCache(
       space,
       modules,
       entryIdentity,
       moduleDelegations,
+      delegated,
     );
     this.compileCacheWrites.add(writeBack);
     this.pendingCacheWriteBacks.add(writeBack);
@@ -1985,6 +2066,7 @@ export class PatternManager {
     modules: CacheableModule[],
     entryIdentity: string,
     moduleDelegations: ModuleDelegationMap = new Map(),
+    delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncSourceCacheWriteTargets(space, modules);
@@ -1995,10 +2077,14 @@ export class PatternManager {
       // compile flows with no scheduler run around it, and a SERVING
       // runtime's wave refuses unstamped seals — unstamped, the cache
       // never heals server-side and every cold load recompiles. No-op
-      // on the OFF arm and for plain clients.
+      // on the OFF arm and for plain clients. A FOREIGN-space writeback
+      // additionally carries the triggering run's §2b delegated
+      // carriage (OW31 seat S-A) — without it the wave's accept gate
+      // refuses the crossing.
       this.runtime.stampServerRun(tx, {
         actionId: `compile-cache/source-writeback/${entryIdentity}`,
         kind: "bookkeeping",
+        ...this.#writebackDelegationFor(space, delegated),
       });
       committedModuleDelegations = writeSourceDocs(
         this.runtime,
@@ -2034,6 +2120,7 @@ export class PatternManager {
     entryIdentity: string,
     opts: { runtimeVersion: string },
     moduleDelegations: ModuleDelegationMap = new Map(),
+    delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
@@ -2100,6 +2187,7 @@ export class PatternManager {
         this.runtime.stampServerRun(tx, {
           actionId: `compile-cache/writeback/${entryIdentity}`,
           kind: "bookkeeping",
+          ...this.#writebackDelegationFor(space, delegated),
         });
         chunkDelegations = writeSourceAndCompiledDocs(
           this.runtime,

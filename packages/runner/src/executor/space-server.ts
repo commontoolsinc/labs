@@ -121,6 +121,17 @@ import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
 
+/** Consecutive not-yet-loadable deferrals of ONE demanded root after
+ * which the root counts as STUCK (`stats.structureLoadStuck`, once per
+ * crossing) and the loop WARNS (`structure-load-stuck`, again at each
+ * doubling of the streak). An observability knob, not a contract: the
+ * routine creation race resolves in one or two cycles, so any streak
+ * this long names a root whose piece cannot start — the OW46 class
+ * (a demanded piece whose program docs never materialized parks in the
+ * retry arm forever, invisible in the aggregate `structureLoadDeferred`
+ * and logged only at debug level). */
+export const STRUCTURE_LOAD_STUCK_AFTER = 8;
+
 /** The sanctioned internal stamp kind's durable action id (serving-loop.md
  * §3d, RULED 2026-08-05: stage F names the kinds when it installs the
  * seal destination). */
@@ -402,6 +413,18 @@ export class SpaceServer implements TransactionSealDestination {
    * classes out of piece demand entirely; this covers the remaining
    * `of:` ids, which id classes cannot split. */
   readonly #terminalStructureLoads = new Map<string, ReadonlySet<string>>();
+  /** Consecutive deferral streak per demanded root (keyed by demand
+   * key), feeding `stats.structureLoadStuck` and the
+   * `structure-load-stuck` WARN once a streak crosses
+   * `STRUCTURE_LOAD_STUCK_AFTER` (verification-coverage.md OW46): the
+   * per-attempt aggregate `structureLoadDeferred` cannot distinguish a
+   * forever-parked root — the home-profile shape, a piece whose
+   * program docs never materialized — from routine one-cycle creation
+   * races, and the per-attempt log line is debug-level. Cleared when
+   * the root starts or terminalizes (a later re-stuck stretch counts
+   * again); left untouched by the THROW arm, whose failures are
+   * already loud (`structureLoadFailures` + warn per attempt). */
+  readonly #structureLoadDeferralStreaks = new Map<string, number>();
   /** The single-flighted demand-structure load pass (stage P2-F): the
    * wave cycle races it against the flush deadline; a pass outliving
    * its wave keeps running and later cycles join it. */
@@ -1349,7 +1372,10 @@ export class SpaceServer implements TransactionSealDestination {
               `${verdict.reason} (protocol.md §2b)`,
             ]);
           }
-          return verdict.granted;
+          // The FULL verdict, not just the boolean (OW31 B4): the wave
+          // retains the `via` arm so the commit step forces a
+          // `creation`-granted target's genesis ACL before the sink.
+          return verdict;
         },
         onForeignWriteRefusal: () => {
           this.#options.stats.foreignWriteRefusals += 1;
@@ -1385,13 +1411,33 @@ export class SpaceServer implements TransactionSealDestination {
    * only; a space node demanded by anyone carries none. HANDLER runs are
    * unchanged (the event's server-stamped `firedAt` is their explicit
    * actor — LD1; the in-process LT6 shape inherits the origin's pair).
-   * Never for `bookkeeping`: the loop's own writes are service-identity
-   * writes that carry addressing and NO acting principal (protocol.md
-   * §1's "The SpaceServer's own writes"). */
+   * Never DERIVED for `bookkeeping`: the loop's own writes are
+   * service-identity writes that carry addressing and NO acting
+   * principal (protocol.md §1's "The SpaceServer's own writes") — with
+   * ONE explicit exception: a bookkeeping run carrying `info.delegated`
+   * (OW31 seat S-A — the compile-cache / program materialization
+   * writeback into a piece's own space) is stamped with the TRIGGERING
+   * run's carriage verbatim, so the crossing rides §2b's delegated
+   * admission instead of being refused carriage-less. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     const principal = info.scopeKeyIdentity?.principal;
     const attributionFromScope = info.kind === "derivation" &&
       info.acting === undefined && principal !== undefined;
+    // The S-A carriage (OW31; protocol.md §2b): a bookkeeping run
+    // sanctioned to cross — the compile-cache / program materialization
+    // writeback into the piece's own space — carries the TRIGGERING
+    // run's delegated carriage verbatim. Everything below that reads
+    // `info.acting`/mints a capabilityRef is bypassed for it: the
+    // carriage is the trigger's, never derived here.
+    if (info.kind === "bookkeeping" && info.delegated !== undefined) {
+      stampWaveRunContext(tx, {
+        actionId: info.actionId,
+        kind: info.kind,
+        acting: info.delegated.acting,
+        capabilityRef: info.delegated.capabilityRef,
+      });
+      return;
+    }
     const acting = info.kind !== "bookkeeping" && !attributionFromScope &&
         principal !== undefined
       ? {
@@ -2698,6 +2744,12 @@ export class SpaceServer implements TransactionSealDestination {
       this.#pendingStructureLoads.delete(key);
       this.#terminalStructureLoads.delete(key);
       this.#rearmedAwaitingSettle.delete(key);
+      // The stuck-streak entry retires with the rest of the per-key
+      // load state (review finding): a departed root's streak would
+      // otherwise linger for the space's whole life, and a later
+      // re-demand of the same key would resume an obsolete streak
+      // instead of starting a fresh episode.
+      this.#structureLoadDeferralStreaks.delete(key);
       runtime.scheduler.leaveDemandedEntity(addressOf(key));
     }
     // ENTERED keys and pairs. A NEW key ENTERS the demanded entity (0→1
@@ -2764,6 +2816,7 @@ export class SpaceServer implements TransactionSealDestination {
       // sound.
       else if (neverAPieceRootId(root.id)) {
         this.#pendingStructureLoads.delete(key);
+        this.#structureLoadDeferralStreaks.delete(key);
         continue;
       } else {
         try {
@@ -2775,6 +2828,7 @@ export class SpaceServer implements TransactionSealDestination {
           const verdict = await this.#attemptStructureLoad(runtime, root);
           if (verdict.started) {
             this.#pendingStructureLoads.delete(key);
+            this.#structureLoadDeferralStreaks.delete(key);
             if (verdict.rootId !== undefined && verdict.rootId !== root.id) {
               // The demand named an argument/derived doc; remember the
               // OWNING piece root so the per-(action × instance) run
@@ -2797,6 +2851,7 @@ export class SpaceServer implements TransactionSealDestination {
             );
             if (confirmed.started) {
               this.#pendingStructureLoads.delete(key);
+              this.#structureLoadDeferralStreaks.delete(key);
               if (
                 confirmed.rootId !== undefined && confirmed.rootId !== root.id
               ) {
@@ -2805,6 +2860,7 @@ export class SpaceServer implements TransactionSealDestination {
               }
             } else if (confirmed.reason === "no-pattern-meta") {
               this.#pendingStructureLoads.delete(key);
+              this.#structureLoadDeferralStreaks.delete(key);
               this.#terminalStructureLoads.set(
                 key,
                 new Set(confirmed.observedDocIds),
@@ -2818,6 +2874,12 @@ export class SpaceServer implements TransactionSealDestination {
             } else {
               this.#pendingStructureLoads.add(key);
               stats.structureLoadDeferred += 1;
+              this.#noteStructureLoadDeferral(
+                key,
+                root.id,
+                confirmed.reason,
+                stats,
+              );
             }
           } else {
             // Not loadable YET for a non-terminal reason (a chain
@@ -2827,6 +2889,12 @@ export class SpaceServer implements TransactionSealDestination {
             // input-driven cycle retries.
             this.#pendingStructureLoads.add(key);
             stats.structureLoadDeferred += 1;
+            this.#noteStructureLoadDeferral(
+              key,
+              root.id,
+              verdict.reason,
+              stats,
+            );
             logger.debug?.("structure-load-deferred", () => [
               `demanded root ${root.id} not loadable yet ` +
               `(${verdict.reason ?? "unclassified"}); ` +
@@ -2938,6 +3006,38 @@ export class SpaceServer implements TransactionSealDestination {
         rkeys.delete(key);
         if (rkeys.size === 0) this.#keysByResolvedRoot.delete(resolved);
       }
+    }
+  }
+
+  /** Track one root's consecutive-deferral streak and surface the
+   * STUCK crossing (OW46): count `stats.structureLoadStuck` once at
+   * `STRUCTURE_LOAD_STUCK_AFTER`, and WARN there and at each doubling
+   * of the streak (8, 16, 32, …) so a forever-parked root keeps
+   * showing up without per-cycle log spam. The streak is cleared by
+   * the resolution arms (started / terminal / never-a-piece) and by
+   * demand departure, never here. */
+  #noteStructureLoadDeferral(
+    key: string,
+    rootId: string,
+    reason: string | undefined,
+    stats: { structureLoadStuck: number },
+  ): void {
+    const streak = (this.#structureLoadDeferralStreaks.get(key) ?? 0) + 1;
+    this.#structureLoadDeferralStreaks.set(key, streak);
+    if (streak < STRUCTURE_LOAD_STUCK_AFTER) return;
+    if (streak === STRUCTURE_LOAD_STUCK_AFTER) {
+      stats.structureLoadStuck += 1;
+    }
+    // Log at the crossing and at each doubling (power-of-two streaks).
+    if ((streak & (streak - 1)) === 0) {
+      logger.warn("structure-load-stuck", () => [
+        `demanded root ${rootId} in ${this.#options.space} has deferred ` +
+        `its structure load ${streak} consecutive cycles ` +
+        `(${reason ?? "unclassified"}): the piece cannot start and the ` +
+        "space serves nothing for it — a forever-park unless the " +
+        "missing docs arrive (verification-coverage.md OW46; the " +
+        "home-profile program-write-loss shape)",
+      ]);
     }
   }
 
@@ -3417,6 +3517,37 @@ export class SpaceServer implements TransactionSealDestination {
     // wave's foreign provisioning targets BEFORE the commit step — the
     // sink's engineFor is synchronous. Same host, same process.
     await this.#resolveForeignEngines(closing);
+
+    // OW31 B4 (RULED 2026-08-18; protocol.md §2's genesis clause): for
+    // every foreign target this wave was granted via the `creation`
+    // arm, force the fresh space's GENESIS ACL — signed by the space's
+    // own keys, naming the acting user OWNER — BEFORE the sink applies
+    // the data batch, so the space's commit #1 IS the ACL commit
+    // (INV-13's precedence, mirrored onto the engine-direct plane; the
+    // sink refuses a foreign batch into a seq-0/no-ACL engine as the
+    // backstop). The forcing is the provider mount's own bootstrap
+    // (`#createInitializedSession`): an in-process loopback round trip,
+    // idempotent on replay (the ACL exists → the bootstrap skips, and
+    // the accept gate re-granted via `acl` through the owner). Failure
+    // is isolated per space, exactly like a failed engine resolution:
+    // the sink's refusal then fails the contributions targeting the
+    // space (requeue for events, drop for derivations) and the wave
+    // commits the rest.
+    for (const creationSpace of closing.creationGrantedForeignSpaces()) {
+      try {
+        await this.#runtime!.storageManager.ensureSpaceInitialized?.(
+          creationSpace,
+        );
+      } catch (error) {
+        logger.warn("foreign-genesis-forcing-failed", () => [
+          `forcing the genesis ACL of creation-granted foreign space ` +
+          `${creationSpace} failed; its contributions will be refused ` +
+          `by the sink's INV-13 mirror and replay (OW31 B4; ` +
+          "protocol.md §2b)",
+          error,
+        ]);
+      }
+    }
 
     const derivedThrough = !exhausted && advanceSealed
       ? advanceTo
