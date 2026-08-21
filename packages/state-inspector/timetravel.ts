@@ -75,8 +75,8 @@ export interface ExactValueChange extends ValueChange {
   pathSegments: string[];
 }
 
-// The data-model hash defines equality for Fabric leaves, including BigInt,
-// symbols, and Fabric instances.
+// The data-model hash defines equality for `FabricValue` leaves, including
+// BigInt, symbols, and `FabricInstance`s.
 function canonical(v: unknown): string {
   return v === undefined ? "undefined" : hashStringOf(v);
 }
