@@ -136,7 +136,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ONE STEP entry (cellset-lww's own-write race; convergence-storm's storm step LIFTED by OW52's close — the red was the harness settle racing the serving drain, not a loss) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ZERO step entries — both gate step lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
@@ -172,10 +172,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
       ),
     );
   }
-  assertMatch(
-    report,
-    /patterns: SKIP-STEP integration\/cellset-lww\.test\.ts :: end-to-end: a typed name survives the own-write race through save \(until phase-7; the rest of the file runs\)/,
-  );
   // The convergence-storm storm-step entry was LIFTED (OW52 CLOSED,
   // 2026-08-21: the 23/40 red was the harness's served-topology settle
   // racing the serving drain — no loss at any seam; the settle now waits
@@ -185,6 +181,15 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   assert(
     !report.includes("integration/convergence-storm.test.ts"),
     "convergence-storm must carry NO skip entry (OW52 closed; the storm step runs ON)",
+  );
+  // The cellset-lww own-write-race step is LIFTED (verification-coverage.md
+  // OW47 closed, the optimize pass): no entry, so the step RUNS on the ON
+  // arm — the lift's CI evidence.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
+      skip.file === "integration/cellset-lww.test.ts"
+    ),
+    false,
   );
   // The two-browser gates RUN in the ON arm: cfc-group-chat-two-browsers
   // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
@@ -222,7 +227,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
-  assertEquals(gateEntries.length, 7);
+  assertEquals(gateEntries.length, 6);
   for (const entry of gateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
@@ -231,21 +236,14 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     assertMatch(entry.reason, /(NOT|NEITHER) a demand hole/i);
     assertMatch(entry.reason, /flip PR needs this list EMPTY/);
   }
-  // The STEP entry is BOUND: the guard lookup the file calls resolves
-  // exactly this entry (the validator additionally checks the file names
-  // the step and calls the guard). convergence-storm's guard resolves to
-  // NO entry since the OW52 lift — its step runs.
+  // ZERO step entries remain — both gate step lifts landed
+  // (cellset-lww with OW47, its in-file guard removed with the entry;
+  // convergence-storm with OW52, its guard kept and resolving to NO
+  // entry). A re-listed step is a deliberate edit here.
   const steps = gateEntries.filter((skip) => skip.step !== undefined);
-  assertEquals(steps.map((skip) => skip.file), [
-    "integration/cellset-lww.test.ts",
-  ]);
-  for (const entry of steps) {
-    assertEquals(
-      serverExecutionOnStepSkip("patterns", entry.file, entry.step!),
-      entry,
-    );
-  }
-  // Step entries never drop their file from the shard's explicit list.
+  assertEquals(steps.map((skip) => skip.file), []);
+  // Lifted files pass through the shard filter untouched (and a step
+  // entry, were one re-listed, would never drop its file).
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
@@ -255,7 +253,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "./integration/convergence-storm.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 8);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 7);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

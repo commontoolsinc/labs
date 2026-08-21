@@ -23,43 +23,10 @@ import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
 } from "./multi-runtime-harness.ts";
-import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
-
-// The server-execution v2 posture this test process runs (testing.md §2):
-// declared from the environment — the CI ON lane sets
-// EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF (the first-party default
-// while Phase 7 is landed dark).
-const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
-  .serverExecution;
-
-/**
- * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
- * a step listed there for this file is skipped ONLY when this process runs
- * the ON posture, loudly (the entry's reason is printed), and only while
- * the entry exists — the OFF arm and an unlisted step always run. Never a
- * silent filter: the CI step prints every entry, and the validator
- * requires this file to name each listed step and call this guard.
- */
-function onArmStepSkip(step: string): { ignore: boolean } {
-  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/cellset-lww.test.ts",
-    step,
-  );
-  if (entry === undefined) return { ignore: false };
-  console.warn(
-    `[server-execution ON arm] patterns: SKIPPING STEP ${
-      JSON.stringify(step)
-    } (until ${entry.phase}) — ${entry.reason}`,
-  );
-  return { ignore: true };
-}
 
 const PROGRAM_PATH = join(
   import.meta.dirname!,
@@ -174,9 +141,6 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
 
   it(
     "end-to-end: a typed name survives the own-write race through save",
-    onArmStepSkip(
-      "end-to-end: a typed name survives the own-write race through save",
-    ),
     async () => {
       // The original cfc-group-chat-demo "Name not set" flake, end to end: a user
       // types a profile name (a scalar `$value` write to the PerUser draft), then
@@ -185,6 +149,18 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
       // rolled back to its prior (empty) value, so the save reads the wrong/empty
       // draft and the profile name is not the one the user typed. With the fix the
       // scalar write is precondition-free, lands, and the save reads it.
+      //
+      // Under the server-execution ON arm this step additionally pins the
+      // OW47 client own-write durability seam (the step was ON-skipped at
+      // the first ON CI gate, 2026-08-21, and lifted with the fix): the
+      // typed name's blind write races the PREVIOUS iteration's saveProfile
+      // handler ECHO — the save handler writes the trimmed name back into
+      // the draft cell, so its speculative echo stands on the same doc
+      // until the arrival gate retires it — and pre-fix the blind write's
+      // structural parent read named that process-local layer, so the
+      // whole write was refused terminally (`speculative-basis-refused`)
+      // and the user's input was silently dropped (storage/v2.ts
+      // buildReads; speculation-overlay.test.ts carries the unit pin).
       for (let i = 0; i < 5; i++) {
         await harness.settle();
         // Another concurrent write bumps the shared PerUser draft's seq…
