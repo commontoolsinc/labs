@@ -107,7 +107,7 @@ describe("sx2 events (Phase 3 gates)", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: `${SPACE_NAME}-sx2-events`,
+      space: `${SPACE_NAME}-sx2-events`,
       apiUrl: new URL(API_URL),
       identity,
     });

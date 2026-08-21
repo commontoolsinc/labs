@@ -146,7 +146,7 @@ describe("sx2 scale (Phase 6 gates)", () => {
   const newController = async (suffix: string): Promise<PiecesController> => {
     const identity = await Identity.generate({ implementation: "noble" });
     const controller = await initializePiecesController({
-      spaceName: `${SPACE_NAME}-sx2-scale-${suffix}`,
+      space: `${SPACE_NAME}-sx2-scale-${suffix}`,
       apiUrl: new URL(API_URL),
       identity,
     });

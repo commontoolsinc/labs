@@ -108,7 +108,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: `${SPACE_NAME}-sx2-loop`,
+      space: `${SPACE_NAME}-sx2-loop`,
       apiUrl: new URL(API_URL),
       identity,
     });

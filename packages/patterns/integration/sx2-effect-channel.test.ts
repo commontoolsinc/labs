@@ -88,7 +88,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: `${SPACE_NAME}-sx2-effects`,
+      space: `${SPACE_NAME}-sx2-effects`,
       apiUrl: new URL(API_URL),
       identity,
       navigateCallback: (target) => {

@@ -31,6 +31,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,
+  type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -2226,9 +2227,30 @@ function getTrackerKey(
   address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
   identity: ScopeKeyIdentity,
 ): string {
-  return `${address.space}/${
-    resolveScopeKey(address.scope, identity)
-  }/${address.id}`;
+  return schemaTrackerKey(address.space, address.id, address.scope, identity);
+}
+
+/**
+ * Key under which a document's reached selectors are recorded in a schema
+ * tracker: `space/scope_key/id`, one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), the scope_key resolved from the address's
+ * scope and the traversal's acting identity via the shared constructor (an
+ * absent scope resolves to `space`, matching how storage defaults one).
+ *
+ * Every writer of a tracker key builds it here, as does the query side that
+ * looks one up (`toDocKey` in `packages/memory/v2/query.ts`).
+ * `isLinkedDocumentCovered` consults it only for links that DECLARE a
+ * scope: an unscoped link refuses coverage explicitly rather than looking
+ * up a key no writer produces — see the OFF-ARM NEUTRALITY note at that
+ * site for why widening that is a deliberate change, not a tidy-up.
+ */
+export function schemaTrackerKey(
+  space: string,
+  id: string,
+  scope: CellScope | null | undefined,
+  identity: ScopeKeyIdentity,
+): `${string}/${ScopeKey}/${string}` {
+  return `${space}/${resolveScopeKey(scope ?? undefined, identity)}/${id}`;
 }
 
 /**
