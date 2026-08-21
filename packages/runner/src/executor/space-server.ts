@@ -1928,12 +1928,15 @@ export class SpaceServer implements TransactionSealDestination {
         // of magnitude over. This span carries the distribution the
         // counter censors, and pairs with it rather than replacing it —
         // the count says how often, the p95 says by how much.
+        //
+        // Recorded on the way out rather than from a `finally`, so a cycle
+        // that THREW contributes nothing: that path parks the space, which
+        // the counters and the loop-failed log already carry, and its
+        // duration is the time to a failure rather than the time to serve
+        // a wave. Averaging the two would be worse than missing one.
         const cycleStart = performance.now();
-        try {
-          await this.#waveCycle();
-        } finally {
-          timing.time(cycleStart, "executor", "wave", "cycle");
-        }
+        await this.#waveCycle();
+        timing.time(cycleStart, "executor", "wave", "cycle");
         if (!this.#active || this.#parkRequested) break;
         if (!this.#hasWork()) {
           const idleParkMs = this.#options.policy?.idleParkMs ??
@@ -3294,9 +3297,12 @@ export class SpaceServer implements TransactionSealDestination {
         }
       }
     } finally {
-      timing.time(settleStart, "executor", "wave", "settle");
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
     }
+    // After the timer is cleared and outside the `finally`, for the reason
+    // the cycle span is: a settle that threw is a failed wave, not a slow
+    // one, and folding its duration in would blunt the measurement.
+    timing.time(settleStart, "executor", "wave", "settle");
 
     // Promote settle-gated re-armed roots (stage P2-F): a TRUE settle
     // proved every frame ≤ batchHead applied — the re-arming commit's
