@@ -35,10 +35,14 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * whole buffer behind it. So a view that covers only part of its buffer is
  * copied even so, since the rest of that buffer may carry unrelated live views
  * -- an allocator handing out windows onto a shared block is a common shape.
- * A source whose buffer cannot be detached at all is likewise copied. There
- * are two such: a `SharedArrayBuffer`, which has no detach operation, and an
- * `ArrayBuffer` holding a detach key, `WebAssembly.Memory`'s being the one in
- * reach.
+ * A source backed by a `SharedArrayBuffer` is likewise copied, that being a
+ * buffer which cannot be detached at all.
+ *
+ * An `ArrayBuffer` holding a detach key -- `WebAssembly.Memory`'s is the one
+ * in reach -- also cannot be detached, and does not get that copy: the key is
+ * a spec-internal slot, leaving such a buffer indistinguishable from a plain
+ * one by every readable property, so ceding one reaches `transfer()` and
+ * surfaces that method's `TypeError`.
  *
  * A caller passing `true` must therefore treat `bytes` as consumed either way,
  * since it cannot tell which of the two happened. Passing an already-detached
@@ -68,17 +72,7 @@ export function toOwnedUint8Array(
     transfer && (buffer instanceof ArrayBuffer) && !isDetached(buffer) &&
     (view.byteOffset === 0) && (view.byteLength === buffer.byteLength)
   ) {
-    try {
-      return new Uint8Array(buffer.transfer());
-    } catch (e) {
-      // A buffer holding a detach key refuses to transfer. The key is
-      // unreachable from JS, so there is nothing to test ahead of time and
-      // the attempt is itself the test; the copy below is what any source
-      // that cannot be detached gets.
-      if (!(e instanceof TypeError)) {
-        throw e;
-      }
-    }
+    return new Uint8Array(buffer.transfer());
   }
 
   return new Uint8Array(view);
