@@ -623,8 +623,7 @@ export function linkPathContracts(
           throw new Error(`array link path contains non-index segment ${part}`);
         }
         const index = Number(part);
-        // A `FabricArray` preserves sparse holes. `minItems` constrains
-        // length,
+        // A `FabricArray` preserves sparse holes. `minItems` constrains length,
         // not own-property presence, so every indexed source path can still
         // yield Fabric `undefined` even for an unconditionally shaped array.
         const mayBeMissing = contract.mayBeMissing === true ||
