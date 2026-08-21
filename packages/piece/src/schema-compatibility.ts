@@ -492,14 +492,14 @@ function schemaSubsetIssue(
     }
 
     // A brand-marked structural emission (the pre-vocabulary generator's
-    // shape for a fabric special object) moving to a fabric-primitive-typed
+    // shape for a `FabricSpecialObject`) moving to a `FabricPrimitive`-typed
     // schema is deliberately NOT allowed through here, even under
     // `allowEvolutionPolicy`. The structural schema is an ordinary object
     // schema, so its value population is decided structurally: a plain
     // record carrying the brand key as an own property satisfies it, and the
     // presence-only `required` checks admit primitives of other classes
     // (`FabricHash` has `length`, so it inhabits the `FabricBytes` emission).
-    // A fabric-primitive-typed schema matches by prototype, and a pattern
+    // A `FabricPrimitive`-typed schema matches by prototype, and a pattern
     // update rewrites the stored argument verbatim -- nothing converts -- so
     // every such inhabitant would survive the update only to be rejected by
     // reads. The transition therefore narrows for every class, and it is
@@ -987,7 +987,7 @@ function typeSubsetIssue(
     !targetTypes.some((targetType) =>
       sourceType === targetType ||
       (sourceType === "integer" && targetType === "number") ||
-      // Each fabric-primitive type is a subtype of "object" (mirrors
+      // Each `FabricPrimitive` type is a subtype of "object" (mirrors
       // schemaTypeMatchesValueType in the runner's traverse).
       (isFabricPrimitiveSchemaType(sourceType) && targetType === "object")
     )

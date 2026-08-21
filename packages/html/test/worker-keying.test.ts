@@ -84,7 +84,7 @@ Deno.test("keying - generateKey", async (t) => {
     assertNotEquals(key({ n: NaN }), key({ n: null }));
     assertNotEquals(key({ n: -0 }), key({ n: 0 }));
 
-    // A `bigint` is a fabric value, so it keys precisely even though
+    // A `bigint` is a `FabricValue`, so it keys precisely even though
     // `WorkerProps` does not admit one.
     assertNotEquals(key({ n: 1n }), key({ n: 2n }));
     assertNotEquals(key({ n: 1n }), key({ n: 1 }));
