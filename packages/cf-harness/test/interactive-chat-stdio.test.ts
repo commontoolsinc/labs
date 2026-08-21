@@ -15,7 +15,10 @@ import {
 import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "../src/contracts/browser-access.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { DEFAULT_PARENT_TOOL_IDS } from "../src/contracts/tool-descriptor.ts";
-import { parseHostMountSpecs } from "../src/host-mounts.ts";
+import {
+  parseHostMountSpecs,
+  resolveInteractiveProvisioning,
+} from "../src/host-mounts.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -1298,4 +1301,31 @@ Deno.test("a typo in a host-mount field is refused, not silently defaulted", asy
   } finally {
     await Deno.remove(source, { recursive: true });
   }
+});
+
+Deno.test("no provisioning flags leaves the run options untouched", async () => {
+  // The other half of the standalone-entrypoint contract: adding these flags
+  // must not change what happens when nobody passes them, or every existing
+  // embedder gets a behaviour change for free.
+  assertEquals(await resolveInteractiveProvisioning({}, Deno.cwd()), {});
+
+  const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+  await runHarnessInteractiveChatStdioCli(
+    ["--chat-max-in-memory-events", "8"],
+    Deno.cwd(),
+    (options) => {
+      seen.push(options);
+      return Promise.resolve();
+    },
+  );
+  assertEquals(seen.length, 1);
+  assertEquals(seen[0].basePromptLoopOptions, undefined);
+  assertEquals(seen[0].maxInMemoryEvents, 8);
+});
+
+Deno.test("resolveInteractiveProvisioning carries a turn budget without mounts", async () => {
+  assertEquals(
+    await resolveInteractiveProvisioning({ maxModelTurns: 32 }, Deno.cwd()),
+    { maxModelTurns: 32 },
+  );
 });
