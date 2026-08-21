@@ -110,7 +110,9 @@ watching for the run that click starts. The wait has no bound, since a
 run takes as long as it takes; Ctrl-C stops watching and running the
 command again picks up where it left off. Run it on a workstation that
 already holds a key and it re-checks the shell profile rather than
-minting a second one.
+minting a second one — unless a run is already minting for you, which it
+takes up, because the key that run delivers is the one replacing what is
+installed.
 
 `request` and `collect` are the same path in two invocations, for
 somewhere a watching command is unwanted — a shell without a terminal to

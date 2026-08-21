@@ -873,8 +873,41 @@ export async function setupCommand(
   deps: KeyToolDeps = defaultDeps(),
   options: { rotate?: boolean } = {},
 ): Promise<number> {
+  const token = await deps.githubToken();
+  const login = token === undefined
+    ? undefined
+    : await githubLogin(deps, token);
+  const stored = await loadIdentity(deps.env);
+
+  // What this recipient already has going, asked before anything else,
+  // because a run still minting is this person's own earlier attempt —
+  // a watch they stopped, or a dispatch from a browser — and taking it
+  // up is what rerunning the command is for. Rotating deliberately is
+  // the one case that wants a new run whatever is already going.
+  let search: RunSearch | undefined;
+  let found: RunMatch | undefined;
+  if (
+    options.rotate !== true && token !== undefined && login !== undefined &&
+    stored !== undefined
+  ) {
+    search = {
+      token,
+      recipient: stored.recipient,
+      artifactName: await deliveryName(stored.recipient),
+      login,
+    };
+    found = (await findMintRun(deps, search)).match;
+  }
+  const running = found !== undefined && found.artifact === undefined &&
+    found.run.status !== "completed";
+
+  // A key installed here settles the matter only when nothing is being
+  // minted to replace it. The key that run delivers is the one this
+  // workstation is going to need, and the mint revokes this one to make
+  // it, so standing down now is how a person ends up holding a key that
+  // has been revoked.
   const existing = await installedKey(deps.env);
-  if (existing !== undefined && options.rotate !== true) {
+  if (existing !== undefined && options.rotate !== true && !running) {
     const works = await keyStillWorks(deps, existing.key);
     if (works === false) {
       console.log(`
@@ -903,14 +936,12 @@ To rotate deliberately:
     }
   }
 
-  const token = await deps.githubToken();
   if (token === undefined) {
     throw new KeyToolError(
       "A GitHub token is needed to mint and collect a key; set GH_TOKEN " +
         "or sign in with `gh auth login`",
     );
   }
-  const login = await githubLogin(deps, token);
   if (login === undefined) {
     throw new KeyToolError(
       "Cannot read your GitHub login; use a token that can GET /user.",
@@ -919,37 +950,26 @@ To rotate deliberately:
 
   const identity = await ensureIdentity(deps);
   console.log(`Recipient: ${identity.recipient}`);
-  const search: RunSearch = {
+  const watching: RunSearch = search ?? {
     token,
     recipient: identity.recipient,
     artifactName: await deliveryName(identity.recipient),
     login,
   };
 
-  // A run already minting for this recipient is this person's own
-  // earlier attempt — a watch they stopped, or a browser dispatch — and
-  // taking it up is what makes rerunning resume rather than start
-  // again. Minting a second time would revoke the key the first is
-  // about to deliver. Rotating deliberately is the one case that wants
-  // a new run whatever is already going.
-  const inFlight = options.rotate === true
-    ? undefined
-    : (await findMintRun(deps, search)).match;
   let artifact: number;
-  if (inFlight?.artifact !== undefined) {
-    console.log(
-      `An earlier run has the key waiting: ${runUrl(inFlight.run)}`,
-    );
-    artifact = inFlight.artifact;
+  if (found?.artifact !== undefined) {
+    console.log(`An earlier run has the key waiting: ${runUrl(found.run)}`);
+    artifact = found.artifact;
   } else {
-    if (inFlight !== undefined && inFlight.run.status !== "completed") {
+    if (running && found !== undefined) {
       console.log(
         `A minting run for this recipient is already going: ${
-          runUrl(inFlight.run)
+          runUrl(found.run)
         }`,
       );
-      const created = Date.parse(inFlight.run.created_at ?? "");
-      if (!Number.isNaN(created)) search.notBefore = created;
+      const created = Date.parse(found.run.created_at ?? "");
+      if (!Number.isNaN(created)) watching.notBefore = created;
     } else {
       const dispatch = await dispatchMint(
         deps,
@@ -966,9 +986,9 @@ Waiting for that run — this command collects the key on its own once it
 finishes. Ctrl-C stops watching; rerunning picks up where it left off.
 `);
       }
-      if (dispatch.at !== undefined) search.notBefore = dispatch.at;
+      if (dispatch.at !== undefined) watching.notBefore = dispatch.at;
     }
-    artifact = await awaitDelivery(deps, search);
+    artifact = await awaitDelivery(deps, watching);
   }
   const path = await installDelivery(deps, token, identity, login, artifact);
   console.log(`Key installed: ${path}`);

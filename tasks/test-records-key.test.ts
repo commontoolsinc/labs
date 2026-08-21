@@ -51,6 +51,7 @@ async function signingKey(): Promise<string> {
 }
 
 const KEY_TEXT = await signingKey();
+const OTHER_KEY_TEXT = await signingKey();
 
 function u16le(value: number): number[] {
   return [value & 0xff, (value >> 8) & 0xff];
@@ -994,10 +995,39 @@ describe("test-records-key", () => {
       expect(await Deno.readTextFile(profile)).toContain(
         "CF_TEST_RECORDS_KEY_FILE",
       );
-      // It asks whether the key still works, and nothing else: no run is
-      // dispatched and no delivery is looked for.
-      expect(urls.every((line) => line.includes("oauth2.googleapis.com")))
+      // It asks what is going and whether the key still works, and
+      // starts nothing.
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com")))
         .toBe(true);
+    });
+
+    it("takes up a run already going even with a key installed", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity, OTHER_KEY_TEXT);
+      const going = mintRun(identity.recipient, {
+        id: 11,
+        status: "in_progress",
+        conclusion: undefined,
+      });
+      withStub({
+        runPages: [[going], [mintRun(identity.recipient, { id: 11 })]],
+        ...published,
+      });
+
+      // The run was dispatched to replace this key, so standing down on
+      // the installed one is how a person ends up holding a dead key.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(OTHER_KEY_TEXT);
     });
 
     it("mints a replacement for a key that is no longer accepted", async () => {
