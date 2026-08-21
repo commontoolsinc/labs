@@ -453,6 +453,21 @@ Grace store dump, seq 4). Built shape:
   proving ALICE, not CAROL, was bound). **D5** — skipped as advised
   (per-ACL-commit owner re-resolution is a cold path: one map lookup +
   one sorted scan per session per ACL commit).
+- 2026-08-21: **origin/main merged in** (d8105d533; the arc's
+  merge-not-rebase rule) reconciling #6158 (1907e050e): the skip-list
+  pin test's new per-entry contract ("(NOT|NEITHER) a demand hole"
+  required in every gate reason; gateEntries 7 with the storm step
+  entry's negative pin) accepts this branch's two edited reasons —
+  the full tasks/ dir runs 625/0 locally; space-server.ts composes
+  cleanly (the `bumpDerivedCommits` per-space counters landed in
+  non-overlapping hunks; the B4 forcing loop and the S-A stamp arm
+  are intact); the affected executor/memory suites green on the merge
+  ref. CI-flake ledger closed: the three ON-lane cfc-* reds across
+  three runs (staged-publish hang, main's own spec-gallery, the
+  multi-runtime post-lockdown delivery timeout) each greened on
+  rerun — the last one confirmed 0-failing on 15d76bcff's rerun —
+  and #6158's OW52 settle-race fix addresses that class at the root.
+  Attribution notes for all three are on the PR.
 - **Escape-hatch status (the READ ruling's own provision): NOT
   exercised.** No case surfaced during the build where user-identity
   routing could not cover a legitimately-needed serving read: home
