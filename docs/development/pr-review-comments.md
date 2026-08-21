@@ -41,10 +41,10 @@ query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
 }' -f owner=commontoolsinc -f repo=labs -F number=<n>
 ```
 
-An unresolved thread still needs inspection. It may be waiting on you, or on
-the reviewer after a reply; `isResolved` alone does not assign the next action.
-An outdated thread also needs inspection: the code moved, which is not the same
-as the finding being answered.
+An unresolved thread still needs inspection, even when it is outdated: the code
+moving is not the same as the finding being answered. It may be waiting on you,
+or on the reviewer after a reply; `isResolved` alone does not assign the next
+action.
 
 ## Waiting for the review
 
