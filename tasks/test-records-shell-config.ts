@@ -54,7 +54,7 @@ export interface ProfileSetting {
   line: string;
   /** Whether the assignment reaches the programs the shell starts. */
   exported: boolean;
-  /** The value, with one level of the shell's quoting taken off. */
+  /** The path it names, read the way the shell reads it. */
   value: string;
 }
 
@@ -127,15 +127,6 @@ export function homeRelative(path: string, home: string | undefined): string {
   return split.underHome ? `$HOME${split.rest}` : split.rest;
 }
 
-/** The path a value naming $HOME stands for. */
-export function expandHome(value: string, home: string | undefined): string {
-  if (home === undefined || home.length === 0) return value;
-  // A name only ends at $HOME when what follows cannot continue it,
-  // which is what keeps $HOMEBREW from reading as $HOME plus BREW.
-  const match = value.match(/^\$(?:\{HOME\}|HOME(?![A-Za-z0-9_]))(.*)$/);
-  return match === null ? value : `${home.replace(/[\\/]+$/, "")}${match[1]}`;
-}
-
 /**
  * A value inside double quotes, with everything the shell would still
  * act on there escaped, so a path holding a dollar sign, a quote, a
@@ -167,34 +158,112 @@ export function exportLine(
     : `export ${name}=${quoted}`;
 }
 
-/** One level of a shell's quoting taken off a value. */
-function unquote(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+/** A value with any comment that follows it on the line taken off. */
+function stripComment(text: string): string {
+  let quote: string | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "\\" && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    const preceding = text[index - 1];
+    if (
+      character === "#" &&
+      (index === 0 || preceding === undefined || /\s/.test(preceding))
+    ) {
+      return text.slice(0, index);
+    }
+  }
+  return text;
+}
+
+/**
+ * The path an assignment names, read the way the shell reads it: single
+ * quotes hold their contents literally, double quotes and bare text
+ * expand $HOME and act on backslashes, and an escaped dollar sign is a
+ * dollar sign.
+ */
+export function effectiveValue(
+  text: string,
+  home: string | undefined,
+): string {
+  const trimmed = stripComment(text).trim();
+  if (
+    trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")
+  ) {
     return trimmed.slice(1, -1);
   }
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
+  const body = trimmed.length >= 2 && trimmed.startsWith('"') &&
+      trimmed.endsWith('"')
+    ? trimmed.slice(1, -1)
+    : trimmed;
+  const root = home === undefined || home.length === 0
+    ? undefined
+    : home.replace(/[\\/]+$/, "");
+  let value = "";
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index]!;
+    if (character === "\\") {
+      value += body[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    // A name only ends at $HOME when what follows cannot continue it,
+    // which is what keeps $HOMEBREW from reading as $HOME plus BREW.
+    const home$ = body.slice(index).match(
+      /^\$(?:\{HOME\}|HOME(?![A-Za-z0-9_]))/,
+    );
+    if (home$ !== null && root !== undefined) {
+      value += root;
+      index += home$[0].length - 1;
+      continue;
+    }
+    value += character;
   }
-  return trimmed;
+  return value;
+}
+
+/** Whether the flags of a fish `set` export the variable. */
+function fishExports(flags: string): boolean {
+  let exported = false;
+  for (const flag of flags.trim().split(/\s+/)) {
+    if (flag.startsWith("--")) {
+      if (flag === "--export") exported = true;
+      if (flag === "--unexport") exported = false;
+      continue;
+    }
+    if (!flag.startsWith("-")) continue;
+    const letters = flag.slice(1);
+    if (letters.includes("x")) exported = true;
+    if (letters.includes("u")) exported = false;
+  }
+  return exported;
 }
 
 /** The assignment of a variable a profile already carries, if any. */
 export function parseSetting(
   text: string,
   name: string,
+  home?: string,
 ): ProfileSetting | undefined {
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line.startsWith("#")) continue;
-    const assignment = line.match(
-      new RegExp(`^(export\\s+)?${name}=(.*)$`),
-    );
+    const assignment = line.match(new RegExp(`^(export\\s+)?${name}=(.*)$`));
     if (assignment !== null) {
       return {
         line,
         exported: assignment[1] !== undefined,
-        value: unquote(assignment[2] ?? ""),
+        value: effectiveValue(assignment[2] ?? "", home),
       };
     }
     const set = line.match(
@@ -203,8 +272,8 @@ export function parseSetting(
     if (set !== null) {
       return {
         line,
-        exported: /-\S*x/.test(set[1] ?? ""),
-        value: unquote(set[2] ?? ""),
+        exported: fishExports(set[1] ?? ""),
+        value: effectiveValue(set[2] ?? "", home),
       };
     }
   }
@@ -230,9 +299,9 @@ async function updateOne(
 ): Promise<ProfileUpdate | undefined> {
   const text = await readIfPresent(path);
   if (text === undefined && !create) return undefined;
-  const existing = parseSetting(text ?? "", name);
+  const existing = parseSetting(text ?? "", name, home);
   if (existing !== undefined) {
-    if (expandHome(existing.value, home) !== value) {
+    if (existing.value !== value) {
       return { path, outcome: "conflict", existing: existing.line };
     }
     return existing.exported

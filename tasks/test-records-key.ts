@@ -414,6 +414,8 @@ function namesRecipient(run: MintRun, recipient: string): boolean {
  * Failing both, the newest run this person dispatched within this
  * attempt is the one they are waiting on, which is all that can be said
  * of a run that is still going and does not name what it is minting.
+ * That last test needs the bound this attempt sets, so a search without
+ * one answers only when it can identify the run outright.
  */
 async function findMintRun(
   deps: KeyToolDeps,
@@ -443,16 +445,15 @@ async function findMintRun(
     if (named) return { ...result, match: { run } };
   }
 
-  if (search.notBefore !== undefined) {
-    const attributed = candidates[0];
-    return attributed === undefined
-      ? result
-      : { ...result, match: { run: attributed } };
-  }
-  const running = candidates.find((run) => run.status !== "completed");
-  return running === undefined
+  // Attributing a run by who started it and when takes a bound to be
+  // safe: without one, a run this person started for some other
+  // recipient, under a name that says nothing about what it is minting,
+  // cannot be told from theirs.
+  if (search.notBefore === undefined) return result;
+  const attributed = candidates[0];
+  return attributed === undefined
     ? result
-    : { ...result, match: { run: running } };
+    : { ...result, match: { run: attributed } };
 }
 
 /** The id of a run's sealed delivery, when it published an unexpired one. */

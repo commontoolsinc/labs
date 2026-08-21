@@ -809,6 +809,40 @@ describe("test-records-key", () => {
       ).toBe(KEY_TEXT);
     });
 
+    it("starts its own run rather than one it cannot identify", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      const opaque = mintRun(identity.recipient, {
+        id: 4,
+        named: false,
+        status: "in_progress",
+        conclusion: undefined,
+        created_at: "2026-08-21T02:00:00Z",
+      });
+      withStub({
+        dispatchDate: "Fri, 21 Aug 2026 03:00:00 GMT",
+        runPages: [
+          [opaque],
+          [
+            mintRun(identity.recipient, {
+              id: 6,
+              created_at: "2026-08-21T03:00:01Z",
+            }),
+            opaque,
+          ],
+        ],
+        ...published,
+      });
+
+      // A run of this person's under a name that says nothing about
+      // what it is minting could be for another identity of theirs.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(true);
+      expect(urls.some((line) => line.includes("/runs/6/artifacts"))).toBe(
+        true,
+      );
+    });
+
     it("collects a delivery an earlier run left waiting", async () => {
       const identity = await storeIdentity();
       const published = await delivery(identity);

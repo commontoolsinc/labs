@@ -4,7 +4,7 @@ import { join } from "@std/path";
 import type { Environment } from "@commonfabric/test-support/records";
 
 import {
-  expandHome,
+  effectiveValue,
   exportFromProfiles,
   exportLine,
   homeRelative,
@@ -134,18 +134,32 @@ describe("test-records-shell-config", () => {
     });
   });
 
-  describe("expandHome()", () => {
+  describe("effectiveValue()", () => {
     it("returns the path a value naming $HOME stands for", () => {
-      expect(expandHome("$HOME/.config/k.json", "/h")).toBe(
+      expect(effectiveValue('"$HOME/.config/k.json"', "/h")).toBe(
         "/h/.config/k.json",
       );
-      expect(expandHome("${HOME}/k.json", "/h")).toBe("/h/k.json");
+      expect(effectiveValue("${HOME}/k.json", "/h")).toBe("/h/k.json");
     });
 
-    it("returns any other value unchanged", () => {
-      expect(expandHome("/etc/k.json", "/h")).toBe("/etc/k.json");
-      expect(expandHome("$HOMEBREW/k.json", "/h")).toBe("$HOMEBREW/k.json");
-      expect(expandHome("$HOME/k.json", undefined)).toBe("$HOME/k.json");
+    it("holds a single-quoted value literally", () => {
+      expect(effectiveValue("'$HOME/k.json'", "/h")).toBe("$HOME/k.json");
+    });
+
+    it("holds an escaped dollar sign literally", () => {
+      expect(effectiveValue('"\\$HOME/k.json"', "/h")).toBe("$HOME/k.json");
+    });
+
+    it("returns a name that only starts like $HOME unchanged", () => {
+      expect(effectiveValue("$HOMEBREW/k.json", "/h")).toBe("$HOMEBREW/k.json");
+      expect(effectiveValue("$HOME/k.json", undefined)).toBe("$HOME/k.json");
+    });
+
+    it("drops a comment that follows the value", () => {
+      expect(effectiveValue('"/k.json" # the reporting key', "/h")).toBe(
+        "/k.json",
+      );
+      expect(effectiveValue('"/a#b.json"', "/h")).toBe("/a#b.json");
     });
   });
 
@@ -201,6 +215,29 @@ describe("test-records-shell-config", () => {
       expect(
         parseSetting(`export ${VARIABLE}="/a\\$b/k.json"\n`, VARIABLE)?.value,
       ).toBe("/a$b/k.json");
+    });
+
+    it("reports fish's --unexport as not exported", () => {
+      expect(
+        parseSetting(`set --unexport ${VARIABLE} "/k.json"\n`, VARIABLE)
+          ?.exported,
+      ).toBe(false);
+      expect(
+        parseSetting(`set --export ${VARIABLE} "/k.json"\n`, VARIABLE)
+          ?.exported,
+      ).toBe(true);
+      expect(
+        parseSetting(`set -gx -u ${VARIABLE} "/k.json"\n`, VARIABLE)?.exported,
+      ).toBe(false);
+    });
+
+    it("reads past a comment that follows the value", () => {
+      expect(
+        parseSetting(
+          `export ${VARIABLE}="/k.json" # the reporting key\n`,
+          VARIABLE,
+        )?.value,
+      ).toBe("/k.json");
     });
 
     it("returns undefined for a mention that sets nothing", () => {
@@ -261,6 +298,32 @@ describe("test-records-shell-config", () => {
 
       const updates = await exportFromProfiles(VARIABLE, key, zsh(), "darwin");
 
+      expect(updates[0]?.outcome).toBe("conflict");
+    });
+
+    it("accepts an export that carries a comment after it", async () => {
+      const key = join(home, ".config", "k.json");
+      await Deno.writeTextFile(
+        join(home, ".zshrc"),
+        `export ${VARIABLE}="$HOME/.config/k.json" # the reporting key\n`,
+      );
+
+      const updates = await exportFromProfiles(VARIABLE, key, zsh(), "darwin");
+
+      expect(updates[0]?.outcome).toBe("present");
+    });
+
+    it("reports a single-quoted $HOME as the other value it is", async () => {
+      const key = join(home, ".config", "k.json");
+      await Deno.writeTextFile(
+        join(home, ".zshrc"),
+        `export ${VARIABLE}='$HOME/.config/k.json'\n`,
+      );
+
+      const updates = await exportFromProfiles(VARIABLE, key, zsh(), "darwin");
+
+      // Single quotes expand nothing, so that line names a file called
+      // "$HOME/.config/k.json" and not the one being installed.
       expect(updates[0]?.outcome).toBe("conflict");
     });
 
