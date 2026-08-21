@@ -261,10 +261,11 @@ collection is the innermost rung, and it needs no name at all.
 
 ### Scope, then member
 
-The last segment of a reference names a member; everything before it is scope,
-and only the leading segment consults the chain. A collection name and a member
-name therefore never compete for a position, and no rule is needed to tell them
-apart.
+The last segment of a reference names a member. Before it comes an optional
+space segment, marked with `@`, and then one or more collection segments; only
+the first collection segment consults the chain, and each one after it resolves
+within what the previous produced. A collection name and a member name therefore
+never compete for a position, and no rule is needed to tell them apart.
 
 ### Nothing hidden decides what a name means
 
