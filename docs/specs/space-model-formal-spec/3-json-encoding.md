@@ -212,7 +212,7 @@ like any other malformation: a lenient decode yields a `ProblematicValue`
 describing that decode, and a strict one raises. A well-formed record is a
 record of a *past* failure and reads back as one under either setting, this
 decode having succeeded. `state` is checked for presence rather than for type,
-because every `FabricValue` is a valid state, `undefined` among them; filling
+because every `FabricValue` is a valid state, `undefined` among them; filling in
 an absent one would put a reshaped record back on the wire.
 
 See `1-fabric-values.md` Section 3.5.
