@@ -334,7 +334,7 @@ describe("cf piece CFC labels", () => {
     expect(updated?.entries[0].label.confidentiality).toEqual(["team"]);
   });
 
-  it("preserves raw Fabric values while adding a label", async () => {
+  it("preserves raw `FabricValue`s while adding a label", async () => {
     const original = {
       bytes: new FabricBytes(new Uint8Array([1, 2, 3])),
       timestamp: new FabricEpochNsec(1_725_000_000_000_000_000n),

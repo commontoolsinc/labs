@@ -279,7 +279,7 @@ type SchemaInner<
  * - $ref resolution (both "#" and "#/path/to/def")
  * - anyOf unions
  * - Primitive types (string, number, boolean, null)
- * - Fabric-primitive types ("FabricBytes", "FabricEpochDay",
+ * - `FabricPrimitive` types ("FabricBytes", "FabricEpochDay",
  *   "FabricEpochNsec", "FabricHash", "FabricRegExp"), each inferring the
  *   corresponding `FabricPrimitive` interface from this package
  * - Arrays with typed items

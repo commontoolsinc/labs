@@ -105,8 +105,8 @@ describe("Pattern result object with a function member", () => {
     );
 
     // ...but running it throws synchronously at result-projection time, when
-    // the live function is converted to a fabric value. The error originates in
-    // packages/data-model/src/native-conversion.ts.
+    // the live function is converted to a `FabricValue`. The error originates
+    // in packages/data-model/src/native-conversion.ts.
     expect(() => runtime.run(tx, methodPattern, {}, resultCell)).toThrow(
       "Not representable as a `FabricValue`: function",
     );

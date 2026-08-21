@@ -965,7 +965,7 @@ Deno.test("synchronous driver failures publish a terminal receipt", async () => 
   }
 });
 
-Deno.test("receipt ownership compares Fabric values", async () => {
+Deno.test("receipt ownership compares `FabricValue`s", async () => {
   const directory = await Deno.makeTempDir();
   try {
     const ledger = await CommandLedger.open(`${directory}/ledger.json`);
