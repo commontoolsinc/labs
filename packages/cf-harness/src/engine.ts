@@ -759,18 +759,18 @@ export class CfHarnessEngine {
    * The run's session-local handle table, or `undefined` while none has been
    * recorded. A defensive copy, like `getRunState()`.
    */
+  get handleTable(): HarnessHandleTable | undefined {
+    return this.#runState.handleTable === undefined
+      ? undefined
+      : structuredClone(this.#runState.handleTable);
+  }
+
   /**
    * The run's register of values materialized from handles. The prompt loop
    * scrubs these out of everything the model reads.
    */
   get resolvedValueRegister(): HarnessResolvedValueRegister {
     return this.#resolvedValueRegister;
-  }
-
-  get handleTable(): HarnessHandleTable | undefined {
-    return this.#runState.handleTable === undefined
-      ? undefined
-      : structuredClone(this.#runState.handleTable);
   }
 
   /**

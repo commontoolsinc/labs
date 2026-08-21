@@ -280,6 +280,26 @@ describe("browser", () => {
       );
     });
 
+    it("refuses a handle field that is not a non-empty string", () => {
+      // Nothing between the model and the tool checks a call against the
+      // input schema, so a null or a number arrives as written.
+      const nonStrings: readonly unknown[] = [null, 7, true, {}, ["x"], "  "];
+      for (const handle of nonStrings) {
+        expect(errorOf({
+          action: "fill",
+          ref: "@e1",
+          valueHandle: handle as string,
+        })).toBe("valueHandle must be a handle token naming a value");
+        expect(errorOf({ action: "open", urlHandle: handle as string }))
+          .toBe("urlHandle must be a handle token naming a value");
+      }
+    });
+
+    it("refuses a wait urlPattern that is not a string", () => {
+      expect(errorOf({ action: "wait", urlPattern: 7 as unknown as string }))
+        .toBe("wait urlPattern requires a non-file pattern");
+    });
+
     it("refuses a handle field outside its action's row", () => {
       expect(errorOf({ action: "snapshot", valueHandle: "cfh:a:22222" }))
         .toBe("valueHandle does not apply to the snapshot action");
@@ -555,6 +575,60 @@ describe("browser", () => {
       expect(output.code).toBe("invalid_input");
       expect(output.message).toBe(
         "value and valueHandle cannot both be set: give the value itself or a handle to it",
+      );
+      expect(runner.calls).toEqual([]);
+    });
+
+    it("refuses a non-string valueHandle without probing or running anything", async () => {
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: null as unknown as string,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.code).toBe("invalid_input");
+      expect(output.message).toBe(
+        "valueHandle must be a handle token naming a value",
+      );
+      expect(runner.calls).toEqual([]);
+    });
+
+    it("refuses a non-string urlHandle without running anything", async () => {
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "open",
+        urlHandle: 7 as unknown as string,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.code).toBe("invalid_input");
+      expect(output.message).toBe(
+        "urlHandle must be a handle token naming a value",
+      );
+      expect(runner.calls).toEqual([]);
+    });
+
+    it("refuses a non-string wait urlPattern without running anything", async () => {
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "wait",
+        urlPattern: 7 as unknown as string,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("invalid_input");
+      expect(output.message).toBe(
+        "wait urlPattern requires a non-file pattern",
       );
       expect(runner.calls).toEqual([]);
     });

@@ -246,6 +246,9 @@ const INPUT_FIELDS = [
   "urlPattern",
 ] as const;
 
+/** The fields that carry a handle rather than the value it stands for. */
+const HANDLE_FIELDS = ["valueHandle", "urlHandle"] as const;
+
 export type BrowserActionPlan =
   | { argv: readonly string[]; error?: undefined }
   | { argv?: undefined; error: string };
@@ -309,6 +312,22 @@ export const checkBrowserInputFields = (
       error:
         "url and urlHandle cannot both be set: give the URL itself or a handle to it",
     };
+  }
+  // A tool call's arguments are whatever the model wrote; nothing between the
+  // model and here checks them against the input schema. A handle field is
+  // established as a non-empty string before anything acts on it, so a `null`
+  // or a number is a refusal the run recovers from rather than a type error
+  // raised deep in resolution.
+  for (const field of HANDLE_FIELDS) {
+    const handle = input[field];
+    if (handle === undefined) {
+      continue;
+    }
+    if (typeof handle !== "string" || handle.trim() === "") {
+      return {
+        error: `${field} must be a handle token naming a value`,
+      };
+    }
   }
   return { action };
 };
@@ -394,8 +413,9 @@ export const planBrowserAction = (
             "wait loadState must be domcontentloaded, load, or networkidle",
           );
       }
-      const urlPattern = input.urlPattern!;
-      return urlPattern !== "" && !/^file:/i.test(urlPattern)
+      const urlPattern = input.urlPattern;
+      return typeof urlPattern === "string" && urlPattern !== "" &&
+          !/^file:/i.test(urlPattern)
         ? { argv: ["wait", "--url", urlPattern] }
         : planError("wait urlPattern requires a non-file pattern");
     }
@@ -433,7 +453,7 @@ export const planBrowserAction = (
 };
 
 const resolveHostTimeoutMs = (timeoutMs: number | undefined): number => {
-  if (timeoutMs === undefined) {
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) {
     return DEFAULT_HOST_TIMEOUT_MS;
   }
   return Math.min(Math.max(Math.floor(timeoutMs), 0), MAX_HOST_TIMEOUT_MS);
