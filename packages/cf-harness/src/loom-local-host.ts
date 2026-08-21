@@ -48,6 +48,7 @@ import {
   runHarnessInteractiveChatStdio,
   type RunHarnessInteractiveChatStdioOptions,
 } from "./interactive-chat-stdio.ts";
+import { resolveInteractiveProvisioning } from "./host-mounts.ts";
 import { OpenAICodexResponsesClient } from "./model/openai-codex-responses.ts";
 
 export const LOOM_LOCAL_CREDENTIAL_OWNER = {
@@ -563,6 +564,15 @@ export const createLoomLocalCfHarnessHost = async (
         );
         return;
       }
+      // Resolved here rather than in the option parser because resolution is
+      // async (realpath + stat per source) and the parser is sync. Same parser,
+      // same grammar, same validation as `cf-harness run --host-mount`.
+      const provisioning = await resolveInteractiveProvisioning(
+        parsed,
+        // Same base the batch path resolves relative sources against, so a
+        // spec means the same thing on either entrypoint.
+        options.cliDependencies?.cwd ?? Deno.cwd(),
+      );
       const provider = await configuredProvider();
       const binding: LoomLocalHostBinding = {
         source: "loom",
@@ -605,6 +615,13 @@ export const createLoomLocalCfHarnessHost = async (
           credentialOwnerKey: LOOM_LOCAL_CREDENTIAL_OWNER.ownerKey,
           harnessHomeIdentity: identity,
           runManifest,
+          // Provisioning reaches the sandbox exactly as it does for a batch
+          // run: CreateHarnessPromptLoopOptions extends
+          // CreateHarnessEngineOptions, and the loop builds its engine from
+          // these when the caller passes none. The interactive service spreads
+          // this object into every turn's options, so what is set here holds
+          // for the whole session.
+          ...provisioning,
           ...(provider === "openai-compatible-gateway"
             ? {
               gatewayBaseUrl: processEnv.CF_HARNESS_GATEWAY_BASE_URL,
