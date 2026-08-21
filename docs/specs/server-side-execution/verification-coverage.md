@@ -5086,30 +5086,62 @@ supply; OW29/OW32/OW34 closed):
     show the park counted/logged (detectability; not itself the lift
     condition).
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
-    rootcause §2b + the cellset-lww reproducer).** A USER's binding
-    write into a serve-owned user-scope doc can be silently LOST:
-    group-chat local shape — Bob's `messageDraft` `$value` patch (the
-    exact op that landed for Alice) never reaches the store in 4/4
-    runs including a 300 s probe while his session commits 12 OTHER
-    writes; cellset-lww end-to-end — the typed name's transaction is
-    refused terminally (`speculative-basis-refused`) and the write is
-    DROPPED. Common premise failure: serving-loop.md §3d's "its own
-    reads re-run it when fresh state lands" does not hold for
-    non-re-derivable INPUTS (the scheduler's logged
-    "dropping the write without retry" class — the which-direction
-    hazard). Owed: **S-E** trace and fix the `$value`-binding commit
-    path for served-instance user-scope docs (candidates: a
-    withdrawn-overlay origin commit dropped on a wave race; a flush
-    queued behind the arrival/echo gate that never drains — needs one
-    instrumented client build; whether the `shell.login` identity
-    switch is necessary is undetermined); **S-F** the pending-commit
-    barrier must cover binding writes into served docs (idle returned
-    with the write unflushed); **S-G** (test-side, secondary)
-    group-chat line 197 clicks without `waitForDisabled(false)` — the
-    wait belongs there under ON regardless; it fixes nothing (proven:
-    300 s). Trigger: lifts the `integration/cellset-lww.test.ts`
-    step entry; jointly with OW31's build, lifts the
-    `integration/cfc-group-chat-demo.test.ts` skip.
+    rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
+    (optimize-on-main client-durability pass; report:
+    `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`).**
+    A USER's binding write into a serve-owned user-scope doc could be
+    silently LOST: group-chat local shape — Bob's `messageDraft`
+    `$value` patch never reaches the store in 4/4 runs including a
+    300 s probe while his session commits 12 OTHER writes; cellset-lww
+    end-to-end — the typed name's transaction refused terminally
+    (`speculative-basis-refused`) and DROPPED. **S-E traced (the
+    instrumented client build the row asked for): neither §6.1
+    candidate.** The write dies at speculation.md §6's export refusal,
+    synchronously, before the optimistic apply: a blind UI-input write
+    (handleCellSet) emits ONE structural nonRecursive read at the
+    cell's parent, and `buildReads`' `pushCommitRead` named EVERY
+    pending layer of that doc — the client's own process-local
+    speculation layers included — so a standing handler echo on the
+    doc turned the user's next input into a terminal refusal. The
+    echo's standing window is a full served round trip at minimum (the
+    arrival gate holds it until every doc it wrote is confirmed — in
+    the trace the echo's speculatively-created entity docs sat at
+    confirmedSeq 0 for ~130 ms), and UNBOUNDED for a never-served
+    instance, so the race is a routine state; the `shell.login` switch
+    is NOT a necessary condition (the cellset reproducer has no login).
+    The cellset trace: iteration i's `saveProfile` echo (the handler
+    writes the trimmed name BACK into the draft cell) stands on the
+    draft's doc when iteration i+1's typed-name set builds its
+    structural read — refused naming exactly that layer, ops
+    `patch /value/profileDraft`. Fix (landed with this row): the
+    structural read of a blind write bases on the doc's
+    NON-speculative stack (`excludeSpeculativeLayers` in
+    `storage/v2.ts` `buildReads`) — the blind write consumes no
+    overlay value, the excluded layers never reach the wire as
+    commits, basisSeq stays the true confirmed basis, durable
+    in-flight layers stay named, and the §6 refusal is untouched for
+    value-consuming reads. Which-direction: the fix re-issues NOTHING
+    (the same single commit exports with a smaller named-layer set),
+    so it cannot double-apply; pinned both ways in
+    `speculation-overlay.test.ts` (the new blind-write pin: exports,
+    exactly one engine commit, durable value via an overlay-free
+    reader, echo untouched; the standing §6 pin: a value-consuming
+    authored tx over an echo is still refused terminally). **S-F
+    resolved as no separate defect**: every commit()-entered write is
+    tracked at the transaction chokepoint
+    (`trackPendingCommit`, v2-transaction.ts) and
+    `idleWithPendingCommits` sources exactly that set, so exported
+    binding writes are barrier-covered; the pre-fix loss was the
+    synchronous refusal — such a write never existed as pending, so no
+    barrier could have held it. **S-G closed**: group-chat's Bob-send
+    click now waits `waitForDisabled(false)` like Alice's. Lift
+    evidence: the cellset-lww end-to-end step 5/5 green ON locally
+    (true ON topology, lane-shaped toolshed) after 2/6-red pre-fix at
+    the same tip; the `integration/cellset-lww.test.ts` step entry is
+    REMOVED. The `integration/cfc-group-chat-demo.test.ts` file skip
+    REMAINS: its CI shape is OW31's §2b acting-identity carriage
+    (that train lifts it jointly; the OW47 half of its reason is
+    closed).
   - **OW48 — #6098's reserved-result-keys rule × system patterns
     under the ON serving compile (seat S-H; rootcause §4b).** Main's
     #6098 transformer rule ("a result may not declare its own screen

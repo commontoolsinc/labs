@@ -239,11 +239,16 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "the store (0/4 runs incl. a 300 s probe; his session committed " +
         "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
         "never flips — the client own-write durability seam, " +
-        "verification-coverage.md OW47 (seats S-E/S-F/S-G). Mechanism + " +
-        "store/log evidence: docs/history/plans/server-execution-v2/" +
-        "stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). Lifts when OW31's build AND OW47 close and " +
-        "the file greens ON; the flip PR needs this list EMPTY.",
+        "verification-coverage.md OW47. OW47 is CLOSED (2026-08-21, " +
+        "optimize pass): the mechanism was the speculation.md §6 export " +
+        "refusal firing on a blind write's structural parent read that " +
+        "named a standing handler-echo layer; fixed in storage/v2.ts " +
+        "buildReads (excludeSpeculativeLayers) with unit + cellset-lww " +
+        "lift evidence — see optimize/ow47-client-durability-report.md. " +
+        "Mechanism + store/log evidence: docs/history/plans/" +
+        "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
+        "first-on-ci-gate.md). Lifts when OW31's build closes and the " +
+        "file greens ON; the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/profile-embed.test.ts",
@@ -325,26 +330,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // these files is green but for ONE step, so the file keeps running ON
     // and only the red step is guarded in-file (bound to these entries,
     // exactly like the runtime-client pair).
-    {
-      file: "integration/cellset-lww.test.ts",
-      step: "end-to-end: a typed name survives the own-write race through save",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under the TRUE ON topology the other 3 " +
-        "steps are green; this end-to-end step stays red — the user's own " +
-        "typed-name write is DROPPED when its transaction is refused " +
-        "terminally (`speculative-basis-refused`): a non-re-derivable " +
-        "USER write refused/withdrawn is silently lost, because the " +
-        "'its own reads re-run it when fresh state lands' premise of " +
-        "serving-loop.md §3d does not hold for INPUTS — the clean " +
-        "reproducer of the client own-write durability seam " +
-        "(verification-coverage.md OW47, seats S-E/S-F; same cluster as " +
-        "cfc-group-chat-demo's local shape). NOT a demand hole. " +
-        "Evidence: docs/history/plans/server-execution-v2/stage-c/" +
-        "first-on-ci-gate.md (mechanism family: " +
-        "on-render-stall-rootcause.md §2b). Lifts when OW47 closes and " +
-        "the step greens ON; the flip PR needs this list EMPTY.",
-    },
     {
       file: "integration/convergence-storm.test.ts",
       step: "a non-writing session sees every concurrently-posted message",

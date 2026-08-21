@@ -194,6 +194,13 @@ describe("cfc group chat demo integration test", () => {
       "Hello from Bob",
     );
     await waitForRuntimeIdle(page);
+    // Wait for the send button to ENABLE before clicking, exactly like
+    // Alice's send above (S-G, rootcause §2b): `sendDisabled` derives from
+    // the draft, and under the server-execution ON arm that derivation is
+    // a served round trip — clicking an interim-disabled cf-button
+    // retargets the click to the host element and the send never fires.
+    // Correct under the OFF arm too (the enable is just immediate there).
+    await waitForDisabled(page, "#trusted-send-button", false);
     await clickCfButton(page, "#trusted-send-button");
     await waitForText(
       page,
