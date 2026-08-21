@@ -68,8 +68,6 @@ export function memoryAclPrincipalsFor(options: {
 } {
   return {
     serviceDids: [...options.configured],
-    delegatingDids: options.serverExecution
-      ? [options.processIdentityDid]
-      : [],
+    delegatingDids: options.serverExecution ? [options.processIdentityDid] : [],
   };
 }

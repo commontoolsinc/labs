@@ -1302,8 +1302,7 @@ export class SpaceSession {
     const restored = await runWithAbortSignal(
       this.routeSignal,
       "memory session route cancelled",
-      () =>
-        this.client.openSession(this.space, session, auth),
+      () => this.client.openSession(this.space, session, auth),
     );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;

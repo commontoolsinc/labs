@@ -2511,7 +2511,9 @@ export class Server {
             ),
           );
         }
-        if (principal === undefined || !this.#isDelegatingPrincipal(principal)) {
+        if (
+          principal === undefined || !this.#isDelegatingPrincipal(principal)
+        ) {
           this.aclStats.denied += 1;
           return respondTypedError<SessionOpenResult>(
             message.requestId,
