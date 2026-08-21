@@ -180,5 +180,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "pattern avoids. A piece holding a roster keeps its stored roles; what " +
       "it loses is the ability to be updated in place to the corrected " +
       "contract.",
+    record: "docs/history/parking-admin-floor-contract-break.md",
   },
 ];
