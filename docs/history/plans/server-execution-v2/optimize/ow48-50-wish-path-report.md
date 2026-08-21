@@ -9,6 +9,8 @@ reason: "OW48/OW49/OW50 served-wish-path seat report (optimize-on-main): OW48's 
 Agent: served-wish-path seat, optimize-on-main phase. Worktree
 `/Users/berni/labs-worktrees/ow48-wishpath`, branch
 `claude/server-exec-v2-ow48-wish-path` off `origin/main` @ `ce92b445f`.
+PR: [#6157](https://github.com/commontoolsinc/labs/pull/6157)
+(coordinator merges).
 Register rows: verification-coverage.md §3 OW48/OW49/OW50. Evidence
 base: stage-c/on-render-stall-rootcause.md §4/§6, first-on-ci-gate.md
 row 3, and the raw investigation logs (still on disk in the shared
