@@ -272,9 +272,11 @@ export interface FabricClassWithNonterminalCodec {
 
 /**
  * The minimal interface that codec `encode()` and `decode()` implementations
- * may depend on. Provided by the `Runtime` in practice, but defined as an
- * interface here to avoid a circular dependency between the fabric protocol
- * and the runner. See Section 2.5 of the formal spec.
+ * may depend on: what a codec needs of the live system around it, and nothing
+ * more. This package names what it requires rather than the classes that
+ * happen to supply it, so a client brings its own. `BaseLiveEnvironment` is
+ * the base to build one on, and `NullLiveEnvironment` covers a caller that
+ * expects to need no cell. See Section 2.5 of the formal spec.
  */
 export interface LiveEnvironment {
   /**

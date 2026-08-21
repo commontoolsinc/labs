@@ -2097,12 +2097,11 @@ Key contracts:
 
 /**
  * The minimal interface that codec `encode()` and `decode()` implementations
- * may depend on. In practice this is provided by the `Runtime` class from
- * `packages/runner/src/runtime.ts`, but defining it as an interface here
- * avoids a circular dependency between the fabric protocol and the runner.
- *
- * Implementors of `encode()` and `decode()` should depend on this interface,
- * not on the concrete `Runtime` class.
+ * may depend on: what a codec needs of the live system around it, and
+ * nothing more. This package names what it requires rather than the classes
+ * that happen to supply it, so a client brings its own.
+ * `BaseLiveEnvironment` is the base to build one on, and
+ * `NullLiveEnvironment` covers a caller that expects to need no cell.
  */
 export interface LiveEnvironment {
   /**
@@ -2131,14 +2130,12 @@ export interface LiveEnvironment {
 }
 ```
 
-> **Why an interface, not the concrete `Runtime`?** The fabric protocol is
-> intended to live in a foundational package (`packages/data-model/`).
-> If codec `decode()` implementations depended on the full `Runtime` type
-> from `packages/runner/`, it would create a circular dependency. The
-> `LiveEnvironment` interface captures the minimal surface needed for
-> decoding. The `Runtime` class satisfies this interface. Future
-> fabric types may extend `LiveEnvironment` if they need additional
-> capabilities beyond `getCell` and `shouldDeepFreeze`.
+> **Why an interface rather than a named class?** `packages/data-model/` is a
+> standalone low-level package, and a requirement it states as an interface is
+> one any client can satisfy. It has several already -- `memory` builds one,
+> as do tests in `data-model` and `runner` -- and more are expected. Future
+> fabric types may extend `LiveEnvironment` if they need capabilities beyond
+> `getCell` and `shouldDeepFreeze`.
 
 ### 2.6 Brand Detection
 
