@@ -17,7 +17,8 @@ cite a member without knowing how the collection arrived at the name.
 
 The document is in two parts, and they are separable. **Addressing** is how a
 name identifies a thing. **Abbreviation and citation** is how a name is spelled
-in a particular context. Only the second is concerned with names being short.
+for a particular reader in a particular place, which is sometimes shorter than
+the name in full and sometimes longer.
 
 ---
 
