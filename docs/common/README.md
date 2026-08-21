@@ -58,7 +58,7 @@ on the Common Fabric runtime.
 - [patterns/view-switching.md](patterns/view-switching.md) — switching between views with `computed()`
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
-- [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, name-collision precedence, mutation tools as handlers
+- [patterns/llm-dialog.md](patterns/llm-dialog.md) — `llmDialog` tool catalog facts: built-in tool injection, shadowing a built-in by name, mutation tools as handlers
 - [patterns/primitives.md](patterns/primitives.md) — the composition contract
   for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
