@@ -82,6 +82,18 @@ Store archaeology (run 1's space, sqlite commit log):
   landed=23; the store reached 40/40 about a second later, with the
   test process already gone — so the loop drains on its own, no
   client-wake dependency).
+- The 16th derived commit (seq 59, 17:35:49) is the run's one
+  ADVANCE-ONLY commit: its sole write is the watermark doc
+  (`of:server-execution-watermark`, `replace /value/seq → 58`),
+  `derived_through: 58`, no `consequence_of` — the S1 drain-settle
+  quiescence-advance signature (protocol.md §4), minted by the
+  serving loop at space quiescence with no client input, after the
+  test's assert had already read (and within the same second the
+  test process exited). Recorded here because it is also the concrete
+  cross-space-pollution witness the sx2 coalescing-gate report
+  (`ow-sx2-coalescing-gate.md` §1 claim 2) cites: such advance-only
+  commits tick the host-global `derivedCommits` for a space whose
+  test is already done.
 
 Probe convergence poll (run 2), reading the observer after the failing
 `settle(20)` and then again per extra `settle(5)` round:
@@ -150,8 +162,12 @@ The fix (test infrastructure only, no product semantics touched):
   inserts the quiescence wait between the sessions' idle and the
   barrier — one shared budget (10 s) per `settle()` call across all
   rounds, so a genuinely wedged consequence degrades to today's
-  behavior (the assert speaks) instead of hanging the harness. The OFF
-  arm's settle is byte-identical.
+  behavior (the assert speaks) instead of hanging the harness — and
+  degrades LOUDLY (#6158 review F1): budget exhaustion with intents
+  still outstanding warns once with the per-session counts, so a red
+  assert on a slow box self-identifies as budget exhaustion (a
+  mid-drain read) rather than presenting as the loss shape this
+  report disproves. The OFF arm's settle is byte-identical.
 
 Ordering argument: after step 1's idle every fired echo is sealed and
 every append is discharging; the quiescence wait then ends only when
@@ -163,10 +179,18 @@ idle re-derives. The observer's schema-read demand for newly-linked
 element docs resolves across the remaining rounds (the storm step runs
 20).
 
-This restores settle PARITY between the arms — the ON settle now means
-what the OFF settle always meant ("the server has drained what I
+This restores settle parity between the arms FOR FIRST-ORDER
+CONSEQUENCES — the ON settle now means what the OFF settle always
+meant for a session's own sends ("the server has drained what I
 sent") — and does not weaken the step's assertion: the step still
 asserts full 40/40 reader convergence on a session that never wrote.
+Scope caveat (#6158 review F2): the wait is NOT full `server.idle()`
+parity — a server-side cascade child (an event a served handler
+itself emits) is no session's intent and commits in a later wave,
+outside the wait; cascades ride the ordinary barrier rounds. The
+storm's `post` handler emits no cascades, so nothing here depends on
+that gap; a future harness test asserting on cascade results needs
+enough rounds or a `waitFor`.
 
 Red-first: the step (skip lifted) is the red test — red twice locally
 pre-fix (landed=22, 23), green 5/5 post-fix (see §6).

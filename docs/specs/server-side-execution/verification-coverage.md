@@ -5145,7 +5145,10 @@ supply; OW29/OW32/OW34 closed):
     OW48/OW49 fix arc (detectability; not itself the lift condition).
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
     ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
-    optimize-phase loss triage) — ARRIVAL ORDERING; the fix fork is
+    optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
+    established by elimination; the exact failing hop is inferred,
+    not traced — the report's evidence-status block draws the line);
+    the fix fork is
     FLAGGED for the owner.** The undefined read is a scheduler lift
     on a freshly SERVED-instantiated note (default-app's menuNewNote
     runs authoritatively in the wave; the client's speculative child
@@ -5196,7 +5199,11 @@ supply; OW29/OW32/OW34 closed):
     outstanding-intent set to empty — speculation.md §4 step 2's
     arrived-terminal-consequence retirement,
     `Runtime.speculationOverlay.pendingIntentCount` — before the
-    barrier, restoring settle parity between the arms. Step green ON
+    barrier, restoring the arms' settle agreement for FIRST-ORDER
+    consequences (server-side cascade children are no session's
+    intent and ride the barrier rounds — the storm has none; budget
+    exhaustion warns loudly so a slow-box mid-drain red
+    self-identifies instead of re-opening this row). Step green ON
     5/5 + file 4/4 ON and OFF; the step entry LIFTED. Evidence:
     docs/history/plans/server-execution-v2/optimize/
     ow52-storm-loss-report.md. Recorded, not decided (adjacent):

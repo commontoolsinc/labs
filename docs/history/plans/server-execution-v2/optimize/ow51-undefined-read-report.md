@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW51 loss-triage: the default-app splitDefinitions undefined-read is the ARRIVAL-ORDERING shape — a scheduler lift on a freshly served-instantiated note runs while its input's link chain (through the piece's result/process doc) is still materializing; the mid-chain resolution yields undefined and the leaf schema's default:null never applies. Crashes BOTH the shell worker AND the toolshed's serving runtime. Fix is a flagged contract fork (defer-on-unresolved-chain vs lifts-tolerate-undefined) — not decided here; skip stays."
+reason: "OW51 loss-triage: the default-app splitDefinitions undefined-read is the ARRIVAL-ORDERING shape (mechanism CLASS established by elimination; the exact failing hop is inferred, not traced — see the evidence-status block) — a scheduler lift on a freshly served-instantiated note runs while its input's link chain (through the piece's result/process doc) is still materializing; the mid-chain resolution yields undefined and the leaf schema's default:null never applies. Crashes BOTH the shell worker AND the toolshed's serving runtime. Fix is a flagged contract fork (defer-on-unresolved-chain vs lifts-tolerate-undefined) — not decided here; skip stays."
 ---
 
 # OW51 — the default-app `splitDefinitions` undefined-read: triage
@@ -109,6 +109,30 @@ Against the register row's three candidates:
   `undefined` where the OFF arm — which instantiates and reads in
   one runtime, synchronously with its own committed docs — always
   supplies the value.
+
+**Evidence status — established vs inferred (#6158 review F6; read
+"root-caused" as "mechanism CLASS established", not "failing hop
+pinned").** ESTABLISHED, directly: the crash sites and the undefined
+value (stacks, both runtimes); the schema-default-only seeding of
+`pendingEdit` (`createWithDefault`, no durable write); the null-safety
+of every leaf default-application site (so a read REACHING the leaf
+cannot yield undefined — the undefined enters above it); the
+serving-runtime crash (which eliminates overlay / runtime-client /
+reconciliation mechanisms — none exists in that stack); the raciness
+and load sensitivity (which eliminate deterministic-strip mechanisms);
+the served-handler instantiation shape and the healthy instances'
+through-the-result-doc basis rows. INFERRED, honestly but without a
+captured trace: (a) WHICH mid-chain hop resolves undefined — no
+instrument caught the failing read in the act (the in-situ probe
+binary never reproduced; the race is load-sensitive); (b) that the
+browser and serving-runtime crashes are ONE mechanism — concluded
+from symptom+stack identity plus the shared lagging-replica-view
+family, not from a shared trace. Neither residual affects the fix
+fork below: both arms treat "input chain not yet resolvable"
+generically, whichever hop it is, and the skip stays either way. A
+fix build on the ruled arm should start by capturing the failing hop
+(one targeted read-path instrument under load), which also retires
+residual (a).
 
 ## 4. The fix fork — FLAGGED, not decided (flag-don't-fill)
 

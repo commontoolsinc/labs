@@ -62,8 +62,13 @@ add into the same total across every space. Two concrete cross-space
 pollution paths exist on a shared lane toolshed even with files
 running sequentially: (i) the S1 drain-settle quiescence advance — an
 advance-only derived commit a PREVIOUS file's space mints when it
-goes quiet; the OW52 archaeology directly observed one landing AFTER
-its test process exited (commit 59, zero consequences); (ii) a parked
+goes quiet, with no client input; the OW52 archaeology records one
+(its run's commit seq 59: sole write the watermark doc, `replace
+/value/seq → 58`, `derived_through: 58`, no `consequence_of` — the
+S1 signature), landing after that test's assert had already read and
+within the same second its process exited — see
+[ow52-storm-loss-report.md](ow52-storm-loss-report.md) §3's
+advance-only bullet; (ii) a parked
 space reactivating and re-deriving. No evidence either caused the
 observed 7→10 (concurring with the writeup); the path is open, and
 retroactive decomposition is impossible precisely because the counter
