@@ -5,6 +5,7 @@ import {
   aggregate,
   churnFamilies,
   collisions,
+  formatIdentity,
   identityKey,
   overSixtySeconds,
   parseReportArgs,
@@ -95,6 +96,22 @@ describe("test-records-report", () => {
       }));
       expect(entry?.runs).toBe(2);
       expect(byIdentity.size).toBe(1);
+    });
+
+    it("separates a non-default variant from the default history", () => {
+      const unmarked = record("glaze", "pass", 10);
+      const marked: TestRecord = {
+        ...unmarked,
+        test: { ...unmarked.test, v: "server-execution" },
+      };
+      const byIdentity = aggregate([report("a", [unmarked, marked])]);
+      expect([...byIdentity.keys()]).toEqual([
+        '["unit","bakery","glaze"]',
+        '["unit","bakery","glaze","server-execution"]',
+      ]);
+      expect(formatIdentity([...byIdentity.keys()][1]!)).toBe(
+        "[unit] bakery: glaze (variant: server-execution)",
+      );
     });
   });
 

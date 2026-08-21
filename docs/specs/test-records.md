@@ -13,7 +13,7 @@ reasoning that shaped what follows. The shared implementation is
 
 ## Identity
 
-A test's identity is the triple, scoped within a repository:
+A test's identity has three required parts, scoped within a repository:
 
 - **kind** — the class of check: `unit`, `browser`, `pattern`,
   `integration`, `typecheck`, `lint`, `format`, `gate`.
@@ -25,17 +25,26 @@ A test's identity is the triple, scoped within a repository:
   script's own name (`acl.sh`), a script step (`integration.sh
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
   `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
+- **variant**, when present — a stable name for a non-default configuration
+  that runs the same test. The default configuration has no variant. The
+  server-execution ON jobs use `server-execution` after variant-aware relay
+  support is on the default branch. When server execution becomes the
+  default, the ON jobs omit that marker, so new runs continue the history of
+  today's unmarked default jobs. The surviving explicit OFF jobs use
+  `server-execution-off` so their history remains separate.
 
 Identity survives moving a test between files, splitting or renaming test
 files, reformatting, editing bodies, and resharding — shard and slice
 labels, and the section that dispatched a script step, are run context and
-never identity. Identity does not survive a change to the reported name; a
+never identity. A configuration is a variant only when its results need a
+separate history. Identity does not survive a change to the reported name; a
 rename splits history, and a line appended to
 `tasks/test-identity-aliases.jsonl` bridges a split worth bridging. That
 file is append-only, maps any identity at most once, must stay acyclic, and
 each line carries the rename's date; readers resolve aliases transitively
 and apply one only to records older than its date
-(`deno task check-test-aliases` enforces the file's shape).
+(`deno task check-test-aliases` enforces the file's shape). Alias lines name
+the three required identity parts and apply the rename to every variant.
 
 A task-level record may coexist with the per-item records of the same run
 (`pattern-compat` beside `pattern-compat <key>`, `integration.sh` beside
@@ -59,6 +68,11 @@ compaction.
 ```json
 { "line": "record", "test": { "k": "unit", "s": "bakery", "n": "glaze > thickens when heated" }, "outcome": "pass", "durationMs": 12 }
 ```
+
+The compact identity fields are `k`, `s`, `n`, and optional `v`. Omitting
+`v` means the default configuration. Readers retain the existing
+`[k,s,n]` grouping key for unmarked records and append `v` as a fourth part
+only when it is present.
 
 A record carries `outcome` (`pass`, `fail`, or `skip`), `durationMs` from
 the runner's own measurement (never a clock inside the test process, which
@@ -187,8 +201,20 @@ zero records or not — and `job.json`; an artifact without a readable
 than ship a context-only object that would read as a run with no tests. The attempt lives in the artifact name because artifacts
 are scoped to the run: a re-run's relay re-ships an earlier attempt's
 artifacts into collisions and ships the re-run jobs' new artifacts as new
-objects, so re-runs neither drop nor double-count records. The relay
-workflow follows the completion of every workflow that runs tests —
+objects, so re-runs neither drop nor double-count records.
+
+The shared shipping action's optional `variant` input stamps every spooled
+and JUnit-derived record gathered by that job. Jobs omit it for the default
+configuration.
+
+The relay checks out its implementation from the default branch, not from
+the triggering test run. A new optional record field therefore rolls out in
+two changes. Its parser, relay, readers, and shipping-action support land
+first. Test workflows start emitting the field only after that support is on
+the default branch. Otherwise the old relay drops the field before writing a
+create-only object that cannot be repaired in place.
+
+The relay workflow follows the completion of every workflow that runs tests —
 success, failure, cancellation, and timeout alike. It ships a
 same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted

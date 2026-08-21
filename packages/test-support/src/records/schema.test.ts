@@ -12,6 +12,7 @@ import {
   type RunContext,
   serializeContextLine,
   serializeRecordLine,
+  testIdentityKey,
   type TestRecord,
 } from "./schema.ts";
 
@@ -58,6 +59,15 @@ describe("schema", () => {
         .toEqual(record);
     });
 
+    it("keeps a non-default test variant", () => {
+      const record: TestRecord = {
+        ...RECORD,
+        test: { ...RECORD.test, v: "server-execution" },
+      };
+      expect(parseRecordLine(serializeRecordLine(record).trim()))
+        .toEqual(record);
+    });
+
     it("returns undefined for malformed JSON", () => {
       expect(parseRecordLine("{nope")).toBeUndefined();
     });
@@ -83,6 +93,29 @@ describe("schema", () => {
         test: { k: "unit", s: "", n: "x" },
       });
       expect(parseRecordLine(line)).toBeUndefined();
+    });
+
+    it("returns undefined for an empty test variant", () => {
+      const line = JSON.stringify({
+        ...RECORD,
+        test: { ...RECORD.test, v: "" },
+      });
+      expect(parseRecordLine(line)).toBeUndefined();
+    });
+  });
+
+  describe("testIdentityKey()", () => {
+    it("keeps the existing key for the default configuration", () => {
+      expect(testIdentityKey(RECORD.test)).toBe(
+        '["unit","bakery","glaze > thickens when heated"]',
+      );
+    });
+
+    it("adds the non-default variant as a fourth part", () => {
+      expect(testIdentityKey({ ...RECORD.test, v: "server-execution" }))
+        .toBe(
+          '["unit","bakery","glaze > thickens when heated","server-execution"]',
+        );
     });
   });
 

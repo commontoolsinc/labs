@@ -27,6 +27,10 @@ export interface AliasLine {
 function isIdentityPart(value: unknown, wholeScope: boolean): boolean {
   if (typeof value !== "object" || value === null) return false;
   const part = value as Record<string, unknown>;
+  const expectedKeys = wholeScope ? ["k", "s"] : ["k", "n", "s"];
+  if (Object.keys(part).sort().join(",") !== expectedKeys.join(",")) {
+    return false;
+  }
   if (typeof part.k !== "string" || part.k.length === 0) return false;
   if (typeof part.s !== "string" || part.s.length === 0) return false;
   if (wholeScope) return part.n === undefined;
@@ -155,6 +159,7 @@ export class AliasResolver {
       const exact = this.#byIdentity.get(aliasKeyOf(current));
       if (exact !== undefined && day < exact.date) {
         current = {
+          ...current,
           k: exact.to.k,
           s: exact.to.s,
           n: exact.to.n ?? current.n,
@@ -165,7 +170,11 @@ export class AliasResolver {
         aliasKeyOf({ k: current.k, s: current.s }),
       );
       if (scope !== undefined && day < scope.date) {
-        current = { k: scope.to.k, s: scope.to.s, n: current.n };
+        current = {
+          ...current,
+          k: scope.to.k,
+          s: scope.to.s,
+        };
         continue;
       }
       return current;

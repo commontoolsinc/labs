@@ -18,6 +18,10 @@ inputs:
     description: Shard label like "3/8" when the job is sharded.
     required: false
     default: ""
+  variant:
+    description: Stable name of a non-default test configuration.
+    required: false
+    default: ""
   junit:
     description: >-
       Newline-separated JUnit ingestion specifications, each
@@ -34,11 +38,15 @@ runs:
       env:
         SHIP_JOB: ${{ inputs.job }}
         SHIP_SHARD: ${{ inputs.shard }}
+        SHIP_VARIANT: ${{ inputs.variant }}
         SHIP_JUNIT: ${{ inputs.junit }}
       run: |
         args=(--out test-records-artifact --job "$SHIP_JOB")
         if [ -n "$SHIP_SHARD" ]; then
           args+=(--shard "$SHIP_SHARD")
+        fi
+        if [ -n "$SHIP_VARIANT" ]; then
+          args+=(--variant "$SHIP_VARIANT")
         fi
         while IFS= read -r spec; do
           if [ -n "$spec" ]; then
