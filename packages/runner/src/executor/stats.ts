@@ -72,6 +72,20 @@ export type ServingLoopStats = {
    * loadable (e.g. a plain value doc demanded as if it owned a
    * piece). */
   structureLoadDeferred: number;
+  /** Demanded roots whose consecutive-deferral streak crossed
+   * `STRUCTURE_LOAD_STUCK_AFTER` (space-server.ts) — counted ONCE per
+   * crossing, so a nonzero value names roots that are effectively
+   * FOREVER-PARKED in the retry arm (verification-coverage.md OW46,
+   * the home-profile shape: a piece whose program docs never
+   * materialized defers every input-driven cycle, indistinguishable in
+   * the aggregate `structureLoadDeferred` from routine one-cycle
+   * creation races, and invisible on a quiet space where no cycle
+   * runs at all). A root that resolves (starts or terminalizes)
+   * clears its streak, so a later re-stuck stretch counts again —
+   * like `structureLoadTerminal`, per episode, not per root
+   * lifetime. The companion WARN log (`structure-load-stuck`) fires
+   * at the crossing and at each doubling while the streak grows. */
+  structureLoadStuck: number;
   /** Demanded roots that reached the TERMINAL not-loadable state
    * (server-execution v2 stage P2-F, the OW19 demand-cycle design): the
    * root's doc is confirmed synced from the durable store and carries
@@ -353,6 +367,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   derivedCommitsBySpaceDropped: 0,
   structureLoadFailures: 0,
   structureLoadDeferred: 0,
+  structureLoadStuck: 0,
   structureLoadTerminal: 0,
   structureLoadRearmed: 0,
   watermarkClamped: 0,

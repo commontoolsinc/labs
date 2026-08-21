@@ -1206,7 +1206,8 @@ escalate.
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
-structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
+structureLoadFailures, structureLoadDeferred, structureLoadStuck,
+structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
@@ -1227,6 +1228,14 @@ never-a-piece id classes are EXCLUDED from piece demand and count
 nothing, RULED 2026-08-07; `structureLoadFailures` also counts a
 piece-start commit that failed AFTER its start resolved (the §3d
 piece-start site's surfaced fire-and-forget failure, stage P2-F);
+`structureLoadStuck` counts roots whose CONSECUTIVE-deferral streak
+crossed the space server's stuck threshold — once per crossing, with a
+WARN naming the space and root at the crossing and at each doubling of
+the streak — so a forever-parked root (a demanded piece whose program
+docs never materialized, verification-coverage.md OW46) is a
+health-stats fact instead of an undifferentiated share of the
+per-attempt `structureLoadDeferred` aggregate; the streak clears when
+the root starts or terminalizes;
 `structureLoadTerminal`/`structureLoadRearmed` carry the
 demand-cycle terminal state (stage P2-F, the OW19 design): a root
 confirmed synced with no pattern meta parks TERMINAL — counted per
