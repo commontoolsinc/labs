@@ -782,6 +782,72 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/divergent anyOf branches/);
   });
 
+  it("still rejects an integer/number carrier-sibling pair — value-set overlap, not string equality (RULING 5 constraints; review F1)", () => {
+    // Every JSON-Schema integer IS a number, so a concrete value (e.g. `5`)
+    // matches BOTH branches — the ONE scalar pair whose value-sets overlap
+    // while the type STRINGS differ. Disjointness is decided over value-sets,
+    // so this pair is NOT disjoint and the union must refuse, both branch
+    // orders and either carrier position.
+    const integerCarrier = {
+      type: "integer",
+      ifc: { confidentiality: ["secret"] },
+    } as const;
+    const numberCarrier = {
+      type: "number",
+      ifc: { confidentiality: ["secret"] },
+    } as const;
+    // ifc on the `integer` branch, `number` sibling — both orders.
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        { anyOf: [integerCarrier, { type: "number" }] },
+        { anyOf: [integerCarrier, { type: "number" }] },
+      )
+    ).toThrow(/divergent anyOf branches/);
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        { anyOf: [{ type: "number" }, integerCarrier] },
+        { anyOf: [{ type: "number" }, integerCarrier] },
+      )
+    ).toThrow(/divergent anyOf branches/);
+    // ifc on the `number` branch, `integer` sibling — both orders.
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        { anyOf: [numberCarrier, { type: "integer" }] },
+        { anyOf: [numberCarrier, { type: "integer" }] },
+      )
+    ).toThrow(/divergent anyOf branches/);
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        { anyOf: [{ type: "integer" }, numberCarrier] },
+        { anyOf: [{ type: "integer" }, numberCarrier] },
+      )
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("still admits a genuinely value-disjoint scalar pair beside the numeric fix (RULING 5)", () => {
+    // The fix excludes ONLY the integer/number pair; every other cross-type
+    // pair stays genuinely disjoint and admits. `string` vs `number` is such
+    // a pair (a value is never both), so a single `number` carrier with a
+    // `string` sibling still MERGES.
+    const merged = mergeCfcSchemaEnvelopes(
+      {
+        anyOf: [
+          { type: "number", ifc: { confidentiality: ["secret"] } },
+          { type: "string" },
+        ],
+      },
+      {
+        anyOf: [
+          { type: "number", ifc: { confidentiality: ["secret"] } },
+          { type: "string" },
+        ],
+      },
+    ) as JSONSchemaObj;
+    expect(Array.isArray(merged.anyOf)).toBe(true);
+    const carrier = (merged.anyOf?.[0] ?? {}) as JSONSchemaObj;
+    expect(carrier.ifc?.confidentiality).toEqual(["secret"]);
+  });
+
   it("still rejects allOf with an ifc-carrying branch (RULING 5 scope)", () => {
     // allOf is conjunctive: type-disjoint siblings are unsatisfiable by
     // construction, so no carrier reading exists there.

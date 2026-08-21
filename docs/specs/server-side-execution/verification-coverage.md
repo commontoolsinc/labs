@@ -5323,9 +5323,10 @@ supply; OW29/OW32/OW34 closed):
     reviewer's cautions as binding constraints — narrow
     `assertNoDivergentIfcBranches` to actual ambiguity, admitting at
     most ONE ifc-carrying branch when every ifc-free sibling is
-    syntactically type-disjoint from it (conservative SYNTACTIC
-    disjointness only — explicit scalar `type` keywords, no semantic
-    subtyping), scoped to anyOf/oneOf (allOf stays refused —
+    type-disjoint from it (conservative disjointness — explicit scalar
+    `type` keywords decided over VALUE-sets, not type strings: the one
+    subtype pair integer ⊂ number is NOT disjoint, review F1; no other
+    semantic subtyping), scoped to anyOf/oneOf (allOf stays refused —
     unsatisfiable-by-construction under the rule), the merge treating
     the ifc branch as the policy carrier, holding at all four
     mergeCfcSchemaEnvelopes call sites, and still recursing INTO the

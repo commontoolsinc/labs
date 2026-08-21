@@ -75,11 +75,37 @@ policy-carrier reading at the merge layer.
   shape pinned to MERGE with the carrier's ifc intact (root anyOf and
   nested oneOf).
 
-Suites: `cfc-schema-merge` 56 steps, `cfc-prepare-crash-surfacing` 15
+### 2a. Review F1 — the disjointness predicate is decided over value-sets, not type strings
+
+The independent adversarial review (PR #6178) found the disjointness
+predicate unsound by the ruling's own criterion in exactly ONE pair:
+it compared type STRINGS (`"integer" !== "number"` → disjoint), but
+every JSON-Schema integer IS a number — the runner's own
+`schemaTypeMatchesValue` matches a concrete `5` against both — so
+`anyOf[{type:"integer", ifc}, {type:"number"}]` was admitted while a
+labeled value could match the unlabeled sibling. It is the ONLY such
+pair: among {null, boolean, object, array, string, number, integer}
+only integer ⊂ number has a value-set subset relationship; every other
+cross-type pair is genuinely value-disjoint (the wish's own
+`undefined | object` among them, so the flip is unaffected). No live
+label-drop was constructible (label derivation is path-keyed union;
+the one value-directed matcher uses fail-safe `.some()`), but a
+security-narrowing must be sound by its own criterion. Fix (this PR):
+`syntacticallyTypeDisjoint` excludes the `{integer, number}` pair —
+the conservative direction, falling through to refuse exactly like the
+unprovable cases. Type-arrays and missing-`type` were already handled
+(a non-string `type` returns not-disjoint). Complete by construction:
+integer/number is the sole subtype pair. Pinned red-first — a new
+`it` asserts the pair REFUSES in both branch orders and either carrier
+position (watched red with the exclusion reverted), plus a companion
+pin that a genuinely value-disjoint scalar pair (`number | string`)
+still MERGES so the fix stays surgical.
+
+Suites: `cfc-schema-merge` 58 steps, `cfc-prepare-crash-surfacing` 15
 steps, plus the neighbor sweep (policy-of-label,
 extended-storage-transaction, additive-default, boundary,
-cid-schema-verify, speculation-overlay) — 200 steps, all green under
-the CI preload.
+cid-schema-verify, speculation-overlay) — 144 steps, all green under
+the CI preload; full `tasks/` 626 green.
 
 ## 3. The lift attempt (profile-embed ON) — NOT lifted; the next
 ## blocker triaged
