@@ -4,7 +4,7 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -28,30 +28,26 @@ export function isValidPieceId(id: string): boolean {
 // use an insecure passphrase.
 // This fallback should be removed once fully migrated
 // over to using keyfiles.
+//
+// The ed25519 implementation is left to the platform, which on a supporting
+// one means Web Crypto: the private key is then a non-extractable `CryptoKey`
+// and its material never enters the JS context. A worker realm receives that
+// key as itself, structured cloning carrying a `CryptoKey` whole.
 export async function getIdentity(
   identityPath?: string,
   operatorPass?: string,
 ): Promise<Identity> {
-  // Deno does not support serializing `CryptoKey`, safely
-  // passing keys to workers. Explicitly use the fallback implementation,
-  // which makes key material available to the JS context, in order
-  // to transfer key material to workers.
-  // https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
-  const keyConfig: IdentityCreateConfig = {
-    implementation: "noble",
-  };
-
   if (identityPath) {
     console.log(`Using identity at ${identityPath}`);
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
-      return await Identity.fromPkcs8(pkcs8Key, keyConfig);
+      return await Identity.fromPkcs8(pkcs8Key);
     } catch (_e) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }
   } else if (operatorPass) {
     console.warn("Using insecure passphrase identity.");
-    return await Identity.fromPassphrase(operatorPass, keyConfig);
+    return await Identity.fromPassphrase(operatorPass);
   }
   throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
 }

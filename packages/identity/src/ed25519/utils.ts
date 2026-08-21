@@ -140,10 +140,10 @@ export class AuthorizationError extends Error {
 //   https://caniuse.com/mdn-api_subtlecrypto_generatekey_ed25519
 // * [2] Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
 //   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993.
-// * [3] While Deno serializes `CryptoKey`s without throwing, they cannot be rehydrated
-//   after cloning. We do not test that here, as we prefer the WebCrypto implementation
-//   in Deno, but in scenarios where a clone is necessary, a fallback implementation
-//   can be requested.
+// * [3] Deno carries a `CryptoKey` through structured cloning whole -- the clone
+//   is a `CryptoKey` with its extractability and algorithm intact, and it signs
+//   -- both within a realm and across a worker boundary. So the cloneability
+//   this checks is about Firefox, per [2], and not about Deno.
 //   https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
 // * [4] Safari/Webkit generates randomized signatures as per `draft-irtf-cfrg-det-sigs-with-noise`
 //   https://datatracker.ietf.org/doc/draft-irtf-cfrg-det-sigs-with-noise/
