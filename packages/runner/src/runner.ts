@@ -5744,10 +5744,16 @@ export class Runner {
    * {@link Runtime.resolveSpaceName} as the genesis owner. Read WITHOUT
    * `homeSpacePrincipalFor`'s read-scope-ratchet side effect (scope report
    * F8): resolving a provisioning target is not a scoped READ of the run.
-   * On a client (`!servingPosture`) no owner is supplied and the genesis
-   * names the active user — byte-identical to before. A serving run with
-   * no acting identity fails the resolution loudly (Runtime.resolveSpaceName
-   * refuses) rather than minting a service-owned space.
+   * The ACTING user is the ONLY source (review F1 on #6156): the genesis
+   * owner must be the same principal the provisioning crossing's grant
+   * probe and carriage carry, or replay's acl arm would probe a stranger —
+   * a demand-supplied `scopeKeyIdentity` is resolution scaffolding whose
+   * acting settles (possibly to NONE) at the seal, so a context carrying
+   * only it REFUSES here exactly like a bare one: its crossing would be
+   * refused carriage-less anyway, and registering the scaffolding
+   * principal would mint an orphaned genesis under an owner the wave
+   * never grants. On a client (`!servingPosture`) no owner is supplied
+   * and the genesis names the active user — byte-identical to before.
    */
   private async resolvePendingSpaceNamesAndRetry(
     frame: Frame,
@@ -5756,9 +5762,7 @@ export class Runner {
     const names = [...(frame.pendingSpaceNames ?? [])];
     let owner: DID | undefined;
     if (this.runtime.servingPosture && tx !== undefined) {
-      const context = waveRunContextOf(tx);
-      owner = (context?.acting?.user ??
-        context?.scopeKeyIdentity?.principal) as DID | undefined;
+      owner = waveRunContextOf(tx)?.acting?.user as DID | undefined;
     }
     await Promise.all(
       names.map((name) =>

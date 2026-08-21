@@ -350,6 +350,23 @@ Grace store dump, seq 4). Built shape:
   plane is exactly the grant-scoped read design's territory (OW13), not
   this build's. If the owner wants per-demanding-user read binding
   ahead of OW13, that is a follow-up ruling — the escape hatch's shape.
+- **FLAG-8 (raised by the independent adversarial review, F2; surfaced
+  to owner 2026-08-21): shared NAMED spaces now transfer OWNER power —
+  ACL-rewrite included — to whichever user's flow wins the genesis
+  race.** `resolveSpaceName` deliberately maps equal names to ONE shared
+  space across users (the pre-OW31 "shared profile space" behavior);
+  under the ruled genesis the FIRST provisioning user becomes the
+  space's concrete OWNER and every later user holds `"*": WRITE` only —
+  including the power asymmetry that the first user can rewrite the ACL
+  and lock peers out. Pre-OW31 the SERVICE owned such spaces (no user
+  could touch the ACL). This is inherent in the ruling ("names the
+  acting user OWNER") composed with the pre-existing shared-name
+  behavior; convergence is clean (the genesis has a seq precondition;
+  the losing bootstrap treats ConflictError as success-by-loss). It is
+  FLAG-3's sharper sibling: not "the service can still write" but "a
+  peer user can now seize the ACL". Owner decision territory
+  (per-user shared-space derivation, or a shared-space genesis policy);
+  surfaced by the coordinator in parallel.
 - **Review disposition (PR #6156, Codex P1 ×3, P2 ×1; Cubic P2 ×1):**
   (1) session-level-binding widening → FLAG-7 above (design of record;
   replied on the thread). (2) stale binding surviving an ownership
@@ -373,6 +390,44 @@ Grace store dump, seq 4). Built shape:
   coordinator's explicit incremental-report instruction, matching the
   stage-c precedent (reports created and archived same-day); nothing
   pre-existing was rewritten.
+- **Independent adversarial review disposition (coordinator-relayed,
+  2026-08-21; verdict MERGE-READY, no BLOCKER/MAJOR):**
+  **F1 (MINOR)** — VALID, FIXED red-first: the genesis-owner threading's
+  `?? scopeKeyIdentity?.principal` fallback is DROPPED — the acting user
+  is the ONLY owner source (the grant probe and carriage carry the same
+  principal, so a scaffolding-only context now REFUSES instead of
+  minting an orphaned divergent-owner genesis). The new runner-seam pin
+  was watched red (the fallback resolved with the scaffolding principal)
+  before the drop. **F6 (MINOR)** — VALID, FIXED red-first-by-mutation:
+  a new pin drives the REAL SpaceServer loop (live activation, a
+  provisioning-shaped tx sealed into the live wave, creation-granted
+  target, `ensureSpaceInitialized` instrumented as the mount-bootstrap
+  stand-in and call-recorded); with `creationGrantedForeignSpaces`
+  neutered to `[]` the pin goes RED (the sink's INV-13 mirror refuses
+  and the data never lands) and green restored. A first pin attempt
+  with a bootstrap-capable manager did NOT redden under the mutation —
+  the provider MOUNT itself mints the genesis on that topology, masking
+  the forcing (recorded honestly: in production BOTH sources exist and
+  the forcing is what makes the ordering deterministic when the sink
+  would win the race). **F2 (NOTE)** → FLAG-8 above (surfaced to owner
+  2026-08-21). **F3 (NOTE)** — recorded for the flip-gate watchers: a
+  via-"owner" crossing into a NEVER-materialized home store is granted
+  without genesis forcing (the owner arm short-circuits before the
+  store-existence probe) and then refused forever by the sink's INV-13
+  mirror — a fail-closed livelock whose signature is nonzero
+  `foreignWriteRefusals` naming a HOME space; sanctioned flows do not
+  reach it (a demanding user's home store exists because the demand
+  came from it). **F4 (NOTE)** — the OFF-invisibility claim is
+  PRECISE as: OFF-invisible FOR EXISTING TRAFFIC; a hand-crafted
+  `actingAs` marker on session.open, previously silently ignored by the
+  parse whitelist, is now hard-refused for non-delegating principals
+  under observe/enforce — a fail-closed TIGHTENING for a wire input no
+  legitimate client sends. **F5 (NOTE)** — matches FLAG-7 (attributed
+  ambient authority, compliance with the ruling as worded). **F7
+  (NOTE)** — VALID, comment fixed: the sink names
+  `commitDelegatedAppend` as the third engine-direct committer (stream
+  appends only; no ACL-doc/genesis vector). **F8** — the reviewer's
+  OFF-invisibility audit confirmed the build's claim independently.
 - **Escape-hatch status (the READ ruling's own provision): NOT
   exercised.** No case surfaced during the build where user-identity
   routing could not cover a legitimately-needed serving read: home

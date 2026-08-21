@@ -2827,7 +2827,18 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   (OW34's family), flagged rather than filled. (iv) the ruled
   ACL-only-read allowance is exercised as the server-side owner
   resolution at session.open; no raw ACL-doc query surface was built
-  (nothing needs one — smaller surface, permissive clause).
+  (nothing needs one — smaller surface, permissive clause). (v) SHARED
+  NAMED spaces (equal `inSpace("name")` across users deliberately map
+  to ONE space) now transfer OWNER power — ACL-rewrite included — to
+  whichever user's flow wins the genesis race; peers hold `"*": WRITE`.
+  Inherent in the ruling composed with the pre-existing shared-name
+  behavior; convergence clean; SURFACED TO OWNER 2026-08-21 (the
+  independent review's F2 — the wildcard residual's sharper sibling;
+  build report FLAG-8). (vi) a via-"owner" crossing into a
+  never-materialized home store is granted without genesis forcing and
+  then refused forever by the sink's INV-13 mirror — a fail-closed
+  livelock unreachable in sanctioned flows; its watcher signature is
+  nonzero `foreignWriteRefusals` naming a HOME space (the review's F3).
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the

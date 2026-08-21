@@ -194,8 +194,13 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         // never lands in a FRESH store ahead of its genesis ACL — the
         // space's commit #1 is the ACL, signed by the space's own keys
         // and naming the acting user OWNER. The session plane enforces
-        // this in `#validateAclCommit`'s precedence clause; the sink is
-        // the only other committer, and before this refusal it silently
+        // this in `#validateAclCommit`'s precedence clause; of the two
+        // other engine-direct committers, this sink is the one that
+        // writes provisioning DATA batches (the third,
+        // `Server.commitDelegatedAppend`, appends outbox-carried events
+        // to stream sidecars and never writes an `of:<space>` ACL doc —
+        // no genesis-bypass vector; review F7 on #6156), and before
+        // this refusal the sink silently
         // bypassed the invariant (a served `.inSpace()` create whose
         // data commit won the race with the provider mount's genesis
         // minted an ACL-less space). The wave commit step forces the
