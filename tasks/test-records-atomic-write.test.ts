@@ -56,6 +56,40 @@ describe("test-records-atomic-write", () => {
       expect(await Deno.readTextFile(real)).toBe("after\n");
     });
 
+    it("writes what a link with nothing at the end of it names", async () => {
+      const missing = join(dir, "missing.txt");
+      const link = join(dir, "dangling.txt");
+      await Deno.symlink(missing, link);
+
+      await replaceFile(link, "after\n");
+
+      expect((await Deno.lstat(link)).isSymlink).toBe(true);
+      expect(await Deno.readTextFile(missing)).toBe("after\n");
+    });
+
+    it("creates a file only its owner can read", async () => {
+      const path = join(dir, "new.txt");
+
+      await replaceFile(path, "hello\n");
+
+      expect((await Deno.stat(path)).mode! & 0o777).toBe(0o600);
+    });
+
+    it("refuses a path it cannot read the state of", async () => {
+      const closed = join(dir, "closed");
+      await Deno.mkdir(closed);
+      await Deno.chmod(closed, 0o000);
+
+      try {
+        // Not "there is no file": there is no answer, and writing would
+        // be a guess about a file somebody has closed off.
+        await expect(replaceFile(join(closed, "f.txt"), "x\n")).rejects
+          .toThrow();
+      } finally {
+        await Deno.chmod(closed, 0o700);
+      }
+    });
+
     it("leaves nothing beside the file it wrote", async () => {
       const path = join(dir, "tidy.txt");
 
