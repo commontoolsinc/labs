@@ -27,6 +27,7 @@ import Topic, {
   type TopicMentionSource,
   type TopicPiece,
   TOPICS_THEME,
+  type TopicSummary,
   whenLabel,
 } from "./topic.tsx";
 
@@ -53,11 +54,46 @@ export type {
   TopicPiece,
 } from "./topic.tsx";
 
+/**
+ * What the board USES of a stored topic — its demand, not the topic's truth.
+ *
+ * Written by the consumer, which is the point: a holder writes down what it
+ * reads or writes and the verbs it calls, never what the other pattern IS
+ * ([designing verbs so they can change](../../../docs/plans/verb-evolution.md),
+ * "a holder demands only what it uses"). This board calls NO topic verb, so
+ * its demand names none — and once it names none, adding a verb to a topic
+ * stops touching the board's shape at all.
+ *
+ * That is what keeps a verb NON-OPTIONAL. The alternative, and the reason
+ * this type exists, is that a verb reachable through the board's projection
+ * has to be declared optional there — a stream cannot carry a default, so
+ * optional is the only form an older generation tolerates — and every
+ * consumer then pays a maybe at the call site, whose obvious spelling
+ * (`piece.verb?.send(...)`) skips in silence.
+ *
+ * The membership, measured rather than guessed: the card list renders
+ * `title`, `body`, `commentCount`, `createdBy`, `createdByName` and
+ * `lastActivityAt`; `index` publishes `title`, `createdAt`, `createdBy`,
+ * `commentCount`, `lastActivityAt`; `crossrefTable` joins on `mentions`;
+ * `cardsByActivity` sorts on `lastActivityAt`; `topicCount` reads only a
+ * length. Eight fields, no verbs.
+ *
+ * Every field carries a default, and that is load-bearing rather than
+ * stylistic: a demanded path an older topic cannot produce makes the WHOLE
+ * array unreadable, while a default materializes in its place and the read
+ * succeeds. Measured, not inferred.
+ */
+export interface TopicDemand extends TopicSummary {
+  body: string | Default<"">;
+  createdByName: string | Default<"">;
+  mentions: unknown[] | Default<[]>;
+}
+
 export interface TopicsInput {
   /** The board's durable topic list. `addTopic` appends here; direct writes
    * are legitimate but unattributed, and a whole-array write forfeits the
    * mergeability the verb's append keeps. */
-  topics?: Writable<TopicPiece[] | Default<[]>>;
+  topics?: Writable<TopicDemand[] | Default<[]>>;
   /** @deprecated Retained while pre-Profile callers still use the old
    * `setMyName` + unsigned-event contract. New callers use `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
@@ -245,10 +281,10 @@ export interface TopicsOutput {
   /** The board's topics, in filing order, as complete pieces — bodies,
    * threads, and verbs included. Survey through `index` instead; read this
    * when you already know which topic you are expanding. */
-  topics: TopicPiece[];
+  topics: TopicDemand[];
   /** The same list, under the name the topic pattern's editor autocompletes
    * over — what `addTopic` wires into each child as its mention universe. */
-  mentionable: TopicPiece[] | Default<[]>;
+  mentionable: TopicDemand[] | Default<[]>;
   /** How many topics the board holds, nulls included. */
   topicCount: number;
   /** The board's mention pivot, one row per topic: the topic, and the topics
@@ -281,8 +317,8 @@ export interface TopicsOutput {
  * bound into this handler as plain snapshot values, which keeps the mutation
  * independently testable without weakening the canonical Profile path. */
 export const submitProfileTopic = handler<void, {
-  topics: Writable<TopicPiece[] | Default<[]>>;
-  mentionable: Writable<TopicPiece[] | Default<[]>>;
+  topics: Writable<TopicDemand[] | Default<[]>>;
+  mentionable: Writable<TopicDemand[] | Default<[]>>;
   /** `Writable` only because that is what the factory boundary accepts: the
    * input this is handed straight to declares `ReadonlyCell`, and a
    * `ReadonlyCell` held in handler state is not assignable to it — handler

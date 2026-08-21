@@ -209,7 +209,7 @@ export interface TopicInput {
    * autocompletes over. A reference to the tracker's array, wired at creation
    * like `myName` (and backfillable as a one-time link-bind on pieces created
    * before it existed). Absent, the editor simply offers no completions. */
-  mentionable?: Writable<TopicPiece[] | Default<[]>>;
+  mentionable?: Writable<TopicSummary[] | Default<[]>>;
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
    * cell, which is what makes a mention durable and — because each entry holds
