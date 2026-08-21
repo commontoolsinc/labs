@@ -167,8 +167,8 @@ class DebugStringifier {
           const tag = fullTag.replace(/@.*$/, "");
           return marked(`/${tag}(...)`);
         } else {
-          // Non-plain non-fabric object. Punt on attempting to render the
-          // innards.
+          // Not a plain object and not a `FabricSpecialObject`. Punt on
+          // attempting to render the innards.
           return marked(`new ${className}(...)`);
         }
       }

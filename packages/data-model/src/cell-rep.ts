@@ -126,8 +126,8 @@ export const LINK_V1_TAG = "link@1" as const;
  * only the form for the _currently active_ regime, never both.
  *
  * `Payload` is bounded by {@link FabricPlainObject} (the payload is always a
- * stored/serialized fabric record) but otherwise open, so this layer needn't
- * know the exact field types (URI / MemorySpace / JSONSchema — those stay in
+ * stored/serialized one) but otherwise open, so this layer needn't know the
+ * exact field types (URI / MemorySpace / JSONSchema — those stay in
  * `runner`). In modern mode the payload type is erased: a {@link FabricLink}
  * holds an unparameterized {@link FabricPlainObject}, just as
  * {@link FabricHash} is unparameterized on the modern arm of

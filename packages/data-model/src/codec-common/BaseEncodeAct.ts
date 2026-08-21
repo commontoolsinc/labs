@@ -14,7 +14,7 @@ import { SELF_REP } from "./CodecRegistry.ts";
 
 /**
  * One act of encoding: what {@link BaseCodecAct} holds, the walk that turns a
- * fabric value into this format's transport tree, and the format's own account
+ * `FabricValue` into this format's transport tree, and the format's own account
  * of how a container is written down.
  *
  * An engine mints one of these per `encode()` call, through a factory its
@@ -95,7 +95,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
   }
 
   /**
-   * Encodes a fabric value into the transport tree, dispatching on what the
+   * Encodes a `FabricValue` into the transport tree, dispatching on what the
    * registry says about it and handing a container to this format's own arms.
    *
    * @throws If `value` holds something the format cannot carry: a
@@ -159,7 +159,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
     // codec's determination, not the value's.
     //
     // A terminal codec's state is already in this format's domain, so it is
-    // final; a nonterminal codec's is made of fabric values, which this walk
+    // final; a nonterminal codec's is made of `FabricValue`s, which this walk
     // has yet to expand.
     let tag: string;
     let state: Encoded;

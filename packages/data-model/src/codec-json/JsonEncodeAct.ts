@@ -7,7 +7,7 @@ import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { isEncodedInstance } from "./wire-text.ts";
 
 /**
- * One act of encoding a fabric value to this format's JSON text.
+ * One act of encoding a `FabricValue` to this format's JSON text.
  *
  * JSON is also its own escape mechanism here: a tagged form is a `/`-keyed
  * object, so a plain object carrying such a key is ambiguous with one, and the

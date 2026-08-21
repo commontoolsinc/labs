@@ -13,7 +13,7 @@ import type { WireFormat } from "@/codec-interface/interface.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
- * Tag prefix on the encoded form of a fabric value. The prefix is explicit so
+ * Tag prefix on the encoded form of a `FabricValue`. The prefix is explicit so
  * as to make it unambiguous whether a given JSON-ish text string is the result
  * of encoding by `JsonCodecEngine` vs. being JSON from some other source. The tag
  * stands for "Fabric Value Json, version 1."

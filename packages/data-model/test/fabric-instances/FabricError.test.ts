@@ -1,5 +1,5 @@
 /**
- * `Error` as a fabric value, where most of the difficulty is that a native
+ * `Error` as a `FabricValue`, where most of the difficulty is that a native
  * error carries two names and arbitrary extra properties.
  *
  * `type` and `name` are stored separately, and the encoding leans on their

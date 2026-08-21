@@ -13,7 +13,7 @@
  * index-like name that is not canonical all count as absent -- and absent
  * means nothing shifts.
  *
- * Neither one descends into a fabric instance on its way through a path.
+ * Neither one descends into a `FabricInstance` on its way through a path.
  */
 
 import { describe, it } from "@std/testing/bdd";

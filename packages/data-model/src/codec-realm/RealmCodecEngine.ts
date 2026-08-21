@@ -7,7 +7,7 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
 
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
- * fabric value takes when it is handed to `structuredClone()` or
+ * `FabricValue` takes when it is handed to `structuredClone()` or
  * `postMessage()` to reach another realm.
  *
  * The format is specified by `4-realm-encoding.md` of the formal spec, which

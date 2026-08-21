@@ -2,7 +2,7 @@
  * The predicates deciding whether a value belongs to the `FabricValue` type,
  * and the narrowings that ask a shape question about one that already does.
  *
- * Membership turns on inertness: a fabric value is data, so anything that is
+ * Membership turns on inertness: a `FabricValue` is data, so anything that is
  * live code is refused -- a function, an accessor-backed property, the
  * prototype of an `Array` subclass, a symbol that was never registry-interned.
  * Frozen-ness is a separate question and deliberately not asked here, so a
@@ -28,12 +28,12 @@ import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 
 /**
- * Indicates whether the value is a fabric value, accepting
+ * Indicates whether the value is a `FabricValue`, accepting
  * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
  * `undefined`, and arrays with `undefined` elements or sparse holes
  * -- in addition to the base fabric types (`null`, `boolean`, `number`,
  * `string`, plain objects, dense arrays). An array must be a direct `Array`
- * instance; a subclass instance is not a fabric value.
+ * instance; a subclass instance is not a `FabricValue`.
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -75,7 +75,8 @@ export function isValidFabricValueLayer(
     }
 
     case "symbol": {
-      // Registry-interned symbols are valid fabric values; unique ones are not.
+      // Registry-interned symbols are valid `FabricValue`s; unique ones are
+      // not.
       return Symbol.keyFor(value) !== undefined;
     }
 
@@ -106,9 +107,9 @@ export function isValidFabricValueLayer(
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
- * question, see `isValidDeepFrozenFabricValue()`. A fabric instance is a member
- * by type (it is a `FabricSpecialObject`); this does not recurse into its
- * private interior, whose contents are `FabricValue`s by the instance's
+ * question, see `isValidDeepFrozenFabricValue()`. A `FabricInstance` is a
+ * member by type (it is a `FabricSpecialObject`); this does not recurse into
+ * its private interior, whose contents are `FabricValue`s by the instance's
  * construction contract and are reachable only via frozen-semantic protocols
  * that a membership check must not invoke.
  *
@@ -152,8 +153,8 @@ export function isValidFabricValue(value: unknown): value is FabricValue {
       // A `FabricPrimitive` is a `FabricValue` with no outbound references.
       return true;
     } else if (BaseFabricInstance.isInstance(item)) {
-      // A fabric instance is a `FabricValue` by type. Its logical contents are
-      // private and reachable only through the frozen-semantic
+      // A `FabricInstance` is a `FabricValue` by type. Its logical contents
+      // are private and reachable only through the frozen-semantic
       // `[IS_DEEP_FROZEN]`/`[DEEP_FREEZE]` protocols, which a pure membership
       // check must not invoke; the instance's construction contract already
       // guarantees its interior holds `FabricValue`s. So membership trusts the
@@ -208,7 +209,7 @@ export function isValidFabricPlainObject(
 }
 
 /**
- * Indicates whether a fabric value is a plain object, an array, or a
+ * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object"
  * alone reads as excluding it.
