@@ -296,10 +296,11 @@ function freezeObject(
   path: string,
   converted: WeakMap<object, ModuleSafeValue>,
 ): ModuleSafeRecord {
-  // A record leaves here in the one shape a fabric value has. `assertPlainData`
-  // admits a null-prototype object, that being an ordinary way to build a
-  // dictionary, and this is where it becomes canonical -- so what a pattern
-  // receives stays inside `FabricValue`, which a null-prototype record is not.
+  // A record leaves here in the one shape a `FabricPlainObject` has.
+  // `assertPlainData` admits a null-prototype object, that being an ordinary
+  // way to build a dictionary, and this is where it becomes canonical -- so
+  // what a pattern receives stays inside `FabricValue`, which a null-prototype
+  // record is not.
   const result = {} as ModuleSafeRecord;
   converted.set(value, result as ModuleSafeValue);
 

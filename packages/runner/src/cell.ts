@@ -506,7 +506,7 @@ declare module "@commonfabric/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw fabric value as `FabricValue`, bypassing the
+     * Reads the cell's raw value as a `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
@@ -526,7 +526,7 @@ declare module "@commonfabric/api" {
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
      * Sets the raw cell value to any `FabricValue`, bypassing the cell's
-     * type parameter `T`. Use this when writing pre-formed fabric data
+     * type parameter `T`. Use this when writing a pre-formed `FabricValue`
      * (e.g., `SigilLink` references, stream markers) that is valid at the
      * storage layer but does not conform to the cell's schema type.
      *
@@ -3870,7 +3870,7 @@ export function frameAnchorIds(
 
 /**
  * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
- * fabric value or a native convertible to one, and on top of that the `Cell`s
+ * `FabricValue` or a native convertible to one, and on top of that the `Cell`s
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *

@@ -627,7 +627,7 @@ const typeMatches = (
     case "array":
       return Array.isArray(value);
     case "object":
-      // A fabric primitive satisfies "object" too: each fabric-primitive
+      // A `FabricPrimitive` satisfies "object" too: each `FabricPrimitive`
       // type is a subtype of "object" (the same rule the read side's
       // schemaTypeMatchesValueType applies in traverse.ts).
       return isFabricPlainObjectValue(value) ||
@@ -1840,7 +1840,7 @@ const validateAgainstSchemaInternal = (
       // `Object.hasOwn`), a primitive carries its surface as class
       // accessors, so the check is `in` — `FabricBytes.length` satisfies
       // `required: ["length"]`. `typeMatches` stays a permissive filter;
-      // this is the complete check behind it. A fabric-primitive-typed
+      // this is the complete check behind it. A `FabricPrimitive`-typed
       // schema is not gated (its type never includes "object").
       //
       // Presence only: `properties` sub-schemas are not enforced against
@@ -1852,13 +1852,13 @@ const validateAgainstSchemaInternal = (
         asTypeArray(schema.type).includes("object");
       if (typeAllowsObject && Array.isArray(schema.required)) {
         for (const key of schema.required) {
-          // The nominal brand key has no runtime existence; a fabric value
-          // satisfies it by construction. Only schemas from pre-vocabulary
-          // compilations carry it (current emissions skip it everywhere).
-          // Removable with the other brand exemptions (see
-          // opaqueLeafMissesRequired in traverse.ts) once those stored
-          // schemas have cycled out — a redeploy-gated horizon, since
-          // pattern update refuses the structural-to-vocabulary transition.
+          // The nominal brand key has no runtime existence; a
+          // `FabricSpecialObject` satisfies it by construction. Only schemas
+          // from pre-vocabulary compilations carry it (current emissions skip
+          // it everywhere). Removable with the other brand exemptions (see
+          // opaqueLeafMissesRequired in traverse.ts) once those stored schemas
+          // have cycled out — a redeploy-gated horizon, since pattern update
+          // refuses the structural-to-vocabulary transition.
           if (key === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(key in value)) {
             return mismatch(`missing required property ${key}`);

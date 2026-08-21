@@ -201,7 +201,7 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
- * independent piece of the new fabric-value pipeline so that the features
+ * independent piece of the new `FabricValue` pipeline so that the features
  * can be enabled incrementally. Passed via `RuntimeOptions.experimental`;
  * lower-layer flags are propagated to their ambient control points, while
  * runtime-owned flags remain scoped to the Runtime instance.

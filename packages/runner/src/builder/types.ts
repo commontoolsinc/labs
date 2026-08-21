@@ -476,7 +476,8 @@ export interface BuilderFunctionsAndConstants {
   UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
-  // Fabric value classes, in the order they are declared in api/index.ts.
+  // `FabricSpecialObject` classes, in the order they are declared in
+  // api/index.ts.
   FabricSpecialObject: typeof FabricSpecialObject;
   FabricInstance: typeof FabricInstance;
   FabricPrimitive: typeof FabricPrimitive;
