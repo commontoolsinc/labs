@@ -838,6 +838,10 @@ export class StorageManager implements IStorageManager {
   /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
   #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
+  /** Genesis ACL owners registered beside a space identity (OW31): the
+   * ACTING user a serving-side provisioning run supplied. Keyed apart so
+   * the client path (no owner registered) stays byte-identical. */
+  #spaceGenesisOwners = new Map<MemorySpace, string>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
@@ -988,9 +992,21 @@ export class StorageManager implements IStorageManager {
    * Retain a derived space key solely as the authority for that space's first
    * ACL commit. Providers continue to authenticate all ordinary replica work
    * as `this.as`.
+   *
+   * `options.owner` names the genesis ACL's OWNER (OW31, RULED 2026-08-18):
+   * on a SERVING runtime the acting user of the provisioning run is
+   * threaded here, so the space's first commit — signed by the space's own
+   * keys — immediately delegates OWNER to that user and the serving
+   * identity appears nowhere in the ACL. Absent (every client), the owner
+   * is the manager's signer: the active user, the pre-OW31 shape
+   * byte-for-byte.
    */
-  registerSpaceIdentity(identity: Signer): void {
+  registerSpaceIdentity(identity: Signer, options?: { owner?: string }): void {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
+    const owner = options?.owner;
+    if (owner !== undefined) {
+      this.#spaceGenesisOwners.set(identity.did() as MemorySpace, owner);
+    }
   }
 
   /**
@@ -1206,9 +1222,15 @@ export class StorageManager implements IStorageManager {
           (isHomeSpace || current.serverSeq === 0)
         ) {
           try {
+            // Non-home genesis owner (OW31, RULED 2026-08-18): the acting
+            // user registered beside the space identity, else the signer
+            // (the active user on a client). The HOME arm is untouched —
+            // a home space is its own identity and owner.
+            const genesisOwner = this.#spaceGenesisOwners.get(space) ??
+              signer.did();
             const bootstrapAcl = isHomeSpace
               ? { [signer.did()]: "OWNER" }
-              : { [signer.did()]: "OWNER", "*": "WRITE" };
+              : { [genesisOwner]: "OWNER", "*": "WRITE" };
             await bootstrap.session.transact({
               localSeq: 1,
               reads: {

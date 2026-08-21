@@ -344,6 +344,54 @@ describe("Phase 5 cross-space serving", () => {
     }
   });
 
+  it("space-name resolution on a serving runtime requires the acting identity as genesis owner; a client stays owner-free (OW31, RULED 2026-08-18)", async () => {
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+      servingHomeSpace: homeSpace,
+    });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      // No acting identity: the serving runtime REFUSES to resolve (and
+      // therefore to register a bootstrap authority) — a served
+      // `.inSpace()` with no actor must never mint a service-owned
+      // space.
+      await expect(serving.resolveSpaceName("ow31-refusal-probe")).rejects
+        .toThrow("acting identity as genesis owner");
+
+      // With the acting user supplied, resolution succeeds and the
+      // cached DID resolves synchronously from then on (no repeated
+      // refusal on the re-run path).
+      const did = await serving.resolveSpaceName("ow31-granted-probe", {
+        owner: aliceSigner.did(),
+      });
+      expect(serving.resolveSpaceNameSync("ow31-granted-probe")).toBe(did);
+
+      // A CLIENT runtime keeps today's byte-identical shape: no owner
+      // required, the genesis names the active user via the signer arm.
+      const client = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: SharedServerStorageManager.connectTo(server, {
+          as: aliceSigner,
+        }),
+      });
+      try {
+        const clientDid = await client.resolveSpaceName("ow31-client-probe");
+        expect(clientDid.startsWith("did:")).toBe(true);
+      } finally {
+        await client.storageManager.close();
+        await client.dispose();
+      }
+    } finally {
+      await serving.dispose();
+      await manager.close();
+    }
+  });
+
   it("the activation foreign re-mark judges recorded foreign inputs against their OWN space's head (serving-loop.md §6 step 2; the F5 pin)", async () => {
     // The re-mark's activation arm fail-degrades to a warn by design
     // (recovery correctness rides recompute-on-demand), so a breakage

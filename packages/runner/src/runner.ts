@@ -99,6 +99,7 @@ import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import type {
+  DID,
   IExtendedStorageTransaction,
   IStorageSubscription,
   MemorySpace,
@@ -5736,13 +5737,36 @@ export class Runner {
    * On the re-run the names resolve synchronously from the runtime cache (see
    * the pattern builder's resolveInSpaceTargetSpace), so the child results are
    * routed into the correct spaces from the start — no link rewriting required.
+   *
+   * OW31 (RULED 2026-08-18): on a SERVING runtime the fresh space's genesis
+   * ACL must name the run's ACTING user as OWNER, so the acting principal is
+   * read from the run transaction's wave run context and threaded to
+   * {@link Runtime.resolveSpaceName} as the genesis owner. Read WITHOUT
+   * `homeSpacePrincipalFor`'s read-scope-ratchet side effect (scope report
+   * F8): resolving a provisioning target is not a scoped READ of the run.
+   * On a client (`!servingPosture`) no owner is supplied and the genesis
+   * names the active user — byte-identical to before. A serving run with
+   * no acting identity fails the resolution loudly (Runtime.resolveSpaceName
+   * refuses) rather than minting a service-owned space.
    */
   private async resolvePendingSpaceNamesAndRetry(
     frame: Frame,
+    tx?: IExtendedStorageTransaction,
   ): Promise<never> {
     const names = [...(frame.pendingSpaceNames ?? [])];
+    let owner: DID | undefined;
+    if (this.runtime.servingPosture && tx !== undefined) {
+      const context = waveRunContextOf(tx);
+      owner = (context?.acting?.user ??
+        context?.scopeKeyIdentity?.principal) as DID | undefined;
+    }
     await Promise.all(
-      names.map((name) => this.runtime.resolveSpaceName(name)),
+      names.map((name) =>
+        this.runtime.resolveSpaceName(
+          name,
+          owner !== undefined ? { owner } : undefined,
+        )
+      ),
     );
     throw new RetryImmediately(
       `Resolving in-space target spaces: ${names.join(", ")}`,
@@ -6138,7 +6162,7 @@ export class Runner {
           logger.timeStart("stream", "postRun");
           try {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
-              return this.resolvePendingSpaceNamesAndRetry(frame);
+              return this.resolvePendingSpaceNamesAndRetry(frame, tx);
             }
             const normalized = normalizeSandboxResult(result, name);
             return this.handleJavaScriptHandlerResult(
@@ -6173,7 +6197,7 @@ export class Runner {
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
-          return this.resolvePendingSpaceNamesAndRetry(frame)
+          return this.resolvePendingSpaceNamesAndRetry(frame, tx)
             .finally(() => popFrame(frame));
         }
         (error as Error & { frame?: Frame }).frame = frame;
@@ -6511,7 +6535,7 @@ export class Runner {
               result = undefined;
             }
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
-              return this.resolvePendingSpaceNamesAndRetry(frame);
+              return this.resolvePendingSpaceNamesAndRetry(frame, tx);
             }
             const normalized = normalizeSandboxResult(result, name);
             return this.writeJavaScriptActionResult(
@@ -6560,7 +6584,7 @@ export class Runner {
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
-          return this.resolvePendingSpaceNamesAndRetry(frame)
+          return this.resolvePendingSpaceNamesAndRetry(frame, tx)
             .finally(() => popFrame(frame));
         }
         // A refusal that escaped the body takes the same disposition as one it

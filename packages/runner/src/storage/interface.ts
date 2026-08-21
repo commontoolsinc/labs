@@ -173,8 +173,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Register a derived space identity for fresh-space ACL genesis. Optional:
    * storage managers without ACL bootstrap support may ignore this capability.
    * The identity is never used as the principal for ordinary storage work.
+   *
+   * `options.owner` names the genesis ACL's OWNER (OW31, RULED 2026-08-18:
+   * a provisioned space's first commit is signed by the space's own keys
+   * and names the ACTING user OWNER — the serving identity appears nowhere
+   * in the ACL). Absent, the genesis owner is the manager's own signer —
+   * the active user on a client, byte-identical to the pre-OW31 shape.
    */
-  registerSpaceIdentity?(identity: Signer): void;
+  registerSpaceIdentity?(identity: Signer, options?: { owner?: string }): void;
 
   /**
    * Close all storage providers

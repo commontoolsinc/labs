@@ -443,6 +443,68 @@ Deno.test("storage ACL bootstrap leaves populated named spaces public", async ()
   }
 });
 
+// OW31 (RULED 2026-08-18; verification-coverage.md): a PROVISIONED
+// space's genesis is signed by the space's own keys and names the ACTING
+// USER as OWNER in that same first commit — the serving identity appears
+// nowhere in the ACL. The client shape (no owner supplied → the signer,
+// i.e. the active user) is pinned byte-for-byte by the named-space tests
+// above.
+Deno.test("storage ACL bootstrap names the supplied genesis owner, not the signer (OW31)", async () => {
+  const service = await Identity.fromPassphrase("acl bootstrap ow31 service");
+  const alice = await Identity.fromPassphrase("acl bootstrap ow31 alice");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl bootstrap ow31 provisioned",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-bootstrap-ow31-owner");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  // The serving posture: the manager authenticates as the SERVICE, and
+  // the space identity is registered with the ACTING user as genesis
+  // owner (threaded from the serving-side resolveSpaceName).
+  const manager = TestStorageManager.overServer({ as: service }, factory);
+  // Red-first witnessed: without the owner option this minted
+  // { [service]: "OWNER", "*": "WRITE" } (the OW31 defect, observed in
+  // this test's red run).
+  manager.registerSpaceIdentity(spaceIdentity, { owner: alice.did() });
+  try {
+    const sync = await manager.open(space).sync(`of:${space}` as URI);
+    assert(!sync.error, sync.error?.message);
+
+    // ACL owner = the acting user; the service principal appears NOWHERE.
+    const acl = await server.readDocument(space, `of:${space}`);
+    assertEquals(acl?.value, {
+      [alice.did()]: "OWNER",
+      "*": "WRITE",
+    });
+    assert(
+      !(service.did() in (acl?.value as Record<string, unknown>)),
+      "the service principal must appear nowhere in the genesis ACL",
+    );
+
+    // Genesis actor = the space DID (the bootstrap session signs as the
+    // space; owner ≠ signer): normal mount, bootstrap mount, resume.
+    assertEquals(factory.principals, [
+      service.did(),
+      spaceIdentity.did(),
+      service.did(),
+    ]);
+
+    // The space's commit #1 IS the ACL commit.
+    const engine = await server.engineForSpace(space);
+    const { selectDocHead } = await import(
+      "@commonfabric/memory/v2/engine"
+    );
+    assertEquals(
+      selectDocHead(engine, { id: `of:${space}`, scopeKey: "space" }),
+      1,
+      "the genesis ACL must be the space's first commit",
+    );
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
 Deno.test("storage without the space signer cannot initialize a foreign space", async () => {
   const user = await Identity.fromPassphrase("acl bootstrap foreign user");
   const space = "did:key:z6Mk-runner-acl-foreign" as MemorySpace;
