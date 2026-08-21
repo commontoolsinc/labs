@@ -15,12 +15,14 @@ import { tsToJs } from "./utils.ts";
 
 const LAUNCH_RETRY_ATTEMPTS = 5;
 const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
+const LAUNCH_RETRYABLE_BOOT_FAILURE = "Your binary refused to boot";
 
 type LaunchFn = (options: LaunchOptions) => Promise<AstralBrowser>;
 type SleepFn = (ms: number) => Promise<unknown>;
 
 export function isRetryableAstralLaunchError(error: unknown): boolean {
-  return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY);
+  return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY) ||
+    error instanceof Error && error.message === LAUNCH_RETRYABLE_BOOT_FAILURE;
 }
 
 export async function launchWithRetry(

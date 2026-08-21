@@ -3,6 +3,23 @@ import type {
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
+import type {
+  ClientCommit,
+  CommitPrecondition,
+  EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
+  PatchOp,
+  ScopeKey,
+  ScopeKeyIdentity,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+} from "@commonfabric/memory/v2";
+import type { EntityId } from "../create-ref.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
@@ -19,21 +36,6 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
-import type {
-  CommitPrecondition,
-  EntityDocument,
-  EntityIdListOptions,
-  EntityIdListResult,
-  PatchOp,
-  SchedulerActionSnapshotQuery,
-  SchedulerExecutionContextKey,
-  SchedulerSnapshotListResult,
-  SqliteDbRef,
-  SqliteOperation,
-  SqliteParamsWire,
-  SqliteQueryResult,
-  SqliteRegisterDiskSourceResult,
-} from "@commonfabric/memory/v2";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import type { Immutable } from "@commonfabric/utils/types";
 
@@ -59,10 +61,7 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
-import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
-
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 
@@ -124,10 +123,39 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   as: Signer;
 
   /**
+   * The manager's own authenticated session identity — the (principal,
+   * sessionId) pair the memory server derives scope keys from for this
+   * manager's commits and reads. This is what the runner's in-memory
+   * identity keys resolve scoped addresses against in the OFF arm
+   * (key-vocabulary.md §2: at cardinality 1 the instance dimension is
+   * derivable from the runtime's own authenticated session), so the
+   * client-side instance keys match the storage rows the server writes.
+   * Stable for the manager's live span; `close()` ends that span.
+   */
+  scopeKeyIdentity(): ScopeKeyIdentity;
+
+  /**
    * Open a new connection to the storage provider associated with the given
    * space.
    */
   open(space: MemorySpace): IStorageProvider;
+
+  /**
+   * Observer of FIRST opens per space (server-execution v2 Phase 4): the
+   * flag-ON client runtime's effects channel installs one so it can
+   * subscribe to its session's effects-doc instance in every space the
+   * manager connects to (protocol.md §5's effects-doc subscription duty).
+   * Optional — the OFF arm and managers that never re-open pay nothing;
+   * the `shadowFlipObserver` precedent on ISpaceReplica.
+   */
+  spaceOpenObserver?: (space: MemorySpace) => void;
+
+  /**
+   * The spaces this manager currently holds providers for — the effects
+   * channel's construction-time sweep (spaces opened before the observer
+   * was installed). Optional, like the observer.
+   */
+  openedSpaces?(): MemorySpace[];
 
   /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
@@ -166,6 +194,20 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. Novelty still
+   * shadowed by a parked own commit is instead EXCLUDED from the wave's
+   * W advance — see `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2
+   * revisit (a)). */
+  inputSynced?(): Promise<void>;
 
   /**
    * Issue an ordered-after round trip on every open space connection, so that
@@ -265,7 +307,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * the link-resolution hop loop). Optional: managers without lazy remote
    * replication (e.g. test mocks) simply don't implement it.
    */
-  shouldPullDoc?(space: MemorySpace, id: URI, scope?: CellScope): boolean;
+  shouldPullDoc?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    /** The reading run's identity when it is not the manager's own
+     * (server-execution v2 stage A): the reservation and the "has this
+     * replica seen the doc" check are then per that INSTANCE. */
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   /**
    * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
@@ -274,7 +324,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * taken before the async pull settles). No-op when the doc was never
    * reserved. Callers pair it with the failure path of the sync they kicked.
    */
-  retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
+  retractDocPullKick?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): void;
 
   /**
    * Wait for the currently pending cross-space promises (and any they
@@ -318,7 +373,35 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    *
    * @returns Promise that resolves when the cell sync is complete.
    */
-  syncCell<T>(cell: Cell<T>): Promise<Cell<T>>;
+  syncCell<T>(
+    cell: Cell<T>,
+    options?: {
+      /** The reading run's identity when it is not the manager's own
+       * (server-execution v2 stage A — the runner's explicit-instance
+       * read): the load NAMES that instance on the wire
+       * (`GraphQueryRoot.entityScopeKey`, lease-holder-only) and lands
+       * it in the replica under that instance's key. Absent (every
+       * client, the OFF arm), the load resolves from the manager's own
+       * session exactly as before. */
+      scopeKeyIdentity?: ScopeKeyIdentity;
+    },
+  ): Promise<Cell<T>>;
+
+  /**
+   * Load ONE scope INSTANCE of a document by address (server-execution v2
+   * stage A — the runner's explicit-instance read at the transaction
+   * layer): a served per-instance run's read of a scoped doc that its
+   * identity's instance has never been loaded for kicks this — the load
+   * names that instance on the wire (lease-holder-only at admission) and
+   * lands it under that instance's key, registered as a pending load like
+   * `syncCell` (so the event preflight can park on it) and tracked until
+   * settled. Optional: managers without lazy remote replication (test
+   * mocks) simply don't implement it; the OFF arm never calls it.
+   */
+  syncInstance?(
+    address: { space: MemorySpace; id: URI; scope?: CellScope },
+    identity: ScopeKeyIdentity,
+  ): Promise<void>;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -349,6 +432,13 @@ export interface IStorageProvider {
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    /** The explicit scope INSTANCE to load (server-execution v2 stage A):
+     * a serving runtime's per-instance read names an instance other than
+     * the manager's own; the watch root then carries
+     * `entityScopeKey` (lease-holder-only on the wire) and the replica
+     * keys the arriving doc under that instance. Absent = the manager's
+     * own instance, exactly as before. */
+    instance?: ScopeKey,
   ): Promise<Result<Unit, Error>>;
 
   /**
@@ -358,6 +448,20 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. Novelty still
+   * shadowed by a parked own commit is instead EXCLUDED from the wave's
+   * W advance — see `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2
+   * revisit (a)). */
+  inputSynced?(): Promise<void>;
 
   /**
    * Destroy the storage provider. Used for tests only.
@@ -382,29 +486,6 @@ export interface IStorageProvider {
 
   /** Test one live space-scoped entity identifier without loading its value. */
   entityIdExists?(id: string): Promise<boolean | undefined>;
-
-  /**
-   * Internal scheduler persistence query. Memory v2 providers implement this
-   * so the runner can rebuild scheduler indexes from persisted observations.
-   */
-  listSchedulerActionSnapshots?(
-    query?: SchedulerActionSnapshotQuery,
-  ): Promise<SchedulerSnapshotListResult>;
-
-  /**
-   * Conservative scheduler-snapshot currency oracle. Returns true only when
-   * every address belongs to this provider, has a confirmed local base, and
-   * that base is no newer than the observation sequence.
-   */
-  areSchedulerAddressesCurrentAtOrBelow?(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean;
-
-  /** Whether an optimistic local write overlaps any supplied address. */
-  schedulerHasPendingWriteOverlapping?(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean;
 
   /** Run a server-side read-only SQLite query against a cell-derived db. */
   sqliteQuery?(
@@ -518,7 +599,6 @@ export type StorageNotification =
   | ILoadNotification
   | IPullNotification
   | IIntegrateNotification
-  | ISchedulerObservationsNotification
   | IResetNotification;
 
 /**
@@ -608,38 +688,21 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
-}
-
-/**
- * Broadcast after an integrate whose subscription push carried scheduler
- * observation rows for the sync window: other clients' committed action runs
- * that this runtime's scheduler may ADOPT instead of re-running
- * (docs/specs/scheduler-v2/incremental-observation-adoption.md). Fired after
- * the corresponding {@link IIntegrateNotification} in the same synchronous
- * turn, so adoption clears the dirt those writes caused before dispatch.
- * `observations` entries are protocol-shaped (observation payload is
- * `unknown`); the scheduler owns validation. `seqCurrentAtOrBelow` and
- * `hasPendingWriteOverlapping` are the storage-side adoption oracles
- * (per-doc replica seq currency; local uncommitted-write overlap).
- */
-export interface ISchedulerObservationsNotification {
-  type: "scheduler-observations";
-  space: MemorySpace;
-  observations: readonly {
-    observedAtSeq: number;
-    executionContextKey: SchedulerExecutionContextKey;
-    observation: unknown;
-    directDirtySeq?: number;
-    staleSeq?: number;
-    unknownReason?: string;
-  }[];
-  seqCurrentAtOrBelow(
-    reads: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean;
-  hasPendingWriteOverlapping(
-    reads: readonly IMemorySpaceAddress[],
-  ): boolean;
+  /**
+   * Present ONLY on the flip a SPECULATION retirement produces
+   * (server-execution v2, speculation.md §4's arrival-gated retirement,
+   * RULED 2026-08-16 — the "own retirement is not a trigger" rider): the
+   * retiring entry's own transaction, so the scheduler treats the flip
+   * of an action's OWN echo like its own commit source and does not
+   * re-run the writer for it. A writer subscribed to its own output
+   * (the scope-narrowing write path reads the redirect slot and its
+   * diff base) would otherwise re-derive on every retirement whose
+   * authoritative value differs from its echo — re-speculate, retire,
+   * flip, forever. Downstream readers of the doc are unaffected (they
+   * are not the source). Absent on every other integrate (foreign
+   * novelty, watch refreshes) — byte-identical there.
+   */
+  source?: IStorageTransaction;
 }
 
 /**
@@ -730,7 +793,7 @@ export interface TransactionCommitOptions {
 }
 
 /**
- * Representation of a storage transaction, which can be used to query facts and
+ * Representation of a storage transaction, which can be used to query state and
  * assert / retract while maintaining consistency guarantees. Storage ensures
  * that transactions retain consistent view of the whole storage through it's
  * lifetime by notifying pending transaction of every change that is integrated
@@ -758,6 +821,20 @@ export interface IStorageTransaction {
    * across instances.
    */
   sourceAction?: object;
+  /**
+   * The scope INSTANCE identity this transaction's scoped reads and writes
+   * resolve against when it is NOT the storage manager's own session
+   * (server-execution v2 stage A — OW17's tx→replica identity seam,
+   * scopes.md §5: a served per-instance run reads and writes ITS instance
+   * of every scoped doc, not the service's and not a sibling's). Set once,
+   * by the wave run stamp (`stampWaveRunContext`), before the run's first
+   * read; absent for every client transaction and the whole OFF arm, where
+   * the manager's own identity applies as before. ONE identity per
+   * transaction: the transaction's own document cache is name-keyed, so a
+   * transaction may never serve two identities (the runner mints one
+   * transaction per instance run — `runOnce`).
+   */
+  scopeKeyIdentity?: ScopeKeyIdentity;
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
@@ -819,8 +896,6 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: FabricValue): void;
-  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -843,6 +918,35 @@ export interface IStorageTransaction {
   markCreateOnly?(
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void;
+
+  /**
+   * Make this transaction's writes AUTHORITATIVE: every value write is
+   * recorded and committed even when it equals the currently-visible
+   * state, instead of being elided as a no-op (deletes of absent slots
+   * stay no-ops — there is nothing to assert). One-way; there is no
+   * un-mark.
+   *
+   * Exists for effect-COMPLETION writebacks under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4): the ordinary
+   * no-op elision diffs against the replica's OPTIMISTIC view, which
+   * layers not-yet-settled sealed overlays over confirmed state. A
+   * completion that diffs its `inputHash`/`pending` writes against a
+   * DOOMED overlay (a sealed derivation write a later wave-commit
+   * supersede-drops, §3d) elides the very write that makes its result
+   * durable-consistent — leaving `result present + inputHash stale`,
+   * which the next run's memo guard reads as "inputs changed" and
+   * destroys the just-served value. Authoritative mode makes the
+   * completion assert its full memo state unconditionally; ordinary
+   * transactions keep the elision (it exists to shrink the conflict
+   * surface, and for them the optimistic view is the right diff base).
+   */
+  markAuthoritativeWrites?(): void;
+
+  /** Whether {@link markAuthoritativeWrites} was applied to this
+   * transaction. Consulted by the value-diff write path
+   * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
+   * transaction layer and must yield for the same reason. */
+  isAuthoritativeWrites?(): boolean;
 
   /**
    * Record one mergeable-write delta against the document at `address` (see
@@ -1111,9 +1215,80 @@ export interface IStorageTransaction {
 
   /**
    * Optional native commit draft hook for storage backends that can consume a
-   * more direct representation than legacy fact archives.
+   * more direct representation than a change archive.
    */
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
+
+  /**
+   * Close this transaction by SEALING instead of committing to the store
+   * (server-execution v2, serving-loop.md §3d). Runs the same close work
+   * commit() runs — validation, per-space native commit construction in
+   * commit order, terminal state transition — but hands each space's native
+   * commit to `sink` rather than the space replica, stopping at the first
+   * failure exactly like the multi-space commit path. The sink owns what
+   * "sealed" means (the wave accumulator applies the writes to the local
+   * replica overlay and defers the store commit to the wave). Absent on
+   * backends that cannot seal; the OFF arm never calls it.
+   */
+  sealInto?(sink: ITransactionSealSink): Promise<Result<Unit, CommitError>>;
+}
+
+/**
+ * Receives a sealing transaction's per-space native commits
+ * (serving-loop.md §3d). Implemented by the wave accumulator; called by
+ * {@link IStorageTransaction.sealInto} once per written space, in commit
+ * order (`.inSpace()` children first, home space last — protocol.md §2b).
+ */
+export interface ITransactionSealSink {
+  sealSpaceCommit(
+    space: MemorySpace,
+    native: NativeStorageCommit,
+    source: IStorageTransaction,
+  ): Promise<Result<Unit, CommitError>>;
+  /**
+   * The read set of a space this transaction READ but wrote nothing to
+   * (stage F, discharging a stage-D bound): a tx seals only spaces it
+   * wrote (or gated), so without this handoff a read in a read-only
+   * space never reaches the accumulator and a withdrawn writer there
+   * cannot fold the reader into the withdrawal (serving-loop.md §3d: no
+   * blind derived writes). Called once per read-only space, inside the
+   * same `sealInto` call as the space commits. Optional: sinks that
+   * predate the handoff simply keep the documented bound.
+   */
+  sealSpaceReads?(
+    space: MemorySpace,
+    reads: readonly IMemorySpaceAddress[],
+  ): void;
+}
+
+/**
+ * The seal destination an action transaction closes into when one is
+ * installed (server-execution v2, serving-loop.md §3d): server-side, under
+ * EXPERIMENTAL_SERVER_EXECUTION, an action tx SEALS into the wave
+ * accumulator instead of committing to the store. One abstraction, two
+ * destinations — with no destination installed (every client, and the OFF
+ * arm always), commit() takes today's store path unchanged.
+ */
+export interface TransactionSealDestination {
+  seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Take ownership of a sealed transaction's post-commit effects
+   * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands
+   * external effects to the OUTBOX post-wave-commit — never at seal
+   * time, where "committed" only means accepted into a wave whose
+   * disposition is still open. A destination that returns `true` OWNS
+   * the effects: it flushes them only after the wave commit landed the
+   * contribution (and discards them when the contribution was withdrawn
+   * — the action re-runs and re-enqueues; at-least-once, serving-loop.md
+   * §4). When absent, or returning `false`, the transaction flushes
+   * inline at seal exactly as commit does today (bare wave accumulators
+   * in tests, and any destination predating the outbox).
+   */
+  deferSealedEffects?(
+    tx: IExtendedStorageTransaction,
+    effects: readonly PostCommitSideEffect[],
+  ): boolean;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -1237,6 +1412,22 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * even when the run never re-reads them.
    */
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
+  /**
+   * The flow-label relevance probe (`cfc/prepare.ts`'s
+   * `flowLabelWorkExists`) evaluated ONCE per transaction activity epoch
+   * (server-execution v2 stage C tuning, T1). The commit chokepoint and
+   * `Runtime.prepareTxForCommit` both ask "did this tx observe or write a
+   * labeled doc?" on the same unprepared, not-yet-relevant transaction, and
+   * the probe is O(reads × dereference traces) — evaluated twice back to
+   * back it was 65 % of a saturated client worker in the stage-C
+   * attribution. A NEGATIVE verdict is memoized on the transaction and
+   * stays valid until the transaction journals any further read, write,
+   * dereference trace or trigger read (each bumps an activity epoch); a
+   * positive verdict marks the tx relevant, after which neither caller
+   * probes again. Optional so hand-built transactions keep working — a
+   * caller falls back to the free function.
+   */
+  probeFlowLabelWork?(): boolean;
   /**
    * Run `fn` with `meta` merged into every read issued within (explicit
    * per-read meta wins). Lets scheduling machinery tag its reads without
@@ -1719,7 +1910,7 @@ export interface IStorageTransactionAborted extends IStorageError {
 
 /**
  * Error indicates that transaction consistency guarantees have being
- * invalidated - some fact has changed while transaction was in progress.
+ * invalidated - some state has changed while transaction was in progress.
  */
 export interface IStorageTransactionInconsistent extends IStorageError {
   readonly name: "StorageTransactionInconsistent";
@@ -1837,7 +2028,7 @@ export interface IStorageTransactionComplete extends IStorageError {
 
 /**
  * Represents adddress within the memory space which is like pointer inside the
- * fact value in the memory.
+ * value held in the memory.
  */
 export type IMemoryAddress = {
   /**
@@ -1845,8 +2036,8 @@ export type IMemoryAddress = {
    */
   id: URI;
   /**
-   * Protocol fact type. Document addresses omit this; storage boundaries use
-   * application/json.
+   * Media type of the addressed value. Document addresses omit this; storage
+   * boundaries use application/json.
    */
   type?: MediaType;
   /**
@@ -1854,8 +2045,29 @@ export type IMemoryAddress = {
    */
   scope?: CellScope;
   /**
+   * The explicit scope INSTANCE this address names (server-execution v2
+   * stage A — OW17's instance-keyed replica and wire; key-vocabulary.md
+   * §5). ABSENT everywhere off the serving path: an address without one
+   * resolves its instance from the ambient identity (the runtime's own
+   * authenticated session in the OFF arm — key-vocabulary.md §2), exactly
+   * as before the field existed, so no key, frame, or serialized
+   * notification moves by a byte when it is absent. SET only where a
+   * serving runtime knows the instance is not the ambient one: a
+   * per-instance run's logged reads/writes (its transaction carries the
+   * demand-supplied identity), the replica's notification differentials
+   * for a keyed instance, and instance-named loads. Every consumer that
+   * builds a key from an address PREFERS this over resolving `scope`
+   * against its identity (`entityKey`, the replica's doc keys, the
+   * selector tracker, the differential's address identity). It is a
+   * resolved key — never a positional index or a "current user" (the §4
+   * tripwires) — and it must never enter a persisted value (links carry
+   * scope NAMES; instances resolve at the reader).
+   */
+  scopeKey?: ScopeKey;
+  /**
    * Intra-value path to the {@link FabricValue} being referenced by this
-   * address. It is a path within the `is` field of the fact in memory protocol.
+   * address. It is a path within the `is` field of the state in the memory
+   * protocol.
    */
   path: readonly MemoryAddressPathComponent[];
 };
@@ -1893,6 +2105,36 @@ export interface ISpace {
   did(): MemorySpace;
 }
 
+/** One event append handed to {@link ISpaceReplica.enqueueEventAppend}
+ * (structural twin of the queue module's QueuedEventAppend — stated here
+ * so the interface stays free of storage-internal imports). */
+export type EventAppendRequest = {
+  /** The stream's sidecar doc id (`streamEntriesDocId`). */
+  sidecarId: string;
+  /** The stream link the entry self-describes (events.md §1). */
+  stream: { id: string; path: readonly string[]; scope?: CellScope };
+  /** The durable client-minted event id (event-identity). */
+  eventId: string;
+  /** The event payload — a FabricValue (round-2 thread T23): the type
+   * is the admission boundary's own domain, so a payload the memory
+   * protocol cannot represent is refused at the CALL SITE'S type check
+   * instead of failing (or endlessly retrying) at delivery. */
+  payload?: FabricValue;
+  /** Client-minted append order within this session; allocated by the
+   * queue when absent. */
+  clientSeq?: number;
+  runtimeInjectedEventKeys?: string[];
+  /** The runtime's attestation that the sent event was renderer-trusted
+   * (server-execution v2 fan-out stage B; the sister of
+   * `runtimeInjectedEventKeys` — see `StreamEventEntry.rendererTrusted`).
+   * Set by `Cell.send` from the process-local mark, never by callers. */
+  rendererTrusted?: true;
+};
+
+export type EventAppendDeliveryOutcome =
+  | { delivered: true; deduped?: boolean }
+  | { delivered: false; refused: string };
+
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
@@ -1900,13 +2142,230 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: BaseMemoryAddress): State | undefined;
 
-  getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
+  /**
+   * The doc's visible document (confirmed + this replica's pending
+   * overlay). `identity` (server-execution v2 stage A — OW17's instance-
+   * keyed replica): the reading run's identity when it is not the
+   * replica's own; the replica holds one local doc PER INSTANCE, so a run
+   * stamped as one principal reads that principal's instance and never
+   * the service's or a sibling's. Absent = the replica's own identity,
+   * exactly the pre-stage-A read.
+   */
+  getDocument(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined;
 
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  /**
+   * Seal a native commit into this replica's optimistic overlay WITHOUT
+   * pushing it to the store (server-execution v2, serving-loop.md §3d). The
+   * local half of commitNative runs unchanged — the writes apply as pending
+   * state, so later action runs read them through the ordinary read path
+   * (the wave accumulator's layered view IS this overlay) — and the store
+   * half is deferred to `verdict`, which the wave commit step resolves:
+   * confirmed writes promote at the wave commit's seq, withdrawn writes
+   * (superseded, requeued, wave aborted) roll back through the same
+   * rejection path a refused push takes.
+   */
+  sealNative?(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+    options?: {
+      /** Server-execution v2 Phase 2 (speculation.md §1, §6): the sealed
+       * commit is a CLIENT SPECULATION overlay entry — process-memory
+       * only, never durable, retired by the overlay destination when the
+       * authoritative derivation covers it. It stays OUT of the
+       * `synced()` durability barrier (`#commitPromises`) and the
+       * ordered-push outcome map: a client settle must never wait on a
+       * speculation's retirement, and nothing ever pushes it. Everything
+       * else — optimistic apply, notifications, in-flight registration
+       * (reset sweeps and origin-drop cascades reach it) — is the
+       * ordinary sealed-commit machinery. */
+      readonly speculative?: boolean;
+      /** Server-execution v2 stage A (OW17's tx→replica identity seam):
+       * the sealing run's identity when it is not the replica's own. Its
+       * operations apply to — and its verdict promotes or rolls back —
+       * THAT identity's local instances of every scoped doc, and its
+       * read set is built against those instances' pending stacks.
+       * Absent = the replica's own identity, exactly as before. */
+      readonly identity?: ScopeKeyIdentity;
+    },
+  ): SealedNativeCommit;
+
+  /**
+   * Resolves when the accepted commit at `localSeq` has been APPLIED to
+   * this replica's settled view — immediately when the accept confirmed
+   * at verdict time, else when its parked accept promotes (catch-up
+   * marker coverage) or dies with the parked set (reset/close).
+   *
+   * Server-execution v2 stage G's effect-retirement read barrier
+   * (serving-loop.md §4): the outbox holds an effect's in-flight entry
+   * until every completion commit's writes are readable by the serving
+   * runtime, so a stale re-admit of the same key dedupes instead of
+   * re-claiming against unabsorbed state. Sequence after the sealed
+   * commit's `settled` promise — the park-or-confirm decision runs
+   * inside settlement.
+   */
+  whenApplied?(localSeq: number): Promise<void>;
+
+  /**
+   * Queue one EVENT APPEND for this space — the client's only
+   * computational commit under EXPERIMENTAL_SERVER_EXECUTION
+   * (server-execution v2 Phase 3; events.md §1, §5, §7): fired-order
+   * discharge with retry across transport loss and session replacement,
+   * a duplicate above the stream's dedupe horizon resolved as delivered,
+   * and LT9's durable-queue seam behind it. Resolves with the delivery
+   * outcome; the local echo never waits on it.
+   */
+  enqueueEventAppend?(
+    append: EventAppendRequest,
+  ): Promise<EventAppendDeliveryOutcome>;
+
+  /** Pending (undischarged) event intents — the offline event queue's
+   * live content (speculation.md §5), bounded by pending-intent count. */
+  pendingEventAppends?(): readonly EventAppendRequest[];
+
+  /**
+   * The lowest server seq among inbound FOREIGN novelty whose visibility
+   * is still shadowed by this replica's own pending (unpromoted) writes —
+   * or `undefined` when nothing is shadowed (server-execution v2
+   * Phase 2's settle input barrier; the plan's Phase 2 revisit (a)).
+   *
+   * The shadow case: an upsert/remove integrates into `confirmed` while
+   * an own sealed commit's pending entry still overlays the same doc
+   * (CT-1927 parks the promotion until a catch-up marker covers it). The
+   * materialized view — and therefore the change notification that
+   * registers scheduler dirtiness — does not (fully) reflect the foreign
+   * value until the pending entry leaves. The serving loop MUST NOT
+   * advance W past a seq this method still reports: `inputSynced` cannot
+   * await the application (it settles only after the wave commit the
+   * loop performs AFTER settling — a deadlock by construction), so the
+   * wave EXCLUDES unapplied frames' seqs from its advance instead, per
+   * the plan's sanctioned alternative. A shadowed REMOVE carries no seq
+   * on the wire and reports the sentinel floor 1 — W holds entirely
+   * until it clears (rare, self-clearing at promotion).
+   */
+  unappliedForeignSeqFloor?(): number | undefined;
+
+  /**
+   * The retirement inputs for one doc of a speculation overlay entry
+   * (server-execution v2 Phase 2, speculation.md §4): the doc's current
+   * CONFIRMED seq (the authoritative basis a covering watermark is
+   * compared against) and the localSeqs of every pending (unpromoted)
+   * write layered on it. The overlay destination retires an entry only
+   * when no pending layer BELOW it remains on any doc it read through —
+   * an unacked authored origin (the user mid-typing) or a parked
+   * promotion keeps the echo alive, exactly speculation.md §4 step 3's
+   * "acked AND W ≥ that commit's seq" condition, evaluated on replica
+   * state instead of tracked acks.
+   */
+  speculationRetirementView?(
+    id: URI,
+    scope?: CellScope,
+  ): { confirmedSeq: number; pendingLocalSeqs: number[] };
+
+  /**
+   * The store seq a local commit's accept committed at (speculation.md
+   * §4's "acked AND W ≥ that commit's seq" retirement floor), or
+   * undefined while unsettled / rejected / pruned from the bounded
+   * record. Undefined reads as "no ack floor" — a rejected or retired
+   * origin's echo falls back to its confirmed read basis.
+   */
+  ackedSeqOf?(localSeq: number): number | undefined;
+
+  /**
+   * The settle input barrier's WAKE (server-execution v2 Phase 2): when
+   * set, invoked synchronously whenever a promotion flips shadowed
+   * foreign novelty visible — the flag-ON condition of the shadow-flip
+   * notification, fired whether or not the flip produced a value diff
+   * (an echo-equal flip still lifts `unappliedForeignSeqFloor`). The
+   * SpaceServer installs it on its serving replica at activation so a
+   * clamped wave's floor lifting wakes the loop directly: the flip is
+   * the one input whose dirtiness arrives WITHOUT a new admitted commit
+   * on the host feed, so nothing else ends the loop's input wait before
+   * the idle timeout.
+   */
+  shadowFlipObserver?: (() => void) | undefined;
+
+  /**
+   * The overlay's retirement WAKE for origin accepts (server-execution
+   * v2 Phase 2, speculation.md §4; leg-C 2026-08-13): when set, invoked
+   * whenever a pushed commit's accept records its ack seq. The
+   * speculation overlay destination installs it beside its watermark
+   * sink: a sweep evaluated while an origin's verdict was still in
+   * flight skips its entries as blocked (unacked pending layer below),
+   * and if the covering watermark event has already passed, nothing
+   * else re-sweeps on a then-quiet space — a REJECTED origin cascades
+   * into the entry through the dependency machinery, but an ACCEPTED
+   * one had no client-side wake, so the entry stayed pending forever.
+   */
+  speculationAckObserver?: (() => void) | undefined;
+
+  /**
+   * The overlay's retirement WAKE for AUTHORITATIVE ARRIVALS
+   * (server-execution v2 stage C tuning T2 — speculation.md §4's owed
+   * "arrival re-sweep"): when set, invoked at the end of integrating a
+   * session sync frame whose upserts moved at least one doc's CONFIRMED
+   * seq forward, with exactly those docs. The speculation overlay
+   * destination installs it beside its watermark sink: the arrival gate
+   * retires an entry only once every doc it wrote holds a confirmed value
+   * at seq ≥ its floor, and until this wake existed the sweep ran only
+   * from the watermark sink, the origin-ack observer and chained
+   * settlements — so a derived value that arrived DECOUPLED from a
+   * watermark advance (an exhausted wave carries no watermark movement;
+   * a doc arriving in a later frame than the covering W) kept its echo
+   * standing until the next unrelated commit lifted W. Fired regardless of
+   * whether the value is VISIBLE through materialization (an arrival under
+   * the entry's own pending layer is invisible to the change
+   * notification, which is why the notification cannot carry this).
+   */
+  speculationArrivalObserver?:
+    | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+    | undefined;
+}
+
+/**
+ * The wave commit step's per-sealed-commit disposition (serving-loop.md
+ * §3d). `committed` carries the wave commit's accepted store seq — the
+ * sealed commit's pending writes promote to confirmed at that seq.
+ * `withdrawn` rolls the sealed commit's pending writes back: its ops were
+ * dropped (superseded pure derivation), requeued (raced non-re-derivable
+ * consequence), or the wave never committed (lease lost, abandon). The
+ * replica shapes the withdrawal into its own rejection type; the wave
+ * supplies only the reason.
+ *
+ * `superseded: true` (server-execution v2 Phase 2, speculation.md §4)
+ * marks a SUCCESS-shaped withdrawal: a client speculation overlay entry
+ * retiring because the authoritative derivation now covers it. The
+ * replica drops the pending writes and notifies the visible flip like
+ * any withdrawal, but it does NOT cascade-reject dependants (an
+ * authored commit that read the echo is fine — the store's CAS decides
+ * it) and the sealed commit settles `ok`, not error.
+ */
+export type SealedCommitVerdict =
+  | { committed: { seq: number } }
+  | { withdrawn: { message: string; superseded?: true } };
+
+/** A replica's handle for one sealed native commit. */
+export interface SealedNativeCommit {
+  /** The replica-local seq the sealed pending writes are keyed by. */
+  localSeq: number;
+  /** The built commit — operations plus the read set (confirmed reads carry
+   * the store versions the wave's per-doc CAS and basis rows are computed
+   * from; pending reads name earlier sealed commits by localSeq, the
+   * in-wave read edges). */
+  commit: ClientCommit;
+  /** Resolves when the verdict has been applied locally (promotion or
+   * rollback complete). */
+  settled: Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
 export type PushError =
@@ -1988,7 +2447,6 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`

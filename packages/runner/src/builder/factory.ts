@@ -219,9 +219,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     fetchProgram,
     streamData,
     compileAndRun,
-    // Placeholder for the per-load binding. Each compiled graph replaces this
-    // with a reader closed over that load's attached data files (see
-    // `Engine.compileToRecordGraph`), so reaching this body means the module is
+    // Placeholder for the per-module binding. A graph carrying data files hands
+    // each module its own copy of this namespace, whose reader is closed over
+    // that load's files and that module's path (see
+    // `compileSourcesToRecords`). Reaching this body means the module is
     // running outside a graph that carries any.
     dataFile: (path: string): string => {
       throw new Error(

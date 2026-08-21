@@ -45,7 +45,8 @@ What works today:
   - override per run with `--sandbox-image` or `CF_HARNESS_SANDBOX_IMAGE`
 - built-in tools:
   - `bash`
-  - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
+  - `browser` (structured host browser control for the browser subagent profile
+    only)
   - `read_file`
   - `view_image`
   - `web_fetch` (explicit parent allowlist or `web_fetch` subagent profile only)
@@ -1102,10 +1103,11 @@ deno task run -- \
   --prompt "Delegate a focused inspection and summarize the result."
 ```
 
-The provisional browser profile is the only CLI-supported path to
-`bash-no-sandbox`. It gives the child a host shell so it can invoke
-`agent-browser`, while the parent still receives only the normal sanitized
-subagent result. Browser/page output is treated as untrusted child-local data;
+The browser profile is the only path to the `browser` tool. The tool drives the
+host `agent-browser` CLI one structured action per call, while the parent still
+receives only the normal sanitized subagent result. Together with the profile's
+allowlisted host skill scripts below, it is the whole of the harness's host
+execution surface. Browser/page output is treated as untrusted child-local data;
 with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The browser child can read
 workspace files but does not receive `edit_file` or `write_file`, so it should
@@ -1122,17 +1124,16 @@ still use the normal skill-script safeguards: activated skill, run-start
 registry snapshot, exact script allowlist, digest/size match, and provenance
 artifacts.
 
-The host shell is policy-restricted to `agent-browser` attached through the
-exact Loom Browser Access CDP endpoint supplied to the child task,
-`agent-browser` discovery (`which agent-browser`, `command -v agent-browser`),
-`pwd`, `ls`, and bounded workspace-local `find` commands. Page commands should
-use the leased endpoint, for example
-`agent-browser --cdp http://host.docker.internal:9362 snapshot -i`. Bare
-`agent-browser open` / `snapshot` launches are denied so the child cannot race
-the host's live browser profile. `agent-browser` is fail-closed to a small
-positive allowlist: `open` for HTTP(S) URLs, `snapshot`, `get title/url/text`,
-read-only `console` / `errors` inspection without mutation flags, bounded
-`wait`, and ref-based `fill`, `type`, `select`, `check`, `click`, and `press`.
+The `browser` tool's input is typed rather than shell-shaped, so anything
+outside its action vocabulary is unrepresentable rather than denied: `open` for
+HTTP(S) URLs, `snapshot`, `get title/url/text`, read-only `console` / `errors`
+inspection, bounded `wait`, and ref-based `fill`, `type`, `select`, `check`,
+`click`, and `press`. The harness attaches every action to the run's Browser
+Access lease itself and refuses actions when the lease is absent, expired, or
+malformed — the CDP endpoint never crosses the model boundary in either
+direction, so the child can neither point the browser elsewhere nor learn the
+host's topology, and a bare browser launch that would race the host's live
+browser profile has no verb to arrive through.
 
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not
@@ -1146,8 +1147,8 @@ For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
 become ordinary workspace inputs for the parent model. If an artifact root is
 physically placed under the workspace, `read_file`, `view_image`, `write_file`,
-and `edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
-reserved from model-facing file and discovery tools.
+and `edit_file` treat that artifact tree as reserved from model-facing file
+tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo

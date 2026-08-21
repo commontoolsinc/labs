@@ -278,9 +278,9 @@ an address emitted by one command is accepted by the next without reshaping.
 (`packages/runner/src/create-ref.ts`) is the entity-specific intake seam: it
 accepts the `of:` scheme and **refuses `computed:` rather than stripping it**,
 because stripping would rename an id to its `of:` sibling, a different
-entity. Not one layer lower: `FabricHash.fromString` has non-entity users
-(`packages/memory/fact.ts` parses a cause with it), and `of:` is a URI
-scheme, not a hash tag — the schemed form is not a parseable tagged hash.
+entity. Not one layer lower: `FabricHash.fromString` parses any tagged hash,
+whatever it names, and `of:` is a URI scheme, not a hash tag — the schemed
+form is not a parseable tagged hash.
 
 **One seam reaches most callers.** The address-string paths that matter go
 through `entityIdFrom`: the CLI, the shell (`runtime-processor`), the

@@ -65,6 +65,13 @@ Two traps in the output itself:
 `--storage-stats` adds the storage rows; `--stats-action-limit` controls how
 many per-step scheduler action deltas print.
 
+The counts this rung prints are exact. Its milliseconds are not the product's:
+[`test-runner.ts`](../../../packages/cli/lib/test-runner.ts) calls
+`runtime.enableIdempotencyCheck()` unconditionally, so every computation runs a
+second time and subscription registers differently. On a fifty-create topics run
+that was 16% of the wall clock and 58% of the action time, and it changed no
+count. Gate the call off before quoting a duration from here.
+
 ## 2. Bracket the phase — in the process you are going to profile
 
 A CPU profile is samples over a window. It has no idea what a phase is, so
@@ -86,7 +93,16 @@ matches the capture:
   parent's total is its own span rather than the sum of its children's. Run the
   process under `--inspect` and the marks and timestamps land on the DevTools
   timeline beside the samples, so zooming to the phase is a drag rather than
-  arithmetic. - **Profiling the browser worker.** The interval has to come from
+  arithmetic.   Deno has no `--cpu-prof`: V8 rejects the flag, which is Node's rather than
+  V8's. To get a `.cpuprofile` out of the `cf test` process, drive V8's profiler
+  from inside it with `node:inspector`, which Deno implements — connect a
+  `Session`, `Profiler.enable`, `Profiler.start` around the phase, and
+  `Profiler.stop` to a file. It needs `--allow-sys`, which the `cf` launcher
+  does not pass, so run `packages/cli/mod.ts` directly with the launcher's own
+  flag set plus that one. Rank it with the same self-time arithmetic
+  `renderProfileReport` uses in
+  [`cdp-profiler.ts`](../../../packages/integration/cdp-profiler.ts).
+- **Profiling the browser worker.** The interval has to come from
   the capture itself: start the profiler when the phase starts and stop it when
   the phase ends, so the profile *is* the phase. That is what the phase-scoped
   capture in step 3 is for. Marks emitted inside the worker also work; marks

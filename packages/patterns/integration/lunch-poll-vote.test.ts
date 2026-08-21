@@ -20,6 +20,7 @@
  */
 
 import { env, type Page, waitFor } from "@commonfabric/integration";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -30,12 +31,16 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
+  armSenderEcho,
   clickCfButton,
   clickCfButtonsConcurrently,
   collectBrowserLoadSummary,
   fillCfInput,
+  installSenderEchoProbe,
   logBrowserLoadSummary,
+  logSenderEchoSummary,
   logStepTimings,
+  readSenderEchoReport,
   StepTimer,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
@@ -44,6 +49,17 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
+// The opt-in sender-echo instrument (W4): time each authored click to the
+// SENDER's own speculative render, beside the cross-browser waits. Off by
+// default: the ordinary gate run is unchanged.
+const SENDER_ECHO = Deno.env.get("CF_SENDER_ECHO") === "1";
+const SENDER_ECHO_ARM = (() => {
+  const raw = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+  const on = raw === undefined
+    ? SERVER_EXECUTION_DEFAULT_ENABLED
+    : raw === "true";
+  return on ? "ON" : "OFF";
+})();
 
 const HOST = "Alice";
 const GUEST = "Bob";
@@ -76,6 +92,35 @@ const voteSwatchVoters = (page: Page): Promise<string[]> =>
     return [...names];
   });
 
+// The participant chips currently rendered in the board's participants strip
+// (`data-participant-guest` — typed-name joins are guests; profile-backed
+// participants render `data-participant-badge`), descending through shadow
+// roots, DUPLICATES KEPT: under server execution the joiner's own browser
+// renders its speculative join echo and the confirmed join through one read
+// path, so a stranded echo shows as the SAME name twice (W0 l3: "3 joined,
+// Alice, Alice, Bob"). The confirmed roster is exactly one chip per name.
+const participantChipNames = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    const names: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (
+        const el of root.querySelectorAll(
+          "[data-participant-guest], [data-participant-badge]",
+        )
+      ) {
+        const name = el.getAttribute("data-participant-guest") ??
+          el.getAttribute("data-participant-badge");
+        if (name) names.push(name);
+      }
+      for (const el of root.querySelectorAll("*")) {
+        const sr = (el as HTMLElement).shadowRoot;
+        if (sr) walk(sr);
+      }
+    };
+    walk(document);
+    return names;
+  });
+
 describe("lunch poll: two users vote on a shared option", () => {
   const hostShell = new ShellIntegration({
     presentation: { id: "alice", label: "Alice", color: "#7c3aed" },
@@ -98,7 +143,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       Identity.generate({ implementation: "noble" }),
     ]);
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: hostIdentity,
     });
@@ -183,6 +228,12 @@ describe("lunch poll: two users vote on a shared option", () => {
             waitForRuntimeIdle(guestPage),
           ]),
       );
+      if (SENDER_ECHO) {
+        await Promise.all([
+          installSenderEchoProbe(hostPage),
+          installSenderEchoProbe(guestPage),
+        ]);
+      }
 
       // Host joins first -> becomes host/admin. Fresh identities carry no
       // shared profile, so the join card opens on the profile create/pick
@@ -194,30 +245,68 @@ describe("lunch poll: two users vote on a shared option", () => {
         "host name filled",
         () => fillCfInput(hostPage, "#lp-join-name", HOST),
       );
+      // Sender echo: the host's own speculative roster render — the joined
+      // count ticking to "1 joined" on the CLICKING browser (the count, not
+      // the name: the presentation overlay already renders "Alice").
+      if (SENDER_ECHO) {
+        await armSenderEcho(hostPage, "host-join", "body", "1 joined");
+      }
       await clickCfButton(hostPage, "#lp-join-button");
       await timer.run(
         "host joined (name in roster)",
         () => waitForSettledText(hostPage, "body", HOST),
       );
 
-      // Guest joins second via the same guest path. The board shows a
-      // participant count, not a full roster, so the host's join landing is
-      // observed as "2 joined" (and the guest's own page shows its name plus
-      // "hosted by Alice").
+      // Guest joins second via the same guest path. Both joins LANDED is the
+      // CONFIRMED roster on BOTH browsers: the participants strip shows
+      // exactly one chip per name — {Alice, Bob} — and the count reads "2
+      // joined". Not a count alone: under server execution the joiner's own
+      // speculative echo satisfied "2 joined" on the host (spec-Alice +
+      // confirmed Alice) in 7–16 ms, BEFORE the guest's join had landed
+      // anywhere (W0 l3's "3 joined, Alice, Alice, Bob" when it did) — the
+      // step passed spuriously on the echo and failed when the probe missed
+      // the transient. The exact-chip form is RED on a standing echo (a
+      // duplicated name, or three chips) and green only on the real
+      // landing, so its wall time is at least a server round trip.
       await clickCfButton(guestPage, "#lp-guest-button");
       await fillCfInput(guestPage, "#lp-join-name", GUEST);
+      // Sender echo: the guest's own speculative join — "2 joined" on the
+      // CLICKING browser (W0 measured this echo at 7–16 ms; the confirmed
+      // exact-chip roster below is the landing, this is the speculation).
+      if (SENDER_ECHO) {
+        await armSenderEcho(guestPage, "guest-join", "body", "2 joined");
+      }
       await clickCfButton(guestPage, "#lp-join-button");
+      const confirmedRoster = async (page: Page): Promise<boolean> => {
+        const chips = await participantChipNames(page);
+        return chips.length === 2 && chips.includes(HOST) &&
+          chips.includes(GUEST);
+      };
       await timer.run(
-        "both join lands (count reaches 2)",
+        "both join lands (confirmed roster: exactly {Alice, Bob} on both)",
         () =>
           Promise.all([
+            waitFor(() => confirmedRoster(hostPage), {
+              timeout: PROPAGATION_TIMEOUT,
+              delay: 250,
+            }),
+            waitFor(() => confirmedRoster(guestPage), {
+              timeout: PROPAGATION_TIMEOUT,
+              delay: 250,
+            }),
             waitForSettledText(hostPage, "body", "2 joined"),
-            waitForSettledText(guestPage, "body", GUEST),
+            waitForSettledText(guestPage, "body", "2 joined"),
           ]),
       );
 
       // Host adds the shared option.
       await fillCfInput(hostPage, "#lp-add-option-input", OPTION_A);
+      // Sender echo: the host's own speculative render of the added option
+      // (the typed draft lives in an input VALUE, so the pre-check cannot
+      // trip on it; the option card's TEXT is the render).
+      if (SENDER_ECHO) {
+        await armSenderEcho(hostPage, "host-add-option-A", "body", OPTION_A);
+      }
       await clickCfButton(hostPage, "#lp-add-option-button");
       await timer.run(
         "option A propagates to both",
@@ -283,6 +372,14 @@ describe("lunch poll: two users vote on a shared option", () => {
         waitForSettledText(hostPage, "body", OPTION_B),
         waitForSettledText(guestPage, "body", OPTION_B),
       ]);
+      // Sender echo: the guest's own speculative tally after its red vote —
+      // the board's count ticking to "3 votes" on the CLICKING browser. (The
+      // concurrent green pair above carries NO echo sample: two senders share
+      // one expectation text, so a render there is not attributable to the
+      // observing page's own click.)
+      if (SENDER_ECHO) {
+        await armSenderEcho(guestPage, "guest-veto-B", "body", "3 votes");
+      }
       await clickCfButton(guestPage, voteButton(OPTION_B, "red"));
       // The third vote (red on option B) lands on both browsers — the count
       // reaches "3 votes" — while option A's tally is unchanged at "2 love it".
@@ -299,6 +396,19 @@ describe("lunch poll: two users vote on a shared option", () => {
       );
     } finally {
       logStepTimings("lunch-poll vote", timer);
+      if (SENDER_ECHO) {
+        for (
+          const [page, label] of [
+            [hostPage, "lunch host"],
+            [guestPage, "lunch guest"],
+          ] as const
+        ) {
+          const report = await readSenderEchoReport(page).catch(() =>
+            undefined
+          );
+          if (report) logSenderEchoSummary(label, SENDER_ECHO_ARM, report);
+        }
+      }
       for (
         const [page, label] of [[hostPage, HOST], [guestPage, GUEST]] as const
       ) {

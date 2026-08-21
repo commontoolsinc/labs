@@ -2986,11 +2986,16 @@ export type CompileAndRunFunction = <T = any, S = any>(
 /**
  * Read an attached data file's text.
  *
- * `path` is the file's root-relative path within the deployed source package —
- * the same spelling `cf piece getsrc` writes it at, and the same one passed to
- * `--datafile`. A data file belongs to the package rather than to any one
- * module, so the path is absolute within the package and does not resolve
- * relative to the caller.
+ * `path` resolves against the module that reads it: `words.txt` and
+ * `./words.txt` both name the file beside this module, and
+ * `../shared/words.txt` the one above it. The same source therefore names the
+ * same file whichever directory the program was assembled from, and a
+ * sub-pattern names its own data without knowing where the package was rooted.
+ *
+ * A path beginning with `/` is grounded at the package root instead, so
+ * `/data/cities.json` is that path within the deployed source package — the
+ * spelling `cf piece getsrc` writes it at, and the one `--datafile` attaches
+ * it under.
  *
  * The bytes travel with the pattern's code in the same content-addressed
  * closure, so this reads memory rather than storage: it is synchronous, it

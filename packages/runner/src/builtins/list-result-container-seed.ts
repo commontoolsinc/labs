@@ -35,6 +35,29 @@ import type { Runtime } from "../runtime.ts";
  * leaves the container as absent as a resolved one does. A rejected pull and a
  * failed seed are each reported through `logger`. The returned promise resolves
  * once the pull and the seed have both settled, and rejects for neither.
+ *
+ * `seedActionId` names the seed's write for the server-run stamp. The seed is
+ * an out-of-band recovery write (serving-loop.md §3d, RULED 2026-08-05):
+ * minted outside any scheduler run, so nothing else stamps it, and a SERVING
+ * runtime's wave refuses an unstamped seal — the seed would never land and
+ * the demanded derivation stay wedged while `editWithRetry` burns on the
+ * refusal (the lunch-gate throw storm). It is legitimate server work but
+ * neither a derivation nor a handler run, so it is declared with the
+ * sanctioned internal bookkeeping kind, like the pattern-swap setup write.
+ * Stamped inside the transaction body so every retry's fresh transaction
+ * carries it. A no-op on the OFF arm; under client speculation bookkeeping
+ * commits exactly as unstamped txs do (the overlay routes only
+ * derivation-kind runs).
+ *
+ * The chain is registered with the storage manager's settle barrier, so
+ * `Cell.pull()` and `storageManager.synced()` hold until the seed's write has
+ * settled. The pull reaches that barrier through the replica's own sync
+ * bookkeeping, and this registration carries the wait across the span between
+ * the pull settling and the seed's commit being issued.
+ * `Runtime.dispose({ closeStorage: false })` drains the runtime through
+ * `settled(Infinity)` before it tears anything down, so the store a reader is
+ * handed afterwards carries whatever the seed wrote. A caller does not register
+ * the returned promise; this function registers the chain.
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
@@ -42,11 +65,16 @@ export function seedResultContainerWhenPullSettles(
   stillHeld: () => boolean,
   pull: Promise<unknown>,
   logger: Logger,
+  seedActionId: string,
 ): Promise<void> {
   const seedIfStillAbsent = (): Promise<void> => {
     if (!stillHeld()) return Promise.resolve();
     return runtime.editWithRetry((seedTx) => {
       if (!stillHeld()) return;
+      runtime.stampServerRun(seedTx, {
+        actionId: seedActionId,
+        kind: "bookkeeping",
+      });
       const scoped = container.withTx(seedTx);
       if (scoped.getRaw() === undefined) scoped.set([]);
     }).then(({ error }) => {
@@ -59,7 +87,12 @@ export function seedResultContainerWhenPullSettles(
       }
     });
   };
-  return pull.finally(seedIfStillAbsent).then(() => {}, (error: unknown) => {
-    logger.warn("resume-pull", "resume container pull rejected", { error });
-  });
+  const settled = pull.finally(seedIfStillAbsent).then(
+    () => {},
+    (error: unknown) => {
+      logger.warn("resume-pull", "resume container pull rejected", { error });
+    },
+  );
+  runtime.storageManager.trackUntilSettled(settled);
+  return settled;
 }

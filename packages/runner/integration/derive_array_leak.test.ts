@@ -11,6 +11,7 @@
  */
 
 import { Identity, Session } from "@commonfabric/identity";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
 import { PiecesController } from "@commonfabric/piece/ops";
 
@@ -102,6 +103,11 @@ async function runTest() {
   // Create runtime
   const runtime = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // declared from the environment so the CI ON lane's test process
+    // really runs the ON client arm (a bare construction resolved OFF and
+    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
     storageManager,
   });
 

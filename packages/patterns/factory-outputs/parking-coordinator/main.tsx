@@ -13,10 +13,9 @@ import {
   type VNode,
   wish,
   Writable,
+  type WriteAuthorizedBy,
 } from "commonfabric";
 import {
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
@@ -68,7 +67,6 @@ export interface SpotRequest {
 }
 
 export const PARKING_ADMIN_INTEGRITY = "parking-admin" as const;
-export const PARKING_ADMIN_MANAGER_INTEGRITY = "parking-admin-manager" as const;
 
 export interface ParkingAdminSubject {
   personName: string;
@@ -84,13 +82,30 @@ export type ParkingAdminRole = AddIntegrity<
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
-export type ParkingAdminManagerCredential = AdminManagerCredential<
-  typeof PARKING_ADMIN_MANAGER_INTEGRITY
->;
-
+/**
+ * The roster of parking-admin roles. It is the durable source of the authority
+ * every other protected write in this pattern is checked against, so it carries
+ * four separate contracts:
+ *
+ * - `AddIntegrity` on the entries, so each stored role is endorsed on its own
+ *   and keeps that endorsement when the roster is rewritten around it;
+ * - `AddIntegrity` on the list, so the value at this path satisfies the floor
+ *   below (an endorsement on the entries does not reach the list path);
+ * - `RequiresIntegrity` as the floor, so nothing without a `parking-admin`
+ *   endorsement can land here, and every labeled value read on the way to
+ *   writing here must carry the same endorsement;
+ * - `WriteAuthorizedBy`, so only `commitParkingAdminChange` may write it, no
+ *   matter which pattern holds a link to the registry cell.
+ */
 export type ParkingAdminList = RequiresIntegrity<
-  ParkingAdminRole[],
-  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+  WriteAuthorizedBy<
+    AddIntegrity<
+      ParkingAdminRole[],
+      readonly [typeof PARKING_ADMIN_INTEGRITY]
+    >,
+    typeof commitParkingAdminChange
+  >,
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
 export interface ParkingAdminRegistryStoredValue {
@@ -101,12 +116,35 @@ export type ParkingAdminRegistryValue =
   | ParkingAdminRegistryStoredValue
   | Default<EmptyAdminRegistryValue>;
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
-export type ParkingAdminManagerCredentialCell = Writable<
-  ParkingAdminManagerCredential | null
+
+/**
+ * Per-user switch that reveals the admin-management controls. Any viewer can
+ * turn it on for themselves, so it carries no integrity: a self-granted value
+ * that claimed one would endorse every protected write that consulted it.
+ * Authority to change the roster comes from the roster itself, through
+ * `actorMayChangeParkingAdmins`.
+ */
+export type ParkingAdminManagerModeCell = Writable<boolean>;
+
+export type ParkingSpotEntry = AddIntegrity<
+  ParkingSpot,
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
+/**
+ * The spot list carries the same endorsement on its entries and on the list, so
+ * a spot that moves position keeps the label its own stored document holds, and
+ * the list satisfies its own floor. The floor names the same atom as the admin
+ * roster: writing a spot consults the roster to check the acting person's role,
+ * and a floored write may only consume reads that all carry one witness for the
+ * floor, so the roster's endorsement and the spot list's floor have to be the
+ * same atom.
+ */
 export type ParkingSpotList = RequiresIntegrity<
-  ParkingSpot[],
+  AddIntegrity<
+    ParkingSpotEntry[],
+    readonly [typeof PARKING_ADMIN_INTEGRITY]
+  >,
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
@@ -151,7 +189,7 @@ export interface ParkingCoordinatorOutput {
   currentPersonIsAdmin: boolean;
   currentUserCanManageAdmins: boolean;
   enableAdminManager: Stream<void>;
-  togglePersonAdmin: Stream<{ name: string }>;
+  togglePersonAdmin: Stream<ParkingAdminChangeEvent>;
   toggleAdminMode: Stream<void>;
   submitRequest: Stream<{ personName: string; date: string }>;
   cancelRequest: Stream<{ requestId: string }>;
@@ -305,36 +343,143 @@ const currentParkingAdminRole = (
     currentActorName(selectedPersonName, people),
   );
 
-const currentUserCanManageParkingAdmins = (
-  credential: ParkingAdminManagerCredentialCell,
-): boolean => adminManagerCredentialIsActive(credential.get());
+const peopleIncludeName = (people: PeopleCell, personName: string): boolean =>
+  (people.get() ?? []).some((person) => person.name === personName);
 
-const prepareParkingAdminToggle = (
-  credential: ParkingAdminManagerCredential | null | undefined,
+// The roster confers parking-admin authority, so only someone who already holds
+// it may change it. An empty roster is the bootstrap case: the first grant is
+// open, and from then on the roster gates itself.
+const actorMayChangeParkingAdmins = (
   registry: ParkingAdminRegistryCell,
-  rawName: string,
-): ParkingAdminRole[] | null => {
-  const personName = rawName.trim();
-  if (!adminManagerCredentialIsActive(credential) || personName === "") {
-    return null;
-  }
+  actorName: string,
+): boolean =>
+  parkingAdminRolesValue(registry).length === 0 ||
+  personIsParkingAdmin(registry, actorName);
 
-  const adminRoles = parkingAdminRolesValue(registry);
-  const nextRoles = adminRoles.filter((role) =>
+const currentUserCanManageParkingAdmins = (
+  managerMode: ParkingAdminManagerModeCell,
+  registry: ParkingAdminRegistryCell,
+  selectedPersonName: Writable<string>,
+  people: PeopleCell,
+): boolean =>
+  managerMode.get() === true &&
+  actorMayChangeParkingAdmins(
+    registry,
+    currentActorName(selectedPersonName, people),
+  );
+
+/** Grant the named person a role, or drop the role they already hold. */
+const toggleParkingAdminRole = (
+  roles: ParkingAdminRole[],
+  personName: string,
+): ParkingAdminRole[] => {
+  const withoutPerson = roles.filter((role) =>
     role.subject.personName !== personName
   );
-  if (nextRoles.length !== adminRoles.length) {
-    return nextRoles;
-  }
-
-  return [
-    ...nextRoles,
+  return withoutPerson.length !== roles.length ? withoutPerson : [
+    ...withoutPerson,
     {
       subject: parkingAdminSubject(personName),
       displayName: personName,
     } as ParkingAdminRole,
   ];
 };
+
+/** Move an existing role onto a renamed person, keeping the same authority. */
+const renameParkingAdminRole = (
+  roles: ParkingAdminRole[],
+  personName: string,
+  newName: string,
+): ParkingAdminRole[] =>
+  roles.map((role) =>
+    role.subject.personName === personName
+      ? {
+        subject: parkingAdminSubject(newName),
+        displayName: newName,
+      } as ParkingAdminRole
+      : role
+  );
+
+type ParkingAdminChangeKind = "toggle" | "rename" | "remove";
+
+export interface ParkingAdminChangeEvent {
+  /** Person whose role changes; for a rename, the name they had before. */
+  name: string;
+  /** The name they now go by. Only read for a rename. */
+  newName?: string;
+}
+
+interface ParkingAdminChangeState {
+  kind: ParkingAdminChangeKind;
+  adminRegistry: ParkingAdminRegistryCell;
+  managerMode: ParkingAdminManagerModeCell;
+  people: PeopleCell;
+  selectedPersonName: Writable<string>;
+}
+
+/**
+ * The one place the admin roster is written. `ParkingAdminList` names this
+ * handler in its `writeAuthorizedBy` contract, so a write from anywhere else —
+ * another action in this pattern, or another pattern sharing the registry cell
+ * — is rejected by the runtime rather than by a convention.
+ *
+ * It stays private to this module. Its checks read the cells it is bound to,
+ * so a module that could import it could bind it to a registry it wants to
+ * change and to state of its own that says the change is allowed. Private, the
+ * only binding is the one below, against this pattern's own cells. A handler
+ * that carries a `uiContract` can afford to be exported, because the event
+ * itself has to come from the reviewed surface; this one is driven by
+ * `editPerson` and `removePerson` as well as by the button, so it has no event
+ * requirement to lean on.
+ *
+ * `rename` and `remove` follow a change the people list already made, so they
+ * arrive as events from `editPerson` and `removePerson` instead of writing the
+ * roster there.
+ *
+ * What none of this reaches is who the acting person is: that is a name read
+ * out of `people`, per the demo identity model above, so a caller that supplies
+ * `people` supplies the answer. A pattern wanting real authority here needs a
+ * stable user identity first.
+ */
+const commitParkingAdminChange = handler<
+  ParkingAdminChangeEvent,
+  ParkingAdminChangeState
+>((event, { kind, adminRegistry, managerMode, people, selectedPersonName }) => {
+  const personName = (event?.name ?? "").trim();
+  const newName = (event?.newName ?? "").trim();
+  if (managerMode.get() !== true || personName === "") return;
+
+  if (kind === "toggle") {
+    // A role is a grant to a person on the roster of people. Granting one to a
+    // name nobody answers to would fill the roster with a role no actor can
+    // hold, and the bootstrap that opens the first grant would never reopen.
+    if (!peopleIncludeName(people, personName)) return;
+    if (
+      !actorMayChangeParkingAdmins(
+        adminRegistry,
+        currentActorName(selectedPersonName, people),
+      )
+    ) return;
+  } else {
+    // `rename` and `remove` arrive after the people list already changed, so
+    // the acting person cannot be identified against it any more. Neither
+    // grants authority — each keeps a role from pointing at someone who is no
+    // longer there — and `editPerson` and `removePerson` refuse the change
+    // outright when the acting user may not move a role, which is the check
+    // that decides who may do this.
+    if (!personIsParkingAdmin(adminRegistry, personName)) return;
+    if (kind === "rename" && (newName === "" || newName === personName)) return;
+  }
+
+  const roles = parkingAdminRolesValue(adminRegistry);
+  const nextRoles = kind === "toggle"
+    ? toggleParkingAdminRole(roles, personName)
+    : kind === "rename"
+    ? renameParkingAdminRole(roles, personName, newName)
+    : roles.filter((role) => role.subject.personName !== personName);
+
+  adminRegistry.key("admins").set(nextRoles as ParkingAdminList);
+});
 
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
@@ -411,9 +556,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Each optional cell input materializes seeded from its type's `Default<>`
     // when the caller wires nothing; a parent that owns the cells (e.g.
     // lot-with-coordinator-demo) shares them by passing them in.
-    const adminManagerCredential = new Writable.perUser<
-      ParkingAdminManagerCredential | null
-    >(null);
+    const adminManagerMode = new Writable.perUser(false);
 
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() => {
@@ -508,21 +651,28 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // --------------------------------------------------------
 
     const enableAdminManager = action(() => {
-      adminManagerCredential.set({
-        canManageAdmins: true,
-      } as ParkingAdminManagerCredential);
+      adminManagerMode.set(true);
     });
 
-    const togglePersonAdmin = action<{ name: string }>(({ name }) => {
-      const nextAdmins = prepareParkingAdminToggle(
-        adminManagerCredential.get(),
-        adminRegistry,
-        name,
-      );
-      if (nextAdmins === null) {
-        return;
-      }
-      adminRegistry.set({ admins: nextAdmins as ParkingAdminList });
+    // Every roster write goes through the one reviewed handler the roster's
+    // `writeAuthorizedBy` contract names.
+    const adminChangeState = {
+      adminRegistry,
+      managerMode: adminManagerMode,
+      people,
+      selectedPersonName,
+    };
+    const togglePersonAdmin = commitParkingAdminChange({
+      kind: "toggle",
+      ...adminChangeState,
+    });
+    const renamePersonAdmin = commitParkingAdminChange({
+      kind: "rename",
+      ...adminChangeState,
+    });
+    const removePersonAdmin = commitParkingAdminChange({
+      kind: "remove",
+      ...adminChangeState,
     });
 
     const toggleAdminMode = action(() => {
@@ -715,6 +865,21 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         trimName !== originalName && current.some((p) => p.name === trimName)
       ) return;
 
+      // A role names its holder, so renaming an admin moves their authority to
+      // the new name. Refuse the whole edit when the acting user may not move
+      // it: renaming anyway would leave the role pointing at a person who no
+      // longer exists, and nobody could reach the roster to repair it.
+      if (
+        trimName !== originalName &&
+        personIsParkingAdmin(adminRegistry, originalName) &&
+        !currentUserCanManageParkingAdmins(
+          adminManagerMode,
+          adminRegistry,
+          selectedPersonName,
+          people,
+        )
+      ) return;
+
       people.set(current.map((p) => {
         if (p.name !== originalName) return p;
 
@@ -745,32 +910,31 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             r.personName === originalName ? { ...r, personName: trimName } : r
           ),
         );
-        if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
-          adminRegistry.set({
-            admins: parkingAdminRolesValue(adminRegistry).map((role) =>
-              role.subject.personName === originalName
-                ? {
-                  subject: parkingAdminSubject(trimName),
-                  displayName: trimName,
-                } as ParkingAdminRole
-                : role
-            ) as ParkingAdminList,
-          });
-        }
+        renamePersonAdmin.send({ name: originalName, newName: trimName });
       }
 
       editingPersonName.set(null);
     });
 
     const removePerson = action<{ name: string }>(({ name }) => {
-      people.set(people.get().filter((p) => p.name !== name));
-      if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
-        adminRegistry.set({
-          admins: parkingAdminRolesValue(adminRegistry).filter((role) =>
-            role.subject.personName !== name
-          ) as ParkingAdminList,
-        });
+      // Removing an admin drops their role with them. Refuse the whole removal
+      // when the acting user may not drop it, rather than leave a role for a
+      // person who is gone — which a later person of the same name would
+      // inherit, and which no actor could hold in the meantime.
+      if (
+        personIsParkingAdmin(adminRegistry, name) &&
+        !currentUserCanManageParkingAdmins(
+          adminManagerMode,
+          adminRegistry,
+          selectedPersonName,
+          people,
+        )
+      ) {
+        removePersonConfirmTarget.set(null);
+        return;
       }
+      people.set(people.get().filter((p) => p.name !== name));
+      removePersonAdmin.send({ name });
       if (selectedPersonName.get() === name) {
         const remaining = people.get();
         selectedPersonName.set(remaining[0]?.name ?? "");
@@ -1231,12 +1395,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       adminMode.get() ? currentPersonIsAdmin : false
     );
 
+    const adminManagerModeEnabled = computed(() =>
+      adminManagerMode.get() === true
+    );
     const currentUserCanManageAdmins = computed(() =>
-      currentUserCanManageParkingAdmins(adminManagerCredential)
+      currentUserCanManageParkingAdmins(
+        adminManagerMode,
+        adminRegistry,
+        selectedPersonName,
+        people,
+      )
     );
     const canBootstrapPeople = computed(() =>
-      (people.get() ?? []).length === 0 &&
-      currentUserCanManageParkingAdmins(adminManagerCredential)
+      (people.get() ?? []).length === 0 && currentUserCanManageAdmins === true
     );
     const showAdminPeopleSection = computed(() =>
       adminModeEnabled === true || canBootstrapPeople === true
@@ -1660,8 +1831,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <cf-vstack gap="1">
                       <cf-heading level={6}>Admin Access</cf-heading>
                       <span style="font-size: 0.75rem; color: var(--cf-colors-gray-500);">
-                        Demo manager access lets any user change who can manage
-                        parking spots.
+                        While nobody is an admin, anyone can take the first
+                        seat. After that, only a parking admin can change who
+                        else has one.
                       </span>
                     </cf-vstack>
                     <cf-chip
@@ -1672,7 +1844,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <cf-button
                       id="parking-enable-admin-manager"
                       size="sm"
-                      disabled={currentUserCanManageAdmins}
+                      disabled={adminManagerModeEnabled}
                       onClick={() => enableAdminManager.send()}
                     >
                       Enable manager demo

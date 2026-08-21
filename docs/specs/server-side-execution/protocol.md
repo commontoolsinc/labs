@@ -3,15 +3,15 @@
 Normative. Assumes [README.md](README.md); details Phases 1–4 surface
 between client, memory server, and SpaceServer.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (verified on main, 2026-08-02; §2b file:line refs refreshed 2026-08-04 — re-verify before coding)
 
 - Memory server: `packages/memory/v2.ts`, toolshed mount
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
 - Client storage stack: `packages/runner/src/storage/` (`interface.ts`,
   `extended-storage-transaction.ts`, `query.ts`, `reactivity-log.ts`).
-- Store tables: `commit`, `revision`, `head`, `branch` (engine-v3).
-  `execution_lease` does not exist on main — it is created in Phase 1
-  (serving-loop.md §2; v1-branch shape as prior art).
+- Store tables: `commit`, `revision`, `head`, `branch` (engine-v3), and
+  `execution_lease` since Phase 1 stage B (serving-loop.md §2 — the
+  reduced three-field shape; the v1-branch shape was prior art only).
 
 ## 1. Commit classes
 
@@ -19,13 +19,76 @@ Every commit carries a `class` in its metadata. Three values, closed set:
 
 | class | producer | contents |
 | --- | --- | --- |
-| `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits — and, until Phase 3 lands, client handler writes: the plan's stated interim posture) or event appends (events.md §1) |
+| `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits) or event appends (events.md §1). Client HANDLER writes ended with Phase 3's events-down (F10's interim — events.md §7): a handler fire commits only the event |
 | `derived` | the space's SpaceServer (lease holder) | derivation results, watermark advance, `consequenceOf` |
-| `system` | memory server itself | space bootstrap, authorization changes — pre-existing, unchanged |
+| `system` | memory server itself — its own direct writes, outside any session and outside the wave (PRODUCER-defined; note below) | e.g. space bootstrap, authorization changes, blob metadata — EXEMPLARY, not a closed list (RULED 2026-08-05) |
 
 FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
+
+**Which work moves to the server — the scheduler tell (RULED, owner
+2026-08-07; the classification that closes the instantiation-write
+question).** ONLY scheduler-driven work moves to the server:
+scheduler-stamped runs — the derivation and event-handler kinds — are
+server work under the flag, and their writes DIVERT on clients
+(speculation.md §2 carries the overlay half of this rule) —
+derivation-kind writes since Phase 2; handler-kind writes since
+Phase 3's events-down (F10's interim ENDED — events.md §7: the
+client handler-write commit path is deleted, and the fire's one
+authored act is the event append). Commits
+made OUTSIDE the scheduler are the client's authored acts and commit
+as today: the setup/instantiation transactions, imperative creation —
+a `cf piece new`-style client writing the result doc with its links
+and the pattern metadata IS the creation act; it may do nothing else
+and `.pull` on that result to have the server run round one — UI
+bindings, and widget edits. In the owner's words:
+
+> a pattern instantiated within a lift (or a map/filter/etc for that
+> matter) is reactive in nature, just a derived computation like any
+> other. you can tell because the causes are all pre-determined, so
+> the server will eventually do the same thing. but a client like the
+> `cf` binary (which acts as client here) can instantiate a new piece
+> (`cf piece new`) and that should create the piece including
+> probably writing the initial result, as writing that doc with the
+> result and the meta data about which pattern it runs is what
+> creates the piece. it might not do anything else than that and then
+> .pull on that result to get the server to actually run it for one
+> round. one big tell: those are commits that happen outside the
+> scheduler. only scheduler-driven work can move to the server, the
+> rest stays on the client. — owner, 2026-08-07
+
+Ratified corollaries, stated so none is inferred: there is NO
+creation carve-out — a pattern instantiated within a lift (or a
+map/filter) is a derived computation like any other, so its first run
+stays diverted even at instantiation (the server converges because
+the causes are pre-determined); README §1's "never computation
+results" sentence stands UNQUALIFIED; and the
+pull-then-server-runs-round-one flow above is the SANCTIONED
+imperative-creation shape. The code's existing stamping boundary
+already implements the rule — an unstamped setup transaction is
+authored, and the scheduler's stamping choke points are exactly where
+derivation-kind runs divert (speculation.md §2's posture rows) — so
+this ruling NAMES the landed boundary rather than changing it.
+
+**The `system` class is PRODUCER-defined, its contents exemplary
+(RULED 2026-08-05).** The stamp rides the memory server's generic
+direct-write path (`Server.writeDocument`,
+`packages/memory/v2/server.ts` — envelope `server:<uuid>`): `system`
+means "the memory server's own direct write, outside any session and
+outside the wave", and the row's contents column is examples, not a
+closed set — beyond bootstrap and authorization changes, the one
+production caller today is the toolshed blob-upload route writing
+`cid:<hash>` metadata docs
+(`packages/toolshed/routes/blobs/blobs.index.ts`). Two consequences,
+stated so neither is inferred: (i) because the stamp rides the PATH,
+any NEW direct-write caller is a spec decision — this list is
+extended deliberately, never silently by pointing more code at the
+path. (ii) `system` commits carry no user attribution in the commit
+ledger — the envelope is the server's own session — which is
+deliberately accepted; per-user attribution for blob writes is a
+named future hardening, out of v2 scope, in the same family as §2's
+grant-scoped foreign reads.
 
 **Both arms carry a class; only the ON arm enforces one.** `class`
 metadata is WRITTEN in every arm from stage A onward and ENFORCED
@@ -43,13 +106,25 @@ nothing outside the flag may claim it; the OFF arm therefore has no
 unclassed commit and no third answer.
 
 **The SpaceServer's own writes.** Not every write inside a derived
-commit belongs to a user. The watermark advance (§4), the
-narrowing redirect written at a broad slot (scopes.md §2), and the
+commit belongs to a user. The watermark advance (§4) and the
 retirement of acked effect entries (§5) are the SpaceServer's OWN
 writes under its SERVICE identity — the same identity before any
 per-user delegation exists and after it does. They carry addressing
 (a `scope_key` where the target is scoped) and NO acting principal;
-nothing is being attributed to a user, so nothing is missing.
+nothing is being attributed to a user, so nothing is missing. **The
+narrowing redirect written at a broad slot (scopes.md §2) is NOT one
+of them (AMENDED — RULED 2026-08-16, the fan-out design §B6/§I.3;
+fan-out stage B):** under the per-demander run supply the redirect
+is written inside the DISCOVERING run's own transaction, so its
+annotation carries that run's scope-derived attribution (below) —
+the discovering principal — recorded, not read, like every
+attribution; the redirect's value is a constant shape (no user data)
+and annotations are not pushed, so no client observes who narrowed
+first. One coupling to state plainly: the shared broad-slot redirect
+rides a per-user run's transaction, so its durability is hostage to
+that run's commit — a withdrawn discovering contribution withdraws
+the shared redirect its siblings' narrowing needs, delaying them by
+one wave.
 
 Threat model, stated honestly (RULED, owner 2026-08-02): the
 single-deriver invariant is by construction against HONEST clients —
@@ -58,8 +133,12 @@ protection: derived-output docs get none in v2, so a malicious client
 holding today's write authority on a doc can still author into it,
 docs the SpaceServer derives into and the watermark doc included
 (watermark forgery is possible and accepted for now). v2 defines the
-outcome, not a defense: such a write is an ordinary authored input,
-and the next wave recomputes the derivation over it. v2 adds no
+outcome, not a defense: such a write is an ordinary authored input;
+whether it triggers a recompute is governed by serving-loop.md §3d's
+dependency-only rule (RULED 2026-08-05) — a derivation that reads
+the intruded-on doc recomputes through the ordinary dependency path;
+one that only writes it (a blind writer) is NOT re-armed, and the
+derived output waits for the next input change. v2 adds no
 security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
@@ -95,8 +174,9 @@ carries the user principal and session id — established once, at
 session open, never sent per commit — and scoped writes inside the
 transaction name only the scope KIND (`scope: "user"`). It is the
 memory server that maps kind → concrete `scope_key` at admission,
-derived from the session that had the commit (`resolveScopeKey`,
-`packages/memory/v2/engine.ts:98-126`). That model is UNCHANGED for
+derived from the session that had the commit (the shared
+`resolveScopeKey`, `packages/memory/v2.ts:120-147` — the wire-shape
+module owns the one definition per LD3). That model is UNCHANGED for
 every `authored` commit: clients never name keys, per commit or
 otherwise; their keys keep deriving from the authenticated session.
 
@@ -129,8 +209,8 @@ quote above before "fixing" it:
   `user:<serviceDID>` here."* The function itself is a pure
   constructor; it is its admission-side CALLERS that feed it
   identity derived from the authenticated session (`applyCommit`,
-  `packages/memory/v2/server.ts:2128-2132` →
-  `engine.ts:5374-5375`) — the client-commit model. Server-side
+  `packages/memory/v2/server.ts:2060-2063` →
+  `engine.ts:2031-2032`) — the client-commit model. Server-side
   runs never derive identity from their own session: identity
   arrives WITH the work (the demand, or the stamped `firedAt`) and
   is carried into keys, not resolved from ambient state (scopes.md
@@ -176,7 +256,29 @@ prevent:
   (serving-loop.md §3c). CFC labels evaluate per instance run for
   the same reason. A run with no acting identity — a space-scope
   derivation before any narrowing — carries none, like the
-  SpaceServer's own writes above.
+  SpaceServer's own writes above. **A run's RESOLUTION identity and
+  its ATTRIBUTION are two things (RULED 2026-08-16, the fan-out
+  design §F/§I.2; fan-out stage B).** The demand supplies a FULL
+  (user, session) pair as the run's resolution identity (a narrower
+  read the run discovers must still resolve to a real demanded
+  instance — for a user-scoped instance the session is the
+  REPRESENTATIVE one, scaffolding only); what the run ACTS AS derives
+  from the scope it DISCOVERS by running: space → no actor; user →
+  the user (a user-scoped instance value belongs to all of the user's
+  sessions — its events carry `firedAt.session = "server"`, events.md
+  §2); session → the pair. Settled at the seal from the transaction's
+  read-scope ratchet — the write annotations, the foreign-write
+  accept gate, the delegated carriage (`demanded-run:<user>`) and
+  the outbox carriage a completion inherits all read the settled
+  pair. A MID-RUN emission (a derivation's `.send()`) derives its
+  actor from the ratchet so far, never broader than the node's known
+  scope for that principal, and the seal REFUSES the contribution
+  fail-closed if the run then discovers a NARROWER scope than the
+  emission was attributed at (the early-emit guard, design risk 4:
+  an under-attributed event never commits; the retry — at the moved
+  known scope — attributes it right; counted as
+  `earlyEmitRefusals`). Handler runs are unchanged (the event's
+  server-stamped `firedAt` is their explicit actor, LD1).
 
 Attributed, not signed, today — and RECORDED, not read, today
 (stated after the 2026-08-03 provenance audit asked): no
@@ -201,10 +303,10 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | --- | --- |
 | `authored` doc write | session authenticated → write authority on doc/path (existing ACL) → CAS on base revision |
 | `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) → the memory server STAMPS `firedAt` from the commit envelope (authenticated principal + session); a client-supplied `firedAt` that disagrees is REJECTED, never corrected |
-| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS |
+| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS. *(Phase-1 bound, stage D/F: the landed validation is carriage PRESENCE + COMPLETENESS — authored class only, non-empty `actingPrincipal` + `capabilityRef`, a sessionless batch refused for session-scoped writes (scopes.md §5) — with scoped writes keyed from the carried identity; RESOLVING the grant against the target doc/stream awaits per-doc grants, which today's ACL model does not hold, and is the named owed hardening — verification-coverage.md OW13.)* **Genesis of a provisioned space (RULED 2026-08-18):** the FIRST commit into a `.inSpace()`-minted space is its ACL, signed by the SPACE'S OWN identity (its keys derive from the creation name, CT-1650), and that same commit names the ACTING user OWNER (`{ [actor]: "OWNER", "*": "WRITE" }` — the shape a client mints); every later write into the space is the actor's, through this row's delegated carriage or a client's own session; the serving identity is neither owner nor actor at any step and appears nowhere in the ACL (verification-coverage.md OW31 — the build is owed post-merge, before the flip). |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
-| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (the shared `resolveScopeKey`, `packages/memory/v2.ts:120-147`). *(Fan-out stage A, 2026-08-16 — the runner ISSUES these: a serving runtime's per-instance run whose read of a scoped doc names an instance other than the runtime's own — the demand-supplied identity's — loads it as an explicit-instance read (`Cell.sync`/`syncCell` with the run identity, the transaction layer's kick for a never-loaded instance, the presync of a served event's inputs as the event's actor), so the serving replica holds that principal's instance keyed apart from the service's; own-identity reads name nothing and keep the no-key admission fast path. A live lease holder may name TWO instances of one (branch, id, scope) — its frames carry `scope_key` (§3) — the wire collapse guard now applies to non-holders only.)* |
 
 That is the ENTIRE admission surface — the last row is the one
 READ-side check; every row above it is commit admission. No scope
@@ -212,6 +314,56 @@ reasoning, no read-set
 validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
+
+**`capabilityRef` — the vocabulary, stated (adjudicated by the Phase-7
+independent review, 2026-08-15; spec-sentence, no rename).** The value
+is a provenance TAG naming the authorizing CONTEXT of a server-produced
+authored write, from a closed vocabulary: `stream-append:<sidecarId>`
+(an outbox event append), `event-consequence:<eventId>` (a consequence
+of a processed event), `demanded-run:<user>` (a demanded instance run's
+provisioning). Admission checks its PRESENCE (the completeness floor
+above; wave.ts's staging refusal), never RESOLVES it — resolution
+against a per-doc grant is the owed hardening OW13/FP7 — and the name
+does NOT denote a capability object: nothing is looked up, delegated,
+or transferred through it today. Renaming it would churn the outbox
+column `capability_ref`, the executable model and their pins for no
+semantic gain; when OW13 lands, the value becomes the key of the
+resolved grant and this sentence retires.
+
+**The Phase-3 floor carve-out for sessionless space-scope emissions
+(SHAPE RULED 2026-08-05; implementation lands with Phase 3).** The
+server-produced row's completeness floor admits an ABSENT acting
+principal iff the entry is declared sessionless-space-scope: its
+`firedAt` stamps `{ session: "server" }` with NO user key, and grant
+presence (`capabilityRef`) stays mandatory — events.md §2 and the
+executable model already carry exactly these semantics, so neither
+needs an edit. What Phase 3's implementation lifts, by name: the
+source refusal in `enqueueOutboundAppend` (wave.ts — today a
+userless or grantless entry is a loud error at staging, fail-closed
+ahead of this floor), the delivery path's `?? ""` acting-principal
+mapping (the memory server's delegated-append admission), plus the
+floor negatives BOTH ways (userless
+space-scope-declared admitted; userless without the declaration
+still refused) and the model pin. Tracked in verification-coverage
+§3's Phase-3 bucket.
+
+**Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
+check LANDED with Phase 1 stage F).** At admission, a `derived`
+commit's producing SESSION must be the lease holder's own service
+session: a derived commit arriving under a user session — or any
+session other than the declared holder's — is REFUSED. This mirrors
+the executable model's `admitDerived`, which compares the envelope
+principal to `holderId`, and closes the "single honest internal
+caller" gap before stage F multiplies the callers of the co-hosted
+engine plane. The operand mapping (stage F design, landed): the
+holder's own service session IS the engine session whose resolved
+commit session key equals the DR1 holder identity — the wave sink
+commits with `sessionId == holder` and no principal
+(`applyCommitTransaction`, `packages/memory/v2/engine.ts`; the
+sink's replay keying doc records the same choice), so the check is
+one equality, `resolveCommitSessionKey(sessionId, principal) ==
+holder`, and "the envelope principal IS the lease holder" (§1) reads
+literally in the stored session column too.
 
 **`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
 carries BOTH the acting user and the session —
@@ -279,10 +431,42 @@ keep resolving from the session. FP2 (RULED 2026-08-03) widens the
 holder condition to ANY live lease holder on the co-hosted memory
 server, so cross-space scoped reads (§2b's free read row) can name
 their foreign instance instead of silently resolving
-`user:<serviceDID>`. Anticipated hardening, OUT OF v2 SCOPE and
-named without design: grant-scoped foreign reads — admissibility
-derived from the piece's granted read authority rather than lease
-identity — alongside remote attestation.
+`user:<serviceDID>`. **Phase 5 LANDED both halves the Phase-1 bound
+deferred:** the read space's own lease is checked first, then FP2's
+cross-engine fallback — any live lease on the co-hosted server; and
+the equality is SHARPENED to the FULL DR1 holder minted by the
+co-hosted process (service identity + process-instance component),
+retiring the Phase-1 recorded acceptance under which a second
+process sharing the service DID passed on the first process's lease
+row (verification-coverage.md's stage-F read-row entry).
+
+**The grant-scoped read DESIGN (Phase 5; the RULED 2026-08-13
+precondition — the design, or an explicit fail-closed refusal, lands
+BEFORE any delegated-scoped-read producer ships, and producer and
+refusal land together as one stack).** A DELEGATED scoped read — the
+home SpaceServer reading a FOREIGN scoped instance on behalf of a
+carried actor — resolves against the CARRIED actor's instance under
+an explicit grant, NEVER the delegating envelope, and NEVER silently
+empty (the FP2 silent-empty-instance trap is the failure mode this
+kills). The design, stated for the implementation that follows the
+per-doc grant store (OW13's trigger): the read carries the acting
+identity + `capabilityRef` exactly like the server-produced authored
+row; admission resolves the grant against the target doc and admits
+the NAMED instance (`entity_scope_key` constructed from the CARRIED
+actor); a read whose grant does not resolve REFUSES — it never falls
+back to lease-wide trust or the envelope. Until that store exists,
+the FAIL-CLOSED interim is normative and LANDED with Phase 5's
+producers, at both ends of the stack: (i) the serving runtime's
+storage plane REFUSES scoped (user/session) reads of any non-home
+space outright — a foreign scoped read cannot leave the producer,
+named or unnamed; (ii) admission REFUSES an UNNAMED scoped root from
+a co-hosted serving session (a live-lease principal) reading a space
+whose lease it does not hold — the shape that would silently resolve
+`user:<serviceDID>`. Cross-space serving therefore reads foreign
+SPACE-scope state freely (§2b's free-read row) and foreign SCOPED
+state not at all; lifting that refusal is exactly the grant
+resolution above, never a lease-trust widening. Remote attestation
+stays anticipated future work.
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a
@@ -296,7 +480,8 @@ case and keep the event's actor (scopes.md §5, server-stamped
 Note what the table does NOT do: `authored` admission checks write
 authority on the TARGET only — nothing marks a doc as derived-output,
 so admission protects derived docs no more than today does (§1's
-threat model; the next wave recomputes over an intruding write).
+threat model, sharpened by serving-loop.md §3d's dependency-only
+recompute rule, RULED 2026-08-05).
 
 ## 2b. Cross-space writes
 
@@ -305,14 +490,14 @@ transaction writes one space — by DEFAULT, with one explicit opt-in.**
 A transaction FAILS if a writer for a different space was already
 opened on it (anchor: `packages/runner/src/storage/interface.ts`
 `writer(space)`) unless it opted in through `enableMultiSpaceWrites`
-(`interface.ts:786`), reachable only via the `.inSpace()` chain below —
+(`interface.ts:690`), reachable only via the `.inSpace()` chain below —
 which is what makes an UNMARKED crossing always a bug. Reads cross
 freely (serving-loop.md §3b; cross-space label metadata flows with
 them). v2 keeps that invariant and adds the class discipline:
 
 | crossing | mechanism |
 | --- | --- |
-| read a foreign doc | free — logged read + server-internal wake (§3b) |
+| read a foreign doc | free — logged read + server-internal wake (§3b). *Mechanism (Phase 7): the serving runtime's loopback session is admitted by the memory ACL as the process identity, which is a memory service principal under the flag (`memoryServiceDidsFor`, toolshed) — the deployment checklist's operator-DID posture, automatic where the loop runs; OFF the flag the configured list is used verbatim. Posture, honestly: a service principal is implicit OWNER everywhere for its sessions, so the process identity's ordinary session traffic is widened to OWNER (not this table's accept gate, which checks the acting identity's grant) — verification-coverage.md OW31. RULED 2026-08-18: the serving identity is NOT an implicit owner of users' spaces and never writes into their home spaces — this OWNER posture is retired by OW31's build (post-merge, before the flip); the READ side is RULED 2026-08-19 (verification-coverage.md OW31 carries the owner's verbatim quote): the service identity may read a space's ACL ONLY, and every other served read runs under the acting USER's identity, mirroring the write posture — SUPERSEDING the scoping report's read-only-service-class recommendation; if the posture proves wrong during the build, flag for follow-up after merging to main rather than blocking.* |
 | derive FROM foreign state | home derivation reading foreign inputs; result commits HOME |
 | mutate a foreign space | **an event append to a foreign stream — the ONLY cross-space mutation** |
 | `derived` commit into a foreign space | FORBIDDEN — SpaceServer(B) is B's only deriver; A never derives into B |
@@ -347,10 +532,10 @@ section.
 even mint new ones — from a handler (`profile-create.tsx`,
 `ProfileHome.inSpace()`). The real chain is an explicit opt-in
 end to end: `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4733`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:786`) →
-`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:2077/2156` —
+(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4698`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:690`) →
+`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:1971/2048` —
 sequential, stop at first failure): today already foreign-first,
 home-after-success. v2 keeps the API, the split, and the order,
 relocated into the wave's commit step:
@@ -412,6 +597,30 @@ the target's `eventWatermark` makes processing exactly-once.
   invisible to that subscriber: not redacted, not empty — absent.
   This pairs with scopes.md §7 M4's re-keying: the push path must
   key dirtiness by `scope_key`, and the same key decides delivery.
+  *(Fan-out stage A, 2026-08-16 — the ONE wire addition on the push
+  side: frames to a session that has been ADMITTED an explicit-instance
+  read (§2's read row) carry `scope_key` on every upsert and remove
+  (`SessionSyncUpsert.scopeKey`, `SessionSyncRemove.scopeKey`;
+  graph.query snapshots to such a session carry `EntitySnapshot.scopeKey`),
+  because that session legitimately receives EVERY instance it serves
+  and may hold two instances of one (branch, id, scope) — the serving
+  replica keys them apart by it. Every other session's frames carry
+  scope NAMES only and resolve instances from the session, exactly as
+  before — the OFF-arm wire is byte-identical. Amended 2026-08-17 (the
+  stage-A independent review's finding 1): the keying is the session's
+  STICKY wire vocabulary — armed by the admission, kept for the
+  session's life, never hung from the live lease — so an instance
+  delivered keyed is always retracted keyed (an unkeyed remove would
+  name the client's OWN instance: a former holder's catch-up wiped the
+  service's doc and kept the stale foreign one). Whether FOREIGN
+  instances are DELIVERED stays the per-pass live-lease question of
+  §2's read row: a lapse withholds them (incremental) or retracts them
+  keyed (full evaluation), and the first live pass afterwards RE-ARMS
+  with a full evaluation that re-delivers what the lapse withheld — a
+  renewal blip the SpaceServer survives in-process reports the reacquire
+  so that pass runs promptly (`Server.noteLeaseReacquired`), rather
+  than leaving the serving replica silently stale until an unrelated
+  write.)*
 - **Basis-index rows are NOT part of the pushed commit** (T2). They
   ride the loopback store TRANSACTION only (serving-loop.md §1 plane
   (a), §3b); nothing about them crosses the wire to a subscriber,
@@ -422,6 +631,18 @@ the target's `eventWatermark` makes processing exactly-once.
   Bookkeeping MUST NOT ride the commit stream at all (lease renewals are
   table updates; watermarks piggyback on derived commits), so in practice
   priority is about big authored blobs vs small derived values.
+  *(LANDED Phase 6 — the implementation shape, stated so no one infers a
+  stronger one: each session gets ONE frame per flush cycle, so priority
+  orders the serialized per-session evaluation/send chain — a two-phase
+  fan-out runs every connection's derived-subscribed sessions before any
+  bulk-only session — never the content of a frame; a session whose one
+  frame mixes derived and bulk carries the whole frame at derived
+  priority, because frames apply atomically and splitting one would put
+  the catch-up marker ahead of undelivered covered docs — an INV-5
+  hazard. Counters: `servingLoop.push.{prioritizedSessions,
+  followerSessions, mixedFlushes}`, all-zero in the OFF arm by
+  construction; the deterministic order pin is
+  `packages/memory/test/v2-push-priority.test.ts`.)*
 - Self-echo: SpaceServer skips its own `derived` commits on receipt
   (serving-loop.md §3).
 
@@ -432,9 +653,54 @@ the target's `eventWatermark` makes processing exactly-once.
   consequences committed AND all DEMANDED derivations current through
   W (demand per serving-loop.md §1/§3b — undemanded derivations stay
   dirty-unmaterialized without holding W back).
+- **The drain-settle quiescence advance (RULED 2026-08-19 — owner, on
+  the coordinator's S1 recommendation from the swatch-stall root-cause
+  report: "S1 sounds good"):** the definition above quantifies over
+  AUTHORED commits, so mid-stream the input-driven advance stops at the
+  input batch head and the wave's own derived commits sit above W — and
+  before this ruling nothing ever lifted W over them on a then-quiet
+  space, which stranded every client retirement predicate gated on
+  `W ≥ floor` whose floor includes a pushed derived commit's seq (the
+  swatch stall:
+  `docs/history/plans/server-execution-v2/stage-c/swatch-stall-rootcause.md`
+  §3 — a diverged speculation layer with no reachable retirement until
+  the next authored commit anywhere in the space). Amendment: at
+  drain-settle — the serving loop reaching TRUE quiescence for a space
+  (a settled, non-exhausted cycle; no contributions, no pending
+  events, the drain empty) — W additionally advances over the space's
+  committed TAIL DERIVATIONS: the loop's own derived commits whose
+  seqs lie contiguously above the input coverage point. Reading taken,
+  stated because the pre-amendment text was silent on it: W may sit
+  above seqs that are not authored commits — the definition's
+  quantifier ranges over authored commits only, and the tail
+  derivations are already committed and delivered, so the advance
+  asserts nothing new about coverage; it closes the quiescence gap
+  ("each new input lifts the previous generation" now holds without
+  requiring a next input). Bounds, normative: the advance covers only
+  COMMITTED seqs — no speculative advance; it fires at most once per
+  quiescence transition (armed by content-carrying wave commits,
+  consumed on seal); its own advance-only commit is NEVER chased — the
+  one derived commit W does not cover at quiescence is the final
+  advance-carrying bookkeeping commit itself, definitionally (covering
+  it would mint a successor — the commit-storm class the input-driven
+  rule existed to prevent); and any non-own seq above the coverage
+  point (an in-flight authored notice, a foreign commit) is a hole the
+  advance stops below, fail-closed — its coverage arrives on the
+  ordinary input-driven path. Counted as `settleAdvances` (count, last
+  delta, series) so §4 amplification arithmetic and settle metrics can
+  subtract the advance-only waves. Seat:
+  `packages/runner/src/executor/space-server.ts` (the wave cycle's
+  advance computation); pins: `executor-settle-advance.test.ts`.
 - Carried: in every `derived` commit's metadata (`derivedThrough: W`) and
   in one well-known doc per space (updated in the same transaction; never
-  its own commit). The watermark doc is a SPACE-scoped instance —
+  its own commit). *(RULED 2026-08-05: "never its own commit" is the
+  bookkeeping-off-the-commit-stream / push-priority rule — the advance
+  rides whatever the wave commits, never a separate commit alongside
+  it. It is NOT a ban on advance-only waves: an input batch that
+  demanded nothing commits the watermark advance as that batch's ONE
+  derived commit — serving-loop.md §3's per-batch commit, with the
+  advance as its only content.)* The watermark doc is a SPACE-scoped
+  instance —
   `scope_key = "space"` — stated explicitly so no one infers it.
 - Client use: "settled" for a client = `W ≥ seq(my last authored
   commit)`. Integration tests MUST wait on this instead of text-polling
@@ -442,7 +708,13 @@ the target's `eventWatermark` makes processing exactly-once.
 - W covers DEMANDED derivations (pull-based laziness, serving-loop.md
   §3b). Client subscriptions are demand, so a fresh subscription
   arriving after W may still trigger a recompute, whose results land in
-  a later derived commit.
+  a later derived commit. Under fan-out (fan-out stage B, RULED
+  2026-08-16) "demanded derivations" means every DEMANDED INSTANCE of
+  every demanded node — `instances(known scope, demanders)`, serving-
+  loop.md §3b — including the siblings a discovery re-armed in the
+  same wave; an instance that was NOT demanded when W advanced (a
+  later arrival) is ordinary later demand. One integer, no
+  per-instance watermark.
 - The watermark is ONE integer per space. Not per-doc, not per-piece, not
   vectorized. If a consumer seems to need a finer watermark, escalate
   before building it.
@@ -463,19 +735,30 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   rule for both. One doc id constant, exported once; the instance
   comes from the key, never from the path.
 - **Write authority for the ack** is the owning session's own scope
-  instance: the session writes its `{ ackedNonce }` into the
-  instance its authenticated `scope_key` resolves to, so no session
-  can ack another's intents and no new ACL is needed. The
-  SpaceServer writes the intents into the same instance by naming
-  the `scope_key` explicitly (§1 addressing).
-- Shape: append-list of
-  `{ nonce, kind, args, issuedIn: <derived commit seq> }`;
-  v2 ships exactly one kind: `navigate` with
-  `args = { target: <entity link> }`.
+  instance: the session writes its ack marks into the instance its
+  authenticated `scope_key` resolves to, so no session can ack
+  another's intents and no new ACL is needed. The SpaceServer
+  writes the intents into the same instance by naming the
+  `scope_key` explicitly (§1 addressing).
+- Shape: the instance value is `{ entries, acks }` — `entries` an
+  append-list of `{ nonce, kind, args, issuedIn: <derived commit
+  seq> }`, `acks` a PER-NONCE map of the session's ack marks
+  (`acks[nonce] = true`). v2 ships exactly one kind: `navigate`
+  with `args = { target: <entity link> }`. The ack's map shape is
+  RULED (owner, 2026-08-13 — ratifying the implemented shape; the
+  earlier scalar `{ ackedNonce }` draft is REJECTED): a scalar
+  last-ack field loses an earlier un-retired ack whenever two
+  intents ack between retirement observations.
 - The SpaceServer writes intents as part of ordinary derived commits
   (navigateTo's output). The session's client subscribes to its own
-  effects doc, enacts, then commits an authored ack write
-  `{ ackedNonce }`; the next wave retires acked entries.
+  effects doc, enacts, then commits an authored ack write — its own
+  `acks[nonce] = true` mark; the next wave retires acked entries,
+  pruning each retired entry AND its mark together. A stale mark
+  (an ack naming no stored entry — a re-ack landing after
+  retirement) is pruned by the same scan as a defined no-op, so
+  re-acks are idempotent and marks never accumulate; map growth is
+  bounded by per-wave retirement, and the session-lifetime GC
+  (below) covers abandoned instances.
 - Exactly-once enactment per nonce is the CLIENT's duty (it may enact
   optimistically from speculation, then reconcile by nonce — navigation
   is reversible). Reload between intent and ack: on resubscribe the
@@ -484,6 +767,18 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   a nonce — the enacted-nonce record lives in the reload-wiped
   overlay — and that is ACCEPTED for reversible effects, which
   every shipped kind is (LT8, RULED 2026-08-03).
+- **Failure postures (both RULED, owner 2026-08-13 — the Phase-4
+  P1-1 residuals).** A FAILED enactment is never acked: the entry
+  stays unacked in the store, and retry is DELIVERY-DRIVEN and
+  RELOAD-DRIVEN only — the next delivery of the instance (any
+  commit touching it) or the resubscribe re-read on reload
+  re-enacts. No client-side backoff timer exists or may be added:
+  the FORBIDDEN server-side retries below are not to be rebuilt as
+  client timers. A PERMANENTLY MALFORMED entry — an unknown kind,
+  an unstageable target — is never synthetically acked and never
+  tombstoned: it stays unacked and LOUD (a warning per delivery)
+  until the session-lifetime GC retires the instance with its
+  session.
 - Session lifecycle: `sessionId` is minted at client connect, persisted
   client-side across reloads, and retired explicitly on logout or by
   TTL. `sessionId` is CLIENT-GLOBAL (LT2, RULED 2026-08-03): one
@@ -524,8 +819,13 @@ disabled (README §3.5).
   the explicit `scope_key` on every scoped write (addressing) and
   the acting identity on every action RUN's writes, where the run
   has one — §1 (attribution,
-  `action × instance`). Anything further needs a spec edit here
-  first.
+  `action × instance`). The pair's CARRIAGE is server-internal
+  admission input (like `commitClass`/`holder`: `ClientCommit`
+  cannot express it), and its STORED form is a per-op-indexed
+  sidecar on the commit row — recorded, never wire, never pushed;
+  admission consumes only the addressing half, to key scoped rows
+  (§1's recorded-not-read attribution). Anything further needs a
+  spec edit here first.
 - **`scope_key` is thereby PROTOCOL vocabulary**, no longer
   engine-internal vocabulary: it appears inside derived commit
   bodies and on lease-holder reads, so its format is defined ONCE
@@ -560,11 +860,16 @@ disabled (README §3.5).
 - The OUTBOX's identity carriage (serving-loop.md §4–§5: the
   result-cell address with its `scope_key`, the acting
   identity, AND — FP6, ruled 2026-08-03 — the run's CFC label
-  basis, captured at the original run's seal) is likewise
+  basis, carried STRUCTURALLY as the basis reference, never as
+  frozen label values: per the 2026-08-05 FP6 ruling the
+  completion's writeback transaction re-reads the request inputs,
+  so its labels derive from the basis AS IT STANDS at writeback —
+  a frozen at-seal snapshot would write stale labels over a
+  re-labeled basis) is likewise
   sanctioned NON-WIRE carriage: process-local, never a commit and
   never metadata — it exists so the completion commit can carry
-  §1's annotations and request-derived labels without re-deriving
-  them, and it does not
+  §1's IDENTITY annotations without re-deriving them (labels are
+  the re-derived half, by design), and it does not
   breach the closed list. The DURABLE exception (FP1, ruled
   2026-08-03): cross-space APPEND entries are engine-table rows
   inside the emitting wave's store transaction, deleted on

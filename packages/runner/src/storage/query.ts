@@ -27,7 +27,7 @@ export class StoreObjectManager implements ObjectStorageManager {
     return this.missingDocs.values();
   }
 
-  // Returns null if there is no matching fact
+  // Returns null if there is no matching state
   load(address: BaseMemoryAddress): IAttestation | null {
     const key = `${address.id}/${address.type ?? "application/json"}`;
     if (this.readValues.has(key)) {

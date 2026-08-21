@@ -28,6 +28,15 @@ async function runTest(base: URL) {
   );
   const runtime = new Runtime({
     apiUrl: base,
+    // Server-execution v2 posture (testing.md §2): this test serves
+    // toolshed's `app.ts` IN-PROCESS (`Deno.serve` below) with NO
+    // ExecutorHost, so it is a single-process harness — client and memory
+    // server in one process, nothing serving — and its client is OFF BY
+    // CONSTRUCTION, whatever EXPERIMENTAL_SERVER_EXECUTION says (a flag-ON
+    // client here would divert its derivations to a server that does not
+    // exist and wedge). The CI ON lane's env does not reach this file;
+    // only the tests that talk to the lane's toolshed (API_URL) declare
+    // the posture from the env (P7 review finding 7).
     storageManager: StorageManager.open({
       as: account,
       memoryHost: new URL(base),

@@ -1840,6 +1840,9 @@ Deno.test("selectBaselines chooses each metric's baseline against the base commi
     5746,
   );
   assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, true);
+  // The commit the comparison was judged against travels with it, so a later
+  // comment can say which `main` code this run's numbers describe.
+  assertEquals(captured.result.get(RUNNER_METRIC)?.baseSha, SHA_C);
   // Only the baseline actually chosen is compared against the base commit.
   assertEquals(compared, [`${SHA_C}...${SHA_C}`]);
   assertStringIncludes(
@@ -1873,6 +1876,7 @@ Deno.test("selectBaselines gates nothing when the base commit cannot be read", a
     5746,
   );
   assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, false);
+  assertEquals(captured.result.get(RUNNER_METRIC)?.baseSha, undefined);
   assertStringIncludes(
     captured.warnings.join("\n"),
     "could not read the base-branch commit",
@@ -2025,6 +2029,7 @@ function rowsFor(
         ? undefined
         : makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", spec.value),
       comparable: spec.comparable,
+      baseSha: SHA_B,
     }]),
   );
   return buildCoverageRows({
@@ -2035,6 +2040,33 @@ function rowsFor(
     ...extra,
   });
 }
+
+Deno.test("buildCoverageRows stamps every row with where it was measured", () => {
+  // The comment for a regression the pull request did not cause reads these
+  // back to say which run produced the numbers and which `main` commit that
+  // run merged, so every row carries them whatever the gate decides.
+  const { rows } = rowsFor(
+    { [RUNNER_METRIC]: 5747, [MEMORY_METRIC]: 3 },
+    {
+      [RUNNER_METRIC]: { value: 5746, comparable: true },
+      [MEMORY_METRIC]: { comparable: true },
+    },
+  );
+
+  assertEquals(rows.map((row) => row.status), ["OVER", "OVER"]);
+  for (const row of rows) {
+    assertEquals(row.measuredRunId, 9);
+    assertEquals(row.baseSha, SHA_B);
+  }
+
+  // A metric with no baseline at all knows no base-branch commit to name.
+  const ungated = rowsFor(
+    { [RUNNER_METRIC]: 1 },
+    {},
+  );
+  assertEquals(ungated.rows[0].measuredRunId, 9);
+  assertEquals(ungated.rows[0].baseSha, undefined);
+});
 
 Deno.test("buildCoverageRows fails a gated group above its baseline", () => {
   const { rows, failures } = rowsFor(
@@ -2234,7 +2266,10 @@ Deno.test("buildCoverageRows reports a rise from a zero baseline as complete", (
   assertEquals(held.rows[0].pctIncrease, 0);
 });
 
-/** A regressed group whose baseline came from `main` run 900. */
+/**
+ * A regressed group measured by run 1001, whose baseline came from `main` run
+ * 900.
+ */
 function unattributedFailure(): Row {
   return {
     metric: "coverage-debt: packages/example uncovered lines",
@@ -2242,6 +2277,9 @@ function unattributedFailure(): Row {
     current: 3,
     baseline: 1,
     baselineRunId: 900,
+    baselineSha: SHA_B,
+    measuredRunId: 1001,
+    baseSha: SHA_C,
   };
 }
 
@@ -2295,6 +2333,18 @@ Deno.test("buildUnattributedRegressionBody names lines the baseline run covered"
 
     assertStringIncludes(body ?? "", "`packages/example/src/racy.ts`: 2");
     assertStringIncludes(body ?? "", "not introduced by this PR");
+    // The prompt names the run that measured the lines and the run each group
+    // was held against, so a session picking it up can find both.
+    assertStringIncludes(
+      body ?? "",
+      "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/1001",
+    );
+    assertStringIncludes(body ?? "", `  Base commit measured: ${SHA_C}`);
+    assertStringIncludes(body ?? "", `  git log ${SHA_C}.. -- `);
+    assertStringIncludes(
+      body ?? "",
+      `  Baseline for packages/example: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${SHA_B}`,
+    );
   });
 });
 

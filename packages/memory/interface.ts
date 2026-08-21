@@ -1,5 +1,4 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import type { Signer as IdentitySigner } from "@commonfabric/identity";
 import type { ClientCommit } from "./v2.ts";
 
@@ -36,87 +35,31 @@ export type MemorySpace = `did:${string}:${string}`;
 export type Entity = URI;
 
 /**
- * Type of the fact, usually formatted as media type. By default we expect
- * this to be  "application/json", but in the future we may support other
- * data types.
+ * Media type of the value held at a memory address. Documents are
+ * "application/json"; other media types address inline data payloads.
  */
 export type The = MIME;
 
 /**
- * Describes not yet claimed memory. It describes a lack of fact about memory.
+ * The value a memory address holds. `is` is absent when the address holds
+ * nothing, either because it was never written or because it was deleted.
  */
-export type Unclaimed<T extends string = MIME, Of extends string = URI> = {
+export type State = {
   /**
-   * Type of the fact, usually formatted as media type. By default we expect
-   * this to be  "application/json", but in the future we may support other
-   * data types.
+   * Media type of the value, usually "application/json".
    */
-  the: T;
+  the: MIME;
 
   /**
-   * Stable memory identifier that uniquely identifies it.
+   * Stable memory identifier that uniquely identifies the entity.
    */
-  of: Of;
+  of: URI;
 
-  is?: undefined;
-  cause?: undefined;
+  /**
+   * The value itself, inline rather than by reference.
+   */
+  is?: FabricValue;
 };
-
-/**
- * Asserts a fact: the value MUST be an inline {@link FabricValue} as opposed to
- * a reference to one.
- */
-export type Assertion<
-  T extends string = MIME,
-  Of extends string = URI,
-  Is extends FabricValue = FabricValue,
-> = {
-  the: T;
-  of: Of;
-  is: Is;
-  cause: FabricHash;
-};
-
-/**
- * Represents retracted {@link Assertion}. It is effectively a tombstone
- * denoting assertion that no longer hold and is a fact in itself.
- */
-export type Retraction<
-  T extends string = MIME,
-  Of extends string = URI,
-  Is extends FabricValue = FabricValue,
-> = {
-  the: T;
-  of: Of;
-  is?: undefined;
-  cause: FabricHash;
-};
-
-export type Invariant<
-  T extends string = MIME,
-  Of extends string = URI,
-  Is extends FabricValue = FabricValue,
-> = {
-  the: T;
-  of: Of;
-  fact: FabricHash;
-
-  is?: undefined;
-  cause?: undefined;
-};
-
-/**
- * Facts represent a memory in the replica. They are either current and
- * represented as {@link Assertion} or since retracted and therefor represented
- * by {@link Retraction}.
- */
-export type Fact<
-  T extends string = MIME,
-  Of extends string = URI,
-  Is extends FabricValue = FabricValue,
-> = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
-
-export type State = Fact | Unclaimed;
 
 export type Revision<T = Unit> = T & { since: number };
 
@@ -186,7 +129,7 @@ export type Conflict = {
   space: MemorySpace;
 
   /**
-   * Type of the fact where a conflict occurred.
+   * Media type of the value where a conflict occurred.
    */
   the: The;
 
@@ -194,26 +137,6 @@ export type Conflict = {
    * Identifier of the entity where conflict occurred.
    */
   of: Entity;
-
-  /**
-   * Expected state in the replica.
-   */
-  expected: FabricHash | null;
-
-  /**
-   * Actual memory state in the replica repository.
-   */
-  actual: Revision<Fact> | null;
-
-  /**
-   * Whether the fact exists in the history of the entity.
-   */
-  existsInHistory: boolean;
-
-  /**
-   * Actual history
-   */
-  history: Revision<Fact>[];
 };
 
 export interface ConflictError extends Error {

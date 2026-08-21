@@ -1207,13 +1207,25 @@ Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () =>
 
 Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip the check", () => {
   const comment = buildCoverageDebtUnattributedComment({
-    groups: [{ group: "packages/runner", target: 4612, current: 4614 }],
+    groups: [{
+      group: "packages/runner",
+      target: 4612,
+      current: 4614,
+      baseline: {
+        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+        sha: "b".repeat(40),
+      },
+    }],
     files: [
       {
         relativePath: "packages/runner/src/scheduler/diagnosis.ts",
         lines: [333, 334],
       },
     ],
+    measurement: {
+      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+      baseSha: "a".repeat(40),
+    },
   });
 
   // Same marker as the other coverage comments, so the poster keeps updating
@@ -1243,6 +1255,27 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
     comment,
     "  packages/runner/src/scheduler/diagnosis.ts: 333, 334",
   );
+  // The prompt says which run measured the lines, at which commit, and which
+  // baseline run each group was held against, so a fresh session can open the
+  // measurement rather than guess at how old the report is.
+  assertStringIncludes(comment, "Where this measurement came from:");
+  assertStringIncludes(
+    comment,
+    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+  );
+  assertStringIncludes(comment, `  Base commit measured: ${"a".repeat(40)}`);
+  // The reader is handed the command that says what landed since.
+  assertStringIncludes(
+    comment,
+    `  git log ${"a".repeat(40)}.. -- <one of the files above>`,
+  );
+  assertStringIncludes(
+    comment,
+    `  Baseline for packages/runner: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${
+      "b".repeat(40)
+    }`,
+  );
+  assertStringIncludes(comment, "merged into that base commit");
   assertStringIncludes(comment, "docs/development/COVERAGE.md");
   // Repetition is not offered as evidence: the prompt asks for the new test to
   // be measured on its own instead.
@@ -1253,6 +1286,57 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
   // None of the "this PR adds uncovered lines" copy survives.
   assertFalse(comment.includes("This PR adds source lines"));
   assertFalse(comment.includes("Could not tie the regression"));
+});
+
+Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not have", () => {
+  // A local run of the checker has no workflow run behind it, and a group can
+  // reach the comment without a baseline run to name.
+  const local = buildCoverageDebtUnattributedComment({
+    groups: [{ group: "tasks", target: 0, current: 1 }],
+    files: [{ relativePath: "tasks/test-records.ts", lines: [90] }],
+  });
+
+  assertFalse(local.includes("Where this measurement came from:"));
+  assertFalse(local.includes("Measuring run:"));
+  assertFalse(local.includes("Baseline for tasks:"));
+  // The reader is still told to check that the report has not been overtaken,
+  // in the wording that names no commit.
+  assertStringIncludes(local, "it may no longer describe the");
+  assertStringIncludes(local, "read");
+  assertFalse(local.includes("merged into that base commit"));
+  assertFalse(local.includes("git log "));
+  assertStringIncludes(local, "since the measurement was taken");
+  assertStringIncludes(local, "Affected lines:");
+
+  // Half an identity is reported as far as it goes: the run page is named and
+  // no commit is invented for it.
+  const runOnly = buildCoverageDebtUnattributedComment({
+    groups: [{
+      group: "tasks",
+      target: 0,
+      current: 1,
+      baseline: {
+        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+      },
+    }],
+    files: [{ relativePath: "tasks/test-records.ts", lines: [90] }],
+    measurement: {
+      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+    },
+  });
+
+  assertStringIncludes(runOnly, "Where this measurement came from:");
+  assertStringIncludes(
+    runOnly,
+    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+  );
+  assertStringIncludes(
+    runOnly,
+    "  Baseline for tasks: run https://github.com/commontoolsinc/labs/actions/runs/900\n",
+  );
+  assertFalse(runOnly.includes("Base commit measured:"));
+  assertFalse(runOnly.includes("merged into that base commit"));
+  assertStringIncludes(runOnly, "since the measurement was taken");
 });
 
 Deno.test("buildCoverageDebtUnattributedComment counts files and lines past the cap", () => {

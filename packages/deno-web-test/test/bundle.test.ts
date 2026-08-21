@@ -1,20 +1,19 @@
-import { assert } from "@std/assert";
-import { decode } from "@commonfabric/utils/encoding";
 import { runDenoWebTest } from "./utils.ts";
 
 Deno.test("a `bundle` entry is bundled onto the server root", async function () {
-  const { success, stdout } = await runDenoWebTest("bundle-project");
-  const stdoutText = decode(stdout);
+  const run = await runDenoWebTest("bundle-project");
 
-  assert(success, stdoutText);
-  assert(
+  run.assert(run.success, "the run succeeds");
+  run.assert(
     /a bundled module loads into a realm the page creates \.\.\. ok/.test(
-      stdoutText,
+      run.stdoutText,
     ),
-    stdoutText,
+    "the worker loads its bundled module",
   );
-  assert(
-    /a bundled module loads into a sandboxed iframe \.\.\. ok/.test(stdoutText),
-    stdoutText,
+  run.assert(
+    /a bundled module loads into a sandboxed iframe \.\.\. ok/.test(
+      run.stdoutText,
+    ),
+    "the sandboxed iframe loads its bundled module",
   );
 });

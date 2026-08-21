@@ -1642,11 +1642,11 @@ Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () =>
   );
 });
 
-Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool", async () => {
+Deno.test("parseCfHarnessCliArgs rejects browser as a parent allow-tool", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--allow-tool", "bash-no-sandbox"],
+        ["--prompt", "hi", "--allow-tool", "browser"],
         {
           cwd: "/tmp/project",
           env: {},
@@ -1865,10 +1865,10 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.version, 1);
   assertEquals(capabilities.parentToolIds.includes("web_fetch"), true);
   assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
-  assertEquals(capabilities.parentToolIds.includes("bash-no-sandbox"), false);
+  assertEquals(capabilities.parentToolIds.includes("browser"), false);
   assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.features.runPattern, true);
-  assertEquals(capabilities.builtinToolIds.includes("bash-no-sandbox"), true);
+  assertEquals(capabilities.builtinToolIds.includes("browser"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
   assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
   assertEquals(
@@ -3391,8 +3391,8 @@ Deno.test({
         "set -euo pipefail",
         'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
         'echo "skill=$SKILL_NAME"',
-        'echo "cdp=$2"',
-        'echo "url=$3"',
+        'echo "cdp=$AGENT_BROWSER_CDP"',
+        'echo "url=$1"',
         "",
       ].join("\n");
       await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
@@ -3470,11 +3470,7 @@ Deno.test({
                             arguments: JSON.stringify({
                               skill: "agent-browser",
                               path: "scripts/capture-workflow.sh",
-                              args: [
-                                "--cdp",
-                                "http://localhost:9362",
-                                "http://localhost:8000/piece",
-                              ],
+                              args: ["http://localhost:8000/piece"],
                             }),
                           },
                         }],
@@ -3521,9 +3517,11 @@ Deno.test({
       assertEquals(toolOutput.executionTarget, "host");
       assertStringIncludes(toolOutput.stdout ?? "", "target=host\n");
       assertStringIncludes(toolOutput.stdout ?? "", "skill=agent-browser\n");
+      // The script sees the lease endpoint through AGENT_BROWSER_CDP, and
+      // what it echoes back reaches the model with the endpoint scrubbed.
       assertStringIncludes(
         toolOutput.stdout ?? "",
-        "cdp=http://localhost:9362\n",
+        "cdp=<lease endpoint>\n",
       );
       assertStringIncludes(
         toolOutput.stdout ?? "",
@@ -3634,6 +3632,60 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
       transcript: [],
     }),
     'assistant -> tools: read_file(path="/workspace/README.md")\n',
+  );
+  // A browser call is summarized by its action and inert selectors; a fill
+  // value is what a run would disclose to the page, so it stays out of the
+  // operator line.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-1",
+          type: "function",
+          function: {
+            name: "browser",
+            arguments: '{"action":"open","url":"https://example.com/checkout"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: browser(action="open" url="https://example.com/checkout")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-2",
+          type: "function",
+          function: {
+            name: "browser",
+            arguments: '{"action":"fill","ref":"@e2","value":"a secret"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: browser(action="fill" ref="@e2")\n',
+  );
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-browser-3",
+          type: "function",
+          function: { name: "browser", arguments: "{}" },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: browser\n",
   );
   // A `describe_handle` call is summarized by the token it asks about, which
   // is what tells a transcript reader which reference the model checked.

@@ -1,10 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import type {
-  ClientCommit,
-  Operation,
-  SchedulerActionObservation,
-} from "../v2.ts";
+import type { ClientCommit, Operation } from "../v2.ts";
 import { classifyCommitTelemetry } from "../v2/commit-telemetry.ts";
 
 const commit = (
@@ -29,25 +25,6 @@ const sqliteOperation: Operation = {
   sql: "CREATE TABLE example (value TEXT)",
 };
 
-const schedulerObservation: SchedulerActionObservation = {
-  version: 1,
-  branch: "",
-  pieceId: "of:telemetry-piece",
-  processGeneration: 0,
-  actionId: "telemetry-action",
-  actionKind: "computation",
-  implementationFingerprint: "impl:telemetry",
-  runtimeFingerprint: "runtime:telemetry",
-  observedAtSeq: 0,
-  transactionKind: "action-run",
-  reads: [],
-  shallowReads: [],
-  actualChangedWrites: [],
-  currentKnownWrites: [],
-  materializerWriteEnvelopes: [],
-  status: "success",
-};
-
 describe("commit-telemetry", () => {
   it("returns `semantic` for non-SQLite entity operations", () => {
     expect(classifyCommitTelemetry(commit([semanticOperation]))).toEqual({
@@ -58,33 +35,9 @@ describe("commit-telemetry", () => {
     });
   });
 
-  it("returns `scheduler_observation` for scheduler-only requests", () => {
-    expect(
-      classifyCommitTelemetry(commit([], { schedulerObservation })),
-    ).toEqual({
-      kind: "scheduler_observation",
-      entityCount: 0,
-      schedulerObservationCount: 1,
-      sqliteOperationCount: 0,
-    });
-
-    expect(classifyCommitTelemetry(commit([], {
-      schedulerObservationBatch: [{
-        localSeq: 2,
-        reads: { confirmed: [], pending: [] },
-        schedulerObservation,
-      }, {
-        localSeq: 3,
-        reads: { confirmed: [], pending: [] },
-        schedulerObservation,
-      }],
-    }))).toEqual({
-      kind: "scheduler_observation",
-      entityCount: 0,
-      schedulerObservationCount: 2,
-      sqliteOperationCount: 0,
-    });
-  });
+  // Server-execution v2 stage C.2 removed the scheduler-observation wire
+  // fields, so no commit can classify as `scheduler_observation` anymore;
+  // the kind stays in the union so dashboards keep their shape.
 
   it("returns `sqlite` for SQLite-only requests", () => {
     expect(classifyCommitTelemetry(commit([sqliteOperation]))).toEqual({
@@ -97,22 +50,11 @@ describe("commit-telemetry", () => {
 
   it("returns `mixed` when several operation classes are present", () => {
     expect(classifyCommitTelemetry(
-      commit([semanticOperation, sqliteOperation], {
-        schedulerObservation,
-      }),
+      commit([semanticOperation, sqliteOperation]),
     )).toEqual({
       kind: "mixed",
       entityCount: 1,
-      schedulerObservationCount: 1,
-      sqliteOperationCount: 1,
-    });
-
-    expect(classifyCommitTelemetry(
-      commit([sqliteOperation], { schedulerObservation }),
-    )).toEqual({
-      kind: "mixed",
-      entityCount: 0,
-      schedulerObservationCount: 1,
+      schedulerObservationCount: 0,
       sqliteOperationCount: 1,
     });
   });

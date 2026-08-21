@@ -369,6 +369,14 @@ export class PatternUpdater {
             signal.throwIfAborted();
           }
           if (!canWrite(tx)) return false;
+          // The updater runs from a raw single-flight promise (no
+          // scheduler run stamps it), and the serving runtime runs with
+          // systemPatternAutoUpdate — bookkeeping per serving-loop.md
+          // §3d, RULED 2026-08-05.
+          runtime.stampServerRun(tx, {
+            actionId: `pattern-update/provenance/${resultCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
           applyPieceSourceTransition(
             runtime,
             resultCell,
@@ -580,6 +588,12 @@ export class PatternUpdater {
           signal.throwIfAborted();
         }
         if (!canWrite(tx)) return false;
+        // Async source-update transition — bookkeeping per
+        // serving-loop.md §3d, same reason as repairProvenance above.
+        runtime.stampServerRun(tx, {
+          actionId: `pattern-update/transition/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
         const candidate = resultCell.withTx(tx);
         if (
           argumentStillMatches !== undefined &&

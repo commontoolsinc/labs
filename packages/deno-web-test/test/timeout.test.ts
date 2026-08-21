@@ -1,7 +1,5 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 
-import { decode } from "@commonfabric/utils/encoding";
-
 import { applyDefaults, DEFAULT_TEST_TIMEOUT_MS } from "../config.ts";
 import { runDenoWebTest } from "./utils.ts";
 
@@ -11,27 +9,35 @@ import { runDenoWebTest } from "./utils.ts";
 // The harness now stops waiting on a test of its own accord, so a stuck test is
 // one named failure among otherwise normal results.
 Deno.test("a stuck test fails by name and the run continues", async function () {
-  const { success, stdout } = await runDenoWebTest("timeout-project");
-  const stdoutText = decode(stdout);
+  const run = await runDenoWebTest("timeout-project");
 
-  assert(!success, "the run fails");
-  assert(/hangs-forever \.\.\. .*FAILED/.test(stdoutText), "names the test");
-  assert(
-    /Timed out after 1000ms/.test(stdoutText),
+  run.assert(!run.success, "the run fails");
+  run.assert(
+    /hangs-forever \.\.\. .*FAILED/.test(run.stdoutText),
+    "names the test",
+  );
+  run.assert(
+    /Timed out after 1000ms/.test(run.stdoutText),
     "reports how long it waited",
   );
-  assert(
-    /a test at that point and calls it stuck/.test(stdoutText),
+  run.assert(
+    /a test at that point and calls it stuck/.test(run.stdoutText),
     "explains that this is a stuck-test detector",
   );
 
   // The point of failing the test rather than the run: everything else still
   // reports, including the tests queued behind the stuck one.
-  assert(/before-hang \.\.\. .*ok/.test(stdoutText), "earlier test ran");
-  assert(/after-hang \.\.\. .*ok/.test(stdoutText), "later test still ran");
-  assert(/2 passed \| 1 failed/.test(stdoutText), "summary is printed");
-  assert(
-    !/RetryError/.test(stdoutText),
+  run.assert(
+    /before-hang \.\.\. .*ok/.test(run.stdoutText),
+    "earlier test ran",
+  );
+  run.assert(
+    /after-hang \.\.\. .*ok/.test(run.stdoutText),
+    "later test still ran",
+  );
+  run.assert(/2 passed \| 1 failed/.test(run.stdoutText), "summary is printed");
+  run.assert(
+    !/RetryError/.test(run.stdoutText),
     "the harness reports before astral's deadline",
   );
 });

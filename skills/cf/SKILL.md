@@ -216,11 +216,12 @@ revision, so omitting the flags drops those test roots from that revision.
 A file that is not code — a fixture, a lookup table, a list of names — ships and
 is recovered with the source. Its bytes are stored verbatim: never parsed,
 type-checked, compiled, or importable, and the pattern reads one with
-`dataFile("/data/cities.json")` from `commonfabric`. That call is the
-declaration. Store the file under the deployment root at the path it names, and
-`new`, `setsrc`, `check`, `test`, and `dev` all attach it, the way they already
-follow what the source imports. A name with no file behind it fails the build
-and says which module read it.
+`dataFile("./data/cities.json")` from `commonfabric`. That call is the
+declaration, and its path resolves against the module that reads it, the way an
+import specifier does. Store the file where the call points and `new`, `setsrc`,
+`check`, `test`, and `dev` all attach it, the way they already follow what the
+source imports. A name with no file behind it fails the build and says which
+module read it.
 
 `--datafile <path>` attaches a file the source cannot name: one read by a
 computed path, or one that ships with a program that does not read it. It adds

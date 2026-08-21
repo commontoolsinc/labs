@@ -10,19 +10,31 @@ export function isPermanentRejection(
 }
 
 /**
- * The wire names of terminal commit rejections: a server-side commit-time
- * evaluation that DETERMINISTICALLY refused the committed data itself, so
- * re-running the identical handler recomputes the identical refused write and
- * can NEVER converge. Today: `RowLabelCommitError` — a CFC per-row label
- * commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated inside
- * `applyCommitTransaction`, rolls back the whole commit). The memory server
- * MUST serialize the class name unchanged (memory/v2/server.ts transact catch);
- * the runner keeps it through normalization (storage/v2.ts `toRejectedError`).
- * Keep the two in sync — the sqlite-cfc-commit-eval integration test exercises
- * the real server→runner path and fails if the name is dropped or renamed.
+ * The names of terminal commit rejections: a commit-time evaluation that
+ * DETERMINISTICALLY refused the committed data itself, so re-running the
+ * identical handler recomputes the identical refused write and can NEVER
+ * converge.
+ *
+ * - `RowLabelCommitError` (server-side, wire): a CFC per-row label
+ *   commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated
+ *   inside `applyCommitTransaction`, rolls back the whole commit). The
+ *   memory server MUST serialize the class name unchanged
+ *   (memory/v2/server.ts transact catch); the runner keeps it through
+ *   normalization (storage/v2.ts `toRejectedError`). Keep the two in
+ *   sync — the sqlite-cfc-commit-eval integration test exercises the
+ *   real server→runner path and fails if the name is dropped or renamed.
+ * - `SpeculativeBasisError` (client-side, server-execution v2 Phase 2 —
+ *   speculation.md §6, RULED 2026-08-13): the replica's loud export
+ *   refusal of a commit whose read basis names a SPECULATIVE overlay
+ *   layer. The layer exists only in the client process, so as a wire
+ *   pending-read dependency it can never resolve; a retry re-reads the
+ *   same live echo and refuses identically. Never crosses the wire —
+ *   minted in storage/v2.ts (`makeSpeculativeBasisRefusal`) before the
+ *   push.
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
+  "SpeculativeBasisError",
 ]);
 
 /**
@@ -30,8 +42,9 @@ const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
  * retrying can never resolve (see {@link TERMINAL_REJECTION_NAMES}). It is
  * terminal like a {@link isPermanentRejection}, but classified separately: a
  * permanent rejection is an idempotency/lineage precondition
- * (`origin-committed`/`receipt-exists`), whereas a terminal rejection is the
- * server refusing the committed rows on their own merits. Both must stop the
+ * (`origin-committed`/`receipt-exists`), whereas a terminal rejection refuses
+ * the committed data on its own merits (server commit-rule evaluation, or the
+ * client-side speculative-basis export refusal). Both must stop the
  * handler immediately: a doomed handler that keeps re-running through its retry
  * budget produces speculative rev bumps on each attempt that starve concurrent
  * sibling commits sharing reactive state. Unlike a stale-read

@@ -133,6 +133,23 @@ file's guarded define is a safe no-op in that case — it only registers when th
 component module didn't (and prevents duplicate-registration errors during hot
 module replacement). Keep both.
 
+### Never setAttribute in the constructor
+
+The custom-element spec forbids setting attributes during construction — the
+browser throws
+`Failed to execute 'createElement' on 'Document': The result
+must not have attributes`
+and the component silently fails to render. Set host attributes (`role`,
+`exportparts`, ARIA defaults) in `connectedCallback` instead, which is what the
+existing components do: `cf-tabs`, `cf-progress`, `cf-tab-list` and their
+siblings call `super.connectedCallback()` and then assign. Lit schedules the
+first update asynchronously, so attributes set immediately after the `super`
+call are still in place before rendering — only impose a specific ordering where
+a component actually needs one. A unit test that depends on these attributes has
+to connect the element (append it, or call `connectedCallback` directly in a
+narrow harness); `updated()` is a post-update hook and does not run the
+connection lifecycle.
+
 ## Theme Integration
 
 Most components should use `var(--cf-theme-*)` CSS variables with fallbacks

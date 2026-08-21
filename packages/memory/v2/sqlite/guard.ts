@@ -22,13 +22,9 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "blob_store",
   "authorization",
   "invocation",
-  "scheduler_observation",
-  "scheduler_observation_replay",
-  "scheduler_action_snapshot",
-  "scheduler_action_state",
-  "scheduler_context_floor",
-  "scheduler_read_index",
-  "scheduler_write_index",
+  "scheduler_basis",
+  "execution_lease",
+  "execution_outbox",
   "_cf_commit_watermark",
 ];
 

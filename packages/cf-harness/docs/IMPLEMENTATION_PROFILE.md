@@ -54,15 +54,16 @@ readiness.
   sidecars. Harness-local policy logic is conservative transport/enforcement,
   not the source of label meaning.
 - Host execution: no parent-run shell reaches the host. Two bounded host-side
-  surfaces exist beside the sandbox: the browser child profile's constrained
-  command/script policy, bound to an explicit local CDP lease, and the
-  `run_pattern` tool, which compiles model-authored pattern source and runs it
-  against the configured Fabric space over a lazy authorized session. The Fabric
-  identity remains outside Docker, the session is constrained to one configured
-  space, and the separate `assign_slug` tool registers a piece the run holds a
-  handle to in that space's piece list under a caller-chosen slug. Neither
-  surface admits arbitrary host commands, and both fabric-session tools are
-  present only when a fabric session is configured.
+  surfaces exist beside the sandbox: the browser child profile's typed `browser`
+  tool and allowlisted skill scripts, bound to an explicit local CDP lease the
+  harness attaches itself, and the `run_pattern` tool, which compiles
+  model-authored pattern source and runs it against the configured Fabric space
+  over a lazy authorized session. The Fabric identity remains outside Docker,
+  the session is constrained to one configured space, and the separate
+  `assign_slug` tool registers a piece the run holds a handle to in that space's
+  piece list under a caller-chosen slug. Neither surface admits arbitrary host
+  commands, and both fabric-session tools are present only when a fabric session
+  is configured.
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.
@@ -83,9 +84,11 @@ Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `write_file`, `delegate_task`, `describe_handle`, and `run_pattern`. Individual
 runs receive only their configured subset; `web_fetch` and `run_skill_script`
 are not in the ordinary default surface, and `run_pattern` additionally requires
-the three `--fabric-*` session flags. `bash-no-sandbox` exists only as a
-built-in used by authorized child profiles and cannot be selected as a parent
-CLI tool.
+the three `--fabric-*` session flags. `browser` exists only as a built-in used
+by the authorized browser child profile and cannot be selected as a parent CLI
+tool; it drives the host `agent-browser` CLI through a typed action vocabulary,
+with the Browser Access CDP endpoint attached by the harness rather than written
+by the model.
 
 `describe_handle` reports the referent's structural schema and path segments,
 never its value. It prefers the session Fabric's declared shape when available

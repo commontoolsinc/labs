@@ -12,7 +12,6 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -29,12 +28,20 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import {
+  createDefaultTraversalContext,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 function getTraverser(
   store: Map<string, Revision<State>>,
@@ -43,7 +50,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function putDoc(
@@ -56,7 +67,6 @@ function putDoc(
     the: TYPE,
     of: uri as Entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: uri as Entity }),
     since,
   };
   store.set(`${revision.of}/${revision.the}`, revision);

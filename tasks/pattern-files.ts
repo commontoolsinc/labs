@@ -18,7 +18,6 @@ export const PATTERNS_DIR = "packages/patterns";
  */
 const NON_PATTERN_FILES = new Set([
   "mod.ts",
-  "scrabble/scrabble-words.ts",
 ]);
 
 const NON_PATTERN_PREFIXES = [

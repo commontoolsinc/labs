@@ -33,15 +33,17 @@ describe("split-clock readiness decisions", () => {
 
   it("does not resolve idle for an event straddled between two clock reads", () => {
     const NOT_BEFORE = 150;
-    // A buggy two-read decision sees 100 (parked) then 200 (ready) → neither.
-    stubClock([100, 200]);
+    // assessPullWork consumes one clock read over the empty work state (50,
+    // before the gate); the park check then reads 100 (parked). A buggy
+    // two-read park decision would see 100 (parked) then 200 (ready) →
+    // neither.
+    stubClock([50, 100, 200]);
 
     let idleResolved = false;
     const state = {
-      // assessPullWork short-circuits on the rehydration barrier before it
-      // reads the clock, so the only clock reads come from the park check.
       pullScheduling: {
-        hasPendingInitialRehydrations: () => true,
+        pending: new Set(),
+        nodes: { getInvalidNodes: () => [] },
       } as unknown as PullSchedulingState,
       eventQueue: [{ notBefore: NOT_BEFORE } as unknown as QueuedEvent],
       idlePromises: [() => {

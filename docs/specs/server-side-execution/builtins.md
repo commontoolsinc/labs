@@ -39,7 +39,7 @@ key; client speculation reads through (speculation.md §2).
 
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
-| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); migrate it onto the result doc | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
+| `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); the "migrate it onto the result doc" move was DEFERRED at stage G (deliberate): the internal-cell hash is functionally equivalent committed state (T10.Q1 — §4's memo rule reads it the same), and the migration is an OFF-arm cell-shape change, so it waits for an OFF-arm ruling batch that wants it (plausibly never) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |
 | `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
 | `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` already sits on the result cell today (`llm.ts:716-822`) — the precedent §4 generalizes | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
@@ -136,6 +136,54 @@ stream is passed to other spaces, which then append intents to it.
   LOAD-BEARING on main in `filter.ts`/`flatmap.ts` (#4367, #4438), so
   "do not port" is not on the table; decide its end state against
   serving-loop.md §6 when Phase 1 lands the list coordinators.
+- `wish` home-space materialization under serving — LIFTED by Phase 5
+  as **per-demanding-identity wish resolution** (RULED 2026-08-14;
+  supersedes the (c)-ruled interim refusal): on a serving runtime the
+  wish's home-space targets (`#favorites`/`#journal`/`#profile`
+  family) resolve against the RUN's demanding identity — the
+  demand-supplied instance identity (P2-F's run supply) or the
+  event's stamped actor, read from the stamped run context — NEVER
+  the service identity (`Runtime.homeSpacePrincipalFor`); a
+  home-space wish with NO demanding identity refuses loudly (a
+  WishError at the resolution guards; a hard error at the cell
+  resolution backstop). Its home-space bootstrap writes ride
+  protocol.md §2b's `.inSpace` sanctioned crossing — authored-class,
+  foreign-first, under the demanding principal's acting identity +
+  grant, ADMITTED at the wave's accept gate because the target IS the
+  demander's own home space (the gate's owner-by-identity structural
+  grant, serving-loop.md §3d — carriage alone admits nothing). A
+  carriage-less or UNGRANTED foreign write — the lunch-wall class,
+  and an actor reaching beyond its authority — still refuses at
+  accumulation, action-scoped and counted (`foreignWriteRefusals`).
+  The serving side's sidecar compile-cache context is the SERVED
+  space, never the service identity's own (the same class of
+  ambient-identity leak, closed with the same lift), and the sidecar
+  SURFACES key per demanding identity — the result/ready cells AND
+  the builtin's per-node closure caches alike (one wish node serves
+  every demander; a shared cache slot would hand demander #2
+  demander #1's create surface and clobber the pending input).
+  Client wishes are byte-identical to before (cardinality 1: the
+  runtime's own user; the client suggestion-cell cause carries no
+  user key, exactly as before). *Phase 7: on a flag-ON NON-serving
+  runtime the sidecar surfaces (create/picker/suggestion) are the
+  SpaceServer's compile-instantiate steps (§3) — the client's
+  speculative wish run REFERENCES the served sidecar cell
+  (cause-derived, so both sides name one doc) and never fetches,
+  instantiates or writes it (pre-Phase-7 a flag-ON client's
+  bookkeeping-stamped instantiation raced the server's on the same
+  docs). The OFF arm and the serving runtime are unchanged.*
+  *Read authority for the demanding user's home space (Phase 7):
+  the served wish's foreign reads ride the serving runtime's loopback
+  plane, whose sessions are admitted by the memory ACL as the process
+  identity — under the flag the toolshed process's identity is a
+  memory service principal (protocol.md §2b's free-read row;
+  `memoryServiceDidsFor`), the posture every deployment checklist
+  already requires of the operator DID. Honestly (P7 independent review
+  finding 6): a service principal is implicit OWNER for its sessions on
+  every space, so this WIDENS the process identity's ORDINARY session
+  traffic to OWNER everywhere; it is not widened at the wave's §2b
+  accept gate (which checks the ACTING identity's grant). The narrower
+  read-only shape is a ruled item — verification-coverage.md OW31.*
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

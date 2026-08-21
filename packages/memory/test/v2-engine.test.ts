@@ -3704,3 +3704,39 @@ Deno.test("memory v2 engine: nonRecursive shape read conflicts with a mergeable 
     await Deno.remove(path);
   }
 });
+
+Deno.test("read forwards an explicit scopeKey to readState (protocol.md §2's read row — the exported wrapper must not drop it)", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    // Alice's session writes her user-scoped instance.
+    applyCommit(engine, {
+      sessionId: "sess-alice",
+      space: "did:key:space",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:scoped-read",
+          scope: "user",
+          value: { value: { owner: "alice" } },
+        }],
+      },
+    });
+    // A DIFFERENT identity reads the instance by explicit key. The
+    // wrapper must forward the key: dropping it resolves the scope from
+    // (principal, sessionId) and returns the WRONG document (the
+    // reader's own empty instance).
+    const doc = read(engine, {
+      id: "entity:scoped-read",
+      scopeKey: "user:did%3Akey%3Aalice",
+      principal: "did:key:service",
+      sessionId: "sess-service",
+    });
+    assertEquals(doc?.value, { owner: "alice" });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

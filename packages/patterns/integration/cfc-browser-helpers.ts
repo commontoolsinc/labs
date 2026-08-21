@@ -1950,6 +1950,51 @@ export interface ChurnCounters {
   scheduleRunErrors: number;
   /** Event handlers that lost the receipt race permanently (`scheduler/event-lost-race`). */
   eventLostRaces: number;
+  /** Server-execution v2 stage C tuning T2 (flag-ON clients only, else 0):
+   * event-handler echoes dropped at seal because their intent was already
+   * terminal (`speculation-overlay/late-echo-dropped`) — the late-echo
+   * class the two-browsers lockdown stall belonged to. */
+  overlayLateEchoDrops: number;
+  /** Stage C tuning T2: overlay sweeps the replica's arrival wake ran
+   * (`speculation-overlay/arrival-sweep`) — served values arriving
+   * decoupled from a watermark advance. */
+  overlayArrivalSweeps: number;
+  /** Stage C design (e): intent checks the overlay's storage-notification
+   * listener ran (`speculation-overlay/intent-check`) — one per fire plus
+   * one per coalesced sidecar change while intents are outstanding; never
+   * a scheduler run. */
+  overlayIntentChecks: number;
+  /** Stage C design (e): intents resolved by their tracked entry's own
+   * consequence mark (`speculation-overlay/intent-retired-by-consequence-of`)
+   * — the sanctioned `consequenceOf` carrier. */
+  overlayIntentsByConsequenceOf: number;
+  /** Stage C design (e): intent-origin echoes retired by the watermark
+   * BACKSTOP instead (`speculation-overlay/intent-echo-retired-by-backstop`). */
+  overlayIntentEchoBackstops: number;
+  /** Stage C W2.1: client CASCADE-child echoes retired because an ancestor
+   * intent's terminal consequence arrived (`speculation-overlay/
+   * cascade-echo-retired`) — the W0 l3 "duplicate join" class: the join is
+   * the click handler's cascade child, its echo carries a client-minted id
+   * no mark ever names and writes an entity doc the server never writes. */
+  overlayCascadeEchoRetired: number;
+  /** Stage C W2.1: the subset retired on a consequenced parent's mark
+   * while NO doc the echo wrote held a confirmed value at or after the
+   * MARK frame's seq (`speculation-overlay/cascade-echo-retired-
+   * unarrived`) — the FLICKER witness: the server's cascade child had
+   * not landed at this client when its echo went (the
+   * purged-LT1-leftover shape, W3's α1: drained a wave after the
+   * parent's consequence). Keyed on the MARK's frame, not the echo's
+   * read basis (a concurrent writer moves a doc past the basis without
+   * the child having landed). A HEURISTIC — the shape-(b) decision
+   * instrument, so read the biases (combined review 2026-08-19, F4/F5):
+   * it UNDER-counts the coalesced-purged shape (a foreign write to a
+   * written doc landing in the mark's own frame reads "arrived" — e.g.
+   * both voters marking in ONE commit that carries the OTHER voter's
+   * add while THIS voter's child was purged), and OVER-counts on the
+   * equality cutoff (an unchanged authoritative value moves no seq and
+   * reads "unarrived"). Treat a nonzero reading as real flicker
+   * evidence and a zero as NOT proof of none. */
+  overlayCascadeEchoFlickers: number;
 }
 
 export interface BrowserLoadSummary {
@@ -2087,6 +2132,13 @@ export async function collectBrowserLoadSummary(
       commitRejected: 0,
       scheduleRunErrors: 0,
       eventLostRaces: 0,
+      overlayLateEchoDrops: 0,
+      overlayArrivalSweeps: 0,
+      overlayIntentChecks: 0,
+      overlayIntentsByConsequenceOf: 0,
+      overlayIntentEchoBackstops: 0,
+      overlayCascadeEchoRetired: 0,
+      overlayCascadeEchoFlickers: 0,
     };
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
@@ -2139,6 +2191,34 @@ export async function collectBrowserLoadSummary(
       churn.commitRejected = countOf("storage.v2", "commit-rejected");
       churn.scheduleRunErrors = countOf("scheduler", "schedule-run-error");
       churn.eventLostRaces = countOf("scheduler", "event-lost-race");
+      churn.overlayLateEchoDrops = countOf(
+        "speculation-overlay",
+        "late-echo-dropped",
+      );
+      churn.overlayArrivalSweeps = countOf(
+        "speculation-overlay",
+        "arrival-sweep",
+      );
+      churn.overlayIntentChecks = countOf(
+        "speculation-overlay",
+        "intent-check",
+      );
+      churn.overlayIntentsByConsequenceOf = countOf(
+        "speculation-overlay",
+        "intent-retired-by-consequence-of",
+      );
+      churn.overlayIntentEchoBackstops = countOf(
+        "speculation-overlay",
+        "intent-echo-retired-by-backstop",
+      );
+      churn.overlayCascadeEchoRetired = countOf(
+        "speculation-overlay",
+        "cascade-echo-retired",
+      );
+      churn.overlayCascadeEchoFlickers = countOf(
+        "speculation-overlay",
+        "cascade-echo-retired-unarrived",
+      );
     } catch {
       // Worker may be disposed during teardown — main-thread IPC still tells
       // the contention story.
@@ -2162,6 +2242,330 @@ export async function collectBrowserLoadSummary(
  * `run` records the elapsed ms even when the wrapped step throws, so a timed-
  * out propagation wait still shows up in the summary.
  */
+// ---------------------------------------------------------------------------
+// Sender-echo probe (stage-C W4's build item; W2 flag 3): client-local
+// speculation latency — from the sender's own trusted click to the sender's
+// OWN speculative render of the value it authored (the overlay echo). The
+// arrival series times send-click → the OTHER browser's render; nothing
+// measured the preserved property that the sender's local echo stays in the
+// low-millisecond class. Both timestamps are taken on the SAME page's
+// `performance.now()` clock — the click at a capture-phase listener when the
+// trusted click event is dispatched in the page, the render inside a
+// MutationObserver callback when the armed text is first present in the
+// armed selector's deep text — so no CDP round-trip skews the difference.
+//
+// Measurement-only: installed by the opt-in benchmark legs, never by the
+// ordinary gate steps, and it touches no production code. The DOM-arrival
+// definition of "render" matches the arrival series' (`waitForText` reads
+// the DOM), so the two numbers are comparable side by side.
+//
+// The probe keeps its own observer set (document + every open shadow root,
+// present and future via an `attachShadow` chain-wrap — the same coverage
+// rule as `waitForCondition`'s pulse hub in packages/integration/utils.ts,
+// replicated privately so a probe bug can never perturb the harness's own
+// wait machinery). The per-mutation check short-circuits unless an armed,
+// clicked, unsampled expectation exists, so the probe's steady-state cost is
+// one no-op callback per mutation batch.
+
+/** One sampled click→own-render echo. All times are page-clock ms. */
+export type SenderEchoSample = {
+  label: string;
+  text: string;
+  /** performance.now() of the last trusted click seen while armed. */
+  clickMs: number;
+  /** performance.now() when the armed text was first observed in the DOM. */
+  renderMs: number;
+  /** renderMs − clickMs: the sender-side speculative echo latency. */
+  echoMs: number;
+  /** Trusted clicks observed while armed (a re-aimed click re-stamps). */
+  clicks: number;
+};
+
+/** An armed expectation that produced no sample, and why — reported, never
+ * silently dropped. `pre-armed`: the text was already rendered at arm time
+ * (the sample would not measure the click). `unclicked` / `unrendered`: a
+ * later arm or the final read found it still waiting. */
+export type SenderEchoAbandoned = {
+  label: string;
+  text: string;
+  reason: "pre-armed" | "unclicked" | "unrendered";
+};
+
+export type SenderEchoReport = {
+  samples: SenderEchoSample[];
+  abandoned: SenderEchoAbandoned[];
+};
+
+type SenderEchoPageState = {
+  pending?: {
+    label: string;
+    text: string;
+    selector: string;
+    armedMs: number;
+    clickMs?: number;
+    clicks: number;
+  };
+  samples: SenderEchoSample[];
+  abandoned: SenderEchoAbandoned[];
+};
+
+type SenderEchoGlobal = typeof globalThis & {
+  __cfcSenderEcho?: SenderEchoPageState & { check: () => void };
+};
+
+/** Install the echo probe on `page`. Idempotent. Must run before
+ * {@link armSenderEcho}; install it once the page is logged in and rendered
+ * so the open shadow roots exist to be scanned. */
+export async function installSenderEchoProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const g = globalThis as SenderEchoGlobal;
+    if (g.__cfcSenderEcho) return;
+
+    // Shadow-piercing collect + text, self-contained (the probe cannot
+    // close over module code). `textContent` (not innerText) keeps the
+    // per-mutation check layout-free; visibility subtleties do not apply
+    // to the rendered-transcript / tally elements this measures.
+    const collect = (selector: string): Element[] => {
+      const out: Element[] = [];
+      const walk = (root: Document | ShadowRoot) => {
+        out.push(...root.querySelectorAll(selector));
+        for (const el of root.querySelectorAll("*")) {
+          const sr = (el as HTMLElement).shadowRoot;
+          if (sr) walk(sr);
+        }
+      };
+      walk(document);
+      return out;
+    };
+    const deepText = (element: Element): string => {
+      const parts: string[] = [element.textContent ?? ""];
+      const walk = (root: Element | ShadowRoot) => {
+        for (const el of root.querySelectorAll("*")) {
+          const sr = (el as HTMLElement).shadowRoot;
+          if (sr) {
+            parts.push(sr.textContent ?? "");
+            walk(sr);
+          }
+        }
+      };
+      const own = (element as HTMLElement).shadowRoot;
+      if (own) {
+        parts.push(own.textContent ?? "");
+        walk(own);
+      }
+      walk(element);
+      return parts.join(" ");
+    };
+
+    const check = () => {
+      const state = g.__cfcSenderEcho;
+      const pending = state?.pending;
+      if (!state || !pending || pending.clickMs === undefined) return;
+      const found = collect(pending.selector).some((el) =>
+        deepText(el).includes(pending.text)
+      );
+      if (!found) return;
+      const renderMs = performance.now();
+      state.samples.push({
+        label: pending.label,
+        text: pending.text,
+        clickMs: pending.clickMs,
+        renderMs,
+        echoMs: renderMs - pending.clickMs,
+        clicks: pending.clicks,
+      });
+      state.pending = undefined;
+    };
+
+    // Private observer set: document + every open shadow root, present and
+    // future. Chain-wraps attachShadow (the pulse hub's wrap, if installed,
+    // composes with this one — both fire).
+    const observed = new WeakSet<Document | ShadowRoot>();
+    const retained: MutationObserver[] = [];
+    const observe = (root: Document | ShadowRoot) => {
+      if (observed.has(root)) return;
+      observed.add(root);
+      const mo = new MutationObserver(check);
+      retained.push(mo);
+      mo.observe(root, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+    };
+    const scan = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll("*")) {
+        if (el.shadowRoot) {
+          observe(el.shadowRoot);
+          scan(el.shadowRoot);
+        }
+      }
+    };
+    observe(document);
+    scan(document);
+    const proto = Element.prototype as Element & {
+      attachShadow: (init: ShadowRootInit) => ShadowRoot;
+    };
+    const original = proto.attachShadow;
+    proto.attachShadow = function (
+      this: Element,
+      init: ShadowRootInit,
+    ): ShadowRoot {
+      const root = original.call(this, init);
+      observe(root);
+      return root;
+    };
+
+    // The click stamp: capture phase, trusted events only (the harness's
+    // CDP click is trusted; synthetic dispatches are not). A re-dispatched
+    // click while still pending re-stamps — the earlier one missed the
+    // control, so the last click is the one whose echo renders.
+    globalThis.addEventListener("click", (event) => {
+      const pending = g.__cfcSenderEcho?.pending;
+      if (!pending || !(event as MouseEvent).isTrusted) return;
+      pending.clickMs = performance.now();
+      pending.clicks += 1;
+    }, true);
+
+    g.__cfcSenderEcho = { samples: [], abandoned: [], check };
+  });
+}
+
+/** Arm one expectation: the next trusted click on `page` starts the clock,
+ * and `text` first appearing in `selector`'s deep text stops it. Call after
+ * the draft is filled and immediately before the click. An expectation whose
+ * text is already rendered is recorded `pre-armed` and NOT armed; a previous
+ * expectation still pending is recorded abandoned. */
+export async function armSenderEcho(
+  page: Page,
+  label: string,
+  selector: string,
+  text: string,
+): Promise<void> {
+  await page.evaluate(
+    (label: string, selector: string, text: string) => {
+      const g = globalThis as SenderEchoGlobal;
+      const state = g.__cfcSenderEcho;
+      if (!state) {
+        throw new Error(
+          "senderEcho: probe not installed (call installSenderEchoProbe first)",
+        );
+      }
+      const prior = state.pending;
+      if (prior) {
+        state.abandoned.push({
+          label: prior.label,
+          text: prior.text,
+          reason: prior.clickMs === undefined ? "unclicked" : "unrendered",
+        });
+        state.pending = undefined;
+      }
+      // Pre-check with the same deep-text rule the check uses: arm only if
+      // the text is not already rendered.
+      const collect = (selector: string): Element[] => {
+        const out: Element[] = [];
+        const walk = (root: Document | ShadowRoot) => {
+          out.push(...root.querySelectorAll(selector));
+          for (const el of root.querySelectorAll("*")) {
+            const sr = (el as HTMLElement).shadowRoot;
+            if (sr) walk(sr);
+          }
+        };
+        walk(document);
+        return out;
+      };
+      const deepText = (element: Element): string => {
+        const parts: string[] = [element.textContent ?? ""];
+        const walk = (root: Element | ShadowRoot) => {
+          for (const el of root.querySelectorAll("*")) {
+            const sr = (el as HTMLElement).shadowRoot;
+            if (sr) {
+              parts.push(sr.textContent ?? "");
+              walk(sr);
+            }
+          }
+        };
+        const own = (element as HTMLElement).shadowRoot;
+        if (own) {
+          parts.push(own.textContent ?? "");
+          walk(own);
+        }
+        walk(element);
+        return parts.join(" ");
+      };
+      if (collect(selector).some((el) => deepText(el).includes(text))) {
+        state.abandoned.push({ label, text, reason: "pre-armed" });
+        return;
+      }
+      state.pending = {
+        label,
+        text,
+        selector,
+        armedMs: performance.now(),
+        clicks: 0,
+      };
+    },
+    { args: [label, selector, text] },
+  );
+}
+
+/** Read the probe's samples and abandoned rows. A still-pending expectation
+ * is flushed into `abandoned` (the read is the series' end). */
+export async function readSenderEchoReport(
+  page: Page,
+): Promise<SenderEchoReport> {
+  return await page.evaluate(() => {
+    const g = globalThis as SenderEchoGlobal;
+    const state = g.__cfcSenderEcho;
+    if (!state) return { samples: [], abandoned: [] };
+    const prior = state.pending;
+    if (prior) {
+      state.abandoned.push({
+        label: prior.label,
+        text: prior.text,
+        reason: prior.clickMs === undefined ? "unclicked" : "unrendered",
+      });
+      state.pending = undefined;
+    }
+    return { samples: state.samples, abandoned: state.abandoned };
+  }) as SenderEchoReport;
+}
+
+/** One summary line + the per-event series, in the benchmark logs' style
+ * (`[sender-echo] …`; quantiles as the chat series computes them:
+ * sorted[floor(f·n)] clamped, so p95 at n=20 is the max). */
+export function logSenderEchoSummary(
+  context: string,
+  arm: string,
+  report: SenderEchoReport,
+): void {
+  const sorted = report.samples.map((s) => s.echoMs).sort((a, b) => a - b);
+  const q = (f: number) =>
+    sorted.length === 0
+      ? undefined
+      : sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
+  const fmt = (v: number | undefined) => v === undefined ? "n/a" : v.toFixed(1);
+  console.log(
+    `[sender-echo] ctx=${context} arm=${arm} n=${sorted.length} ` +
+      `p50=${fmt(q(0.5))}ms p95=${fmt(q(0.95))}ms ` +
+      `min=${fmt(sorted[0])}ms max=${fmt(sorted[sorted.length - 1])}ms ` +
+      `abandoned=${report.abandoned.length}`,
+  );
+  if (report.samples.length > 0) {
+    console.log(
+      `[sender-echo] per-event ms: ${
+        report.samples.map((s) => s.echoMs.toFixed(1)).join(" ")
+      }`,
+    );
+  }
+  for (const row of report.abandoned) {
+    console.log(
+      `[sender-echo] abandoned: ${row.label} (${row.reason}) text="${row.text}"`,
+    );
+  }
+}
+
 export class StepTimer {
   #rows: Array<{ label: string; ms: number }> = [];
 
@@ -2210,7 +2614,14 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` commitConflicts=${c.commitConflicts} commitReverts=${c.commitReverts}` +
     ` commitRejected=${c.commitRejected}` +
     ` scheduleRunErrors=${c.scheduleRunErrors}` +
-    ` eventLostRaces=${c.eventLostRaces}`;
+    ` eventLostRaces=${c.eventLostRaces}` +
+    ` overlayLateEchoDrops=${c.overlayLateEchoDrops}` +
+    ` overlayArrivalSweeps=${c.overlayArrivalSweeps}` +
+    ` overlayIntentChecks=${c.overlayIntentChecks}` +
+    ` overlayIntentsByConsequenceOf=${c.overlayIntentsByConsequenceOf}` +
+    ` overlayIntentEchoBackstops=${c.overlayIntentEchoBackstops}` +
+    ` overlayCascadeEchoRetired=${c.overlayCascadeEchoRetired}` +
+    ` overlayCascadeEchoFlickers=${c.overlayCascadeEchoFlickers}`;
   const pendingLine = summary.pendingIpc.length === 0
     ? "    (none)"
     : summary.pendingIpc.map((row) =>

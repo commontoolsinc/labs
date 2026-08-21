@@ -452,14 +452,14 @@ Deno.test("CfHarnessEngine does not apply the CFC transport floor to an injected
   assertEquals(typeof result.output.outputId, "string");
 });
 
-Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {
+Deno.test("CfHarnessEngine runs browser actions on the host with the configured lease", async () => {
   const workspaceHostPath = await Deno.makeTempDir({
-    prefix: "cf-harness-engine-missing-",
+    prefix: "cf-harness-engine-browser-",
   });
   const runner = new FakeProcessRunner([{
-    stdout: "",
-    stderr: "ls: missing.txt: No such file or directory\n",
-    exitCode: 1,
+    stdout: "Example Domain\n",
+    stderr: "",
+    exitCode: 0,
   }]);
   const engine = new CfHarnessEngine({
     runId: "run-1",
@@ -467,42 +467,38 @@ Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing wor
     sandboxRuntime: new FakeSandboxRuntime(),
     processRunner: runner,
     cfcEnforcementMode: "observe",
+    browserAccess: {
+      type: "cf-harness.chat.browser-access-lease",
+      leaseId: "lease-1",
+      cdpUrl: "http://localhost:9362",
+    },
     now: () => "2026-04-29T23:20:00.000Z",
   });
 
-  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
-    command: "ls missing.txt",
+  const result = await engine.invokeBuiltinTool("browser", {
+    action: "get",
+    kind: "title",
   });
 
   assertEquals(runner.calls, [{
-    command: "ls",
-    args: ["missing.txt"],
+    command: "agent-browser",
+    args: ["--cdp", "http://localhost:9362", "get", "title"],
     cwd: workspaceHostPath,
     clearEnv: true,
     env: { PATH: runner.calls[0]!.env!.PATH },
     timeoutMs: 30_000,
   }]);
   assertEquals(result.output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr: "ls: missing.txt: No such file or directory\n",
-    exitCode: 1,
-    cwd: "/workspace",
+    outputId: "run-1:browser:1",
+    status: "ok",
+    output: "Example Domain\n",
   });
 });
 
-Deno.test("CfHarnessEngine denies bash-no-sandbox missing paths below escaping symlinks", async () => {
+Deno.test("CfHarnessEngine refuses browser actions when no lease is configured", async () => {
   const workspaceHostPath = await Deno.makeTempDir({
-    prefix: "cf-harness-engine-workspace-",
+    prefix: "cf-harness-engine-browser-noleases-",
   });
-  const outsideHostPath = await Deno.makeTempDir({
-    prefix: "cf-harness-engine-outside-",
-  });
-  await Deno.symlink(
-    outsideHostPath,
-    `${workspaceHostPath}/outside-link`,
-    { type: "dir" },
-  );
   const runner = new FakeProcessRunner();
   const engine = new CfHarnessEngine({
     runId: "run-1",
@@ -513,18 +509,16 @@ Deno.test("CfHarnessEngine denies bash-no-sandbox missing paths below escaping s
     now: () => "2026-04-29T23:20:00.000Z",
   });
 
-  const result = await engine.invokeBuiltinTool("bash-no-sandbox", {
-    command: "ls outside-link/missing.txt",
+  const result = await engine.invokeBuiltinTool("browser", {
+    action: "snapshot",
   });
 
   assertEquals(runner.calls, []);
   assertEquals(result.output, {
-    outputId: "run-1:bash-no-sandbox:1",
-    stdout: "",
-    stderr:
-      "bash-no-sandbox command denied: path outside-link/missing.txt must resolve within or below the workspace",
-    exitCode: 126,
-    cwd: "/workspace",
+    outputId: "run-1:browser:1",
+    status: "error",
+    code: "lease_unavailable",
+    message: "browser requires a Browser Access lease, and this run has none",
   });
 });
 
@@ -563,9 +557,6 @@ Deno.test("CfHarnessEngine reserves artifact roots through host realpath mapping
     const readResult = await engine.invokeBuiltinTool("read_file", {
       path: "artifact-link/run-state.json",
     });
-    const lsResult = await engine.invokeBuiltinTool("bash-no-sandbox", {
-      command: "ls artifact-link",
-    });
 
     assertEquals(readResult.output, {
       outputId: createToolOutputId(
@@ -582,18 +573,6 @@ Deno.test("CfHarnessEngine reserves artifact roots through host realpath mapping
         path: "/workspace/artifact-link/run-state.json",
         detail: RESERVED_ARTIFACT_PATH_DETAIL,
       },
-    });
-    assertEquals(lsResult.output, {
-      outputId: createToolOutputId(
-        "run-artifact-reserved",
-        "bash-no-sandbox",
-        2,
-      ),
-      stdout: "",
-      stderr:
-        "bash-no-sandbox command denied: path artifact-link is reserved for cf-harness artifacts",
-      exitCode: 126,
-      cwd: "/workspace",
     });
     assertEquals(hostRunner.calls, []);
     assertEquals(sandbox.shellRequests.length, 1);

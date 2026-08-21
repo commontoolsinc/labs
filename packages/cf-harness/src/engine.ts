@@ -109,6 +109,10 @@ import type {
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
+  type BrowserToolInput,
+  type BrowserToolOutput,
+} from "./tools/browser.ts";
+import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
 } from "./tools/describe-handle.ts";
@@ -152,7 +156,7 @@ import {
 
 export interface BuiltinToolInputMap {
   bash: BashToolInput;
-  "bash-no-sandbox": BashToolInput;
+  browser: BrowserToolInput;
   read_file: ReadFileToolInput;
   view_image: ViewImageToolInput;
   web_fetch: WebFetchToolInput;
@@ -168,7 +172,7 @@ export interface BuiltinToolInputMap {
 
 export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
-  "bash-no-sandbox": BashToolOutput;
+  browser: BrowserToolOutput;
   read_file: ReadFileToolOutput;
   view_image: ViewImageToolOutput;
   web_fetch: WebFetchToolOutput;
@@ -1199,7 +1203,7 @@ export class CfHarnessEngine {
   } {
     if (this.#hostMounts.length === 0) {
       throw new Error(
-        "bash-no-sandbox requires a host mount path to map sandbox paths",
+        "host execution requires a host mount path to map sandbox paths",
       );
     }
     const sandboxPath = this.sandbox.resolvePath(

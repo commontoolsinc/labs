@@ -3,10 +3,12 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceScopeAndURI } from "./scheduler.ts";
+import { entityKey } from "./scheduler/keys.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -41,11 +43,19 @@ export function sortAndCompactPaths(
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
+  // The instance segment: an address that NAMES its instance
+  // (`scopeKey`, server-execution v2 stage A — a served per-instance
+  // run's logged read) compares by that key, so the union of one node's
+  // N instance runs' logs keeps N reads of one doc apart instead of
+  // compacting them into one; an address without one compares by scope
+  // NAME as before (byte-identical ordering and compaction OFF).
+  const instanceOf = (address: IMemorySpaceAddress): string =>
+    address.scopeKey ?? normalizeCellScope(address.scope);
   const sorted = unsorted.toSorted((a, b) => {
     if (a.space !== b.space) return a.space < b.space ? -1 : 1;
     if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-    const aScope = normalizeCellScope(a.scope);
-    const bScope = normalizeCellScope(b.scope);
+    const aScope = instanceOf(a);
+    const bScope = instanceOf(b);
     if (aScope !== bScope) return aScope < bScope ? -1 : 1;
     return comparePaths(a.path, b.path);
   });
@@ -55,8 +65,7 @@ export function sortAndCompactPaths(
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
-      normalizeCellScope(sorted[i].scope) ===
-        normalizeCellScope(previous.scope) &&
+      instanceOf(sorted[i]) === instanceOf(previous) &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this
@@ -78,12 +87,13 @@ export function sortAndCompactPaths(
  */
 export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
+  identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceScopeAndURI = `${address.space}/${
-      normalizeCellScope(address.scope)
-    }/${address.id}`;
+    // Same key vocabulary as the dependency graph — one map entry per
+    // scope instance, via the shared constructor (no inline restatement).
+    const key = entityKey(address, identity);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }

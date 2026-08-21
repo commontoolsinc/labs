@@ -81,6 +81,14 @@ composite web component; use a flattened-tree tool or the pierce fallback below.
      probe.collect("cf-input[role='textbox']").length > 0);
    ```
 
+   Every navigation a `ShellIntegration` page performs — `shell.goto()`, and a
+   bare `page.goto()` or `page.reload()` on the page it hands out — returns
+   only once the shell behind it can be driven. The shell publishes
+   `globalThis.app`, the handle a driver reaches it through, as the last step
+   of a bootstrap module whose body runs on past the document's `load` event,
+   so a navigation that settled on `load` would otherwise hand back a page
+   whose shell is still booting.
+
 ## Why This Works
 
 - **Host roles** give single-control `cf-*` components one stable semantic
@@ -174,7 +182,7 @@ describe("shadow DOM component test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await PiecesController.initialize({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });

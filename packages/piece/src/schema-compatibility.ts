@@ -154,48 +154,67 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
 
 /**
  * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`
- * that record the content hash of the authoring module rather than the
- * authorization's consumer-facing contract.
+ * that a backward-compatibility comparison ignores, because the runtime's
+ * write-time authorization does not hold them fixed either.
+ *
+ * `moduleIdentity` (and the legacy `bundleId`) is the content hash of the
+ * authoring module. It rehashes on any edit to that module, and the runtime
+ * re-verifies the live writer's `moduleIdentity` against the claim at write
+ * time (`writeAuthorizedByReason`, `packages/runner/src/cfc/prepare.ts`), so the
+ * comparison defers it to that live check rather than reading a recompile as a
+ * contract change.
+ *
+ * `file` is the module's source-file spelling, and that spelling is
+ * resolver-dependent: the same module spells differently across piece-deploy
+ * staging, piece-manifest-relative, and HTTP-resolved compiles
+ * (`packages/runner/src/cfc/writer-claim-correspondence.ts`, labs#4772). The
+ * runtime authorization ignores `file` entirely — it anchors on `moduleIdentity`
+ * plus the binding `path` — so two claims that differ only in `file` authorize
+ * identically, and the comparison must not reject one as the other's
+ * incompatible successor.
  */
-const WRITER_IDENTITY_HASH_KEYS: ReadonlySet<string> = new Set([
+const WRITER_IDENTITY_VOLATILE_KEYS: ReadonlySet<string> = new Set([
   "bundleId",
+  "file",
   "moduleIdentity",
 ]);
 
 /**
- * Return an `ifc` extension with the content-addressed identity of a
- * `writeAuthorizedBy` writer claim removed, so a recompile of the authorizing
- * module does not read as a contract change in the semantic-extension
- * comparison below.
+ * Return an `ifc` extension with the volatile identity of a `writeAuthorizedBy`
+ * writer claim removed, so that neither a recompile of the authorizing module
+ * nor a cross-resolver rebuild of the same module reads as a contract change in
+ * the semantic-extension comparison below.
  *
  * A CFC write authorization (`TrustedActionWrite`) lowers to
- * `ifc.writeAuthorizedBy.__ctWriterIdentityOf`, whose `moduleIdentity` (and the
- * legacy `bundleId`) is the content hash of the module that defines the
- * authorizing handler. When that handler lives in the pattern's own module —
- * the common case — any edit to the pattern rehashes the module, so
- * `moduleIdentity` changes while the binding `file` and `path` and the sibling
- * `uiContract` stay identical. That is the same authorization recompiled, not a
- * narrowed contract. The runtime still re-verifies the live writer's
- * `moduleIdentity` against the claim at write time (`writeAuthorizedByReason`,
- * `packages/runner/src/cfc/prepare.ts`), so dropping it here only stops the
- * schema diff from reading "the code was edited" as "the contract changed"; it
- * does not weaken that enforcement.
+ * `ifc.writeAuthorizedBy.__ctWriterIdentityOf`, which records the authoring
+ * module three ways: its content hash (`moduleIdentity`, and the legacy
+ * `bundleId`), its source-file spelling (`file`), and the binding `path` within
+ * the module. The runtime's write-time authorization anchors on `moduleIdentity`
+ * plus `path` alone (`writeAuthorizedByReason`,
+ * `packages/runner/src/cfc/prepare.ts`): it re-verifies the live writer's
+ * `moduleIdentity` against the claim and never consults `file`. So both the
+ * content hash and the file spelling are volatile against anything a caller can
+ * depend on — the hash rehashes on any edit to the module, and the file spelling
+ * changes with the resolver that compiled it (labs#4772). Removing both here
+ * stops the schema diff from reading "the code was edited" or "a different
+ * resolver compiled it" as "the contract changed"; it weakens no enforcement,
+ * because the runtime holds neither field fixed.
  *
  * Everything a caller can depend on is kept and still compared: the binding
- * `file` and `path` — a handler moving files or being renamed is a real change
- * — and the entire `uiContract` (helper/action/surface/role/kind/
- * trustedPattern/requiredEventIntegrity). The builtin `readonly string[]` form
- * of `writeAuthorizedBy` names trusted builtins rather than a compiled module,
- * so it carries no content hash and is returned unchanged.
+ * `path` — the coordinate the runtime authorizes against — and the entire
+ * `uiContract` (helper/action/surface/role/kind/trustedPattern/
+ * requiredEventIntegrity). The builtin `readonly string[]` form of
+ * `writeAuthorizedBy` names trusted builtins rather than a compiled module, so
+ * it carries no writer identity and is returned unchanged.
  *
  * This runs where the `ifc` extension is compared as a semantic-extension key,
  * which the per-node recursion reaches for a claim placed directly on a
  * property, behind a `$defs` reference, or in an `anyOf` branch. A claim
  * reached only through a composite keyword (`allOf`, `oneOf`, `if`/`then`,
- * `not`) is compared by whole-value equality instead, so its content hash still
- * participates and a recompile there is reported as a change.
+ * `not`) is compared by whole-value equality instead, so its volatile identity
+ * still participates and a recompile there is reported as a change.
  */
-const ifcWithoutWriterContentHash = (ifc: unknown): unknown => {
+const ifcWithoutVolatileWriterIdentity = (ifc: unknown): unknown => {
   if (typeof ifc !== "object" || ifc === null) return ifc;
   const claim = (ifc as Record<string, unknown>).writeAuthorizedBy;
   if (typeof claim !== "object" || claim === null || Array.isArray(claim)) {
@@ -205,7 +224,7 @@ const ifcWithoutWriterContentHash = (ifc: unknown): unknown => {
   if (typeof identity !== "object" || identity === null) return ifc;
   const strippedIdentity: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(identity)) {
-    if (WRITER_IDENTITY_HASH_KEYS.has(key)) continue;
+    if (WRITER_IDENTITY_VOLATILE_KEYS.has(key)) continue;
     strippedIdentity[key] = value;
   }
   return {
@@ -256,13 +275,18 @@ const ifcWithoutWriterContentHash = (ifc: unknown): unknown => {
  *
  * The semantic-extension keys (`asCell`, `ifc`, `readOnly`, `scope`,
  * `writeOnly`) are compared for exact equality, with one exception: a
- * `writeAuthorizedBy` writer claim's content-addressed module identity
- * (`moduleIdentity`, and the legacy `bundleId`) is treated as update-volatile
- * and normalized out before the `ifc` comparison, because it rehashes on any
- * edit to the authoring module while the authorization it names is unchanged
- * (see `ifcWithoutWriterContentHash`). The binding `file` and `path` and the
- * whole `uiContract` are still compared, and the runtime re-verifies the live
- * writer's identity at write time, so this narrows nothing.
+ * `writeAuthorizedBy` writer claim's volatile identity is normalized out before
+ * the `ifc` comparison. That identity is the content-addressed module hash
+ * (`moduleIdentity`, and the legacy `bundleId`), which rehashes on any edit to
+ * the authoring module, together with the source-file spelling (`file`), which
+ * changes with the resolver that compiled the module. The runtime authorizes a
+ * write on `moduleIdentity` plus the binding `path` and never on `file`, and it
+ * re-verifies the live writer's `moduleIdentity` against the claim at write
+ * time, so holding those fields fixed here would reject a recompile or a
+ * cross-resolver rebuild of an unchanged authorization (see
+ * `ifcWithoutVolatileWriterIdentity`). The binding `path` and the whole
+ * `uiContract` are still compared, and the runtime enforcement is untouched, so
+ * this narrows nothing.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -494,14 +518,14 @@ function schemaSubsetIssue(
 
     for (const key of SEMANTIC_EXTENSION_KEYS) {
       // The `ifc` extension is compared for exact equality except for a
-      // `writeAuthorizedBy` writer claim's content-addressed module identity,
-      // which is volatile across a recompile of the same authorization (see
-      // ifcWithoutWriterContentHash).
+      // `writeAuthorizedBy` writer claim's volatile identity — its content hash
+      // and its resolver-dependent file spelling — which the runtime does not
+      // hold fixed either (see ifcWithoutVolatileWriterIdentity).
       const sourceValue = key === "ifc"
-        ? ifcWithoutWriterContentHash(source[key])
+        ? ifcWithoutVolatileWriterIdentity(source[key])
         : source[key];
       const targetValue = key === "ifc"
-        ? ifcWithoutWriterContentHash(target[key])
+        ? ifcWithoutVolatileWriterIdentity(target[key])
         : target[key];
       if (!fabricAwareEqual(sourceValue, targetValue)) {
         return `${path}: ${key} changed`;

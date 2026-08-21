@@ -8,14 +8,26 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
+  isScopeKey,
+  resolvePrincipalSessionKey,
+  resolveScopeKey,
+} from "@commonfabric/memory/v2";
+import {
   admitDerived,
   applicableSet,
   apply,
+  applyFanout,
   explore,
+  type FanoutState,
+  fanoutStateKey,
+  type FanoutStep,
   holderId,
+  isCanonicalKey,
+  makeFanout,
   makeWorld,
   pushRowsFor,
   sessionKey,
+  SPACE_KEY,
   type Step,
   userKey,
   type World,
@@ -792,4 +804,270 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   const t = w3.spaces.B.streams.t.entries[0];
   assertEquals(t.firedAt.session, "server");
   assertEquals(t.firedAt.user, U1);
+  // OW15 (protocol §2's Phase-3 floor carve-out, SHAPE RULED
+  // 2026-08-05; the model pin the register row owes): a chain with NO
+  // actor ANYWHERE — a space-scope derivation's emission — crosses
+  // spaces and admits with firedAt = { session: "server" } and NO user
+  // key. The engine-side floor negatives (userless-undeclared refused,
+  // contradiction refusals, grant mandatory) are implementation-side
+  // pins (memory/test/v2-event-append.test.ts) — the model's admission
+  // deliberately models the POST-carve-out semantics only.
+  let w4 = apply(w3base, {
+    kind: "derivationEmit",
+    space: "A",
+    stream: "s",
+    acting: {},
+  });
+  w4 = apply(w4, { kind: "wave", space: "A" });
+  w4 = apply(w4, { kind: "deliver", space: "A" });
+  const sessionless = w4.spaces.B.streams.t.entries[0];
+  assertEquals(sessionless.firedAt.session, "server");
+  // Key ABSENCE, not a present-but-undefined key (round-2 thread T32):
+  // the OW15 carve-out stamps NO user key at all, and the old
+  // value-equality read passed vacuously against `{ user: undefined }`.
+  assertEquals("user" in sessionless.firedAt, false, "no user key (OW15)");
+});
+
+// ---------- conformance bridge: model keys === the wire vocabulary ----------
+
+Deno.test("bridge: model scope-key constructors byte-agree with the real wire vocabulary (LD3, key-vocabulary §3)", () => {
+  // The model RESTATES the constructors (model.ts stays import-free);
+  // this bridge is what keeps the restatement honest. Corpus includes
+  // `:`-bearing principals (DIDs contain `:`), `/`-bearing components,
+  // pre-encoded-looking strings (must stay distinct from their decoded
+  // forms), and non-ASCII.
+  const principals = [
+    "did:u1",
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+    "a:b",
+    "a/b",
+    "a%3Ab",
+    "user with spaces",
+    "ünïcode:∆",
+  ];
+  const sessionIds = ["sess1", "b:c", "s/1", "s%2F1", "s ü:∆"];
+  assertEquals(SPACE_KEY, resolveScopeKey("space", {}));
+  assertEquals(SPACE_KEY, resolveScopeKey(undefined, {}));
+  for (const p of principals) {
+    assertEquals(userKey(p), resolveScopeKey("user", { principal: p }));
+    for (const s of sessionIds) {
+      assertEquals(
+        sessionKey(p, s),
+        resolveScopeKey("session", { principal: p, sessionId: s }),
+      );
+      assertEquals(sessionKey(p, s), resolvePrincipalSessionKey(p, s));
+    }
+  }
+  // The injectivity witness the un-encoded constructors failed: encoding
+  // keeps the literal `:` separators exact, so these no longer collide.
+  assert(sessionKey("a:b", "c") !== sessionKey("a", "b:c"));
+  assert(userKey("session:x") !== sessionKey("x", "x"));
+
+  // Validator half of the bridge: the model's restated validator and the
+  // real `isScopeKey` agree POINTWISE — every constructed key is in both
+  // acceptance sets, and the rejection sets coincide over the corpus of
+  // prefix-shaped non-keys: raw delimiters inside a segment, malformed
+  // escapes, decodable-but-non-canonical escapes, missing/empty segments.
+  for (const p of principals) {
+    for (
+      const key of [
+        userKey(p),
+        ...sessionIds.map((s) => sessionKey(p, s)),
+      ]
+    ) {
+      assert(isScopeKey(key), `real validator rejects constructed ${key}`);
+      assert(isCanonicalKey(key), `model validator rejects constructed ${key}`);
+    }
+  }
+  const rejectionCorpus = [
+    "",
+    "user",
+    "session",
+    "user:",
+    "session:x",
+    "session:x:",
+    "Space",
+    " space",
+    "space ",
+    "user:a/b",
+    "session:a/b:c",
+    "session:a:b/c",
+    "user:did:key:alice",
+    "session:a:b:c",
+    "user:%",
+    "user:%2",
+    "user:%GG",
+    "session:%GG:s",
+    "user:a%2fb",
+    "user:%41",
+    "user:a b",
+    "user:a+b",
+    "user:\uD800",
+    "user:%ED%A0%80",
+  ];
+  for (const value of rejectionCorpus) {
+    assertEquals(
+      isScopeKey(value),
+      false,
+      `real validator admits ${JSON.stringify(value)}`,
+    );
+    assertEquals(
+      isCanonicalKey(value),
+      false,
+      `model validator admits ${JSON.stringify(value)}`,
+    );
+  }
+});
+
+// ---------- C11: narrowing / fan-out (Phase 2 pre-gate, OW3) ----------
+//
+// One extension covers the OW3 trio (verification-coverage §3):
+// instance sets stay CLEAN PRODUCTS over principals (scopes §2's
+// monotonicity), the enforcement/attribution unit under fan-out is the
+// RUN — `action × instance`, never the action (serving-loop §3c) —
+// and W never forks (scopes §9): one integer, waiting on DEMANDED
+// siblings only, undemanded instances never holding it back
+// (scopes §2's watermark × fan-out composition).
+
+const FAN_MENU = (): FanoutStep[] => [
+  { kind: "fanInput" },
+  { kind: "fanNarrow", by: U1 },
+  { kind: "fanNarrow", by: U2 },
+  { kind: "fanDemand", user: U1 },
+  { kind: "fanDemand", user: U2 },
+  { kind: "fanWave" },
+];
+
+function exploreFanout(
+  s0: FanoutState,
+  maxSteps: number,
+): FanoutState[] {
+  const all: FanoutState[] = [];
+  const visited = new Set<string>();
+  const stack: Array<{ s: FanoutState; depth: number }> = [
+    { s: s0, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const { s, depth } = stack.pop()!;
+    const key = fanoutStateKey(s);
+    if (visited.has(key)) continue;
+    visited.add(key);
+    all.push(s);
+    if (depth < maxSteps) {
+      for (const step of FAN_MENU()) {
+        const next = applyFanout(s, step);
+        if (fanoutStateKey(next) !== key) {
+          stack.push({ s: next, depth: depth + 1 });
+        }
+      }
+    }
+  }
+  return all;
+}
+
+Deno.test("C11a: instance sets are CLEAN PRODUCTS over principals — never ragged, on every reachable schedule (scopes §2)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  assert(all.length > 50, `state space too small (${all.length})`);
+  const legalInstanceKeys = new Set([userKey(U1), userKey(U2)]);
+  for (const s of all) {
+    assertEquals(s.violations, []);
+    const keys = Object.keys(s.instances);
+    if (s.narrowed) {
+      // Narrow for EVERYONE: no broad value instance survives, and
+      // every value instance is a principal's — a subset of the clean
+      // product, never a key outside it.
+      assert(!keys.includes(SPACE_KEY), "broad value after narrowing");
+      for (const key of keys) {
+        assert(legalInstanceKeys.has(key), `ragged instance key ${key}`);
+      }
+    } else {
+      // Broad for EVERYONE: no principal instance exists before the
+      // one shared redirect fact does.
+      for (const key of keys) {
+        assertEquals(key, SPACE_KEY, `pre-narrowing instance ${key}`);
+      }
+    }
+  }
+});
+
+Deno.test("C11d: a step naming a principal outside the configured set is REJECTED — the menu cannot smuggle instances past the clean-product invariant (r3739139513)", () => {
+  const s0 = makeFanout([U1]);
+  // Pre-fix, fanNarrow/fanDemand minted the foreign user's instance:
+  // the clean-product check quantifies over `principals`, so the
+  // out-of-set state passed the violations assertion unseen.
+  assertEquals(applyFanout(s0, { kind: "fanNarrow", by: U2 }), s0);
+  assertEquals(applyFanout(s0, { kind: "fanDemand", user: U2 }), s0);
+  // And after a legitimate narrowing, a foreign demand still cannot
+  // mint an out-of-set instance key.
+  const narrowed = applyFanout(s0, { kind: "fanNarrow", by: U1 });
+  assertEquals(
+    applyFanout(narrowed, { kind: "fanDemand", user: U2 }),
+    narrowed,
+  );
+});
+
+Deno.test("C11b: the fan-out unit is the RUN — `action × instance`, one principal's writes per run, never merged (serving-loop §3c)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  for (const s of all) {
+    for (const run of s.runs) {
+      // Every run names exactly ONE instance and wrote exactly that
+      // instance — the granularity CFC labels and attribution ride at.
+      assertEquals(run.wrote, run.instanceKey);
+    }
+  }
+  // And fan-out genuinely happens: some schedule runs BOTH principals'
+  // instances (the N-runs-as-N-principals-in-one-wave shape).
+  assert(
+    all.some((s) =>
+      s.runs.some((r) => r.instanceKey === userKey(U1)) &&
+      s.runs.some((r) => r.instanceKey === userKey(U2))
+    ),
+    "no schedule exercised cardinality 2",
+  );
+});
+
+Deno.test("C11c: W never forks — one integer, waiting on DEMANDED siblings only; undemanded instances never hold it back (scopes §2, §9)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  for (const s of all) {
+    // Type-level: FanoutState.W is a single number (a per-instance
+    // watermark shape cannot even be expressed); behaviorally the rule
+    // binds the ADVANCE, not the standing state — protocol §4: a fresh
+    // subscription arriving AFTER W may still trigger a recompute that
+    // lands in a LATER derived commit, so a post-W new demand with a
+    // stale instance is a legal state. What must hold: a wave never
+    // ADVANCES W while any instance demanded at advance time is stale.
+    assert(typeof s.W === "number");
+    const advanced = applyFanout(s, { kind: "fanWave" });
+    if (advanced.W > s.W) {
+      for (const key of advanced.demanded) {
+        assertEquals(
+          advanced.instances[key] ?? 0,
+          advanced.input,
+          `the wave advanced W to ${advanced.W} with demanded ${key} stale`,
+        );
+      }
+    }
+  }
+  // Undemanded-never-holds: a schedule exists where U2's instance is
+  // stale (or absent) while W covers the input — because only U1
+  // demanded.
+  assert(
+    all.some((s) =>
+      s.narrowed && s.W === s.input && s.W > 0 &&
+      s.demanded.includes(userKey(U1)) &&
+      !s.demanded.includes(userKey(U2)) &&
+      (s.instances[userKey(U2)] ?? 0) < s.input
+    ),
+    "no schedule showed an undemanded sibling left behind while W " +
+      "advanced",
+  );
+  // Demanded-holds: a schedule exists where BOTH are demanded and W
+  // lags the input until the wave runs both.
+  assert(
+    all.some((s) =>
+      s.demanded.includes(userKey(U1)) &&
+      s.demanded.includes(userKey(U2)) && s.W < s.input
+    ),
+    "no schedule showed W waiting on demanded siblings",
+  );
 });

@@ -34,6 +34,19 @@ export interface NodeTypeLinks {
    * pre-injection user call, which must NOT read as injected.
    */
   schemaInjected?: true;
+  /**
+   * For a `toSchema` call SchemaInjection created to describe a pattern's
+   * RESULT, the authored node a diagnostic about that schema points at. The
+   * schema call is synthetic and carries no source position of its own, so the
+   * anchor is what gives the reader a line to look at.
+   *
+   * SchemaGeneration is the stage that turns the call into a schema literal,
+   * and it is the only stage that can see what the declared result type
+   * generated. This channel is what tells it which of the many `toSchema` calls
+   * in a file is a pattern result rather than an argument, a handler's event,
+   * or a nested claim.
+   */
+  patternResultAnchor?: ts.Node;
 }
 
 /**
@@ -207,6 +220,19 @@ export class CrossStageState {
 
   lookupCapabilitySummary(fn: ts.Node): FunctionCapabilitySummary | undefined {
     return this.nodeLinks.get(fn)?.capabilitySummary;
+  }
+
+  // --- patternResultAnchor (nodeLinks-backed) ---
+
+  recordPatternResultSchemaCall(schemaCall: ts.Node, anchor: ts.Node): void {
+    this.#linksFor(schemaCall).patternResultAnchor = anchor;
+  }
+
+  lookupPatternResultSchemaAnchor(schemaCall: ts.Node): ts.Node | undefined {
+    // Plain identity lookup with NO getOriginalNode fallback: the marker sits
+    // on the synthetic call SchemaInjection built, and that node reaches
+    // SchemaGeneration as the same object.
+    return this.nodeLinks.get(schemaCall)?.patternResultAnchor;
   }
 
   // --- schemaInjected (nodeLinks-backed) ---

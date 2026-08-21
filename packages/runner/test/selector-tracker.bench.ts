@@ -71,7 +71,10 @@ function homeSchema(): JSONSchema {
 const TRACKED_SELECTORS = 24;
 
 function setupTracker(): SelectorTracker<void> {
-  const tracker = new SelectorTracker<void>();
+  const tracker = new SelectorTracker<void>(() => ({
+    principal: "did:bench:user",
+    sessionId: "bench-session",
+  }));
   for (let i = 0; i < TRACKED_SELECTORS; i++) {
     const selector: SchemaPathSelector = {
       path: [],

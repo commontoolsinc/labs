@@ -30,12 +30,12 @@ was last checked against the code.
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`modernCellRep`](#moderncellrep)                                           | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental`                                                                            | off                                                                                  | Dan Bornstein (#3818)                                 | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default                                                     |
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
-| [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -66,8 +66,11 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, and `computedCellIds` default on; the other flags in this
-category default off unless their section says otherwise.
+`plainResultReceipts`, `computedCellIds` and `lazyMaterialization` default on;
+`serverExecution` resolves an unset flag to the ONE first-party default
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
+today, Phase 7 having landed flip-ready DARK (its section); the other flags in
+this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -159,36 +162,6 @@ value is ignored with a warning rather than coerced. See
   re-instantiation). Phases 1 and 2 both ship behind this flag; what
   remains after graduation is the spec's Phase 3 (retiring transport
   schema compression for link positions).
-
-### `persistentSchedulerState`
-
-- **Toggle via.** `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` environment variable
-  (through the canonical mapping described in the category note above), or
-  `RuntimeOptions.experimental.persistentSchedulerState`. The ambient control
-  point is `setPersistentSchedulerStateConfig` in
-  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) (the runner owns the
-  feature, but the value has to be known at the memory client and server
-  handshake, so it lives beside the memory protocol flags).
-- **Added by.** Bernhard Seefeld, in "persist scheduler state for rehydration"
-  (#3646, 2026-05-28).
-- **Purpose.** Persists the scheduler's observations to durable storage through
-  memory-v2 and uses them to rehydrate scheduler state after a restart, instead
-  of rediscovering everything by re-running.
-- **Current default and planned end state.** Off by default. The scheduler-v2
-  design is persistence-first, so the intended end state is to graduate this to
-  always-on. The scheduler-observation protocol is an optional capability rather
-  than a data-model contract, so peers with different settings can still share
-  memory data; the server's setting controls whether scheduler rows are accepted
-  on a connection.
-- **Status on 2026-07-08.** Implemented; the durable tables, the rehydration
-  primitives, and the memory-protocol capability are wired. Off by default,
-  rollout in progress. See
-  [`docs/specs/persistent-scheduler-state.md`](../specs/persistent-scheduler-state.md)
-  and [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) for the tracked
-  status.
-- **Path to removal.** Confirm rehydration falls back cleanly when observations
-  are absent or stale; graduate the default to on across the fleet; then fold
-  the behavior into the base scheduler and delete the flag.
 
 ### `plainResultReceipts`
 
@@ -376,6 +349,146 @@ value is ignored with a warning rather than coerced. See
 - **Path to removal.** Confirm all syncing clients carry `computed:`-aware
   readers and the default-on rollout has soaked; then remove the environment
   mapping, runtime option, builder guard, and legacy rollback tests.
+
+### `serverExecution`
+
+- **Toggle via.** `EXPERIMENTAL_SERVER_EXECUTION` environment variable (through
+  the canonical mapping described in the category note above), or
+  `RuntimeOptions.experimental.serverExecution`; browser-side via the shell
+  build define of the same name
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)). The
+  ambient control point is `setServerExecutionConfig` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts): the runner owns the
+  feature, but the per-class commit admission rows are enforced by the memory
+  server under the flag, so the value lives beside the memory protocol flags.
+  It is not a handshake capability — admission enforcement is server-local and
+  nothing about it is negotiated per connection.
+- **Added by.** Bernhard Seefeld, in server-execution v2 Phase 1 stage A
+  (#5339;
+  [`docs/plans/server-execution-v2.md`](../plans/server-execution-v2.md);
+  spec:
+  [`docs/specs/server-side-execution/`](../specs/server-side-execution/README.md)).
+- **Purpose.** The single flag of server-execution v2 — servers do all the
+  compute that is stored; clients commit nothing but intent. Exactly two
+  states, no shippable intermediates (spec README §3.4); deliberately named
+  unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
+  alias it. Both states, defined:
+  - **OFF (the default today — the first-party default constant is `false`;
+    explicit `false` selects it regardless of the constant): today's
+    behavior, byte-for-byte.** Every client
+    runtime runs and commits derivations exactly as it does today, and every
+    client commit is `authored`-class — `derived` is never claimed off the
+    flag. The commit `class` metadata is still *written* in this arm (it is
+    written in every arm from stage A onward — protocol.md §1), but nothing
+    is enforced from it, and `stream-data` behaves as today. Any OFF-arm
+    behavioral diff from a v2 stage is a phase-gate failure by itself
+    (testing.md §2).
+  - **ON (explicit `true` — or the first-party default once the flip PR
+    sets the constant `true`): the v2 posture.** With stages A–F landed
+    this means: the per-class admission rows of protocol.md §2 are enforced
+    — the `derived` row is the stage-B lease equality check PLUS stage F's
+    derived-envelope defense-in-depth (the producing session must BE the
+    holder's own service session), reads may name an explicit
+    `entity_scope_key` (lease-holder-only; refused for anyone else), the
+    delegated authored row validates its acting-identity + capabilityRef
+    carriage, and the `authored`/`system` rows equal today's checks — the
+    deferred `stream-data` built-in is disabled with a runtime error naming
+    builtins.md §5 — AND the serving loop actually SERVES: toolshed
+    constructs an ExecutorHost over its memory server, spaces activate on
+    session open / authored admission, one SpaceServer per active space
+    holds and renews the lease, runs demanded derivations through the
+    seal-into-wave machinery, commits ONE derived transaction per wave
+    carrying the watermark (protocol.md §4; `waitForSettled` rides it),
+    hosts the pattern-update watcher server-side (serving-loop.md §3e),
+    and exposes the §7 `servingLoop` counters on `/api/health/stats`.
+    Narrowing writes chain the eager via-user hop (scopes.md §2's MUST).
+    Since Phase 2 (speculation.md), a flag-ON CLIENT no longer commits
+    derivations at all: derivation runs divert into the process-local
+    speculation overlay (the echo), and the store's only derivation
+    results are the SpaceServer's derived-class commits — the
+    two-deriver interim is over. Since Phase 3 (events-down;
+    events.md), client HANDLER runs divert to the overlay too and the
+    fire's ONE authored act is the EVENT APPEND to the stream's sidecar
+    doc (fired-order offline queue, LT9): the server drains undelivered
+    events, runs handlers authoritatively as the event's stamped actor,
+    marks consequences + advances the per-stream `eventWatermark` in the
+    same derived commit, and the client's echo retires on the
+    consequence signal (the client handler-write commit path — the old
+    F10 interim — is DELETED). Later stages add their surfaces under
+    this same flag; both halves of any coupled behavior move together
+    on it.
+- **Current default and planned end state.** **OFF by default** — the ONE
+  first-party default is `SERVER_EXECUTION_DEFAULT_ENABLED` in
+  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
+  value `false` (Phase 7 landed flip-READY, DARK, by owner ruling
+  2026-08-16), read by every deployed-topology entry point — the
+  `productionServer` / `remoteClient` construction presets (toolshed's
+  operator runtime, the background piece service, the CLI, every pieces
+  controller and integration harness against a toolshed), toolshed's
+  serving-host gate and its memory service-principal grant, and the browser
+  shell's build define fallback. An UNSET flag resolves to it; an explicit
+  `EXPERIMENTAL_SERVER_EXECUTION=true` (or `experimental.serverExecution:
+  true`, or the shell define `true`) selects the ON arm, an explicit `false`
+  the OFF arm regardless of the constant. Single-process harnesses do not
+  read the constant: a bare `new Runtime` and the `patternTest` /
+  `localDev` / `unitTest` presets have no serving host, so they resolve the
+  ambient baseline (OFF) by construction — the unit suites and `cf test`
+  run the derive-and-commit model; the ON posture's unit coverage sets the
+  flag explicitly (the `executor-*` suites) and its integration coverage is
+  the explicit-`true` CI lanes. In CI (testing.md §2) the DEFAULT lanes are
+  the OFF posture (probed), and the explicit-`true` lanes on an ON-BUILT
+  binary (`build-toolshed-on`; the shell define is baked at build) are the
+  ON arm — the full posture, verified by a probe before each suite, its
+  Deno-side clients declaring the posture from the env — with skips only
+  through `tasks/server-execution-on-skips.ts`, printed loudly (six
+  `phase-7` entries today, all red under the full ON posture, none
+  vacuous). **THE FLIP IS ITS OWN ONE-LINE PR** (the constant → `true`, plus
+  the absolute pin, the CI lane roles + probes, and this entry; repo
+  convention: a flip is reverted by reverting the PR that only flips),
+  landing after the plan's Phase-7 ordered gates: OW32 (the client-side
+  non-settling loop in the two-browser journeys) triaged → OW17 (the
+  serving replica's per-instance re-keying, with OW29) → OW28
+  (`compile-and-run` as an outbox effect kind) → the honest propagation
+  benchmark → the skip list EMPTY and the deployed-topology binaries the
+  presets flip exercised ON by a gate → the flip PR. End state: after a soak
+  on main (which starts at the flip PR's merge) the flag retires and the
+  OFF code path is removed — a separate post-soak PR (the plan's Phase 7
+  task 2, split from the flip because stacked PRs cannot soak).
+- **Status on 2026-08-16 (Phase 7 flip-READY, landed DARK).** Phases 1–6
+  landed; Phase 7 landed the flip's mechanism — the one constant and its
+  readers, OW27 per-stream send pacing in the event-append queue
+  (pace-never-drop, per-stream independence — README §3.8), the LT9
+  simplification (process-lifetime queue), served-wish read authority (the
+  process identity is a memory service principal under the flag —
+  honestly, implicit OWNER for its ordinary session traffic:
+  verification-coverage.md OW31, a ruled item), the demand-root chain in
+  the run supply (nested pieces, result-as-pattern children, and the list
+  builtins' element pieces) — with the constant `false`. Known ON-arm gaps,
+  carried on the plan's Phase 7 section and the register: the two-browser
+  journeys stall on an UNATTRIBUTED client-side scheduler-non-settling
+  loop (OW32, first gate); the serving replica's scope-name collapse at
+  scoped cardinality ≥ 2 (OW17, a bounded architectural leg with a known
+  fix shape); fresh `compile-and-run` inert until its serving port (OW28);
+  the ON-posture Deno-client family surfaced by the uniform ON lanes
+  (OW33); the topics-navigation / two-browser / lunch gates and three
+  package-suite items are ON-skip-listed with loud reasons.
+- **Status on 2026-08-05.** Phase 1 stages A–F landed (E re-keyed the
+  vocabulary per instance; F landed the serving loop itself): the
+  ExecutorHost + SpaceServer host one committing runtime per active space
+  — lease renewed on stage B's cadence, waves through stage D's machinery,
+  the watermark doc + `derivedThrough` + `waitForSettled`, M1 per-run
+  identity seams, M4 instance-keyed push, the read-row and
+  derived-envelope and delegated admission checks, the eager via-user
+  hop, the server-side pattern-update posture, and the §7 counters. All
+  still dark: OFF by default and byte-identical to today; the ON arm now
+  actually serves (with the documented two-deriver interim). Stage G
+  (effects + outbox) remains.
+- **Path to removal.** The flip PR (the constant → `true`) after the
+  ordered gates above; soak the default on main; then the post-soak PR
+  retires the flag, removes the OFF path (and the OFF regression-guard CI
+  lanes + the OFF-built binary the flip PR introduces by inverting
+  `build-toolshed-on`), and closes out this entry.
 
 ---
 
@@ -1031,11 +1144,13 @@ useful part of the remaining work for that flag.
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
-`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`, `EXPERIMENTAL_LAZY_MATERIALIZATION`)
-reach the runtime through the deployed processes. The runtime-only flags
-(`commitPreconditions`, the CFC dials) reach it only through the
-`RuntimeOptions` passed to `new Runtime(...)`.
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
+`EXPERIMENTAL_COMPUTED_CELL_IDS`,
+`EXPERIMENTAL_LAZY_MATERIALIZATION`,
+`EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
+deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
+dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 
 All first-party processes build their `RuntimeOptions` through a construction
 preset in
@@ -1198,6 +1313,26 @@ config reaches:
 
 These are recorded so that references to them elsewhere in the tree do not send
 a future reader hunting for a flag that no longer exists.
+
+### `persistentSchedulerState` / `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` (removed)
+
+Persisted the scheduler's observations to durable storage through memory-v2
+and used them to rehydrate scheduler state after a restart, with a live
+extension (incremental observation adoption) that let one client adopt
+another's committed action runs. Added by Bernhard Seefeld in #3646
+(2026-05-28); implemented and OFF by default throughout its life. Deleted by
+server-execution v2 Phase 1 stage C (2026-08-04): the flag, its ambient
+control point, the hello negotiation, the `scheduler.snapshot.list` RPC, the
+commit-carried observation payload, and the seven observation tables all
+left the tree, and the persisted form was REPLACED by the `scheduler_basis`
+index ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
+§3b) — ids + seqs only, written by the serving loop when it lands. A store
+that had opted in lost warm start once at the migration, by design; old
+clients take the hello-degrade path (a server advertising nothing to
+negotiate reads as "state absent, run fresh"). The archived specs:
+[`persistent-scheduler-state.md`](../history/specs/persistent-scheduler-state.md),
+[`per-doc-rehydration-persisted-form.md`](../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+[`incremental-observation-adoption.md`](../history/specs/scheduler-v2/incremental-observation-adoption.md).
 
 ### `eagerSourceAnnotation` / `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` (removed)
 

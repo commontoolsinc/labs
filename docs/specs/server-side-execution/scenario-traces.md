@@ -2,7 +2,7 @@
 
 **Verification instrument, NON-NORMATIVE.** The detail docs govern;
 a trace never overrides them. What a trace does is force the
-composition question the doc-by-doc organization hides: twelve
+composition question the doc-by-doc organization hides: fifteen
 canonical end-to-end journeys, each traced hop by hop, with every
 load-bearing value — identity, `scope_key`, commit class, envelope,
 stamp source — written down explicitly WITH A CITATION. A cell that
@@ -354,6 +354,90 @@ into (the watermark doc too).
   handler): what class of problem is this, and how does it
   resolve?
 
+### T13 — Activation, demand, park, and the server-side hot-swap (stage F; OW5/OW6)
+
+Purpose: the SpaceServer lifecycle end to end — what activation
+loads (and does NOT), what demand means mechanically, when a space
+parks, and who performs a pattern update under the flag.
+Setup: space A parked (no SpaceServer). S1 connects and subscribes
+to a piece's result doc; U1 later writes the piece's argument; an
+updater (any authorized session) writes the piece's
+pattern-pointer; finally S1 disconnects and the space idles.
+
+- T13.Q1 — S1's `session.open` arrives: what notifies the host, and
+  what makes the space ACTIVE? What would a `system`-class direct
+  write alone have done?
+- T13.Q2 — What does activation LOAD for S1's subscription — and
+  what is deliberately NOT a step of it? Where does the piece's
+  handler registration ride?
+- T13.Q3 — What IS the demand, mechanically, once structure is
+  loaded? What keeps an undemanded derivation from running?
+- T13.Q4 — U1's authored write arrives while the space is active:
+  walk the wave — input, settle, commit contents, watermark — and
+  name what the loop's own commit does NOT do when it returns on
+  the subscription.
+- T13.Q5 — The updater writes the pattern-pointer: what class is
+  that write, who reacts, and what does the reaction do? What stamp
+  does the swap's setup write carry?
+- T13.Q6 — S1 disconnects. What must ALL be true before the space
+  parks, and what does parking do? A commit races the park — what
+  heals it?
+- T13.Q7 — A gate wake (debounce timer) is armed at the would-be
+  park moment: park or wait? Under which mapping row's rule?
+- T13.Q8 — Wish `#now` interval timers: what does this trace NOT
+  answer about them, and why?
+
+### T14 — Effect failure and retry: input-driven, never timers (stage G; OW7)
+
+Purpose: the §4 failure contract end to end — an error-shaped result
+is a memoized completion, nothing in the loop retries on a timer,
+and a retry happens exactly when the inputs change.
+Setup: a space-scoped `fetchData` node, demanded by S1. The request
+for url₁ fails (a transport error). Later U1 edits the argument to
+url₂, which succeeds. The host also crashes once, in Q5's window.
+
+- T14.Q1 — The failed request's completion: what commits, in what
+  class, and what carries the memo key?
+- T14.Q2 — After the error result lands, the node's action re-runs
+  (its result cells changed): does the effect re-fire? What rule
+  prevents it?
+- T14.Q3 — What, if anything, in the serving loop may schedule a
+  RETRY of the failed request on its own? Cite the FORBIDDEN list.
+  Distinguish the durable rows that DO re-send.
+- T14.Q4 — U1 writes url₂: walk the retry — what makes it fire
+  (which rule), and what happens to url₁'s stored error result?
+- T14.Q5 — The crash window: the host crashes after url₁'s request
+  left the process but BEFORE its error result committed. On
+  recovery, what happens — and how does that differ from the
+  committed-error case?
+- T14.Q6 — Which §7 counters move across the journey (the miss, the
+  suppressed re-fire, the input-driven retry)?
+
+### T15 — Client speculation under the flag: overlay lifecycle (Phase 2; OW4)
+
+Purpose: the client half of the ON posture end to end — what runs,
+what commits, what retires, and what never leaves the process
+(speculation.md is the governing doc).
+Setup: flag ON. S1's client replicates part of space A: a derivation
+D = f(X) downstream of doc X; an effectful node E (`fetchData`)
+downstream of D; a second branch G reading a doc Y the client has
+NOT replicated. U1 edits X through a UI binding; the SpaceServer
+derives authoritatively and pushes.
+
+- T15.Q1 — U1's binding edit: what commits (class, envelope), and
+  what does the client's local run do with D?
+- T15.Q2 — The overlay entry for D: what does it record, and which
+  instances may the overlay hold?
+- T15.Q3 — The local run reaches E: does it execute? What does it
+  read, and what renders when the memo key differs from the stored
+  one?
+- T15.Q4 — The branch through unreplicated Y: does speculation fetch
+  Y? What renders?
+- T15.Q5 — The push arrives: what retires the D entry, exactly — the
+  input-origin rule, stated precisely?
+- T15.Q6 — What may the client NEVER do with the overlay or under
+  it? Cite the tripwires.
+
 ## 4. Reference answers
 
 **Run 2026-08-03** — six Sonnet trace runners (two traces each),
@@ -396,9 +480,24 @@ these.
   consumed from stamped `firedAt`. [protocol §5; builtins §4]
 - Q2: `{nonce, kind:"navigate", args:{target}, issuedIn}`; nonce
   minted server-side; exactly-once-per-nonce is the CLIENT's duty.
-  [protocol §5]
+  [protocol §5] (Phase-4 refresh, 2026-08-11: the mint is the
+  DETERMINISTIC constructor `effectIntentNonce(eventId, instanceId)`
+  over the firing event's durable id and the navigateTo instance's
+  cause-derived result doc id — which is what lets the client's
+  speculative run PREDICT the same nonce for Q7's optimistic
+  enactment, converging by cause-derived identity exactly as
+  result-as-pattern children do [speculation §2; builtins §4]; and
+  `issuedIn` is ENGINE-stamped at apply with the issuing commit's
+  seq — the stream-entry `seq` precedent [events §1].)
 - Q3: `authored`; envelope S1; the ack's instance RESOLVES from the
   authenticated session — the client names no key. [protocol §5, §1]
+  (Phase-4 refresh, 2026-08-11: the ack WRITE is a per-nonce mark —
+  `acks[nonce] = true` on the instance — one mark per nonce rather
+  than a scalar last-ack field, which would LOSE an earlier
+  unretired ack whenever two intents ack within one retirement
+  interval; retirement prunes acked entries and their marks
+  together. RULED 2026-08-13: ratified — the per-nonce map is §5's
+  normative shape, the scalar `{ ackedNonce }` draft retired.)
 - Q4: SpaceServer's OWN write in the next wave's derived commit:
   addressing (`session:U1:S1`) but NO acting principal. [protocol §1, §5]
 - Q5: no — logical write = authored commit EXCLUDING effect-channel
@@ -542,9 +641,9 @@ these.
 
 ### T8 (GAPS(1))
 - Q1: client-side unacked `authored` event appends, in fired order.
-  [events §5; speculation §5] (LT9 RULED 2026-08-03: the queue is
-  DURABLE client-side, same persistence class as `sessionId` — a
-  reload while offline preserves it.)
+  [events §5; speculation §5] (LT9 RE-RULED 2026-08-15: the queue is
+  PROCESS-LIFETIME — reload loss accepted this round; an in-process
+  replica replacement is survived.)
 - Q2: discharge in fired order (RULED). [events §5; speculation §5]
 - Q3: DROP — "a doc the handler must write was deleted meanwhile"
   meets the unrunnable predicate verbatim; a raced consequence
@@ -559,11 +658,14 @@ these.
   notice retires `intent(E2)` entries — the echo un-renders; notice
   is the UI hook. [speculation §4, §5; events §2, §5; README §3.2]
 
-### T9 (FLAGS(1) → fixed)
+### T9 (FLAGS(1) → fixed) (re-verified after the 2026-08-05 Q1 ruling; Q1 cell updated)
 - Q1: superseded derived write DROPPED from the wave commit (sound:
-  re-derivable; next wave recomputes); counted `supersededWrites`.
-  [serving-loop §3d] (The counter was missing from §7's stats shape
-  — FIXED with this fold.)
+  re-derivable); the drop itself RE-ARMS NOTHING — recompute, if
+  any, arrives only via the ordinary dependency path: the concurrent
+  commit is next wave's input and recomputes exactly the runs whose
+  recorded reads it dirties, with no superseded-write mark; counted
+  `supersededWrites`. [serving-loop §3d, RULED 2026-08-05] (The
+  counter was missing from §7's stats shape — FIXED with this fold.)
 - Q2: non-re-derivable writes REBASE AND RETRY with field-level
   merge; the watermark advance and its consequences move TOGETHER,
   never separately. [serving-loop §3d; events §4]
@@ -618,7 +720,7 @@ these.
   serving-loop §1's plane (b) — RECONCILED in serving-loop §1 with
   this fold; vetoable.)
 
-### T12 (adjudicated COMPLETE)
+### T12 (adjudicated COMPLETE) (re-verified after the 2026-08-05 Q1 ruling; Q4 cell updated)
 - Q1: speculate pure structural + handlers + optimistic navigate +
   overlay-local children; own instances ONLY; never effectful nodes
   (read through to last committed result, pending on key change) or
@@ -628,15 +730,158 @@ these.
 - Q3: retirement on pushed derived commits, keyed `origin:
   intent(eventId)` matched against `consequenceOf`. [speculation §1, §4]
 - Q4: the authored write is ADMITTED (target ACL + CAS only);
-  next wave recomputes over it; mid-wave, the WAVE's write is the
-  one dropped. Single-deriver protects against dual DERIVED
+  mid-wave, the WAVE's write is the one dropped
+  (`supersededWrites`). Recompute is NOT automatic: the drop
+  re-arms nothing, and a derivation that blind-writes this doc
+  without reading it back is never dirtied by the intruding write,
+  so the derived doc holds the authored value until the
+  derivation's own upstream inputs next change — "the derived
+  output waits for the next input change" (owner, RULED
+  2026-08-05). Single-deriver protects against dual DERIVED
   committers by construction; it is NOT an ACL on derived-output
-  docs. [protocol §1, §2; serving-loop §3d; README §1]
+  docs — this scenario is exactly that gap. [protocol §1, §2;
+  serving-loop §3d RULED 2026-08-05; README §1]
 - Q5: watermark forgery possible and ACCEPTED (owner 2026-08-02,
   no-new-guarantees); "what tightening requires" is an explicit
   deferral — future work. [protocol §1; README §1]
 - Q6: ordinary speculation divergence; silent value replacement on
   reconciliation. [README §3.6; speculation §3, §4]
+
+### T13 (COMPLETE, 1 GAP carried deliberately — authored with stage F, 2026-08-05)
+- Q1: the memory server's admission-side observer notifies the host
+  on session open and on any AUTHORED admission into a space with no
+  live SpaceServer — an admission-side hook, never a poll; ACTIVE =
+  ≥1 live client session (the serving loop's own loopback session
+  never counts) or undelivered events (no instances until Phase 3).
+  A `system` direct write alone activates nothing — a provisioning
+  write into a lease-less space stays parked until its first session
+  or event. [serving-loop §1 planes (b)/(d); T11.Q7]
+- Q2: activation acquires the lease (else parks), builds the serving
+  runtime (flag ON, §3e posture), reads W, re-marks the dirty
+  frontier from the basis index, and subscribes from the head the
+  index scan ran against; graph structure loads PER DEMANDED ROOT
+  through the auto-load prior art (`ensurePieceRunning` — result-
+  metadata chain to the owning result cell, pattern loaded by
+  identity, `runtime.start`). There is NO piece-start step, no root
+  bootstrap, no auto-start-on-event; handler registration rides the
+  structure load for demanded roots. [serving-loop §1, §3, §6;
+  runtime-mapping N22/N31]
+- Q3: demand is a LIVE READER per demanded root — the loop holds a
+  deep-walking sink over each (id, scope) the space's client
+  sessions watch, and the read through the query proxies is what
+  pulls a computed's link. Pull-based laziness is untouched:
+  undemanded derivations stay dirty-unmaterialized indefinitely —
+  `idle()` already excludes them. [serving-loop §1, §3b]
+- Q4: the commit's record enters the loop's feed (class + holder +
+  written instances); dirtiness travels the scheduler's EXISTING
+  path (the loopback session's frames); the loop settles to
+  quiescence under the T_flush race, then commits ONE derived
+  transaction: the wave's surviving writes, `consequenceOf` (empty
+  until Phase 3), the watermark DOC write as a stamped
+  `bookkeeping` contribution, and `derivedThrough = W`. W advances
+  to the input batch's non-echo head at TRUE quiescence only. The
+  loop's own commit returns on the feed and is SKIPPED by class +
+  holder (self-echo) — it never re-arms a wave, and the watermark
+  never chases its own commits. [serving-loop §2, §3, §3d;
+  protocol §4]
+- Q5: the pointer write is an ordinary AUTHORED input under the
+  updater's principal; the SpaceServer's watcher (the
+  `patternIdentity` meta sink, installed with the piece) reacts —
+  teardown + reinstantiation server-side, the swapped derivation
+  lands in the next wave's derived commit, and no client runs
+  anything. The swap's setup write stamps the `bookkeeping` kind
+  (§3d's sanctioned internal stamp kinds). [serving-loop §3d, §3e;
+  runtime-mapping N40/N41]
+- Q6: park requires ALL of: no live client sessions, no feed input,
+  no open wave contributions, idle past IDLE_PARK_MS, and no armed
+  gate wake. Parking releases the lease row, cancels the demand
+  sinks, disposes the runtime. A racing commit self-heals: the
+  admission hook re-fires on the next admission and the host
+  re-activates. [serving-loop §1, §2]
+- Q7: WAIT — a pending gate wake is "not idle"; parking would lose
+  trailing debounce flushes. [runtime-mapping N9's recommended
+  default, adopted by the stage-F parking policy]
+- Q8: GAP, deliberate: wish `#now` interval timers carry their own
+  owner ruling first (N50 — a space with an interval `#now` never
+  quiesces, and every tick is a derived commit against the
+  amplification budget's spirit). This trace does not answer it;
+  the owed register carries the ruling. [runtime-mapping N50]
+
+### T14 (COMPLETE — authored with stage G, 2026-08-06; OW7's impl witness is `executor-serving-loop.test.ts`'s effectful-node journey)
+
+- Q1: an error-shaped result (the existing builtin error-cell
+  conventions) WITH the request key, in ONE derived-class completion
+  commit — the same carriage as a success ("Failures commit an
+  error-shaped result … with the key"). [serving-loop §4]
+- Q2: no — the recomputed key equals the stored key and the stored
+  result IS the node's value; the hit rule does not distinguish
+  success-shaped from error-shaped results, which is exactly what
+  makes retries input-driven. [serving-loop §4]
+- Q3: nothing — "effect retry timers inside the loop" are FORBIDDEN,
+  and the outbox holds no effect-retry machinery: at-least-once
+  re-sending exists ONLY for the durable APPEND rows (activation's
+  §6 step 5), which carry events, never effect state ("the durable
+  rows of §5 carry APPENDS, never effect state"). [serving-loop §4,
+  §5, §6]
+- Q4: the input change re-derives the memo key; recomputed ≠ stored
+  ⇒ the miss rule fires the effect (the input-driven retry). url₁'s
+  stored error is superseded on the node's cells by the new key's
+  pending/result state — retries are "input-driven (inputs change →
+  new key), never timer-driven loops". [serving-loop §4]
+- Q5: the completion never committed, so recovery finds NO stored
+  key for the recomputed request: the first wave re-misses and
+  re-fires — the external request may thereby run twice
+  (at-least-once across crash, RULED and accepted; the fired-marker
+  was considered and REJECTED). With a COMMITTED error the recovery
+  run memo-HITS instead and nothing re-fires (Q2). [serving-loop §4,
+  §6 step 3]
+- Q6: the miss counts `memo.misses` and `outbox.queued`; the
+  post-completion re-run's suppressed re-fire counts `memo.hits`;
+  the input-driven retry counts a second `memo.misses` +
+  `outbox.queued`. [serving-loop §4, §7]
+
+### T15 (COMPLETE — authored with Phase 2, 2026-08-07; OW4's impl witnesses are `packages/runner/test/speculation-overlay.test.ts` and the `sx2-speculation` integration surface)
+
+- Q1: the binding edit commits AUTHORED under S1's session envelope —
+  state authorship under existing ACL + CAS, unchanged (README §3.6).
+  The client's local run re-derives D and REDIRECTS the run's writes
+  into the overlay — rendering reads the echo immediately; nothing
+  about D is committed (there is no client code path that could —
+  speculation §1; protocol §1's FORBIDDEN clause). [README §1, §3.6;
+  speculation §1, §3]
+- Q2: a process-memory entry recording the seq basis the speculation
+  ran against and its origin (the input's commit); it is never
+  serialized, synced, or committed, and the overlay holds ONLY S1's
+  own user/session instances — a foreign instance is unreplicated and
+  its branch is pending, so the overlay never holds one. [speculation
+  §1, §2; scopes §4]
+- Q3: E NEVER executes client-side. The run reads through to E's last
+  COMMITTED result; if the recomputed memo key differs from the
+  stored one, the branch reads as pending and the UI shows its
+  ordinary loading state until the server's completion pushes — no
+  exceptions, no "just this one idempotent GET". [speculation §2;
+  README §3.5]
+- Q4: no — speculation NEVER blocks on a fetch and never triggers a
+  network read; the branch through Y is PENDING and renders its
+  ordinary loading state, reconciling when the server's derived value
+  arrives (the server discovers the same read by running with the
+  store local — the asymmetry is the point). [speculation §2;
+  serving-loop §3b]
+- Q5: input-origin retirement (speculation §4 step 3): the entry
+  retires once its authored origin is ACKED and the pushed watermark
+  covers it — `W ≥` that commit's seq — REGARDLESS of value
+  agreement (the store wins); a live-input echo whose commit is
+  unacked or not yet covered stays (the user is mid-typing).
+  Divergence is silent value replacement in the same render path.
+  [speculation §3, §4; protocol §4]
+- Q6: FORBIDDEN client-side under the flag: constructing a
+  `derived`-class commit; committing any handler write (Phase 3's
+  deletion — until then handler writes commit authored, which is the
+  plan's stated interim, not an overlay write); executing an
+  effectful builtin; persisting the overlay; sending overlay contents
+  to any server; deciding "the server is wrong" — the store wins by
+  construction. [speculation §6; protocol §1; the plan's interim
+  postures]
 
 ## 5. Findings routing
 
@@ -688,6 +933,10 @@ answers.
 - **LT8 (T2.Q6) — RULED: accepted.** The reload ×
   optimistic-enactment window may re-enact a nonce; acceptable for
   reversible effects, which every shipped kind is (protocol.md §5).
-- **LT9 (T8.Q1) — RULED:** the offline event queue is DURABLE
-  client-side, same persistence class as `sessionId` (events.md
-  §5).
+- **LT9 (T8.Q1) — RULED 2026-08-03, RE-RULED 2026-08-15 (owner):**
+  the offline event queue is PROCESS-LIFETIME — reload survival is a
+  non-goal this round ("the status quo doesn't survive client + server
+  reload either"); in-process replica replacement is survived via the
+  manager-shared store; per-tab sessions, no leader election, no
+  shared persisted session (events.md §5). The 2026-08-03 "durable"
+  ruling and Phase 3's Web-Storage adapter are retired.

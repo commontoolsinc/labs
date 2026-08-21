@@ -23,16 +23,6 @@ import {
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
 const { FRONTEND_URL } = env;
-// Keep these as guardrails rather than exact budgets; CI reload runs vary
-// slightly while still exercising persisted scheduler-state reuse.
-const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
-
-const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
-  const raw = Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE");
-  return raw === "1" || raw === "true" || raw === "yes";
-})();
-
 describe("default-app notebook reload integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -41,9 +31,7 @@ describe("default-app notebook reload integration test", () => {
   // pattern result cells) are now identified by the reserved output spot — a
   // stable, position-derived identity — instead of the serialized `op` / inputs
   // cell, which dragged in the session-varying `program` and forced per-row
-  // cell ids to churn across reloads. Persisted scheduler state now rehydrates,
-  // dropping reload action runs well under this shard's budget (was ~167 > 150;
-  // now ~80-95).
+  // cell ids to churn across reloads.
   it("reloads every rapidly created notebook note in a separate shard", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
@@ -142,19 +130,6 @@ describe("default-app notebook reload integration test", () => {
     console.log(
       "Notebook reload scheduler summary:",
       JSON.stringify(reloadSummary, null, 2),
-    );
-
-    if (!EXPECT_PERSISTENT_SCHEDULER_STATE) return;
-
-    assert(
-      schedulerSummary.graph.actionRuns <=
-        NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
-      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${schedulerSummary.graph.actionRuns}`,
-    );
-    assert(
-      schedulerSummary.graph.computationRunsFromStats <=
-        NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
-      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${schedulerSummary.graph.computationRunsFromStats}`,
     );
   });
 });
