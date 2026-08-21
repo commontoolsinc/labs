@@ -143,6 +143,7 @@ describe("list-result-container-seed", () => {
         () => true,
         pull.promise,
         logger,
+        "filter/resume-seed/of:barrier-held-until-seeded",
       );
       // The cross-space promise set is what `Cell.pull()`,
       // `storageManager.synced()` and the `settled(Infinity)` drain in
