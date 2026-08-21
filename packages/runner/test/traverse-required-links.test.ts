@@ -12,7 +12,6 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -56,7 +55,6 @@ function putDoc(
     the: TYPE,
     of: uri as Entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: uri as Entity }),
     since,
   };
   store.set(`${revision.of}/${revision.the}`, revision);

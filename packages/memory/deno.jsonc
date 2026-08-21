@@ -23,10 +23,8 @@
     }
   },
   "exports": {
-    ".": "./lib.ts",
     "./acl": "./acl.ts",
     "./interface": "./interface.ts",
-    "./fact": "./fact.ts",
     "./v2": "./v2.ts",
     "./v2/patch": "./v2/patch.ts",
     "./v2/client": "./v2/client.ts",
