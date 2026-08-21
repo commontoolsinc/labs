@@ -3,114 +3,48 @@
  *
  * Each worker owns ONE full client stack — Identity, StorageManager, Runtime,
  * PiecesController — in its own JS realm, exactly like one browser tab. The
- * main thread orchestrates via a tiny request/response protocol.
+ * main thread orchestrates via a tiny request/response protocol, whose shapes
+ * and conversions live in `./multi-runtime-ipc.ts`.
+ *
+ * This is a worker entry point: loading it installs a `self.onmessage`
+ * handler. Nothing outside a worker may import a value from here, which is
+ * what the protocol module is for.
  */
 
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import {
   type FabricValue,
   isValidFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
-import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import {
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import {
-  Identity,
-  isCryptoKeyPair,
-  type KeyPairRaw,
-} from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   initializePiecesController,
   type PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import {
+  keyPairRawFromFabric,
+  type RuntimeDiagnosticsSnapshot,
+  type TrustedUiDescriptor,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./multi-runtime-ipc.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-
-/**
- * A request to a worker realm.
- *
- * `args` crosses as one `codec-realm` encoding, that being the format written
- * for a realm boundary, so a command's arguments carry the whole `FabricValue`
- * domain rather than whatever structured cloning preserves of them. `id` and
- * `cmd` are addressing and travel as themselves.
- */
-export type WorkerRequest = {
-  id: number;
-  cmd: string;
-  args: RealmEncodedValue;
-};
-
-/**
- * Converts a key pair into the form `init` carries it in, a `FabricKeyPair`
- * being what lets key material travel inside the encoded args rather than
- * beside them.
- *
- * A byte pair does not say what algorithm it is for, where a `CryptoKeyPair`
- * reports its own; `identity` only ever produces ed25519, so that is the name
- * the material arm is given.
- *
- * TODO(danfuzz): this pair of conversions belongs in
- * `@commonfabric/identity`, once `Identity` speaks `FabricKeyPair` rather
- * than `KeyPairRaw`. `serializeKeyPairRaw()` there is the function they
- * replace, it having no answer but `null` for the handles arm.
- */
-export function fabricFromKeyPairRaw(raw: KeyPairRaw): FabricKeyPair {
-  return isCryptoKeyPair(raw)
-    ? new FabricKeyPair(raw)
-    : new FabricKeyPair("Ed25519", raw.publicKey, raw.privateKey);
-}
-
-/**
- * Converts a key pair back into the form `Identity.deserialize()` takes.
- *
- * The material arm's bytes are copied where the handles arm's keys are not, a
- * `CryptoKey` being an opaque handle with no copy to make. So the result of
- * the handles arm holds the very keys the instance holds.
- */
-function keyPairRawFromFabric(pair: FabricKeyPair): KeyPairRaw {
-  return pair.hasMaterial
-    ? {
-      publicKey: pair.publicKeyBytes.slice(),
-      privateKey: pair.privateKeyBytes.slice(),
-    }
-    : pair.cryptoKeyPair;
-}
-
-/**
- * A response from a worker realm. `ok` is the command's answer as one
- * `codec-realm` encoding, for the reason {@link WorkerRequest} gives; a
- * command that fails answers with text instead.
- */
-export type WorkerResponse =
-  | { id: number; ok: RealmEncodedValue }
-  | { id: number; error: string };
-
-export type TrustedUiDescriptor = {
-  /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
-  surface: string;
-  /** `data-ui-action` of the control inside the surface. */
-  action: string;
-};
-
-export type RuntimeDiagnosticsSnapshot = {
-  graph: SchedulerGraphSnapshot;
-  settleStatsHistory: FabricValue[];
-  actionRunTrace: FabricValue[];
-};
 
 let cc: PiecesController | undefined;
 let piece: PieceController | undefined;

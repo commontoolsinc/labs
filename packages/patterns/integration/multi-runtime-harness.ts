@@ -52,7 +52,7 @@ import {
   type TrustedUiDescriptor,
   type WorkerRequest,
   type WorkerResponse,
-} from "./multi-runtime-worker.ts";
+} from "./multi-runtime-ipc.ts";
 
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
