@@ -2284,11 +2284,18 @@ describe("Phase 3 events-down (serving side)", () => {
     try {
       const servingSeen = w.servingC;
       // The s2 handler records every tag; for the derivation's "ping" it
-      // ALSO commits the sibling tx inline (the intent half).
+      // ALSO commits the sibling tx inline (the intent half) — and ARMS
+      // the settle gate as its first act, so the arming is sequenced
+      // before this cycle's settle reaches its barrier (see the gate
+      // installation below).
+      let holdArmed = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
-          if (tag === "ping") stampSibling(w.serving, tx, sideServing);
+          if (tag === "ping") {
+            holdArmed = true;
+            stampSibling(w.serving, tx, sideServing);
+          }
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2315,15 +2322,16 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open once EITHER of the copy's two seals is visible
-      // through the sealed overlay. The seal chain runs emitter → sibling
-      // (committed inline by the handler) → the handler's own tx, so the
-      // sibling's write is the earliest event-handler seal the settle's
-      // barrier can observe — the same chain position the (α3) pin's
-      // handler seal holds; the handler's seal then joins the held wave.
+      // Hold the wave open for the cycle that RUNS the copy: the handler
+      // arms the gate as its first act, and that assignment is sequenced
+      // before the cycle's settle reaches its barrier — the hold catches
+      // the sealing cycle structurally, where a polled overlay read raced
+      // it (the settle could cross the barrier before either seal was
+      // visible, flush the wave, and a later, empty cycle hung instead —
+      // CT-2060). An idle settle already in flight still passes: nothing
+      // arms until the copy actually runs.
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () =>
-        sideView() === 1 || seenView().includes("ping");
+      servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);
