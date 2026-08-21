@@ -17,6 +17,7 @@ import type {
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
+import type { HarnessResolvedValueRegister } from "../contracts/resolved-value-register.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -38,6 +39,14 @@ export interface HarnessToolContext {
    * addresses by the prompt loop.
    */
   handleTable?: HarnessHandleTable;
+  /**
+   * The run's register of values materialized from handles, and the scrub
+   * that keeps them out of model-facing output for the rest of the run. The
+   * engine always supplies one; a tool that materializes a value without it
+   * can only scrub within its own invocation, which leaves a later read of
+   * the same page unguarded.
+   */
+  resolvedValueRegister?: HarnessResolvedValueRegister;
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also

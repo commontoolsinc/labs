@@ -24,6 +24,7 @@ import {
   type HarnessHandleEntry,
   type HarnessHandleTable,
 } from "./contracts/handle-table.ts";
+import { scrubResolvedValuesDeep } from "./contracts/resolved-value-register.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
@@ -466,6 +467,16 @@ const summarizeToolInput = async (
         ...(typeof input.action === "string" ? { action: input.action } : {}),
         ...(typeof input.kind === "string" ? { kind: input.kind } : {}),
         ...(typeof input.ref === "string" ? { ref: input.ref } : {}),
+        // A handle is a selector, not a value: it names an address the model
+        // already holds and the summary carries it whole. Digesting it would
+        // be pointless, and digesting what it stands for would turn the
+        // summary into an oracle for the value the handle exists to withhold.
+        ...(typeof input.valueHandle === "string"
+          ? { valueHandle: input.valueHandle }
+          : {}),
+        ...(typeof input.urlHandle === "string"
+          ? { urlHandle: input.urlHandle }
+          : {}),
         ...(isSafeNonNegativeInteger(input.timeoutMs)
           ? { timeoutMs: input.timeoutMs }
           : {}),
@@ -2646,7 +2657,15 @@ export class CfHarnessPromptLoop {
     if (swapped.table !== table) {
       await this.engine.recordHandleTable(swapped.table);
     }
-    return swapped.value;
+    // Addresses become tokens and materialized values disappear at the same
+    // boundary, because both are things the model must not hold. A value a
+    // handle put into a page can return through any tool that reads that
+    // page, not only the one that put it there, so the scrub belongs here
+    // rather than in each tool.
+    return scrubResolvedValuesDeep(
+      this.engine.resolvedValueRegister,
+      swapped.value,
+    );
   }
 
   /**
