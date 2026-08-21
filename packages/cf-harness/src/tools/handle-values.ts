@@ -67,6 +67,16 @@ export const httpOriginOf = (url: string): string | undefined => {
 };
 
 /**
+ * Materializing a value obliges the caller to keep it out of what the model
+ * reads. Record it in the run's resolved-value register before use, and check
+ * that the fields your tool's output carries it back through are covered by
+ * `SCRUBBED_PAYLOAD_TEXT_FIELDS`. Today only the browser tool materializes,
+ * and its text fields are covered; a tool that echoes its own arguments — the
+ * `argv` and `args` a skill-script result carries, say — would need those
+ * fields added the day it starts resolving handles, because they are
+ * deliberately off the list while nothing puts a secret in them.
+ */
+/**
  * The string value behind `handle`, or an explanation of why the run cannot
  * read one. `label` names the field being resolved — "browser valueHandle",
  * say — and opens every message, so a refusal says which position failed.

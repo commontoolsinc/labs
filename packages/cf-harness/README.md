@@ -1174,9 +1174,11 @@ Binding permitted destinations to the handle itself, at mint time, is the shape
 that closes both, and it is not what this does.
 
 Once a run materializes a value, that string is scrubbed out of the
-text-carrying fields of model-facing tool output — `output`, `detail`,
-`message`, `stdout`, `stderr` — for the rest of the run, at the same boundary
-where addresses become handle tokens. The scrub is a backstop against the
+text-carrying fields of model-facing tool output for the rest of the run, at the
+same boundary where addresses become handle tokens. A field qualifies when it
+carries free text the tool did not compose from its own vocabulary — what it
+read off a file, a page, a network response, a child process, or a child run —
+which is what makes rewriting it safe. The scrub is a backstop against the
 obvious return path — a later snapshot, a skill script driving the same browser,
 a failing command's stderr — and not a containment boundary. Three things pass
 through it. It matches strings, so a value the page transformed (HTML-escaped,
