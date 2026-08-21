@@ -1366,7 +1366,11 @@ Preconditions (all RULED 2026-08-15, all landed with this phase):
       authority — under the flag the toolshed process identity is a
       memory service principal, so the loopback plane reads the
       demanding user's home space (`memoryServiceDidsFor`; OFF the
-      configured list verbatim); (2) a flag-ON client's wish REFERENCES
+      configured list verbatim) — *this posture was later RETIRED by
+      OW31's build (2026-08-21): the process identity became a
+      DELEGATING principal whose serving sessions read as the space's
+      owner via the `actingAs` binding, `memoryAclPrincipalsFor`;
+      verification-coverage.md OW31*; (2) a flag-ON client's wish REFERENCES
       the served sidecar cell instead of fetching/instantiating it
       itself (the bookkeeping-authored instantiation raced the server's
       derived one — the ~13/s stale-basis loop); (3) the nested-piece
