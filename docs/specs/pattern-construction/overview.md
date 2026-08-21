@@ -192,7 +192,7 @@ snapshots or the reactive-interpreter rollout. See
 [implementation plan](../../plans/first-class-serializable-factories.md).
 
 1. Make pattern, module/lift, and handler factory functions directly branded
-   `Factory@1` Fabric values.
+   `Factory@1` `FabricValue`s.
 2. Generalize ref binding, cold resolution, and symbolic invocation across
    factory kinds.
 3. Closure-convert and hoist nested patterns, binding callback argument 1 with
