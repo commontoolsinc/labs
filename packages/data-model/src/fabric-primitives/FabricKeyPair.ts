@@ -59,17 +59,6 @@ type RealmHandleState = {
   privateKey: CryptoKey;
 };
 
-/** Whether the given value is a `CryptoKey` this realm recognizes. */
-function isCryptoKey(value: unknown): value is CryptoKey {
-  return !!globalThis.CryptoKey && (value instanceof globalThis.CryptoKey);
-}
-
-/** Whether the given value is a `CryptoKeyPair` this realm recognizes. */
-function isCryptoKeyPair(value: unknown): value is CryptoKeyPair {
-  return isPlainObject(value) && isCryptoKey(value.publicKey) &&
-    isCryptoKey(value.privateKey);
-}
-
 /**
  * Immutable asymmetric key pair in the fabric type system.
  *
@@ -315,7 +304,10 @@ export class FabricKeyPair extends BaseFabricPrimitive
           privateKey?: unknown;
         };
 
-        if (isCryptoKey(publicKey) && isCryptoKey(privateKey)) {
+        if (
+          FabricKeyPair.#isCryptoKey(publicKey) &&
+          FabricKeyPair.#isCryptoKey(privateKey)
+        ) {
           return algorithm === undefined;
         }
 
@@ -339,7 +331,7 @@ export class FabricKeyPair extends BaseFabricPrimitive
         state: RealmMaterialState | RealmHandleState,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (isCryptoKey(state.publicKey)) {
+        if (FabricKeyPair.#isCryptoKey(state.publicKey)) {
           return new FabricKeyPair(state as RealmHandleState);
         }
 
@@ -388,6 +380,18 @@ export class FabricKeyPair extends BaseFabricPrimitive
     return this.#realmCodec;
   }
 
+  /** Whether the given value is a `CryptoKey` this realm recognizes. */
+  static #isCryptoKey(value: unknown): value is CryptoKey {
+    return !!globalThis.CryptoKey && (value instanceof globalThis.CryptoKey);
+  }
+
+  /** Whether the given value is a `CryptoKeyPair` this realm recognizes. */
+  static #isCryptoKeyPair(value: unknown): value is CryptoKeyPair {
+    return isPlainObject(value) &&
+      FabricKeyPair.#isCryptoKey(value.publicKey) &&
+      FabricKeyPair.#isCryptoKey(value.privateKey);
+  }
+
   /**
    * Returns the given key pair's two keys, checked as a public/private pair
    * whose `algorithm` records agree in full, parameters included.
@@ -399,7 +403,7 @@ export class FabricKeyPair extends BaseFabricPrimitive
    * establishes is that they *could* be counterparts.
    */
   static #validPair(pair: CryptoKeyPair): CryptoKeyPair {
-    if (!isCryptoKeyPair(pair)) {
+    if (!FabricKeyPair.#isCryptoKeyPair(pair)) {
       throw new Error("Not a `CryptoKeyPair`: both keys must be `CryptoKey`s.");
     }
 
