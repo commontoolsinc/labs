@@ -48,14 +48,24 @@ export const authorizationError = (
 
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
-  right: { sessionId?: string; seenSeq?: number; sessionToken?: string },
+  right: {
+    sessionId?: string;
+    seenSeq?: number;
+    sessionToken?: string;
+    actingAs?: string;
+  },
 ): boolean =>
   (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
     right.sessionId &&
   (typeof left.seenSeq === "number" ? left.seenSeq : undefined) ===
     right.seenSeq &&
   (typeof left.sessionToken === "string" ? left.sessionToken : undefined) ===
-    right.sessionToken;
+    right.sessionToken &&
+  // The delegated READ binding (OW31) is part of the signed descriptor:
+  // a message-level marker that disagrees with the signed one is a
+  // mismatch, so the binding cannot be injected or stripped in transit.
+  (typeof left.actingAs === "string" ? left.actingAs : undefined) ===
+    right.actingAs;
 
 export type SessionOpenMessage = {
   space: string;

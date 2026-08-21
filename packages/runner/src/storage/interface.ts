@@ -182,8 +182,32 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Register a derived space identity for fresh-space ACL genesis. Optional:
    * storage managers without ACL bootstrap support may ignore this capability.
    * The identity is never used as the principal for ordinary storage work.
+   *
+   * `options.owner` names the genesis ACL's OWNER (OW31, RULED 2026-08-18:
+   * a provisioned space's first commit is signed by the space's own keys
+   * and names the ACTING user OWNER — the serving identity appears nowhere
+   * in the ACL). Absent, the genesis owner is the manager's own signer —
+   * the active user on a client, byte-identical to the pre-OW31 shape.
    */
-  registerSpaceIdentity?(identity: Signer): void;
+  registerSpaceIdentity?(identity: Signer, options?: { owner?: string }): void;
+
+  /**
+   * Force `space`'s provider session — and with it any fresh-space ACL
+   * genesis the manager's session factory performs — to have completed
+   * (OW31 B4). Optional: managers without ACL bootstrap support resolve
+   * after a plain session mount; the serving loop's commit step calls it
+   * for `creation`-granted foreign targets so the genesis lands before
+   * the sink's data batch (protocol.md §2b's genesis clause).
+   */
+  ensureSpaceInitialized?(space: MemorySpace): Promise<void>;
+
+  /**
+   * The serving manager's HOME space (a serving runtime's storage
+   * manager declares it; undefined on every client manager). Consumers
+   * use it to decide whether a write target is FOREIGN to the serving
+   * loop (OW31 seat S-A).
+   */
+  readonly servingHomeSpace?: MemorySpace | undefined;
 
   /**
    * Close all storage providers

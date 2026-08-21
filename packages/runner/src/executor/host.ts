@@ -142,6 +142,10 @@ export class ExecutorHost {
     }
     return {
       ...this.#stats,
+      // Own copy: the live Record mutates under bumpDerivedCommits and
+      // the top-level spread shares its reference (the same reason as
+      // NIT-1's settle-series copy below).
+      derivedCommitsBySpace: { ...this.#stats.derivedCommitsBySpace },
       events: { ...this.#stats.events },
       demand: { ...this.#stats.demand },
       settle: {

@@ -102,6 +102,7 @@ import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import type {
+  DID,
   IExtendedStorageTransaction,
   IStorageSubscription,
   MemorySpace,
@@ -5739,13 +5740,40 @@ export class Runner {
    * On the re-run the names resolve synchronously from the runtime cache (see
    * the pattern builder's resolveInSpaceTargetSpace), so the child results are
    * routed into the correct spaces from the start — no link rewriting required.
+   *
+   * OW31 (RULED 2026-08-18): on a SERVING runtime the fresh space's genesis
+   * ACL must name the run's ACTING user as OWNER, so the acting principal is
+   * read from the run transaction's wave run context and threaded to
+   * {@link Runtime.resolveSpaceName} as the genesis owner. Read WITHOUT
+   * `homeSpacePrincipalFor`'s read-scope-ratchet side effect (scope report
+   * F8): resolving a provisioning target is not a scoped READ of the run.
+   * The ACTING user is the ONLY source (review F1 on #6156): the genesis
+   * owner must be the same principal the provisioning crossing's grant
+   * probe and carriage carry, or replay's acl arm would probe a stranger —
+   * a demand-supplied `scopeKeyIdentity` is resolution scaffolding whose
+   * acting settles (possibly to NONE) at the seal, so a context carrying
+   * only it REFUSES here exactly like a bare one: its crossing would be
+   * refused carriage-less anyway, and registering the scaffolding
+   * principal would mint an orphaned genesis under an owner the wave
+   * never grants. On a client (`!servingPosture`) no owner is supplied
+   * and the genesis names the active user — byte-identical to before.
    */
   private async resolvePendingSpaceNamesAndRetry(
     frame: Frame,
+    tx?: IExtendedStorageTransaction,
   ): Promise<never> {
     const names = [...(frame.pendingSpaceNames ?? [])];
+    let owner: DID | undefined;
+    if (this.runtime.servingPosture && tx !== undefined) {
+      owner = waveRunContextOf(tx)?.acting?.user as DID | undefined;
+    }
     await Promise.all(
-      names.map((name) => this.runtime.resolveSpaceName(name)),
+      names.map((name) =>
+        this.runtime.resolveSpaceName(
+          name,
+          owner !== undefined ? { owner } : undefined,
+        )
+      ),
     );
     throw new RetryImmediately(
       `Resolving in-space target spaces: ${names.join(", ")}`,
@@ -6141,7 +6169,7 @@ export class Runner {
           logger.timeStart("stream", "postRun");
           try {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
-              return this.resolvePendingSpaceNamesAndRetry(frame);
+              return this.resolvePendingSpaceNamesAndRetry(frame, tx);
             }
             const normalized = normalizeSandboxResult(result, name);
             return this.handleJavaScriptHandlerResult(
@@ -6176,7 +6204,7 @@ export class Runner {
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
-          return this.resolvePendingSpaceNamesAndRetry(frame)
+          return this.resolvePendingSpaceNamesAndRetry(frame, tx)
             .finally(() => popFrame(frame));
         }
         (error as Error & { frame?: Frame }).frame = frame;
@@ -6514,7 +6542,7 @@ export class Runner {
               result = undefined;
             }
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
-              return this.resolvePendingSpaceNamesAndRetry(frame);
+              return this.resolvePendingSpaceNamesAndRetry(frame, tx);
             }
             const normalized = normalizeSandboxResult(result, name);
             return this.writeJavaScriptActionResult(
@@ -6563,7 +6591,7 @@ export class Runner {
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
-          return this.resolvePendingSpaceNamesAndRetry(frame)
+          return this.resolvePendingSpaceNamesAndRetry(frame, tx)
             .finally(() => popFrame(frame));
         }
         // A refusal that escaped the body takes the same disposition as one it
@@ -7435,10 +7463,24 @@ export class Runner {
       // pattern artifacts from `resultCell.space` (the child's own space),
       // where neither the meta nor the compiled closure exist yet. Replicate
       // them there (fire-and-forget) so the child is independently loadable.
+      // On a SERVING runtime the replication's writebacks into the child's
+      // space are FOREIGN to the home wave, so they ride the instantiating
+      // run's §2b delegated carriage (OW31 seat S-A) — the served mirror of
+      // the client committing the program under the user's own session;
+      // without it the wave's accept gate refuses the crossing and the
+      // child space's program never materializes (the render-stall class).
+      const runContext = waveRunContextOf(tx);
       this.runtime.patternManager.replicatePatternToSpace(
         patternImpl,
         childResultCell.space,
         parentResultCell.space,
+        runContext?.acting !== undefined &&
+          runContext.capabilityRef !== undefined
+          ? {
+            acting: runContext.acting,
+            capabilityRef: runContext.capabilityRef,
+          }
+          : undefined,
       );
     }
     const childRun = this.runWithStartOwnership(

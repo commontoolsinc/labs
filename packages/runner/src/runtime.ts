@@ -406,6 +406,23 @@ export type ServerRunInfo = {
    * other wave (events.md §4). Absent on the drain's
    * `streamEntry`-bearing copies and on every client-side event. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
+  /** An EXPLICIT §2b delegated carriage for a `bookkeeping`-kind
+   * internal write sanctioned to cross a space boundary (OW31 seat S-A;
+   * protocol.md §2b): the compile-cache / program-materialization
+   * writeback into a piece's OWN space, riding the carriage of the
+   * provisioning or demanding run that triggered it — the served mirror
+   * of the client committing the program under the user's own session.
+   * The wave's conflict machinery still treats the contribution as
+   * bookkeeping (rebase-or-drop; the writeback's own retry re-issues);
+   * only the accept gate and the foreign batch's delegated admission
+   * read this. Never set on a HOME-space writeback (those stay plain
+   * bookkeeping, protocol.md §1's "The SpaceServer's own writes") and
+   * never derived by the stamper — the caller attributes the trigger,
+   * or the foreign write stays refused (fail-closed). */
+  delegated?: {
+    acting: { user: string; session?: string };
+    capabilityRef: string;
+  };
 };
 
 /**
@@ -2736,10 +2753,32 @@ export class Runtime {
    * `spaceName` path), so equal names map to the same shared space across users.
    * This is the deliberate "shared profile space" behavior today; revisit once
    * we can derive unique space DIDs from a string.
+   *
+   * OW31 (RULED 2026-08-18): `options.owner` names the fresh space's
+   * genesis ACL OWNER. On a SERVING runtime the caller MUST supply the
+   * run's ACTING principal (the serving-side resolvePendingSpaceNames
+   * threads it from the frame tx's wave run context) — a serving runtime
+   * with no actor REFUSES to register, mirroring getHomeSpaceCell's
+   * refusal: a served `.inSpace()` with no acting identity must never
+   * mint a service-owned space (builtins.md §5; protocol.md §2b). On a
+   * client the owner is omitted and the genesis names the manager's own
+   * signer — the active user, byte-identical to before.
    */
-  async resolveSpaceName(name: string): Promise<MemorySpace> {
+  async resolveSpaceName(
+    name: string,
+    options?: { owner?: DID },
+  ): Promise<MemorySpace> {
     const cached = this.resolveSpaceNameSync(name);
     if (cached !== undefined) return cached;
+    if (this.servingPosture && options?.owner === undefined) {
+      throw new Error(
+        `space-name resolution for "${name}" on a serving runtime requires ` +
+          "the run's acting identity as genesis owner (OW31, RULED " +
+          "2026-08-18; builtins.md §5's per-demanding-identity resolution; " +
+          "protocol.md §2b): refusing to register a space identity whose " +
+          "genesis would name the SERVICE as owner",
+      );
+    }
     const session = await createSession({
       identity: this.storageManager.as as unknown as Identity,
       spaceName: name,
@@ -2749,7 +2788,10 @@ export class Runtime {
     // as the active user (`storageManager.as`), so resolving a name does not
     // grant an existing space's key to the caller.
     if (session.spaceIdentity) {
-      this.storageManager.registerSpaceIdentity?.(session.spaceIdentity);
+      this.storageManager.registerSpaceIdentity?.(
+        session.spaceIdentity,
+        options?.owner !== undefined ? { owner: options.owner } : undefined,
+      );
     }
     const did = session.space as MemorySpace;
     this.spaceNameToDid.set(name, did);

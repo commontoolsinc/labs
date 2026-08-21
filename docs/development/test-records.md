@@ -40,15 +40,28 @@ append-only, no-double-mapping, acyclic rules.
   everywhere. CI jobs set it to a workspace directory; local entry points
   set it themselves when they own a run. Never point two concurrent runs
   at one directory by hand — each run owns its own spool.
-- `CF_TEST_RECORDS_KEY_FILE` — a personal reporting key
-  (see below), exported from the login shell's profile by
-  `deno task test-records-key setup`. Its presence is the local opt-in:
-  with it, `deno task test`, `deno task integration`, and `deno task
-  run-recorded` stamp a spool, ship it when the run ends, and sweep any
-  orphaned spools a killed run left behind.
+- `CF_TEST_RECORDS_KEY_FILE` — a personal reporting key (see below), put in
+  the shell's profile and in each agent harness's configuration by `deno
+  task test-records-key setup`. Its presence is the local opt-in: with it,
+  `deno task test`, `deno task integration`, and `deno task run-recorded`
+  stamp a spool, ship it when the run ends, and sweep any orphaned spools a
+  killed run left behind. It has to reach shells nobody is typing into,
+  since that is what an agent's run is, so the export goes in `.zshenv`
+  rather than `.zshrc`. A harness that runs its commands through no shell at
+  all is covered by its own configuration instead, which the setup command
+  writes; the harnesses it knows are listed in
+  `tasks/test-records-agent-config.ts`, and one whose directory is not
+  there is left alone. Anything else — a bash workstation whose agents run
+  non-interactive shells, a harness nothing here knows — puts the variable
+  in whatever starts the agent.
 - `CF_TEST_AGENT` — an opaque label for the operating agent, recorded
-  verbatim in the run context. Set it to tell an agent fleet's runs apart
-  from a person's; it is never required.
+  verbatim in the run context. Set it to tell one agent from another, or
+  one checkout of a fleet from the next; it is never required. Left
+  unset, a run started by an agent is still labeled, by the harness that
+  started it — `claude-code`, `cursor`, `codex`, or `agent` for anything
+  that announces itself only as one. A person's own terminal carries
+  none of those, so their runs stay unlabeled, and a consumer that wants
+  human runs alone reads the ones with no `agent` field.
 - `CF_TEST_RECORDS_SPOOL_ROOT` — overrides the per-user spool root, which
   is otherwise under the user cache directory
   (`~/.cache/common-fabric/test-records`). The root is deliberately not in
@@ -76,8 +89,12 @@ deno task test-records-key setup
 
 generates a delivery identity, dispatches the minting workflow, watches
 until the run delivers, installs the key file with owner-only
-permissions, and exports `CF_TEST_RECORDS_KEY_FILE` from the login
-shell's profile — every shell opened after that records. A profile that
+permissions, and puts `CF_TEST_RECORDS_KEY_FILE` where the things that
+run tests will find it: the shell's profile, and the configuration of
+every agent harness installed here, since an agent that runs its
+commands without a shell is reached only by telling its harness to
+carry the variable. Every shell opened after that records, and so does
+every agent. A profile that
 already sets the variable is reported and left alone, whether it points
 somewhere else or sets it without exporting it, and so is a login
 profile that does not exist yet, since creating one is what stops a
@@ -93,7 +110,9 @@ watching for the run that click starts. The wait has no bound, since a
 run takes as long as it takes; Ctrl-C stops watching and running the
 command again picks up where it left off. Run it on a workstation that
 already holds a key and it re-checks the shell profile rather than
-minting a second one.
+minting a second one — unless a run is already minting for you, which it
+takes up, because the key that run delivers is the one replacing what is
+installed.
 
 `request` and `collect` are the same path in two invocations, for
 somewhere a watching command is unwanted — a shell without a terminal to
@@ -123,10 +142,52 @@ accounts of people with no pull-request activity for a month and
 re-enables them when they return — the same key file simply starts
 working again.
 
-You hold one live key: minting revokes the previous ones, so
-`deno task test-records-key setup --rotate` is how a lost or leaked key
-is rotated, and a second machine gets the existing key file copied to it
-rather than a fresh mint that would kill the first machine's.
+You hold one live key: minting revokes the previous ones before it
+creates the new one, so `deno task test-records-key setup --rotate` is
+how a lost or leaked key is rotated, and a second machine gets the
+existing key file copied to it rather than a fresh mint that would kill
+the first machine's. A mint that fails after the revocation leaves you
+with no key rather than two; the next run says so, and running setup
+again mints one.
+
+A key file on disk is not the same thing as a key that works, so setup
+asks whether the one installed here is still accepted before it stands
+down. A key that has been revoked — by a rotation from another machine,
+or by a mint that failed after revoking the key it was replacing — is
+replaced rather than mistaken for a working one, and no flag is needed
+to recover. Where the question cannot be put at all, setup says so and
+leaves the key alone.
+
+## Taking it off a workstation
+
+```
+deno task test-records-key uninstall
+```
+
+removes what setup put there — the key file, the delivery identity, the
+export it added, and the entry in each harness's configuration —
+leaving any line or value a person set themselves alone.
+
+Both commands write a profile the way a profile should be written. A
+profile that is a symbolic link, which is what a dotfiles repository
+leaves behind, is followed: the link stays a link and the file it points
+at is what changes. A file's permissions carry over, so one kept
+readable only by its owner comes back that way, and a file either of
+them creates is readable only by its owner. Each replacement happens in
+one step, because a shell startup file left half written is a shell that
+will not start. And a file whose state cannot be read — permissions
+withdrawn, a directory closed off — is reported and left alone rather
+than guessed at.
+Records that were spooled and never shipped stay where they are, since a
+later key ships them; the command says where they sit and what removing
+them would throw away.
+
+Two things it deliberately does not do. The service account and its key
+still exist, so a key that has leaked is made useless by minting a
+replacement, from this machine or any other, and not by uninstalling.
+And records already in the store stay there: they carry no personal
+material, and no key this tool installs can change or remove anything
+that is already stored.
 
 ## How records move
 

@@ -434,6 +434,33 @@ const handlers: Record<
     return {};
   },
 
+  // Wait until this runtime has NO outstanding event intents: every event it
+  // fired has reached a terminal consequence (consequenced, errored, dropped,
+  // or refused) AND that consequence has arrived back here — speculation.md
+  // §4 step 2's retirement, whose outstanding set the overlay maintains
+  // (`Runtime.speculationOverlay.pendingIntentCount`). Under the served (ON)
+  // topology this is the client-observable "the server has drained my sends"
+  // signal the harness settle uses in place of the in-process server's
+  // `idle()` (see MultiRuntimeHarness.settle). Resolves `{ pending: 0 }` on
+  // quiescence, or with the still-outstanding count once `timeoutMs`
+  // elapses — the caller's settle round proceeds and the test's own assert
+  // speaks, so a wedged consequence degrades loudly instead of hanging the
+  // harness. The OFF arm has no overlay and resolves immediately.
+  async eventQuiescence({ timeoutMs }) {
+    const runtime = controller().runtime;
+    const budget = typeof timeoutMs === "number" ? timeoutMs : 10_000;
+    const deadline = Date.now() + budget;
+    for (;;) {
+      const pending = runtime.speculationOverlay?.pendingIntentCount ?? 0;
+      if (pending === 0) return { pending: 0 };
+      if (Date.now() >= deadline) return { pending };
+      // Plain timer wait: consequence pushes arrive on the WebSocket and the
+      // overlay's intent listener runs in a microtask on the replica
+      // notification, so nothing here needs nudging — just time.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  },
+
   // Force an ordered-after round trip on every open space connection, so any
   // subscription fan-out the server has already sent has been received and
   // applied by this runtime before returning. The harness's cross-runtime

@@ -39,7 +39,7 @@ export async function uploadFile(
   const upload = await runtime.uploadBlob({
     space,
     contentType: mediaType,
-    body: new Uint8Array(buffer),
+    body: buffer,
     suffix: fileSuffix(file.name, mediaType),
   });
 

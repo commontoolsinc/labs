@@ -368,8 +368,8 @@ export class FabricKeyPair extends BaseFabricPrimitive {
         try {
           return new FabricKeyPair(
             algorithm,
-            new FabricBytes(new Uint8Array(publicKey), true),
-            new FabricBytes(new Uint8Array(privateKey), true),
+            new FabricBytes(publicKey, true),
+            new FabricBytes(privateKey, true),
           );
         } catch (e) {
           throw new Error(

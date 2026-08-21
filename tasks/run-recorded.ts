@@ -70,7 +70,13 @@ async function main(): Promise<void> {
       stdout: "inherit",
       stderr: "inherit",
     }).spawn();
-    code = (await child.status).code;
+    const status = await child.status;
+    code = status.code;
+    if (status.signal !== null) {
+      console.error(
+        `run-recorded: \`${args[0]}\` terminated by \`${status.signal}\`.`,
+      );
+    }
   } catch (error) {
     console.error(`run-recorded: cannot run ${args[0]}: ${error}`);
     code = 127;

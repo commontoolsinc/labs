@@ -68,7 +68,9 @@ name (a constant owned by the repository's tooling, never derived from git
 remotes), the `commit` the tests ran against, a `dirty` flag, an optional
 `branch`, `env` (`ci` or `local`), the machine facts (`os`, `arch`,
 `denoVersion`), an ISO 8601 `startedAt` from the run's start, an optional
-opaque `agent` label from `CF_TEST_AGENT`, and for CI runs a `ci` block:
+opaque `agent` label — `CF_TEST_AGENT`, or the name of the harness the
+run was started under when that variable is unset — and for CI runs a
+`ci` block:
 `workflowRunId`, `runAttempt` (the attempt that produced the records),
 `workflow`, `job` (display name with matrix leg), optional `shard`,
 optional `headCommit` (the pull request's head; `commit` is the ephemeral
@@ -144,8 +146,9 @@ service accounts (`test-records-gh-<username>`, the login lowercased)
 with create on their own `submissions/local/<username>/` folders, minted
 by a dispatch-gated workflow and delivered sealed to a
 requester-generated X25519 identity. Minting revokes the account's
-previous keys once the new one exists — a person holds one live key, and
-re-requesting is how a lost or compromised key is rotated — and a daily
+previous keys before the new one exists — a person holds one live key,
+never two, and re-requesting is how a lost or compromised key is
+rotated — and a daily
 janitor disables accounts after a month without pull-request activity
 and re-enables them on return. The **compactor**, when provisioned,
 holds create on `aggregated/` and rewrites each closed day of raw

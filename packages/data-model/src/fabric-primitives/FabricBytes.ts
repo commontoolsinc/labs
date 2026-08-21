@@ -24,6 +24,7 @@ import {
  * The underlying bytes are private. Callers access them through:
  * - `length` -- the byte count.
  * - `slice()` -- returns an unshared copy (or sub-range).
+ * - `sliceBuffer()` -- the same, as a bare `ArrayBuffer`.
  * - `copyInto()` -- copies bytes into a caller-provided buffer.
  *
  * Immutable: instances are `Object.freeze()`-d at construction time, and an
@@ -40,13 +41,13 @@ export class FabricBytes extends BaseFabricPrimitive {
   /**
    * Constructs an instance holding the given bytes, which it owns outright.
    *
-   * @param bytes - The raw bytes to wrap.
+   * @param bytes - The raw bytes to wrap, as a view or as a whole buffer.
    * @param transfer - Whether the caller cedes `bytes` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
    *   caller must not use `bytes` afterwards; `toOwnedUint8Array()` says what that
    *   permission does and does not guarantee.
    */
-  constructor(bytes: Uint8Array, transfer: boolean = false) {
+  constructor(bytes: Uint8Array | ArrayBufferLike, transfer: boolean = false) {
     super();
     this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
@@ -203,7 +204,7 @@ export class FabricBytes extends BaseFabricPrimitive {
         // Either way nothing on this side but the wire tree refers to it, and
         // that tree is spent once decoding is done.
         try {
-          return new FabricBytes(new Uint8Array(state), true);
+          return new FabricBytes(state, true);
         } catch (e) {
           // The one way an `ArrayBuffer` reaches here and cannot be built
           // from is by being detached, and it detaches by having been taken

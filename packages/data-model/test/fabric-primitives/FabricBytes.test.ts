@@ -57,6 +57,31 @@ describe("FabricBytes", () => {
       expect(fb.slice()).toEqual(new Uint8Array([1, 2, 3]));
       expect(fb.length).toBe(3);
     });
+
+    it("accepts a bare `ArrayBuffer` as the source", () => {
+      const original = Uint8Array.from([1, 2, 3]).buffer;
+      const fb = new FabricBytes(original);
+
+      expect(fb.length).toBe(3);
+      expect(fb.slice()).toEqual(new Uint8Array([1, 2, 3]));
+      new Uint8Array(original)[0] = 99; // Mutate original.
+      expect(fb.slice()[0]).toBe(1); // Unaffected.
+    });
+
+    it("consumes a bare `ArrayBuffer` source, given `transfer` as `true`", () => {
+      const original = Uint8Array.from([1, 2, 3]).buffer;
+      const fb = new FabricBytes(original, true);
+
+      expect(original.detached).toBe(true);
+      expect(fb.slice()).toEqual(new Uint8Array([1, 2, 3]));
+    });
+
+    it("round-trips the buffer that `sliceBuffer()` produces", () => {
+      const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const again = new FabricBytes(fb.sliceBuffer(), true);
+
+      expect(again.slice()).toEqual(new Uint8Array([1, 2, 3]));
+    });
   });
 
   describe("instance members", () => {

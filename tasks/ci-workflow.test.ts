@@ -562,3 +562,29 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   // extraction broke, not that the repository stopped shipping records.
   assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
 });
+
+Deno.test("every deno.yml job that writes a JUnit file spools and ships test records (the ON lanes' observability gap: 25 pattern-ON flakes had to be censused from raw Actions logs because the two server-execution ON jobs set no CF_TEST_RECORDS_DIR and had no ship step — records the dashboard never saw)", async () => {
+  const contents = withoutComments(await workflow("deno.yml"));
+  const missing: string[] = [];
+  let junitJobs = 0;
+  for (const jobId of jobIds(contents)) {
+    const job = jobBlock(contents, jobId);
+    if (!job.includes("--junit-path=")) continue;
+    junitJobs++;
+    if (!job.includes("uses: ./.github/actions/test-records-ship")) {
+      missing.push(
+        `${jobId}: writes a JUnit file but has no test-records-ship step`,
+      );
+    }
+    if (!job.includes("CF_TEST_RECORDS_DIR:")) {
+      missing.push(
+        `${jobId}: runs tests without CF_TEST_RECORDS_DIR — the spool ` +
+          "half of the records is never written",
+      );
+    }
+  }
+  assertEquals(missing, []);
+  // Pin the search itself: zero junit jobs would mean the extraction
+  // broke, not that the repository stopped writing JUnit files.
+  assert(junitJobs >= 7, `only ${junitJobs} JUnit-writing jobs found`);
+});

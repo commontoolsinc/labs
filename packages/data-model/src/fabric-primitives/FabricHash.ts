@@ -62,7 +62,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * Constructs an instance from raw hash bytes and an algorithm tag, owning
    * the bytes outright. The instance is frozen after construction.
    *
-   * @param hash - The raw hash bytes.
+   * @param hash - The raw hash bytes, as a view or as a whole buffer.
    * @param tag - Algorithm identifier (e.g., `fid1` for fabric ID v1).
    * @param transfer - Whether the caller cedes `hash` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
@@ -70,7 +70,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    *   permission does and does not guarantee.
    */
   constructor(
-    hash: Uint8Array,
+    hash: Uint8Array | ArrayBufferLike,
     tag: string,
     transfer: boolean = false,
   ) {
@@ -218,7 +218,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         // arrived either by being cloned, making it this realm's own, or by
         // being transferred, which detached the sender's.
         try {
-          return new FabricHash(new Uint8Array(hash), tag, true);
+          return new FabricHash(hash, tag, true);
         } catch (e) {
           // A detached buffer, for the reason `FabricBytes` states: it
           // detaches by having been taken over, so this tree was decoded

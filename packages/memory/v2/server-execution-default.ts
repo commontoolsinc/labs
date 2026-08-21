@@ -5,7 +5,9 @@
  * deployed-topology entry point resolves an UNSET flag to this value: the
  * `productionServer` / `remoteClient` construction presets
  * (`packages/runner/src/runtime-presets.ts`), toolshed's serving-host gate
- * and service-principal grant (`packages/toolshed/lib/server-execution.ts`),
+ * and memory ACL principal lists (`packages/toolshed/lib/
+ * server-execution.ts`; the DELEGATING class since OW31's build — never
+ * an implicit-OWNER service grant),
  * and the browser shell's build-define fallback
  * (`packages/shell/src/lib/env.ts`), so flipping the default is this one
  * value. `false` is the pre-flip behavior byte-for-byte; `true` is the v2

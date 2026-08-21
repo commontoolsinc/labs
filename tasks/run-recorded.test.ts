@@ -76,6 +76,28 @@ describe("run-recorded", () => {
     expect(spool.records[0]?.outcome).toBe("fail");
   });
 
+  it({
+    name: "reports the signal that terminated the command",
+    ignore: Deno.build.os === "windows",
+    async fn() {
+      const output = await runRecorded(spoolDir, [
+        "gate",
+        "repo",
+        "probe-signal",
+        "--",
+        "/bin/sh",
+        "-c",
+        "kill -TERM $$",
+      ]);
+      expect(output.code).toBe(143);
+      expect(new TextDecoder().decode(output.stderr)).toContain(
+        "run-recorded: `/bin/sh` terminated by `SIGTERM`.",
+      );
+      const spool = await readSpool(spoolDir);
+      expect(spool.records[0]?.outcome).toBe("fail");
+    },
+  });
+
   it("records a fail with code 127 for an unrunnable command", async () => {
     const output = await runRecorded(spoolDir, [
       "gate",

@@ -427,7 +427,9 @@ value is ignored with a warning rather than coerced. See
   `productionServer` / `remoteClient` construction presets (toolshed's
   operator runtime, the background piece service, the CLI, every pieces
   controller and integration harness against a toolshed), toolshed's
-  serving-host gate and its memory service-principal grant, and the browser
+  serving-host gate and its memory ACL principal lists (the DELEGATING
+  class since OW31's build — the process identity is no longer an
+  implicit-OWNER service principal), and the browser
   shell's build define fallback. An UNSET flag resolves to it; an explicit
   `EXPERIMENTAL_SERVER_EXECUTION=true` (or `experimental.serverExecution:
   true`, or the shell define `true`) selects the ON arm, an explicit `false`
@@ -460,10 +462,14 @@ value is ignored with a warning rather than coerced. See
   landed; Phase 7 landed the flip's mechanism — the one constant and its
   readers, OW27 per-stream send pacing in the event-append queue
   (pace-never-drop, per-stream independence — README §3.8), the LT9
-  simplification (process-lifetime queue), served-wish read authority (the
-  process identity is a memory service principal under the flag —
-  honestly, implicit OWNER for its ordinary session traffic:
-  verification-coverage.md OW31, a ruled item), the demand-root chain in
+  simplification (process-lifetime queue), served-wish read authority
+  (AT THE TIME: the process identity as a memory service principal —
+  implicit OWNER for its ordinary session traffic; that posture was
+  RULED away and RETIRED by OW31's build 2026-08-21 — the process
+  identity is now a DELEGATING principal whose serving sessions read as
+  the space's owner via the `actingAs` binding, and the operator's
+  service-DID list is used verbatim on both arms:
+  verification-coverage.md OW31), the demand-root chain in
   the run supply (nested pieces, result-as-pattern children, and the list
   builtins' element pieces) — with the constant `false`. Known ON-arm gaps,
   carried on the plan's Phase 7 section and the register: the two-browser

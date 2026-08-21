@@ -44,6 +44,13 @@ export type SessionState = {
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
+  /** The delegated READ binding (OW31; `SessionDescriptor.actingAs`):
+   * the acting user — the space's ACL owner at open time — this
+   * session's READ-class capability decisions resolve as. Never
+   * consulted for WRITE/OWNER requirements, the lease-holder read row,
+   * or scoped-read identity (those key on `principal`, the envelope).
+   * Re-resolved on every open; a resume without the marker drops it. */
+  actingPrincipal?: string;
 };
 
 type OpenSessionState = {
@@ -89,6 +96,7 @@ export class SessionRegistry {
     serverSeq: number,
     ownerConnectionId = "session-registry",
     principal?: string,
+    actingPrincipal?: string,
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -143,6 +151,10 @@ export class SessionRegistry {
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,
+      // Fresh per open (never inherited): the binding reflects THIS
+      // open's resolution against the current ACL; an open without the
+      // marker carries none (fail-closed toward less authority).
+      ...(actingPrincipal !== undefined ? { actingPrincipal } : {}),
     });
     return {
       sessionId,

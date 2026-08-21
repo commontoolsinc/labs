@@ -18,6 +18,10 @@
  *   deno task test-records-key collect
  *     The second half alone: install the delivery of a finished run.
  *
+ *   deno task test-records-key uninstall
+ *     Takes back everything setup put on the workstation: the key, the
+ *     delivery identity, and the export it added to the profiles.
+ *
  * Keys are a team-member workflow, and every part is self-service. A
  * person contributing without commit access needs no key: local tests run
  * identically without one, and CI records their pull requests' runs on
@@ -26,9 +30,12 @@
 
 import { join } from "@std/path";
 import {
+  defaultSpoolRoot,
   type Environment,
   readEnv,
   RECORDS_KEY_FILE_VARIABLE,
+  saAssertion,
+  STORE_WRITE_SCOPE,
 } from "@commonfabric/test-support/records";
 import {
   generateIdentity,
@@ -40,15 +47,23 @@ import {
 import {
   MINT_WORKFLOW_FILE,
   parsePersonalKeyFile,
+  type PersonalKeyFile,
   REPO,
 } from "./test-records-config.ts";
 import { readZip } from "./test-records-zip.ts";
+import {
+  type AgentConfigRemoval,
+  type AgentConfigUpdate,
+  exportFromAgentConfigs,
+  unexportFromAgentConfigs,
+} from "./test-records-agent-config.ts";
 import {
   exportFromProfiles,
   exportLine,
   type ProfileUpdate,
   reloadHint,
   shellKind,
+  unexportFromProfiles,
 } from "./test-records-shell-config.ts";
 
 const API = "https://api.github.com";
@@ -567,6 +582,9 @@ async function exportKeyFile(
 No shell profile to update. Export the key file yourself:
 
     ${RECORDS_KEY_FILE_VARIABLE}=${path}`);
+    // A workstation with no profile to write can still be running an
+    // agent, whose harness carries the variable instead.
+    await exportAgentConfigs(deps, path);
     return updates;
   }
   const kind = shellKind(deps.env);
@@ -607,13 +625,87 @@ Every new shell records its test runs. For the one you are in:
 
     ${reloadHint(added[0]!.path, kind)}`);
   }
+  await exportAgentConfigs(deps, path);
+  return updates;
+}
+
+/** What one harness configuration's update says to a person. */
+export function agentConfigReport(
+  update: AgentConfigUpdate,
+  path: string,
+): string {
+  switch (update.outcome) {
+    case "added":
+      return `${update.harness} passes ${RECORDS_KEY_FILE_VARIABLE} to what ` +
+        `it runs (${update.path})`;
+    case "present":
+      return `${update.harness} already passes the key file on.`;
+    case "conflict":
+      return `
+${update.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${update.harness} as
+
+    ${update.existing}
+
+Left alone. Point it at ${path} to record from this key.`;
+    case "changed":
+      return `
+${update.path} changed while this was writing, so ${update.harness} was
+left as it stands. Run the command again.`;
+    case "unreadable":
+      return `
+${update.path} does not parse as JSON, so ${update.harness} was left
+alone. Add this to its "env" once the file is readable again:
+
+    "${RECORDS_KEY_FILE_VARIABLE}": "${path}"`;
+  }
+}
+
+/** What one harness configuration's removal says to a person. */
+export function agentRemovalReport(removal: AgentConfigRemoval): string {
+  switch (removal.outcome) {
+    case "removed":
+      return `${removal.harness} no longer passes ` +
+        `${RECORDS_KEY_FILE_VARIABLE} on (${removal.path})`;
+    case "kept":
+      return `
+${removal.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${removal.harness} as
+
+    ${removal.existing}
+
+Left alone. It is not the key this tool installed.`;
+    case "changed":
+      return `
+${removal.path} changed while this was writing, so ${removal.harness} was
+left as it stands. Run the command again.`;
+    case "unreadable":
+      return `
+${removal.path} does not parse as JSON, so ${removal.harness} was left
+alone. Take ${RECORDS_KEY_FILE_VARIABLE} out of its "env" by hand.`;
+  }
+}
+
+/**
+ * Carries the key file into the configuration of every agent harness
+ * installed here. A shell profile covers an agent whose commands go
+ * through that shell; this covers the rest.
+ */
+async function exportAgentConfigs(
+  deps: KeyToolDeps,
+  path: string,
+): Promise<AgentConfigUpdate[]> {
+  const updates = await exportFromAgentConfigs(
+    RECORDS_KEY_FILE_VARIABLE,
+    path,
+    deps.env,
+  );
+  for (const update of updates) console.log(agentConfigReport(update, path));
   return updates;
 }
 
 /** The key already installed on this workstation, when there is one. */
 async function installedKey(
   env: Environment,
-): Promise<{ path: string; username: string } | undefined> {
+): Promise<{ path: string; key: PersonalKeyFile } | undefined> {
   const path = keyFilePath(env);
   let text: string;
   try {
@@ -622,8 +714,56 @@ async function installedKey(
     return undefined;
   }
   const parsed = parsePersonalKeyFile(text);
-  if (parsed === undefined) return undefined;
-  return { path, username: parsed.cf_username };
+  return parsed === undefined ? undefined : { path, key: parsed };
+}
+
+/**
+ * Whether Google still accepts the installed key, as far as asking can
+ * tell: true where it does, false where it is refused, and undefined
+ * where the question could not be put.
+ *
+ * A key file on disk is not the same thing as a key that works. Minting
+ * revokes the person's previous keys before it creates the new one, so a
+ * mint that fails in between leaves this workstation holding a file that
+ * names a key nothing will accept — and every later test run would ship
+ * nothing while saying so only in a warning nobody reads.
+ */
+async function keyStillWorks(
+  deps: KeyToolDeps,
+  key: PersonalKeyFile,
+): Promise<boolean | undefined> {
+  let assertion: string;
+  try {
+    assertion = await saAssertion(
+      key,
+      Math.floor(Date.now() / 1000),
+      STORE_WRITE_SCOPE,
+    );
+  } catch {
+    // A key that cannot sign is a key nothing will accept, whatever the
+    // endpoint would have said about it.
+    return false;
+  }
+  let response: Response;
+  try {
+    response = await deps.fetchImpl(key.token_uri, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion,
+      }),
+    });
+  } catch {
+    // The endpoint could not be reached, which says nothing about the
+    // key; a workstation offline enough for this cannot mint either.
+    return undefined;
+  }
+  await response.text();
+  if (response.ok) return true;
+  // A key that has been revoked, or an account that has been disabled,
+  // is refused; anything else is the endpoint having a bad day.
+  return response.status === 400 || response.status === 401 ? false : undefined;
 }
 
 export async function requestCommand(
@@ -733,30 +873,75 @@ export async function setupCommand(
   deps: KeyToolDeps = defaultDeps(),
   options: { rotate?: boolean } = {},
 ): Promise<number> {
+  const token = await deps.githubToken();
+  const login = token === undefined
+    ? undefined
+    : await githubLogin(deps, token);
+  const stored = await loadIdentity(deps.env);
+
+  // What this recipient already has going, asked before anything else,
+  // because a run still minting is this person's own earlier attempt —
+  // a watch they stopped, or a dispatch from a browser — and taking it
+  // up is what rerunning the command is for. Rotating deliberately is
+  // the one case that wants a new run whatever is already going.
+  let search: RunSearch | undefined;
+  let found: RunMatch | undefined;
+  if (
+    options.rotate !== true && token !== undefined && login !== undefined &&
+    stored !== undefined
+  ) {
+    search = {
+      token,
+      recipient: stored.recipient,
+      artifactName: await deliveryName(stored.recipient),
+      login,
+    };
+    found = (await findMintRun(deps, search)).match;
+  }
+  const running = found !== undefined && found.artifact === undefined &&
+    found.run.status !== "completed";
+
+  // A key installed here settles the matter only when nothing is being
+  // minted to replace it. The key that run delivers is the one this
+  // workstation is going to need, and the mint revokes this one to make
+  // it, so standing down now is how a person ends up holding a key that
+  // has been revoked.
   const existing = await installedKey(deps.env);
-  if (existing !== undefined && options.rotate !== true) {
-    console.log(
-      `A reporting key for ${existing.username} is installed at ` +
-        `${existing.path}`,
-    );
-    await exportKeyFile(deps, existing.path);
-    console.log(`
+  if (existing !== undefined && options.rotate !== true && !running) {
+    const works = await keyStillWorks(deps, existing.key);
+    if (works === false) {
+      console.log(`
+The key installed at ${existing.path} is no longer accepted, which is
+what a mint that failed after revoking the key it was replacing leaves
+behind. Minting a replacement; there is nothing live to revoke.`);
+    } else {
+      console.log(
+        `A reporting key for ${existing.key.cf_username} is installed at ` +
+          `${existing.path}`,
+      );
+      if (works === undefined) {
+        console.log(
+          "Whether the token endpoint still accepts it could not be asked " +
+            "just now.",
+        );
+      }
+      await exportKeyFile(deps, existing.path);
+      console.log(`
 Minting another key revokes this one, on every machine holding a copy.
 To rotate deliberately:
 
     deno task test-records-key setup --rotate
 `);
-    return 0;
+      return 0;
+    }
   }
 
-  const token = await deps.githubToken();
   if (token === undefined) {
     throw new KeyToolError(
       "A GitHub token is needed to mint and collect a key; set GH_TOKEN " +
         "or sign in with `gh auth login`",
     );
   }
-  const login = await githubLogin(deps, token);
   if (login === undefined) {
     throw new KeyToolError(
       "Cannot read your GitHub login; use a token that can GET /user.",
@@ -765,37 +950,26 @@ To rotate deliberately:
 
   const identity = await ensureIdentity(deps);
   console.log(`Recipient: ${identity.recipient}`);
-  const search: RunSearch = {
+  const watching: RunSearch = search ?? {
     token,
     recipient: identity.recipient,
     artifactName: await deliveryName(identity.recipient),
     login,
   };
 
-  // A run already minting for this recipient is this person's own
-  // earlier attempt — a watch they stopped, or a browser dispatch — and
-  // taking it up is what makes rerunning resume rather than start
-  // again. Minting a second time would revoke the key the first is
-  // about to deliver. Rotating deliberately is the one case that wants
-  // a new run whatever is already going.
-  const inFlight = options.rotate === true
-    ? undefined
-    : (await findMintRun(deps, search)).match;
   let artifact: number;
-  if (inFlight?.artifact !== undefined) {
-    console.log(
-      `An earlier run has the key waiting: ${runUrl(inFlight.run)}`,
-    );
-    artifact = inFlight.artifact;
+  if (found?.artifact !== undefined) {
+    console.log(`An earlier run has the key waiting: ${runUrl(found.run)}`);
+    artifact = found.artifact;
   } else {
-    if (inFlight !== undefined && inFlight.run.status !== "completed") {
+    if (running && found !== undefined) {
       console.log(
         `A minting run for this recipient is already going: ${
-          runUrl(inFlight.run)
+          runUrl(found.run)
         }`,
       );
-      const created = Date.parse(inFlight.run.created_at ?? "");
-      if (!Number.isNaN(created)) search.notBefore = created;
+      const created = Date.parse(found.run.created_at ?? "");
+      if (!Number.isNaN(created)) watching.notBefore = created;
     } else {
       const dispatch = await dispatchMint(
         deps,
@@ -812,9 +986,9 @@ Waiting for that run — this command collects the key on its own once it
 finishes. Ctrl-C stops watching; rerunning picks up where it left off.
 `);
       }
-      if (dispatch.at !== undefined) search.notBefore = dispatch.at;
+      if (dispatch.at !== undefined) watching.notBefore = dispatch.at;
     }
-    artifact = await awaitDelivery(deps, search);
+    artifact = await awaitDelivery(deps, watching);
   }
   const path = await installDelivery(deps, token, identity, login, artifact);
   console.log(`Key installed: ${path}`);
@@ -893,9 +1067,127 @@ export async function collectCommand(
   return 0;
 }
 
+/** Deletes a file, saying whether there was one. */
+async function removeFile(path: string): Promise<boolean> {
+  try {
+    await Deno.remove(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw new KeyToolError(`Cannot remove ${path}: ${reason(error)}`);
+  }
+}
+
+/** The spools waiting under a root, of which there may be none. */
+async function spoolCount(root: string): Promise<number | undefined> {
+  try {
+    let count = 0;
+    for await (const entry of Deno.readDir(root)) {
+      if (entry.isDirectory) count += 1;
+    }
+    return count;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Takes this workstation back to where it was before `setup`: the key,
+ * the delivery identity, and the export are removed, and the recording
+ * every task entry point does turns itself off with them.
+ */
+export async function uninstallCommand(
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<number> {
+  const key = keyFilePath(deps.env);
+  const identity = identityPath(deps.env);
+
+  // What names the key comes apart before the key itself. A removal
+  // that fails part way then leaves a workstation that still records,
+  // rather than one pointing every shell at a file that is gone.
+  const removals = await unexportFromProfiles(
+    RECORDS_KEY_FILE_VARIABLE,
+    key,
+    deps.env,
+  );
+  for (const removal of removals) {
+    if (removal.outcome === "removed") {
+      console.log(
+        `${RECORDS_KEY_FILE_VARIABLE} no longer exported from ${removal.path}`,
+      );
+    } else {
+      console.log(`
+${removal.path} sets ${RECORDS_KEY_FILE_VARIABLE} in a line this tool did
+not write:
+
+    ${removal.existing}
+
+Left alone. Recording continues from whatever key that names.`);
+    }
+  }
+
+  const configs = await unexportFromAgentConfigs(
+    RECORDS_KEY_FILE_VARIABLE,
+    key,
+    deps.env,
+  );
+  for (const config of configs) console.log(agentRemovalReport(config));
+
+  const removedKey = await removeFile(key);
+  if (removedKey) console.log(`Removed ${key}`);
+  const removedIdentity = await removeFile(identity);
+  if (removedIdentity) console.log(`Removed ${identity}`);
+  // The directory goes only when this tool leaves it empty; anything
+  // else in there belongs to something other than test records.
+  await Deno.remove(configDir(deps.env)).catch(() => {});
+
+  const removed = removedKey || removedIdentity ||
+    removals.some((removal) => removal.outcome === "removed") ||
+    configs.some((config) => config.outcome === "removed");
+  if (!removed) {
+    console.log("Nothing to remove; this workstation was not recording.");
+    return 0;
+  }
+  // What somebody else set stays, and so does whatever it points at, so
+  // saying recording has stopped would be saying something untrue.
+  const kept = removals.some((removal) => removal.outcome !== "removed") ||
+    configs.some((config) => config.outcome !== "removed");
+
+  const root = defaultSpoolRoot(deps.env);
+  const spools = root === undefined ? undefined : await spoolCount(root);
+  if (spools !== undefined && spools > 0) {
+    const runs = spools === 1 ? "One run's" : `${spools} runs'`;
+    console.log(`
+${runs} records were never shipped, and are still spooled in
+
+    ${root}
+
+A later key ships them; remove that directory to throw them away.`);
+  }
+
+  console.log(`
+${
+    kept
+      ? "What this tool could take back is gone."
+      : "Every new shell records nothing."
+  } Two things this does not do.
+
+The key still exists. This stops the machine using it, and the service
+account and the key itself are untouched; a key that has leaked stops
+working only when a new one replaces it, which any machine can do with
+
+    deno task test-records-key setup --rotate
+
+Records already shipped stay in the store. They carry no personal
+material, and nothing there can be changed or removed by any key this
+tool installs.`);
+  return 0;
+}
+
 function usage(): number {
   console.error(
-    "usage: deno task test-records-key <setup [--rotate]|request|collect>",
+    "usage: deno task test-records-key " +
+      "<setup [--rotate]|request|collect|uninstall>",
   );
   return 2;
 }
@@ -956,6 +1248,10 @@ export async function runCli(
     if (command === "collect") {
       if (rest.length > 0) return usage();
       return await collectCommand(deps);
+    }
+    if (command === "uninstall") {
+      if (rest.length > 0) return usage();
+      return await uninstallCommand(deps);
     }
     return usage();
   } catch (error) {
