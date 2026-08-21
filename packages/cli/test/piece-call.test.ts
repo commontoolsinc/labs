@@ -1318,7 +1318,7 @@ describe("executePieceCallable", () => {
   });
 
   it("returns a keyless instance result instead of reading it as value-less", async () => {
-    // The value-less witness is a PLAIN empty record. A fabric primitive
+    // The value-less witness is a PLAIN empty record. A `FabricPrimitive`
     // whose slots are private — FabricBytes — has no enumerable keys, and a
     // key-count test alone would swallow it as "no result".
     class FakeBytes {
