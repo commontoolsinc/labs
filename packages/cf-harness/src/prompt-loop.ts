@@ -24,7 +24,6 @@ import {
   type HarnessHandleEntry,
   type HarnessHandleTable,
 } from "./contracts/handle-table.ts";
-import { scrubResolvedValuesDeep } from "./contracts/resolved-value-register.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
@@ -2653,21 +2652,7 @@ export class CfHarnessPromptLoop {
   async #swapModelBoundValue(value: unknown): Promise<unknown> {
     const table = this.engine.handleTable ??
       createHarnessHandleTable(this.engine.getRunState().runId);
-    // Addresses become tokens and materialized values disappear at the same
-    // boundary, because both are things the model must not hold. A value a
-    // handle put into a page can return through any tool that reads that
-    // page, not only the one that put it there, so the scrub belongs here
-    // rather than in each tool.
-    //
-    // The scrub runs first. A materialized value can be, or can contain, a
-    // fabric address; tokenizing first would rewrite that part of it and
-    // leave a string the register no longer recognizes, so the remainder of
-    // the value would reach the model beside a freshly minted token.
-    const scrubbed = scrubResolvedValuesDeep(
-      this.engine.resolvedValueRegister,
-      value,
-    );
-    const swapped = await swapLinksForTokens(table, scrubbed);
+    const swapped = await swapLinksForTokens(table, value);
     if (swapped.table !== table) {
       await this.engine.recordHandleTable(swapped.table);
     }
@@ -3510,16 +3495,14 @@ export class CfHarnessPromptLoop {
           this.#browserAccess !== undefined
         ? {
           browserAccess: this.#browserAccess,
-          // The destination allowlist and the resolved-value register both
-          // belong to the lease rather than to the run. Two browser children
-          // share one persistent profile and therefore one page: a fresh
-          // register would hand child B what child A typed, and a missing
-          // allowlist would make the one tool that can materialize a value
-          // the one run that cannot say where it may go.
+          // The destination allowlist belongs to the lease rather than to the
+          // run. Two browser children share one persistent profile and
+          // therefore one page, and a missing allowlist would make the one
+          // tool that can materialize a value the one run that cannot say
+          // where it may go.
           ...(this.engine.config.handleValueOrigins !== undefined
             ? { handleValueOrigins: this.engine.config.handleValueOrigins }
             : {}),
-          resolvedValueRegister: this.engine.resolvedValueRegister,
         }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,

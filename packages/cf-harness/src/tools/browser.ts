@@ -12,9 +12,6 @@ import {
   redactCdpEndpoint,
   validateBrowserAccessLeaseFreshness,
 } from "../contracts/browser-access.ts";
-import {
-  createHarnessResolvedValueRegister,
-} from "../contracts/resolved-value-register.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { httpOriginOf, resolveHandleValue } from "./handle-values.ts";
 import { createClearedHostProcessEnv } from "./host-process-env.ts";
@@ -526,13 +523,8 @@ const originNotAllowedMessage = (origin: string): string =>
   `${origin} is not an allowlisted destination for a handle's value; an operator allows one with ${HANDLE_VALUE_ORIGIN_FLAG} <origin>`;
 
 type BrowserHandleResolution =
-  | {
-    input: BrowserToolInput;
-    /** Each value the resolution produced, in binding order. */
-    values: readonly string[];
-    error?: undefined;
-  }
-  | { input?: undefined; values?: undefined; error: string };
+  | { input: BrowserToolInput; error?: undefined }
+  | { input?: undefined; error: string };
 
 /**
  * `input` with each bound handle replaced by a placeholder standing in for the
@@ -556,13 +548,8 @@ const withHandlePlaceholders = (input: BrowserToolInput): BrowserToolInput => ({
 });
 
 /**
- * `input` with each bound handle replaced by the value it stands for, and the
- * values that substitution produced. Returns the input unchanged when the
- * call binds no handle.
- *
- * Resolving is separate from recording so the caller can refuse a destination
- * before any value enters the register. A refused call materializes nothing,
- * so its refusal has nothing to scrub, and it can name the origin it denied.
+ * `input` with each bound handle replaced by the value it stands for. Returns
+ * the input unchanged when the call binds no handle.
  *
  * The substitution builds a fresh input rather than writing into the one the
  * model sent: that object is what the run records as the call, and a resolved
@@ -574,7 +561,7 @@ const resolveBrowserHandles = async (
 ): Promise<BrowserHandleResolution> => {
   const { valueHandle, urlHandle, ...rest } = input;
   if (valueHandle === undefined && urlHandle === undefined) {
-    return { input, values: [] };
+    return { input };
   }
   const resolvedInput: BrowserToolInput = { ...rest };
   const bindings: readonly (readonly [
@@ -589,16 +576,14 @@ const resolveBrowserHandles = async (
       ? [["browser urlHandle", urlHandle, "url"] as const]
       : []),
   ];
-  const values: string[] = [];
   for (const [label, handle, field] of bindings) {
     const resolution = await resolveHandleValue(context, handle, label);
     if (resolution.error !== undefined) {
       return { error: resolution.error };
     }
-    values.push(resolution.value);
     resolvedInput[field] = resolution.value;
   }
-  return { input: resolvedInput, values };
+  return { input: resolvedInput };
 };
 
 export const browserTool: HarnessToolDefinition<
@@ -608,14 +593,6 @@ export const browserTool: HarnessToolDefinition<
   descriptor: browserToolDescriptor,
   async invoke(context, input) {
     const outputId = context.nextOutputId("browser");
-    // Every value this run has materialized from a handle is scrubbed out of
-    // everything the model reads here, whether or not this call is the one
-    // that materialized it: the page echoes what was typed into it, and a
-    // later snapshot is exactly how a resolved value would come back. Without
-    // a run-scoped register the scrub can only reach this invocation, which
-    // is worth having and is not the whole guarantee.
-    const register = context.resolvedValueRegister ??
-      createHarnessResolvedValueRegister();
     const errorOutput = (
       code: BrowserToolErrorCode,
       message: string,
@@ -624,7 +601,7 @@ export const browserTool: HarnessToolDefinition<
       outputId,
       status: "error",
       code,
-      message: register.scrub(message),
+      message,
       ...(exitCode !== undefined ? { exitCode } : {}),
     });
     const fields = checkBrowserInputFields(input);
@@ -633,9 +610,9 @@ export const browserTool: HarnessToolDefinition<
     }
     // The whole action is validated before anything is read. A call that
     // cannot execute — a fill with a valid handle but no ref — must not reach
-    // the fabric, because resolving would read the value and arm the run's
-    // scrub for a call that never happened. Handles stand in as placeholders
-    // for that check: shape is all it is asking about.
+    // the fabric, because a call that never happens has no business reading a
+    // value out of the run's space. Handles stand in as placeholders for that
+    // check: shape is all it is asking about.
     const usesHandle = input.valueHandle !== undefined ||
       input.urlHandle !== undefined;
     const shape = planBrowserAction(
@@ -676,8 +653,8 @@ export const browserTool: HarnessToolDefinition<
     // echoes scrubbed before reaching the model. The scrub is a backstop:
     // what keeps the endpoint out of model reach is that only the trusted
     // agent-browser binary holds it.
-    const scrub = (text: string): string =>
-      register.scrub(redactCdpEndpoint(text, cdpOrigin));
+    const redactEndpoint = (text: string): string =>
+      redactCdpEndpoint(text, cdpOrigin);
     // Materialization is default-deny by destination. A handle's value is
     // one the run cannot see, so nothing about the call can be weighed
     // against it; where it is going is the one property that can be, and an
@@ -721,11 +698,8 @@ export const browserTool: HarnessToolDefinition<
     if (input.urlHandle !== undefined) {
       // A URL handle names its own destination, so the allowlist is checked
       // against what it resolved to rather than against the page in view.
-      // The check runs before the register does, because a denied call
-      // materializes nothing: were the value recorded first, a value that is
-      // its own origin would be scrubbed out of its own refusal, and the
-      // operator would be told a destination was denied without being told
-      // which one.
+      // The check runs on what the handle resolved to, and the refusal names
+      // that origin so the operator knows which destination to allow.
       const target = httpOriginOf(resolved.input.url ?? "");
       if (target === undefined) {
         return errorOutput("invalid_input", "open only allows http(s) URLs");
@@ -736,12 +710,6 @@ export const browserTool: HarnessToolDefinition<
           originNotAllowedMessage(target),
         );
       }
-    }
-    // Recording precedes use, so every string this invocation produces after
-    // this point already has the value scrubbed out of it, including the
-    // argument list that joins a nonzero exit's stderr.
-    for (const value of resolved.values) {
-      register.record(value);
     }
     const plan = planBrowserAction(resolved.input);
     if (plan.error !== undefined) {
@@ -761,7 +729,9 @@ export const browserTool: HarnessToolDefinition<
       return errorOutput(
         "host_unavailable",
         `agent-browser could not run: ${
-          scrub(error instanceof Error ? error.message : String(error))
+          redactEndpoint(
+            error instanceof Error ? error.message : String(error),
+          )
         }`,
       );
     }
@@ -771,15 +741,15 @@ export const browserTool: HarnessToolDefinition<
         : result.stdout;
       return errorOutput(
         "command_failed",
-        truncateHostOutput(scrub(failureText), "message"),
+        truncateHostOutput(redactEndpoint(failureText), "message"),
         result.exitCode,
       );
     }
-    const stderrText = scrub(result.stderr).trim();
+    const stderrText = redactEndpoint(result.stderr).trim();
     return {
       outputId,
       status: "ok",
-      output: truncateHostOutput(scrub(result.stdout), "output"),
+      output: truncateHostOutput(redactEndpoint(result.stdout), "output"),
       ...(stderrText !== ""
         ? { detail: truncateHostOutput(stderrText, "detail") }
         : {}),

@@ -17,12 +17,6 @@
  * this run was given has an entry, an address the model composed does not, and
  * only the first resolves. Without that check a handle field is a general read
  * of every cell in the run's space.
- *
- * The caller is responsible for the other half of the contract: recording the
- * resolved value in the run's
- * {@link ../contracts/resolved-value-register.ts | resolved-value register}
- * before using it, so that the value cannot travel back to the model through
- * the tool's own output.
  */
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 
