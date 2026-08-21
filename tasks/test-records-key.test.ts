@@ -16,10 +16,6 @@ import {
   uninstallCommand,
 } from "./test-records-key.ts";
 import {
-  AGENT_HARNESSES,
-  type AgentHarness,
-} from "./test-records-agent-config.ts";
-import {
   generateIdentity,
   type KeyDeliveryIdentity,
   recipientFingerprint,
