@@ -21,7 +21,7 @@ export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue, null> {
   }
 
   /** @inheritDoc */
-  encode(_value: FabricValue): null {
+  encode(_value: FabricValue, _env: LiveEnvironment): null {
     return null;
   }
 

@@ -140,7 +140,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
       }
 
       /** @inheritDoc */
-      encode(value: FabricHash): FabricHashState {
+      encode(value: FabricHash, _env: LiveEnvironment): FabricHashState {
         return { tag: value.tag, hash: value.hashString };
       }
 
@@ -186,7 +186,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
        * the value would cede bytes that are not part of it, and one shared
        * with this instance would leave a transferred value hollow.
        */
-      encode(value: FabricHash): RealmCodecValue {
+      encode(value: FabricHash, _env: LiveEnvironment): RealmCodecValue {
         return { tag: value.tag, hash: value.#hash.buffer.slice(0) };
       }
 

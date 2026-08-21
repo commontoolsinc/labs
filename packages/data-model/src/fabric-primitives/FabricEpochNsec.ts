@@ -62,7 +62,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochNsec): string {
+      encode(value: FabricEpochNsec, _env: LiveEnvironment): string {
         return bigintToUnpaddedBase64url(value.#value);
       }
 
@@ -98,7 +98,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochNsec): RealmCodecValue {
+      encode(value: FabricEpochNsec, _env: LiveEnvironment): RealmCodecValue {
         return value.#value;
       }
 

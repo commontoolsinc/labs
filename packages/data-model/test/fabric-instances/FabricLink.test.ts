@@ -201,7 +201,7 @@ describe("FabricLink", () => {
       describe("encode()", () => {
         it("encodes to the payload object", () => {
           const link = new FabricLink({ id: "fid1:abc", path: ["a", "b"] });
-          expect(codec.encode(link)).toEqual({
+          expect(codec.encode(link, env)).toEqual({
             id: "fid1:abc",
             path: ["a", "b"],
           });
@@ -239,7 +239,7 @@ describe("FabricLink", () => {
           });
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(link),
+            codec.encode(link, env),
             env,
           ) as FabricLink;
           expect(decoded).toBeInstanceOf(FabricLink);

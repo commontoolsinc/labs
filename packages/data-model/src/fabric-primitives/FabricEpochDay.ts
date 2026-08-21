@@ -55,7 +55,7 @@ export class FabricEpochDay extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochDay): string {
+      encode(value: FabricEpochDay, _env: LiveEnvironment): string {
         return bigintToUnpaddedBase64url(value.#value);
       }
 
@@ -91,7 +91,7 @@ export class FabricEpochDay extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochDay): RealmCodecValue {
+      encode(value: FabricEpochDay, _env: LiveEnvironment): RealmCodecValue {
         return value.#value;
       }
 

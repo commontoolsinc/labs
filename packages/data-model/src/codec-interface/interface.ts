@@ -172,8 +172,11 @@ export interface FabricCodec<Encoded> {
    * called after {@link #canEncode} has confirmed that `value` is encodable by
    * this instance. The result is expected to be a _shallow_ encoding; the
    * codec system handles recursion as necessary.
+   *
+   * `env` is what a codec reaches the running system through, the same one
+   * {@link #decode} is handed.
    */
-  encode(value: FabricValue): Encoded;
+  encode(value: FabricValue, env: LiveEnvironment): Encoded;
 }
 
 /**
@@ -268,10 +271,10 @@ export interface FabricClassWithNonterminalCodec {
 }
 
 /**
- * The minimal interface that codec `decode()` implementations may depend on.
- * Provided by the `Runtime` in practice, but defined as an interface here to
- * avoid a circular dependency between the fabric protocol and the runner.
- * See Section 2.5 of the formal spec.
+ * The minimal interface that codec `encode()` and `decode()` implementations
+ * may depend on. Provided by the `Runtime` in practice, but defined as an
+ * interface here to avoid a circular dependency between the fabric protocol
+ * and the runner. See Section 2.5 of the formal spec.
  */
 export interface LiveEnvironment {
   /**

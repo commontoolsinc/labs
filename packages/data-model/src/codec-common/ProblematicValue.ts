@@ -162,7 +162,10 @@ export class ProblematicValue extends BaseFabricInstance {
       }
 
       /** @inheritDoc */
-      encode(value: ProblematicValue): ProblematicValueState {
+      encode(
+        value: ProblematicValue,
+        _env: LiveEnvironment,
+      ): ProblematicValueState {
         return {
           tag: value.wireTypeTag,
           state: value.state,

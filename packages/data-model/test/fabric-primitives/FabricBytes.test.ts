@@ -229,12 +229,12 @@ describe("FabricBytes", () => {
         it("encodes to an unpadded base64url string", () => {
           // [1, 2, 3] -> base64url "AQID".
           const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
-          expect(codec.encode(fb)).toBe("AQID");
+          expect(codec.encode(fb, env)).toBe("AQID");
         });
 
         it("encodes empty bytes to the empty string", () => {
           const fb = new FabricBytes(new Uint8Array());
-          expect(codec.encode(fb)).toBe("");
+          expect(codec.encode(fb, env)).toBe("");
         });
       });
 
@@ -264,7 +264,7 @@ describe("FabricBytes", () => {
           const fb = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(fb),
+            codec.encode(fb, env),
             env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
@@ -275,7 +275,7 @@ describe("FabricBytes", () => {
           const fb = new FabricBytes(new Uint8Array());
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(fb),
+            codec.encode(fb, env),
             env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);

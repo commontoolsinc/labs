@@ -578,7 +578,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   // slots + bag; `wrappedValue` / `toNativeFrozen()` / `toNativeThawed()`
   // build the native `Error` projection on demand. `deepClone(frozen)`
   // round-trips through the codec: `codec.decode(tag,
-  // codec.encode(this), env)`. Bodies omitted for brevity.)
+  // codec.encode(this, env), env)`. Bodies omitted for brevity.)
 
   static #codec = Object.freeze(
     new (class FabricErrorCodec extends BaseNonterminalCodec {
@@ -592,7 +592,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
        * case) to avoid redundancy; `decode()` interprets `null` as "same
        * as `type`."
        */
-      encode(value: FabricError): FabricValue {
+      encode(value: FabricError, _env: LiveEnvironment): FabricValue {
         const state: Record<string, FabricValue> = {
           type: value.type,
           name: value.name === value.type ? null : value.name,
@@ -702,7 +702,7 @@ export class FabricMap
 
       /** Entry pairs as an array of two-element arrays; insertion order
        *  is preserved. */
-      encode(value: FabricMap): FabricValue {
+      encode(value: FabricMap, _env: LiveEnvironment): FabricValue {
         return [...value.map.entries()] as FabricValue;
       }
 
@@ -756,7 +756,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       }
 
       /** Elements as an array; iteration order is preserved. */
-      encode(value: FabricSet): FabricValue {
+      encode(value: FabricSet, _env: LiveEnvironment): FabricValue {
         return [...value.set] as FabricValue;
       }
 
@@ -1936,8 +1936,11 @@ export interface FabricCodec<Encoded> {
    * ever called after `canEncode()` has confirmed that `value` is
    * encodable by this instance. The result is expected to be a _shallow_
    * encoding. The codec system handles recursion as necessary.
+   *
+   * `env` is what a codec reaches the running system through, the same one
+   * `decode()` is handed.
    */
-  encode(value: FabricValue): Encoded;
+  encode(value: FabricValue, env: LiveEnvironment): Encoded;
 }
 
 /**
@@ -2093,13 +2096,13 @@ Key contracts:
 // file: packages/data-model/codec-interface/interface.ts
 
 /**
- * The minimal interface that codec `decode()` implementations may depend
- * on. In practice this is provided by the `Runtime` class from
+ * The minimal interface that codec `encode()` and `decode()` implementations
+ * may depend on. In practice this is provided by the `Runtime` class from
  * `packages/runner/src/runtime.ts`, but defining it as an interface here
  * avoids a circular dependency between the fabric protocol and the runner.
  *
- * Implementors of `decode()` should depend on this interface, not on
- * the concrete `Runtime` class.
+ * Implementors of `encode()` and `decode()` should depend on this interface,
+ * not on the concrete `Runtime` class.
  */
 export interface LiveEnvironment {
   /**
@@ -2225,7 +2228,10 @@ class Temperature extends BaseFabricInstance {
       }
 
       /** Extract essential state (shallow). */
-      encode(value: Temperature): TemperatureState {
+      encode(
+        value: Temperature,
+        _env: LiveEnvironment,
+      ): TemperatureState {
         return { value: value.value, unit: value.unit };
       }
 
@@ -2266,7 +2272,7 @@ flatten it into `{ value: 100, unit: "C" }`. With the protocol, the
 codec system:
 
 1. Finds the class's codec (via the registry; Section 4.5) and calls
-   `codec.encode(value)` to extract the essential state.
+   `codec.encode(value, env)` to extract the essential state.
 2. Encodes that state (recursively handling any nested `FabricValue`s)
    and wraps it with the tag from `codec.tagForValue(value)`.
 3. On decoding, routes the tag back to the codec, asks
@@ -2454,7 +2460,7 @@ export class UnknownValue extends BaseFabricInstance {
       }
 
       /** The preserved bare state -- NOT an envelope. */
-      encode(value: UnknownValue): FabricValue {
+      encode(value: UnknownValue, _env: LiveEnvironment): FabricValue {
         return value.state;
       }
 
@@ -2577,7 +2583,10 @@ export class ProblematicValue extends BaseFabricInstance {
       }
 
       /** All three preserved facts; the tag is data here, not structure. */
-      encode(value: ProblematicValue): FabricValue {
+      encode(
+        value: ProblematicValue,
+        _env: LiveEnvironment,
+      ): FabricValue {
         return {
           tag: value.wireTypeTag,
           state: value.state,

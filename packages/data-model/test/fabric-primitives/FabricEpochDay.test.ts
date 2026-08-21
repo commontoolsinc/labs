@@ -84,7 +84,7 @@ describe("FabricEpochDay", () => {
         it("encodes to a flat base64 string (epoch zero)", () => {
           const sd = new FabricEpochDay(0n);
           // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
-          expect(codec.encode(sd)).toBe("AA");
+          expect(codec.encode(sd, env)).toBe("AA");
         });
       });
 
@@ -124,7 +124,7 @@ describe("FabricEpochDay", () => {
           const sd = new FabricEpochDay(0n);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sd),
+            codec.encode(sd, env),
             env,
           ) as unknown as FabricEpochDay;
           expect(decoded).toBeInstanceOf(FabricEpochDay);
@@ -136,7 +136,7 @@ describe("FabricEpochDay", () => {
           const sd = new FabricEpochDay(days);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sd),
+            codec.encode(sd, env),
             env,
           ) as unknown as FabricEpochDay;
           expect(decoded).toBeInstanceOf(FabricEpochDay);
@@ -148,7 +148,7 @@ describe("FabricEpochDay", () => {
           const sd = new FabricEpochDay(days);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sd),
+            codec.encode(sd, env),
             env,
           ) as unknown as FabricEpochDay;
           expect(decoded).toBeInstanceOf(FabricEpochDay);
