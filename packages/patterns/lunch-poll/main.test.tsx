@@ -259,7 +259,16 @@ export default pattern(() => {
   );
 
   const assert_outsider_left_the_tally_alone = assert(() =>
-    (poll.votes ?? []).every((v) => !equals(v.voter, outsider)) &&
+    // The switch LANDED — without this the lane passes under whoever was
+    // viewing before, who is joined and may legitimately vote.
+    poll.myName === "Outsider" &&
+    poll.isJoined === false &&
+    // And the standing invariant the guard exists to keep: every stored vote
+    // belongs to somebody on the roster. Stronger than naming the outsider,
+    // since it fails for any non-member's vote rather than this one's.
+    (poll.votes ?? []).every((v) =>
+      (poll.users ?? []).some((u) => equals(u.profile, v.voter))
+    ) &&
     (poll.users ?? []).every((u) => !equals(u.profile, outsider))
   );
 

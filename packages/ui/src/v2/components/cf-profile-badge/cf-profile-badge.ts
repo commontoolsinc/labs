@@ -762,7 +762,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   private _applyValue(val: unknown): void {
     const { name, avatar } = profileDisplayFromValue(val);
-    this._resolved = true;
+    // A VALUE arrived, not merely an attempt that finished. The no-cell and
+    // failed-resolve paths both land here with `undefined`, and treating
+    // those as resolved would suppress the fallback in exactly the case it
+    // exists for.
+    this._resolved = val !== undefined;
     const { bio, pinnedCount } = profileTooltipFromValue(val);
     this._name = name;
     this._avatar = avatar;
@@ -878,7 +882,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
                 part="avatar"
                 exportparts="avatar"
                 .src="${this._avatar}"
-                .name="${this._name}"
+                .name="${presentedName}"
                 size="${this.size}"
               ></cf-avatar>
             `
@@ -898,7 +902,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           : null} ${hasTooltip
           ? html`
             <span class="tooltip" part="tooltip" role="tooltip">
-              <span class="tooltip-name">${this._name ?? "Profile"}</span>
+              <span class="tooltip-name">${presentedName ?? "Profile"}</span>
               ${this._bio !== undefined
                 ? html`
                   <span class="tooltip-bio">${this._bio}</span>
