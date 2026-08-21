@@ -73,6 +73,7 @@ import type {
   CachedResultField,
   ExecutedPieceCallable,
   PieceCallablesListing,
+  PieceInspection,
 } from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
@@ -445,6 +446,85 @@ export function renderCachedResultFields(
     );
   }
   return lines.join("\n");
+}
+
+/** The human-readable output for `cf piece inspect`. */
+export function renderPieceInspection(
+  pieceData: PieceInspection,
+  summary: boolean,
+): string {
+  const displayData = summary
+    ? {
+      ...pieceData,
+      source: summarizeForDisplay(pieceData.source),
+      result: summarizeForDisplay(pieceData.result),
+    }
+    : pieceData;
+
+  let output = `
+=== Piece: ${pieceData.id} ===
+Name: ${pieceData.name || "<no name>"}
+Pattern: ${formatPatternRef(pieceData.patternRef)}
+Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
+Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
+Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
+Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
+Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
+
+--- Source (Inputs) ---`;
+
+  if (displayData.source) {
+    output += `\n${safeStringify(displayData.source)}`;
+  } else {
+    output += "\n<no source data>";
+  }
+
+  output += "\n\n--- Result ---";
+  if (displayData.result !== null && displayData.result !== undefined) {
+    const isPlainObject = typeof displayData.result === "object" &&
+      !Array.isArray(displayData.result);
+    if (!summary && isPlainObject) {
+      const filteredResult = {
+        ...(displayData.result as Record<string | symbol, unknown>),
+      };
+      if (UI in filteredResult && typeof filteredResult[UI] === "object") {
+        filteredResult[UI] = "<large UI object - use --json to see full UI>";
+      }
+      output += `\n${safeStringify(filteredResult)}`;
+    } else {
+      output += `\n${safeStringify(displayData.result)}`;
+    }
+  } else {
+    output += "\n<no result data>";
+  }
+
+  output += `\n\n${
+    renderCachedResultFields(
+      pieceData.cachedResultFields,
+      pieceData.sourceCommit,
+      pieceData.sourceSpace,
+    )
+  }`;
+
+  output += "\n\n--- Reading From ---";
+  if (pieceData.readingFrom.length > 0) {
+    pieceData.readingFrom.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  output += "\n\n--- Read By ---";
+  if (pieceData.readBy.length > 0) {
+    pieceData.readBy.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  return output;
 }
 
 export function renderPieceSummaries(
@@ -2203,72 +2283,7 @@ export const piece = targetOptions(
       return;
     }
 
-    // Build formatted output as template
-    let output = `
-=== Piece: ${pieceData.id} ===
-Name: ${pieceData.name || "<no name>"}
-Pattern: ${formatPatternRef(pieceData.patternRef)}
-Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
-Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
-Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
-Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
-Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
-
---- Source (Inputs) ---`;
-
-    if (displayData.source) {
-      output += `\n${safeStringify(displayData.source)}`;
-    } else {
-      output += "\n<no source data>";
-    }
-
-    output += "\n\n--- Result ---";
-    if (displayData.result !== null && displayData.result !== undefined) {
-      const isPlainObject = typeof displayData.result === "object" &&
-        !Array.isArray(displayData.result);
-      if (!options.summary && isPlainObject) {
-        // Filter out large UI objects that clutter the non-summary output
-        const filteredResult = {
-          ...(displayData.result as Record<string | symbol, unknown>),
-        };
-        if (UI in filteredResult && typeof filteredResult[UI] === "object") {
-          filteredResult[UI] = "<large UI object - use --json to see full UI>";
-        }
-        output += `\n${safeStringify(filteredResult)}`;
-      } else {
-        output += `\n${safeStringify(displayData.result)}`;
-      }
-    } else {
-      output += "\n<no result data>";
-    }
-
-    output += `\n\n${
-      renderCachedResultFields(
-        pieceData.cachedResultFields,
-        pieceData.sourceCommit,
-        pieceData.sourceSpace,
-      )
-    }`;
-
-    output += "\n\n--- Reading From ---";
-    if (pieceData.readingFrom.length > 0) {
-      pieceData.readingFrom.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    output += "\n\n--- Read By ---";
-    if (pieceData.readBy.length > 0) {
-      pieceData.readBy.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    render(output);
+    render(renderPieceInspection(pieceData, options.summary === true));
   })
   /* piece view */
   .command("view", "Display the rendered view for a piece")

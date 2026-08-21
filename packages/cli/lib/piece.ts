@@ -3701,7 +3701,8 @@ function commitOfDocument(
 }
 
 /**
- * Which of `names` a read of `resultCell` resolves through a computed cell.
+ * Which fields of `result` resolve through a computed cell when read from
+ * `resultCell`.
  *
  * The runtime's own link resolution supplies every dereference. A computed
  * document counts even when its cached value is another link and the terminal
@@ -3712,12 +3713,13 @@ function commitOfDocument(
  */
 export function cachedResultFields(
   resultCell: Cell<unknown>,
-  names: readonly string[],
+  result: Readonly<unknown>,
 ): CachedResultField[] {
+  if (!isObjectNotArray(result)) return [];
   const runtime = resultCell.runtime;
   const tx = runtime.readTx();
   const cached: CachedResultField[] = [];
-  for (const name of names) {
+  for (const name of Object.keys(result)) {
     const start = resultCell.key(name).getAsNormalizedFullLink();
     const { link: resolved, traces } = resolveLinkTracingDereferences(
       runtime,
@@ -3752,7 +3754,7 @@ export interface PieceInspection {
   name?: string;
   patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
-  result: Readonly<unknown>;
+  result: Readonly<unknown> | null | undefined;
   /**
    * The commit the argument document behind `source` last stood at. It can be
    * ordered against a {@link CachedResultCell} commit only when both have the
@@ -3817,9 +3819,7 @@ export async function inspectPiece(
     inputCell.getAsNormalizedFullLink(),
   );
   const sourceCommit = commitOfDocument(runtime, sourceLink);
-  const cached = isObjectNotArray(result)
-    ? cachedResultFields(resultCell, Object.keys(result))
-    : [];
+  const cached = cachedResultFields(resultCell, result);
 
   return {
     id,
@@ -3866,9 +3866,7 @@ async function inspectSlugTargetCell(
     name,
     patternRef,
     result,
-    cachedResultFields: isObjectNotArray(result)
-      ? cachedResultFields(target, Object.keys(result))
-      : [],
+    cachedResultFields: cachedResultFields(target, result),
     readingFrom: [],
     readBy: [],
   };

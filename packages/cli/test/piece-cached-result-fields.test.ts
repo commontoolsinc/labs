@@ -1,10 +1,13 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { parseLink, Runtime } from "@commonfabric/runner";
+import { parseLink, Runtime, UI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
-import { renderCachedResultFields } from "../commands/piece.ts";
+import {
+  renderCachedResultFields,
+  renderPieceInspection,
+} from "../commands/piece.ts";
 import { type CachedResultField, cachedResultFields } from "../lib/piece.ts";
 
 /**
@@ -46,6 +49,7 @@ const FIELDS = ["title", "shout", "loud"];
 /** What one run of {@link PROGRAM} says about its own result fields. */
 interface LivePieceReport {
   cached: CachedResultField[];
+  primitive: CachedResultField[];
   /** The entity each field's own stored link names, before any is followed. */
   firstHop: Record<string, string>;
 }
@@ -88,7 +92,11 @@ async function runLivePiece(): Promise<LivePieceReport> {
     for (const name of FIELDS) {
       firstHop[name] = parseLink(stored[name] as never, base)?.id ?? base.id;
     }
-    return { cached: cachedResultFields(result, FIELDS), firstHop };
+    return {
+      cached: cachedResultFields(result, stored),
+      primitive: cachedResultFields(result, "not an object result"),
+      firstHop,
+    };
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -104,15 +112,21 @@ describe("piece-cached-result-fields", () => {
     });
 
     it("returns the derived field and not the one linked into the argument", () => {
-      expect(report.cached.map((field) => field.name)).toEqual([
-        "shout",
+      expect(report.cached.map((field) => field.name).sort()).toEqual([
         "loud",
+        "shout",
       ]);
-      expect(report.cached[0].cells[0].id.startsWith("computed:")).toBe(true);
+      expect(
+        report.cached.find((field) => field.name === "shout")?.cells[0].id
+          .startsWith("computed:"),
+      ).toBe(true);
     });
 
     it("returns the commit the derived field's own document last stood at", () => {
-      expect(typeof report.cached[0].cells[0].derivedAtCommit).toBe("number");
+      expect(
+        typeof report.cached.find((field) => field.name === "shout")?.cells[0]
+          .derivedAtCommit,
+      ).toBe("number");
     });
 
     it("returns a computed hop which links on to live state", () => {
@@ -124,6 +138,10 @@ describe("piece-cached-result-fields", () => {
             derivedAtCommit: expect.any(Number),
           }),
         ]);
+    });
+
+    it("returns no cached fields for a scalar result", () => {
+      expect(report.primitive).toEqual([]);
     });
   });
 
@@ -215,6 +233,72 @@ describe("piece-cached-result-fields", () => {
       expect(section).toContain(
         "commits from different spaces cannot be compared",
       );
+    });
+  });
+
+  describe("renderPieceInspection()", () => {
+    it("places the cached-field section between the result and references", () => {
+      const output = renderPieceInspection({
+        id: "piece-one",
+        name: "Example",
+        patternRef: {
+          identity: "A".repeat(43),
+          symbol: "default",
+          source: {
+            ref: `cf:pattern:${"A".repeat(43)}`,
+            repository: "https://github.com/example/repo",
+            entry: "/pattern.tsx",
+            origin: "https://example.com/pattern.tsx",
+          },
+        },
+        source: { title: "Input" },
+        result: { title: "Result", [UI]: { tag: "div" } },
+        sourceCommit: 20,
+        sourceSpace: "did:key:source",
+        cachedResultFields: [{
+          name: "title",
+          cells: [{
+            id: "computed:fid1:title",
+            space: "did:key:source",
+            scope: "space",
+            derivedAtCommit: 10,
+          }],
+        }],
+        readingFrom: [{ id: "source", name: "Source" }, { id: "bare" }],
+        readBy: [{ id: "reader", name: "Reader" }, { id: "anonymous" }],
+      }, false);
+
+      expect(output.indexOf("--- Result ---")).toBeLessThan(
+        output.indexOf("--- Cached Result Fields ---"),
+      );
+      expect(output.indexOf("--- Cached Result Fields ---")).toBeLessThan(
+        output.indexOf("--- Reading From ---"),
+      );
+      expect(output).toContain(
+        '"$UI": "<large UI object - use --json to see full UI>"',
+      );
+      expect(output).toContain(
+        "title: last derived at commit 10; Source (Inputs) stands at commit 20",
+      );
+      expect(output).toContain("  - source (Source)\n  - bare");
+      expect(output).toContain("  - reader (Reader)\n  - anonymous");
+    });
+
+    it("summarizes data and renders absent values and references", () => {
+      const output = renderPieceInspection({
+        id: "piece-two",
+        result: null,
+        cachedResultFields: [],
+        readingFrom: [],
+        readBy: [],
+      }, true);
+
+      expect(output).toContain("Name: <no name>");
+      expect(output).toContain("<no source data>");
+      expect(output).toContain("<no result data>");
+      expect(output).toContain("--- Cached Result Fields ---\n  (none)");
+      expect(output).toContain("--- Reading From ---\n  (none)");
+      expect(output).toContain("--- Read By ---\n  (none)");
     });
   });
 });
