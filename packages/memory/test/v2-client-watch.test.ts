@@ -304,7 +304,7 @@ Deno.test("memory v2 session closed mid-watch-set arms no ack timer", async () =
   const transport: Transport = {
     send(payload: string) {
       // Frames carry the `fvj1:` `FabricValue` encoding, not bare JSON, so
-      // reads the payload as text.
+      // this reads the payload as text.
       if (payload.includes('"session.watch.set"')) {
         setRequestId = /"requestId":"([^"]+)"/.exec(payload)?.[1] ?? null;
       }
