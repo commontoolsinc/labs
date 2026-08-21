@@ -386,6 +386,28 @@ modeled refusal's retry behavior — CFC-adjacent, flagged not filled).
 | wish-half red re-verify | wish.ts reverted alone → the surfacing test fails with the silent-stale shape; restored → green |
 | neighbor suites (cfc-schema-merge, cfc-additive-default, extended-storage-transaction, memory-v2-transaction-commit-rejection, cfc-boundary, wish×3, scheduler-core, scheduler-commit-backpressure) | failures identical to UNTOUCHED main on this machine (pre-existing local env: scheduler-core "rechecks downstream readers", wish scope/#now family, commit-backpressure family); no new failures from this diff |
 
+## 5a. CI + review rounds (PR #6157)
+
+- **CI round 1:** every server-execution ON lane green (all 10 pattern
+  shards, runner/runtime-client/shell package lanes), coverage-check
+  green (no debt line needed), OFF lanes green. ONE red: the new test
+  file under the runner lane's fake-clock preload (`--preload=
+  test/clock-preload.ts`), which freezes test-file wall-clock sleeps —
+  the two-writer journey drives live cross-runtime transport, the
+  class the harness exempts via `realClockFiles`. Fixed by adding the
+  file to that list (the established convention; the executor suites
+  sit there for the same reason).
+- **Codex review:** four P1s. Applied: one top-level describe per test
+  file, `/** */` file header, historical+archived frontmatter on this
+  report. DECLINED with reproduction: `trackBackgroundTask` for the
+  failure-UI chain — quiescence waits on tracked tasks while the
+  chain's conflict retries wait on quiescence (deadlock), and
+  retrying without that wait collides with the refused action's own
+  bounded re-runs until both budgets exhaust (the tracked variant
+  broke the suite on BOTH clocks). The bounded cost — `idle()` can
+  resolve a beat before the error surface lands — is documented at
+  the launch site.
+
 ## 6. Flagged residuals (not filled)
 
 1. OW49's decision (§2e) — CFC owner.
