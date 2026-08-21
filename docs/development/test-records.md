@@ -148,6 +148,14 @@ the first machine's. A mint that fails after the revocation leaves you
 with no key rather than two; the next run says so, and running setup
 again mints one.
 
+A key file on disk is not the same thing as a key that works, so setup
+asks whether the one installed here is still accepted before it stands
+down. A key that has been revoked — by a rotation from another machine,
+or by a mint that failed after revoking the key it was replacing — is
+replaced rather than mistaken for a working one, and no flag is needed
+to recover. Where the question cannot be put at all, setup says so and
+leaves the key alone.
+
 ## Taking it off a workstation
 
 ```

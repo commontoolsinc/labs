@@ -22,12 +22,35 @@ import {
   seal,
 } from "./test-records-crypto.ts";
 
-const KEY_TEXT = JSON.stringify({
-  client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
-  private_key: "pem",
-  token_uri: "https://oauth2.googleapis.com/token",
-  cf_username: "octocat",
-});
+/** A key file whose private key can actually sign, as a real one does. */
+async function signingKey(): Promise<string> {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  ) as CryptoKeyPair;
+  const pkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", pair.privateKey),
+  );
+  const base64 = btoa(String.fromCharCode(...pkcs8)).replace(
+    /(.{64})/g,
+    "$1\n",
+  );
+  return JSON.stringify({
+    client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
+    private_key:
+      `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`,
+    token_uri: "https://oauth2.googleapis.com/token",
+    cf_username: "octocat",
+  });
+}
+
+const KEY_TEXT = await signingKey();
 
 function u16le(value: number): number[] {
   return [value & 0xff, (value >> 8) & 0xff];
@@ -140,6 +163,8 @@ function mintRun(
 interface StubOptions {
   login?: string;
   loginStatus?: number;
+  /** What the token endpoint says about the installed key. */
+  keyStatus?: number;
   /** One page of runs per listing call; the last repeats. */
   runPages?: Record<string, unknown>[][];
   runsStatus?: number;
@@ -175,6 +200,13 @@ describe("test-records-key", () => {
     withFetch(
       ((input: URL | RequestInfo) => {
         const url = String(input);
+        if (url.includes("oauth2.googleapis.com/token")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: "t" }), {
+              status: options.keyStatus ?? 200,
+            }),
+          );
+        }
         if (url.endsWith("/user")) {
           return Promise.resolve(
             new Response(
@@ -962,7 +994,92 @@ describe("test-records-key", () => {
       expect(await Deno.readTextFile(profile)).toContain(
         "CF_TEST_RECORDS_KEY_FILE",
       );
-      expect(urls).toEqual([]);
+      // It asks whether the key still works, and nothing else: no run is
+      // dispatched and no delivery is looked for.
+      expect(urls.every((line) => line.includes("oauth2.googleapis.com")))
+        .toBe(true);
+    });
+
+    it("mints a replacement for a key that is no longer accepted", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity);
+      withStub({
+        keyStatus: 400,
+        runPages: [[mintRun(identity.recipient)]],
+        ...published,
+      });
+
+      // A mint that failed after revoking leaves a file naming a key
+      // nothing accepts; setup must not take it for a working one.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com"))).toBe(
+        true,
+      );
+    });
+
+    it("replaces a key file that cannot sign", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        JSON.stringify({
+          client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
+          private_key: "not a key",
+          token_uri: "https://oauth2.googleapis.com/token",
+          cf_username: "octocat",
+        }),
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      // Nothing will accept it, so there is no asking to be done.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com")))
+        .toBe(false);
+    });
+
+    it("keeps a key the endpoint could not be asked about", async () => {
+      await Deno.mkdir(join(home, "common-fabric"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      withStub({});
+      const inner = deps.fetchImpl;
+      deps.fetchImpl = ((input: URL | RequestInfo, init?: RequestInit) => {
+        if (String(input).includes("oauth2.googleapis.com")) {
+          return Promise.reject(new TypeError("connection refused"));
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+    });
+
+    it("keeps a key it could not ask about", async () => {
+      await Deno.mkdir(join(home, "common-fabric"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      withStub({ keyStatus: 503 });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
     });
 
     it("mints a replacement when asked to rotate", async () => {

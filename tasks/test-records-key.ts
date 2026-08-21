@@ -34,6 +34,8 @@ import {
   type Environment,
   readEnv,
   RECORDS_KEY_FILE_VARIABLE,
+  saAssertion,
+  STORE_WRITE_SCOPE,
 } from "@commonfabric/test-support/records";
 import {
   generateIdentity,
@@ -45,6 +47,7 @@ import {
 import {
   MINT_WORKFLOW_FILE,
   parsePersonalKeyFile,
+  type PersonalKeyFile,
   REPO,
 } from "./test-records-config.ts";
 import { readZip } from "./test-records-zip.ts";
@@ -702,7 +705,7 @@ async function exportAgentConfigs(
 /** The key already installed on this workstation, when there is one. */
 async function installedKey(
   env: Environment,
-): Promise<{ path: string; username: string } | undefined> {
+): Promise<{ path: string; key: PersonalKeyFile } | undefined> {
   const path = keyFilePath(env);
   let text: string;
   try {
@@ -711,8 +714,56 @@ async function installedKey(
     return undefined;
   }
   const parsed = parsePersonalKeyFile(text);
-  if (parsed === undefined) return undefined;
-  return { path, username: parsed.cf_username };
+  return parsed === undefined ? undefined : { path, key: parsed };
+}
+
+/**
+ * Whether Google still accepts the installed key, as far as asking can
+ * tell: true where it does, false where it is refused, and undefined
+ * where the question could not be put.
+ *
+ * A key file on disk is not the same thing as a key that works. Minting
+ * revokes the person's previous keys before it creates the new one, so a
+ * mint that fails in between leaves this workstation holding a file that
+ * names a key nothing will accept — and every later test run would ship
+ * nothing while saying so only in a warning nobody reads.
+ */
+async function keyStillWorks(
+  deps: KeyToolDeps,
+  key: PersonalKeyFile,
+): Promise<boolean | undefined> {
+  let assertion: string;
+  try {
+    assertion = await saAssertion(
+      key,
+      Math.floor(Date.now() / 1000),
+      STORE_WRITE_SCOPE,
+    );
+  } catch {
+    // A key that cannot sign is a key nothing will accept, whatever the
+    // endpoint would have said about it.
+    return false;
+  }
+  let response: Response;
+  try {
+    response = await deps.fetchImpl(key.token_uri, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion,
+      }),
+    });
+  } catch {
+    // The endpoint could not be reached, which says nothing about the
+    // key; a workstation offline enough for this cannot mint either.
+    return undefined;
+  }
+  await response.text();
+  if (response.ok) return true;
+  // A key that has been revoked, or an account that has been disabled,
+  // is refused; anything else is the endpoint having a bad day.
+  return response.status === 400 || response.status === 401 ? false : undefined;
 }
 
 export async function requestCommand(
@@ -824,18 +875,32 @@ export async function setupCommand(
 ): Promise<number> {
   const existing = await installedKey(deps.env);
   if (existing !== undefined && options.rotate !== true) {
-    console.log(
-      `A reporting key for ${existing.username} is installed at ` +
-        `${existing.path}`,
-    );
-    await exportKeyFile(deps, existing.path);
-    console.log(`
+    const works = await keyStillWorks(deps, existing.key);
+    if (works === false) {
+      console.log(`
+The key installed at ${existing.path} is no longer accepted, which is
+what a mint that failed after revoking the key it was replacing leaves
+behind. Minting a replacement; there is nothing live to revoke.`);
+    } else {
+      console.log(
+        `A reporting key for ${existing.key.cf_username} is installed at ` +
+          `${existing.path}`,
+      );
+      if (works === undefined) {
+        console.log(
+          "Whether the token endpoint still accepts it could not be asked " +
+            "just now.",
+        );
+      }
+      await exportKeyFile(deps, existing.path);
+      console.log(`
 Minting another key revokes this one, on every machine holding a copy.
 To rotate deliberately:
 
     deno task test-records-key setup --rotate
 `);
-    return 0;
+      return 0;
+    }
   }
 
   const token = await deps.githubToken();
