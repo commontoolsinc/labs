@@ -1782,11 +1782,7 @@ export function analyzeFunctionCapabilities(
     const resolveBinding = (
       expression: ts.Expression,
     ): AliasBinding | undefined => {
-      // Reading through an `assert` body's operand recording is what keeps the
-      // receiver of a recorded method call — the `event.details` of
-      // `event.details.includes(text)` — attributed to the source it was read
-      // from, so the field survives into the schema the body is served.
-      const current = unwrapAssertCapture(expression);
+      const current = unwrapExpression(expression);
       if (
         ts.isBinaryExpression(current) &&
         FALLBACK_OPERATORS.has(current.operatorToken.kind)
@@ -3097,9 +3093,11 @@ export function analyzeFunctionCapabilities(
           ts.isElementAccessExpression(node.expression)
         ) {
           // The expression the method is called on, with an `assert` body's
-          // operand recording read through, so cell-likeness is judged on the
-          // value the author wrote rather than on the recording helper's
-          // untyped result.
+          // operand recording read through. Recording the receiver of a method
+          // call puts a call where the member access the author wrote used to
+          // be, and both questions asked of it here — which source it was read
+          // from, and whether it is cell-like — are about the value the
+          // recording hands back rather than about the recording.
           const receiverExpression = unwrapAssertCapture(
             node.expression.expression,
           );
