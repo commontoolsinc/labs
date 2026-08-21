@@ -133,16 +133,9 @@ export const resolveHandleValue = async (
       error: `${label} can only read a reference in this run's own space`,
     };
   }
-  let cell;
-  try {
-    cell = pieces.runtime.getCellFromLink({ ...link, schema: undefined });
-  } catch (error) {
-    return {
-      error: `${label} does not name a readable reference: ${
-        errorMessage(error)
-      }`,
-    };
-  }
+  // The link came out of the parser and names this run's own space, so it is
+  // a well-formed full link and constructing a cell over it cannot fail.
+  const cell = pieces.runtime.getCellFromLink({ ...link, schema: undefined });
   try {
     await cell.sync();
   } catch (error) {

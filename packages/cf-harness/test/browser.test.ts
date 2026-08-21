@@ -91,7 +91,7 @@ class FakeProcessRunner implements ProcessRunner {
   readonly calls: ProcessRunRequest[] = [];
 
   constructor(
-    private readonly results: ProcessRunResult[] = [{
+    private readonly results: (ProcessRunResult | Error)[] = [{
       stdout: "",
       stderr: "",
       exitCode: 0,
@@ -100,9 +100,11 @@ class FakeProcessRunner implements ProcessRunner {
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.calls.push(request);
-    return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
-    );
+    const next = this.results.shift() ??
+      { stdout: "", stderr: "", exitCode: 0 };
+    // An `Error` in the script stands for a run that never produced a result
+    // at all — no binary on the host, a spawn the OS refused.
+    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   }
 }
 
@@ -663,6 +665,107 @@ describe("browser", () => {
       expect(runner.calls.map((call) => call.args)).toEqual([
         ["--cdp", "http://localhost:9362", "get", "url"],
       ]);
+    });
+
+    it("refuses to materialize a handle when the destination probe cannot be run", async () => {
+      // Where the value would go is unknown, and an unknown destination is
+      // not an allowed one.
+      const ref = await seedRef("passphrase", "hunter2");
+      const runner = new FakeProcessRunner([
+        new Error("agent-browser: no such file or directory"),
+      ]);
+      const engine = createEngine(runner);
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toBe(
+        "the current page could not be read, so where a handle's value would go is unknown",
+      );
+      // Reading the destination is all that was attempted; nothing was filled.
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
+    });
+
+    it("refuses to materialize a handle when the destination probe exits nonzero", async () => {
+      const ref = await seedRef("passphrase", "hunter2");
+      const runner = new FakeProcessRunner([
+        { stdout: "", stderr: "no page in view\n", exitCode: 1 },
+      ]);
+      const engine = createEngine(runner);
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "fill",
+        ref: "@e1",
+        valueHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toBe(
+        "the current page could not be read, so where a handle's value would go is unknown",
+      );
+      expect(runner.calls.map((call) => call.args)).toEqual([
+        ["--cdp", "http://localhost:9362", "get", "url"],
+      ]);
+    });
+
+    it("refuses to materialize a handle into a page that is not on an http(s) origin", async () => {
+      // A page with no origin to compare against the allowlist — a blank tab,
+      // a local file — is refused rather than compared.
+      const ref = await seedRef("passphrase", "hunter2");
+      for (const page of ["about:blank", "file:///tmp/x.html"]) {
+        const runner = new FakeProcessRunner([pageAt(page)]);
+        const engine = createEngine(runner);
+        await holdHandles(engine, ref);
+
+        const result = await engine.invokeBuiltinTool("browser", {
+          action: "fill",
+          ref: "@e1",
+          valueHandle: ref,
+        });
+
+        const output = result.output as BrowserToolErrorOutput;
+        expect(output.code).toBe("destination_not_allowed");
+        expect(output.message).toBe(
+          "the current page is not on an http(s) origin, so no handle can be materialized into it",
+        );
+        expect(output.message).not.toContain("hunter2");
+        expect(runner.calls.map((call) => call.args)).toEqual([
+          ["--cdp", "http://localhost:9362", "get", "url"],
+        ]);
+      }
+    });
+
+    it("refuses a resolved URL the action plan rejects, even from an allowed origin", async () => {
+      // The plan is the authority on what agent-browser is asked to do, and
+      // it runs again over the resolved input: a URL whose origin the operator
+      // allowed still has to be one the open action accepts.
+      const ref = await seedRef("target-url", " https://example.com/inbox");
+      const runner = new FakeProcessRunner();
+      const engine = createEngine(runner);
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "open",
+        urlHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.code).toBe("invalid_input");
+      expect(output.message).toBe("open only allows http(s) URLs");
+      expect(output.message).not.toContain("/inbox");
+      expect(runner.calls).toEqual([]);
     });
 
     it("refuses a urlHandle whose resolved origin is outside the allowlist", async () => {
