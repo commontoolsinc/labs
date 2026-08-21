@@ -5056,6 +5056,21 @@ Deno.test("structured config commands expose stable success and failure envelope
     );
   }
 
+  const persisted = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: persisted.io,
+      env,
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(persisted.stdout[0]).result, {
+    state: "configured",
+    configuredProvider: "openai-compatible-gateway",
+    effectiveProvider: "openai-compatible-gateway",
+    effectiveSource: "persistent",
+  });
+
   await Deno.writeTextFile(join(home, "config.json"), "{secret-corruption", {
     mode: 0o600,
   });
