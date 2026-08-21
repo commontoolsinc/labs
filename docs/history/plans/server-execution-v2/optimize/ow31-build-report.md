@@ -333,6 +333,46 @@ Grace store dump, seq 4). Built shape:
   `closure-replication-failed`, and the next child-creation retry
   re-runs with the carriage (the slot cleared on settle). Noted, not
   wired around: the retry semantics are the existing CT-1687 contract.
+- **FLAG-7 (raised by the Codex review on PR #6156, P1; kept as a flag,
+  not rebuilt): the space-owner binding is SESSION-level, so a serving
+  session on space X reads as X's owner regardless of WHICH user's run
+  demanded the read.** A served run for Alice following a reference into
+  Bob's owner-only space reads it as Bob. This is the design of record
+  (the session is per-space and shared across every demanding run; the
+  scope report's option (c) — per-read acting carriage — was analyzed as
+  OW13-sized and unable to cover `session.open`), it grants nothing the
+  co-hosted deriver does not structurally hold (it derives every
+  co-hosted space through the engine plane — the same trust argument the
+  read row and the scope report's §6 made), and it is a strict NARROWING
+  of the Phase-7 blanket it replaces (READ-class only, resolvable-owner
+  spaces only, flag-gated delegating class only). The residual is real
+  as ATTRIBUTION precision: per-demander read isolation on the session
+  plane is exactly the grant-scoped read design's territory (OW13), not
+  this build's. If the owner wants per-demanding-user read binding
+  ahead of OW13, that is a follow-up ruling — the escape hatch's shape.
+- **Review disposition (PR #6156, Codex P1 ×3, P2 ×1; Cubic P2 ×1):**
+  (1) session-level-binding widening → FLAG-7 above (design of record;
+  replied on the thread). (2) stale binding surviving an ownership
+  change → VALID, FIXED red-first: `#revokeDeauthorizedSessions` now
+  also revokes a bound session whose stored acting principal differs
+  from the CURRENT owner resolution (covers the self-owned space's
+  implicit-OWNER short-circuit; new pin "an ownership TRANSFER
+  re-binds"). (3) genesis forcing ahead of the wave's lease check →
+  DECLINED with reasoning: the genesis is a SESSION-plane, space-signed,
+  client-shape commit that is lease-independent by design (clients
+  bootstrap spaces holding no lease; INV-13's authority is the space
+  identity, not the deriver), deterministic and idempotent per CT-1650 —
+  a lapsed-tenure forcing is indistinguishable from a client
+  bootstrapping the same space and converges identically (the replay
+  pins cover the exact orphan state; moving genesis into the sink was
+  argued against in the scope report §5(4) — cache invalidation).
+  (4) stale implicit-OWNER prose in EXPERIMENTAL_OPTIONS.md, the plan's
+  Phase-7 task bullet, and `server-execution-default.ts` → VALID, all
+  three re-tensed to the delegating posture. (Cubic) updating a
+  `docs/history` report in-PR → the report is BORN in this PR under the
+  coordinator's explicit incremental-report instruction, matching the
+  stage-c precedent (reports created and archived same-day); nothing
+  pre-existing was rewritten.
 - **Escape-hatch status (the READ ruling's own provision): NOT
   exercised.** No case surfaced during the build where user-identity
   routing could not cover a legitimately-needed serving read: home

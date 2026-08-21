@@ -1542,9 +1542,28 @@ export class Server {
   ): void {
     if (this.#aclMode() !== "enforce") return;
     for (const session of this.#sessions.sessionsForSpace(space)) {
-      // A delegated READ binding (OW31) is judged as its acting user:
-      // an ACL change that removes the bound owner revokes the session,
-      // and the serving plane's next mount re-resolves the new owner.
+      // A delegated READ binding (OW31) is judged as its acting user,
+      // AND against the CURRENT owner resolution: an ACL change that
+      // moves ownership revokes the bound session even when the stale
+      // acting principal still holds READ (the self-owned space's
+      // implicit-OWNER short-circuit included — the Codex P1 finding
+      // on #6156), so the serving plane's next mount re-binds the new
+      // owner instead of reading indefinitely under a stale identity.
+      if (
+        session.actingPrincipal !== undefined &&
+        this.#resolveSpaceOwnerBinding(engine, space) !==
+          session.actingPrincipal
+      ) {
+        this.#sessions.remove(space, session.id);
+        if (session.ownerConnectionId !== null) {
+          this.#connections.get(session.ownerConnectionId)?.revokeSession(
+            space,
+            session.id,
+            "unauthorized",
+          );
+        }
+        continue;
+      }
       const capability = this.#capabilityFor(
         engine,
         space,

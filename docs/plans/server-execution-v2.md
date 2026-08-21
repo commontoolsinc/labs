@@ -1401,7 +1401,8 @@ Tasks:
       ENABLED` (`packages/memory/v2/server-execution-default.ts`) — value
       `false` today — resolved by the `productionServer` / `remoteClient`
       presets, the shell define fallback, and toolshed's serving-host
-      gate + service-principal grant; explicit `true` = the ON arm,
+      gate + memory ACL principal lists (the DELEGATING class since
+      OW31's build); explicit `true` = the ON arm,
       explicit `false` = the OFF arm; the single-process presets keep the
       OFF baseline by construction (EXPERIMENTAL_OPTIONS.md); the ONE
       absolute pin (`packages/toolshed/lib/server-execution-flag.test.

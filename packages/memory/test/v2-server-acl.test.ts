@@ -1956,3 +1956,51 @@ Deno.test("OW31 acl off: the actingAs marker is inert (off preserves historical 
     await server.close();
   }
 });
+
+Deno.test("OW31 acl enforce: an ownership TRANSFER re-binds — the bound session is revoked even when the stale acting principal retains READ (a self-owned space included)", async () => {
+  const server = createAclServer("memory://acl-ow31-rebind", {
+    mode: "enforce",
+    delegatingDids: [SERVICE],
+  });
+  // A SELF-OWNED (home-shaped) space: the binding resolves the space
+  // DID itself, whose implicit-OWNER short-circuit would keep READ
+  // forever — the stale-binding hazard's worst case (Codex P1 review
+  // finding on #6156).
+  const space = "did:key:z6Mk-acl-ow31-space-7";
+  await initializeSpaceAcl(server, space, { [space]: "OWNER" });
+  const service = await connect(server);
+  const authority = await connect(server);
+  try {
+    const bound = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(bound.ok, bound.error?.message);
+
+    // The space identity transfers ownership wholly to BOB. The bound
+    // session's stored acting principal (the space DID) still holds
+    // implicit OWNER by identity — but it is no longer what the
+    // binding WOULD resolve, so the session must be revoked and the
+    // next mount re-binds the new owner.
+    const spaceSession = await openSession(authority, space, space);
+    assertExists(spaceSession.ok);
+    const transferred = await transactSet(
+      authority,
+      space,
+      spaceSession.ok.sessionId,
+      `of:${space}`,
+      { [BOB]: "OWNER" },
+      1,
+    );
+    assertExists(transferred.ok, transferred.error?.message);
+
+    const revoked = service.messages.find((message) =>
+      message.type === "session/revoked"
+    );
+    assertExists(
+      revoked,
+      "an ownership transfer must revoke the stale binding",
+    );
+  } finally {
+    await server.close();
+  }
+});
