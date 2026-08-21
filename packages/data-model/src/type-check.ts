@@ -116,6 +116,11 @@ export function isValidFabricValueLayer(
  * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
  * `isValidFabricConvertibleValue()` (which additionally accepts native values
  * *convertible* to fabric form).
+ *
+ * This is the admission test the encoding path's input contract is written
+ * against: a value this accepts encodes, and one it does not gets whatever
+ * best-effort handling costs correct input nothing. See
+ * `BaseCodecEngine.encode()`.
  */
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
