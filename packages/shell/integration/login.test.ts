@@ -98,7 +98,7 @@ describe("shell login tests", () => {
     await shell.login(identity);
 
     const state = await shell.state();
-    assertEquals(state?.identity?.did(), identity.did());
+    assertEquals(state?.identityDid, identity.did());
   });
 
   it("can create a new user via passphrase", async () => {

@@ -35,8 +35,8 @@ export interface ShellPageProbe {
   view?: unknown;
   /** Why that state could not be read, when `app` is set and reading it threw. */
   viewError?: string;
-  /** Whether that state carries an identity. */
-  identity?: boolean;
+  /** The DID of the identity that state carries, where it carries one. */
+  identityDid?: string;
   /** The start of the document's rendered text. */
   text: string;
   /**
@@ -51,7 +51,7 @@ export interface ShellPageProbe {
 export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
   return await page.evaluate((textLimit: number, tailLimit: number) => {
     const scope = globalThis as typeof globalThis & {
-      app?: { serialize?: () => { view?: unknown; identity?: unknown } };
+      app?: { serialize?: () => { view?: unknown; identityDid?: string } };
       __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
     };
 
@@ -65,12 +65,12 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
     const app = typeof scope.app?.serialize === "function";
     let view: unknown;
     let viewError: string | undefined;
-    let identity: boolean | undefined;
+    let identityDid: string | undefined;
     if (app) {
       try {
         const state = scope.app!.serialize!();
         view = state.view;
-        identity = !!state.identity;
+        identityDid = state.identityDid;
       } catch (error) {
         viewError = String(error);
       }
@@ -93,7 +93,7 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
       app,
       view,
       viewError,
-      identity,
+      identityDid,
       text,
       consoleTail,
     };
@@ -124,7 +124,7 @@ export function describeShellPage(probe: ShellPageProbe): string {
   } else if (probe.app) {
     lines.push(
       `  globalThis.app: present, holding view ${JSON.stringify(probe.view)}` +
-        ` and ${probe.identity ? "an identity" : "no identity"}`,
+        ` and ${probe.identityDid ?? "no identity"}`,
     );
   } else {
     lines.push("  globalThis.app: absent");
