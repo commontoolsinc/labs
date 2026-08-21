@@ -1153,13 +1153,15 @@ trusted-side at the moment of use, so the model composes the action while
 holding only a reference, and the value it stands for never enters the
 conversation. A value-bearing field and its handle sibling are alternatives —
 set together, the call is refused rather than one winning silently. Once a run
-materializes a value this way, that exact string is scrubbed out of every
-model-facing tool output for the rest of the run — at the same boundary where
-addresses become handle tokens, because both are things the model must not hold.
-The scrub is not limited to the tool that materialized the value: a value typed
-into a page can return through any tool that reads that page, so a later
-snapshot, a skill script driving the same browser, or a failing command's stderr
-all carry it back withheld.
+materializes a value this way, that exact string is scrubbed out of model-facing
+tool output for the rest of the run, at the same boundary where addresses become
+handle tokens. That scrub is a backstop against the obvious return path — a
+later snapshot, a skill script driving the same browser, a failing command's
+stderr — and not a containment boundary: it matches strings, so a value the page
+transformed (HTML-escaped, case-changed, split across elements) passes through
+it. What a handle buys is that the model never held the value and could not
+choose where it went; keeping a materialized value out of model context for good
+needs the labels on the data to govern the read.
 
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not
