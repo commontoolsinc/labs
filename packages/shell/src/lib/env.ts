@@ -77,9 +77,9 @@ export const EXPERIMENTAL = {
   serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??
     SERVER_EXECUTION_DEFAULT_ENABLED,
   // Content-addressed schemas Phases 1 and 2: link writers and selectors
-  // emit cid: references. Off by default in the runner; the define is the
-  // opt-in (`EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS=true` bakes a shell
-  // that emits references).
+  // emit cid: references. On by default in the runner; the define is the
+  // rollback override (`EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS=false` bakes
+  // a shell that emits inline schemas again).
   contentAddressedSchemas: flagValue(
     EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
   ),

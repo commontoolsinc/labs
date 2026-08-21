@@ -9,16 +9,16 @@
  * with no runtime handle. The Runtime propagates its experimental option
  * here and reads the effective state back. Readers are NOT gated — they
  * accept both forms unconditionally, so old data keeps reading whatever
- * the flag does. Off by default; an explicit `true` opts a runtime in,
- * and because references written under the flag persist, turning it off
- * stops emission without un-writing anything.
+ * the flag does. On by default; an explicit `false` is the rollback
+ * override, and because references written under the flag persist,
+ * turning it off stops emission without un-writing anything.
  */
 
-let contentAddressedSchemas = false;
+let contentAddressedSchemas = true;
 
 /**
  * Sets the flag; `undefined` keeps the current state (the built-in default
- * is off).
+ * is on).
  */
 export function setContentAddressedSchemasConfig(
   enabled: boolean | undefined,
@@ -33,5 +33,5 @@ export function getContentAddressedSchemasConfig(): boolean {
 
 /** Restores the flag to its default. */
 export function resetContentAddressedSchemasConfig(): void {
-  contentAddressedSchemas = false;
+  contentAddressedSchemas = true;
 }
