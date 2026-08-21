@@ -2031,6 +2031,11 @@ export function wish(
     if (wishFailureObservedTxs.has(tx)) return;
     wishFailureObservedTxs.add(tx);
     const link = stateCell.getAsNormalizedFullLink();
+    // The failed run's demand-supplied identity (a served per-instance run
+    // stamps it on its transaction; clients and the OFF arm carry none): the
+    // error write must land in the SAME scoped instance the failed writes
+    // aimed at, not the service's own.
+    const scopeIdentity = tx.scopeKeyIdentity;
     tx.addCommitCallback((_tx, result) => {
       if (!result.error) return;
       if (
@@ -2040,7 +2045,12 @@ export function wish(
         return;
       }
       const message = toCompactDebugString(result.error);
-      const inFlightKey = `${link.space}/${link.id}`;
+      // Keyed per scoped INSTANCE: scope and identity separate user/session
+      // instances of one doc id, so one demander's in-flight report cannot
+      // hide another's failure.
+      const inFlightKey = `${link.space}/${link.scope ?? "space"}/${
+        scopeIdentity?.principal ?? ""
+      }:${scopeIdentity?.sessionId ?? ""}/${link.id}`;
       if (wishFailureUIInFlight.has(inFlightKey)) return;
       wishFailureUIInFlight.add(inFlightKey);
       // Deliberately NOT `scheduler.trackBackgroundTask` (unlike the sidecar
@@ -2053,7 +2063,7 @@ export function wish(
       // cost is bounded and benign: `idle()` can resolve a beat before the
       // error surface lands, and the surface still arrives on the doc's
       // ordinary change notification.
-      void commitWishFailureUI(link, message)
+      void commitWishFailureUI(link, message, scopeIdentity)
         .catch((surfacingError) => {
           // The surfacing must never become a new unhandled failure itself
           // (e.g. a raw write refused on a doc that never materialized).
@@ -2088,14 +2098,21 @@ export function wish(
   async function commitWishFailureUI(
     stateLink: ReturnType<Cell<any>["getAsNormalizedFullLink"]>,
     message: string,
+    scopeIdentity?: IExtendedStorageTransaction["scopeKeyIdentity"],
     attempt = 0,
   ): Promise<void> {
     const errorTx = runtime.edit();
     // Async error surfacing after the originating wish tx is gone — no
-    // scheduler run stamps it; bookkeeping per serving-loop.md §3d.
+    // scheduler run stamps it; bookkeeping per serving-loop.md §3d. The
+    // failed run's demand-supplied identity rides along so the stamper
+    // resolves the scoped error write against the DEMANDER's instance, not
+    // the service's (clients pass none — unchanged).
     runtime.stampServerRun(errorTx, {
       actionId: `wish/commit-failure-ui/${stateLink.id}`,
       kind: "bookkeeping",
+      ...(scopeIdentity !== undefined
+        ? { scopeKeyIdentity: scopeIdentity }
+        : {}),
     });
     const { schema: _schema, ...bareLink } = stateLink;
     // RAW value writes on purpose, not cell writes: a cell write against a
@@ -2128,7 +2145,12 @@ export function wish(
       // state on a fresh transaction. This wait is why the chain must stay
       // untracked (see the launch site above).
       await runtime.idle();
-      return commitWishFailureUI(stateLink, message, attempt + 1);
+      return commitWishFailureUI(
+        stateLink,
+        message,
+        scopeIdentity,
+        attempt + 1,
+      );
     }
     // The account of the failure failed to land, so the surface stays blank
     // and this is the only place the reason exists.
