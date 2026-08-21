@@ -10,9 +10,10 @@ import {
   sanitizeDenoWebTestOutput,
 } from "./utils.ts";
 
-// A run built from a stated `Deno.CommandOutput` rather than from a subprocess,
-// so a transcript can be read for an ending no real run in this suite reaches.
-function harnessRun(output: Partial<Deno.CommandOutput>): HarnessRun {
+// A run built from output written out here rather than from a subprocess. It
+// takes no process to make, and it can carry an ending no real run in this
+// suite reaches.
+function runWith(output: Partial<Deno.CommandOutput> = {}): HarnessRun {
   const encoder = new TextEncoder();
   return new HarnessRun("some-project", {
     code: 1,
@@ -51,7 +52,7 @@ Deno.test("smoke test", async function () {
 // those says what happened on one of the run's two streams, and an assertion
 // that reported only its own words left the reason nowhere.
 Deno.test("a failed assertion carries the whole run", function () {
-  const run = harnessRun({});
+  const run = runWith();
   const error = assertThrows(
     () => run.assert(run.success, "test successful"),
     AssertionError,
@@ -65,14 +66,13 @@ Deno.test("a failed assertion carries the whole run", function () {
 });
 
 Deno.test("an assertion that holds says nothing", function () {
-  harnessRun({}).assert(true, "test successful");
+  runWith().assert(true, "test successful");
 });
 
-// The exit code of a killed process is 128 plus the signal number, which reads
-// as an ordinary exit to anyone not counting. The signal is what says the run
-// was killed rather than that it decided to stop.
+// No real run in this suite is killed by a signal, so this states one. The
+// transcript names the signal rather than only the exit code it comes with.
 Deno.test("a run the kernel killed names the signal", function () {
-  const transcript = harnessRun({ code: 137, signal: "SIGKILL" }).transcript();
+  const transcript = runWith({ code: 137, signal: "SIGKILL" }).transcript();
 
   assertStringIncludes(transcript, "SIGKILL");
   assertStringIncludes(transcript, "137");

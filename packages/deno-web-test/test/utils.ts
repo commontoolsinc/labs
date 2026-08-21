@@ -158,8 +158,8 @@ export class HarnessRun {
   }
 
   transcript(): string {
-    // A run the kernel killed reports the signal alongside the code, which is
-    // 128 plus the signal number and reads as an ordinary exit on its own.
+    // The exit code of a run the kernel killed is 128 plus the signal number.
+    // That reads as an ordinary exit. The ending names the signal as well.
     const ending = this.signal === null
       ? `exited with code ${this.code}`
       : `was killed by ${this.signal}, exiting with code ${this.code}`;
