@@ -126,8 +126,10 @@ incompatible or too costly to maintain; it is not the selected path here.
 
 1. Add a separate `openai-codex` provider. Do not reinterpret
    `gatewayAuthMode: "bearer"` as subscription auth.
-2. Preserve the existing OpenAI-compatible gateway as the default. Existing
-   CLI flags, library callers, run artifacts, and tests remain compatible.
+2. Keep the OpenAI-compatible gateway a first-class provider, selected the same
+   explicit way `openai-codex` is. Neither provider is a default: a run that
+   names none is refused rather than routed to a billing route it never chose.
+   Existing CLI flags, library callers, and run artifacts keep their shapes.
 3. Keep `cf-harness` in charge of every model turn and every harness tool call.
    Subscription auth changes provider transport and credentials, not CFC
    authority.
@@ -447,7 +449,8 @@ Expected files:
 
 - [x] Replace combinations that can represent invalid states with a provider
   union: current OpenAI-compatible gateway config or `openai-codex` config.
-- [x] Keep the gateway provider and its current defaults unchanged.
+- [x] Keep the gateway provider's URL and auth defaults unchanged; selecting
+  the provider itself is explicit.
 - [x] Add `--model-provider openai-codex` and
   `CF_HARNESS_MODEL_PROVIDER=openai-codex` as explicit opt-ins.
 - [x] Reject gateway URL/auth flags when `openai-codex` is selected instead of
@@ -623,7 +626,7 @@ Expected files:
 - Importing credentials from Codex CLI or other harnesses.
 - A native Codex app-server runtime mode.
 - Managed Business/Enterprise automation through Codex access tokens.
-- Changing the package's default model or provider.
+- Changing the package's default model.
 - Using subscription credentials for non-Codex OpenAI APIs.
 
 [opencode-codex]: https://github.com/anomalyco/opencode/blob/411eff73f026d4950c07947c4d983788cb615baa/packages/opencode/src/plugin/openai/codex.ts
