@@ -407,6 +407,39 @@ describe("verb prose", () => {
         expect(result.properties.pet.$ref).toBe("#/$defs/Pet");
       });
 
+      it("strips schema prose without rewriting application data", () => {
+        // A `default` carries DATA, and data may contain a member named
+        // `description`. The name map's prose-stripped hash must remove
+        // only schema prose, or the definition hashes to a third form
+        // nothing served ever carries — and the authored name is lost for
+        // exactly the definitions that ship default data.
+        const declared = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              description: "A household pet.",
+              default: { description: "literal application data" },
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const servedSource = object({ pet: { $ref: "#/$defs/Pet" } }, {
+          $defs: {
+            Pet: {
+              type: "object",
+              default: { description: "literal application data" },
+              properties: { name: { type: "string" } },
+            },
+          },
+        });
+        const rootRef = registeredRefTo(servedSource);
+        const result = fold({ $ref: rootRef } as JSONSchema, declared);
+        expect(Object.keys(result.$defs)).toEqual(["Pet"]);
+        expect(result.$defs.Pet.default).toEqual({
+          description: "literal application data",
+        });
+      });
+
       it("serves a reference to a boolean document as that boolean", () => {
         // A definition can be a boolean, so a document can be one too, and
         // a boolean has no siblings to keep or prose to fold.

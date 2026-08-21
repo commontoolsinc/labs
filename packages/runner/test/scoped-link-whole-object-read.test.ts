@@ -269,6 +269,75 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
+  it("relaxes a required inside an inline child scope's own $defs", async () => {
+    // `inner` DECLARES its own `$defs`; the local reference under it
+    // resolves against inner, not the outer document. Losing that scope
+    // leaves the nested `required` unrelaxed, and strict traversal can
+    // void the containing read.
+    const scopedSchema = {
+      type: "object",
+      properties: {
+        question: { type: "string" },
+        inner: {
+          type: "object",
+          $defs: {
+            Nested: {
+              type: "object",
+              properties: { draft: { type: "string" } },
+              required: ["draft"],
+            },
+          },
+          properties: {
+            value: { $ref: "#/$defs/Nested" },
+          },
+        },
+      },
+    } as unknown as JSONSchema;
+
+    const tx = writerRt.edit();
+    const draft = writerRt.getCell<string>(
+      space,
+      "inline-scope-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    draft.set("writer-session-only");
+    const container = writerRt.getCell(
+      space,
+      "inline-scope-container",
+      scopedSchema,
+      tx,
+    );
+    container.set({
+      question: "inline scope question",
+      inner: { value: { draft } },
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "inline-scope-container", scopedSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        scopedSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as {
+        properties?: {
+          inner?: { properties?: { value?: { required?: string[] } } };
+        };
+      };
+      expect(relaxed.properties?.inner?.properties?.value?.required).toEqual(
+        [],
+      );
+    } finally {
+      await close();
+    }
+  });
+
   it("relaxes a required inside a recursive group's local definition", async () => {
     // A cyclic group stores its members as LOCAL references — the nested
     // definition arrives as a bare pointer whose `properties` and

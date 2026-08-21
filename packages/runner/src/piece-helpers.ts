@@ -13,6 +13,7 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
@@ -170,10 +171,14 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   // relaxation see `properties` and `required` inside a nested definition.
   // Either miss keeps the strict pre-existing behavior.
   let structural = resolveExternalRootRefForStructure(schema);
-  let structuralRoot = root ?? structural;
+  let structuralRoot: JSONSchema;
   if (structural !== schema) {
     structuralRoot = structural;
   } else {
+    // A schema declaring its own `$defs` opens a scope: local references
+    // under it resolve against IT, not the inherited document — the same
+    // child-root rule the CFC schema walkers apply.
+    structuralRoot = cfcSchemaChildRoot(structural, root ?? structural);
     const ref = (structural as { $ref?: unknown }).$ref;
     if (typeof ref === "string" && ref.startsWith("#")) {
       const resolved = ContextualFlowControl.resolveSchemaRefs(
@@ -186,6 +191,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
       structural = resolved;
     }
   }
+  structuralRoot = cfcSchemaChildRoot(structural, structuralRoot);
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.

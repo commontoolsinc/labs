@@ -43,6 +43,7 @@ import {
   isReadableCell,
   isSlugAddress,
   lookupSchemaDocument,
+  mapSubschemas,
   type MemorySpace,
   NAME,
   parseExternalSchemaRef,
@@ -2394,10 +2395,12 @@ function declaredDefNamesByHash(
   if (!isObjectOrArray(declared) || !isObjectOrArray(declared.$defs)) {
     return names;
   }
-  const defGroups = [
-    declared.$defs,
-    withoutDescriptions(declared.$defs) as typeof declared.$defs,
-  ];
+  const strippedDefs = Object.fromEntries(
+    Object.entries(declared.$defs).map((
+      [name, def],
+    ) => [name, withoutSchemaProse(def as JSONSchema)]),
+  );
+  const defGroups = [declared.$defs, strippedDefs as typeof declared.$defs];
   for (const name of Object.keys(declared.$defs)) {
     for (const defs of defGroups) {
       try {
@@ -2420,19 +2423,21 @@ function declaredDefNamesByHash(
 }
 
 /**
- * `value` with every `description` member removed, recursively — the one
- * keyword `withDeclaredFieldProse` folds, so the stripped form is the
- * structural shape a prose-free served document hashes to.
+ * `schema` with every SCHEMA-NODE `description` removed — the one keyword
+ * `withDeclaredFieldProse` folds, so the stripped form is the structural
+ * shape a prose-free served document hashes to. The walk is schema-aware:
+ * data-bearing keyword values (`default`, `const`, `enum`, `examples`) are
+ * opaque, so a data member that happens to be NAMED `description` rides
+ * through untouched.
  */
-function withoutDescriptions(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutDescriptions);
-  if (!isObjectOrArray(value)) return value;
-  const result: Record<string, unknown> = {};
-  for (const [key, member] of Object.entries(value)) {
-    if (key === "description") continue;
-    result[key] = withoutDescriptions(member);
-  }
-  return result;
+function withoutSchemaProse(schema: JSONSchema): JSONSchema {
+  if (!isObjectOrArray(schema)) return schema;
+  const { description: _prose, ...rest } = schema as Record<string, unknown>;
+  return mapSubschemas(
+    rest as Parameters<typeof mapSubschemas>[0],
+    (child) => withoutSchemaProse(child),
+    { includeUnused: true, includeDefs: true },
+  );
 }
 
 /**
