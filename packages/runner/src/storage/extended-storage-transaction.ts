@@ -1720,19 +1720,44 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // exactly the protected writes `noteSystemWrite` rejects from untrusted
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
-    const reasons = this.#runPrivilegedSystemWrite(() =>
-      prepareBoundaryCommit(
-        this,
-        // Stage-0 precision counters: threaded through only when the hook is
-        // installed, so the gate skips all measurement (and the summary
-        // allocation) otherwise. The non-null assertion restates the
-        // presence check above — the hooks object is fixed at construction.
-        this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
-          onPrefixProvenance: (summary) =>
-            this.cfcInstrumentation.onPrefixProvenance!(summary),
-        },
-      )
-    );
+    let reasons: string[];
+    try {
+      reasons = this.#runPrivilegedSystemWrite(() =>
+        prepareBoundaryCommit(
+          this,
+          // Stage-0 precision counters: threaded through only when the hook is
+          // installed, so the gate skips all measurement (and the summary
+          // allocation) otherwise. The non-null assertion restates the
+          // presence check above — the hooks object is fixed at construction.
+          this.cfcInstrumentation.onPrefixProvenance === undefined
+            ? undefined
+            : {
+              onPrefixProvenance: (summary) =>
+                this.cfcInstrumentation.onPrefixProvenance!(summary),
+            },
+        )
+      );
+    } catch (error) {
+      // An UNMODELED crash inside commit-prep (e.g. schema-merge's
+      // divergent-ifc assert reached through a stored envelope — the served-
+      // wish shape, verification-coverage.md OW49/OW50) used to escape here
+      // as a thrown error: the scheduler's action died without its
+      // transaction ever settling — no rollback callbacks, an unresolved run
+      // promise, an unhandled rejection — and the failure was invisible at
+      // every surface above (the wish UI silently never mounted). Fail
+      // exactly as closed as a modeled refusal instead: record the crash as
+      // a prepare reason, so commit() rejects through the standard
+      // pre-storage-rejection path and every observer (commit callbacks, the
+      // scheduler's failed-commit machinery, error surfacing) sees the real
+      // cause. Kept loud: a crash here is still a bug in prep itself, not a
+      // policy verdict.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        "cfc-prepare-crash",
+        () => ["CFC commit-prep crashed; refusing the commit:", message],
+      );
+      reasons = [`CFC commit-prep crashed: ${message}`];
+    }
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
       // A recorded reason makes the transaction CFC-relevant by definition.

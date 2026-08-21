@@ -38,6 +38,10 @@ import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "../storage/rejection.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
@@ -1994,7 +1998,132 @@ export function wish(
       }
     }
     scoped.set(value);
+    surfaceWishStateCommitFailure(tx, scoped);
     sendResult(tx, scoped);
+  }
+
+  // Transactions that already carry the wish-state failure observer — one
+  // callback per action tx, however many sendWishState calls it makes.
+  const wishFailureObservedTxs = new WeakSet<IExtendedStorageTransaction>();
+  // One in-flight failure-UI write per state doc: the scheduler retries a
+  // refused wish action (bounded), and each retry's failure observer would
+  // otherwise start its own surfacing write racing the others on the same
+  // doc and the same fields.
+  const wishFailureUIInFlight = new Set<string>();
+
+  /**
+   * Surface a failed wish-state commit in the wish UI (verification-coverage
+   * OW50, seat S-J). The wish action's own writes — including any error state
+   * the body wrote — die with a refused transaction, so until now a killed
+   * wish left its surface silently never-mounted (the served-wish shape:
+   * commit-prep refuses the /result envelope, first-on-ci-gate.md row 3).
+   * A commit callback observes the settled failure and writes the reason
+   * where the wish UI belongs, in a fresh bookkeeping transaction.
+   *
+   * Conflict-class rejections (stale basis / local inconsistency) are NOT
+   * surfaced: the scheduler re-runs the action against fresh state and
+   * convergence is the norm — an error surface there would flash noise.
+   */
+  function surfaceWishStateCommitFailure(
+    tx: IExtendedStorageTransaction,
+    stateCell: Cell<any>,
+  ): void {
+    if (wishFailureObservedTxs.has(tx)) return;
+    wishFailureObservedTxs.add(tx);
+    const link = stateCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_tx, result) => {
+      if (!result.error) return;
+      if (
+        isConflictRejection(result.error) ||
+        isStorageTransactionInconsistent(result.error)
+      ) {
+        return;
+      }
+      const message = toCompactDebugString(result.error);
+      const inFlightKey = `${link.space}/${link.id}`;
+      if (wishFailureUIInFlight.has(inFlightKey)) return;
+      wishFailureUIInFlight.add(inFlightKey);
+      void commitWishFailureUI(link, message)
+        .catch((surfacingError) => {
+          // The surfacing must never become a new unhandled failure itself
+          // (e.g. a raw write refused on a doc that never materialized).
+          console.error(
+            `Can't report "${message}" in the surface it belongs to`,
+            surfacingError,
+          );
+        })
+        .finally(() => {
+          wishFailureUIInFlight.delete(inFlightKey);
+        });
+    });
+  }
+
+  /**
+   * Write `{error, [UI]}` into the wish state doc in its own committed
+   * bookkeeping transaction, SCHEMALESS on purpose: the failed commit was
+   * refused with the full wish-state schema in play (the served-wish shape
+   * dies in CFC prep on that envelope), and re-presenting the same envelope
+   * would meet the same refusal. A bare value write against the stored
+   * envelope does not.
+   *
+   * Bounded retries for the transient classes only: a stale-basis conflict
+   * or a local inconsistency converges when re-run against settled state —
+   * unlike a policy refusal, which would repeat identically and is reported
+   * instead. (The previous error-report path treated every failure as the
+   * repeating kind and gave up after one attempt — the
+   * "Can't report … in the surface it belongs to" /
+   * StorageTransactionInconsistent follow-on OW50 names: the transient
+   * classes are exactly the ones a fresh transaction CAN land.)
+   */
+  async function commitWishFailureUI(
+    stateLink: ReturnType<Cell<any>["getAsNormalizedFullLink"]>,
+    message: string,
+    attempt = 0,
+  ): Promise<void> {
+    const errorTx = runtime.edit();
+    // Async error surfacing after the originating wish tx is gone — no
+    // scheduler run stamps it; bookkeeping per serving-loop.md §3d.
+    runtime.stampServerRun(errorTx, {
+      actionId: `wish/commit-failure-ui/${stateLink.id}`,
+      kind: "bookkeeping",
+    });
+    const { schema: _schema, ...bareLink } = stateLink;
+    // RAW value writes on purpose, not cell writes: a cell write against a
+    // doc with stored CFC metadata records the stored schema as the write's
+    // candidate envelope, and the candidate/stored merge re-meets exactly
+    // the refusal being reported (observed live: the divergent /result
+    // envelope refuses the error report too — the "Can't report …" loop).
+    // A raw value write records no candidate; prep keeps the stored
+    // envelope as-is, and the runtime-authored `error`/`$UI` fields carry
+    // no policy of their own (`true` in the wish-state schema).
+    errorTx.writeValueOrThrow(
+      { ...bareLink, path: ["error"] },
+      message,
+    );
+    errorTx.writeValueOrThrow(
+      { ...bareLink, path: [UI] },
+      errorUI(message) as unknown as Parameters<
+        IExtendedStorageTransaction["writeValueOrThrow"]
+      >[1],
+    );
+    runtime.prepareTxForCommit(errorTx);
+    const { error } = await errorTx.commit();
+    if (error === undefined) return;
+    if (
+      attempt < 2 &&
+      (isConflictRejection(error) || isStorageTransactionInconsistent(error))
+    ) {
+      // Let the conflicting write settle locally, then re-derive the error
+      // state against it on a fresh transaction.
+      await runtime.idle();
+      return commitWishFailureUI(stateLink, message, attempt + 1);
+    }
+    // The account of the failure failed to land, so the surface stays blank
+    // and this is the only place the reason exists.
+    console.error(
+      `Can't report "${message}" in the surface it belongs to`,
+      error,
+    );
   }
 
   /**

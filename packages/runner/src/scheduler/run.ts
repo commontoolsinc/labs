@@ -146,7 +146,23 @@ export function startReactiveActionCommit(state: {
   readonly beforeCommit?: () => void;
 } = {}): ReturnType<IExtendedStorageTransaction["commit"]> {
   logger.timeStart("scheduler", "run", "commit");
-  state.runtime.prepareTxForCommit(state.tx);
+  try {
+    state.runtime.prepareTxForCommit(state.tx);
+  } catch (error) {
+    // A throw escaping prep must become a FAILED COMMIT, not an escaped
+    // exception: the finalize path re-enters this function from the run
+    // promise's rejection handler, so a deterministic prep throw used to
+    // throw AGAIN there — an unhandled rejection, an unresolved run
+    // promise, and a transaction that never settled (no rollback
+    // callbacks). Abort the transaction with the real cause; `commit()` on
+    // the settled transaction below then reports it through the ordinary
+    // failed-commit path (retry classification, error surfacing). The CFC
+    // prep class is already converted to a modeled refusal inside
+    // `prepareCfc` — this is the backstop for everything else.
+    if (state.tx.status().status === "ready") {
+      state.tx.abort(error);
+    }
+  }
   options.beforeCommit?.();
   const commitPromise = state.tx.commit();
   logger.timeEnd("scheduler", "run", "commit");
