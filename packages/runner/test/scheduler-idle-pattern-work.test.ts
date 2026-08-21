@@ -181,4 +181,54 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     await compileBarrier;
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
   });
+
+  it("a REJECTING registry promise still settles the barrier — failures are the caller's to surface, never the barrier's to hang on", async () => {
+    // The settle uses Promise.allSettled on purpose: a failed compile /
+    // load / write-back rejects its registry promise, and the barrier
+    // must treat that as SETTLED (the original caller surfaces the
+    // failure). A regression to Promise.all would reject the settle
+    // chain — the recheck continuation never runs, the barrier hangs,
+    // and the rejection surfaces uncaught. Pinned bounded: the barrier
+    // races a generous logical-time deadline and must win.
+    //
+    // The synthetic entry carries the REAL registries' cleanup
+    // contract — retire-on-settle in a `finally` (pattern-manager
+    // registers every chain that way): a settled promise never stays
+    // registered beyond its cleanup microtask, which is also what
+    // keeps the barrier's recheck fixpoint from spinning on a
+    // settled-but-registered entry.
+    const manager = runtime.patternManager as unknown as {
+      inProgressCompilations: Map<string, Promise<unknown>>;
+    };
+    const failing = Promise.withResolvers<unknown>();
+    const tracked = failing.promise.finally(() => {
+      manager.inProgressCompilations.delete("ow45-rejecting-compile");
+    });
+    manager.inProgressCompilations.set(
+      "ow45-rejecting-compile",
+      tracked as Promise<never>,
+    );
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
+    let resolved = false;
+    const barrier = runtime.scheduler.idleWithPendingCommits().then(() => {
+      resolved = true;
+    });
+    // Reject AFTER the barrier's first evaluation attached its settle
+    // handler (the synchronous branch ran at creation, so the rejection
+    // is handled — no unhandled-rejection noise under allSettled).
+    failing.reject(new Error("ow45 synthetic compile failure"));
+    let deadline = false;
+    await Promise.race([
+      barrier,
+      (async () => {
+        for (let i = 0; i < 40 && !resolved; i++) {
+          await clock.tick(25);
+        }
+        deadline = !resolved;
+      })(),
+    ]);
+    expect(resolved).toBe(true);
+    expect(deadline).toBe(false);
+    expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
+  });
 });

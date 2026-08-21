@@ -445,13 +445,15 @@ export class PatternManager {
   }
 
   /**
-   * Settle every currently-registered by-identity load and
-   * compile-cache write-back (failures settle — they are the original
-   * caller's to surface, not the barrier's). Work registered WHILE
-   * awaiting is the caller's to re-check: the scheduler barrier
-   * re-evaluates from scratch after each settle, the same
-   * joint-fixpoint structure pending commits use, so a load that
-   * registers its write-back mid-await is seen by the next pass.
+   * Settle every currently-registered in-progress compilation,
+   * by-identity load, and compile-cache write-back (failures SETTLE —
+   * allSettled by contract: they are the original caller's to surface,
+   * never the barrier's to hang on; the rejecting-promise pin guards
+   * the allSettled→all regression). Work registered WHILE awaiting is
+   * the caller's to re-check: the scheduler barrier re-evaluates from
+   * scratch after each settle, the same joint-fixpoint structure
+   * pending commits use, so a chain that registers its follow-on work
+   * mid-await is seen by the next pass.
    */
   async pendingPatternWorkSettled(): Promise<void> {
     await Promise.allSettled([
