@@ -13,7 +13,7 @@ import { WRITE_FILE_MODES } from "../src/tools/write-file.ts";
 Deno.test("builtin tool registry includes the agreed first-pass tool floor", () => {
   assertEquals(BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId), [
     "bash",
-    "bash-no-sandbox",
+    "browser",
     "read_file",
     "view_image",
     "web_fetch",

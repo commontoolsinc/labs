@@ -1,7 +1,7 @@
 import type { BuiltinToolId } from "../contracts/tool-descriptor.ts";
 import { assignSlugTool } from "./assign-slug.ts";
 import { bashTool } from "./bash.ts";
-import { bashNoSandboxTool } from "./bash-no-sandbox.ts";
+import { browserTool } from "./browser.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
 import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
@@ -16,7 +16,7 @@ import type { HarnessToolDefinition } from "./types.ts";
 
 export const BUILTIN_TOOLS = [
   bashTool,
-  bashNoSandboxTool,
+  browserTool,
   readFileTool,
   viewImageTool,
   webFetchTool,

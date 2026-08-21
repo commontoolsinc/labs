@@ -97,7 +97,7 @@ import {
   validateStructuredResultValue,
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
-import { normalizeCdpOrigin } from "./tools/browser-host-command-policy.ts";
+import { normalizeCdpOrigin } from "./contracts/browser-access.ts";
 import {
   defaultHarnessCredentialStorePath,
   FileHarnessCredentialStore,
@@ -2271,10 +2271,24 @@ const summarizeToolCallArguments = (
     const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
     switch (toolName) {
       case "bash":
-      case "bash-no-sandbox":
         return typeof parsed.command === "string"
           ? `command=${JSON.stringify(parsed.command)}`
           : undefined;
+      case "browser": {
+        const action = typeof parsed.action === "string"
+          ? `action=${JSON.stringify(parsed.action)}`
+          : undefined;
+        const ref = typeof parsed.ref === "string"
+          ? `ref=${JSON.stringify(parsed.ref)}`
+          : undefined;
+        const url = typeof parsed.url === "string"
+          ? `url=${JSON.stringify(parsed.url)}`
+          : undefined;
+        const joined = [action, ref, url].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
       case "read_file":
         return typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`

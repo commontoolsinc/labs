@@ -17,11 +17,11 @@ The runtime has four main boundaries:
 2. The prompt loop performs bounded turns through the selected model provider
    and invokes only the configured tool/profile surface.
 3. Most tool execution uses Docker with a configurable runtime, normally
-   `runsc-cfc`. The browser child is a constrained host-adjacent profile bound
-   to a leased local CDP endpoint and narrow command policy. The optional
-   `run_pattern` tool is a distinct trusted-host path whose Fabric identity
-   stays outside Docker and whose authority is constrained to one configured
-   space.
+   `runsc-cfc`. The browser child is a constrained host-adjacent profile whose
+   typed `browser` tool the harness binds to a leased local CDP endpoint itself.
+   The optional `run_pattern` tool is a distinct trusted-host path whose Fabric
+   identity stays outside Docker and whose authority is constrained to one
+   configured space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
    optional product run manifests.

@@ -16,9 +16,10 @@ Read that guide first. It is the canonical reference.
 
 When this skill is activated inside a `cf-harness` browser-profile subagent, the
 profile intentionally narrows the generic `agent-browser` capability surface
-described below. Use the leased CDP endpoint provided in the task, for example
-`agent-browser --cdp http://host.docker.internal:9362 snapshot -i`, and do not
-open or attach to any other browser endpoint.
+described below. There is no shell in that profile: page actions go through the
+harness's `browser` tool, and the harness attaches the leased CDP endpoint
+itself. Allowlisted skill scripts likewise receive the endpoint through
+`AGENT_BROWSER_CDP` in their environment; do not pass `--cdp` to them.
 
 The cf-harness browser profile allows only a small set of page commands: `open`
 for HTTP(S) URLs, `snapshot`, `get title/url/text`, bounded `wait`, and
@@ -285,12 +286,15 @@ bundled scripts over constructing equivalent shell commands. Invoke them with
 the `agent-browser` CLI to be available on `PATH` in the script execution
 environment.
 
-For cf-harness runs, pass a local CDP origin with `--cdp` or set
-`AGENT_BROWSER_CDP`. Note that `AGENT_BROWSER_CDP` is honored by these bundled
-scripts (as the fallback when their `--cdp` flag is omitted), not by the
-`agent-browser` CLI itself. The scripts intentionally avoid browser state,
-screenshots, PDFs, uploads, downloads, and local file output; they print
-snapshots and extracted content to stdout for harness capture.
+These bundled scripts read the CDP origin from `AGENT_BROWSER_CDP` when their
+`--cdp` flag is omitted; the `agent-browser` CLI itself does not honor that
+variable. Inside a cf-harness browser-profile run, the harness sets
+`AGENT_BROWSER_CDP` from the Browser Access lease and refuses a `--cdp`
+argument, so pass only the script's other arguments there. The `--cdp` forms
+below are for direct host usage outside the harness. The scripts intentionally
+avoid browser state, screenshots, PDFs, uploads, downloads, and local file
+output; they print snapshots and extracted content to stdout for harness
+capture.
 
 | Script                                                               | Description                                      |
 | -------------------------------------------------------------------- | ------------------------------------------------ |
@@ -308,4 +312,8 @@ APP_USERNAME="user@example.com" APP_PASSWORD="..." \
   https://app.example.com/login --username-ref @e1 --password-ref @e2 --submit-ref @e3
 
 ./scripts/capture-workflow.sh --cdp http://host.docker.internal:9222 https://example.com
+
+# Inside a cf-harness browser-profile run: the harness supplies the endpoint.
+# run_skill_script skill="agent-browser" path="scripts/capture-workflow.sh" \
+#   args=["https://example.com"]
 ```

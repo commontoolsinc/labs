@@ -11,10 +11,7 @@ import type {
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { BashToolInput, BashToolOutput } from "./tools/bash.ts";
-import {
-  BROWSER_HOST_COMMAND_DENIED_EXIT_CODE,
-  BROWSER_HOST_COMMAND_DENIED_PREFIX,
-} from "./tools/browser-host-command-policy.ts";
+import type { BrowserToolOutput } from "./tools/browser.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import type { HarnessModelProviderId } from "./config.ts";
 import type { ReadSkillResourceToolOutput } from "./tools/read-skill-resource.ts";
@@ -667,22 +664,6 @@ export const classifyBashToolFailure = (
   capabilitySnapshot?: HarnessCapabilitySnapshot,
   toolId = "bash",
 ): HarnessFailureRecord | undefined => {
-  if (
-    toolId === "bash-no-sandbox" &&
-    output.exitCode === BROWSER_HOST_COMMAND_DENIED_EXIT_CODE &&
-    output.stderr.startsWith(BROWSER_HOST_COMMAND_DENIED_PREFIX)
-  ) {
-    return createHarnessFailureRecord({
-      kind: "tool_not_allowed",
-      source: "tool_output",
-      detail: output.stderr,
-      at,
-      toolId,
-      outputId: output.outputId as ToolOutputId,
-      command: input.command,
-      exitCode: output.exitCode,
-    });
-  }
   if (output.exitCode !== 127) {
     return undefined;
   }
@@ -726,14 +707,8 @@ export const classifyBuiltinToolFailure = (
         capabilitySnapshot,
         toolId,
       );
-    case "bash-no-sandbox":
-      return classifyBashToolFailure(
-        input as BashToolInput,
-        output as BashToolOutput,
-        at,
-        undefined,
-        toolId,
-      );
+    case "browser":
+      return classifyBrowserToolFailure(output, at);
     case "read_file":
     case "view_image":
     case "edit_file":
@@ -761,6 +736,43 @@ export const classifyBuiltinToolFailure = (
       return undefined;
   }
 };
+
+/**
+ * Which browser-tool errors count as harness failures. `invalid_input` is the
+ * model asking for something outside the action vocabulary, recorded as
+ * `tool_not_allowed`. `lease_unavailable` and `host_unavailable` are the
+ * run's environment failing the tool. A `command_failed` is an ordinary
+ * page-level outcome (a ref that no longer exists, a navigation that failed)
+ * the model is expected to react to, so it is not recorded as a failure.
+ */
+const classifyBrowserToolFailure = (
+  output: unknown,
+  at: string,
+): HarnessFailureRecord | undefined => {
+  if (!isBrowserToolErrorOutput(output) || output.code === "command_failed") {
+    return undefined;
+  }
+  return createHarnessFailureRecord({
+    kind: output.code === "invalid_input"
+      ? "tool_not_allowed"
+      : "harness_error",
+    source: "tool_output",
+    detail: output.message,
+    at,
+    toolId: "browser",
+    outputId: output.outputId as ToolOutputId,
+    ...(output.exitCode !== undefined ? { exitCode: output.exitCode } : {}),
+  });
+};
+
+const isBrowserToolErrorOutput = (
+  output: unknown,
+): output is Extract<BrowserToolOutput, { status: "error" }> =>
+  isObjectNotArray(output) &&
+  (output as { status?: unknown }).status === "error" &&
+  typeof (output as { code?: unknown }).code === "string" &&
+  typeof (output as { message?: unknown }).message === "string" &&
+  typeof (output as { outputId?: unknown }).outputId === "string";
 
 const classifyWebFetchToolFailure = (
   output: unknown,

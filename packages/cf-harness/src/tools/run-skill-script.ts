@@ -3,7 +3,10 @@ import { basename, isAbsolute, relative } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 
-import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
+import {
+  redactCdpEndpoint,
+  validateBrowserAccessLeaseFreshness,
+} from "../contracts/browser-access.ts";
 import type {
   HarnessSkillDiagnostic,
   HarnessSkillRecord,
@@ -18,7 +21,7 @@ import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
 } from "../skills/scripts.ts";
-import { normalizeCdpOrigin } from "./browser-host-command-policy.ts";
+import { normalizeCdpOrigin } from "../contracts/browser-access.ts";
 import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
@@ -220,60 +223,41 @@ const normalizeTimeoutMs = (timeoutMs: number | undefined): number => {
   return resolved;
 };
 
-const findCdpArg = (
-  args: readonly string[],
-): { value?: string; error?: string } => {
-  let value: string | undefined;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg !== "--cdp" && !arg.startsWith("--cdp=")) {
-      continue;
-    }
-    if (value !== undefined) {
-      return {
-        error: "host agent-browser skill scripts may supply --cdp only once",
-      };
-    }
-    if (arg === "--cdp") {
-      value = args[index + 1];
-      index += 1;
-    } else {
-      value = arg.slice("--cdp=".length);
-    }
-    if (value === undefined || value === "") {
-      return {
-        error: "host agent-browser skill scripts require a --cdp value",
-      };
-    }
-  }
-  return { value };
-};
-
-const validateHostAgentBrowserScriptArgs = (
+/**
+ * The lease origin a host agent-browser script runs against, or why there is
+ * none. The endpoint is harness-side state the model does not hold, so the
+ * scripts receive it through `AGENT_BROWSER_CDP` in their cleared environment
+ * rather than as an argument — and an argument that tries to supply one is
+ * refused, because the only endpoint a script may attach to is the lease's.
+ */
+const resolveHostAgentBrowserLeaseOrigin = (
   args: readonly string[],
   expectedCdpUrl: string | undefined,
   browserAccessExpiresAt: string | undefined,
-): string | undefined => {
+): { origin: string; error?: undefined } | {
+  origin?: undefined;
+  error: string;
+} => {
   const expiryError = validateBrowserAccessLeaseFreshness(
     browserAccessExpiresAt,
   );
   if (expiryError !== undefined) {
-    return expiryError;
+    return { error: expiryError };
   }
-  const expectedCdpOrigin = normalizeCdpOrigin(expectedCdpUrl);
-  if (expectedCdpOrigin === undefined) {
-    return "host agent-browser skill scripts require a Browser Access lease endpoint";
+  const origin = normalizeCdpOrigin(expectedCdpUrl);
+  if (origin === undefined) {
+    return {
+      error:
+        "host agent-browser skill scripts require a Browser Access lease endpoint",
+    };
   }
-  const cdpArg = findCdpArg(args);
-  if (cdpArg.error !== undefined) {
-    return cdpArg.error;
+  if (args.some((arg) => arg === "--cdp" || arg.startsWith("--cdp="))) {
+    return {
+      error:
+        "host agent-browser skill scripts must not pass --cdp; the harness attaches the Browser Access lease endpoint itself",
+    };
   }
-  if (cdpArg.value === undefined) {
-    return "host agent-browser skill scripts must pass --cdp explicitly";
-  }
-  return normalizeCdpOrigin(cdpArg.value) === expectedCdpOrigin
-    ? undefined
-    : "host agent-browser skill script --cdp must match the Browser Access lease endpoint";
+  return { origin };
 };
 
 const splitShebangWords = (shebang: string): string[] =>
@@ -1099,20 +1083,21 @@ export const runSkillScriptTool: HarnessToolDefinition<
     }
     const scriptExecution = scriptExecutionPlan.execution;
 
+    let hostAgentBrowserCdpOrigin: string | undefined;
     if (executionTarget === "host" && skill.name === "agent-browser") {
-      const browserLeaseError = validateHostAgentBrowserScriptArgs(
+      const browserLease = resolveHostAgentBrowserLeaseOrigin(
         args,
         context.browserAccess?.cdpUrl,
         context.browserAccess?.expiresAt,
       );
-      if (browserLeaseError !== undefined) {
+      if (browserLease.error !== undefined) {
         const output = errorOutput({
           outputId,
           skill: skill.name,
           path: normalizedPath,
           executionTarget,
           code: "permission_denied",
-          message: browserLeaseError,
+          message: browserLease.error,
           resource,
           observedDigest,
           observedSizeBytes,
@@ -1127,6 +1112,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
         );
         return output;
       }
+      hostAgentBrowserCdpOrigin = browserLease.origin;
     }
 
     const cwd = input.cwd !== undefined
@@ -1183,6 +1169,9 @@ export const runSkillScriptTool: HarnessToolDefinition<
           SKILL_DIR: skill.skillDir,
           SKILL_SCRIPT: resource.resourcePath,
           CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
+          ...(hostAgentBrowserCdpOrigin !== undefined
+            ? { AGENT_BROWSER_CDP: hostAgentBrowserCdpOrigin }
+            : {}),
         }),
         ...(scriptExecution.stdinText !== undefined
           ? { stdinText: scriptExecution.stdinText }
@@ -1236,8 +1225,16 @@ export const runSkillScriptTool: HarnessToolDefinition<
       digestMatchesRegistry: true,
       registrySizeBytes: resource.sizeBytes,
       observedSizeBytes,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      // A host agent-browser script holds the lease endpoint in its
+      // environment and may echo it, so echoes are scrubbed from what the
+      // model reads. The scrub is a backstop: what keeps the endpoint out of
+      // model reach is that only the digest-pinned bundled script holds it.
+      stdout: hostAgentBrowserCdpOrigin !== undefined
+        ? redactCdpEndpoint(result.stdout, hostAgentBrowserCdpOrigin)
+        : result.stdout,
+      stderr: hostAgentBrowserCdpOrigin !== undefined
+        ? redactCdpEndpoint(result.stderr, hostAgentBrowserCdpOrigin)
+        : result.stderr,
       exitCode: result.exitCode,
       ...(cfcResult !== undefined ? { cfcResult } : {}),
     };
