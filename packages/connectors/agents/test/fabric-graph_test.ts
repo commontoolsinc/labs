@@ -120,7 +120,7 @@ Deno.test("stable graph writes keep child identity and hydrate linked values", a
   }
 });
 
-Deno.test("stable graph writes preserve native Fabric values", async () => {
+Deno.test("stable graph writes preserve native `FabricValue`s", async () => {
   const signer = await Identity.fromPassphrase(
     "agent connector native graph test",
   );
