@@ -265,8 +265,12 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "lift evidence — see optimize/ow47-client-durability-report.md. " +
         "Mechanism + store/log evidence: docs/history/plans/" +
         "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). Lifts when OW31's build closes and the " +
-        "file greens ON; the flip PR needs this list EMPTY.",
+        "first-on-ci-gate.md). OW31's build and OW47 are both DONE " +
+        "(2026-08-21); what remains is the FLAG-5 CFC-attribution seam " +
+        "(the trust snapshot supplying the SERVICE identity to served " +
+        "authorship labels — OW34's family, flagged in OW31's register " +
+        "row). Lifts when that seam closes and the file greens ON; the " +
+        "flip PR needs this list EMPTY.",
     },
     {
       file: "integration/profile-embed.test.ts",
@@ -313,8 +317,11 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
         "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
         "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
-        "§1 (and first-on-ci-gate.md). Lifts when OW31's build AND OW45 " +
-        "close and the file greens ON; the flip PR needs this list EMPTY.",
+        "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
+        "(2026-08-21); lifts when OW45 closes and the file greens ON " +
+        "(the optimize pass's joint run had step 1 green in ~10 s and " +
+        "step 2 still red on the cross-space module-run residual OW31's " +
+        "row carries); the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",
