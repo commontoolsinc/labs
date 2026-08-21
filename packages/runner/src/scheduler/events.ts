@@ -1291,6 +1291,11 @@ export async function dispatchQueuedEvent(state: {
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
           runFinalCommitCallback();
+          // A CFC-refused write is silent data loss of user intent whichever
+          // disposition carries it, and the `logger.warn` below is the opt-in
+          // scheduler logger, disabled in deployed workers. Report it here for
+          // the same reason the give-up path does.
+          reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
@@ -1437,8 +1442,9 @@ type CommitDisposition =
  *  - permanent: a commit-time precondition failure (receipt-exists,
  *    origin-committed). Re-running can never succeed and would double-handle the
  *    event, so it is never retried.
- *  - terminal: a deterministic server-side refusal of the committed data (a CFC
- *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *  - terminal: a deterministic refusal of the committed data on its own merits
+ *    (`isTerminalRejection`) — the server's CFC row-label commit rule, or the
+ *    client's CFC boundary refusing before storage; never retried —
  *    re-running recomputes the identical refused write, and the doomed re-runs'
  *    speculative rev bumps would starve concurrent siblings. Surfaced as a
  *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.

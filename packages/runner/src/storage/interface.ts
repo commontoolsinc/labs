@@ -1742,6 +1742,23 @@ export interface IPreconditionFailedError extends Error {
 }
 
 /**
+ * The CFC boundary refused to hand the transaction to storage: policy
+ * evaluated the transaction's own reads and writes and rejected them
+ * (`rejectCommitBeforeStorage` in extended-storage-transaction.ts). A
+ * terminal rejection in the spec scheduler-v2 §7.6 taxonomy: the refusal is
+ * deterministic — re-running the identical computation recomputes the
+ * identical refused write — so the client must not retry. `reasons` carries
+ * the prepare refusal reasons verbatim (writer-fit misfits and the rest of
+ * what `prepareBoundaryCommit` collects); empty when the transaction reached
+ * commit relevant but never prepared, which is a caller bug with the same
+ * deterministic character.
+ */
+export interface ICfcCommitRefusalError extends IStorageError {
+  readonly name: "CfcCommitRefusalError";
+  readonly reasons: readonly string[];
+}
+
+/**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
  */
@@ -1758,6 +1775,7 @@ export type StorageTransactionRejected =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -1916,6 +1934,7 @@ export type PushError =
   | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
+  | ICfcCommitRefusalError
   | TransactionError
   | IAuthorizationError;
 

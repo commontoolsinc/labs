@@ -145,6 +145,30 @@ describe("scheduler non-settling telemetry", () => {
             ? markers[0].deferredActions
             : undefined;
           expect(firstLabels?.length).toBe(1);
+
+          // An action carrying a scheduler observation identity is attributed
+          // to its piece in the marker, scope stripped back to the result
+          // cell's id — the attribution a builtin's `raw:` label cannot
+          // provide. An unannotated action stays label-only.
+          const annotatedAction: Action = function annotatedDeferred() {};
+          (annotatedAction as {
+            schedulerObservationIdentity?: {
+              pieceId: string;
+              ownerSpace?: string;
+            };
+          }).schedulerObservationIdentity = {
+            pieceId: "space:of:fid1:attributed",
+            ownerSpace: "did:key:zTest",
+          };
+          scheduler.recordBudgetBackoffTelemetry(
+            settleResultWithBackoff([annotatedAction, firstAction]),
+          );
+          const attributed = markers[2].type === "scheduler.non-settling"
+            ? markers[2].deferredActions
+            : undefined;
+          expect(attributed?.[0]?.pieceId).toBe("of:fid1:attributed");
+          expect(attributed?.[0]?.space).toBe("did:key:zTest");
+          expect(attributed?.[1]?.pieceId).toBeUndefined();
           // The latch the warning rides still records that this run of settle
           // passes churned; a new continuation replaces the tracker holding it.
           expect(runtime.scheduler.isNonSettling()).toBe(true);
