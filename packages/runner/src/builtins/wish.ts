@@ -36,8 +36,13 @@ import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
+import { RetryImmediately } from "../scheduler/retry-immediately.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "../storage/rejection.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
@@ -1775,6 +1780,55 @@ function wishOutputScope(
   return inputScope;
 }
 
+/**
+ * Whether a settled wish-state commit failure deserves the error surface
+ * (verification-coverage OW50, seat S-J). Excluded, because re-running
+ * converges them and a red surface would race the converged state:
+ * - conflict-class rejections (stale basis) and local inconsistencies — the
+ *   scheduler re-queues the action against fresh state;
+ * - deliberate control-flow aborts: `RetryImmediately` (an `inSpace("name")`
+ *   target just resolved; the scheduler aborts THIS transaction and
+ *   immediately re-runs the action, which then lands the good state — a red
+ *   error over that is the repair-manufactures-failure shape).
+ * Everything else — the CFC-modeled refusals and genuine crash-backstop
+ * aborts — surfaces.
+ */
+export function isSurfacableWishCommitFailure(
+  error: { name?: string; reason?: unknown },
+): boolean {
+  if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+    return false;
+  }
+  if (
+    error.name === "StorageTransactionAborted" &&
+    (error as { reason?: unknown }).reason instanceof RetryImmediately
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The text the wish surface shows for a settled commit failure: the
+ * informative layer, not the debug dump. A plain abort's own message is the
+ * generic "Transaction was aborted" — the cause rides `reason` — while a
+ * CFC-modeled rejection carries everything in `message`.
+ */
+export function wishCommitFailureMessage(
+  error: { message?: string; reason?: unknown },
+): string {
+  const message = typeof error.message === "string" ? error.message : "";
+  if (message !== "" && !message.startsWith("Transaction was aborted")) {
+    return message;
+  }
+  const reason = (error as { reason?: unknown }).reason;
+  if (reason instanceof Error && reason.message !== "") {
+    return reason.message;
+  }
+  if (message !== "") return message;
+  return toCompactDebugString(error);
+}
+
 export function wishTargetMayUseHomeSpace(
   query: unknown,
   scope?: ("~" | "." | "profile" | string)[],
@@ -1994,7 +2048,161 @@ export function wish(
       }
     }
     scoped.set(value);
+    surfaceWishStateCommitFailure(tx, scoped);
     sendResult(tx, scoped);
+  }
+
+  // Transactions that already carry the wish-state failure observer — one
+  // callback per action tx, however many sendWishState calls it makes.
+  const wishFailureObservedTxs = new WeakSet<IExtendedStorageTransaction>();
+  // One in-flight failure-UI write per state doc: the scheduler retries a
+  // refused wish action (bounded), and each retry's failure observer would
+  // otherwise start its own surfacing write racing the others on the same
+  // doc and the same fields.
+  const wishFailureUIInFlight = new Set<string>();
+
+  /**
+   * Surface a failed wish-state commit in the wish UI (verification-coverage
+   * OW50, seat S-J). The wish action's own writes — including any error state
+   * the body wrote — die with a refused transaction, so until now a killed
+   * wish left its surface silently never-mounted (the served-wish shape:
+   * commit-prep refuses the /result envelope, first-on-ci-gate.md row 3).
+   * A commit callback observes the settled failure and writes the reason
+   * where the wish UI belongs, in a fresh bookkeeping transaction.
+   *
+   * Conflict-class rejections (stale basis / local inconsistency) are NOT
+   * surfaced: the scheduler re-runs the action against fresh state and
+   * convergence is the norm — an error surface there would flash noise.
+   */
+  function surfaceWishStateCommitFailure(
+    tx: IExtendedStorageTransaction,
+    stateCell: Cell<any>,
+  ): void {
+    if (wishFailureObservedTxs.has(tx)) return;
+    wishFailureObservedTxs.add(tx);
+    const link = stateCell.getAsNormalizedFullLink();
+    // The failed run's demand-supplied identity (a served per-instance run
+    // stamps it on its transaction; clients and the OFF arm carry none): the
+    // error write must land in the SAME scoped instance the failed writes
+    // aimed at, not the service's own.
+    const scopeIdentity = tx.scopeKeyIdentity;
+    tx.addCommitCallback((_tx, result) => {
+      if (!result.error) return;
+      if (!isSurfacableWishCommitFailure(result.error)) return;
+      const message = wishCommitFailureMessage(result.error);
+      // Keyed per scoped INSTANCE: scope and identity separate user/session
+      // instances of one doc id, so one demander's in-flight report cannot
+      // hide another's failure.
+      const inFlightKey = `${link.space}/${link.scope ?? "space"}/${
+        scopeIdentity?.principal ?? ""
+      }:${scopeIdentity?.sessionId ?? ""}/${link.id}`;
+      if (wishFailureUIInFlight.has(inFlightKey)) return;
+      wishFailureUIInFlight.add(inFlightKey);
+      // Deliberately NOT `scheduler.trackBackgroundTask` (unlike the sidecar
+      // launches below): quiescence waits on tracked tasks, and this chain
+      // must wait on quiescence — its conflict retries wait out the refused
+      // action's own bounded re-runs (which write the same doc) before
+      // re-deriving the error state, so tracking it would deadlock
+      // `runtime.idle()` against itself, and retrying without that wait
+      // collides with the action's retries until both budgets exhaust. The
+      // cost is bounded and benign: `idle()` can resolve a beat before the
+      // error surface lands, and the surface still arrives on the doc's
+      // ordinary change notification.
+      void commitWishFailureUI(link, message, scopeIdentity)
+        .catch((surfacingError) => {
+          // The surfacing must never become a new unhandled failure itself
+          // (e.g. a raw write refused on a doc that never materialized).
+          console.error(
+            `Can't report "${message}" in the surface it belongs to`,
+            surfacingError,
+          );
+        })
+        .finally(() => {
+          wishFailureUIInFlight.delete(inFlightKey);
+        });
+    });
+  }
+
+  /**
+   * Write `{error, [UI]}` into the wish state doc in its own committed
+   * bookkeeping transaction, SCHEMALESS on purpose: the failed commit was
+   * refused with the full wish-state schema in play (the served-wish shape
+   * dies in CFC prep on that envelope), and re-presenting the same envelope
+   * would meet the same refusal. A bare value write against the stored
+   * envelope does not.
+   *
+   * Bounded retries for the transient classes only: a stale-basis conflict
+   * or a local inconsistency converges when re-run against settled state —
+   * unlike a policy refusal, which would repeat identically and is reported
+   * instead. (The previous error-report path treated every failure as the
+   * repeating kind and gave up after one attempt — the
+   * "Can't report … in the surface it belongs to" /
+   * StorageTransactionInconsistent follow-on OW50 names: the transient
+   * classes are exactly the ones a fresh transaction CAN land.)
+   */
+  async function commitWishFailureUI(
+    stateLink: ReturnType<Cell<any>["getAsNormalizedFullLink"]>,
+    message: string,
+    scopeIdentity?: IExtendedStorageTransaction["scopeKeyIdentity"],
+    attempt = 0,
+  ): Promise<void> {
+    const errorTx = runtime.edit();
+    // Async error surfacing after the originating wish tx is gone — no
+    // scheduler run stamps it; bookkeeping per serving-loop.md §3d. The
+    // failed run's demand-supplied identity rides along so the stamper
+    // resolves the scoped error write against the DEMANDER's instance, not
+    // the service's (clients pass none — unchanged).
+    runtime.stampServerRun(errorTx, {
+      actionId: `wish/commit-failure-ui/${stateLink.id}`,
+      kind: "bookkeeping",
+      ...(scopeIdentity !== undefined
+        ? { scopeKeyIdentity: scopeIdentity }
+        : {}),
+    });
+    const { schema: _schema, ...bareLink } = stateLink;
+    // RAW value writes on purpose, not cell writes: a cell write against a
+    // doc with stored CFC metadata records the stored schema as the write's
+    // candidate envelope, and the candidate/stored merge re-meets exactly
+    // the refusal being reported (observed live: the divergent /result
+    // envelope refuses the error report too — the "Can't report …" loop).
+    // A raw value write records no candidate; prep keeps the stored
+    // envelope as-is, and the runtime-authored `error`/`$UI` fields carry
+    // no policy of their own (`true` in the wish-state schema).
+    errorTx.writeValueOrThrow(
+      { ...bareLink, path: [...stateLink.path, "error"] },
+      message,
+    );
+    errorTx.writeValueOrThrow(
+      { ...bareLink, path: [...stateLink.path, UI] },
+      errorUI(message) as unknown as Parameters<
+        IExtendedStorageTransaction["writeValueOrThrow"]
+      >[1],
+    );
+    runtime.prepareTxForCommit(errorTx);
+    const { error } = await errorTx.commit();
+    if (error === undefined) return;
+    if (
+      attempt < 2 &&
+      (isConflictRejection(error) || isStorageTransactionInconsistent(error))
+    ) {
+      // Let the conflicting writers settle — including the refused action's
+      // own bounded re-runs against this doc — then re-derive the error
+      // state on a fresh transaction. This wait is why the chain must stay
+      // untracked (see the launch site above).
+      await runtime.idle();
+      return commitWishFailureUI(
+        stateLink,
+        message,
+        scopeIdentity,
+        attempt + 1,
+      );
+    }
+    // The account of the failure failed to land, so the surface stays blank
+    // and this is the only place the reason exists.
+    console.error(
+      `Can't report "${message}" in the surface it belongs to`,
+      error,
+    );
   }
 
   /**

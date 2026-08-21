@@ -102,14 +102,20 @@ describe("PolicyOf label-time binding", () => {
     }]);
   });
 
-  it("fails closed when the destination lacks the manifest", () => {
+  it("fails closed when the destination lacks the manifest", async () => {
     const tx = runtime.edit();
     runtime.getCell(space, "missing-policy", schema, tx).set("secret");
-    expect(() => tx.prepareCfc()).toThrow("is not installed");
-    tx.abort?.();
+    // OW50 (verification-coverage.md): a commit-prep crash no longer escapes
+    // `prepareCfc` as a throw (which killed the scheduler's action without
+    // settling its transaction); it is recorded as an invalidation reason and
+    // the commit rejects with the diagnostic — same fail-closed, observable
+    // failure.
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain("is not installed");
   });
 
-  it("rejects a malformed owning-space PolicyOf marker", () => {
+  it("rejects a malformed owning-space PolicyOf marker", async () => {
     const malformedSchema = {
       type: "string",
       ifc: {
@@ -126,8 +132,12 @@ describe("PolicyOf label-time binding", () => {
     runtime.getCell(space, "malformed-policy", malformedSchema, tx).set(
       "secret",
     );
-    expect(() => tx.prepareCfc()).toThrow("malformed PolicyOf schema marker");
-    tx.abort?.();
+    // OW50: crash -> recorded reason -> rejected commit (see above).
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain(
+      "malformed PolicyOf schema marker",
+    );
   });
 
   it("rejects unprivileged overwrite and deletion of a durable manifest", async () => {
@@ -233,7 +243,7 @@ describe("PolicyOf label-time binding", () => {
     expect((await decision.commit()).error).toBeDefined();
   });
 
-  it("rejects a raw module-policy object in authored schema metadata", () => {
+  it("rejects a raw module-policy object in authored schema metadata", async () => {
     runtime.registerCfcPolicyManifests(space, [artifact]);
     const forgedSchema = {
       ...schema,
@@ -250,8 +260,12 @@ describe("PolicyOf label-time binding", () => {
     } as const;
     const tx = runtime.edit();
     runtime.getCell(space, "forged-policy", forgedSchema, tx).set("secret");
-    expect(() => tx.prepareCfc()).toThrow("compiler-lowered PolicyOf");
-    tx.abort?.();
+    // OW50: crash -> recorded reason -> rejected commit (see above).
+    expect(tx.prepareCfc()).toBe("");
+    const result = await tx.commit();
+    expect(String(result.error?.message)).toContain(
+      "compiler-lowered PolicyOf",
+    );
   });
 
   it("compiles, installs, persists, and reloads a direct authored policy", async () => {

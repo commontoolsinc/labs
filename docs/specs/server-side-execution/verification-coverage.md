@@ -5293,39 +5293,83 @@ supply; OW29/OW32/OW34 closed):
     REMAINS: its CI shape is OW31's §2b acting-identity carriage
     (that train lifts it jointly; the OW47 half of its reason is
     closed).
-  - **OW48 — #6098's reserved-result-keys rule × system patterns
-    under the ON serving compile (seat S-H; rootcause §4b).** Main's
-    #6098 transformer rule ("a result may not declare its own screen
-    opaque") makes the SERVER fail to load `profile-create.tsx` /
-    `profile-picker.tsx` (TransformerError into `profile-home.tsx`)
-    in the ON serving-compile posture ONLY — the OFF arm compiles the
-    same byte-identical files green; compile byte-cache presence
-    decides whether this or OW49's assert is the proximate kill.
-    Owed: decide the composition — compliant `$UI` typing for the
-    wish/system patterns on main, or the serving compile relaxing the
-    #6098 check for the consumer-view position it trips on. Trigger:
-    one half of lifting the `integration/profile-embed.test.ts` ON
-    skip.
+  - **OW48 — CLOSED 2026-08-21 (refuted premise; optimize-on-main
+    served-wish seat,
+    [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
+    §1).** The row's premise — #6098's reserved-result-keys rule
+    breaks the ON serving compile of byte-identical system patterns —
+    was environment contamination, not a defect: the failing compiles'
+    content-derived program ids match the PRE-#6019 sources exactly,
+    and those bytes came from a STALE toolshed on localhost:8000 (the
+    `env.API_URL` default) that the investigation's serving runtimes
+    fetched system patterns from — a pre-#6019 vendor pin still
+    live-serving `[UI]: unknown` at the result root, the exact defect
+    #6098 exists to reject. Main's current system patterns compile
+    green under every posture including `servingPosture` (posture
+    matrix in the report); the transformer stack reads neither
+    server-execution flag. No pattern-typing change and no
+    serving-compile relaxation is owed. Residuals flagged in the
+    report §1c: the serving runtimes' pattern-fetch trust surface
+    (API_URL decides whose bytes the server compiles), and the
+    historical-stored-sources × new-transformer-rules exposure.
   - **OW49 — the ifc-divergent-anyOf envelope at /result under ON
-    (seat S-I; rootcause §4a; a CFC-OWNER call — FLAGGED, not
-    scheduled).** Main's `assertNoDivergentIfcBranches`
-    (cfc/schema-merge.ts, #3263) fires inside the `raw:wish` action's
-    commit-prep only under ON: the /result envelope becomes
-    divergent-ifc-carrying when served/instance schema envelopes
-    merge with the local one (the profile schema family is documented
-    divergent-union-prone). Owed: a merge rule for ifc-in-anyOf at
-    /result OR normalizing the served envelope before the merge — the
-    CFC owner decides; first step is an envelope dump at
-    `prepareBoundaryCommit` (rootcause §6.2). Trigger: the other half
-    of lifting the `integration/profile-embed.test.ts` ON skip.
-  - **OW50 — wish-action commit-prep failures must surface in the
-    wish UI (seat S-J; detectability).** Today the killed wish action
-    leaves the UI silently never-mounted (`pendingIpc` empty, 1
-    subscribe), and even the red error surface lands at most once
-    (the "Can't report … in the surface it belongs to" /
-    StorageTransactionInconsistent follow-on). Owed: the failure
-    surfaces where the wish UI belongs. Trigger: rides the
-    OW48/OW49 fix arc (detectability; not itself the lift condition).
+    (seat S-I; a CFC-OWNER call — FLAGGED, not scheduled; envelope
+    DECODED 2026-08-21,
+    [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
+    §2).** Main's `assertNoDivergentIfcBranches` (cfc/schema-merge.ts,
+    #3263) fires inside the `raw:wish` action's commit-prep only under
+    ON. The envelope question is answered: the /result branches are
+    the WISH BUILTIN'S OWN presence union —
+    `anyOf[{type:"undefined"}, <requested schema asCell>]`
+    (`wishStateSchemaForResult`) — with ifc riding the requested
+    profile consumer view; NOT a served-vs-local vintage divergence
+    and NOT instance-keyed (both writers intern the identical `cid:`
+    schema doc, so "normalize the served envelope before merge" is
+    refuted — there is nothing served-side to normalize, and open PR
+    #6083's content-addressing neither causes nor fixes it). The
+    ON-only trigger is two-writer sequencing: the serving loop
+    persists the envelope first; the browser's raw:wish, writing a
+    changed /result link against it, dies at the un-caught
+    verification merge — whoever writes second dies, and under ON
+    there is always a second writer. The stored envelope is a POISON
+    PILL: every later merging writer (including the runtime's own
+    error report) is refused via the merge's entry assert on the
+    STORED side. Deterministic unit repro:
+    `packages/runner/test/cfc-prepare-crash-surfacing.test.ts`.
+    Owed (the CFC owner decides; recommendation in the report §2e):
+    preferred — narrow the assert to actual ambiguity (allow a
+    combinator when at most one branch carries ifc and the ifc-free
+    branches are type-disjoint from it; merge treats the ifc branch
+    as the policy carrier); alternative — remove the combinator from
+    the wish's own result declaration (narrower; other ifc-under-union
+    families re-trip). Trigger: lifts the
+    `integration/profile-embed.test.ts` ON skip (the sole remaining
+    blocker after OW48's refutation and OW50's build).
+  - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
+    seat,
+    [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
+    §3; red-first tests in
+    `packages/runner/test/cfc-prepare-crash-surfacing.test.ts`).**
+    Wish-action commit-prep failures now surface where the wish UI
+    belongs, in three layers, none touching cfc/ semantics: (1) a
+    crash escaping `prepareBoundaryCommit` becomes a MODELED refusal
+    (`prepareCfc` records it as an invalidation reason; commit()
+    rejects with the real cause; callbacks fire; observe mode
+    survives); (2) the scheduler survives any `prepareTxForCommit`
+    throw (the tx is aborted with the cause instead of the
+    double-finalize wedge + unhandled rejection + never-settling tx);
+    (3) the wish writes `{error, [UI]}` into its state doc on a
+    settled non-transient commit failure — raw value writes (a cell
+    write's candidate re-meets the OW49 poison envelope), transient
+    conflict classes excluded (the scheduler converges those),
+    surfacing serialized per doc, and the old error-report path's
+    "would meet whatever refused it the first time" single-shot
+    corrected with bounded retries for the transient classes. The
+    formerly silent never-mount now shows the refusal's text in the
+    wish surface. Still open (flagged in the report §6): whether
+    modeled CFC refusals should be terminal-classified for the retry
+    budget, and whether the browser should run raw:wish at all under
+    ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
     ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
     optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
@@ -5410,6 +5454,59 @@ supply; OW29/OW32/OW34 closed):
     `integration/sqlite-db-owner-multi-runtime.test.ts` and
     `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
     skips.
+  - **OW54 — a served EVENT whose commit-prep crashes seals NO
+    consequence (adversarial review of PR #6157, F1 —
+    CONFIRMED-by-trace; minted 2026-08-21).** Pre-#6157, a prep crash
+    on the EVENT path threw out of `prepareTxForCommit` inside the
+    event finalize, was caught by the `.catch((error) =>
+    finalize(error))` chain, and took the handler-error arm —
+    `served.onFailure({kind: "error"})` sealed an ERROR consequence
+    and the durable LT1 entry was consequenced. With OW50's totality
+    (`prepareCfc` records the crash as a modeled pre-storage
+    rejection), the same crash now classifies on the event path as a
+    give-up "non-retryable" disposition: `runFinalCommitCallback()` +
+    `reportDroppedCfcRejectedWrite`, but NO `served.onFailure` and
+    nothing seals a consequence (the pre-storage rejection returns
+    before the `#sealDestination.seal` branch). The drain-in-flight
+    guard releases in the "queued" state, the durable entry stays
+    unconsequenced, and the post-wave re-arm re-drains it — "the wave
+    IS the retry cadence" — so a DETERMINISTIC prep crash (the OW49
+    poison-envelope class) is a forever re-drain, and under #6158's
+    settle wait the unretired client intent pays the full bounded
+    quiescence timeout per settle round (bounded and loud by design,
+    but every round). Scope honesty: the give-up-without-consequence
+    gap PRE-EXISTS for modeled CFC refusals; what changed is that the
+    CRASH class — previously the one class that DID seal an error
+    consequence — joins it. Exposure today: none live (the poisoned
+    class is reactive wish docs; profile-embed is skipped ON). Owed:
+    seal an error consequence for a served event whose commit is
+    refused pre-storage with a deterministic CFC reason (mirror the
+    terminal arm's honesty), or route CFC pre-storage rejections on
+    served events through `served.onFailure({kind: "error"})` — the
+    events seal path is (α)-critical, so the fix belongs to a
+    deliberate pass, not a side-swipe. Trigger: the OW49 fix arc or
+    the `integration/profile-embed.test.ts` ON-skip lift, whichever
+    comes first.
+  - **OW55 — the serving runtimes' pattern-fetch trust surface
+    (adversarial review of PR #6157, F7; the OW48 investigation's
+    security-adjacent residual; minted 2026-08-21).** Under ON,
+    `env.API_URL` alone decides which server the serving runtimes
+    fetch and compile system patterns from (`startServerExecutionHost`
+    hands it to every serving runtime; the wish sidecars and the
+    pattern updater fetch `apiUrl + api/patterns/system/…`), and its
+    DEFAULT names another process's port (localhost:8000). A
+    stale-but-healthy neighbor on that port produced the entire OW48
+    misdiagnosis: pre-#6019 bytes compiled by current transformers,
+    silent wish-path kills that presented as a main defect. The
+    cross-vintage case is the demonstrated one; the cross-ORIGIN case
+    is the security-adjacent one (whose bytes does the server
+    compile?). Owed: a deliberate posture — pin the serving runtimes'
+    pattern source to self when co-hosted, or verify the served
+    `?identity` against the local patterns route — plus a
+    local-repro runbook note (API_URL/MEMORY_URL must be set
+    explicitly when the default port is occupied). Follow-up class
+    (flip-follow-up family): no lift trigger; close with the ruled
+    posture landed.
 
 ## 4. Standing rule
 

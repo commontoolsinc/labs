@@ -276,24 +276,32 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       file: "integration/profile-embed.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): two deterministic killers stacked on " +
-        "the served-wish path, which one fires depending on compiled-byte " +
-        "availability; both kill the wish UI before it mounts; OFF green " +
-        "in 12 s. (1) CI shape: the pre-existing " +
-        "`assertNoDivergentIfcBranches` assert (runner cfc/schema-merge.ts, " +
-        "main's #3263 code) fires in the raw:wish action's commit-prep " +
-        "under ON — the /result envelope only becomes " +
-        "divergent-ifc-carrying when served/instance schema envelopes " +
-        "merge with the local one (verification-coverage.md OW49, a " +
-        "CFC-owner merge-rule call). (2) local/fresh-compile shape: " +
-        "main's day-old #6098 reserved-result-keys transformer rule " +
-        "refuses profile-create.tsx/profile-picker.tsx in the ON " +
-        "serving-compile posture only (OW48). NOT a demand hole. " +
-        "Mechanism + evidence: docs/history/plans/server-execution-v2/" +
-        "stage-c/on-render-stall-rootcause.md §4 (and " +
-        "first-on-ci-gate.md; OW50 owes the wish-UI failure surfacing). " +
-        "Lifts when OW48 AND OW49 close and the file greens ON; the flip " +
-        "PR needs this list EMPTY.",
+        "the FLIP, not the land), re-scoped by the optimize-on-main " +
+        "served-wish seat (ow48-50-wish-path-report.md): ONE killer, not " +
+        "two. The remaining blocker is OW49 — main's " +
+        "`assertNoDivergentIfcBranches` (runner cfc/schema-merge.ts, " +
+        "#3263) refuses the wish builtin's own /result declaration " +
+        '`anyOf[{type:"undefined"}, <requested schema>]` whenever the ' +
+        "requested schema carries ifc (the profile consumer view). Under " +
+        "ON the serving loop persists that envelope first, and the " +
+        "browser's raw:wish, writing a changed /result link against it, " +
+        "is refused in commit-prep — reproduced on a clean local env " +
+        "(fresh store, self-referential API_URL) and at unit level " +
+        "(runner test/cfc-prepare-crash-surfacing.test.ts). A CFC-owner " +
+        "merge-rule call (verification-coverage.md OW49); NOT a demand " +
+        "hole. Gate record: docs/history/plans/server-execution-v2/" +
+        "stage-c/first-on-ci-gate.md; seat evidence: " +
+        "docs/history/plans/server-execution-v2/optimize/" +
+        "ow48-50-wish-path-report.md. " +
+        "OW48 (the #6098 TransformerError shape) was REFUTED as " +
+        "environment contamination — the investigation's serving " +
+        "runtimes fetched system patterns from a stale localhost:8000 " +
+        "toolshed (env.API_URL default) serving pre-#6019 sources; " +
+        "current sources compile green under every posture. OW50's " +
+        "failure surfacing is BUILT: the killed wish now shows `error` " +
+        "+ an error UI in its state instead of silently never mounting. " +
+        "Lifts when OW49 closes and the file greens ON; the flip PR " +
+        "needs this list EMPTY.",
     },
     {
       file: "integration/home-profile-reload-durability.test.ts",

@@ -1708,7 +1708,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   prepareCfc(): string {
-    this.#materializeReferencedSchemaDocuments();
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -1720,19 +1719,56 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // exactly the protected writes `noteSystemWrite` rejects from untrusted
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
-    const reasons = this.#runPrivilegedSystemWrite(() =>
-      prepareBoundaryCommit(
-        this,
-        // Stage-0 precision counters: threaded through only when the hook is
-        // installed, so the gate skips all measurement (and the summary
-        // allocation) otherwise. The non-null assertion restates the
-        // presence check above — the hooks object is fixed at construction.
-        this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
-          onPrefixProvenance: (summary) =>
-            this.cfcInstrumentation.onPrefixProvenance!(summary),
-        },
-      )
-    );
+    let reasons: string[];
+    try {
+      // The schema-doc materialization is INSIDE the try on purpose: it is
+      // part of commit-prep, and a crash in it must take the same modeled
+      // refusal below rather than escaping (the totality this catch exists
+      // for).
+      this.#materializeReferencedSchemaDocuments();
+      reasons = this.#runPrivilegedSystemWrite(() =>
+        prepareBoundaryCommit(
+          this,
+          // Stage-0 precision counters: threaded through only when the hook is
+          // installed, so the gate skips all measurement (and the summary
+          // allocation) otherwise. The non-null assertion restates the
+          // presence check above — the hooks object is fixed at construction.
+          this.cfcInstrumentation.onPrefixProvenance === undefined
+            ? undefined
+            : {
+              onPrefixProvenance: (summary) =>
+                this.cfcInstrumentation.onPrefixProvenance!(summary),
+            },
+        )
+      );
+    } catch (error) {
+      // An UNMODELED crash inside commit-prep (e.g. schema-merge's
+      // divergent-ifc assert reached through a stored envelope — the served-
+      // wish shape, verification-coverage.md OW49/OW50) used to escape here
+      // as a thrown error: the scheduler's action died without its
+      // transaction ever settling — no rollback callbacks, an unresolved run
+      // promise, an unhandled rejection — and the failure was invisible at
+      // every surface above (the wish UI silently never mounted). Fail
+      // exactly as closed as a modeled refusal instead: record the crash as
+      // a prepare reason, so commit() rejects through the standard
+      // pre-storage-rejection path and every observer (commit callbacks, the
+      // scheduler's failed-commit machinery, error surfacing) sees the real
+      // cause.
+      const message = error instanceof Error ? error.message : String(error);
+      // Reported UNCONDITIONALLY, not through this module's opt-in logger
+      // (disabled by default — utils/logger.ts early-returns): a crash here
+      // is a bug in prep itself, and before this catch existed the class
+      // escaped as an unhandled rejection, the loudest signal in the system.
+      // Converting it to a modeled refusal must not also convert it to
+      // silence — the same labs#4772 shape `reportDroppedCfcRejectedWrite`
+      // (scheduler/events.ts) exists for.
+      console.error(
+        "[cfc] commit-prep crashed; refusing the commit:",
+        message,
+        error,
+      );
+      reasons = [`CFC commit-prep crashed: ${message}`];
+    }
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
       // A recorded reason makes the transaction CFC-relevant by definition.
