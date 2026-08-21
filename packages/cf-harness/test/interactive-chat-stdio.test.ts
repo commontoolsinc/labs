@@ -1229,6 +1229,28 @@ Deno.test("interactive stdio CLI accepts the batch entrypoint's provisioning fla
   );
 });
 
+Deno.test("interactive stdio CLI accepts the inline --flag=value spelling", () => {
+  // Both spellings exist for every other flag on this parser, so both are part
+  // of the contract; only the space-separated form was covered.
+  assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([
+      "--max-model-turns=48",
+      "--host-mount=name=gtd,source=/tmp,target=/gtd,mode=writable",
+    ], {}),
+    {
+      hostMountSpecs: ["name=gtd,source=/tmp,target=/gtd,mode=writable"],
+      maxModelTurns: 48,
+      help: false,
+    },
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions(["--max-model-turns=0"], {}),
+    Error,
+    "requires a positive integer",
+  );
+});
+
 Deno.test("interactive stdio CLI rejects a zero model-turn budget", () => {
   // 0 would mean "no model turns", which is not a smaller budget, it is a
   // session that cannot answer.
