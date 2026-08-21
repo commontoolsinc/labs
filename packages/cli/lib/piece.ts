@@ -1596,10 +1596,14 @@ export async function writeSourcePackage(
  * keeps the round trip whole.
  */
 export function undeclaredDataFiles(program: RuntimeProgram): string[] {
+  // A data file is never parsed. One already attached sits in `files` like any
+  // other entry, and its bytes may happen to read as a `dataFile()` call.
+  const attached = new Set(program.dataFiles ?? []);
   const declared = new Set(
-    program.files.flatMap((file) => collectDataFileNames(file, TARGET)),
+    program.files.filter((file) => !attached.has(file.name))
+      .flatMap((file) => collectDataFileNames(file, TARGET)),
   );
-  return (program.dataFiles ?? []).filter((name) => !declared.has(name));
+  return [...attached].filter((name) => !declared.has(name));
 }
 
 /**

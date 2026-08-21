@@ -35,13 +35,15 @@ export interface PatternIntegrationScenario<TArgument = any> {
   argument?: TArgument;
   steps: TestStep[];
   /**
-   * Data files the pattern reads with `dataFile()`, as paths on disk. Each is
-   * stored under its path relative to `dataRoot`, which is the name the pattern
-   * addresses it by.
+   * Data files to store with the pattern, as paths on disk. A file the pattern
+   * reads with `dataFile()` is attached from that call alone and needs no
+   * entry here; this is for a file the source cannot name, such as one read by
+   * a computed path, and for a file that ships with a pattern that does not
+   * read it. Each is stored under its path relative to `dataRoot`.
    */
   dataFiles?: readonly string[];
   /**
-   * Root grounding `dataFiles`, and so the paths the pattern addresses them by.
+   * Root grounding `dataFiles`, and so the paths those files are stored under.
    * Omitted, it is the common directory containing the module and every data
    * file — which is the module's own directory only when the data sits beside
    * or beneath it. Given explicitly, it must contain the module.

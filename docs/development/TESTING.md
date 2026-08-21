@@ -231,11 +231,15 @@ run directory.
 A pattern calling `dataFile()` reads a file attached to the program under test.
 The call names the file, and that is the declaration every test path reads:
 `resolveLocalProgram` attaches what the source asks for, so a pattern under
-test behaves the way it does deployed without the test restating anything. A
-file the source cannot name — one read by a computed path — is added where the
-test builds the program: `cf test` takes repeatable `--datafile` paths, a
-`generated-patterns` scenario names them in `dataFiles` grounded by `dataRoot`,
-and a browser integration test passes `dataFilePaths` to `resolveLocalProgram`.
+test behaves the way it does deployed without the test restating anything. The
+path resolves against the module that reads it, so `./data/cities.json` is the
+file beside the pattern under whichever root the test's own runner assembles
+the program with — a test lane rooted at `packages/patterns` and a gate rooted
+at the repository reach the same file. A file the source cannot name — one read
+by a computed path — is added where the test builds the program: `cf test`
+takes repeatable `--datafile` paths, a `generated-patterns` scenario names them
+in `dataFiles` grounded by `dataRoot`, and a browser integration test passes
+`dataFilePaths` to `resolveLocalProgram`.
 
 A browser integration test needs nothing further: the data travels to the
 browser inside the compiled pattern the space holds, so there is no file to
@@ -243,7 +247,8 @@ serve and no browser-side plumbing to arrange.
 
 The attachment is easy to leave out and reports nothing when it is: the pattern
 compiles and type-checks without it, and fails only when it reads, with
-`No attached data file "<path>"` naming what is attached instead. That is why
+`No attached data file "<path>"` — naming the path the read resolved to, and
+what is attached instead. That is why
 `resolveLocalProgram` is the one operation for building a program from local
 files, and why `deno task check-local-program` refuses a
 `FileSystemProgramResolver` built anywhere else.

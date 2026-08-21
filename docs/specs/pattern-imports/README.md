@@ -240,11 +240,28 @@ update defines a complete source revision. `set-home --reset` rejects
 `--datafile` because a reset deploys no local source package.
 
 A pattern reads an attached data file with `dataFile(path)` from
-`commonfabric`, naming the path the file is stored under. A data file belongs
-to the package rather than to any one module, so that path is absolute within
-the package and does not resolve relative to the caller — every module in the
-package names a given file the same way, and a sub-pattern reads one as readily
-as the entry does. A path naming no attached data file throws.
+`commonfabric`. The path resolves against the module that reads it, as an
+import specifier resolves against the module that imports it: `words.txt` and
+`./words.txt` both name the file beside the reader, and `../shared/words.txt`
+the one above it, so a sub-pattern names its own data as readily as the entry
+does. Unlike an import there is no bare specifier to hold back, because every
+data-file path names a file the package carries, so the only paths that do not
+resolve against the reader are the ones grounded at the package root:
+`/data/cities.json` addresses the same file from every module. A path naming no
+attached data file throws, reporting the path the read resolved to.
+
+Writing the path relative to the reader is what makes a source package
+portable. The root a package is assembled with decides the name every file is
+stored under, and the same directory of source is legitimately rooted several
+ways — at the pattern's own directory, at the tree of patterns it sits in, at
+the repository around that. A relative read names one file under all of them.
+A grounded read names a different file under each, so it commits the source to
+one root, and moving the package or building it from a different directory
+silently stops finding the file.
+
+A `dataFile()` path may not climb above the program root, and one that does is
+refused while the program is assembled rather than clamped to a path that
+appears in no source file.
 
 The read is immediate. A data file's bytes travel with the pattern's code in
 the same content-addressed closure, so they are present before any module
@@ -261,11 +278,13 @@ The same bytes are read by whatever reads the source package: `cf piece
 getsrc`, the FUSE `.src/` view, and any tool working from a recovered
 checkout.
 
-`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
-pattern that reads a data file can be checked and tested before it is deployed.
-An integration test names its data files on the scenario or fixture it runs —
-`dataFiles`, grounded by `dataRoot` — rather than on a command line.
-Without it such a pattern still compiles and type-checks, because `dataFile` is
+`cf check` and `cf test` take the same repeatable `--datafile` flag, so a file
+the source cannot name can be attached before the pattern is deployed. An
+integration test names such files on the scenario or fixture it runs —
+`dataFiles`, grounded by `dataRoot` — rather than on a command line. A file the
+source does name needs none of this: the call is the declaration, and every
+command that builds the program follows it. Where a file is neither declared
+nor named, the pattern still compiles and type-checks, because `dataFile` is
 declared whether or not a file is attached; the absence surfaces when the
 pattern runs.
 

@@ -90,7 +90,9 @@ function isUnresolvedModuleOk(
 // existing compile-path importers.
 export { resolveImportSpecifier } from "../specifier.ts";
 import {
+  assertDataFileInsideProgramRoot,
   assertImportInsideProgramRoot as assertInsideRoot,
+  resolveDataFilePath,
   resolveImportSpecifier as resolveSpecifier,
 } from "../specifier.ts";
 
@@ -123,17 +125,19 @@ const DATA_FILE_READER = "dataFile";
 
 /**
  * Returns the data-file names `source` declares, as the paths its `dataFile()`
- * calls name.
+ * calls name, each resolved against `source` the way an import specifier is.
  *
  * A pattern declares the code it depends on by importing it and the data it
  * depends on by reading it, so this is the data-side counterpart of the import
  * scan: both read a declaration out of the source rather than take one from a
- * caller.
+ * caller, and both resolve what they read against the module that wrote it.
+ * The runtime resolves a read the same way, so a file is attached under the
+ * name it is later looked up by.
  *
  * Only a call to the runtime's own `dataFile` counts, and only where the
  * argument is a string literal. The binding is followed through a renaming
- * import and through a namespace import, so `df("/x.json")` and
- * `cf.dataFile("/x.json")` are the same declaration as the plain call. A
+ * import and through a namespace import, so `df("./x.json")` and
+ * `cf.dataFile("./x.json")` are the same declaration as the plain call. A
  * type-only import binds no value and so declares nothing. A computed path
  * cannot be read from the source at all, and stays the caller's to name.
  */
@@ -188,7 +192,11 @@ export function collectDataFileNames(
         read !== undefined && argument !== undefined &&
         ts.isStringLiteral(argument) && !isShadowed(read)
       ) {
-        names.push(argument.text);
+        // Refused before resolving, as an escaping import is: past the join
+        // the climbing segments are clamped away and the name no longer
+        // appears in any source file.
+        assertDataFileInsideProgramRoot(argument.text, source);
+        names.push(resolveDataFilePath(argument.text, source.name));
       }
     }
     ts.forEachChild(node, visit);

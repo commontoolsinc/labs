@@ -91,6 +91,8 @@ describe("typescript/resolver.ts", () => {
   describe("collectDataFileNames", () => {
     const names = (contents: string) =>
       collectDataFileNames({ name: "/main.tsx", contents }, TARGET);
+    const namesIn = (name: string, contents: string) =>
+      collectDataFileNames({ name, contents }, TARGET);
 
     it("reads the path a dataFile call names", () => {
       expect(names(
@@ -107,6 +109,68 @@ describe("typescript/resolver.ts", () => {
           '  b: dataFile("/b.txt"),\n' +
           "}));\n",
       )).toEqual(["/a.json", "/b.txt"]);
+    });
+
+    it("resolves a sibling path against the reading module", () => {
+      expect(namesIn(
+        "/scrabble/scrabble.tsx",
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("./words.txt");\n',
+      )).toEqual(["/scrabble/words.txt"]);
+    });
+
+    it("resolves a path in a directory beneath the reading module", () => {
+      expect(namesIn(
+        "/examples/reader.tsx",
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("./data/cities.json");\n',
+      )).toEqual(["/examples/data/cities.json"]);
+    });
+
+    it("resolves a bare path against the reading module too", () => {
+      expect(namesIn(
+        "/examples/reader.tsx",
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("data/cities.json");\n',
+      )).toEqual(["/examples/data/cities.json"]);
+    });
+
+    it("resolves a parent path out of the reading module's directory", () => {
+      expect(namesIn(
+        "/scrabble/scrabble.tsx",
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("../shared/words.txt");\n',
+      )).toEqual(["/shared/words.txt"]);
+    });
+
+    it("names one file for a sibling path under any root", () => {
+      // One source, three roots. The path each root grounds the reader at
+      // differs, and the file the read names is the same one every time.
+      const source = 'import { dataFile } from "commonfabric";\n' +
+        'export default () => dataFile("./words.txt");\n';
+      expect(namesIn("/words-game/main.tsx", source))
+        .toEqual(["/words-game/words.txt"]);
+      expect(namesIn("/patterns/words-game/main.tsx", source))
+        .toEqual(["/patterns/words-game/words.txt"]);
+      expect(namesIn("/main.tsx", source)).toEqual(["/words.txt"]);
+    });
+
+    it("leaves a grounded path as the source wrote it", () => {
+      expect(namesIn(
+        "/deep/nested/reader.tsx",
+        'import { dataFile } from "commonfabric";\n' +
+          'export default () => dataFile("/data/cities.json");\n',
+      )).toEqual(["/data/cities.json"]);
+    });
+
+    it("refuses a path that climbs above the program root", () => {
+      expect(() =>
+        namesIn(
+          "/scrabble/scrabble.tsx",
+          'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("../../outside.txt");\n',
+        )
+      ).toThrow('Data file "../../outside.txt" read in');
     });
 
     it("follows the binding through a renaming import", () => {

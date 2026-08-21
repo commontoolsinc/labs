@@ -80,6 +80,82 @@ describe("attachDeclaredDataFiles", () => {
     );
   });
 
+  it("attaches a sibling read under the reading module's directory", async () => {
+    const nested: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/main.tsx", contents: 'export * from "./lists/read.ts";\n' },
+        {
+          name: "/lists/read.ts",
+          contents: 'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("./cities.json");\n',
+        },
+      ],
+    };
+    const resolver = withDataReader({}, { "/lists/cities.json": '["Oslo"]\n' });
+    const result = await attachDeclaredDataFiles(nested, resolver);
+    assertEquals(result.dataFiles, ["/lists/cities.json"]);
+    assertEquals(resolver.dataReads, ["/lists/cities.json"]);
+  });
+
+  it("attaches a parent read above the reading module's directory", async () => {
+    const nested: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/main.tsx", contents: 'export * from "./lists/read.ts";\n' },
+        {
+          name: "/lists/read.ts",
+          contents: 'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("../shared/cities.json");\n',
+        },
+      ],
+    };
+    const resolver = withDataReader({}, {
+      "/shared/cities.json": '["Lima"]\n',
+    });
+    const result = await attachDeclaredDataFiles(nested, resolver);
+    assertEquals(result.dataFiles, ["/shared/cities.json"]);
+  });
+
+  it("names the resolved path in a refusal, not the one written", async () => {
+    // The reader wrote a path relative to itself; the file has to be stored at
+    // the path that resolves to, and that is the path worth reporting.
+    const nested: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/main.tsx", contents: 'export * from "./lists/read.ts";\n' },
+        {
+          name: "/lists/read.ts",
+          contents: 'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("./cities.json");\n',
+        },
+      ],
+    };
+    await assertRejects(
+      () => attachDeclaredDataFiles(nested, sourceOnly({})),
+      Error,
+      '"/lists/read.ts" reads the data file "/lists/cities.json"',
+    );
+  });
+
+  it("refuses a read that climbs above the program root", async () => {
+    const escaping: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'import { dataFile } from "commonfabric";\n' +
+            'export default () => dataFile("../outside.json");\n',
+        },
+      ],
+    };
+    await assertRejects(
+      () => attachDeclaredDataFiles(escaping, sourceOnly({})),
+      Error,
+      'Data file "../outside.json" read in "/main.tsx" escapes',
+    );
+  });
+
   it("leaves a program whose source declares nothing alone", async () => {
     const plain = program("export default 1;\n");
     assertEquals(await attachDeclaredDataFiles(plain, sourceOnly({})), plain);

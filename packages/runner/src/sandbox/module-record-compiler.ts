@@ -1,5 +1,8 @@
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
-import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+import {
+  resolveDataFilePath,
+  resolveImportSpecifier,
+} from "@commonfabric/js-compiler/specifier";
 import type {
   BuilderSourceSitesV1,
   PatternCoverageSpan,
@@ -13,6 +16,7 @@ import {
   findInternalTarget,
 } from "../harness/module-identity.ts";
 import { recordDefiningModule } from "../harness/verified-provenance.ts";
+import { freezeSandboxValue } from "./hardening.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
@@ -40,6 +44,9 @@ export const SOURCE_ROOT_SPECIFIER = "cf:source-root/";
 export function sourceRootSpecifier(path: string): string {
   return `${SOURCE_ROOT_SPECIFIER}${path.replace(/^\/+/, "")}`;
 }
+
+/** The runtime export a module reads an attached data file through. */
+const DATA_FILE_READER = "dataFile";
 
 /** Identity-only import edge for an attached data file. */
 export const DATA_FILE_SPECIFIER = "cf:data-file/";
@@ -425,6 +432,14 @@ export interface CompileSourcesOptions {
    * program. Used for scheme-prefixed fabric refs mounted under reserved paths.
    */
   specifierAliases?: ReadonlyMap<string, string>;
+  /**
+   * The stored path for a resolved source name — the spelling `dataFiles` is
+   * keyed by, with the per-load `idPrefix` and any fabric mount root taken off.
+   * A module's `dataFile()` reads resolve against this name, so the path a read
+   * produces and the path a file was attached under are in the same space.
+   * Omitted, a source's name is its stored path.
+   */
+  storedNameFor?: (name: string) => string;
 }
 
 export interface CompiledModuleGraph {
@@ -630,11 +645,81 @@ function mountPrefix(mount: FabricMount): string {
   return `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}/`;
 }
 
+/**
+ * Hands one module its view of a runtime namespace it imports: the namespace
+ * itself, or a copy carrying that module's own `dataFile`.
+ */
+type NamespaceBinder = (
+  namespace: Record<string, unknown>,
+) => Record<string, unknown>;
+
+/**
+ * A module's own view of the runtime namespaces that expose `dataFile`.
+ *
+ * A data file is read by path, and that path resolves against the module that
+ * reads it, exactly as an import specifier resolves against the module that
+ * imports it. The runtime namespaces a graph registers are shared by every
+ * module in it, so the resolution cannot live in them: each module is instead
+ * handed its own copy of the namespace, whose `dataFile` closes over that
+ * module's own stored path.
+ *
+ * The caller applies this only to a namespace imported through a runtime module
+ * that declares the reader. An authored module is free to export a value of its
+ * own named `dataFile`, and an importer gets the one it imported; a runtime
+ * module that declares no reader gains none.
+ *
+ * The read is a map lookup: the closure is fully loaded before any module
+ * executes, so it needs no storage access and cannot be asynchronous.
+ *
+ * A graph carrying no data files hands every namespace straight through, and a
+ * read reaches the builder's placeholder, which reports that the load attached
+ * nothing.
+ */
+function dataFileBinding(
+  dataByPath: ReadonlyMap<string, string>,
+): (moduleName: string) => NamespaceBinder {
+  if (dataByPath.size === 0) {
+    const passThrough: NamespaceBinder = (namespace) => namespace;
+    return () => passThrough;
+  }
+  const attached = [...dataByPath.keys()].sort();
+  return (moduleName: string) => {
+    const read = freezeSandboxValue((path: string): string => {
+      const resolved = resolveDataFilePath(path, moduleName);
+      const bytes = dataByPath.get(resolved);
+      if (bytes !== undefined) return bytes;
+      // The message states what is attached and stops there. How a caller
+      // attaches one differs by the surface driving the compile — a CLI flag, a
+      // scenario field, an argument to `resolveLocalProgram` — and the runtime
+      // knows none of that, so naming any single mechanism would misdirect
+      // every caller reaching it by another route.
+      throw new Error(
+        `No attached data file "${resolved}". ` +
+          `Attached: ${attached.join(", ")}.`,
+      );
+    });
+    const bound = new WeakMap<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >();
+    return (namespace) => {
+      const memo = bound.get(namespace);
+      if (memo !== undefined) return memo;
+      const copy = Object.freeze({ ...namespace, [DATA_FILE_READER]: read });
+      bound.set(namespace, copy);
+      return copy;
+    };
+  };
+}
+
 export function compileSourcesToRecords(
   sources: Source[],
   options: CompileSourcesOptions = {},
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
+  const dataByPath = new Map(options.dataFiles ?? []);
+  const bindDataFileFor = dataFileBinding(dataByPath);
+  const storedNameFor = options.storedNameFor ?? ((name: string) => name);
   // Identities are computed prefix-free (see computeModuleIdentities) so
   // `cf:module/<hash>` is entry-point independent and dedupes across programs.
   // Reuse the caller's precomputed map when supplied (avoids a second hash pass).
@@ -765,6 +850,9 @@ export function compileSourcesToRecords(
     // (VirtualModuleRecord.imports is `string[]`); this is the cold compile path.
     const importSpecs = [...extractRuntimeImports(compiled)];
     const resolutions: Record<string, string> = {};
+    // The specifiers whose runtime namespace declares `dataFile`, and so the
+    // only ones this module reads a data file through.
+    const readerImports = new Set<string>();
     for (const spec of importSpecs) {
       const resolved = resolveImportSpecifier(spec, source);
       const internal = findInternalTarget(fileNames, resolved);
@@ -772,6 +860,9 @@ export function compileSourcesToRecords(
         resolutions[spec] = specifierByPath.get(internal)!;
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+        if (runtimeModules[spec].includes(DATA_FILE_READER)) {
+          readerImports.add(spec);
+        }
       } else if (options.specifierAliases?.has(spec)) {
         const target = options.specifierAliases.get(spec)!;
         const targetSpecifier = specifierByPath.get(target);
@@ -804,6 +895,7 @@ export function compileSourcesToRecords(
     // `source.name` would otherwise end the comment and let the remainder of
     // the name execute as code inside the compartment.
     const sourceUrl = source.name.replace(/[\r\n\u2028\u2029]/g, "_");
+    const bindDataFile = bindDataFileFor(storedNameFor(source.name));
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,
@@ -837,12 +929,16 @@ export function compileSourcesToRecords(
         // way the lookup fails closed (importNowHook throws on anything not in
         // `records`), but only the own-property test makes "absent from the map
         // resolves to itself" literally true — which is what the spec states.
-        const requireShim = (specifier: string) =>
-          compartment.importNow(
+        const requireShim = (specifier: string) => {
+          const namespace = compartment.importNow(
             Object.hasOwn(resolvedImports, specifier)
               ? resolvedImports[specifier]
               : specifier,
           );
+          return readerImports.has(specifier)
+            ? bindDataFile(namespace)
+            : namespace;
+        };
         // A throw inside the factory is terminal for this module: SES caches the
         // error and re-throws it on every subsequent importNow.
         // Grant the real registrar ONLY if the verifier approved this module's
@@ -876,7 +972,7 @@ export function compileSourcesToRecords(
     builderSourceSitesByIdentity,
     registrationSink,
     registrationApproved,
-    dataByPath: new Map(options.dataFiles ?? []),
+    dataByPath,
   };
 }
 
@@ -979,6 +1075,7 @@ export function buildRecordsFromCompiled(
   });
   const byIdentity = new Map(moduleEntries.map((m) => [m.identity, m]));
   const sourceNames = cachedModuleSourceNames(moduleEntries);
+  const bindDataFileFor = dataFileBinding(dataByPath);
 
   // Fix B: use the record surface persisted on the compiled doc; parse the body
   // only when it wasn't precomputed. A module carries the full surface (a warm
@@ -1073,12 +1170,16 @@ export function buildRecordsFromCompiled(
       ? [...surface.importSpecs]
       : [...parseCompiledImports(m.code)];
     const resolutions: Record<string, string> = {};
+    const readerImports = new Set<string>();
     for (const spec of importSpecs) {
       const edge = m.imports.find((i) => i.specifier === spec);
       if (edge !== undefined) {
         resolutions[spec] = specifierOf(edge.targetIdentity);
       } else if (spec in runtimeModules) {
         resolutions[spec] = `cf:runtime/${spec}`;
+        if (runtimeModules[spec].includes(DATA_FILE_READER)) {
+          readerImports.add(spec);
+        }
       } else {
         resolutions[spec] = spec;
       }
@@ -1091,6 +1192,9 @@ export function buildRecordsFromCompiled(
       "_",
     );
     const compiled = m.code;
+    // The module's own filename, not the disambiguated source name: a data
+    // file is keyed by filename too, so both sides of a read agree.
+    const bindDataFile = bindDataFileFor(m.filename);
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,
@@ -1106,10 +1210,12 @@ export function buildRecordsFromCompiled(
         ) => void;
         // Own-property test, matching the cold path in
         // `compileSourcesToRecords` — see the note there.
-        const requireShim = (spec: string) =>
-          compartment.importNow(
+        const requireShim = (spec: string) => {
+          const namespace = compartment.importNow(
             Object.hasOwn(resolvedImports, spec) ? resolvedImports[spec] : spec,
           );
+          return readerImports.has(spec) ? bindDataFile(namespace) : namespace;
+        };
         const { register, commit } = registrationApproved.has(specifier)
           ? createHoistRegistrar(m.identity, registrationSink)
           : createRejectingRegistrar();

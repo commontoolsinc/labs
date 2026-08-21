@@ -55,9 +55,11 @@ export interface MultiRuntimeHarnessOptions {
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
   /**
-   * Data files the pattern reads with `dataFile()`, as paths on disk. The
-   * bootstrap worker compiles the pattern in its own process, so these travel
-   * with the request rather than being attached here.
+   * Data files to store with the pattern, as paths on disk. A file the pattern
+   * reads with `dataFile()` is attached from that call alone and needs no
+   * entry here; this is for a file the source cannot name. The bootstrap
+   * worker compiles the pattern in its own process, so these travel with the
+   * request rather than being attached here.
    */
   dataFilePaths?: readonly string[];
   /** Optional initial pattern input for the bootstrap-created piece. */

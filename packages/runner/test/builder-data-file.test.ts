@@ -2,8 +2,10 @@
  * `dataFile` is exposed to pattern code through the `commonfabric` builder
  * surface (declared in `api/index.ts`, bound in `builder/factory.ts`). The
  * surface carries a placeholder, because which data files exist is a property
- * of the program being loaded rather than of the runtime: each compiled graph
- * replaces it with a reader closed over that load's attached files.
+ * of the program being loaded rather than of the runtime, and where a path
+ * resolves from is a property of the module reading it: a graph carrying data
+ * files hands each module its own copy of the namespace, with a reader closed
+ * over both.
  *
  * These tests pin the placeholder's behavior. Reaching it means a module is
  * running outside any graph carrying data files, and the failure has to say so

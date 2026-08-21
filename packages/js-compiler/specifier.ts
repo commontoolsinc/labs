@@ -14,12 +14,56 @@ export function resolveImportSpecifier(
   specifier: string,
   from: Source,
 ): string {
-  if (
-    specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../"
-  ) {
-    return join(dirname(from.name), specifier);
-  }
-  return specifier;
+  return isImportRelative(specifier)
+    ? resolveAgainstModule(specifier, from.name)
+    : specifier;
+}
+
+/**
+ * Whether an import specifier is written relative to the importing module.
+ *
+ * The two prefixes are the ones the language gives a module specifier, and a
+ * specifier with neither names a package rather than a file.
+ */
+function isImportRelative(specifier: string): boolean {
+  return specifier.substring(0, 2) === "./" ||
+    specifier.substring(0, 3) === "../";
+}
+
+/**
+ * Whether a data-file path is written relative to the module that reads it.
+ *
+ * Every data-file path names a file the package carries, so there is no bare
+ * specifier to hold back the way an import has: a path is either grounded at
+ * the package root or relative to the reader. `./` contributes nothing to a
+ * directory walk, so `data/cities.json` and `./data/cities.json` are one path.
+ */
+function isDataFileRelative(path: string): boolean {
+  return path.substring(0, 1) !== "/";
+}
+
+/** Join a relative path against the directory of the module named by `fromName`. */
+function resolveAgainstModule(path: string, fromName: string): string {
+  return join(dirname(fromName), path);
+}
+
+/**
+ * Resolve a `dataFile()` path against the module that reads it, as
+ * {@link resolveImportSpecifier} resolves an import against the module that
+ * imports it. `./words.txt`, `words.txt` and `../shared/words.txt` name files
+ * beside or above the reader, so the same source names the same file whichever
+ * directory the program was rooted at.
+ *
+ * A path beginning with `/` is grounded at the package root and returned
+ * unchanged, so `/data/cities.json` names one file for every module in the
+ * package.
+ *
+ * Takes the reading module's path rather than its {@link Source} because the
+ * runtime resolves a read from a module record, which holds the path and not
+ * the text.
+ */
+export function resolveDataFilePath(path: string, fromName: string): string {
+  return isDataFileRelative(path) ? resolveAgainstModule(path, fromName) : path;
 }
 
 /**
@@ -47,16 +91,16 @@ export function importEscapesProgramRoot(
   specifier: string,
   from: Source,
 ): boolean {
-  if (
-    specifier.substring(0, 2) !== "./" && specifier.substring(0, 3) !== "../"
-  ) {
-    return false;
-  }
-  if (from.name.substring(0, 1) !== "/") return false;
+  return isImportRelative(specifier) &&
+    escapesProgramRoot(specifier, from.name);
+}
+
+function escapesProgramRoot(path: string, fromName: string): boolean {
+  if (fromName.substring(0, 1) !== "/") return false;
   // Every leading slash: an HTTP-derived name preserves its URL pathname,
   // which may begin "//...", and a base left absolute would clamp again.
-  const relativeDir = dirname(from.name).replace(/^\/+/, "");
-  const joined = join(relativeDir, specifier);
+  const relativeDir = dirname(fromName).replace(/^\/+/, "");
+  const joined = join(relativeDir, path);
   return joined === ".." || joined.substring(0, 3) === "../";
 }
 
@@ -74,6 +118,27 @@ export function assertImportInsideProgramRoot(
   if (importEscapesProgramRoot(specifier, from)) {
     throw new Error(
       `Import "${specifier}" in "${from.name}" escapes the program root.`,
+    );
+  }
+}
+
+/**
+ * Refuse a `dataFile()` path that climbs above the program root, naming the
+ * path and the module that reads it. The scan that turns a call site into an
+ * attached file calls this before resolving, so the refusal names the path the
+ * author wrote rather than the in-root path the clamping join would produce.
+ *
+ * {@link resolveDataFilePath} stays total for the same reason
+ * {@link resolveImportSpecifier} does: the runtime read resolves a path the
+ * build already accepted, and must produce the same answer for it.
+ */
+export function assertDataFileInsideProgramRoot(
+  path: string,
+  from: Source,
+): void {
+  if (isDataFileRelative(path) && escapesProgramRoot(path, from.name)) {
+    throw new Error(
+      `Data file "${path}" read in "${from.name}" escapes the program root.`,
     );
   }
 }

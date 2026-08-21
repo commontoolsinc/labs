@@ -110,6 +110,30 @@ export default pattern(() => {
     scrabble.message === "Cleared your unsubmitted tiles."
   );
 
+  const action_submit_dictionary_word = action(() => {
+    const n = rackLetter(scrabble.rack, "N");
+    const o = rackLetter(scrabble.rack, "O");
+    const d = rackLetter(scrabble.rack, "D");
+    const e = rackLetter(scrabble.rack, "E");
+    const s = rackLetter(scrabble.rack, "S");
+    scrabble.placeTile.send({ letterId: n.id, row: 8, col: 7 });
+    scrabble.placeTile.send({ letterId: o.id, row: 9, col: 7 });
+    scrabble.placeTile.send({ letterId: d.id, row: 10, col: 7 });
+    scrabble.placeTile.send({ letterId: e.id, row: 11, col: 7 });
+    scrabble.placeTile.send({ letterId: s.id, row: 12, col: 7 });
+    scrabble.submitTurn.send();
+  });
+
+  // ANODES is in the attached dictionary and outside the handful of words the
+  // board already demonstrates, so scoring it reads the word list end to end.
+  const assert_dictionary_word_scored = assert(() => {
+    const lastEvent = scrabble.gameEvents.at(-1);
+    return scrabble.board.length === 7 &&
+      lastEvent?.type === "word" &&
+      lastEvent?.details?.includes("ANODES") === true &&
+      scrabble.message.startsWith("Scored ");
+  });
+
   const assert_reset_clears_game = assert(() =>
     scrabble.board.length === 0 &&
     scrabble.players.length === 0 &&
@@ -131,6 +155,8 @@ export default pattern(() => {
       { assertion: assert_center_word_submitted },
       { action: action_clear_unsubmitted_tiles },
       { assertion: assert_clear_returns_tiles },
+      { action: action_submit_dictionary_word },
+      { assertion: assert_dictionary_word_scored },
       { action: action_reset_game },
       { assertion: assert_reset_clears_game },
     ],

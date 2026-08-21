@@ -119,9 +119,11 @@ compiled but never executed, such as tests. `dataFiles` names members of `files`
 that are not code at all: they are split out before the pipeline below runs, so
 nothing prefixes, parses, transforms, or compiles them, and they rejoin only at
 the identity and persistence steps. Their bytes are carried on the resulting
-graph, keyed by stored path, and bound into the runtime-module namespaces this
-load registers, so a module's `dataFile` read is a lookup against the same
-closure its code came from. The result is a graph of per-module records.
+graph, keyed by stored path. A module reading one gets its own view of the
+runtime namespaces that expose `dataFile`, whose reader resolves a path against
+that module's own stored name — the way the record compiler resolves an import
+specifier against the importing source — and then looks it up in that closure.
+The result is a graph of per-module records.
 It:
 
 1. Derives a per-load program id and prefixes every file path with it

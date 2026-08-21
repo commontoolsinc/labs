@@ -106,34 +106,30 @@ An explicit `--root` applies to all of them. A test-only change creates a new
 source revision, so history and recovery keep each test package separate.
 
 Files that hold data rather than code — a fixture, a table, a list of names —
-travel the same way, under a repeatable `--datafile` flag:
-
-```bash
-deno task cf piece setsrc pattern.tsx \
-  --test pattern.test.tsx \
-  --datafile data/cities.json \
-  --piece fid1:abc... -s myspace
-```
-
-A data file is stored verbatim beside the source. Deployment never parses,
-type-checks, or compiles it, and no pattern can import it. It must be UTF-8
-text, and it must sit inside the deployment root, which the CLI infers to cover
-the main entry, every test entry, and every data file. Like a test entry, a data
-file is part of the source revision's identity, so changing one creates a new
-revision, and each revision keeps its own bytes. Repeat the complete set of
-`--datafile` flags on every `setsrc`.
-
-The pattern reads one with `dataFile`, naming the path the file is stored
-under:
+travel the same way, and the pattern declares them by reading them:
 
 ```tsx
 // Shown for illustration only.
 import { dataFile, pattern } from "commonfabric";
 
 export default pattern(() => ({
-  cities: JSON.parse(dataFile("/data/cities.json")).cities,
+  cities: JSON.parse(dataFile("./data/cities.json")).cities,
 }));
 ```
+
+The path is relative to the module that reads it, the way an import specifier
+is, so `./data/cities.json` is the file in the `data` directory beside the
+pattern. That call is the whole declaration: `setsrc`, `check`, `test` and
+`dev` each read it out of the source and attach the file, as they already
+follow what the source imports. Nothing names the file a second time on a
+command line.
+
+A data file is stored verbatim beside the source. Deployment never parses,
+type-checks, or compiles it, and no pattern can import it. It must be UTF-8
+text, and it must sit inside the deployment root, which the CLI infers to cover
+the main entry, every test entry, and every data file. Like a test entry, a data
+file is part of the source revision's identity, so changing one creates a new
+revision, and each revision keeps its own bytes.
 
 The bytes travel with the pattern's code, so the read is immediate and returns
 the same text on every load of a given revision. Reading at module scope rather
@@ -149,20 +145,29 @@ interface Cities {
   cities: string[];
 }
 
-const parsed = JSON.parse(dataFile("/data/cities.json")) as Cities;
+const parsed = JSON.parse(dataFile("./data/cities.json")) as Cities;
 ```
 
-`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
-pattern that reads one can be checked and tested before it is deployed:
+A file the source cannot name — one read by a computed path, or one that ships
+with a pattern that does not read it — is attached with a repeatable
+`--datafile` flag, which every one of those commands takes:
 
 ```bash
-deno task cf check pattern.tsx --datafile data/cities.json
-deno task cf test pattern.test.tsx --datafile data/cities.json
+deno task cf piece setsrc pattern.tsx \
+  --test pattern.test.tsx \
+  --datafile data/lookup.csv \
+  --piece fid1:abc... -s myspace
 ```
 
-Without the flag the pattern compiles and type-checks, then fails on the read —
-`dataFile` is declared whether or not a file is attached, so the absence shows
-up when the pattern runs rather than when it compiles.
+That flag names a path on disk, and the file is stored under its path relative
+to the deployment root. Repeat the complete set of `--datafile` flags on every
+`setsrc`, because each update defines a complete source revision. A file
+attached this way and never read leaves nothing in the source saying it is
+data, which is why `cf piece getsrc` names those files for the next `setsrc`.
+
+Attach neither way and the pattern still compiles and type-checks, then fails
+on the read — `dataFile` is declared whether or not a file is attached, so the
+absence shows up when the pattern runs rather than when it compiles.
 
 Data files also travel for whoever reads the source next — you on another
 machine, a teammate running `cf piece getsrc`, a tool reading the FUSE `.src/`
