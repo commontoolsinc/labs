@@ -80,4 +80,25 @@ describe("llmDialog reserved tool names", () => {
       expect(name in catalog.llmTools).toBe(true);
     }
   });
+
+  it("flattens the pattern's tools alongside the built-ins", () => {
+    const toolsCell = toolsCellNamed("searchNotes");
+
+    const flattened = flattenTools(toolsCell as any);
+
+    // `flattenedTools` is what the UI lists, and it names the same set the
+    // model is offered.
+    expect(flattened.searchNotes.description).toBe("the pattern's own tool");
+    for (const name of BUILTIN_NAMES) {
+      expect(name in flattened).toBe(true);
+    }
+  });
+
+  it("flattens only the pattern's tools when builtinTools is false", () => {
+    const toolsCell = toolsCellNamed("searchNotes");
+
+    const flattened = flattenTools(toolsCell as any, false);
+
+    expect(Object.keys(flattened)).toEqual(["searchNotes"]);
+  });
 });
