@@ -54,10 +54,9 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
   }
 
   // Only "noble" implementations can be converted to PKCS8, since we need the
-  // raw material. Asks the implementation directly rather than inspecting what
-  // `serialize()` returns: that would build a pair object and a second array
-  // only to discard both, and the question here is which implementation this
-  // is, which the type already answers.
+  // raw material. Narrows to the implementation rather than asking the key
+  // pair which state it is in: the bytes come from that class's own
+  // `privateKey()`, and the narrowing is what makes that call reachable.
   toPkcs8() {
     if (this.#impl instanceof NobleEd25519Signer) {
       return toPEM(ed25519RawToPkcs8(this.#impl.privateKey().slice()));

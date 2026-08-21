@@ -29,9 +29,11 @@ export function isInitializationData(
   return !!(isObjectNotArray(value) &&
     typeof value.did === "string" &&
     typeof value.toolshedUrl === "string" &&
-    // Shape only: what the encoding decodes to is settled by the decode
-    // itself, in `initialize()`.
-    (value.encodedIdentity !== undefined));
+    // The envelope's shape and no more: what it decodes to is settled by the
+    // decode itself, in `initialize()`, the marker in slot zero being
+    // recognizable only there.
+    Array.isArray(value.encodedIdentity) &&
+    (value.encodedIdentity.length === 2));
 }
 
 export type RunData = {

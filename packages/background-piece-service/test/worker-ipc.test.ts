@@ -45,6 +45,15 @@ describe("isWorkerIPCRequest", () => {
         data: { toolshedUrl, encodedIdentity },
       }),
     );
+    // An encoding is a two-slot envelope, which the guard checks for and
+    // nothing else does until the decode.
+    assert(
+      !isWorkerIPCRequest({
+        msgId: 1,
+        type: "initialize",
+        data: { did, toolshedUrl, encodedIdentity: { privateKey: "secret" } },
+      }),
+    );
     assert(
       !isWorkerIPCRequest({
         msgId: 1,
