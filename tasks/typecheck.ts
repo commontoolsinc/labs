@@ -225,6 +225,15 @@ export interface TypecheckOptions {
   list?: boolean;
   reload?: boolean;
   check?: typeof checkGroup;
+  /**
+   * Spool one typecheck record per scope.
+   *
+   * The task's entry point sets this: the scopes it collected are the
+   * repository's packages. A caller inside another test leaves it unset,
+   * because the scopes it hands over are that test's fixtures, and a
+   * fixture is data rather than a check of this repository.
+   */
+  recordResults?: boolean;
 }
 
 /**
@@ -262,7 +271,9 @@ export async function runTypecheck(
     `Type checking ${total} paths in ${byScope.size} package groups...`,
   );
 
-  const recordsFragment = FragmentWriter.openForRun();
+  const recordsFragment = options.recordResults === true
+    ? FragmentWriter.openForRun()
+    : undefined;
   const scopes = [...byScope.keys()];
   const results: GroupResult[] = [];
   let next = 0;
@@ -312,6 +323,7 @@ export async function main(): Promise<void> {
   const passed = await runTypecheck(await collectPathsByScope(), {
     list: Deno.args.includes("--list"),
     reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
+    recordResults: true,
   });
   if (!passed) Deno.exit(1);
 }

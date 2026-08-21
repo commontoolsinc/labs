@@ -53,6 +53,7 @@ const SERIAL_TESTS = [
   "test/runtime-creation.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
   "test/test-runner-pattern-coverage.test.ts",
+  "test/test-runner-records.test.ts",
   "test/view-commitmsg-01.test.ts",
   "test/view-commitmsg-02.test.ts",
   "test/view-commitmsg-03.test.ts",

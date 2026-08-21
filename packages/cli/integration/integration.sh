@@ -65,11 +65,13 @@ SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
 
-# The dispatched section is the recorded test: one record per run, named
-# "integration.sh <section>", written from the EXIT trap with the script's
-# status and duration.
+# The script records as one test named "integration.sh", written from the EXIT
+# trap with its status and duration; each step below records as its own test
+# named "integration.sh <step>". Neither name carries the dispatched section:
+# which section scheduled a step is run context, and the same script and the
+# same step join across a CI section leg and a local `all` run.
 source "$SCRIPT_DIR/test-records.sh"
-cf_test_record_script "integration.sh $SECTION"
+cf_test_record_script "integration.sh"
 
 # A fresh invocation id. uuidgen is not present on every runner image, so this
 # falls back to Python, which the timing helper above already requires.
@@ -1294,10 +1296,9 @@ run_piece_data_files() {
   echo "Successfully ran CLI data-file integration tests for ${API_URL}."
 }
 
-# Each step of a section records as its own test, named
-# "integration.sh <section> <step>"; the begin markers close the previous
-# step's record and the exit trap closes the last one, so a failing step is
-# recorded with the failure.
+# Each step records as its own test, named "integration.sh <step>"; the begin
+# markers close the previous step's record and the exit trap closes the last
+# one, so a failing step is recorded with the failure.
 case "$SECTION" in
   all)
     cf_test_step_begin piece-values

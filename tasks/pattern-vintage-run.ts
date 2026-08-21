@@ -895,6 +895,19 @@ export async function replayVintage(
   });
 }
 
+/** How `replayAll` reports what it walked. */
+export interface ReplayAllOptions {
+  /**
+   * Spool one gate record per fixture replayed.
+   *
+   * The task's entry point sets this: the fixtures under the repository's
+   * vintage root are the gate's tests. A caller inside another test leaves
+   * it unset, because the fixtures it points the roots at are that test's
+   * own, and a fixture is data rather than a test of this repository.
+   */
+  recordResults?: boolean;
+}
+
 /**
  * Replay every fixture under `vintagesRoot`.
  *
@@ -905,6 +918,7 @@ export async function replayVintage(
  */
 export async function replayAll(
   roots: GateRoots,
+  options: ReplayAllOptions = {},
 ): Promise<
   {
     vintages: VintageRef[];
@@ -977,7 +991,9 @@ export async function replayAll(
   // covers several patterns, and anything finer would be a redesign. The
   // stamp is part of the name because each captured generation is its own
   // test; a new capture is a new test, not a rename.
-  const recordsFragment = FragmentWriter.openForRun();
+  const recordsFragment = options.recordResults === true
+    ? FragmentWriter.openForRun()
+    : undefined;
   for (const vintage of vintages) {
     const replayStarted = performance.now();
     const report = await replayVintage(roots, vintage);
