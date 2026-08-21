@@ -197,8 +197,10 @@ Pattern schemas are not backward compatible:
 - result.motto: existing result field was removed
 ```
 
-A field the pattern only reads goes freely: giving up an input leaves whatever
-the piece stored unread rather than breaking a reader.
+A field the pattern only reads goes freely while the argument object stays open,
+which is the default: giving up an input leaves whatever the piece stored unread
+rather than breaking a reader. A closed argument object refuses it, since it
+could no longer hold the value the piece is carrying.
 
 `--dangerously-allow-incompatible-schema` replaces the source anyway. Adding
 fields is safe, but heavily **reordering or renaming** pattern inputs can shift

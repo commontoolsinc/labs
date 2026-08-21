@@ -117,9 +117,11 @@ by the target object`. The result side preserves every named field it
 published.
 
 Stated plainly, because much of the design rests on it: **a deployed
-holder's required demands can be given up but never raised.** Only optional
-demands can be added, and a required one, once made, is kept or dropped
-whole. (The provider side is looser on that axis: a pattern may add a newly
+holder's demands can be given up freely, and added only where an existing
+piece still meets them** — optional, or a required field whose default fills
+it in, which a verb cannot be, having no default to carry. What is already
+demanded is kept or dropped whole, never tightened. (The provider side is
+looser on that axis: a pattern may add a newly
 required field to its own *result*, because the new code materializes it
 when it runs. A demand has no such escape — the piece it points at already
 exists.)
