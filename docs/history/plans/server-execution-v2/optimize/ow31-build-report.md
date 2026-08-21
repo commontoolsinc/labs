@@ -188,6 +188,75 @@ Grace store dump, seq 4). Built shape:
   stamper + commit step; runner resolvePendingSpaceNames;
   pattern-manager writeback chain; toolshed flag + bootstrap). Design of
   record written (above). Adjacent PRs checked. Building slice 1 next.
+- 2026-08-21, slice 1 (B0+B3) LANDED (4c4b0a9f2): genesis owner = the
+  acting user. RED WITNESSED: the new bootstrap pin failed with
+  `{ [service]: "OWNER", "*": "WRITE" }` before the fix (the B0
+  observation, run logged in the test comment). `registerSpaceIdentity`
+  gains `{ owner }`; the bootstrap's non-home arm names it; the serving
+  runtime with no actor refuses `resolveSpaceName`; the acting principal
+  is read from the frame tx's wave context acting-first (matching the
+  write carriage — the grant probe keys on `acting.user`, so the genesis
+  owner MUST be the same principal or replay's acl arm would probe a
+  stranger), without the ratchet side effect (F8). Client byte-identical
+  (its `as` IS the user — why the client shape was already right).
+- 2026-08-21, slice 2 (B4) LANDED (8c71b7725): genesis-before-data. RED
+  WITNESSED: the INV-13 sink pin watched a delegated foreign batch land
+  in a fresh (seq-0, no-ACL) store before the fix. The wave retains the
+  grant `via` per (space, acting); the commit step forces
+  `ensureSpaceInitialized` (the provider mount's own bootstrap — an
+  in-process round trip, idempotent) for creation-granted targets; the
+  sink refuses seq-0/no-ACL foreign batches. Kill/replay pins converge
+  on ONE user-owned ACL; the executor pin also carries the
+  actor-=-space / owner-=-acting-user / service-nowhere /
+  commit-#1-is-the-ACL shape. Three pre-existing wave/outbox tests that
+  committed foreign batches into fresh engines now seed the genesis the
+  production ordering provides (an honest contract update — the old
+  behavior WAS the INV-13 bypass).
+- 2026-08-21, slice 3 (READ posture) LANDED (17df0a6a7): the OWNER
+  blanket is retired. `memoryServiceDidsFor` → `memoryAclPrincipalsFor`
+  ({serviceDids: operator verbatim BOTH arms; delegatingDids: ON →
+  process identity, OFF → empty}; the absolute not-OWNER-class pin).
+  Session-open carries `actingAs: "space-owner"` (typed into
+  SessionDescriptor + MountOptions, signed via the descriptor,
+  compared by `sameSessionDescriptor`, parsed by the wire whitelist,
+  carried across reopen); the server admits it for delegating-class
+  envelopes only, resolves the space's concrete ACL owner itself, binds
+  `SessionState.actingPrincipal`; READ-class requirements resolve as
+  acting ?? envelope, WRITE/OWNER stay envelope-only; revocation judges
+  the acting user; delegating principals cannot initialize genesis;
+  the lease/read-row/scoped machinery (all keyed on `session.principal`)
+  untouched. Six new memory ACL pins + the executor-level R2 acceptance
+  (a serving manager reads an owner-only home space under enforce; the
+  same identity without the marker is denied). RED WITNESSED by
+  mutation: disabling `#resolveSpaceOwnerBinding` fails the owner-read
+  and revocation pins (2 red / restored 36 green).
+- 2026-08-21, slice 4 (seat S-A) LANDED (f0dc3e261): the cross-space
+  compile-cache writeback rides the TRIGGERING run's delegated carriage.
+  `ServerRunInfo.delegated` (explicit carriage for the bookkeeping-kind
+  materialization family), applied verbatim by `#stampRun`; threaded
+  `replicatePatternToSpace` → `replicateClosures` → persist → writeback,
+  attached only for targets FOREIGN to the serving home space (new
+  `servingHomeSpace` accessor); the trigger (`instantiatePatternNode`,
+  CT-1687) supplies it from the run tx's wave context. End-to-end pin
+  through a REAL activated SpaceServer: carriage-less replication
+  refused (the render-stall 17-refusal class, kept as the fail-closed
+  pin) and delegated replication lands in the provisioned space with
+  `acting_principal` = the user. RED WITNESSED by mutation: disabling
+  the stamper's delegated arm fails the pin.
+- 2026-08-21, slice 5: spec/register edits (protocol.md §2b mechanism →
+  the BUILT posture; serving-loop.md §3b bullet; builtins.md §5
+  read-authority paragraph; verification-coverage.md OW31 row → BUILT
+  with evidence + the closeout bullet re-tensed + OW45's S-A seat marked
+  built-on-the-carriage-arm); the two ON-skip reason texts updated
+  (entries NOT removed — joint lift with OW45/OW47 stands). Suites run:
+  memory full (558), runner executor family (wave 43, cross-space 11,
+  serving-loop+outbox+no-op 43+18, space-server/events/watermark/settle
+  39, fan-out/run-supply/instance-keyed/dprime 39, effect-channel/
+  cooperative-yield/outbox-budget 23), storage bootstrap+mutation 26,
+  toolshed flag+serving 11. Lint + fmt clean on all 91 changed files.
+  (toolshed lib's build-info/clone-banner/configure-open-api/clientKey
+  failures are pre-existing local-env dependences — ENV=test + .env.test
+  — unrelated to this diff; CI's lanes carry them.)
 
 ## FLAGGED questions (running list)
 
@@ -209,3 +278,49 @@ Grace store dump, seq 4). Built shape:
   session-plane write admitted "as the user" via the binding would
   bypass the wave's accept gate — neither ruling sanctions that, so it
   stays closed and the observe canary keeps counting any residual.
+- **FLAG-3 (for the owner's eye, carried from the scope report's F2,
+  now pinned live): the `"*": WRITE` wildcard on minted spaces still
+  means "the service cannot write P" does NOT follow from this build.**
+  The executor mutation pin shows it concretely: a genesis whose owner
+  is mis-threaded to bob still GRANTS alice's replay via the wildcard's
+  acl arm. "The user is OWNER, the service is not" holds everywhere;
+  narrowing the wildcard is the separate policy question the register
+  row already carries.
+- **FLAG-4 (residual, fail-closed, named follow-up): the
+  `loadPatternByIdentity` repair writeback and `compilePattern`'s own
+  persist do not carry the S-A carriage** — no wave-run context is
+  reachable at those triggers today (they run in detached async compile
+  flows fanned from many callers). Their FOREIGN-target case stays
+  refused exactly as before this build; the observed defect class (the
+  create-flow replication, 17 refusals per profile space) is the
+  replicate trigger, which is covered. If the live gates surface
+  residual `compile-cache/*` foreign refusals from the repair path,
+  thread the demanding run's context there — do not exempt.
+- **FLAG-5 (residual discovered during the build; NOT closable by this
+  build's rulings): CFC authorship labels on served rows still carry
+  the SERVICE signer.** cfc-group-chat-demo's CI shape
+  (`authored-by`/`represents-principal` naming the service DID) comes
+  from the runtime-level CFC trust snapshot —
+  `Runtime.trustSnapshotProvider` defaults to
+  `storageManager.as.did()`, attached per tx at `edit()` — NOT from the
+  memory-plane commit carriage this build landed. Making CFC
+  attribution per-run (the acting user) touches trust-revision keying
+  and prepared-digest invalidation — a CFC-owner seam (the OW34 family),
+  flagged rather than filled. The group-chat skip entry's reason now
+  says so; that skip does NOT lift on this build alone.
+- **FLAG-6 (transient, converges): the compile-cache write slot dedup
+  can coalesce a carriage-bearing replication into an in-flight
+  carriage-less one** for the same (space, entry, runtimeVersion); the
+  predecessor's refusal rejects, the caller logs
+  `closure-replication-failed`, and the next child-creation retry
+  re-runs with the carriage (the slot cleared on settle). Noted, not
+  wired around: the retry semantics are the existing CT-1687 contract.
+- **Escape-hatch status (the READ ruling's own provision): NOT
+  exercised.** No case surfaced during the build where user-identity
+  routing could not cover a legitimately-needed serving read: home
+  spaces bind their owner (== the demanding user in every sanctioned
+  flow), provisioned spaces carry the wildcard, fresh/legacy spaces
+  keep today's arms. The one structurally-unreachable class — an
+  owner-only space whose ACL was hand-narrowed away from any resolvable
+  owner while the serving loop must derive it — would deny loudly and
+  is exactly the flag-for-follow-up shape, none observed.

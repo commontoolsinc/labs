@@ -432,9 +432,11 @@ executing:
   seq (mid-wave commits are next wave's input), so a mid-run discovered
   read cannot tear.
 - **Cross-space**: the first foreign read (executed under the piece's
-  granted authority — concretely, on the loopback plane as the process
-  identity, a memory service principal under the flag since Phase 7;
-  protocol.md §2b's free-read row) registers, by being logged, a
+  granted authority — concretely, on the loopback plane over a session
+  whose READ capability resolves as the foreign space's OWNER through
+  the `actingAs: "space-owner"` delegated binding, OW31 RULED
+  2026-08-18/19; protocol.md §2b's free-read row carries the full
+  mechanism) registers, by being logged, a
   server-internal wake on that doc for the home SpaceServer. Same one-run-late soundness.
   v2 assumes spaces co-hosted on one memory server; sharding is out of
   scope. *(Phase 5 pinned the wake end to end and added NO machinery

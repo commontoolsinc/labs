@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { selectDocHead } from "@commonfabric/memory/v2/engine";
 import {
   type Options,
   type SessionFactory,
@@ -491,9 +492,6 @@ Deno.test("storage ACL bootstrap names the supplied genesis owner, not the signe
 
     // The space's commit #1 IS the ACL commit.
     const engine = await server.engineForSpace(space);
-    const { selectDocHead } = await import(
-      "@commonfabric/memory/v2/engine"
-    );
     assertEquals(
       selectDocHead(engine, { id: `of:${space}`, scopeKey: "space" }),
       1,

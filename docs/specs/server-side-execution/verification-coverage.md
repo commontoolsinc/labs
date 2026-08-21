@@ -2754,9 +2754,86 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   delegated carriage. Escape hatch, per the ruling's own words: if
   this proves wrong during the OW31 build, FLAG for follow-up work
   after merging to main (the merge happening if the confidence
-  criteria succeed) rather than blocking on it. The build — the write
-  and read postures together — stays OWED POST-MERGE, BEFORE the flip
-  PR; OFF-invisible; does not gate landing the stack OFF.
+  criteria succeed) rather than blocking on it.
+
+  **BUILT 2026-08-21 (the optimize-on-main train; build report:
+  `docs/history/plans/server-execution-v2/optimize/ow31-build-report.md`).**
+  What landed, per the recorded work order:
+  (a) **genesis owner = the acting user** —
+  `registerSpaceIdentity(identity, { owner })` threaded from the
+  serving-side `resolveSpaceName` (the acting principal read from the
+  frame tx's wave run context WITHOUT the read-scope-ratchet side
+  effect, F8); a serving runtime with no actor REFUSES to resolve;
+  the bootstrap ACL's non-home arm names the registered owner
+  (`{ [actor]: "OWNER", "*": "WRITE" }`), the home arm and every
+  client byte-identical. Pins: `memory-v2-acl-bootstrap.test.ts`
+  (red-first: the pre-fix run minted `{ [service]: "OWNER" }`),
+  `executor-cross-space.test.ts` (the serving no-actor refusal).
+  (b) **genesis before data** — the wave retains the grant probe's
+  `via` per (space, acting) and the commit step forces
+  `ensureSpaceInitialized` for every `creation`-granted foreign
+  target before the sink applies; the sink refuses a foreign batch
+  into a seq-0/no-ACL engine (INV-13 mirrored on the engine-direct
+  plane; red-first: the pre-fix sink landed the batch in a fresh
+  store). Kill/replay converges on ONE user-owned ACL (the replay
+  grant resolves `acl` through the owner; `executor-wave.test.ts`'s
+  OW31 pins, including the actor-=-space / owner-=-acting-user /
+  service-nowhere / commit-#1-is-the-ACL shape).
+  (c) **the READ posture** — the OWNER blanket is RETIRED:
+  `memoryServiceDidsFor` became `memoryAclPrincipalsFor`
+  (`serviceDids` = the operator list verbatim on BOTH arms — the
+  absolute pin "under ON the process identity is not an OWNER-class
+  service DID by default" is in `server-execution-flag.test.ts`;
+  `delegatingDids` = ON: the process identity, OFF: empty). A serving
+  manager's session mounts carry `actingAs: "space-owner"` (signed
+  into the session.open descriptor); the memory server admits the
+  marker for delegating-class envelopes only, resolves the space's
+  ACL owner ITSELF (the ruled service-identity ACL read), and the
+  session's READ-class decisions run as that user — WRITE/OWNER
+  requirements stay on the envelope (no session-plane write path; the
+  observe canary counts residuals — `v2-server-acl.test.ts`'s OW31
+  pins, mutation-witnessed), a delegating principal cannot initialize
+  a genesis, revocation judges the acting user, and the lease/read-row
+  /scoped-read machinery (which keys on the envelope) is untouched.
+  (d) **seat S-A** — the cross-space `compile-cache/writeback` rides
+  the TRIGGERING run's §2b carriage: `ServerRunInfo.delegated`
+  (an explicit carriage for the bookkeeping-kind materialization
+  family), stamped verbatim by the SpaceServer's stamper and threaded
+  through `replicatePatternToSpace` from the instantiating run's wave
+  context — attached only when the target is FOREIGN to the serving
+  home space; carriage-less foreign writebacks stay refused
+  (fail-closed pin + mutation witness in
+  `executor-cross-space.test.ts`). The carriage arm was NOT wrong at
+  writeback time for the observed defect class — the trigger
+  (`instantiatePatternNode`, CT-1687) has the provisioning run's
+  carriage in scope, and the client precedent is exact (the program
+  commit is the user's own session client-side) — so the system-class
+  alternative was not needed for this class.
+  RESIDUALS, flagged (see the build report's running list): (i) the
+  `"*": WRITE` wildcard residual (finding iv) STANDS — pinned live in
+  the executor mutation test: a mis-threaded genesis owner is visible
+  in the ACL content while the wildcard still grants the write;
+  narrowing it is the separate policy question. (ii) the
+  `loadPatternByIdentity` repair path and `compilePattern`'s own
+  persist do not carry the carriage (no run context is reachable at
+  those triggers today) — their foreign-write case stays fail-closed
+  refused; if live gates surface residual refusals from them, that is
+  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS
+  (`authored-by`/`represents-principal`) on served rows still carry
+  the SERVICE signer: they come from the runtime-level CFC trust
+  snapshot (`storageManager.as`), NOT the memory-plane carriage this
+  build landed — so cfc-group-chat-demo's CI shape does NOT lift on
+  this build alone; per-run CFC attribution is a CFC-owner seam
+  (OW34's family), flagged rather than filled. (iv) the ruled
+  ACL-only-read allowance is exercised as the server-side owner
+  resolution at session.open; no raw ACL-doc query surface was built
+  (nothing needs one — smaller surface, permissive clause).
+  Acceptance beyond the executor pins rides the PR's CI ON lanes and
+  the flip train's live gates (the lunch/served-wish log criteria and
+  the store dump), which stay the flip PR's bar; the
+  `home-profile-reload-durability` and `cfc-group-chat-demo` ON skips
+  stay listed — they lift jointly with OW45 and OW47 (+ the CFC
+  attribution residual above).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -3754,13 +3831,15 @@ supply; OW29/OW32/OW34 closed):
     BAR is the owner's ruling — W4 reports the numbers and does not
     rule; the flip gate (plan Phase 7 task 1 item 4) still reads
     against the RULED bar once the owner sets it.
-  - OW31 (row above, RULED 2026-08-18): the write-authority posture is
+  - OW31 (row above, RULED 2026-08-18; BUILT 2026-08-21): the
+    write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
     user's identity does; a provisioned space's genesis is signed by
     the space's own keys and names the acting user OWNER in that same
     first commit — with the work order recorded (the scoping report
-    beside the closeout); implementation OWED post-merge, BEFORE the
-    flip PR; OFF-invisible; does not gate landing the stack OFF (the
+    beside the closeout); the implementation LANDED on the
+    optimize-on-main train (the row above carries the build evidence);
+    OFF-invisible; it did not gate landing the stack OFF (the
     grant is flag-gated; OFF uses the configured list verbatim). The
     READ side is RULED 2026-08-19 (the row above carries the verbatim
     quote): the service identity reads the ACL ONLY, every other
@@ -5062,12 +5141,14 @@ supply; OW29/OW32/OW34 closed):
     space observed), so the space's serving loop parks the structure
     load forever and the name renders the `#id` placeholder. Owed:
     **S-A** a legitimate server-side write path for
-    `compile-cache/writeback` into the piece's own space — either the
-    OW31 §2b delegated carriage covering it, or a RULING that
-    program/compile-cache materialization docs are system-class,
-    content-addressed, idempotent writes exempt from the foreign-write
-    refusal (this arm also heals already-broken spaces on next
-    demand); **S-B** the client pending-commit durability barrier
+    `compile-cache/writeback` into the piece's own space — **BUILT
+    2026-08-21 with OW31's build, on the carriage arm**: the
+    replicate trigger threads the instantiating run's §2b delegated
+    carriage into the writeback stamps (the system-class-exemption
+    alternative was not needed; the heal-on-next-demand property
+    holds for the replicate trigger — the repair path's own foreign
+    case stays fail-closed, a flagged residual in OW31's row);
+    **S-B** the client pending-commit durability barrier
     covering program materialization (`Scheduler.idleWithPendingCommits`
     — `waitForRuntimeIdle` must not return before the program is
     durable); **S-C** heal-on-read: re-issue program materialization
