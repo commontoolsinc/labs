@@ -219,7 +219,9 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "schema-default-only pendingEdit cell) is still materializing in " +
         "the reading runtime's replica view; the mid-chain resolution " +
         "yields undefined and the leaf default:null is never consulted. " +
-        "NOT client-only (the toolshed's serving runtime hits the same " +
+        "NOT a demand hole (the gate's classification stands — the value " +
+        "is served and lands; the read races its arrival), and NOT " +
+        "client-only (the toolshed's serving runtime hits the same " +
         "TypeError in its pull-settle loop); racy and load-sensitive " +
         "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
         "mostly green); OFF green by construction (instantiate-and-read " +

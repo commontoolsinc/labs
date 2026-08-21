@@ -136,7 +136,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and two STEP entries (cellset-lww's own-write race, convergence-storm's storm step) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ONE STEP entry (cellset-lww's own-write race; convergence-storm's storm step LIFTED by OW52's close — the red was the harness settle racing the serving drain, not a loss) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
@@ -176,9 +176,15 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     report,
     /patterns: SKIP-STEP integration\/cellset-lww\.test\.ts :: end-to-end: a typed name survives the own-write race through save \(until phase-7; the rest of the file runs\)/,
   );
-  assertMatch(
-    report,
-    /patterns: SKIP-STEP integration\/convergence-storm\.test\.ts :: a non-writing session sees every concurrently-posted message \(until phase-7; the rest of the file runs\)/,
+  // The convergence-storm storm-step entry was LIFTED (OW52 CLOSED,
+  // 2026-08-21: the 23/40 red was the harness's served-topology settle
+  // racing the serving drain — no loss at any seam; the settle now waits
+  // for event-consequence quiescence and the step is green ON 5/5). The
+  // file's in-file guard remains and resolves to NO entry, so the step
+  // RUNS on the ON arm — pinned here so a re-skip is a deliberate edit.
+  assert(
+    !report.includes("integration/convergence-storm.test.ts"),
+    "convergence-storm must carry NO skip entry (OW52 closed; the storm step runs ON)",
   );
   // The two-browser gates RUN in the ON arm: cfc-group-chat-two-browsers
   // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
@@ -216,7 +222,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
-  assertEquals(gateEntries.length, 8);
+  assertEquals(gateEntries.length, 7);
   for (const entry of gateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
@@ -225,13 +231,13 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     assertMatch(entry.reason, /(NOT|NEITHER) a demand hole/i);
     assertMatch(entry.reason, /flip PR needs this list EMPTY/);
   }
-  // The two STEP entries are BOUND: the guard lookup the files call
-  // resolves exactly these entries (the validator additionally checks the
-  // files name the steps and call the guard).
+  // The STEP entry is BOUND: the guard lookup the file calls resolves
+  // exactly this entry (the validator additionally checks the file names
+  // the step and calls the guard). convergence-storm's guard resolves to
+  // NO entry since the OW52 lift — its step runs.
   const steps = gateEntries.filter((skip) => skip.step !== undefined);
   assertEquals(steps.map((skip) => skip.file), [
     "integration/cellset-lww.test.ts",
-    "integration/convergence-storm.test.ts",
   ]);
   for (const entry of steps) {
     assertEquals(
@@ -249,7 +255,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "./integration/convergence-storm.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 9);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 8);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
