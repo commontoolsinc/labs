@@ -530,6 +530,18 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
         .toThrow("CFC enforcement rejected commit");
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+
+      // The setup boundary re-wraps the rejection as a plain Error, so the
+      // refusal reasons survive only if they are carried onto the cause.
+      // The boundary refusal carries every reason as `reasons`; reading the
+      // digest-drift `reason` instead would drop them silently.
+      const rejection = await runtime.setup(undefined, pattern, {}, resultCell)
+        .then(() => undefined, (error: unknown) => error as Error);
+      expect(rejection?.cause).toBeDefined();
+      expect(Array.isArray(rejection?.cause)).toBe(true);
+      expect((rejection?.cause as string[]).join(" ")).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
