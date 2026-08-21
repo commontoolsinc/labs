@@ -73,6 +73,21 @@ describe("handle-values", () => {
     ))
       .table;
 
+  /**
+   * `table` with every entry's stored `ref` replaced by `ref`, leaving each
+   * entry's `addressKey` alone. A handle table is plain data a run carries, so
+   * this is the shape a malformed entry arrives in: the lookup by address
+   * still finds the entry, and the stored reference is what turns out to be
+   * awkward.
+   */
+  const withStoredRef = (
+    table: HarnessHandleTable,
+    ref: string,
+  ): HarnessHandleTable => ({
+    ...table,
+    entries: table.entries.map((entry) => ({ ...entry, ref })),
+  });
+
   /** An address in the run's space holding `value`, or holding nothing. */
   const seedRef = async (cause: string, value?: unknown): Promise<string> => {
     const space = pieces.getSpace();
@@ -226,6 +241,76 @@ describe("handle-values", () => {
       );
       // A coerced rendering would be the value by another name.
       expect(resolution.error).not.toContain("12345678");
+    });
+
+    it("returns an error naming the field when the fabric session cannot be established", async () => {
+      const ref = await seedRef("traveller-name", "Ada Lovelace");
+      const resolution = await resolveHandleValue(
+        {
+          getFabricSession: () =>
+            Promise.reject(new Error("space is unreachable")),
+          handleTable: await tableHolding(ref),
+        },
+        ref,
+        "browser valueHandle",
+      );
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle could not establish the fabric session: space is unreachable",
+      );
+    });
+
+    it("returns an error for a held entry whose stored reference does not parse", async () => {
+      // An entry is trusted input, and trusted input can still turn out
+      // malformed. The refusal is the one an unparseable reference gets
+      // anywhere else, so a broken table entry reads as a reference this run
+      // does not hold rather than as an exception out of the tool.
+      const ref = await seedRef("traveller-name", "Ada Lovelace");
+      const resolution = await resolveHandleValue(
+        context(withStoredRef(await tableHolding(ref), "the traveller's name")),
+        ref,
+        "browser valueHandle",
+      );
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle does not name a reference this run holds",
+      );
+    });
+
+    it("returns an error naming the failure, not the value, when the referent cannot be loaded", async () => {
+      // A storage or connection failure while loading the referent is the
+      // resolution's answer to give, not an exception to escape with.
+      const ref = await seedRef("traveller-name", "Ada Lovelace");
+      const handleTable = await tableHolding(ref);
+      const originalGetCellFromLink = pieces.runtime.getCellFromLink.bind(
+        pieces.runtime,
+      );
+      let syncFailures = 0;
+      pieces.runtime.getCellFromLink = ((
+        ...args: Parameters<Runtime["getCellFromLink"]>
+      ) => {
+        const cell = originalGetCellFromLink(...args);
+        (cell as unknown as { sync: () => Promise<unknown> }).sync = () => {
+          syncFailures += 1;
+          return Promise.reject(new Error("storage unavailable"));
+        };
+        return cell;
+      }) as unknown as Runtime["getCellFromLink"];
+
+      const resolution = await resolveHandleValue(
+        context(handleTable),
+        ref,
+        "browser valueHandle",
+      );
+      pieces.runtime.getCellFromLink = originalGetCellFromLink;
+
+      // The injected failure really was this resolution's load.
+      expect(syncFailures).toBe(1);
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle could not load the referenced value: storage unavailable",
+      );
+      expect(resolution.error).not.toContain("Ada Lovelace");
     });
 
     it("returns an error naming the type, not the value, for a numeric referent", async () => {
