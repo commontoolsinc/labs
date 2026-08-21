@@ -7,12 +7,13 @@ reason: "OW51 build: the RULED option (a) unresolved-input lift semantics are BU
 
 # OW51 build — the ruled unresolved-input lift semantics
 
-> **STATUS (2026-08-21, wind-down): SEMANTICS BUILT + PINNED; CARRIER /
-> REFUSAL-SCOPE DESIGN OPEN — do not merge #6179.** The red-first pin
-> (`unresolved-input-lift.test.ts`) and the ruling are preserved. The
-> naive fix as-built refuses on EVERY data-derived dead-end and breaks
-> real patterns broadly (§6 — the CI blast radius). The open question
-> and alternative designs are in §6.
+> **STATUS (2026-08-21): the review's GATING memo-variant fix is BUILT
+> and PINNED (both directions, mutation-verified); it closed the alias
+> class that drove most of the broad breakage. ONE remaining over-fire
+> class is SURFACED — `P-arrival-closure` (a demand-closure
+> self-producing read) still times out; needs a design call before
+> #6179 is green/mergeable. Details in §6 (updated).** Nothing lost:
+> ruling, red-first pins, spec text all preserved.
 
 ## 0. The ruling (2026-08-21)
 
@@ -352,3 +353,71 @@ analysis. `#6179` stays "semantics built + pinned, carrier/scope OPEN
 — do not merge"; the OW51 register row's CLOSED status is PREMATURE
 given this finding and should read OPEN until the scope is resolved
 (corrected in the same commit as this section).
+
+## 7. Post-review update: the memo-variant fix, and the ONE remaining over-fire
+
+The #6179 adversarial review re-diagnosed §6's broad breakage as a
+MEMO-ALIASING bug (Finding 1), not a fundamentally-too-broad refusal —
+and confirmed the carrier is SOUND-BUT-BROAD, the only leak being
+INWARD (into the resolution memo). Landed:
+
+- **GATING — the one-line memo-variant fix** (`viaLinkHop` added to
+  `resolutionMemoVariant`): a clean read and a data-derived read of the
+  SAME missing doc in one lazy tx no longer share a memo entry.
+  **Both directions pinned and mutation-verified**
+  (`link-resolution-memo.test.ts` P2a/P2b — each RED with the variant
+  term removed, GREEN with it), plus the own-root carve-out pin closing
+  the reviewer's Mutation-C vacuity gap (Finding 6).
+- **Finding 2** — stale `pendingHopDoc` cleared on the result spread
+  and dropped by `undefinedDataLink`.
+- **The churn** — every deep-equal of a sigil-parsed link updated
+  (link-utils, runner, pattern-binding, cell-as-cell, list-element-link
+  ×3), verified assertion-shape.
+
+**What the memo fix RESOLVED (verified by bisect):**
+`list-element-issuance-ownership` "re-links a created filter element" —
+a memo-alias case — **passes with the fix** (fails on pure main-plus-
+refusal without it). The alias class the review named is closed.
+
+**What it did NOT resolve — the remaining over-fire, SURFACED for a
+design call:** `executor-dprime-w0` **"P-arrival-closure"** still TIMES
+OUT (22 s) with the full fix (passes on pure main in 2 s — bisected to
+the refusal). It is a DEMAND-CLOSURE SELF-PRODUCING read: a demanded
+derivation reads a value reached only through non-root rows into a
+nested child's result that its OWN closure produces; the refusal
+disposes that run, and — because "no demanded root gains her pair, so
+the root-level arrival re-arm is inert" (the test's own words) — the
+re-trigger the refusal relies on never fires for that principal, so she
+deadlocks. This is exactly the shape Finding 3 flagged ("the
+re-trigger story assumes an EXTERNAL writer exists"), now shown to
+also break a demanded closure, not just a lift-body initializer.
+
+**Not this class:** `schema-examples` "nested sinks via asCell" — the
+§6-era TypeError — fails IDENTICALLY on pure main (a pre-existing
+local-env sink-teardown flake), not the refusal; excluded.
+
+**The design question (owner/coordinator call before #6179 is green):**
+how to keep the refusal from firing on a read whose target the current
+demand closure itself produces. Candidates, none built:
+
+1. **Confine the refusal to the ON serving arm** — the OW51 crash is a
+   served phenomenon; an OFF (client) lift keeps today's
+   undefined-returning behavior. Trades the ruling's "match exactly"
+   letter for not touching the OFF demand-closure machinery. Simplest;
+   an owner call since the ruling said match exactly.
+2. **Exclude demanded/self-produced reads** — don't refuse when the
+   dead-end doc is (or is reachable from) something the current wave's
+   demand closure is producing. Correct but needs the serving loop to
+   expose "this doc is in-flight-produced-by-me", which it may not.
+3. **Make the refusal's re-trigger independent of the root-level
+   arrival re-arm** — so a disposed demanded run re-fires on the
+   registered read's arrival even when the root re-arm is inert. Deeper
+   serving-loop work.
+4. **Narrow the trigger to the served-INSTANTIATION-arrival case only**
+   (the true OW51 shape — a served-instantiated piece's input chain
+   mid-materialization), via an explicit "expected to arrive" marker
+   set by that path, rather than the blanket data-derived dead-end.
+
+The memo-variant fix + pins are correct and should land as part of the
+eventual fix regardless of which direction closes the demand-closure
+class.
