@@ -51,7 +51,6 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -69,7 +68,6 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -129,15 +127,13 @@ After a successful `session.open`, the response includes a new
 `sessionOpen.challenge`. The client uses that new challenge for the next
 `session.open` on the same connection.
 
-`persistentSchedulerState` advertises whether the runner and memory server are
-allowed to write and serve internal scheduler observations. It defaults to
-`false` when absent. When `false`, clients should not send scheduler observation
-payloads, servers ignore scheduler observation payloads if received, and
-snapshot-list requests return no scheduler snapshots even if older scheduler
-rows exist in the database. This flag is negotiated as an optional capability:
-a client and server may connect when their scheduler-state flags differ, and
-the server's flag controls the scheduler-observation data plane for that
-connection.
+`persistentSchedulerState` was RETIRED 2026-08-04 (server-execution v2
+Phase 1 stage C: the persisted observation form was deleted and reduced
+to the `scheduler_basis` index — see
+[the archived spec](../../history/specs/persistent-scheduler-state.md)).
+The server no longer advertises or reads it; an old client that still
+advertises it connects normally (optional-capability flags tolerate
+mismatch) and takes the flag-absent path it already handled.
 
 `syncSchemaTableV2` advertises support for the hash-keyed schema table described
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
@@ -281,7 +277,6 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
-    persistentSchedulerState?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;

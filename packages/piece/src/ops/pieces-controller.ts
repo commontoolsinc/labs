@@ -7,8 +7,14 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { homeSchema } from "@commonfabric/home-schemas";
-import { createSession, Identity, type Session } from "@commonfabric/identity";
+import {
+  createSession,
+  Identity,
+  isDID,
+  type Session,
+} from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { setLLMUrl } from "@commonfabric/llm";
 import {
   applyPieceSourceTransition,
   type Cell,
@@ -188,6 +194,25 @@ const isCfcMigrationRejection = (error: unknown): boolean =>
 const readEnv: EnvReader = (key) =>
   typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
 
+/**
+ * Records a piece a running pattern navigated to in the space's registry, so a
+ * piece a pattern created inside this runtime is reachable from the space
+ * afterwards. A piece the registry already lists is left alone.
+ */
+export async function registerNavigatedPiece(
+  pieces: PiecesController,
+  target: Cell<unknown>,
+): Promise<void> {
+  const id = pieceId(target);
+  if (id === undefined) {
+    throw new Error("navigateTo: the target carries no piece id");
+  }
+  await pieces.runtime.storageManager.synced();
+  const registry = await pieces.getPieceRegistry();
+  if (registry.get().some((piece) => pieceId(piece) === id)) return;
+  await pieces.add([target]);
+}
+
 export interface PiecesControllerOptions {
   deferSpaceCellSync?: boolean;
 }
@@ -242,19 +267,39 @@ export class PiecesController<T = unknown> {
     this.ready = syncSpaceCellContents.then(() => {});
   }
 
+  /**
+   * Connects a client to one space of a deployed API and returns a controller
+   * over it. The server is asked for its health before any of the space is
+   * read, so an unreachable API fails here rather than as a stream of absent
+   * reads, and a space this identity may not open fails with the server's own
+   * authorization error. A connection that does not complete takes its socket
+   * and its replica down with it.
+   *
+   * A pattern that navigates to a piece has that piece recorded in the
+   * space's registry, and one that reaches the LLM reaches this deployment's.
+   */
   static async initialize(
     {
       apiUrl,
       identity,
-      spaceName,
+      space,
+      deferSpaceCellSync,
       moduleByteCache,
       patternCoverage,
+      navigateCallback,
       cfcEnforcementMode,
       cfcFlowLabels,
     }: {
-      apiUrl: URL;
+      apiUrl: URL | string;
       identity: Identity;
-      spaceName: string;
+      /** The space to open, as a `did:key:` DID or as a space name. */
+      space: string;
+      /**
+       * Open the space's session without syncing the space cell's contents. A
+       * caller that reaches pieces by id, and never reads the space record,
+       * does not need those contents.
+       */
+      deferSpaceCellSync?: boolean;
       // Optional compiled-module-byte cache to share across controllers. Supplied
       // only by test code (see the integration suite's compile-byte-cache helper);
       // unset in production, so no cache is installed.
@@ -265,37 +310,82 @@ export class PiecesController<T = unknown> {
       // coverage against the same space warm-loads them instead of recompiling
       // every pattern for itself.
       patternCoverage?: PatternCoverageCollector;
+      // Optional navigation enactment surface (the remoteClient preset's
+      // existing delta): test code passes one to observe navigateTo
+      // enactments — under EXPERIMENTAL_SERVER_EXECUTION the
+      // client-effect channel enacts served intents through it
+      // (server-execution v2 Phase 4, protocol.md §5).
+      navigateCallback?: Parameters<
+        typeof runtimePresets.remoteClient
+      >[0]["navigateCallback"];
       // Host-controlled CFC rollout dials, passed through to the remoteClient
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
     },
   ): Promise<PiecesController> {
-    const session = await createSession({ identity, spaceName });
+    const api = new URL(apiUrl);
+    setLLMUrl(api.toString());
+    // Holds the controller built below, which the navigate callback reads and
+    // the runtime takes at construction. A pattern navigates only from a
+    // running piece, and the controller is what starts one.
+    const piecesRef: { current?: PiecesController } = {};
+    const session = await createSession(
+      isDID(space)
+        ? { identity, spaceDid: space }
+        : { identity, spaceName: space },
+    );
+    const storageManager = StorageManager.open({
+      as: session.as,
+      memoryHost: api,
+      spaceIdentity: session.spaceIdentity,
+    });
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
     // preset core. Trust provenance stays a visible delta of this controller.
     const runtime = new Runtime(runtimePresets.remoteClient({
-      apiUrl: new URL(apiUrl),
-      storageManager: StorageManager.open({
-        as: session.as,
-        memoryHost: new URL(apiUrl),
-        spaceIdentity: session.spaceIdentity,
-      }),
+      apiUrl: api,
+      storageManager,
       experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
       patternCoverage,
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+      // A caller-supplied surface (the client-effect channel's test hook,
+      // server-execution v2 Phase 4) overrides the registry default.
+      navigateCallback: navigateCallback ??
+        ((target) => registerNavigatedPiece(piecesRef.current!, target)),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
       }),
     }));
-
-    const pieces = new PiecesController(session, runtime);
-    await pieces.synced();
-    return pieces;
+    try {
+      if (!await runtime.healthCheck()) {
+        throw new Error(`Could not connect to "${api.toString()}".`);
+      }
+      const pieces = new PiecesController(session, runtime, {
+        deferSpaceCellSync,
+      });
+      piecesRef.current = pieces;
+      // Opening the space's session is what turns a permanent denial into an
+      // error: the per-space status below is written while the session opens,
+      // and `synced()` stays quiet about a denial so that a denied cross-space
+      // link can stay a silent absent read.
+      await pieces.ensureSpaceSession();
+      if (!deferSpaceCellSync) await pieces.synced();
+      const denial = storageManager.authorizationError?.(session.space);
+      if (denial) throw denial;
+      return pieces;
+    } catch (error) {
+      // Tear the half-built connection down. `closeNow()` drops the replica and
+      // its socket without waiting on a server that may be the reason this
+      // failed, and `dispose()` takes the rest of the runtime with it. The
+      // error that started the teardown is the one that leaves.
+      await storageManager.closeNow().catch(() => {});
+      await runtime.dispose().catch(() => {});
+      throw error;
+    }
   }
 
   getSpace(): MemorySpace {

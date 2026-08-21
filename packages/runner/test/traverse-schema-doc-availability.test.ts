@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type {
   Entity,
@@ -49,10 +48,14 @@ const addDoc = (
     the: TYPE,
     of: entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: entity }),
     since: 1,
   });
 };
+
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:key:test-schema-doc-availability",
+  sessionId: "session:test-schema-doc-availability",
+} as const;
 
 const topDoc = (
   docUri: URI,
@@ -68,6 +71,7 @@ const contextWith = (
   createTraversalContext(
     new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
     new MapSetStringToPathSelectors(true),
+    TEST_SCOPE_IDENTITY,
     false,
     new Set(),
     onMissingLinkTarget,

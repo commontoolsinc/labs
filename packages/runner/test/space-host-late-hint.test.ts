@@ -2,10 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
-import {
-  resetPersistentSchedulerStateConfig,
-  setPersistentSchedulerStateConfig,
-} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -14,8 +10,6 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
-import type { IStorageTransaction } from "../src/storage/interface.ts";
-import { StateInconsistency } from "../src/storage/transaction/attestation.ts";
 import { Runtime } from "../src/runtime.ts";
 import { loadSchemaDocument } from "../src/cfc/prepare.ts";
 import {
@@ -23,6 +17,11 @@ import {
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+  streamEntriesDocId,
+} from "@commonfabric/memory/v2";
 
 class LoopbackSessionFactory implements SessionFactory {
   constructor(
@@ -76,26 +75,6 @@ const makeServer = (name: string): MemoryV2Server.Server =>
     },
     sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
-
-const schedulerObservation = {
-  version: 1,
-  branch: "",
-  pieceId: "of:late-hint-piece",
-  processGeneration: 1,
-  actionId: "action:late-hint",
-  actionKind: "computation",
-  implementationFingerprint: "impl:late-hint",
-  runtimeFingerprint: "runtime:late-hint",
-  observedAtSeq: 0,
-  transactionKind: "action-run",
-  reads: [],
-  shallowReads: [],
-  actualChangedWrites: [],
-  currentKnownWrites: [],
-  declaredWrites: [],
-  materializerWriteEnvelopes: [],
-  status: "success",
-};
 
 describe("late space host hints", () => {
   it("confirms the default host without rebuilding its provider", async () => {
@@ -529,6 +508,155 @@ describe("late space host hints", () => {
       await writer.close();
       await defaultServer.close();
       await hintedServer.close();
+    }
+  });
+
+  it("refuses replacement after an EVENT APPEND issued on the provisional route (verdict blocker, 2026-08-12): the queue's commits are stateful route operations", async () => {
+    // Pre-fix the event queue's transact passed a no-op beforeIssue
+    // callback, skipping the writeIssuedGeneration marker ordinary
+    // commits set — so a late host hint could still approve
+    // replaceProvisionalReplica() after an event append had already
+    // targeted the original route, closing the old queue's route
+    // underneath its traffic.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-event-append");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-event-append-target",
+    )).did();
+    const defaultServer = makeServer("late-hint-event-append-default");
+    const manager = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => defaultServer),
+    );
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+      };
+      const stream = { id: "of:late-hint-stream", path: [] as string[] };
+      const outcome = await replica.enqueueEventAppend({
+        sidecarId: streamEntriesDocId(stream),
+        stream,
+        eventId: "evt-late-hint",
+        payload: { n: 1 },
+      });
+      expect(outcome.delivered).toBe(true);
+      // The issued append marked the route: a late hint to a DIFFERENT
+      // host may no longer replace the provisional replica.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(false);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
+  it("a provisional-replica replacement preserves queued event intents — the manager-shared store survives the swap (LT9; verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix every EventAppendQueue minted its own private in-memory
+    // store, so the replacement's fresh queue lost the old queue's
+    // undischarged user intents in-process. The manager now owns ONE
+    // store; the replacement replica's eager queue init loads the
+    // backlog and discharges it with no fresh fire.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-queue-preserve");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-queue-preserve-target",
+    )).did();
+    const workingServer = makeServer("late-hint-queue-preserve-hinted");
+    // The FIRST session open fails (the provisional route is dark), so
+    // the queued intent stays undischarged and the route stays
+    // UNMARKED — replacement is still approvable.
+    let sessionAttempts = 0;
+    const factory: SessionFactory = {
+      create: (space, signerArg, mountOptions, signal) => {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          return Promise.reject(new Error("provisional host down"));
+        }
+        return new LoopbackSessionFactory(() => workingServer).create(
+          space,
+          signerArg,
+          mountOptions,
+          signal,
+        );
+      },
+    };
+    const manager = TestStorageManager.create(signer, factory);
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+        pendingEventAppends(): readonly unknown[];
+      };
+      const stream = { id: "of:preserved-stream", path: [] as string[] };
+      const sidecarId = streamEntriesDocId(stream);
+      const outcome = replica.enqueueEventAppend({
+        sidecarId,
+        stream,
+        eventId: "evt-preserved",
+        payload: { n: 7 },
+      });
+      // The intent is queued (first discharge attempt failing).
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replica.pendingEventAppends().length).toBe(1);
+      // The late hint replaces the provisional replica (no append ever
+      // ISSUED on the dark route, so the route-write guard permits it).
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      // registerSpaceHost triggered the replacement itself; settle it
+      // the way the neighboring tests do.
+      await manager.crossSpaceSettled();
+      // The REPLACEMENT queue discharges the preserved intent with no
+      // fresh fire; the working host's engine holds the entry.
+      const delivered = await outcome;
+      expect(delivered).toEqual({
+        delivered: false,
+        refused: "event queue closed",
+      });
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const doc = await workingServer.readDocument(
+          targetSpace,
+          sidecarId as never,
+        );
+        const entries =
+          ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+            .entries ?? [];
+        if (entries.some((entry) => entry.eventId === "evt-preserved")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const doc = await workingServer.readDocument(
+        targetSpace,
+        sidecarId as never,
+      );
+      const entries =
+        ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+          .entries ?? [];
+      expect(entries.some((entry) => entry.eventId === "evt-preserved"))
+        .toBe(true);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await workingServer.close();
     }
   });
 
@@ -1482,358 +1610,6 @@ describe("late space host hints", () => {
     } finally {
       await manager.close();
       await defaultServer.close();
-    }
-  });
-
-  it("settles a scheduler observation waiting on a replaced route", async () => {
-    setPersistentSchedulerStateConfig(true);
-    const signer = await Identity.fromPassphrase(
-      "late-hint-scheduler-observation",
-    );
-    const targetSpace = (await Identity.fromPassphrase(
-      "late-hint-scheduler-observation-target",
-    )).did();
-    const pendingSession = Promise.withResolvers<{
-      client: MemoryV2Client.Client;
-      session: MemoryV2Client.SpaceSession;
-    }>();
-    const sessionStarted = Promise.withResolvers<void>();
-    const manager = TestStorageManager.create(signer, {
-      create() {
-        sessionStarted.resolve();
-        return pendingSession.promise;
-      },
-    });
-
-    try {
-      const replica = manager.open(targetSpace).replica as unknown as {
-        commitNative(transaction: {
-          operations: [];
-          schedulerObservation: unknown;
-        }): Promise<{ error?: unknown }>;
-      };
-      const observation = replica.commitNative({
-        operations: [],
-        schedulerObservation,
-      });
-      await sessionStarted.promise;
-
-      expect(
-        manager.registerSpaceHost(
-          targetSpace,
-          "https://hinted-toolshed.test",
-        ),
-      ).toBe(true);
-      await manager.crossSpaceSettled();
-
-      expect((await observation).error).toBeDefined();
-    } finally {
-      await manager.close();
-      resetPersistentSchedulerStateConfig();
-    }
-  });
-
-  it("drains observations after a rejected batch without releasing a waiting write", async () => {
-    setPersistentSchedulerStateConfig(true);
-    const signer = await Identity.fromPassphrase(
-      "late-hint-scheduler-queued-after-rejection",
-    );
-    const resultId = "of:late-hint-scheduler-waiting-write" as URI;
-    const server = makeServer("late-hint-scheduler-queued-after-rejection");
-    const factory = new LoopbackSessionFactory(() => server);
-    const firstBatchStarted = Promise.withResolvers<void>();
-    const releaseFirstBatch = Promise.withResolvers<void>();
-    const secondBatchIssued = Promise.withResolvers<void>();
-    let schedulerBatchCount = 0;
-    const manager = TestStorageManager.create(signer, {
-      async create(space, sessionSigner, mountOptions, signal) {
-        const connection = await factory.create(
-          space,
-          sessionSigner,
-          mountOptions,
-          signal,
-        );
-        const transact = connection.session.transact.bind(connection.session);
-        connection.session.transact = async (commit, beforeIssue) => {
-          if (commit.schedulerObservationBatch !== undefined) {
-            schedulerBatchCount++;
-            if (schedulerBatchCount === 1) {
-              firstBatchStarted.resolve();
-              await releaseFirstBatch.promise;
-              throw new Error("first scheduler batch rejected");
-            }
-            if (
-              commit.schedulerObservationBatch.some((entry) =>
-                (entry.schedulerObservation as { actionId?: string })
-                  .actionId === "action:queued-after-rejection"
-              )
-            ) {
-              secondBatchIssued.resolve();
-            }
-          }
-          return await transact(commit, beforeIssue);
-        };
-        return connection;
-      },
-    });
-
-    try {
-      const provider = manager.open(signer.did());
-      const replica = provider.replica as unknown as {
-        commitNative(transaction: {
-          operations: [];
-          schedulerObservation: unknown;
-        }): Promise<{ error?: unknown }>;
-      };
-      const first = replica.commitNative({
-        operations: [],
-        schedulerObservation: {
-          ...schedulerObservation,
-          actionId: "action:rejected-batch",
-        },
-      });
-      await firstBatchStarted.promise;
-
-      const waitingWrite = (provider as unknown as {
-        send(
-          batch: { uri: URI; value: { value: { released: boolean } } }[],
-        ): Promise<{ error?: { message?: string } }>;
-      }).send([{
-        uri: resultId,
-        value: { value: { released: true } },
-      }]);
-      const second = replica.commitNative({
-        operations: [],
-        schedulerObservation: {
-          ...schedulerObservation,
-          actionId: "action:queued-after-rejection",
-        },
-      });
-      releaseFirstBatch.resolve();
-
-      expect((await first).error).toBeDefined();
-      expect((await second).error).toBeUndefined();
-      expect((await waitingWrite).error?.message).toContain(
-        "first scheduler batch rejected",
-      );
-      await secondBatchIssued.promise;
-      expect(schedulerBatchCount).toBe(2);
-      expect(await server.readDocument(signer.did(), resultId)).toBeNull();
-    } finally {
-      releaseFirstBatch.resolve();
-      await manager.close();
-      await server.close();
-      resetPersistentSchedulerStateConfig();
-    }
-  });
-
-  it("rejects only stale observations in a mixed scheduler batch", async () => {
-    setPersistentSchedulerStateConfig(true);
-    const signer = await Identity.fromPassphrase(
-      "late-hint-mixed-scheduler-batch",
-    );
-    const targetSpace = (await Identity.fromPassphrase(
-      "late-hint-mixed-scheduler-target",
-    )).did();
-    const targetId = "of:late-hint-mixed-scheduler-target" as URI;
-    const defaultServer = makeServer("late-hint-mixed-scheduler-default");
-    const hintedServer = makeServer("late-hint-mixed-scheduler-hinted");
-    const defaultFactory = new LoopbackSessionFactory(() => defaultServer);
-    const hintedFactory = new LoopbackSessionFactory(() => hintedServer);
-    const writer = TestStorageManager.create(signer, hintedFactory);
-    const issuedBatches: string[][] = [];
-    let targetSessions = 0;
-    const reader = TestStorageManager.create(signer, {
-      async create(space, sessionSigner, mountOptions, signal) {
-        const connection = space === targetSpace
-          ? await (targetSessions++ === 0 ? defaultFactory : hintedFactory)
-            .create(space, sessionSigner, mountOptions, signal)
-          : await defaultFactory.create(
-            space,
-            sessionSigner,
-            mountOptions,
-            signal,
-          );
-        if (space === signer.did()) {
-          const transact = connection.session.transact.bind(
-            connection.session,
-          );
-          connection.session.transact = async (commit, beforeIssue) => {
-            if (commit.schedulerObservationBatch !== undefined) {
-              issuedBatches.push(
-                commit.schedulerObservationBatch.map((entry) =>
-                  (entry.schedulerObservation as { actionId: string }).actionId
-                ),
-              );
-            }
-            return await transact(commit, beforeIssue);
-          };
-        }
-        return connection;
-      },
-    });
-
-    try {
-      const seeded = await (writer.open(targetSpace) as unknown as {
-        send(
-          batch: { uri: URI; value: { value: { name: string } } }[],
-        ): Promise<{ error?: unknown }>;
-      }).send([{
-        uri: targetId,
-        value: { value: { name: "intended data" } },
-      }]);
-      expect(seeded.error).toBeUndefined();
-      await writer.synced();
-
-      const targetProvider = reader.open(targetSpace);
-      expect((await targetProvider.sync(targetId)).error).toBeUndefined();
-      expect(targetProvider.replica.getDocument(targetId)).toBeUndefined();
-      const stale = reader.edit();
-      expect(
-        stale.read({
-          space: targetSpace,
-          id: targetId,
-          type: "application/json",
-          path: [],
-        }).ok?.value,
-      ).toBeUndefined();
-
-      const replica = reader.open(signer.did()).replica as unknown as {
-        commitNative(
-          transaction: {
-            operations: [];
-            schedulerObservation: unknown;
-          },
-          source?: IStorageTransaction,
-        ): Promise<{ error?: unknown }>;
-      };
-      const staleObservation = replica.commitNative({
-        operations: [],
-        schedulerObservation: {
-          ...schedulerObservation,
-          actionId: "action:stale-mixed-observation",
-        },
-      }, stale);
-      const validObservation = replica.commitNative({
-        operations: [],
-        schedulerObservation: {
-          ...schedulerObservation,
-          actionId: "action:valid-mixed-observation",
-        },
-      });
-
-      expect(
-        reader.registerSpaceHost(
-          targetSpace,
-          "https://hinted-toolshed.test",
-        ),
-      ).toBe(true);
-      await reader.crossSpaceSettled();
-
-      const staleResult = await staleObservation;
-      const staleError = staleResult.error as
-        | {
-          name?: string;
-          address?: unknown;
-          from?: unknown;
-        }
-        | undefined;
-      expect(staleError?.name).toBe("StorageTransactionInconsistent");
-      expect(staleError?.address).toBeDefined();
-      expect(typeof staleError?.from).toBe("function");
-      expect((await validObservation).error).toBeUndefined();
-      expect(issuedBatches).toEqual([["action:valid-mixed-observation"]]);
-    } finally {
-      await reader.close();
-      await writer.close();
-      await defaultServer.close();
-      await hintedServer.close();
-      resetPersistentSchedulerStateConfig();
-    }
-  });
-
-  it("preserves scheduler inconsistency details for a waiting write", async () => {
-    setPersistentSchedulerStateConfig(true);
-    const signer = await Identity.fromPassphrase(
-      "late-hint-scheduler-inconsistency-details",
-    );
-    const resultId = "of:late-hint-scheduler-inconsistency-result" as URI;
-    const server = makeServer("late-hint-scheduler-inconsistency-details");
-    const manager = TestStorageManager.create(
-      signer,
-      new LoopbackSessionFactory(() => server),
-    );
-    const address = {
-      id: "of:late-hint-stale-basis" as URI,
-      type: "application/json" as const,
-      path: [],
-    };
-    const inconsistency = StateInconsistency({
-      address,
-      expected: undefined,
-      actual: { intended: true },
-      space: signer.did(),
-    });
-    let validations = 0;
-    const source = {
-      getReadActivities: () => [],
-      validateReplicaRoutes: () => {
-        validations++;
-        return validations === 1 ? { ok: {} } : { error: inconsistency };
-      },
-    } as unknown as IStorageTransaction;
-
-    try {
-      const provider = manager.open(signer.did());
-      const observation = (
-        provider.replica as unknown as {
-          commitNative(
-            transaction: {
-              operations: [];
-              schedulerObservation: unknown;
-            },
-            source?: IStorageTransaction,
-          ): Promise<{ error?: unknown }>;
-        }
-      ).commitNative({
-        operations: [],
-        schedulerObservation: {
-          ...schedulerObservation,
-          actionId: "action:structured-inconsistency",
-        },
-      }, source);
-      const write = (provider as unknown as {
-        send(
-          batch: { uri: URI; value: { value: { derived: boolean } } }[],
-        ): Promise<{ error?: unknown }>;
-      }).send([{
-        uri: resultId,
-        value: { value: { derived: true } },
-      }]);
-
-      const observationError = (await observation).error as
-        | {
-          name?: string;
-          address?: unknown;
-          from?: unknown;
-        }
-        | undefined;
-      const writeError = (await write).error as
-        | {
-          name?: string;
-          address?: unknown;
-          from?: unknown;
-        }
-        | undefined;
-      expect(observationError?.name).toBe("StorageTransactionInconsistent");
-      expect(writeError?.name).toBe("StorageTransactionInconsistent");
-      expect(writeError?.address).toEqual(address);
-      expect(typeof writeError?.from).toBe("function");
-      expect(await server.readDocument(signer.did(), resultId)).toBeNull();
-    } finally {
-      await manager.close();
-      await server.close();
-      resetPersistentSchedulerStateConfig();
     }
   });
 

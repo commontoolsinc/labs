@@ -1,10 +1,10 @@
 /**
- * The Fabric value classes reach pattern code as `export declare const`s in
- * `api/index.ts`, but the runtime values behind those declarations are bound
- * separately, in `builder/factory.ts`. The two sides are maintained by hand, so
- * a class can be declared without being bound -- which type-checks when the
- * pattern is compiled and then fails once it actually runs. These tests pin the
- * runtime half against the declared half.
+ * The `FabricSpecialObject` classes reach pattern code as `export declare
+ * const`s in `api/index.ts`, but the runtime values behind those declarations
+ * are bound separately, in `builder/factory.ts`. The two sides are maintained
+ * by hand, so a class can be declared without being bound -- which type-checks
+ * when the pattern is compiled and then fails once it actually runs. These
+ * tests pin the runtime half against the declared half.
  *
  * `types/commonfabric.d.ts` is a symlink to `api/index.ts`, and is the exact
  * artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
@@ -29,6 +29,7 @@ import {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -54,10 +55,11 @@ const expectedBindings: Record<string, unknown> = {
   FabricLink,
   FabricBytes,
   FabricRegExp,
+  FabricKeyPair,
   FabricError,
 };
 
-describe("commonfabric Fabric value classes", () => {
+describe("commonfabric `FabricSpecialObject` classes", () => {
   // Viewed as a plain record on purpose: the question here is what the builder
   // surface carries at runtime, which is exactly what its static type cannot
   // answer.
@@ -138,6 +140,28 @@ describe("commonfabric Fabric value classes", () => {
       expect(instance.flavor).toBe("es2025");
       expect(instance.source).toBe("a.c");
       expect(instance.flags).toBe("s");
+    });
+  });
+
+  describe("FabricKeyPair", () => {
+    it("constructs an instance from an algorithm name and key bytes", () => {
+      const BoundFabricKeyPair = commonfabric
+        .FabricKeyPair as typeof FabricKeyPair;
+      const instance = new BoundFabricKeyPair(
+        "ExampleAlgorithm",
+        new Uint8Array([1, 2, 3]),
+        new Uint8Array([4, 5, 6]),
+      );
+
+      expect(instance).toBeInstanceOf(FabricKeyPair);
+      expect(instance.algorithm).toBe("ExampleAlgorithm");
+      expect(instance.hasMaterial).toBe(true);
+      expect(instance.publicKeyBytes.slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      expect(instance.privateKeyBytes.slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
     });
   });
 

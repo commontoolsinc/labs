@@ -62,7 +62,7 @@ async function waitForContent(
   const pieces = await PiecesController.initialize({
     apiUrl: new URL(API_URL!),
     identity,
-    spaceName,
+    space: spaceName,
   });
   try {
     const controller = await pieces.get(piece);

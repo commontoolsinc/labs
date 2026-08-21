@@ -8,9 +8,16 @@ import {
 import type { Action, ReactivityLog } from "../src/scheduler/types.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
+// Identity entity keys resolve scoped addresses against (stage E).
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+const identityThunk = () => TEST_IDENTITY;
+
 describe("SchedulerTriggerIndex", () => {
   it("removes empty trigger entities when the last action unsubscribes", () => {
-    const triggerIndex = new SchedulerTriggerIndex();
+    const triggerIndex = new SchedulerTriggerIndex(identityThunk);
     const action: Action = () => {};
     const read: IMemorySpaceAddress = {
       space: "did:key:trigger-index-test",
@@ -30,7 +37,7 @@ describe("SchedulerTriggerIndex", () => {
   });
 
   it("removes all trigger entities for an unloaded space", () => {
-    const triggerIndex = new SchedulerTriggerIndex();
+    const triggerIndex = new SchedulerTriggerIndex(identityThunk);
     const firstAction: Action = () => {};
     const secondAction: Action = () => {};
     const firstRead: IMemorySpaceAddress = {
@@ -60,7 +67,7 @@ describe("applyActionReadDelta", () => {
   const emptyLog: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
 
   it("updates triggers when only the read scope changes", () => {
-    const triggerIndex = new SchedulerTriggerIndex();
+    const triggerIndex = new SchedulerTriggerIndex(identityThunk);
     const state = new SchedulerTriggerSubscriptions({
       triggerIndex,
       cancels: new WeakMap(),
@@ -100,7 +107,7 @@ describe("applyActionReadDelta", () => {
   });
 
   it("keeps one cancel that removes the latest trigger entities", () => {
-    const triggerIndex = new SchedulerTriggerIndex();
+    const triggerIndex = new SchedulerTriggerIndex(identityThunk);
     const cancels = new WeakMap<Action, () => void>();
     const state = new SchedulerTriggerSubscriptions({
       triggerIndex,

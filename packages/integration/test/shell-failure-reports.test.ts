@@ -11,7 +11,12 @@ import {
   readAndDescribeShellPage,
   readShellPageProbe,
 } from "../shell-page-probe.ts";
-import { describeStateWaitFailure, login } from "../shell-utils.ts";
+import {
+  describeShellReadyFailure,
+  describeStateWaitFailure,
+  login,
+  waitForShellReady,
+} from "../shell-utils.ts";
 
 // What the toolshed answers with when its fetch to the shell dev server fails.
 const PROXY_FAILURE_TEXT =
@@ -180,6 +185,33 @@ describe("shell-failure-reports", () => {
       const url = await load("/shell");
 
       await assertShellDocument(page, url);
+    });
+  });
+
+  describe("waitForShellReady()", () => {
+    it("returns for a document that is not the shell", async () => {
+      await load("/proxy-failure");
+
+      await waitForShellReady(page);
+    });
+
+    it("returns for a shell that has published itself", async () => {
+      await load("/booted-shell");
+
+      await waitForShellReady(page);
+    });
+  });
+
+  describe("describeShellReadyFailure()", () => {
+    it("returns a block naming the shell document that published nothing", async () => {
+      await load("/shell");
+
+      const described = await describeShellReadyFailure(page);
+      expect(described).toContain(
+        "The shell never published itself on globalThis.app.",
+      );
+      expect(described).toContain("x-root-view: present");
+      expect(described).toContain("globalThis.app: absent");
     });
   });
 

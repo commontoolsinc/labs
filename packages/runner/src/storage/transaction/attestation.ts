@@ -10,7 +10,6 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { unclaimed } from "@commonfabric/memory/fact";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -29,6 +28,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 
 const logger = getLogger("attestation", {
@@ -117,11 +117,10 @@ export const read = (
 > => resolve(source, address);
 
 /**
- * Takes a source fact {@link State} and derives an attestion describing its
- * state.
+ * Takes a source {@link State} and derives an attestation describing it.
  */
 export const attest = (
-  { the, of, is, scope }: Omit<State, "cause"> & Pick<IMemoryAddress, "scope">,
+  { the, of, is, scope }: State & Pick<IMemoryAddress, "scope">,
 ): IAttestation => {
   return {
     address: { id: of, type: the, path: [], scope },
@@ -132,7 +131,7 @@ export const attest = (
 /**
  * Verifies consistency of provided attestation with a given replica. If
  * current state matches provided attestation function succeeds with a state
- * of the fact in the given replica otherwise function fails with
+ * of the address in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
  * Values are compared with `valueEqual()`.
@@ -140,16 +139,19 @@ export const attest = (
 export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
+  // The reading transaction's scope-instance identity (server-execution v2
+  // stage A — OW17's tx→replica seam): the claim re-reads the SAME instance
+  // the load came from; absent = the replica's own, as before.
+  identity?: ScopeKeyIdentity,
 ): Result<State, IStorageTransactionInconsistent> => {
   const type = address.type ?? "application/json";
-  const state = replica.get(address) ??
-    unclaimed({ of: address.id, the: type });
+  const state = replica.get(address) ?? { the: type, of: address.id };
   const source = attest(state);
   const actual = type === "application/json" &&
       address.path.length === 0 &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      replica.getDocument(address.id, address.scope),
+      replica.getDocument(address.id, address.scope, identity),
     )
     : read(source, address)?.ok?.value;
 

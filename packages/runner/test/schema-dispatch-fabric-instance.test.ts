@@ -20,7 +20,6 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
@@ -55,7 +54,6 @@ const traverserOver = (
     the: type,
     of: entity,
     is: { value },
-    cause: hashOf({ the: type, of: entity }),
     since: 1,
   });
   for (const [linkedUri, value] of Object.entries(linkedValues)) {
@@ -64,7 +62,6 @@ const traverserOver = (
       the: type,
       of: linkedEntity,
       is: { value },
-      cause: hashOf({ the: type, of: linkedEntity }),
       since: 1,
     });
   }
@@ -74,7 +71,7 @@ const traverserOver = (
   const traverser = new SchemaObjectTraverser(
     storeTx,
     selector,
-    createDefaultTraversalContext(includeMeta),
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY, includeMeta),
   );
   const doc: IMemorySpaceValueAttestation = {
     address: {
@@ -86,6 +83,13 @@ const traverserOver = (
     value,
   };
   return { traverser, doc };
+};
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
 };
 
 describe("value-type dispatch: FabricSpecialObject subclasses", () => {

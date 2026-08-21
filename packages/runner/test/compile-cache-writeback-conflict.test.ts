@@ -354,10 +354,6 @@ describe("editWithRetry sequential conflict discovery", () => {
                 space,
                 the: "application/json",
                 of: `of:doc-${k}`,
-                expected: null,
-                actual: null,
-                existsInHistory: false,
-                history: [],
               },
             },
           });
@@ -411,10 +407,6 @@ describe("editWithRetry sequential conflict discovery", () => {
               space,
               the: "application/json",
               of: `of:doc-${commits}`,
-              expected: null,
-              actual: null,
-              existsInHistory: false,
-              history: [],
             },
           },
         });

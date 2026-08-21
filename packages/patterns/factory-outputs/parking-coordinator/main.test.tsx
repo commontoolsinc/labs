@@ -34,6 +34,15 @@ import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
+// The Admin Access card renders one row per person, with a chip reading
+// "Admin" or "Member".
+const adminRowIsAdmin = (ui: unknown, name: string): boolean =>
+  findNodeByProp(
+    findNodeByProp(ui, "data-parking-admin-row", name),
+    "label",
+    "Admin",
+  ) !== undefined;
+
 const toLocalDateStr = (timestamp: number): string => {
   const d = new Date(timestamp);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
@@ -980,6 +989,204 @@ export default pattern(() => {
   // Test sequence
   // ============================================================
 
+  // ============================================================
+  // Subject 10: Admin roster authority
+  // ============================================================
+
+  // The roster is the source of parking-admin authority, so the first grant is
+  // open and every later one needs an admin. The acting person is people[0].
+  const rosterAlice: Person = {
+    name: "Alice",
+    email: "alice@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
+  const rosterBob: Person = {
+    name: "Bob",
+    email: "bob@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 2,
+  };
+
+  const s10 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [rosterAlice, rosterBob],
+    requests: [],
+  });
+
+  const action_s10_enable_manager = action(() => s10.enableAdminManager.send());
+  const action_s10_bootstrap_alice = action(() =>
+    s10.togglePersonAdmin.send({ name: "Alice" })
+  );
+  const action_s10_rename_alice = action(() => {
+    s10.editPerson.send({
+      originalName: "Alice",
+      name: "Alicia",
+      email: "alice@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+  const action_s10_grant_bob = action(() =>
+    s10.togglePersonAdmin.send({ name: "Bob" })
+  );
+  const action_s10_remove_bob = action(() =>
+    s10.removePerson.send({ name: "Bob" })
+  );
+  const action_s10_re_add_bob = action(() => {
+    s10.addPerson.send({
+      name: "Bob",
+      email: "bob@co.com",
+      commuteMode: "drive",
+      priorityRank: 2,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+
+  const assert_s10_bootstrap_open = assert(() =>
+    s10.currentUserCanManageAdmins === true
+  );
+  const assert_s10_alice_is_admin = assert(() =>
+    s10.currentPersonIsAdmin === true && adminRowIsAdmin(s10[UI], "Alice")
+  );
+  // The role follows the rename, so the renamed person keeps their authority.
+  const assert_s10_role_followed_rename = assert(() =>
+    len(s10.people.filter((p: Person) => p.name === "Alicia")) === 1 &&
+    s10.currentPersonIsAdmin === true && adminRowIsAdmin(s10[UI], "Alicia")
+  );
+  const assert_s10_bob_is_admin = assert(() => adminRowIsAdmin(s10[UI], "Bob"));
+  const assert_s10_bob_removed = assert(() =>
+    len(s10.people.filter((p: Person) => p.name === "Bob")) === 0
+  );
+  // Removing a person drops their role, so a later person of the same name
+  // starts as a member rather than inheriting the old grant.
+  const assert_s10_re_added_bob_is_member = assert(() =>
+    len(s10.people.filter((p: Person) => p.name === "Bob")) === 1 &&
+    !adminRowIsAdmin(s10[UI], "Bob")
+  );
+
+  // ============================================================
+  // Subject 11: Only an admin may grant once the roster is filled
+  // ============================================================
+
+  const rosterCarol: Person = {
+    name: "Carol",
+    email: "carol@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
+  const rosterDave: Person = {
+    name: "Dave",
+    email: "dave@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 2,
+  };
+
+  // Carol acts; the bootstrap grant goes to Dave, so Carol is left holding no
+  // role while the roster is no longer empty.
+  const s11 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [rosterCarol, rosterDave],
+    requests: [],
+  });
+
+  const action_s11_enable_manager = action(() => s11.enableAdminManager.send());
+  const action_s11_bootstrap_dave = action(() =>
+    s11.togglePersonAdmin.send({ name: "Dave" })
+  );
+  const action_s11_carol_grants_self = action(() =>
+    s11.togglePersonAdmin.send({ name: "Carol" })
+  );
+
+  const assert_s11_dave_is_admin = assert(() =>
+    adminRowIsAdmin(s11[UI], "Dave")
+  );
+  const assert_s11_carol_locked_out = assert(() =>
+    s11.currentUserCanManageAdmins === false &&
+    propValue(
+        findNodeByProp(s11[UI], "data-parking-admin-toggle", "Carol"),
+        "disabled",
+      ) === true
+  );
+  const assert_s11_carol_still_member = assert(() =>
+    !adminRowIsAdmin(s11[UI], "Carol")
+  );
+
+  // Renaming or removing an admin moves or drops their role, so a user who may
+  // not change the roster may not do either — otherwise the role would end up
+  // naming a person who is not there, and no actor could hold it.
+  const action_s11_carol_renames_dave = action(() => {
+    s11.editPerson.send({
+      originalName: "Dave",
+      name: "Mallory",
+      email: "dave@co.com",
+      commuteMode: "drive",
+      priorityRank: 2,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+  const action_s11_carol_removes_dave = action(() =>
+    s11.removePerson.send({ name: "Dave" })
+  );
+
+  const assert_s11_dave_keeps_his_name = assert(() =>
+    len(s11.people.filter((p: Person) => p.name === "Mallory")) === 0 &&
+    adminRowIsAdmin(s11[UI], "Dave")
+  );
+  const assert_s11_dave_still_there = assert(() =>
+    len(s11.people.filter((p: Person) => p.name === "Dave")) === 1 &&
+    adminRowIsAdmin(s11[UI], "Dave")
+  );
+
+  // ============================================================
+  // Subject 12: A role is only ever granted to a person who exists
+  // ============================================================
+
+  const rosterErin: Person = {
+    name: "Erin",
+    email: "erin@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
+
+  const s12 = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [rosterErin],
+    requests: [],
+  });
+
+  const action_s12_enable_manager = action(() => s12.enableAdminManager.send());
+  const action_s12_grant_phantom = action(() =>
+    s12.togglePersonAdmin.send({ name: "Nobody" })
+  );
+  const action_s12_grant_erin = action(() =>
+    s12.togglePersonAdmin.send({ name: "Erin" })
+  );
+
+  // A role for a name nobody answers to would fill the roster with authority
+  // no actor can hold, closing the bootstrap for good.
+  const assert_s12_phantom_refused = assert(() =>
+    !adminRowIsAdmin(s12[UI], "Erin") &&
+    s12.currentUserCanManageAdmins === true
+  );
+  const assert_s12_erin_is_admin = assert(() =>
+    adminRowIsAdmin(s12[UI], "Erin")
+  );
+
   return {
     [TESTS]: [
       // People management
@@ -1104,6 +1311,39 @@ export default pattern(() => {
       { assertion: assert_s9g_deduped },
       { action: action_s9h_add_invalid_color },
       { assertion: assert_s9h_invalid_color_cleared },
+
+      // Admin roster authority
+      { action: action_s10_enable_manager },
+      { assertion: assert_s10_bootstrap_open },
+      { action: action_s10_bootstrap_alice },
+      { assertion: assert_s10_alice_is_admin },
+      { action: action_s10_rename_alice },
+      { assertion: assert_s10_role_followed_rename },
+      { action: action_s10_grant_bob },
+      { assertion: assert_s10_bob_is_admin },
+      { action: action_s10_remove_bob },
+      { assertion: assert_s10_bob_removed },
+      { action: action_s10_re_add_bob },
+      { assertion: assert_s10_re_added_bob_is_member },
+
+      // Only an admin may grant once the roster is filled
+      { action: action_s11_enable_manager },
+      { action: action_s11_bootstrap_dave },
+      { assertion: assert_s11_dave_is_admin },
+      { assertion: assert_s11_carol_locked_out },
+      { action: action_s11_carol_grants_self },
+      { assertion: assert_s11_carol_still_member },
+      { action: action_s11_carol_renames_dave },
+      { assertion: assert_s11_dave_keeps_his_name },
+      { action: action_s11_carol_removes_dave },
+      { assertion: assert_s11_dave_still_there },
+
+      // A role is only ever granted to a person who exists
+      { action: action_s12_enable_manager },
+      { action: action_s12_grant_phantom },
+      { assertion: assert_s12_phantom_refused },
+      { action: action_s12_grant_erin },
+      { assertion: assert_s12_erin_is_admin },
     ],
     s1,
     s2,
@@ -1121,6 +1361,9 @@ export default pattern(() => {
     s9f,
     s9g,
     s9h,
+    s10,
+    s11,
+    s12,
     // TODO(cfc-schema-ref): the CFC schema-ref resolver warns about
     // unsupported/unresolved $ref(s) in this pattern's schemas (logger "cfc",
     // fail-closed). Fix the schema(s), then drop this opt-out.

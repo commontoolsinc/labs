@@ -2387,7 +2387,7 @@ describe("cli piece parsing", () => {
     ).toEqual([]);
   });
 
-  it("reports unreadable iterators, cell proxies, and Fabric values", async () => {
+  it("reports unreadable iterators, cell proxies, and `FabricValue`s", async () => {
     const iteratorError = new Error("array keys are not readable");
     const unreadableArray = new Proxy<unknown[]>([], {
       ownKeys: () => {

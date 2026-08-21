@@ -1,5 +1,6 @@
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { CellScope, Module, Pattern } from "../builder/types.ts";
+import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
+import type { Module, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -39,6 +40,24 @@ export type SchedulerObservationIdentity = {
   branch?: string;
   pieceId: string;
   processGeneration?: number;
+  /** The piece root's RAW doc id (no scope-key prefix — `pieceId` above
+   * is instance-keyed for shaper buckets). The per-(action × instance)
+   * run supply (server-execution v2 stage P2-F) resolves an action's
+   * demanded instances through this id at the reactive-action choke
+   * point. */
+  pieceRootId?: string;
+  /** The DEMAND roots this action's instances resolve through (Phase 7):
+   * `pieceRootId` plus every ANCESTOR piece root that instantiated it —
+   * a nested pattern node's or a result-as-pattern child's actions are
+   * demanded through the outer piece the client actually watches, so
+   * the run supply resolves their instances at any root in the chain
+   * (dedupe per instance). Absent means `[pieceRootId]`. Pre-Phase-7 a
+   * nested piece's scoped derivations fell to the wave-level identity —
+   * the serving session's own — and landed in the SERVICE identity's
+   * instances, unread by any demander (the lunch-gate wall's last
+   * mechanism; protocol.md §2's S1: "there is no third source of run
+   * identity"). */
+  demandRootIds?: readonly string[];
 };
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
@@ -63,9 +82,19 @@ export type EventHandler =
      * inputs (e.g. a SqliteDb handle) synchronously from the local replica;
      * the scheduler awaits this before dispatching the event so those reads
      * don't race the doc-carrying storage responses. The event is passed so
-     * inputs reachable only through the event can be covered too.
+     * inputs reachable only through the event can be covered too. A SERVED
+     * event's dispatch passes the event's server-stamped actor as
+     * `identity` (server-execution v2 stage A — the runner's
+     * explicit-instance read): the handler runs AS that actor (LD1) and
+     * reads that actor's instances of its scoped inputs, so the presync
+     * loads THOSE instances — the served save handler must find the
+     * actor's own draft, not the service instance's empty one (the R7
+     * wall). Absent on every client-side event.
      */
-    presyncInputs?: (event: any) => Promise<void>;
+    presyncInputs?: (
+      event: any,
+      identity?: ScopeKeyIdentity,
+    ) => Promise<void>;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
@@ -87,9 +116,14 @@ export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   rootDirectWriterActions: Set<Action>;
 };
 
-export type SpaceScopeAndURI = `${MemorySpace}/${CellScope}/${URI}`;
+/**
+ * In-memory identity keys carry the scope INSTANCE (the shared `ScopeKey`
+ * vocabulary), never the scope NAME (scopes.md §7 M2, stage E). Built by
+ * `entityKey` — see `keys.ts` for the identity-threading contract.
+ */
+export type SpaceScopeAndURI = `${MemorySpace}/${ScopeKey}/${URI}`;
 export type SpaceScopeURIAndType =
-  `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
+  `${MemorySpace}/${ScopeKey}/${URI}/${MediaType}`;
 
 /** Per-iteration stats captured during the settle loop. */
 export type SettleIterationStats = {
@@ -123,6 +157,10 @@ export type ActionRunTraceEntry = {
   durationMs: number;
   declaredWrites: ActionRunTraceAddress[];
   actualWrites: ActionRunTraceAddress[];
+  /** Server-execution v2 fan-out stage B: the instance key a fanned-out
+   * run was stamped with (`space` for the probe, `user:…`/`session:…`
+   * otherwise); absent on every other run. */
+  instanceKey?: string;
 };
 
 export type ActionRunTraceAddress = {
@@ -177,9 +215,70 @@ export type TriggerTraceEntry = {
   triggered: TriggerTraceActionRecord[];
 };
 
+/** The `reason.message` of the seal-destination refusal an LT1
+ * in-process copy receives when it seals OUTSIDE its appending wave
+ * (server-execution v2 stage C build W3, (α); events.md §4). The
+ * scheduler's event dispatch recognizes it to settle the copy QUIETLY:
+ * the refusal is the invariant working, not a failed commit — the
+ * durable entry is the truth and the drain delivers it. */
+export const LT1_LATE_SEAL_REFUSED = "lt1-late-seal-refused";
+
+/** The serving drain's per-event carriage (see QueuedEvent.served). */
+export type ServedEventDispatch = {
+  firedAt?: { user?: string; session?: string };
+  streamEntry?: { sidecarId: string; index: number; seq: number };
+  /** The EMITTING run's durable event id for a same-wave cascade
+   * (C8d; review 2026-08-11 M2): cell.ts's LT1 same-space emission
+   * queues the emitted event in-process with the emitter's own
+   * `eventId` here, and the dispatch stamp threads it into the wave
+   * run context as `parentEventId` — the fold key that rolls a
+   * cascade child back with its requeued parent. Absent for root
+   * (drain-dispatched) events and for derivation emitters (no
+   * eventId to fold on; a requeued derivation withdraws the entry
+   * with its own contribution). */
+  parentEventId?: string;
+  /** The LT1 same-space in-process copy's APPENDING-WAVE identity
+   * (server-execution v2 stage C build W3, (α); events.md §4's RULED
+   * one-entry-one-completed-run sentence): the EMITTING run's
+   * transaction. Its seal chose the wave that carries this event's
+   * durable entry, so the copy must COMPLETE (seal) into that same wave
+   * or not at all — the SpaceServer's seal destination refuses a copy
+   * sealing into any other wave (`events.lt1LateSealsRefused`), and
+   * the durable entry is then the truth the drain re-runs WITH a
+   * `streamEntry`. Present only on cell.ts's LT1 emission (a
+   * `streamEntry`-less served copy); absent on the drain's copies and
+   * everywhere client-side. */
+  lt1?: { emitterTx: IExtendedStorageTransaction };
+  onFailure?: (
+    outcome: {
+      /** `error`: the handler THREW — the error is the consequence
+       * (events.md §5). `dropped`: no runnable handler exists — §5's
+       * drop predicate, the notice is the consequence. `deferred`: the
+       * handler could not be REACHED yet (a cold-view piece load — the
+       * creation-race shape OW19 warns about): no consequence is
+       * written, the entry stays pending, and a later wave re-drains
+       * it. Deferral is NOT the drop predicate — "the test is 'no
+       * runnable handler', never 'the run raced'". */
+      kind: "error" | "dropped" | "deferred";
+      message: string;
+    },
+  ) => void;
+};
+
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
+  /** The EMITTING run's event id for a CLIENT-side same-wave cascade
+   * echo (independent review M1, 2026-08-11): cell.ts's plain
+   * queueEvent threads it when the send came from within a
+   * speculation-stamped handler run, so the dispatch stamp can mark
+   * the run's navigate capture ATTEMPT-MINTED (the cascade's id is
+   * fresh per attempt and diverges from the server's — see
+   * navigate-context.ts). Deliberately NOT carried on `served`:
+   * `served`'s PRESENCE classifies a no-handler outcome as
+   * deferred-vs-dropped (the drain's cold-view deferral), and a
+   * client echo must keep today's dropped shape. */
+  readonly parentEventId?: string;
   /**
    * Whether `id` was supplied by the caller rather than minted at enqueue. A
    * caller-supplied id is a durable delivery id: the handling's receipt
@@ -244,6 +343,18 @@ export type QueuedEvent = {
    */
   retry: boolean;
   onCommit?: (tx: IExtendedStorageTransaction) => void;
+  /**
+   * Server-execution v2 Phase 3 (events-down): the serving drain's
+   * per-event carriage. `firedAt` is the server-stamped acting identity
+   * the handler runs as (LD1); `streamEntry` locates the durable entry
+   * whose `consequenced` mark rides the handler's own transaction; and
+   * `onFailure` is the drain's hook for the two arms that need a
+   * consequence written OUTSIDE the handler tx — the handler THREW (the
+   * error is the consequence, events.md §5) or the event DROPPED (no
+   * runnable handler — the §5 drop predicate). Success needs no
+   * callback: the mark rode the tx. Absent on every client-side event.
+   */
+  served?: ServedEventDispatch;
   notBefore?: number;
   /**
    * Number of transient commit failures this intent has hit. Drives the

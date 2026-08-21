@@ -28,7 +28,7 @@ describe("google calendar importer e2e", () => {
 
     // 2. Initialize PiecesController
     cc = await PiecesController.initialize({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });

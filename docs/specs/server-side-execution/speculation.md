@@ -26,6 +26,16 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 
 ## 2. What may speculate
 
+- The membership test is the SCHEDULER TELL (RULED, owner 2026-08-07;
+  protocol.md §1 carries the primary statement and the owner's
+  rationale): ONLY scheduler-driven work moves to the server —
+  scheduler-stamped derivation and handler runs are what divert here.
+  Commits OUTSIDE the scheduler — setup/instantiation transactions,
+  imperative creation (with its sanctioned `.pull`-for-round-one
+  flow), UI bindings, widget edits — are the client's authored acts
+  and commit as today. NO creation carve-out: a pattern instantiated
+  within a lift/map/filter is a derived computation like any other,
+  so its first run diverts even at instantiation.
 - Pure structural nodes: freely.
 - Handlers: run locally on fire, writes go to the overlay (events.md §2);
   the committed artifact is the event only.
@@ -73,12 +83,102 @@ On each pushed `derived` commit with `derivedThrough = W` and
 1. Apply the commit to the local store replica (existing path).
 2. Retire overlay entries whose `origin` is `intent(e)` for `e ∈ E` —
    the authoritative consequences (or, for a dropped event, its
-   notice — events.md §5) now exist; the echo's job is done.
+   notice — events.md §5) now exist; the echo's job is done. This is a
+   condition on STATE, not on arrival order (stage C tuning T2,
+   2026-08-18; **RULED 2026-08-18** — ratified as written: a
+   speculative preview of an event the server has already completed
+   has nothing to add and can only mislead): an echo of `e` sealed
+   AFTER `e`'s terminal consequence (consequenced, errored, dropped, or
+   refused) has already arrived at this client — the local dispatch
+   ran late (a load-parked head event, a busy worker) — is jobless on
+   the same grounds and is NOT registered: its writes are dropped
+   before any layer is sealed. A
+   non-idempotent handler's late echo is divergent by construction (it
+   re-toggles the already-served state), and its floor sits at the
+   served commit's seq, above every W reachable until the next authored
+   input, so it would otherwise stand indefinitely and hide the served
+   value (the two-browsers lockdown chip's 48-s / 300-s stalls; #5969's
+   late castVote echo). Impl: `overlay-destination.ts`
+   `#terminalIntents` at `#sealSpeculative`; pinned in
+   `speculation-arrival-gate.test.ts` (the late-echo rule, scripted,
+   with its mutation).
+   *Clarification (2026-08-19, stage C W2.1 — DESCRIPTIVE, the same
+   rule read at its other edge; not a new rule):* the jobless-cascade
+   consequence applies on ARRIVAL too. Retiring `e`'s echo when `e`'s
+   terminal consequence arrives also retires every overlay entry that
+   is a CLIENT CASCADE DESCENDANT of `e` — the echoes of the events
+   `e`'s speculative run itself sent, sealed under client-minted
+   cascade ids (`mintEventId(link, originTx)`, a per-attempt mint —
+   events.md §4) that the server's own run of `e` never mints (it mints
+   its own for the same cascade, and the handler-frame-caused entity
+   ids of the two runs differ likewise), so no mark ever names them and
+   step 3's arrival gate never passes for them: they are jobless on the
+   same grounds as a late cascade echo (W0 l3's "duplicate join" —
+   spec-Alice standing beside the confirmed Alice, forever). Scope,
+   exactly: only entries whose cascade thread (`parentEventId`,
+   recorded at seal) reaches `e` — client-minted descendants of `e`'s
+   speculative run, never a durable entry of its own (a root fire's
+   echo carries no thread; another intent's cascade does not reach
+   `e`); a retired descendant's id joins the jobless set so a LATE
+   grandchild drops at seal. Cost, stated: when the server's LT1 child
+   of `e` did not complete in `e`'s appending wave (events.md §4's
+   purge; the drain delivers it a wave later), the descendant echo goes
+   at `e`'s consequence while the child's own consequence is still a
+   wave away — a visible one-wave flicker, COUNTED
+   (`cascade-echo-retired-unarrived`), not hidden; the owner-level
+   alternative (deterministic cascade ids derived from the parent id +
+   send ordinal on both sides — which would also make the frame-caused
+   entity ids agree, so the arrival gate would carry the echo to the
+   child's own landing) touches this section's per-attempt mint and is
+   NOT taken here. Impl: `overlay-destination.ts` `retireIntent` (the
+   cascade arm) over `OverlayEntry.parentEventId` + `#cascadeParents`;
+   pinned in `speculation-intent-listener.test.ts` (W2.1-1…4 scripted,
+   each with its mutation, + the W2.1 e2e lunch-join shape, RED on the
+   pre-W2.1 tip).
+   **The match, and its carrier (RULED 2026-08-18 — the stage-C design
+   pass, items 5/6, landed with W2):** the match is on the pushed
+   commit's `consequenceOf` — carried to the client as the TRACKED
+   entry's own `consequenced` / `status` / `error` fields (events.md
+   §5's T7 semantics: written as that event's consequence, retiring
+   with the entry at compaction — not a processed-events table), which
+   are SANCTIONED as the client's consequence carrier; `consequenceOf`
+   does NOT go on the wire. Two guards bind: the client reads the
+   tracked entry ONLY — its own terminal fields and, on a drop, its
+   reason for the UI hook — never whole-history and never as a
+   dependency on HISTORY; and the read is always BACKSTOPPED by
+   `W ≥ seq(e)` / `eventWatermark ≥ seq(e)` (item 9: an intent-origin
+   entry whose signal was missed retires on coverage — step 3's sweep
+   serves both origins). **The client keeps a stream subscribed while
+   it has intents outstanding on it** (item 8): the sidecar doc it
+   appended to stays watched — the minimal watch; the `eventWatermark`
+   write on that doc is the delivery vehicle in practice — so the marks
+   arrive; the watch is a NON-REACTIVE storage-notification listener
+   keyed on the outstanding set, outside the scheduler (item 4 — no
+   effect, no transaction, no CFC probe, no demand edge, never a
+   dependency on history). Its cost, as built (W2; the ruling says
+   nothing about cost): a notified check runs in a microtask and
+   costs O(outstanding + hinted indices) — a hint that misses (the
+   index moved) or a change with no index (an append) degrades to a
+   raw backward scan over the entries appended AFTER the tracked one,
+   a plain array walk, O(k) per notification while an intent stays
+   outstanding on a busy shared stream; and the immediate check at
+   `trackIntent` walks the raw array once, O(E), for an id whose entry
+   is not yet present (the T25 re-fire needs it). Impl:
+   `overlay-destination.ts` `trackIntent` / `#checkIntents` over
+   `speculation/doc-notification-listener.ts`; pinned in
+   `speculation-intent-listener.test.ts` (pins 1–11, each with its
+   mutation or OFF witness, plus the review pins) and re-seamed in
+   `event-append-client.test.ts`.
 3. Retire overlay entries whose `origin` is `input` once their authored
-   commit is acked AND `W ≥` that commit's seq — regardless of value
-   agreement (the store wins); keep live-input echoes whose authored
-   commit is still unacked or not yet covered by `W` (the user is
-   mid-typing).
+   commit is acked AND `W ≥` that commit's seq AND — the ARRIVAL GATE
+   (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
+   the entry wrote holds a CONFIRMED value at seq `≥` that floor (the
+   authoritative derivation for the instance this client reads has
+   ARRIVED) — regardless of value agreement (the store wins); keep
+   live-input echoes whose authored commit is still unacked or not yet
+   covered by `W` (the user is mid-typing), and keep echoes whose
+   written instance the store has not yet spoken for (nothing to win
+   with — see the arrival-gate paragraph below).
 4. If any local intents remain un-consequenced (offline queue, in-flight
    events), re-run their speculation against the fresh store state so
    the echo rebases instead of going stale.
@@ -87,6 +187,101 @@ Divergence is silent by default: the authoritative value replaces the
 speculative one in the same render path — the simplest thing, and
 exactly how conflicts render today (RULED 2026-08-02). No flicker
 suppression beyond what rebasing gives.
+
+Stated honestly (RULED 2026-08-07; owed from the wedge round), and
+scoped to step 3's INPUT-origin entries — step 2's intent-origin
+entries retire on their event appearing in `consequenceOf`, which IS
+the authoritative consequence arriving: coverage of an entry's BASIS
+alone carries no by-construction guarantee that the store HOLDS what
+won at withdrawal time (W covers DEMANDED derivations; nothing about
+an entry's own output riding the covering wave is implied). What makes
+coverage-based retirement safe is the serving loop's first-round
+reliability machinery — the demanded-structure loads with their
+counted, retried deferrals (serving-loop.md §7's
+`structureLoadDeferred` / `structureLoadFailures` counters over §1/§3's
+per-cycle load pass) — which makes the demanded derivation exist and
+land. That premise is FALSE for a scoped instance the server never
+serves (before the fan-out run supply, every per-user derivation is
+such an instance — the demand registry keeps no identity for a
+space-scoped root; and after it, any per-user instance the server's
+demand set does not reach — the stage-B walk's coverage then, and under
+serving-loop.md §1's (d′) sentence an instance no client session
+tracks), and coverage without arrival is then the
+retire-to-nothing loop the P7 review recorded as OW32: the echo dropped
+to nothing, the writer — a reader of its own output through the
+scope-narrowing write path — re-derived, re-speculated, retired,
+forever, at ~80 ms cycles bounded per pass only by the scheduler's
+budget.
+
+**The arrival gate (RULED 2026-08-16 — owner, on the fan-out design
+panel's recommendation; landed with fan-out stage A):** step 3
+additionally requires ARRIVAL — every doc instance the entry wrote
+holds a confirmed value at seq ≥ the entry's floor. The panel's
+rationale: the gate is the client's BACKSTOP for demand-walk coverage
+gaps (fan-out design §E residual 4) and the first-demand transient (§E
+residual 1 — a node whose basis W already covers at speculation time
+retires before the server's first wave lands), and it is independent
+of the server half: it treats the SYMPTOM (a never-served instance
+flips to nothing) while stage B's fan-out run supply fixes the CAUSE
+(the instance is never served). Consequences, exact: a served node
+still retires the moment its derived value arrives — the watermark
+write rides the same wave commit, so the covering sweep sees the
+value; an echo whose instance nobody serves persists as the client's
+own value (correct rendering; no durability of per-user derived values,
+of which there was none before either); an unchanged authoritative
+value (equality cutoff — no rewrite, so the doc's seq stays below the
+floor) leaves the echo standing rather than retiring it, which is
+value-identical. Stated as an ASSUMPTION, not a guarantee (fan-out stage
+A's independent review, finding 7): the sweep has no arrival trigger of
+its own — it runs on the watermark sink, the origin-ack observer, and
+chained settlements — so "retires the moment its derived value arrives"
+holds because a wave's derived doc and its watermark advance ride ONE
+frame per session and the replica applies every record of a frame before
+it notifies; a written doc that arrived in a LATER frame than the
+covering watermark, or one the client never watched, keeps its echo
+until the next watermark event (value-identical when the values agree;
+otherwise the echo hides the authoritative value that long). An arrival
+re-sweep is the owed follow-up if that coupling ever loosens (recorded
+in verification-coverage.md's stage-A delta). **LANDED (stage C tuning
+T2, 2026-08-18): the coupling DID loosen — an EXHAUSTED wave carries no
+watermark movement (serving-loop.md §3: its `derivedThrough` is frozen),
+so its derived values arrive DECOUPLED from W, and with the honest flush
+deadline (T3) exhaustion is the routine shape of a busy wave. The
+replica now fires an ARRIVAL wake
+(`ISpaceReplica.speculationArrivalObserver`) at the end of integrating
+any frame that moves a doc's confirmed seq forward, and the overlay
+re-sweeps the space when an arrived doc is one some live entry WROTE.
+The gate's predicates are UNCHANGED — arrival is a second, EARLIER
+trigger, never a relaxation of coverage (`W ≥ floor`) or of the arrival
+gate itself; the sweep re-evaluates both on replica state at every
+trigger, so the wake can only retire an entry the next watermark event
+would have retired anyway (the store has spoken for the instance at seq
+≥ the entry's floor: the derivation the gate waits for HAS landed).
+Pinned in `speculation-arrival-gate.test.ts` (the E2 shape end to end,
+mutation: wake removed → the entry stands until an unrelated commit;
+scripted: an arrival for an unwritten doc sweeps nothing, an arrival
+while `W < floor` retires nothing).** Two riders ride with the
+gate: SUPERSEDE-BY-NEWER — a
+newer entry of the same writer whose WHOLE-DOC ops cover every doc an
+older entry wrote retires the older one at seal (the drop of a lower
+layer under an upper whole-doc layer is invisible; a patch is
+path-relative to the layer beneath and never supersedes), bounding
+entry growth for a never-served instance that keeps changing; and
+OWN-RETIREMENT-IS-NOT-A-TRIGGER — the `integrate` a retiring echo
+produces carries the echo's own transaction as its source, so the
+scheduler treats the flip of an action's own output like its own
+commit and does not re-run the writer for it (a divergent
+authoritative value would otherwise re-derive, re-speculate, retire,
+and flip forever); downstream readers are unaffected. Impl:
+`packages/runner/src/speculation/overlay-destination.ts` (`#sweep`'s
+gate, `#supersedeOlderEntries`), the replica's superseded flip
+(`finalizeSupersededSpeculation` — `IIntegrateNotification.source`),
+and the scheduler's own-source skip (`scheduler/invalidation.ts`);
+pinned in `speculation-arrival-gate.test.ts` (each with its mutation).
+The measured effect that motivated the ruling (the OW32 triage's
+prototype, 2026-08-16): 45–56 k → 55–137 client action runs per
+5-minute two-browser gate, zero non-settling episodes, `runtime:idle`
+resolving, both two-browser gates booting in < 3 s.
 
 ## 5. Offline
 
@@ -109,3 +304,49 @@ commit; committing any handler write; executing an effectful builtin;
 persisting the overlay; sending overlay contents to any server; deciding
 "the server is wrong" (there is no client arbitration — the store wins,
 always, by construction).
+
+### The process-local principle and the export refusal (RULED 2026-08-13)
+
+Overlay entries are PROCESS-LOCAL: their localSeqs exist only in the
+client process, so a pushed commit whose read basis names one carries a
+wire pending-read dependency the server can NEVER resolve — and only
+the client can know that (the client knows which of its layers are
+speculative; the server cannot distinguish a dependency that is never
+coming from one that has not arrived yet). "Sending overlay contents to
+any server" above therefore includes the BASIS, not just the values.
+
+The rule: a commit basis MUST NOT name a speculative layer. The export
+path REFUSES to build one — a loud, terminal, client-side failure
+(`SpeculativeBasisError`; never retried — a retry would re-read the
+same live echo and refuse identically) raised BEFORE the optimistic
+apply, so nothing renders, nothing reverts, and nothing reaches the
+wire. Anything that slips through or pre-exists is caught twice more:
+a `ConflictError` whose commit names a known-speculative layer is
+upgraded to the same terminal refusal at the push boundary, so the
+convergence-retry loop is bounded-and-loud instead of infinite for
+dependencies that cannot resolve. Pre-fix, this exported as
+`pending dependency not resolved` and spun the scheduler's whole retry
+window per event (~43 attempts / 30s observed) against an echo that
+was never going to push.
+
+The ruling that fixed the direction (owner, 2026-08-13):
+
+> since only ui components land here and they don't use intermediate
+> values like this, we're not going to hit it. so let's fix infinitely
+> stuck things but otherwise go for what adds the least amount of
+> complexity. e.g. fine to just outright, but loudly, fail those.
+
+Rebase-to-confirmed / CAS-translation machinery for authored writes
+over speculative bases was CONSIDERED AND REJECTED with that ruling:
+UI components do not commit authored writes derived from intermediate
+speculative values, so the added complexity buys nothing shipped.
+
+One retirement wake completes the ruling's "fix infinitely stuck
+things" half (§4's evaluation detail): a sweep that runs while an
+origin's accept verdict is still in flight skips its entries as
+blocked, and on a then-quiet space the covering watermark event has
+already passed — so the replica signals origin ACKS to the overlay
+(`speculationAckObserver`) and the overlay re-sweeps. Rejected origins
+already reached it through the dependency cascade; accepts had no
+client-side wake, and an entry whose origin's verdict landed after the
+covering watermark stayed pending forever.

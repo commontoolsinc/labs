@@ -44,12 +44,17 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import {
   type FabricConvertibleValue,
   FabricInstance,
+  type FabricPrimitive,
   type FabricValue,
 } from "@/interface.ts";
 import {
@@ -711,10 +716,52 @@ describe("native-conversion", () => {
     });
 
     describe("passes Fabric values through", () => {
-      it("passes a `FabricPrimitive` value through unchanged", () => {
-        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-        expect(shallowFabricFromNativeValue(bytes)).toBe(bytes);
+      // One instance per concrete primitive class, checked against
+      // `codecClasses()` for exact membership. A single class would not do:
+      // the pass-through is a `switch` with one `case` per class and a
+      // throwing `default`, so a class missing a `case` is invisible to any
+      // test that only ever hands it a different one.
+      const PRIMITIVES: readonly FabricPrimitive[] = [
+        new FabricBytes(new Uint8Array([1, 2, 3])),
+        new FabricEpochDay(1n),
+        new FabricEpochNsec(1n),
+        new FabricHash(new Uint8Array(32), "fid1"),
+        new FabricKeyPair(
+          "ExampleAlgorithm",
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+        ),
+        new FabricRegExp(/x/),
+      ];
+
+      it("covers every registered primitive class", () => {
+        const covered = new Set(PRIMITIVES.map((p) => p.constructor));
+        expect(covered.size).toBe(PRIMITIVES.length);
+        for (const cls of codecClasses()) {
+          expect(covered.has(cls)).toBe(true);
+        }
+        expect(codecClasses().length).toBe(PRIMITIVES.length);
       });
+
+      for (const value of PRIMITIVES) {
+        const name = value.constructor.name;
+
+        it(`passes a \`${name}\` through unchanged`, () => {
+          expect(shallowFabricFromNativeValue(value)).toBe(value);
+        });
+
+        // `freeze: false` skips the deep-frozen identity shortcut in
+        // `fabricFromNativeValue()`, which is what the sandbox boundary
+        // passes for an action result, so it reaches the `switch` that
+        // `shallowFabricFromNativeValue()` shares.
+        it(`carries a \`${name}\` nested in an object, unfrozen`, () => {
+          const result = fabricFromNativeValue({ v: value }, false) as {
+            v: unknown;
+          };
+
+          expect(result.v).toBe(value);
+        });
+      }
 
       it("passes a frozen `FabricInstance` value through unchanged", () => {
         const fe = Object.freeze(

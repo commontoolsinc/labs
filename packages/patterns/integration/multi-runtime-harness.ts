@@ -18,6 +18,22 @@
  * process is its own realm. The storage server is self-hosted in-process
  * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
  * `apiUrl` to target a running toolshed instead.
+ *
+ * POSTURE (server-execution v2): the self-hosted standalone server has no
+ * serving host — no ExecutorHost, no serving loop — and its engine reads
+ * this realm's ambient flag, which nothing here enables. Under the ON
+ * posture that combination is a MIXED topology no deployment produces:
+ * the worker clients resolve `EXPERIMENTAL_SERVER_EXECUTION=true` from
+ * env and send event appends, and the in-process engine's OFF-arm
+ * admission refuses them deterministically ("the OFF arm has no
+ * event-append admission"), so every cross-session consequence silently
+ * never happens (first observed on the first CI run of the ON pattern
+ * lanes, 2026-08-21). So when the environment resolves the ON posture
+ * (the canonical env mapping, else the first-party default) and no
+ * explicit `apiUrl` was passed, the harness targets the integration
+ * environment's toolshed (`env.API_URL`) — the real ON topology, serving
+ * loop included — instead of self-hosting. The OFF arm is byte-identical
+ * to before: flag unset or false keeps the in-process standalone server.
  */
 
 import {
@@ -25,9 +41,10 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { env } from "@commonfabric/integration";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
-import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import type {
   RuntimeDiagnosticsSnapshot,
@@ -35,24 +52,6 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from "./multi-runtime-worker.ts";
-
-// The self-hosted storage server lives in THIS realm, while every runtime
-// lives in a worker realm whose Runtime constructor propagates the
-// EXPERIMENTAL_* env flags into the memory module's ambient config. No
-// Runtime is ever constructed in the harness realm, so a flag-ON test run
-// would otherwise leave the SERVER side of the flag off — a client/server
-// capability skew the harness does not intend to model (skewed peers now
-// degrade gracefully, so the suite would silently test flag-off semantics).
-// Mirror toolshed (whose in-process Runtime sets the ambient flag for its
-// memory route) by propagating the canonical env mapping. Re-asserted per
-// harness creation: any Runtime constructed later in this realm re-derives
-// the ambient flag from ITS options and would stomp a load-time value.
-function propagateExperimentalEnvToServerRealm(): void {
-  const experimental = experimentalOptionsFromEnv(Deno.env.get);
-  if (experimental.persistentSchedulerState !== undefined) {
-    setPersistentSchedulerStateConfig(experimental.persistentSchedulerState);
-  }
-}
 
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
@@ -80,9 +79,11 @@ export interface MultiRuntimeHarnessOptions {
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
   /**
-   * Data files the pattern reads with `dataFile()`, as paths on disk. The
-   * bootstrap worker compiles the pattern in its own process, so these travel
-   * with the request rather than being attached here.
+   * Data files to store with the pattern, as paths on disk. A file the pattern
+   * reads with `dataFile()` is attached from that call alone and needs no
+   * entry here; this is for a file the source cannot name. The bootstrap
+   * worker compiles the pattern in its own process, so these travel with the
+   * request rather than being attached here.
    */
   dataFilePaths?: readonly string[];
   /** Optional initial pattern input for the bootstrap-created piece. */
@@ -371,10 +372,18 @@ export class MultiRuntimeHarness {
     if (options.sessions.length === 0) {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
-    propagateExperimentalEnvToServerRealm();
     const spaceName = options.spaceName ?? crypto.randomUUID();
-    const server = options.apiUrl ? undefined : StandaloneMemoryServer.start();
-    const apiUrl = (options.apiUrl ?? server!.url).href;
+    // The ON posture needs a serving host, which the standalone in-process
+    // server does not have — see the header's POSTURE block. Resolve the
+    // posture exactly like a deployed entry point (canonical env mapping,
+    // else the first-party default) and pick the backend accordingly.
+    const serverExecutionOn =
+      experimentalOptionsFromEnv(Deno.env.get).serverExecution ??
+        SERVER_EXECUTION_DEFAULT_ENABLED;
+    const targetUrl = options.apiUrl ??
+      (serverExecutionOn ? new URL(env.API_URL) : undefined);
+    const server = targetUrl ? undefined : StandaloneMemoryServer.start();
+    const apiUrl = (targetUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
     let bootstrap: WorkerClient | undefined;

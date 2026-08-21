@@ -16,10 +16,12 @@ import type { RuntimeProgram } from "./types.ts";
  * listed here; the option is for a path the source cannot state, and for one
  * a caller wants attached to a program that does not read it.
  *
- * `root` grounds every authored name, and so decides the paths `dataFile()`
- * addresses a data file by. Omitted, it is the common directory containing the
- * entry, every test entry, and every data file — the smallest root that can
- * hold them all.
+ * `root` grounds every authored name, so it decides which file on disk a
+ * grounded `dataFile()` path such as `/data/cities.json` reaches, and the
+ * stored name each `dataFilePaths` entry is given. A `dataFile()` path written
+ * relative to the module that reads it reaches the same file under any root.
+ * Omitted, `root` is the common directory containing the entry, every test
+ * entry, and every data file — the smallest root that can hold them all.
  */
 export interface LocalProgramOptions {
   main: string;

@@ -8,6 +8,7 @@
     "FabricEpochNsec",
     "FabricHash",
     "FabricInstance",
+    "FabricKeyPair",
     "FabricPrimitive",
     "FabricSpecialObject",
     "NAME",

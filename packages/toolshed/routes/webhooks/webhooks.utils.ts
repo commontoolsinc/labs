@@ -1,16 +1,17 @@
-import { WebhookConfigSchema } from "@commonfabric/runner";
+import { getLogger } from "@commonfabric/utils/logger";
+import { sha256 } from "@/lib/sha2.ts";
+import { runtime } from "@/index.ts";
+import { identity } from "@/lib/identity.ts";
+import {
+  type IExtendedStorageTransaction,
+  WebhookConfigSchema,
+} from "@commonfabric/runner";
 import {
   assertWebhookCellLinkRefPayload,
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadFromString,
 } from "@commonfabric/runner/shared";
-import { getLogger } from "@commonfabric/utils/logger";
-
-import { runtime } from "@/index.ts";
-import { identity } from "@/lib/identity.ts";
-import { sha256 } from "@/lib/sha2.ts";
-
 const _logger = getLogger("webhooks.utils");
 
 const WEBHOOK_ID_LENGTH = 20;
@@ -234,10 +235,45 @@ export async function sendToStream(
   await streamCell.sync();
   await runtime.storageManager.synced();
 
-  const { error } = await streamCell.runtime.editWithRetry((tx) => {
-    streamCell.withTx(tx).send(payload);
-  });
-  if (error) throw error;
+  if (runtime.experimental.serverExecution !== true) {
+    // OFF arm: byte-for-byte today's behavior — the outer tx's commit
+    // is the acknowledgment.
+    const { error } = await streamCell.runtime.editWithRetry((tx) => {
+      streamCell.withTx(tx).send(payload);
+    });
+    if (error) throw error;
+    return;
+  }
+  // Events-down: the durable acknowledgment rides the send's settle
+  // callback (verdict blocker, 2026-08-12) — the outer tx carries NO
+  // writes (the fire's one authored act is the queued event append),
+  // so its commit alone would report a webhook delivery as successful
+  // while the append was refused, offline, or its server-side handling
+  // failed. The callback settles from the append + authoritative
+  // consequence outcome; an error status there fails the delivery
+  // loudly (the caller's HTTP timeout bounds an offline hold — a held
+  // delivery beats a false 200 under at-least-once webhook semantics).
+  const settled = new Promise<IExtendedStorageTransaction>(
+    (resolve, reject) => {
+      streamCell.runtime.editWithRetry((tx) => {
+        (streamCell.withTx(tx) as unknown as {
+          send(
+            value: unknown,
+            onCommit?: (tx: IExtendedStorageTransaction) => void,
+          ): unknown;
+        }).send(payload, resolve);
+      }).then(({ error }) => {
+        if (error) reject(error);
+      }, reject);
+    },
+  );
+  const ackTx = await settled;
+  const status = ackTx.status();
+  if (status.status === "error") {
+    throw new Error(
+      `webhook delivery failed: ${status.error?.message ?? "send rejected"}`,
+    );
+  }
 }
 
 // Extract space DID from a serialized cell link. `parseCellLink` already

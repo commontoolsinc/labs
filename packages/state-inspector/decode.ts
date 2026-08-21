@@ -1,4 +1,4 @@
-// Decoding stored Fabric values into an inspectable form.
+// Decoding stored `FabricValue`s into an inspectable form.
 //
 // Stored payloads (`revision.data`, `commit.original`, …) come in TWO at-rest
 // formats, BOTH seen in real DBs:
@@ -471,7 +471,7 @@ export function annotate(v: Json, maxDepth = 8): Json {
       continue;
     }
 
-    // A Fabric instance has no enumerable state to walk by property name.
+    // A `FabricInstance` has no enumerable state to walk by property name.
     if (typeof frame.value === "object" && frame.value !== null) {
       assign({ $fabric: toCompactDebugString(frame.value) });
       continue;

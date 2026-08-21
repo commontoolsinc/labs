@@ -2,8 +2,8 @@
 // only in the type system -- no runtime value carries it -- so the generator
 // must not surface it as a schema property or requirement.
 //
-// A concrete fabric-primitive class (`FabricBytes`) emits its
-// fabric-primitive schema type (`{ type: "FabricBytes" }`, matched by
+// A concrete `FabricPrimitive` class (`FabricBytes`) emits its
+// `FabricPrimitive` schema type (`{ type: "FabricBytes" }`, matched by
 // prototype at validation time). A branded type OUTSIDE that vocabulary
 // (the `FabricPrimitive` base here) still emits a structural object schema,
 // with the brand skipped.

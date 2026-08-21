@@ -28,7 +28,7 @@ snapshots or the reactive-interpreter migration.
 
 Every builder factory gets the same internal factory protocol, and every
 factory with a cold-resolvable content-addressed artifact ref becomes a durable
-first-class Fabric value:
+first-class `FabricValue`:
 
 - `PatternFactory` returned by `pattern`;
 - `ModuleFactory` returned by `lift`, `byRef`, and other node-factory builders;
@@ -39,7 +39,7 @@ The callable function itself carries an internal Fabric-factory brand and
 codec-state accessor. It serializes as `Factory@1` and decodes to a callable,
 reference-backed factory shell. There is no `FabricPatternFactory` or
 `NodeFactory` wrapper object. Arbitrary JavaScript functions remain invalid
-Fabric values.
+`FabricValue`s.
 
 Patterns additionally gain lexical closure conversion. A nested authored
 `pattern(...)` is hoisted to module scope. Its callback receives public input as
@@ -227,7 +227,7 @@ The inner pattern's public input remains `{ foo, bar }`. `param2` and
 `otherPattern` are closure params; they do not appear in, merge with, or
 override the public input.
 
-Captures may include reactive values, cells, plain Fabric values, and any of
+Captures may include reactive values, cells, plain `FabricValue`s, and any of
 the three factory kinds. An arbitrary function value is never valid in closure
 params, regardless of where it was declared. A module-scoped helper that the
 hoisted callback references lexically is not a capture; it remains part of the
@@ -283,7 +283,7 @@ already present, so no route permits a second internal curry.
 
 ### Direct factory branding
 
-The factory function is the Fabric value. Trusted builder constructors attach
+The factory function is the `FabricValue`. Trusted builder constructors attach
 a non-enumerable internal brand and a state accessor. The exact symbol names
 are internal; conceptually the dependency-free protocol is:
 
@@ -384,11 +384,11 @@ type LiveFactoryState = {
 type FactoryStateView = LiveFactoryState | FactoryStateV1;
 ```
 
-`LiveFactoryState` is not yet a hashable or encodable Fabric value. During graph
-construction, shared factory traversal maps Cells/Reactives to aliases while
-preserving `rootToken`. After verified module registration, the first Fabric
-boundary calls `sealFactoryState()`: it resolves the factory artifact ref,
-validates and freezes the mapped state, and memoizes one immutable
+`LiveFactoryState` is not yet a hashable or encodable `FabricValue`. During
+graph construction, shared factory traversal maps Cells/Reactives to aliases
+while preserving `rootToken`. After verified module registration, the first
+Fabric boundary calls `sealFactoryState()`: it resolves the factory artifact
+ref, validates and freezes the mapped state, and memoizes one immutable
 `FactoryStateV1`. Encode, hash, equality, and Fabric deep-freeze fail if sealing
 is attempted before the ref exists. Once sealed, the logical state and its hash
 cannot change.
@@ -459,7 +459,7 @@ Encoding performs these checks:
 3. The factory has a cold-resolvable, content-addressed artifact ref. A
    keyless/manual or `host:<n>` pseudo-module factory fails encoding rather
    than embedding executable source or writing a session-only ref.
-4. Pattern params, modifier state, and schemas are valid Fabric values and
+4. Pattern params, modifier state, and schemas are valid `FabricValue`s and
    contain no cycles.
 
 Decode validates the discriminant, ref, schemas, allowed fields, and
@@ -507,7 +507,7 @@ Canonical factories are immutable functional values:
 - equality compares canonical `Factory@1` state, not function identity or
   `Function.prototype.toString()`; and
 - hashing uses the `Factory@1` tag plus the recursively hashed codec state, the
-  same semantic path used for codec-backed Fabric instances.
+  same semantic path used for codec-backed `FabricInstance`s.
 
 The JSON encoder must include branded functions in its codec cycle tracking.
 

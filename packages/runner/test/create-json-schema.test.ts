@@ -472,8 +472,9 @@ describe("create-json-schema", () => {
         },
       );
 
-      // `createJsonSchema()` accepts cells as well as fabric data -- which is
-      // exactly what these cases exercise -- so this cannot be `FabricValue`.
+      // `createJsonSchema()` accepts cells as well as `FabricValue`s -- which
+      // is exactly what these cases exercise -- so this cannot be
+      // `FabricValue`.
       const create = (value: unknown) =>
         createJsonSchema(value, false, runtime);
 

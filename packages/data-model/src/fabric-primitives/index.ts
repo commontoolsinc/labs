@@ -20,11 +20,13 @@ import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDay } from "./FabricEpochDay.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
+import { FabricKeyPair } from "./FabricKeyPair.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
 
 export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";
+export { FabricKeyPair } from "./FabricKeyPair.ts";
 export { FabricEpochNsec } from "./FabricEpochNsec.ts";
 export { FabricEpochDay } from "./FabricEpochDay.ts";
 
@@ -49,6 +51,7 @@ export function codecClasses(): readonly Constructor[] {
 const CODEC_CLASSES: readonly Constructor[] = Object.freeze([
   FabricBytes,
   FabricHash,
+  FabricKeyPair,
   FabricEpochNsec,
   FabricEpochDay,
   FabricRegExp,
@@ -75,6 +78,7 @@ export function schemaTypeOfFabricPrimitive(
   if (value instanceof FabricEpochDay) return "FabricEpochDay";
   if (value instanceof FabricEpochNsec) return "FabricEpochNsec";
   if (value instanceof FabricHash) return "FabricHash";
+  if (value instanceof FabricKeyPair) return "FabricKeyPair";
   if (value instanceof FabricRegExp) return "FabricRegExp";
   throw new Error(
     `Shouldn't happen: \`FabricPrimitive\` subclass without a schema type ` +

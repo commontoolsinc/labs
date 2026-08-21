@@ -13,6 +13,30 @@ import { cellIdentityKey } from "./scope-policy.ts";
 type ElementRuns = Map<string, ElementRun>;
 
 /**
+ * The run-context kind for a list builtin's out-of-band resume-SETTLE
+ * write (map/filter/flatMap's `awaitInputThenSettle`), shared so the
+ * three builtins cannot drift (review thread r3756175819):
+ *
+ * - SERVING posture: `bookkeeping` — the sanctioned internal kind
+ *   (serving-loop.md §3d, RULED 2026-08-05), so the wave admits the
+ *   recovery write instead of refusing an unstamped seal.
+ * - Everything else (flag-ON clients included): `derivation` — the
+ *   settle writes DERIVED content (result := f(input)), and on a
+ *   client that must divert to the speculation overlay like any other
+ *   derivation. Stamped `bookkeeping` it committed authored-class — a
+ *   by-construction violation of the client derivation-commit removal.
+ *   (On the OFF arm the stamp is a no-op either way.)
+ *
+ * The resume-SEED stays `bookkeeping` on both postures: materializing
+ * the empty result container is setup/instantiation-class work under
+ * the scheduler tell (protocol.md §1), not derived content.
+ */
+export const resumeSettleRunKind = (
+  runtime: Runtime,
+): "bookkeeping" | "derivation" =>
+  runtime.servingPosture ? "bookkeeping" : "derivation";
+
+/**
  * Decide what one element contributes to the rebuilt aggregate. `value` is the
  * element's per-element result (a predicate boolean for filter, a result value
  * or array for flatMap); `inputElement` is the corresponding input list entry.
@@ -140,6 +164,15 @@ export function createResumeRepublisher(
     runtime.editWithRetry((tx): Cell<any>[] => {
       const result = isActive() ? getResult() : undefined;
       if (!result) return [];
+      // Out-of-band recovery write (serving-loop.md §3d, RULED
+      // 2026-08-05): the republish runs from a raw promise chain under
+      // trackUntilSettled — no scheduler run stamps it, and a SERVING
+      // runtime's wave refuses unstamped seals. Same bookkeeping stamp
+      // as the list builtins' resume-seed/settle writes.
+      runtime.stampServerRun(tx, {
+        actionId: `list-republish/${result.sourceURI}`,
+        kind: "bookkeeping",
+      });
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
         list?: unknown;
       };

@@ -4,7 +4,10 @@ import {
   isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { unclaimed } from "@commonfabric/memory/fact";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -15,20 +18,47 @@ import type {
 } from "./interface.ts";
 import * as Address from "./transaction/address.ts";
 
-export const create = () => new Changes();
+// A differential merges one notification batch's changes per address
+// IDENTITY — per scope instance (key-vocabulary.md §1 site 8), so two
+// instances of one doc in a batch never collapse into one change entry.
+// `identity` is the session the batch belongs to: the changes arrive
+// scope-NAMED on today's per-session wire, and the owning session's
+// identity maps each name to the same instance the session's reads map to.
+export const create = (identity: ScopeKeyIdentity) => new Changes(identity);
 
 interface Memory {
   get(entry: IMemoryAddress): State | undefined;
 }
 
+type ScopedState = State & Pick<IMemoryAddress, "scope" | "scopeKey">;
+
 const stateScope = (state: State) =>
-  normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
+  normalizeCellScope((state as ScopedState).scope);
 
-const unclaimedWithScope = (state: State): State =>
-  ({ ...unclaimed(state), scope: stateScope(state) }) as State;
+// The explicit scope INSTANCE a state names (server-execution v2 stage A,
+// OW17's instance-keyed replica): a serving replica that holds several
+// instances of one doc snapshots each with its key, so one notification
+// batch keeps them apart and its change addresses carry the instance to
+// the scheduler's per-instance dependency keys. Absent everywhere else
+// (every client, the OFF arm): the batch identity resolves the name, and
+// the change address is byte-identical to before.
+const stateScopeKey = (state: State): string | undefined =>
+  (state as ScopedState).scopeKey;
 
-const toKey = (state: State) =>
-  `/${stateScope(state)}/${state.the}/${state.of}`;
+const valuelessWithScope = (state: State): State =>
+  ({
+    the: state.the,
+    of: state.of,
+    scope: stateScope(state),
+    ...(stateScopeKey(state) !== undefined
+      ? { scopeKey: stateScopeKey(state) }
+      : {}),
+  }) as State;
+
+const toKey = (state: State, identity: ScopeKeyIdentity) =>
+  `/${
+    stateScopeKey(state) ?? resolveScopeKey(stateScope(state), identity)
+  }/${state.the}/${state.of}`;
 const toAddress = (
   state: State,
   path: readonly string[] = [],
@@ -36,6 +66,9 @@ const toAddress = (
   id: state.of,
   type: state.the,
   scope: stateScope(state),
+  ...(stateScopeKey(state) !== undefined
+    ? { scopeKey: stateScopeKey(state) as IMemoryAddress["scopeKey"] }
+    : {}),
   path: [...path],
 });
 
@@ -247,37 +280,44 @@ const addStateChange = (
 };
 
 /**
- * Checks out facts from the given memory so that we can compute changes
- * later on.
+ * Checks out state from the given memory so that we can compute changes
+ * later on. An address the memory does not hold is checked out as its
+ * address alone, carrying no value.
  */
-export const checkout = (memory: Memory, facts: Iterable<State>) => {
-  const checkout = new Checkout();
-  for (const member of facts) {
+export const checkout = (
+  memory: Memory,
+  states: Iterable<State>,
+  identity: ScopeKeyIdentity,
+) => {
+  const checkout = new Checkout(identity);
+  for (const member of states) {
     const address = toAddress(member);
     const existing = memory.get(address);
     if (existing) {
       checkout.add(existing);
     } else {
-      checkout.add(unclaimedWithScope(member));
+      checkout.add(valuelessWithScope(member));
     }
   }
   return checkout;
 };
 
-export const load = (facts: Iterable<State>) => create().set(facts);
+export const load = (states: Iterable<State>, identity: ScopeKeyIdentity) =>
+  create(identity).set(states);
 
 class Checkout {
   #model: Map<string, State> = new Map();
+  constructor(readonly identity: ScopeKeyIdentity) {}
   add(state: State) {
-    this.#model.set(toKey(state), state);
+    this.#model.set(toKey(state, this.identity), state);
   }
 
   compare(memory: Memory) {
-    const changes = new Changes();
-    for (const fact of this.#model.values()) {
-      const before = fact?.is;
-      const after = memory.get(toAddress(fact))?.is;
-      addStateChange(changes, fact, before, after);
+    const changes = new Changes(this.identity);
+    for (const state of this.#model.values()) {
+      const before = state?.is;
+      const after = memory.get(toAddress(state))?.is;
+      addStateChange(changes, state, before, after);
     }
     return changes;
   }
@@ -285,35 +325,36 @@ class Checkout {
 
 class Changes implements IMergedChanges {
   #model: Map<string, IMemoryChange> = new Map();
+  constructor(readonly identity: ScopeKeyIdentity) {}
   *[Symbol.iterator]() {
     yield* this.#model.values();
   }
 
   /**
-   * Adds a new fact to the changeset.
+   * Adds new state to the changeset.
    */
-  set(facts: Iterable<State>) {
-    for (const fact of facts) {
-      addStateChange(this, fact, undefined, fact.is);
+  set(states: Iterable<State>) {
+    for (const state of states) {
+      addStateChange(this, state, undefined, state.is);
     }
     return this;
   }
 
   /**
    * Captures changes between what is in the given memory and
-   * provided facts.
+   * provided state.
    */
-  update(memory: Memory, facts: Iterable<State>) {
-    for (const fact of facts) {
-      const before = memory.get(toAddress(fact))?.is;
-      const after = fact.is;
-      addStateChange(this, fact, before, after);
+  update(memory: Memory, states: Iterable<State>) {
+    for (const state of states) {
+      const before = memory.get(toAddress(state))?.is;
+      const after = state.is;
+      addStateChange(this, state, before, after);
     }
     return this;
   }
 
   add(change: IMemoryChange) {
-    const key = Address.toString(change.address);
+    const key = Address.toString(change.address, this.identity);
 
     if (!this.#model.has(key)) {
       this.#model.set(key, change);

@@ -1,23 +1,81 @@
-import { assert, assertEquals } from "@std/assert";
-import { decode } from "@commonfabric/utils/encoding";
-import { runDenoWebTest, sanitizeDenoWebTestOutput } from "./utils.ts";
+import {
+  assertEquals,
+  AssertionError,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import {
+  HarnessRun,
+  runDenoWebTest,
+  sanitizeDenoWebTestOutput,
+} from "./utils.ts";
+
+// A run built from output written out here rather than from a subprocess. It
+// takes no process to make, and it can carry an ending no real run in this
+// suite reaches.
+function runWith(output: Partial<Deno.CommandOutput> = {}): HarnessRun {
+  const encoder = new TextEncoder();
+  return new HarnessRun("some-project", {
+    code: 1,
+    success: false,
+    signal: null,
+    stdout: encoder.encode("error: Could not load add.test.ts\n"),
+    stderr: encoder.encode("Task test deno run cli.ts *.test.ts\n"),
+    ...output,
+  });
+}
 
 Deno.test("smoke test", async function () {
-  const { success, stdout, stderr } = await runDenoWebTest("success-project");
-  const stdoutText = decode(stdout);
-  const stderrText = decode(stderr);
+  const run = await runDenoWebTest("success-project");
 
-  assert(success, "test successful");
-  assert(/add-sync ... ok/.test(stdoutText), "test output ok");
-  assert(/add-async ... ok/.test(stdoutText), "test output ok");
-  assert(/ok | 2 passed | 0 failed/.test(stdoutText), "test output ok");
-  assert(/deno run/.test(stderrText), "stderr has deno task run");
-  assert(
-    !/experimentalDecorators/.test(stderrText),
+  run.assert(run.success, "test successful");
+  run.assert(/add-sync ... ok/.test(run.stdoutText), "test output ok");
+  run.assert(/add-async ... ok/.test(run.stdoutText), "test output ok");
+  run.assert(/ok | 2 passed | 0 failed/.test(run.stdoutText), "test output ok");
+  run.assert(/deno run/.test(run.stderrText), "stderr has deno task run");
+  run.assert(
+    !/experimentalDecorators/.test(run.stderrText),
     "stderr has no compiler options warning",
   );
-  assert(stderrText.split("\n").length === 2, "stderr has no other messages");
-  assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
+  run.assert(
+    run.stderrText.split("\n").length === 2,
+    "stderr has no other messages",
+  );
+  run.assert(
+    run.stderrText.split("\n")[1] === "",
+    "stderr has no other messages",
+  );
+});
+
+// A harness run can fail for a reason no assertion in this suite anticipates:
+// the browser refuses to boot, a bundle fails, the process is killed. Each of
+// those says what happened on one of the run's two streams, and an assertion
+// that reported only its own words left the reason nowhere.
+Deno.test("a failed assertion carries the whole run", function () {
+  const run = runWith();
+  const error = assertThrows(
+    () => run.assert(run.success, "test successful"),
+    AssertionError,
+  );
+
+  assertStringIncludes(error.message, "test successful");
+  assertStringIncludes(error.message, "some-project");
+  assertStringIncludes(error.message, "code 1");
+  assertStringIncludes(error.message, "Could not load add.test.ts");
+  assertStringIncludes(error.message, "Task test deno run cli.ts *.test.ts");
+});
+
+Deno.test("an assertion that holds says nothing", function () {
+  runWith().assert(true, "test successful");
+});
+
+// No real run in this suite is killed by a signal, so this states one. The
+// transcript names the signal rather than only the exit code it comes with.
+Deno.test("a run the kernel killed names the signal", function () {
+  const transcript = runWith({ code: 137, signal: "SIGKILL" }).transcript();
+
+  assertStringIncludes(transcript, "SIGKILL");
+  assertStringIncludes(transcript, "137");
 });
 
 Deno.test("dependency downloads before the harness boundary are removed", function () {

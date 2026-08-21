@@ -1,4 +1,9 @@
 import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  getServerExecutionConfig,
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
@@ -98,11 +103,17 @@ const seededDocs = (runtime: Runtime): Set<string> => {
   }
   return docs;
 };
-// Scope is part of the key: per-user/per-session instances share an id with
-// the space-scoped doc, and one scope's presence must not suppress another's
-// seed.
-const seedMemoKey = (link: NormalizedFullLink): string =>
-  `${link.space}/${link.scope ?? "space"}/${link.id}`;
+// The scope INSTANCE is part of the key (key-vocabulary.md §1 site 4):
+// per-user/per-session instances share an id with the space-scoped doc, and
+// one instance's presence must not suppress another's seed — at fan-out one
+// USER's presence must not suppress another's. Keys are built from the
+// acting identity via the shared constructor; in the OFF arm that is the
+// runtime's own session.
+const seedMemoKey = (
+  link: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
+): string =>
+  `${link.space}/${resolveScopeKey(link.scope, identity)}/${link.id}`;
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
@@ -696,6 +707,55 @@ export function normalizeAndDiff(
     !isCell(newValue)
   ) {
     const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    // The eager via-user hop (scopes.md §2's MUST, flag-gated so the OFF
+    // arm keeps today's one-hop-per-event behavior): a space→session
+    // narrowing writes CHAINED redirects, space→user→session — ALWAYS
+    // via user, even when the declaration jumps straight to session, so
+    // every chain has the one uniform shape.
+    if (
+      getServerExecutionConfig() &&
+      declaredScope === "session" &&
+      scopeRank(link.scope) < scopeRank("user")
+    ) {
+      const userLink: NormalizedFullLink = { ...link, scope: "user" };
+      return [
+        // Content goes into the session instance.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          scopedLink,
+          newValue,
+          context,
+          options,
+          state,
+          NO_PRECOMPUTED,
+          undefined,
+          isArrayElement,
+        ),
+        // The user-level slot points to the session instance.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          userLink,
+          createSigilLinkFromParsedLink(scopedLink, {
+            base: userLink,
+          }) as unknown,
+          context,
+          options,
+          state,
+        ),
+        // The broader slot points via user.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          link,
+          createSigilLinkFromParsedLink(userLink, { base: link }) as unknown,
+          context,
+          options,
+          state,
+        ),
+      ];
+    }
     return [
       // Content goes into the narrower-scope instance (its missing container
       // structure is created by the storage write, which builds parents for the
@@ -787,7 +847,19 @@ export function normalizeAndDiff(
       // cell skip it — the check would otherwise run on EVERY defaulted-cell
       // serialization, a measurable hot-path cost (the CI perf check caught
       // +22–36% on the CLI integration suites for the unmemoized version).
-      !seededDocs(runtime).has(seedMemoKey(seedTarget))
+      // The memo keys per INSTANCE under the RUN's identity (server-
+      // execution v2 stage A — key-vocabulary.md §1 site 4's audit): a
+      // served per-instance run's tx carries its demand-supplied
+      // identity, so Alice's presence check memoizes under Alice's
+      // instance and never suppresses Bob's seed of HIS default (one
+      // user's presence must not suppress another's). Absent identity —
+      // every client, the OFF arm — resolves the runtime's own, as before.
+      !seededDocs(runtime).has(
+        seedMemoKey(
+          seedTarget,
+          tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+        ),
+      )
     ) {
       // Don't subscribe the serializing action to the seed doc — mirror
       // materializeDerivedInternalCells' read for the same check.
@@ -795,7 +867,12 @@ export function normalizeAndDiff(
         meta: ignoreReadForScheduling,
       }) === undefined;
       if (!absent) {
-        seededDocs(runtime).add(seedMemoKey(seedTarget));
+        seededDocs(runtime).add(
+          seedMemoKey(
+            seedTarget,
+            tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+          ),
+        );
       }
       if (absent) {
         try {
@@ -1366,6 +1443,20 @@ export function normalizeAndDiff(
       });
     }
 
+    // Authoritative container re-assert (round-2 thread 16, the F2
+    // family): an EMPTY (or all-equal-links) array produces no leaf
+    // writes at all — the element walk above has nothing to emit — so
+    // a completion writeback of an equal `[]` against a DOOMED
+    // optimistic overlay would commit only its sibling fields
+    // (pending/requestHash) and the durable result slot stays torn,
+    // exactly the elision the authoritative primitive branch below
+    // exists to prevent. Assert the container itself when the subtree
+    // emitted nothing; identical re-asserts are idempotent at the
+    // store (serving-loop.md §5).
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
+    }
+
     return changes;
   }
 
@@ -1574,6 +1665,46 @@ export function normalizeAndDiff(
           ...childLink,
           scope: childScope,
         };
+        // The eager via-user hop (scopes.md §2's MUST, flag-gated): an
+        // eager space→session redirect chains via user like every other
+        // narrowing write, so the chain shape stays uniform.
+        if (
+          getServerExecutionConfig() &&
+          childScope === "session" &&
+          scopeRank(link.scope) < scopeRank("user")
+        ) {
+          const userLink: NormalizedFullLink = {
+            ...childLink,
+            scope: "user",
+          };
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              userLink,
+              createSigilLinkFromParsedLink(scopedLink, {
+                base: userLink,
+              }) as unknown,
+              context,
+              options,
+              state,
+            ),
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              childLink,
+              createSigilLinkFromParsedLink(userLink, {
+                base: childLink,
+              }) as unknown,
+              context,
+              options,
+              state,
+              currentRecord[key],
+            ),
+          );
+          eagerScopedKeys.add(key);
+          continue;
+        }
         changes.push(
           ...normalizeAndDiff(
             runtime,
@@ -1607,6 +1738,15 @@ export function normalizeAndDiff(
           delete: true,
         });
       }
+    }
+
+    // Authoritative container re-assert — the record-branch twin of the
+    // array branch's (round-2 thread 16): an empty `{}` (or a record of
+    // only unchanged links) emits no per-key writes, so without this a
+    // completion's equal-`{}` result riding a doomed overlay is never
+    // asserted durably. See the array branch for the full rationale.
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
     }
 
     return changes;
@@ -1646,8 +1786,24 @@ export function normalizeAndDiff(
     } // else, i.e. parent is not an array: fall through to the primitive case
   }
 
-  // Handle primitive values and other cases (Object.is handles NaN and -0)
-  if (!Object.is(currentValue, newValue)) {
+  // Handle primitive values and other cases (Object.is handles NaN and -0).
+  //
+  // Authoritative transactions (markAuthoritativeWrites — effect-completion
+  // writebacks under the serving posture) emit equal-value leaves TOO:
+  // `currentValue` was read through the replica's optimistic view, which can
+  // layer a DOOMED sealed overlay (a derivation write a later wave-commit
+  // supersede-drops) over confirmed state — so "already equal" is not
+  // evidence the store holds the value. Eliding a completion's
+  // `inputHash`/`pending` write against such an overlay durably lands
+  // `result present + inputHash stale`, and the next run's memo guard
+  // destroys the just-served value (the completion-visibility wedge, F2).
+  // One nuance this accepts: an authoritative write of `undefined` to an
+  // ABSENT slot materializes it as present-but-undefined instead of
+  // eliding — reads see `undefined` either way.
+  if (
+    !Object.is(currentValue, newValue) ||
+    tx.isAuthoritativeWrites?.() === true
+  ) {
     changes.push({ location: link, value: newValue as FabricValue });
   }
 

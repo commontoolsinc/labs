@@ -75,7 +75,6 @@ export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   "chat-note.test.ts": 0.3,
   "chatbot.test.ts": 0.4,
   "fetch-json.test.ts": 0.4,
-  "group-chat-adoption-bench.test.ts": 0.1,
 };
 // Files at or above this measured duration occupy distinct shards.
 export const PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM = 31;

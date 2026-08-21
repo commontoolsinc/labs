@@ -29,6 +29,11 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
+import {
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -73,23 +78,23 @@ import {
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
-import type {
-  Activity,
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemoryAddress,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  ReadError,
-  StorageTransactionStatus,
-  WriteError,
-  WriterError,
+import {
+  type Activity,
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemoryAddress,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type ReadError,
+  type StorageTransactionStatus,
+  type WriteError,
+  type WriterError,
 } from "./storage/interface.ts";
-import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import {
   excludeReadFromConflict,
   ignoreReadForScheduling,
@@ -1209,6 +1214,16 @@ export type PointerCycleTracker = CompoundCycleTracker<
 export type TraversalContext = {
   tracker: PointerCycleTracker;
   schemaTracker: MapSet<string, SchemaPathSelector>;
+  /**
+   * The acting identity this traversal's schema-tracker keys resolve
+   * scoped addresses against (key-vocabulary.md §1 sites 5–6): coverage
+   * proven for one scope INSTANCE is not coverage of another, so tracker
+   * keys carry the shared scope_key, built from this identity. The
+   * identity arrives with the work — a client traversal supplies its
+   * runtime's own session (`Runtime.scopeKeyIdentity`); the memory
+   * server's query path supplies the querying session's.
+   */
+  scopeKeyIdentity: ScopeKeyIdentity;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
   /**
@@ -1248,6 +1263,7 @@ export type TraversalContext = {
 export function createTraversalContext(
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
   onMissingLinkTarget?: (
@@ -1260,6 +1276,7 @@ export function createTraversalContext(
   return {
     tracker,
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1269,6 +1286,7 @@ export function createTraversalContext(
 }
 
 export function createDefaultTraversalContext(
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
@@ -1284,6 +1302,7 @@ export function createDefaultTraversalContext(
       JSONSchema | undefined
     >(),
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1589,10 +1608,13 @@ function getNormalizedLink(
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
+  // `context` is required: it carries the traversal's acting identity
+  // (scopeKeyIdentity), which no default could supply — identity arrives
+  // with the work, never from ambient state (key-vocabulary.md §3).
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    protected context: TraversalContext = createDefaultTraversalContext(),
+    protected context: TraversalContext,
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
   ) {
@@ -1894,6 +1916,23 @@ export abstract class BaseObjectTraverser {
     if (link?.id === undefined) {
       return false;
     }
+    // OFF-ARM NEUTRALITY (stage E, deliberate): coverage is only ever
+    // consulted for links that DECLARE a scope. The pre-stage-E key here
+    // interpolated `link.scope` raw, so an unscoped link produced an
+    // "undefined" scope segment that never matched the tracker's
+    // normalized entries — the covered-skip paths (which replace a
+    // repeat link's value with `null` in traverseCells mode) never fired
+    // for unscoped links, and consumers of traversed values (the html
+    // reconciler's cell reads) rely on that. Re-keying must not widen
+    // when the skip fires (testing.md §2: the OFF arm stays
+    // byte-identical), so the old never-matches outcome is kept
+    // explicitly. Enabling the coverage memo for unscoped links is a
+    // separate, deliberate change — gated on first resolving the html
+    // reconciler's `get({ traverseCells: true })` value consumption —
+    // never a side effect of re-keying.
+    if (link.scope === undefined) {
+      return false;
+    }
 
     const targetSelector = narrowAndCombineSelectorForLink(
       doc.address.path,
@@ -1904,7 +1943,10 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.scope}/${link.id}`,
+      // Same key construction as getTrackerKey (key-vocabulary.md §1
+      // site 5): coverage proven for one scope instance is not coverage
+      // of another.
+      getTrackerKey(link, this.context.scopeKeyIdentity),
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -2177,14 +2219,38 @@ function reportMissingLinkTarget(
 }
 
 /**
- * Get a string to use as a key for the specified address
- *
- * @param address an IMemorySpaceAddress
+ * Schema-tracker key for an address: one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), built from the traversal's acting
+ * identity via the shared scope_key constructor.
  */
 function getTrackerKey(
-  address: IMemorySpaceAddress,
+  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+  identity: ScopeKeyIdentity,
 ): string {
-  return `${address.space}/${address.scope ?? "space"}/${address.id}`;
+  return schemaTrackerKey(address.space, address.id, address.scope, identity);
+}
+
+/**
+ * Key under which a document's reached selectors are recorded in a schema
+ * tracker: `space/scope_key/id`, one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), the scope_key resolved from the address's
+ * scope and the traversal's acting identity via the shared constructor (an
+ * absent scope resolves to `space`, matching how storage defaults one).
+ *
+ * Every writer of a tracker key builds it here, as does the query side that
+ * looks one up (`toDocKey` in `packages/memory/v2/query.ts`).
+ * `isLinkedDocumentCovered` consults it only for links that DECLARE a
+ * scope: an unscoped link refuses coverage explicitly rather than looking
+ * up a key no writer produces — see the OFF-ARM NEUTRALITY note at that
+ * site for why widening that is a deliberate change, not a tidy-up.
+ */
+export function schemaTrackerKey(
+  space: string,
+  id: string,
+  scope: CellScope | null | undefined,
+  identity: ScopeKeyIdentity,
+): `${string}/${ScopeKey}/${string}` {
+  return `${space}/${resolveScopeKey(scope ?? undefined, identity)}/${id}`;
 }
 
 /**
@@ -2323,10 +2389,10 @@ function followPointer(
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
     if (error.name === "NotFoundError" && error.path.length === 0) {
-      // If the object we're pointing to is a retracted fact, just return undefined.
+      // If the address we're pointing to holds no value, just return undefined.
       logger.info(
         "traverse",
-        () => ["followPointer found missing/retracted fact", valueEntry],
+        () => ["followPointer found missing document", valueEntry],
       );
       // A target absent from the replica may simply never have been pulled —
       // report it for an async load. This read still resolves notFound; the
@@ -2389,7 +2455,7 @@ function followPointer(
       const lastValue = tx.readOrThrow(partialTarget)!;
       // We can continue with the target, but provide the top level target doc
       // to getAtPath.
-      // An assertion fact.is will be an object with a value property, and
+      // A stored document's `is` is an object with a value property, and
       // that's what our schema is relative to.
       const partialTargetDoc = {
         address: partialTarget,
@@ -2410,7 +2476,7 @@ function followPointer(
 
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
-  // An assertion fact.is will be an object with a value property, and
+  // A stored document's `is` is an object with a value property, and
   // that's what our schema is relative to.
   const targetDoc = {
     address: target,
@@ -2431,11 +2497,12 @@ function trackVisitedDoc(
   // and update our targetDoc
   if (selector !== undefined) {
     context.schemaTracker.add(
-      getTrackerKey(target),
+      getTrackerKey(target, context.scopeKeyIdentity),
       internPathSelector(selector),
     );
   }
-  // Load the metadata-linked docs recursively unless we're a retracted fact.
+  // Load the metadata-linked docs recursively unless the address holds no
+  // value.
   if (context.includeMeta) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(
@@ -2461,6 +2528,7 @@ function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
 ): IMemorySpaceAttestation[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
@@ -2487,6 +2555,7 @@ function loadMetaLinkedDoc(
           tx,
           valueEntry,
           schemaTracker,
+          identity,
           manifestEntry.link,
         );
         if (item !== undefined) {
@@ -2512,6 +2581,7 @@ function loadMetaLinkedDoc(
       tx,
       valueEntry,
       schemaTracker,
+      identity,
       linkObj,
     );
     if (item !== undefined) {
@@ -2525,6 +2595,7 @@ function loadMetaLinkedDocFromLink(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
   linkObj: SigilLink,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
@@ -2543,7 +2614,7 @@ function loadMetaLinkedDocFromLink(
   // tracked too, or nothing would re-run this load when it arrives. The
   // read itself is deliberately not a scheduling read: delivery
   // reactivity rides the tracker, not the runner scheduler.
-  const docKey = getTrackerKey(address);
+  const docKey = getTrackerKey(address, identity);
   schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
@@ -2621,7 +2692,7 @@ function loadSchemaDocClosure(
       scope: "space" as const,
       path: [],
     };
-    const key = getTrackerKey(address);
+    const key = getTrackerKey(address, context.scopeKeyIdentity);
     if (context.schemaDocsLoaded.has(key)) continue;
     context.schemaDocsLoaded.add(key);
     // A plain read: loads the document AND records the dependency, so an
@@ -2689,7 +2760,10 @@ export function loadMetaLinkedDocs(
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
 ) {
-  const valueEntryKey = getTrackerKey(valueEntry.address);
+  const valueEntryKey = getTrackerKey(
+    valueEntry.address,
+    context.scopeKeyIdentity,
+  );
   if (context.metaDocsVisited.has(valueEntryKey)) {
     return;
   }
@@ -2712,13 +2786,17 @@ export function loadMetaLinkedDocs(
         currentDoc,
         meta,
         context.schemaTracker,
+        context.scopeKeyIdentity,
       );
       for (const linkedDoc of linkedDocs) {
         // Don't recurse into invalid docs or cid docs
         if (linkedDoc.address.id.startsWith("cid:")) {
           continue;
         }
-        const linkedDocKey = getTrackerKey(linkedDoc.address);
+        const linkedDocKey = getTrackerKey(
+          linkedDoc.address,
+          context.scopeKeyIdentity,
+        );
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
         pendingDocs.push(linkedDoc);
@@ -3224,6 +3302,53 @@ export function createSchemaMemo(): SchemaMemo {
   return new Map();
 }
 
+// The single-identity tripwire on shared schema memos (key-vocabulary.md
+// §5's identity-bound invariant, OW10): `schemaMemoAddressKey` has no
+// identity component, so ONE memo instance may only ever be traversed
+// under ONE identity — schema narrowing memoized under one principal's
+// traversal would otherwise leak into another's (value-bleed). Every
+// sharing scope today is single-identity by construction
+// (`TrackedGraphState.memo` is bound to its manager; the query path's
+// sharedMemo instances are per call); this guard is what keeps a future
+// sharing change from silently becoming value-bleed rather than a loud
+// error. Bindings live in a side table so the memo type stays a plain
+// Map.
+const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
+
+const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
+  // Injective over the pair: JSON escapes every delimiter, and `null`
+  // keeps an ABSENT component distinct from an empty string. A raw
+  // `\0`-joined key let two DISTINCT identities collide (a NUL inside a
+  // segment; undefined vs ""), and a collision here is exactly the
+  // cross-identity sharing this tripwire exists to make loud.
+  JSON.stringify([identity.principal ?? null, identity.sessionId ?? null]);
+
+/**
+ * Bind a shared schema memo to the traversing identity, or throw if it
+ * was already bound to a DIFFERENT one. Called at the one choke point
+ * where a shared memo meets a traversal (the SchemaObjectTraverser
+ * constructor), so no cross-identity sharing path can exist without
+ * tripping it.
+ */
+export function assertSchemaMemoIdentity(
+  memo: SchemaMemo,
+  identity: ScopeKeyIdentity,
+): void {
+  const key = schemaMemoIdentityKey(identity);
+  const bound = schemaMemoIdentityBindings.get(memo);
+  if (bound === undefined) {
+    schemaMemoIdentityBindings.set(memo, key);
+    return;
+  }
+  if (bound !== key) {
+    throw new Error(
+      "shared schema memo traversed under a second identity — sharing " +
+        "one memo across identities is FORBIDDEN (value-bleed; " +
+        "key-vocabulary.md §5's identity-bound invariant)",
+    );
+  }
+}
+
 export class SchemaObjectTraverser<V extends FabricValue>
   extends BaseObjectTraverser {
   private sharedSchemaMemo?: SchemaMemo;
@@ -3231,11 +3356,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    context: TraversalContext = createDefaultTraversalContext(),
+    context: TraversalContext,
     objectCreator?: IObjectCreator<V>,
     sharedSchemaMemo?: SchemaMemo,
   ) {
     super(tx, selector, context, objectCreator);
+    if (sharedSchemaMemo !== undefined) {
+      // OW10: a shared memo binds to its first traversal's identity and
+      // refuses any other (value-bleed tripwire — see
+      // assertSchemaMemoIdentity).
+      assertSchemaMemoIdentity(sharedSchemaMemo, context.scopeKeyIdentity);
+    }
     this.sharedSchemaMemo = sharedSchemaMemo;
   }
 
@@ -3350,7 +3481,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(
-      getTrackerKey(doc.address),
+      getTrackerKey(doc.address, this.context.scopeKeyIdentity),
       internPathSelector(this.selector),
     );
     // Flag the top level read of doc for the scheduler

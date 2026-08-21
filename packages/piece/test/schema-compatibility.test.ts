@@ -83,11 +83,12 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // The identity fields excluded from the comparison are only the content
-  // hashes. The rest of the writer claim and the whole uiContract still name
-  // the real consumer-facing contract, so a change to any of them must still be
-  // rejected. These build two result schemas that differ in exactly one such
-  // field and assert the update is refused.
+  // The identity fields excluded from the comparison are the content hashes
+  // (moduleIdentity/bundleId) and the resolver-dependent file spelling. The
+  // binding path and the whole uiContract still name the real consumer-facing
+  // contract, so a change to either of them must still be rejected. These build
+  // two result schemas that differ in exactly one such field and assert the
+  // update is refused.
   const trustedWriteResult = (
     identity: Record<string, unknown>,
     uiContract: Record<string, unknown>,
@@ -130,7 +131,31 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  it("still rejects a writeAuthorizedBy binding file change", () => {
+  // A writer claim's `file` is the module's source-file spelling, and that
+  // spelling is resolver-dependent: the same module compiles to a different
+  // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
+  // while its content-addressed `moduleIdentity` agrees everywhere (labs#4772).
+  // The runtime authorizes a write on `moduleIdentity` plus the binding `path`
+  // and never on `file`, so a cross-resolver recompile that re-spells only the
+  // `file` — same `moduleIdentity`, same `path`, same `uiContract` — is the same
+  // authorization, and the update is accepted.
+  it("accepts a cross-resolver recompile that only re-spells the writeAuthorizedBy file", () => {
+    const respelled = (file: string): JSONSchema =>
+      trustedWriteResult({ ...baselineIdentity, file }, baselineUiContract);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, respelled("/api/patterns/demo/main.tsx")),
+        pattern({ type: "object" }, respelled("/patterns/demo/main.tsx")),
+      )
+    ).not.toThrow();
+  });
+
+  // `file` carries no authorization signal beyond the content-addressed
+  // `moduleIdentity` (which the runtime re-verifies live) and the binding
+  // `path`, so it is normalized out of the comparison entirely rather than made
+  // spelling-tolerant. Any `file` change is accepted while the `path` and
+  // `uiContract` are unchanged.
+  it("accepts a writeAuthorizedBy binding file change", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(
@@ -145,7 +170,7 @@ describe("piece schema compatibility", () => {
           ),
         ),
       )
-    ).toThrow(/flag: ifc changed/);
+    ).not.toThrow();
   });
 
   it("still rejects a writeAuthorizedBy binding path change", () => {
@@ -1210,7 +1235,7 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
-  it("treats fabric-primitive types as subtypes of object (one-way)", () => {
+  it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.
     expect(() =>
@@ -2187,15 +2212,15 @@ describe("piece schema compatibility", () => {
     }
   });
 
-  describe("fabric-primitive schema vocabulary transitions", () => {
+  describe("`FabricPrimitive` schema vocabulary transitions", () => {
     // The schema generator used to describe a fabric special object
     // structurally: an object schema whose `required` carries the
     // `FabricSpecialObject` nominal brand key. It now emits the
-    // fabric-primitive type name instead. That transition is refused, for
+    // `FabricPrimitive` type name instead. That transition is refused, for
     // pattern evolution too: the structural schema admits values by shape
     // (a plain record carrying the brand key as an own property, or a
     // primitive of another class whose members cover `required`), the
-    // fabric-primitive-typed schema matches by prototype, and a pattern
+    // `FabricPrimitive`-typed schema matches by prototype, and a pattern
     // update rewrites stored data verbatim -- so any such value would
     // survive the update only to be rejected by every subsequent read.
     // See the note in `schemaSubsetIssue`.
@@ -2212,7 +2237,7 @@ describe("piece schema compatibility", () => {
       required: ["blob"],
     });
 
-    it("refuses an argument field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+    it("refuses an argument field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(withField(oldBytes), true),
@@ -2221,10 +2246,10 @@ describe("piece schema compatibility", () => {
       ).toThrow(/type object is not accepted/);
     });
 
-    it("accepts a result field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+    it("accepts a result field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
       // The result direction proves candidate-within-previous: the new
       // schema's population is prototype-matched primitives, and every one
-      // satisfies the old structural contract (fabric-primitive types are
+      // satisfies the old structural contract (`FabricPrimitive` types are
       // subtypes of "object", members are present via `in`, and the brand
       // is exempt for instances). Nothing is stranded, so no allowance is
       // involved -- this holds through the ordinary subset machinery.
@@ -2252,7 +2277,7 @@ describe("piece schema compatibility", () => {
       }
     });
 
-    it("refuses a plain object schema without the brand against a fabric-primitive type", () => {
+    it("refuses a plain object schema without the brand against a `FabricPrimitive` type", () => {
       const plainObject: JSONSchema = {
         type: "object",
         properties: { length: { type: "number" } },

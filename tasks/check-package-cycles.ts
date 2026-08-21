@@ -72,26 +72,22 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
     packages: ["api", "data-model"],
     reason:
       "api's cfc module freezes values with data-model's deep-freeze, while " +
-      "data-model's Fabric value classes are typed by api.",
+      "data-model's `FabricSpecialObject` classes are typed by api.",
   },
   {
     packages: ["memory", "runner"],
     reason:
-      "memory's v2 query planner walks schemas with runner's traverse and " +
-      "builder types, while runner's storage and ACL layers are written " +
-      "against memory's interfaces.",
+      "memory's v2 query planner drives runner's schema traversal through " +
+      "@commonfabric/runner/graph-query, and reaches runner's schema-document " +
+      "registry, while runner's storage and ACL layers are written against " +
+      "memory's interfaces and runner's traversal takes the shared scope_key " +
+      "vocabulary (resolveScopeKey) from @commonfabric/memory/v2.",
   },
   {
     packages: ["html", "runtime-client"],
     reason: "html's main-thread applicator and debug helpers speak the " +
       "runtime-client protocol, while runtime-client's protocol types and " +
       "worker backend are defined in terms of html's VDOM operations.",
-  },
-  {
-    packages: ["cli", "fuse"],
-    reason:
-      "cli mounts and drives fuse, while fuse's cell bridge reads pieces " +
-      "through cli's piece and callable helpers.",
   },
 ];
 

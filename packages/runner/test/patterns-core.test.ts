@@ -15,6 +15,7 @@ import {
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -365,8 +366,10 @@ describe("Pattern Runner - Core", () => {
     const openedElement = result.key("output").key(1).resolveAsCell();
     expect(await runtime.start(openedElement)).toBe(true);
     expect(await openedElement.pull()).toEqual({ doubled: 4 });
-    const link = openedElement.getAsNormalizedFullLink();
-    const resultKey = `${link.space}/${link.scope}/${link.id}` as const;
+    const resultKey = entityKey(
+      openedElement.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
 
     tx = runtime.edit();
     result.withTx(tx).key("values").set([1]);

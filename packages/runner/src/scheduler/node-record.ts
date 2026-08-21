@@ -1,4 +1,5 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type { FanOutNodeState } from "./fan-out.ts";
 import type { Action } from "./types.ts";
 
 export type NodeKind = "computation" | "effect";
@@ -37,6 +38,14 @@ export interface SchedulerNode {
   provisionalDemandPass?: number;
   gate: SchedulerGateState;
   passRuns: number;
+  /** Server-execution v2 fan-out stage B: the node's known-scope
+   * ratchet and per-instance record (scheduler/fan-out.ts). Present ONLY
+   * once the serving loop's demand registry supplied demanders for this
+   * node — never on a client, never in the OFF arm — and dropped when
+   * the node runs as the wave-level fallback again or unsubscribes. The
+   * node itself stays singular (C11b): this is a record ON the node, not
+   * a node per instance. */
+  fanOut?: FanOutNodeState;
 }
 
 export class NodeRegistry {
@@ -57,6 +66,22 @@ export class NodeRegistry {
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
+  /** (d′) — the STANDING, refcounted `demandedWriters` root
+   * kind (design §2.4; serving-loop.md §1's "a demanded instance's
+   * writers hold demand … while any session tracks the instance"): the
+   * writers of instances a client session TRACKS. A third `isDemandRoot`
+   * disjunct beside effects and materializers — NOT `provisionalDemand`
+   * (pass-scoped, one-shot). Held here so every liveness state bundle
+   * (`nodes` is on all of them) sees it with no plumbing. Only the
+   * serving loop's demand pass ever adds to it (through the facade's
+   * enter/leave, bracketed with the liveness notifications); EMPTY off
+   * the serving posture and on every client. Refcounts (per demanded
+   * entity) live in the facade. */
+  readonly demandedWriters = new Set<Action>();
+
+  isDemandedWriter(action: Action): boolean {
+    return this.demandedWriters.has(action);
+  }
 
   register(
     action: Action,

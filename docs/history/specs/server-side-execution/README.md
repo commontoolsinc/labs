@@ -35,7 +35,7 @@ descriptions of current behavior. Operator procedure lives in the
 [server-primary execution runbook](../../../development/server-primary-execution.md).
 
 Related specs: [scheduler v2](../../../specs/scheduler-v2/),
-[persistent scheduler state](../../../specs/persistent-scheduler-state.md),
+[persistent scheduler state](../persistent-scheduler-state.md),
 [content-addressed action identity](../../../specs/content-addressed-action-identity.md),
 [pattern ID retirement](../../specs/pattern-id-retirement.md),
 [memory v2](../../../specs/memory-v2/),

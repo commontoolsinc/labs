@@ -1,0 +1,45 @@
+== c1a-chat-off
+[sender-echo] ctx=chat-series sender arm=OFF n=20 p50=108.4ms p95=156.3ms min=68.2ms max=156.3ms abandoned=0
+[sender-echo] per-event ms: 117.9 70.0 68.2 70.3 73.9 85.1 91.0 80.3 85.7 104.9 108.4 108.0 119.5 142.5 118.0 125.5 138.5 138.4 139.0 156.3
+== c1-chat-on
+[sender-echo] ctx=chat-series sender arm=ON n=20 p50=264.4ms p95=448.3ms min=167.5ms max=448.3ms abandoned=0
+[sender-echo] per-event ms: 193.9 167.5 169.4 179.9 192.9 232.7 233.7 264.8 218.2 263.6 259.4 285.0 292.9 359.8 448.3 405.9 270.7 273.8 308.0 264.4
+== c1b-chat-off
+[sender-echo] ctx=chat-series sender arm=OFF n=20 p50=113.5ms p95=141.0ms min=62.9ms max=141.0ms abandoned=0
+[sender-echo] per-event ms: 131.6 78.9 62.9 72.1 84.4 81.9 78.4 91.2 121.6 113.5 141.0 93.6 98.7 118.2 106.7 124.1 122.1 125.1 130.2 135.6
+== c2-chat-on
+[sender-echo] ctx=chat-series sender arm=ON n=20 p50=165.8ms p95=214.0ms min=100.4ms max=214.0ms abandoned=0
+[sender-echo] per-event ms: 141.8 103.5 100.4 109.1 117.1 123.5 145.0 130.8 144.8 139.0 169.1 165.8 165.9 173.7 209.9 209.1 205.6 208.6 214.0 199.7
+== c2b-chat-off
+[sender-echo] ctx=chat-series sender arm=OFF n=20 p50=109.1ms p95=173.5ms min=75.1ms max=173.5ms abandoned=0
+[sender-echo] per-event ms: 112.8 76.8 82.2 75.1 87.7 76.2 83.1 92.5 95.3 99.8 111.6 101.3 109.1 125.6 116.6 138.9 173.5 173.4 124.0 136.9
+== l1a-lunch-off
+[sender-echo] ctx=lunch guest arm=OFF n=2 p50=68.7ms p95=68.7ms min=21.4ms max=68.7ms abandoned=0
+[sender-echo] ctx=lunch host arm=OFF n=2 p50=210.4ms p95=210.4ms min=63.0ms max=210.4ms abandoned=0
+[sender-echo] per-event ms: 210.4 63.0
+[sender-echo] per-event ms: 68.7 21.4
+== l1-lunch-on
+[sender-echo] ctx=lunch guest arm=ON n=2 p50=159.1ms p95=159.1ms min=40.6ms max=159.1ms abandoned=0
+[sender-echo] ctx=lunch host arm=ON n=2 p50=196.2ms p95=196.2ms min=83.1ms max=196.2ms abandoned=0
+[sender-echo] per-event ms: 196.2 83.1
+[sender-echo] per-event ms: 40.6 159.1
+== l1b-lunch-off
+[sender-echo] ctx=lunch guest arm=OFF n=2 p50=78.5ms p95=78.5ms min=20.2ms max=78.5ms abandoned=0
+[sender-echo] ctx=lunch host arm=OFF n=2 p50=157.1ms p95=157.1ms min=67.8ms max=157.1ms abandoned=0
+[sender-echo] per-event ms: 157.1 67.8
+[sender-echo] per-event ms: 78.5 20.2
+== l2-lunch-on
+[sender-echo] ctx=lunch guest arm=ON n=2 p50=63.2ms p95=63.2ms min=41.7ms max=63.2ms abandoned=0
+[sender-echo] ctx=lunch host arm=ON n=2 p50=163.1ms p95=163.1ms min=76.2ms max=163.1ms abandoned=0
+[sender-echo] per-event ms: 163.1 76.2
+[sender-echo] per-event ms: 63.2 41.7
+== l3-lunch-on
+[sender-echo] ctx=lunch guest arm=ON n=2 p50=181.4ms p95=181.4ms min=52.1ms max=181.4ms abandoned=0
+[sender-echo] ctx=lunch host arm=ON n=2 p50=82.6ms p95=82.6ms min=74.5ms max=82.6ms abandoned=0
+[sender-echo] per-event ms: 52.1 181.4
+[sender-echo] per-event ms: 82.6 74.5
+== l2b-lunch-off
+[sender-echo] ctx=lunch guest arm=OFF n=2 p50=87.5ms p95=87.5ms min=24.6ms max=87.5ms abandoned=0
+[sender-echo] ctx=lunch host arm=OFF n=2 p50=202.9ms p95=202.9ms min=59.5ms max=202.9ms abandoned=0
+[sender-echo] per-event ms: 202.9 59.5
+[sender-echo] per-event ms: 87.5 24.6

@@ -242,9 +242,9 @@ function captureFabricValue(
 }
 
 /**
- * Capture a graph value as immutable Fabric data. Stable child cells become
- * links, while native values and shared references retain their Fabric value
- * semantics.
+ * Capture a graph value as an immutable `FabricValue`. Stable child cells
+ * become links, while native values and shared references retain their
+ * `FabricValue` semantics.
  */
 export function stableFabricValue(value: unknown): FabricValue {
   return captureFabricValue(

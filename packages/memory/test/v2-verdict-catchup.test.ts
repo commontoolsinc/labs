@@ -438,116 +438,6 @@ Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by 
   }
 });
 
-Deno.test("memory v2 server: a verdict precedes fan-out held by scheduler bookkeeping", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-durable-visibility",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-
-  const gate = Promise.withResolvers<void>();
-  const reached = Promise.withResolvers<void>();
-  const completed = Promise.withResolvers<void>();
-  const serverInternals = server as unknown as {
-    runPostCommitSchedulerSideEffects: (
-      ...args: unknown[]
-    ) => Promise<void>;
-    withSpacePublicationLock<T>(
-      space: string,
-      run: () => Promise<T>,
-    ): Promise<T>;
-  };
-  const originalSideEffects = serverInternals.runPostCommitSchedulerSideEffects
-    .bind(server);
-  serverInternals.runPostCommitSchedulerSideEffects = async (...args) => {
-    reached.resolve();
-    await gate.promise;
-    try {
-      return await originalSideEffects(...args);
-    } finally {
-      completed.resolve();
-    }
-  };
-
-  // setup() left foreign novelty for doc:b behind the fan-out timer. This
-  // session's patch gives that document mixed provenance, so its next frame
-  // includes the authoritative post-commit document instead of suppressing
-  // the writer's own echo.
-  const commit = committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-b-gated",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "patch",
-        id: "of:doc:b",
-        patches: [{ op: "add", path: "/value/mine", value: true }],
-      }],
-    },
-  }));
-  await reached.promise;
-
-  const fanoutLockAttempted = Promise.withResolvers<void>();
-  let fanoutEntered = false;
-  const originalPublicationLock = serverInternals.withSpacePublicationLock
-    .bind(server);
-  serverInternals.withSpacePublicationLock = <T>(
-    space: string,
-    run: () => Promise<T>,
-  ) => {
-    fanoutLockAttempted.resolve();
-    return originalPublicationLock(space, async () => {
-      fanoutEntered = true;
-      return await run();
-    });
-  };
-  let fanout: Promise<void> | undefined;
-  try {
-    // Scheduler bookkeeping begins only after the verdict is published.
-    const verdict = assertResponse<{ seq: number }>(
-      shiftMessage(committerMessages),
-    );
-    assertEquals(verdict.ok?.seq, 2);
-    assertEquals(committerMessages.length, 0);
-
-    // An explicit flush uses the same per-space publication lock. It cannot
-    // consume the dirty batch while this transaction still owns the lock.
-    fanout = server.flushSessions([space]);
-    await fanoutLockAttempted.promise;
-    assertEquals(fanoutEntered, false);
-    assertEquals(committerMessages.length, 0);
-  } finally {
-    gate.resolve();
-    try {
-      await Promise.all([commit, completed.promise, fanout]);
-    } finally {
-      serverInternals.withSpacePublicationLock = originalPublicationLock;
-    }
-  }
-
-  assertEquals(fanoutEntered, true);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
-  assertEquals(sync.caughtUpLocalSeq, 1);
-  assertEquals(
-    sync.upserts.map((upsert) => ({
-      id: upsert.id,
-      seq: upsert.seq,
-      doc: upsert.doc,
-    })),
-    [{
-      id: "of:doc:b",
-      seq: 2,
-      doc: { value: { from: "writer", mine: true } },
-    }],
-  );
-  assertEquals(committerMessages.length, 0);
-});
-
 Deno.test("memory v2 server: a failed send rolls back delivery state; the next flush recomputes and delivers", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
@@ -642,91 +532,6 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
   assertEquals(committerMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a throwing refresh evaluation skips that session's frame; a fresh session sees current state", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-eval-rollback",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-a",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:a",
-        value: { value: { from: "committer" } },
-      }],
-    },
-  }));
-  assertEquals(
-    assertResponse<{ seq: number }>(shiftMessage(committerMessages)).ok?.seq,
-    2,
-  );
-
-  // Fail evaluation AFTER the marker was consumed into the frame
-  // (adoption attachment runs inside finishCatchUp, after the counters
-  // advance). The catch must roll the counters back or the marker is
-  // gone: a later successful pass would compute an empty sync, return
-  // null, and strand the client's parked promotion.
-  const serverInternals = server as unknown as {
-    attachAdoptionObservations: (...args: unknown[]) => Promise<void>;
-  };
-  const originalAttach = serverInternals.attachAdoptionObservations
-    .bind(server);
-  let failed = false;
-  serverInternals.attachAdoptionObservations = (...args) => {
-    if (!failed) {
-      failed = true;
-      return Promise.reject(new Error("synthetic evaluation failure"));
-    }
-    return originalAttach(...args);
-  };
-  // The evaluation failure is logged and the session's frame skipped —
-  // no throw surfaces, nothing is delivered to it, and the connection is
-  // left alone (a broken evaluation means a bad commit slipped past the
-  // commit boundary or the database was altered out of band; neither has
-  // a connection-level remedy).
-  await server.flushSessions([space]);
-  assertEquals(committerMessages.length, 0);
-
-  // A fresh session's own watch evaluation sees the current state, parked
-  // novelty included.
-  const freshMessages: ServerMessage[] = [];
-  const fresh = server.connect((message) => freshMessages.push(message));
-  await fresh.receive(encodeMemoryBoundary(HELLO));
-  const freshOpen = expectHelloOk(freshMessages);
-  await fresh.receive(encodeMemoryBoundary({
-    type: "session.open",
-    requestId: "fresh-open",
-    space,
-    session: {},
-    invocation: authInvocation(freshOpen),
-  }));
-  const freshSessionId =
-    assertResponse<{ sessionId: string }>(shiftMessage(freshMessages))
-      .ok!.sessionId;
-  await fresh.receive(
-    encodeMemoryBoundary({
-      ...watchBoth(space, freshSessionId),
-      requestId: "fresh-watch",
-    }),
-  );
-  const watched = assertResponse<{ sync: SessionSync }>(
-    shiftMessage(freshMessages),
-  );
-  assertEquals(
-    watched.ok?.sync.upserts.map((upsert) => upsert.id).toSorted(),
-    ["of:doc:a", "of:doc:b"],
-  );
-});
-
 Deno.test("memory v2 server: transact against a registry-unknown session fails closed", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
@@ -789,6 +594,168 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
     (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
     ["of:doc:b"],
   );
+});
+
+Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-requeue-origin",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
+  // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
+  // write would. The failure is at the CONNECTION delivery layer (below
+  // the evaluation boundary), so the requeue merge runs, and it must not
+  // let the newer origin win: provenance survives only when both batches
+  // agree.
+  const original = committer.refreshDirty.bind(committer);
+  let failed = false;
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
+    if (!failed) {
+      failed = true;
+      server.markSpaceDirty(space, ["space\x00of:doc:b"], {
+        sessionId: committerSessionId,
+        // doc:b's ACTUAL seq: echo suppression fires only when the origin's
+        // seq matches the delivered upsert's seq, so a fabricated seq would
+        // never suppress and the pin would pass even without the provenance
+        // rule it exists to guard. The op must be an ELIDABLE kind
+        // ("set"): a "patch" origin is delivered under CT-1965 regardless,
+        // which would also let the pin pass vacuously.
+        seq: 1,
+        ops: new Map([["space\x00of:doc:b", "set" as const]]),
+      });
+      return Promise.reject(new Error("synthetic fan-out failure"));
+    }
+    return original(...args);
+  };
+
+  let threw = false;
+  try {
+    await server.flushSessions([space]);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+
+  // Recovery: doc:b must fan out to the committer AUTHORITATIVELY — the
+  // consumed batch's unattributed novelty forbids suppressing it as the
+  // committer's own echo.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  assertEquals(
+    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
+    ["of:doc:b"],
+  );
+});
+
+Deno.test("memory v2 server: the verdict leaves within the transact's publication turn; fan-out cannot enter it", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-publication-turn",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Train-side re-pin of #5529's verdict-precedes-fan-out: main's instrument
+  // gated runPostCommitSchedulerSideEffects, machinery this train deleted, so
+  // this test instruments the publication turn itself. The wrapper extends
+  // the transact's own turn tenure: it resolves `turnHeld` after the turn's
+  // body — including the in-lock verdict publication — finishes, then holds
+  // the lock open until the gate opens. The verdict must already be at the
+  // committing session while the turn is still owned, and fan-out must not
+  // be able to enter the turn until it is released.
+  const gate = Promise.withResolvers<void>();
+  const turnHeld = Promise.withResolvers<void>();
+  const fanoutLockAttempted = Promise.withResolvers<void>();
+  let fanoutEntered = false;
+  let transactTurnSeen = false;
+  const serverInternals = server as unknown as {
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
+  };
+  const originalLock = serverInternals.withSpacePublicationLock.bind(server);
+  serverInternals.withSpacePublicationLock = <T>(
+    lockSpace: string,
+    run: () => Promise<T>,
+  ) => {
+    if (!transactTurnSeen) {
+      transactTurnSeen = true;
+      return originalLock(lockSpace, async () => {
+        const result = await run();
+        turnHeld.resolve();
+        await gate.promise;
+        return result;
+      });
+    }
+    fanoutLockAttempted.resolve();
+    return originalLock(lockSpace, async () => {
+      fanoutEntered = true;
+      return await run();
+    });
+  };
+
+  const commit = committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-turn",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+
+  let fanout: Promise<void> | undefined;
+  try {
+    await turnHeld.promise;
+    // The verdict is already at the committing session while its transact
+    // still owns the publication turn.
+    const verdict = assertResponse<{ seq: number }>(
+      shiftMessage(committerMessages),
+    );
+    assertEquals(verdict.ok?.seq, 2);
+    assertEquals(committerMessages.length, 0);
+
+    // Fan-out serializes behind the held turn: the flush attempts the lock
+    // but cannot enter it, and no frame reaches the committer.
+    fanout = server.flushSessions([space]);
+    await fanoutLockAttempted.promise;
+    assertEquals(fanoutEntered, false);
+    assertEquals(committerMessages.length, 0);
+  } finally {
+    gate.resolve();
+    try {
+      await Promise.all([commit, fanout]);
+    } finally {
+      serverInternals.withSpacePublicationLock = originalLock;
+    }
+  }
+
+  // With the turn released, fan-out enters and delivers the parked novelty;
+  // the committer's own accepted doc:a stays echo-suppressed.
+  assertEquals(fanoutEntered, true);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(
+    sync.upserts
+      .map((upsert) => ({ id: upsert.id, seq: upsert.seq, doc: upsert.doc })),
+    [
+      { id: "of:doc:b", seq: 1, doc: { value: { from: "writer" } } },
+    ],
+  );
+  assertEquals(committerMessages.length, 0);
 });
 
 Deno.test("memory v2 server: an evaluation failure skips only that session's frame; later spaces deliver in the same pass", async () => {
@@ -855,62 +822,6 @@ Deno.test("memory v2 server: an evaluation failure skips only that session's fra
   assertEquals(
     observerSync.upserts.map((upsert) => upsert.id),
     ["of:doc:z"],
-  );
-});
-
-Deno.test("memory v2 server: requeue after failure does not resurrect echo suppression for re-dirtied docs", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-requeue-origin",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
-
-  // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
-  // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
-  // write would. The failure is at the CONNECTION delivery layer (below
-  // the evaluation boundary), so the requeue merge runs, and it must not
-  // let the newer origin win: provenance survives only when both batches
-  // agree.
-  const original = committer.refreshDirty.bind(committer);
-  let failed = false;
-  (committer as unknown as {
-    refreshDirty: typeof original;
-  }).refreshDirty = (...args) => {
-    if (!failed) {
-      failed = true;
-      server.markSpaceDirty(space, ["space\x00of:doc:b"], {
-        sessionId: committerSessionId,
-        // doc:b's ACTUAL seq: echo suppression fires only when the origin's
-        // seq matches the delivered upsert's seq, so a fabricated seq would
-        // never suppress and the pin would pass even without the provenance
-        // rule it exists to guard. The op must be an ELIDABLE kind
-        // ("set"): a "patch" origin is delivered under CT-1965 regardless,
-        // which would also let the pin pass vacuously.
-        seq: 1,
-        ops: new Map([["space\x00of:doc:b", "set" as const]]),
-      });
-      return Promise.reject(new Error("synthetic fan-out failure"));
-    }
-    return original(...args);
-  };
-
-  let threw = false;
-  try {
-    await server.flushSessions([space]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
-
-  // Recovery: doc:b must fan out to the committer AUTHORITATIVELY — the
-  // consumed batch's unattributed novelty forbids suppressing it as the
-  // committer's own echo.
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  assertEquals(
-    (effect.effect as SessionSync).upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
   );
 });
 

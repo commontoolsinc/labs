@@ -1,5 +1,7 @@
 // Scheduler reactive retry tests.
 
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   afterEach,
   beforeEach,
@@ -18,6 +20,7 @@ import type {
   ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
 
 describe("reactive retries", () => {
@@ -49,14 +52,21 @@ describe("reactive retries", () => {
       await tx.commit();
       tx = runtime.edit();
 
-      // Count runs; force commit failure each time
+      // Count runs; force commit failure each time. The action reports its
+      // own runs: the run that spends the last of the retry budget resolves
+      // `budgetExhausted`, and the run that a later input change triggers
+      // resolves `retriggered`.
       let attempts = 0;
+      const budgetExhausted = defer();
+      const retriggered = defer();
       const reactiveAction: Action = (actionTx) => {
         attempts++;
         // Read to establish dependency so later changes re-trigger
         source.withTx(actionTx).get();
         // Force commit to fail so scheduler retries
         actionTx.abort("force-abort-for-reactive-retry");
+        if (attempts === MAX_RETRIES_FOR_REACTIVE) budgetExhausted.resolve();
+        if (attempts === MAX_RETRIES_FOR_REACTIVE + 1) retriggered.resolve();
       };
 
       // Subscribe and run immediately
@@ -66,24 +76,27 @@ describe("reactive retries", () => {
         { isEffect: true },
       );
 
-      // Allow retries to process. Idle may resolve before re-queue occurs,
-      // so loop a few times until attempts reach the expected amount.
-      for (let i = 0; i < 20 && attempts < 10; i++) {
-        await runtime.idle();
-      }
+      // The initial run plus its retries spend the whole budget.
+      await budgetExhausted.promise;
+      // The commit of that run is still in flight, and whether to retry is
+      // decided in that commit's continuation. The commit-aware barrier spans
+      // both, so a run past the budget is counted before the assertion reads
+      // the count.
+      await runtime.scheduler.idleWithPendingCommits();
 
-      // MAX_RETRIES_FOR_REACTIVE is 10; expect initial + retries == 10 attempts
-      expect(attempts).toBe(10);
+      expect(attempts).toBe(MAX_RETRIES_FOR_REACTIVE);
 
       // After reaching retry limit, a subsequent input change should re-trigger
       source.withTx(tx).send(2);
       await tx.commit();
       tx = runtime.edit();
 
-      // Wait for the follow-up run
-      await runtime.idle();
+      // Wait for the run the change triggers, then span its commit as well.
+      // The budget is spent, so nothing is retried after that run.
+      await retriggered.promise;
+      await runtime.scheduler.idleWithPendingCommits();
 
-      expect(attempts).toBe(11);
+      expect(attempts).toBe(MAX_RETRIES_FOR_REACTIVE + 1);
     },
   );
 
@@ -314,6 +327,10 @@ describe("reactive retries", () => {
       let action1Attempts = 0;
       let action2Attempts = 0;
       const action2Values: number[] = [];
+      // Action 1 commits on its third run, and action 2 then re-runs against
+      // the value that run wrote. Action 2's second run is the end of that
+      // cascade, and resolves `cascadeComplete`.
+      const cascadeComplete = defer();
 
       // Action 1: reads source, writes intermediate (will fail first 2 times)
       const action1: Action = (actionTx) => {
@@ -333,6 +350,7 @@ describe("reactive retries", () => {
         const val = intermediate.withTx(actionTx).get();
         action2Values.push(val);
         output.withTx(actionTx).send(val + 5);
+        if (action2Attempts === 2) cascadeComplete.resolve();
       };
 
       // Subscribe both actions with correct dependencies
@@ -357,10 +375,16 @@ describe("reactive retries", () => {
         {},
       );
 
-      // Allow all actions to complete (action1 will retry twice)
-      for (let i = 0; i < 20 && action1Attempts < 3; i++) {
-        await output.pull();
-      }
+      // Neither action is an effect, so the scheduler runs one only while
+      // something demands what it writes. The sink holds that demand for the
+      // whole wait: it reaches action 2 through `output`, and action 1 through
+      // action 2's read of `intermediate`.
+      const cancel = output.sink(() => {});
+      await cascadeComplete.promise;
+      // Span the commit of action 2's second run, so a run past the cascade is
+      // counted before the assertions read the counters.
+      await runtime.scheduler.idleWithPendingCommits();
+      cancel();
 
       // Verify action1 ran 3 times (2 aborts + 1 success)
       expect(action1Attempts).toBe(3);

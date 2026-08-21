@@ -42,8 +42,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * The nominal brand key declared on `FabricSpecialObject`. It exists only in
  * the type system — a runtime instance never carries the key; `instanceof
  * FabricSpecialObject` is its runtime form. Schema `required` presence
- * checks must therefore treat this key as satisfied by any fabric value
- * rather than probing for it with `in`.
+ * checks must therefore treat this key as satisfied by any
+ * `FabricSpecialObject` rather than probing for it with `in`.
  */
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
@@ -87,7 +87,7 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
-/** Abstract base class for fabric primitive types. */
+/** Abstract base class for `FabricPrimitive` types. */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
 export interface FabricPrimitiveConstructor {
@@ -216,6 +216,53 @@ export interface FabricRegExpConstructor {
 export declare const FabricRegExp: FabricRegExpConstructor;
 
 /**
+ * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
+ * a primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * An instance either holds handles -- two `CryptoKey`s, whose material this
+ * realm may have no way to reach -- or holds material, the two keys as bytes.
+ * `hasMaterial` says which, and every accessor belonging to the other arm
+ * throws.
+ */
+export interface FabricKeyPair extends FabricPrimitive {
+  readonly algorithm: string;
+  readonly hasMaterial: boolean;
+
+  /**
+   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
+   * object on each call, so a caller may do as it likes with it; the two
+   * `CryptoKey`s within it are this instance's own, and are the same two
+   * objects on every call. Throws when this instance holds material.
+   */
+  readonly cryptoKeyPair: CryptoKeyPair;
+
+  /** The public key's handle. Throws when this instance holds material. */
+  readonly publicCryptoKey: CryptoKey;
+
+  /** The private key's handle. Throws when this instance holds material. */
+  readonly privateCryptoKey: CryptoKey;
+
+  /** The public key's bytes. Throws when this instance holds handles. */
+  readonly publicKeyBytes: FabricBytes;
+
+  /** The private key's bytes. Throws when this instance holds handles. */
+  readonly privateKeyBytes: FabricBytes;
+}
+
+export interface FabricKeyPairConstructor {
+  new (pair: CryptoKeyPair): FabricKeyPair;
+  new (
+    algorithm: string,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
+  ): FabricKeyPair;
+  prototype: FabricKeyPair;
+}
+
+export declare const FabricKeyPair: FabricKeyPairConstructor;
+
+/**
  * Structured state for constructing a `FabricError`. The fixed-schema slots
  * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
  * whose keys must not collide with the slot names.
@@ -239,7 +286,7 @@ export type FabricErrorState = {
 };
 
 /**
- * An error carried as fabric data. Extends `FabricInstance` (not
+ * An error carried as a `FabricValue`. Extends `FabricInstance` (not
  * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
  * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
  * rather than a leaf.
@@ -299,13 +346,13 @@ export type FabricValue =
   | FabricPlainObject
   | undefined;
 
-/** A fabric value other than `null` or `undefined`. */
+/** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** Read-only array of fabric values. */
+/** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
-/** Read-only object/record of fabric values. */
+/** Read-only object/record of `FabricValue`s. */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
 
@@ -1815,12 +1862,13 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 export type MutableJSONValue = Mutable<JSONValue>;
 
 /**
- * Fabric-primitive validation types -- a non-standard addition to the JSON
+ * `FabricPrimitive` validation types -- a non-standard addition to the JSON
  * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
  * class from the data-model, and a value matches by prototype (`instanceof`),
- * not by structure. `"object"` also accepts these values -- every fabric
- * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
- * a `"number"` schema -- so schemas that predate this vocabulary keep working.
+ * not by structure. `"object"` also accepts these values -- every
+ * `FabricPrimitive` is a subtype of `"object"` the way an `"integer"` value
+ * satisfies a `"number"` schema -- so schemas that predate this vocabulary keep
+ * working.
  */
 export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
   [
@@ -1828,6 +1876,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricEpochDay",
     "FabricEpochNsec",
     "FabricHash",
+    "FabricKeyPair",
     "FabricRegExp",
   ] as const,
 );
@@ -2938,11 +2987,16 @@ export type CompileAndRunFunction = <T = any, S = any>(
 /**
  * Read an attached data file's text.
  *
- * `path` is the file's root-relative path within the deployed source package —
- * the same spelling `cf piece getsrc` writes it at, and the same one passed to
- * `--datafile`. A data file belongs to the package rather than to any one
- * module, so the path is absolute within the package and does not resolve
- * relative to the caller.
+ * `path` resolves against the module that reads it: `words.txt` and
+ * `./words.txt` both name the file beside this module, and
+ * `../shared/words.txt` the one above it. The same source therefore names the
+ * same file whichever directory the program was assembled from, and a
+ * sub-pattern names its own data without knowing where the package was rooted.
+ *
+ * A path beginning with `/` is grounded at the package root instead, so
+ * `/data/cities.json` is that path within the deployed source package — the
+ * spelling `cf piece getsrc` writes it at, and the one `--datafile` attaches
+ * it under.
  *
  * The bytes travel with the pattern's code in the same content-addressed
  * closure, so this reads memory rather than storage: it is synchronous, it

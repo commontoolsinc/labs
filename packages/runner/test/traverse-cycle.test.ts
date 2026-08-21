@@ -3,7 +3,6 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -17,6 +16,7 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   CompoundCycleTracker,
+  createDefaultTraversalContext,
   IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
@@ -33,6 +33,13 @@ import {
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
@@ -40,7 +47,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function storeWith(
@@ -49,12 +60,10 @@ function storeWith(
 ): Map<string, Revision<State>> {
   const store = new Map<string, Revision<State>>();
   const entity = docUri as Entity;
-  // hashOf only hashes { the, of }, so a cyclic value here is fine.
   store.set(`${entity}/${TYPE}`, {
     the: TYPE,
     of: entity,
     is: { value },
-    cause: hashOf({ the: TYPE, of: entity }),
     since: 1,
   });
   return store;

@@ -15,14 +15,14 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // does not: the read projects to `undefined`, which is what the `Date`
   // mapping used to do to every value read through the schema its own TS type
   // generates.) These deliberately stay `"object"` rather than adopting the
-  // fabric-primitive type names below: a field authored against a NATIVE TS
+  // `FabricPrimitive` type names below: a field authored against a NATIVE TS
   // type can hold a raw native value on the way into the fabric boundary, and
-  // the fabric-primitive types validate by prototype only.
+  // the `FabricPrimitive` types validate by prototype only.
   Date: { type: "object" },
   RegExp: { type: "object" },
   Uint8Array: { type: "object" },
-  // Fields authored against the fabric-primitive classes themselves emit the
-  // fabric-primitive schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  // Fields authored against the `FabricPrimitive` classes themselves emit
+  // the `FabricPrimitive` schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   // `@commonfabric/api`): a value matches by prototype, not by structure.
   // Guarded in `supportsType` by the `FabricSpecialObject` brand so an
   // unrelated user type sharing a name keeps its structural schema.
@@ -30,6 +30,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   FabricEpochDay: { type: "FabricEpochDay" },
   FabricEpochNsec: { type: "FabricEpochNsec" },
   FabricHash: { type: "FabricHash" },
+  FabricKeyPair: { type: "FabricKeyPair" },
   FabricRegExp: { type: "FabricRegExp" },
   // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },
@@ -167,7 +168,9 @@ export class NativeTypeFormatter implements TypeFormatter {
     return type.aliasSymbol;
   }
 
-  /** Whether the name is one of the fabric-primitive schema-vocabulary names. */
+  /**
+   * Whether the name is one of the `FabricPrimitive` schema-vocabulary names.
+   */
   public static isFabricPrimitiveTypeName(
     typeName: string | undefined,
   ): boolean {
@@ -177,7 +180,7 @@ export class NativeTypeFormatter implements TypeFormatter {
   /**
    * Whether the type carries the `FabricSpecialObject` nominal brand
    * (directly or by inheritance). This is what makes a type named e.g.
-   * `FabricBytes` actually BE the fabric-primitive class rather than an
+   * `FabricBytes` actually BE the `FabricPrimitive` class rather than an
    * unrelated user type that happens to share the name. Both this formatter's
    * `supportsType` and named-type hoisting (`getNamedTypeKey`,
    * `type-utils.ts`) classify by it, so an unbranded name-sharer keeps its

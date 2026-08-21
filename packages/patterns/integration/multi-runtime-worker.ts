@@ -244,7 +244,7 @@ const handlers: Record<
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
-      spaceName: spaceName as string,
+      space: spaceName as string,
     });
     if (diagnostics === true) {
       const scheduler = controller().runtime.scheduler;

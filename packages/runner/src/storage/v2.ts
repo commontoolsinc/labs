@@ -6,7 +6,6 @@ import {
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { aclDocId } from "@commonfabric/memory/acl";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
 import type { Entity } from "@commonfabric/memory/interface";
 import {
   type AuthorizationError as IAuthorizationError,
@@ -19,19 +18,21 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import {
+  canResolveScopeKey,
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
+  DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
   type EntityIdListOptions,
   type EntityIdListResult,
   getCommitPreconditionsConfig,
-  getPersistentSchedulerStateConfig,
+  getServerExecutionConfig,
   type PatchOp,
-  type SchedulerActionSnapshotQuery,
-  type SchedulerObservationCommit,
-  type SchedulerSnapshotListResult,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -68,6 +69,7 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import { entityKey } from "../scheduler/keys.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -75,7 +77,6 @@ import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
-  IMemorySpaceAddress,
   IMergedChanges,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
@@ -90,12 +91,27 @@ import type {
   PullError,
   PushError,
   Result,
+  SealedCommitVerdict,
+  SealedNativeCommit,
   State,
   StorageNotification,
   StorageTransactionRejected,
   TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
+import {
+  type EventAppendOutcome,
+  type EventAppendPacing,
+  EventAppendQueue,
+  type EventAppendQueueStore,
+  memoryEventAppendQueueStore,
+  type QueuedEventAppend,
+} from "./event-append-queue.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+} from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
   isMergeableOpRead,
@@ -105,12 +121,7 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-} from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   createStorageAddressResolver,
@@ -270,6 +281,27 @@ export function dataURISyncKey(identity: {
 
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+/**
+ * Placeholder entity for a conflict descriptor that names no entity. A
+ * retrier compares against it rather than pulling it.
+ */
+export const UNKNOWN_CONFLICT_ENTITY = "of:unknown" as URI;
+
+/**
+ * Names the entity a commit's conflict descriptor is about: the first
+ * operation that addresses one. A SQLite operation carries no entity
+ * identifier, so a commit of nothing but SQLite writes names
+ * {@link UNKNOWN_CONFLICT_ENTITY} instead.
+ */
+export const conflictEntityOf = (commit: ClientCommit): URI => {
+  for (const operation of commit.operations) {
+    if (operation.op !== "sqlite") {
+      return operation.id as URI;
+    }
+  }
+  return UNKNOWN_CONFLICT_ENTITY;
+};
 
 const activeCommitPreconditions = (
   preconditions: readonly CommitPrecondition[] | undefined,
@@ -546,6 +578,27 @@ export interface Options {
   /** Space authority used only for fresh named-space ACL genesis. The durable
    *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
+  /** The event-intent queue's store seam (server-execution v2 Phase 3;
+   *  events.md §5; LT9 re-ruled 2026-08-15: PROCESS-LIFETIME — reload
+   *  survival is a non-goal this round). Absent = one in-memory store per
+   *  manager, shared across its replicas, so an in-process replica
+   *  replacement carries the predecessor's undischarged intents to the
+   *  successor. Tests inject their own to observe or fail the store. */
+  eventAppendQueueStore?: EventAppendQueueStore;
+  /** OW27 (server-execution v2 Phase 7): the client event-append queue's
+   *  per-stream send pacing — pace-never-drop, README §3.8. Absent = the
+   *  default posture (`DEFAULT_EVENT_APPEND_PACING`); `false` = unpaced.
+   *  Lives only in the flag-gated append path (the OFF arm never
+   *  constructs the queue). */
+  eventAppendPacing?: EventAppendPacing | false;
+  /** Server-execution v2 Phase 5: declares this manager a SERVING
+   *  manager whose home space is `servingHomeSpace`. Providers opened
+   *  for OTHER spaces refuse scoped (user/session) reads fail-closed
+   *  (protocol.md §2's grant-scoped read design, RULED 2026-08-13) —
+   *  a serving runtime's foreign scoped read would otherwise resolve
+   *  against the delegating service envelope and silently read an
+   *  empty instance. Absent on every non-serving manager. */
+  servingHomeSpace?: MemorySpace;
 }
 
 /**
@@ -728,40 +781,15 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
         ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
         : read
     );
-  const needsCommit = hasStack(commit.reads.pending);
-  const needsBatch =
-    commit.schedulerObservationBatch?.some((entry) =>
-      hasStack(entry.reads.pending)
-    ) === true;
-  if (!needsCommit && !needsBatch) {
+  if (!hasStack(commit.reads.pending)) {
     return commit;
   }
   return {
     ...commit,
-    ...(needsCommit
-      ? {
-        reads: {
-          confirmed: commit.reads.confirmed,
-          pending: scalarizeReads(commit.reads.pending),
-        },
-      }
-      : {}),
-    ...(needsBatch
-      ? {
-        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
-          (entry) =>
-            hasStack(entry.reads.pending)
-              ? {
-                ...entry,
-                reads: {
-                  confirmed: entry.reads.confirmed,
-                  pending: scalarizeReads(entry.reads.pending),
-                },
-              }
-              : entry,
-        ),
-      }
-      : {}),
+    reads: {
+      confirmed: commit.reads.confirmed,
+      pending: scalarizeReads(commit.reads.pending),
+    },
   };
 };
 
@@ -805,6 +833,10 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
+  #eventAppendQueueStore?: EventAppendQueueStore;
+  #eventAppendPacing?: EventAppendPacing | false;
+  /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
+  #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -859,6 +891,16 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
+    // ONE store per manager (verdict blocker, 2026-08-12 / LT9): the
+    // store must outlive any single SpaceReplica, or a provisional-replica
+    // replacement hands the new queue a FRESH private store and the old
+    // queue's undischarged user intents vanish in-process. That is the
+    // one persistence class the queue has (process-lifetime; LT9
+    // re-ruled 2026-08-15 — see event-append-queue.ts).
+    this.#eventAppendQueueStore = options.eventAppendQueueStore ??
+      memoryEventAppendQueueStore();
+    this.#eventAppendPacing = options.eventAppendPacing;
+    this.#servingHomeSpace = options.servingHomeSpace;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -951,11 +993,33 @@ export class StorageManager implements IStorageManager {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
   }
 
+  /**
+   * The manager's own authenticated session identity (IStorageManager
+   * contract): every provider session authenticates as `this.as` and mounts
+   * with `#sessionId`, so this pair is exactly what the memory server
+   * resolves this manager's scoped operations against.
+   */
+  scopeKeyIdentity(): ScopeKeyIdentity {
+    return { principal: this.as.did(), sessionId: this.#sessionId };
+  }
+
+  /** IStorageManager (server-execution v2 Phase 4): first-open observer
+   * — the flag-ON client effects channel subscribes per space through
+   * it. Assigned post-construction by the Runtime; undefined otherwise. */
+  spaceOpenObserver?: (space: MemorySpace) => void;
+
+  /** IStorageManager (Phase 4): the currently-open spaces, for the
+   * effects channel's construction-time sweep. */
+  openedSpaces(): MemorySpace[] {
+    return [...this.#providers.keys()];
+  }
+
   open(space: MemorySpace): IStorageProvider {
     // A manager reused after close() starts a new session; retention
     // follows it.
     this.#schemaRegistryLease ??= acquireSchemaRegistryLease();
     let provider = this.#providers.get(space);
+    const firstOpen = !provider;
     if (!provider) {
       // Session principal drives user/session scoped storage. Even when we have
       // a derived space key for named spaces, the connection must authenticate
@@ -967,6 +1031,12 @@ export class StorageManager implements IStorageManager {
         space,
         settings: this.#settings,
         subscription: this.#subscription,
+        scopeKeyIdentity: () => this.scopeKeyIdentity(),
+        // Phase 5's producer-side foreign-scoped-read refusal: only a
+        // serving manager sets a home space, and only its FOREIGN
+        // providers refuse (see Options.servingHomeSpace).
+        refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
+          this.#servingHomeSpace !== space,
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -984,8 +1054,22 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        eventAppendQueueStore: this.#eventAppendQueueStore,
+        eventAppendPacing: this.#eventAppendPacing,
       });
       this.#providers.set(space, provider);
+    }
+    if (firstOpen && this.spaceOpenObserver !== undefined) {
+      // Deferred a microtask: the observer subscribes cells, which
+      // re-enters open() and the sync machinery — never re-entrantly
+      // inside the first open call.
+      queueMicrotask(() => {
+        try {
+          this.spaceOpenObserver?.(space);
+        } catch (error) {
+          console.warn("spaceOpenObserver threw", error);
+        }
+      });
     }
     return provider;
   }
@@ -1252,6 +1336,20 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * INBOUND settlement only (server-execution v2 stage F): the serving
+   * loop's wave-settle barrier. Awaits watch refreshes and update
+   * processing across providers, but NOT commit settlement — a sealed
+   * commit settles at the wave commit the loop performs after settling,
+   * so the full `synced()` would deadlock against it (see
+   * SpaceReplica.inputSynced).
+   */
+  async inputSynced(): Promise<void> {
+    await Promise.all(
+      [...this.#providers.values()].map((provider) => provider.inputSynced()),
+    );
+  }
+
+  /**
    * A throwable `AuthorizationError` when `space` is under a permanent
    * authorization denial (an ACL shortfall, an audience or protocol mismatch),
    * or undefined when it is authorized or was never opened. Scoped to one space
@@ -1308,11 +1406,17 @@ export class StorageManager implements IStorageManager {
     }
   }
 
-  shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
+  shouldPullDoc(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
     if (hasDataUriScheme(id)) {
       return false;
     }
-    const key = `${space}\0${docKey(id, scope)}`;
+    const instance = this.#foreignInstanceKey(scope, identity);
+    const key = `${space}\0${this.#pullKickKey(id, scope, instance)}`;
     if (this.#docPullKicks.has(key)) {
       return false;
     }
@@ -1325,11 +1429,63 @@ export class StorageManager implements IStorageManager {
       id,
       type: DOCUMENT_MIME as MIME,
       scope,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
     }) === undefined;
   }
 
-  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
-    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
+  retractDocPullKick(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    this.#docPullKicks.delete(
+      `${space}\0${
+        this.#pullKickKey(id, scope, this.#foreignInstanceKey(scope, identity))
+      }`,
+    );
+  }
+
+  /** Pull-kick keys are per scope INSTANCE (key-vocabulary.md §5's
+   * M4-coupled list, stage F): name-keyed, A's kick suppressed B's pull
+   * and B's doc never loaded at cardinality > 1. Resolved against the
+   * manager's own identity — partition-unchanged at cardinality 1
+   * (key-vocabulary.md §2) — or the explicit foreign instance a served
+   * per-instance read names (server-execution v2 stage A). */
+  #pullKickKey(id: URI, scope?: CellScope, instance?: ScopeKey): string {
+    return `${
+      instance ?? resolveScopeKey(scope, this.scopeKeyIdentity())
+    }\0${id}`;
+  }
+
+  /**
+   * The explicit instance a read under `identity` names when — and only
+   * when — it differs from this manager's own resolution of `scope`
+   * (server-execution v2 stage A — the runner's explicit-instance read):
+   * a served per-instance run's read of a scoped doc names THAT
+   * principal's instance on the wire and in the replica; an own-identity
+   * read (every client, the OFF arm, and a served run whose identity IS
+   * the service's) names nothing and keeps the fast own-instance path.
+   * Undefined for `space` (one instance) and for a scope the identity
+   * cannot resolve (the anonymous-session name fallback).
+   */
+  #foreignInstanceKey(
+    scope: CellScope | undefined,
+    identity: ScopeKeyIdentity | undefined,
+  ): ScopeKey | undefined {
+    if (identity === undefined) return undefined;
+    const name = normalizeCellScope(scope);
+    if (name === "space" || !canResolveScopeKey(name, identity)) {
+      return undefined;
+    }
+    const instance = resolveScopeKey(name, identity);
+    const own = this.scopeKeyIdentity();
+    if (
+      canResolveScopeKey(name, own) && resolveScopeKey(name, own) === instance
+    ) {
+      return undefined;
+    }
+    return instance;
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1340,14 +1496,25 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
-  // In-flight document loads keyed `space/scope/id` (the scheduler's
-  // entityKey format). Refcounted: concurrent syncCell calls for the same
+  // In-flight document loads keyed `space/scope_key/id` (the scheduler's
+  // entityKey format — one entry per scope INSTANCE, key-vocabulary.md §1
+  // site 7: two instances of one doc are two loads, and collapsing them
+  // would make one waiter observe another's failure). Keys are BUILT with
+  // entityKey so the strings cross-match the scheduler's
+  // (collectPendingLoadParkKeys correlates the two maps); both sides
+  // resolve against this manager's own session identity.
+  // Refcounted: concurrent syncCell calls for the same
   // document share one entry. Waiters resolve when the count returns to zero
   // — whether the load produced a value or found the document absent.
   #pendingLoads = new Map<string, {
     count: number;
     generation: number;
-    address: { space: MemorySpace; scope: CellScope; id: URI };
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    };
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
@@ -1359,9 +1526,17 @@ export class StorageManager implements IStorageManager {
   #loggedSyncFailures = new Set<string>();
 
   private registerPendingLoad(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      /** The explicit instance an instance-named load targets (stage A);
+       * the key — and the address the scheduler's park machinery
+       * cross-matches — is then per THAT instance. */
+      scopeKey?: ScopeKey;
+    },
   ): (failure?: unknown) => void {
-    const key = `${address.space}/${address.scope}/${address.id}`;
+    const key = entityKey(address, this.scopeKeyIdentity());
     const entry = this.#pendingLoads.get(key) ??
       {
         count: 0,
@@ -1412,6 +1587,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace;
     scope: CellScope;
     id: URI;
+    scopeKey?: ScopeKey;
   }[] {
     return [...this.#pendingLoads.values()].map((entry) => entry.address);
   }
@@ -1469,7 +1645,10 @@ export class StorageManager implements IStorageManager {
     this.#subscription.unsubscribe(subscription);
   }
 
-  async syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
+  async syncCell<T>(
+    cell: Cell<T>,
+    options?: { scopeKeyIdentity?: ScopeKeyIdentity },
+  ): Promise<Cell<T>> {
     const { space, id, schema, scope } = cell.getAsNormalizedFullLink();
     if (!space) {
       throw new Error("No space set");
@@ -1480,17 +1659,29 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
+    // The runner's explicit-instance read (server-execution v2 stage A):
+    // a served per-instance run's load of a scoped doc NAMES that
+    // principal's instance — the load registers, travels, and lands per
+    // instance. Own-identity loads (every client, the OFF arm) name
+    // nothing and take exactly the pre-stage-A path.
+    const instance = this.#foreignInstanceKey(scope, options?.scopeKeyIdentity);
     const releaseLoad = this.registerPendingLoad({
       space,
       scope: normalizeCellScope(scope),
       id,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
     });
     let loadFailure: unknown;
     try {
-      const result = await provider.sync(id, {
-        path: cell.path.map((segment) => segment.toString()),
-        schema: schema ?? false,
-      }, scope);
+      const result = await provider.sync(
+        id,
+        {
+          path: cell.path.map((segment) => segment.toString()),
+          schema: schema ?? false,
+        },
+        scope,
+        instance,
+      );
       loadFailure = result.error;
       const schemaFailure = await this.syncCfcSchemaDocument(
         space,
@@ -1510,6 +1701,52 @@ export class StorageManager implements IStorageManager {
       return cell;
     } catch (error) {
       loadFailure = error;
+      throw error;
+    } finally {
+      releaseLoad(loadFailure);
+    }
+  }
+
+  /**
+   * The explicit-instance load by address (IStorageManager.syncInstance —
+   * server-execution v2 stage A): the transaction layer's kick for a
+   * served per-instance run's read of a scoped instance the replica has
+   * never seen. Registered like syncCell's load (the preflight park
+   * cross-matches the instance-keyed address) and named on the wire.
+   * Own-identity or space-scope addresses name nothing and take the
+   * ordinary root pull; a load that fails hands back the pull-kick
+   * reservation so a later read may retry.
+   */
+  async syncInstance(
+    address: { space: MemorySpace; id: URI; scope?: CellScope },
+    identity: ScopeKeyIdentity,
+  ): Promise<void> {
+    if (hasDataUriScheme(address.id)) return;
+    const scope = normalizeCellScope(address.scope);
+    const instance = this.#foreignInstanceKey(scope, identity);
+    const provider = this.open(address.space);
+    const releaseLoad = this.registerPendingLoad({
+      space: address.space,
+      scope,
+      id: address.id,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
+    });
+    let loadFailure: unknown;
+    try {
+      const result = await provider.sync(
+        address.id,
+        { path: [], schema: false },
+        scope,
+        instance,
+      );
+      loadFailure = result.error;
+      if (loadFailure !== undefined) {
+        this.logSyncLoadFailure(address.space, address.id, loadFailure);
+        this.retractDocPullKick(address.space, address.id, scope, identity);
+      }
+    } catch (error) {
+      loadFailure = error;
+      this.retractDocPullKick(address.space, address.id, scope, identity);
       throw error;
     } finally {
       releaseLoad(loadFailure);
@@ -1731,6 +1968,12 @@ type ProviderOptions = {
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
+  /**
+   * The owning manager's authenticated session identity
+   * (IStorageManager.scopeKeyIdentity) — what the replica's notification
+   * differentials resolve scoped change addresses against.
+   */
+  scopeKeyIdentity: () => ScopeKeyIdentity;
   routeState: ProviderRouteState;
   createSession: (
     routeGeneration: number,
@@ -1741,6 +1984,19 @@ type ProviderOptions = {
   ) => Promise<Error | undefined>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+  /** The LT9 event-intent persistence seam (see Options). */
+  eventAppendQueueStore?: EventAppendQueueStore;
+  /** OW27 per-stream send pacing (see Options). */
+  eventAppendPacing?: EventAppendPacing | false;
+  /** Server-execution v2 Phase 5 (protocol.md §2's grant-scoped read
+   * design, RULED 2026-08-13 — the delegated-scoped-read fail-closed
+   * precondition): set on a SERVING manager's FOREIGN-space providers.
+   * A scoped (user/session) read against such a provider REFUSES
+   * loudly instead of shipping an unnamed scoped root the memory
+   * server would resolve against the delegating service envelope —
+   * the silent-empty-instance trap. Space-scope foreign reads (the
+   * §2b free-read row) are unaffected. */
+  refuseForeignScopedReads?: boolean;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -1752,6 +2008,8 @@ type ProviderSyncRequest = {
   uri: URI;
   selector: SchemaPathSelector;
   scope?: CellScope;
+  /** The explicit instance an instance-named load targets (stage A). */
+  instance?: ScopeKey;
 };
 
 /**
@@ -1805,6 +2063,7 @@ class Provider implements IStorageProvider {
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, Error>> {
     // Externalization happens where requests enter, so request dedup, watch
     // ids, and session-resume replay all see one selector form.
@@ -1812,7 +2071,9 @@ class Provider implements IStorageProvider {
       normalizeSyncSelector(selector),
       (hash) => this.replica.isSchemaDocPersisted(hash),
     );
-    const key = docKey(uri, scope);
+    // Replay requests are per (doc, instance): an instance-named load
+    // (stage A) must replay as that instance on a replacement replica.
+    const key = docKey(uri, instance ?? normalizeCellScope(scope));
     let requests = this.#syncRequests.get(key);
     if (requests === undefined) {
       requests = new Map();
@@ -1822,8 +2083,14 @@ class Provider implements IStorageProvider {
       uri,
       selector: normalizedSelector,
       scope,
+      ...(instance !== undefined ? { instance } : {}),
     });
-    return this.replica.sync(uri, normalizedSelector, scope) as Promise<
+    return this.replica.sync(
+      uri,
+      normalizedSelector,
+      scope,
+      instance,
+    ) as Promise<
       Result<Unit, Error>
     >;
   }
@@ -1833,8 +2100,9 @@ class Provider implements IStorageProvider {
     uri: URI,
     selector: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, PullError>> {
-    const result = await replica.sync(uri, selector, scope);
+    const result = await replica.sync(uri, selector, scope, instance);
     if (result.error !== undefined || uri.startsWith("cid:")) {
       return result;
     }
@@ -1879,22 +2147,27 @@ class Provider implements IStorageProvider {
     this.#routeAbort = new AbortController();
     const replacement = this.createReplica();
     this.replica = replacement;
-    previous.redirectOverlappingReadsTo((uri, selector, scope) =>
-      this.replaySync(replacement, uri, selector, scope)
+    previous.redirectOverlappingReadsTo((uri, selector, scope, instance) =>
+      this.replaySync(replacement, uri, selector, scope, instance)
     );
     previous.reset();
     previous.closeNow();
     const requests = [...this.#syncRequests.values()]
       .flatMap((bySelector) => [...bySelector.values()]);
     await Promise.all(
-      requests.map(({ uri, selector, scope }) =>
-        this.replaySync(replacement, uri, selector, scope)
+      requests.map(({ uri, selector, scope, instance }) =>
+        this.replaySync(replacement, uri, selector, scope, instance)
       ),
     );
   }
 
   synced(): Promise<void> {
     return this.followReplacement((replica) => replica.synced());
+  }
+
+  /** See SpaceReplica.inputSynced (stage F's serving-loop barrier). */
+  inputSynced(): Promise<void> {
+    return this.followReplacement((replica) => replica.inputSynced());
   }
 
   authorizationError(): Error | undefined {
@@ -1923,27 +2196,6 @@ class Provider implements IStorageProvider {
 
   pullToServerHead(): Promise<void> {
     return this.followReplacement((replica) => replica.pullToServerHead());
-  }
-
-  listSchedulerActionSnapshots(
-    query: SchedulerActionSnapshotQuery = {},
-  ): Promise<SchedulerSnapshotListResult> {
-    return this.followReplacement((replica) =>
-      replica.listSchedulerActionSnapshots(query)
-    );
-  }
-
-  areSchedulerAddressesCurrentAtOrBelow(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean {
-    return this.replica.areSchedulerAddressesCurrentAtOrBelow(addresses, seq);
-  }
-
-  schedulerHasPendingWriteOverlapping(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean {
-    return this.replica.schedulerHasPendingWriteOverlapping(addresses);
   }
 
   sqliteQuery(
@@ -1998,17 +2250,22 @@ class Provider implements IStorageProvider {
   }
 }
 
+type WatchAddress = {
+  id: URI;
+  type: MIME;
+  scope?: CellScope;
+  /** The explicit instance an instance-named load targets (stage A). */
+  scopeKey?: ScopeKey;
+};
+
 type SyncTask = {
-  entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][];
+  entries: [WatchAddress, SchemaPathSelector][];
   promise: Promise<Result<Unit, PullError>>;
 };
 
 type WatchRefreshBatch = {
   type: "pull" | "integrate";
-  entries: Map<
-    string,
-    [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
-  >;
+  entries: Map<string, [WatchAddress, SchemaPathSelector]>;
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
 
@@ -2027,13 +2284,6 @@ type NativeCommitOperation =
     value: EntityDocument;
   }
   | { op: "delete"; id: URI; scope?: CellScope };
-
-type SchedulerObservationBatchEntry = {
-  commit: SchedulerObservationCommit;
-  pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
-  source?: IStorageTransaction;
-  batchGeneration: number;
-};
 
 class StorageTransactionRejectionError extends Error {
   constructor(readonly rejection: StorageTransactionRejected) {
@@ -2067,6 +2317,10 @@ type InFlightCommit = {
   readonly operations: NativeCommitOperation[];
   readonly source?: IStorageTransaction;
   readonly commit: ClientCommit;
+  /** The identity the commit's operations were applied under (a served
+   * per-instance run's; absent = the replica's own) — its verdict
+   * promotes or drops exactly those instances' pending layers. */
+  readonly identity?: ScopeKeyIdentity;
   /**
    * Resolves when a rejection is fabricated locally for this commit (a
    * pending dependency was dropped, or the replica reset). Raced against the
@@ -2084,12 +2338,39 @@ type InFlightCommit = {
   settled: boolean;
 };
 
-const docKey = (id: URI, scope?: CellScope): string =>
-  `${normalizeCellScope(scope)}\0${id}`;
+/**
+ * The replica's local doc key: per scope INSTANCE (server-execution v2
+ * stage A — OW17's instance-keyed serving replica; key-vocabulary.md §5).
+ * `instance` is the shared `scope_key` — `space`, `user:<p>`,
+ * `session:<p>:<s>` — resolved by the caller through
+ * {@link SpaceReplica.instanceKey}: from an explicit key (a keyed frame,
+ * a keyed address), else from the reading/sealing run's identity, else
+ * from the replica's own identity. At cardinality 1 (every client, the
+ * whole OFF arm) every key resolves from the replica's own identity, so
+ * the re-keyed string partitions the local docs exactly as the scope-NAME
+ * string did (key-vocabulary.md §2's argument): nothing distinct merges,
+ * nothing merged separates. On a serving runtime the replica can now hold
+ * BOTH the service instance and per-principal instances of one doc, and a
+ * per-instance run reads and writes ITS instance. The one name-keyed
+ * fallback: a scope the identity cannot resolve (an anonymous session's
+ * user-scoped read) keys by the scope NAME, exactly as before.
+ */
+const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
+
+/** A local address the replica keys: the scope name plus, where the
+ * caller knows it, the explicit instance key. */
+type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
+  readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
+  /** The replica's OWN instance keys per scope name, resolved once (the
+   * manager's identity is stable for the manager's live span — `close()`
+   * ends it and the replicas with it): the doc-key hot path resolves an
+   * own-identity address with a map lookup, never a per-read
+   * `resolveScopeKey`. A scope the identity cannot resolve keys by NAME. */
+  #ownInstanceKeys: Map<string, string> | undefined;
   readonly #createSession: () => Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
@@ -2138,15 +2419,6 @@ class SpaceReplica implements ISpaceReplica {
   // withhold indefinitely; close()/closeNow() drain the set after client
   // teardown rejects every in-flight request.
   readonly #suppressedVerdicts = new Set<Promise<void>>();
-  readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
-  readonly #unsettledSchedulerObservations = new Set<
-    SchedulerObservationBatchEntry
-  >();
-  #schedulerObservationBatchGeneration = 0;
-  #schedulerObservationFlushScheduled = false;
-  #schedulerObservationFlushPromise:
-    | Promise<Result<Unit, StorageTransactionRejected>>
-    | undefined;
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -2161,9 +2433,21 @@ class SpaceReplica implements ISpaceReplica {
   // only `#watchView` can leave the consumer's view open, hanging dispose() on
   // `Promise.allSettled([...#updatePromises])`.
   #subscribedWatchView: MemoryV2Client.WatchView | null = null;
-  #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+  #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+    () => this.#scopeKeyIdentity(),
+  );
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+  /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
+   * first fire into this space. Owns fired-order discharge and the
+   * duplicate-as-delivered classification; its entries are the client's
+   * offline event queue. */
+  #eventAppendQueue?: EventAppendQueue;
+  #eventAppendQueueStore?: EventAppendQueueStore;
+  #eventAppendPacing?: EventAppendPacing | false;
+  /** Phase 5's producer-side foreign-scoped-read refusal (see
+   * ProviderOptions.refuseForeignScopedReads). */
+  #refuseForeignScopedReads = false;
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -2185,6 +2469,83 @@ class SpaceReplica implements ISpaceReplica {
      * subscribed view as one reflecting the committed write. */
     settled: PromiseWithResolvers<void>;
   }>();
+  // Waiters on a parked accept's APPLICATION (server-execution v2 stage
+  // G's read-consistency barrier — see `whenApplied`). Resolved when the
+  // parked accept promotes (marker coverage, marker-channel death) or
+  // dies with the parked set (reset/close — the re-pull re-derives the
+  // durable state, so "applied" is moot and the waiter must not hang).
+  #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
+  // Foreign novelty whose VISIBILITY is still shadowed by own pending
+  // writes (server-execution v2 Phase 2's settle input barrier — see
+  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> the set of
+  // shadowed inbound seqs. A SET, not one extremum (review thread
+  // r3739139487): the floor must be the doc's LOWEST hidden seq —
+  // every derivation in the wave read the view from before the
+  // EARLIEST hidden input, so W may not pass it even when later hidden
+  // updates superseded its value (the previous per-doc max let W skip
+  // the earlier one) — while the own-echo verdict repair must remove
+  // EXACTLY its own mis-recorded seq without disturbing genuine
+  // foreign shadows folded around it (a single min would be deleted
+  // whole, losing them). A shadowed REMOVE records the sentinel 1 —
+  // the wire carries no seq for removes, so the floor holds W entirely
+  // until the shadow clears. Entries are pruned lazily when the doc's
+  // pending set empties (promotion, drop, rollback); cleared whole on
+  // reset.
+  readonly #shadowedForeignSeqs = new Map<string, Set<number>>();
+  // The settle input barrier's WAKE (ISpaceReplica.shadowFlipObserver):
+  // invoked synchronously whenever a confirmPending promotion touched a
+  // doc with a standing shadow (flag ON — the flip checkout's own
+  // condition), value diff or not: the FLOOR lifts either way, and the
+  // floor is what the wake exists for. The SpaceServer installs it at
+  // activation so a clamped-then-quiet space's catch-up wave runs at
+  // the flip instead of waiting out the idle window — the flip is the
+  // one input whose dirtiness arrives WITHOUT a new admitted commit on
+  // the host feed (the commit was drained waves ago; only its
+  // VISIBILITY changed).
+  // Initialized EXPLICITLY (`= undefined`), as are the two overlay wakes
+  // below: the browser worker bundle compiles class fields without define
+  // semantics, so an UNINITIALIZED field is dropped from the class body and
+  // an `"observer" in replica` probe reads false — the overlay's install
+  // silently returned and the wake never fired in browsers (found while
+  // landing stage C tuning T2's arrival wake; the ack wake had the same
+  // shape). The overlay now probes by capability method instead, and the
+  // initializers keep the fields visible either way.
+  shadowFlipObserver: (() => void) | undefined = undefined;
+  // localSeq -> the store seq its accept committed at (server-execution
+  // v2 Phase 2, speculation.md §4): the overlay destination's retirement
+  // floor is "the origin ACKED and W ≥ that commit's seq", and the ack
+  // seq is otherwise consumed by promotion. Bounded (insertion-ordered,
+  // oldest pruned) — the overlay only ever asks about recent origins.
+  readonly #ackedSeqsByLocalSeq = new Map<number, number>();
+  static readonly #MAX_RETAINED_ACK_SEQS = 4096;
+  // localSeqs of live SPECULATIVE sealed commits (server-execution v2
+  // Phase 2, speculation.md §1/§6): overlay entries exist only in this
+  // process — the client never pushes them — so a PUSHED commit whose
+  // read basis names one can NEVER have that dependency resolve
+  // server-side. commitOperations refuses such an export loudly
+  // (RULED 2026-08-13); membership ends when the speculative commit
+  // settles (retirement/withdrawal drops its pending layers first, so
+  // no stack names a seq after it leaves this set).
+  readonly #speculativeLocalSeqs = new Set<number>();
+  // The overlay destination's retirement WAKE for origin accepts
+  // (ISpaceReplica.speculationAckObserver, speculation.md §4): fired
+  // when a pushed commit's accept records its ack seq. Without it, an
+  // entry whose sweep ran while its origin's verdict was still in
+  // flight (blocked on the unacked layer) — and whose covering
+  // watermark event therefore passed — stayed pending forever on a
+  // then-quiet space: rejected origins cascade into the entry, but
+  // ACCEPTED origins had no client-side wake. Guarded at the call
+  // site — an observer throw must not corrupt accept settlement.
+  speculationAckObserver: (() => void) | undefined = undefined;
+  // The overlay destination's retirement WAKE for authoritative ARRIVALS
+  // (ISpaceReplica.speculationArrivalObserver, stage C tuning T2 —
+  // speculation.md §4's owed arrival re-sweep): fired at the end of
+  // applySessionSync with the docs whose confirmed seq a frame moved
+  // forward. Guarded at the call site — an observer throw must not
+  // corrupt frame integration.
+  speculationArrivalObserver:
+    | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+    | undefined = undefined;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -2215,6 +2576,7 @@ class SpaceReplica implements ISpaceReplica {
       uri: URI,
       selector: SchemaPathSelector,
       scope?: CellScope,
+      instance?: ScopeKey,
     ) => Promise<Result<Unit, PullError>>)
     | undefined;
 
@@ -2223,15 +2585,97 @@ class SpaceReplica implements ISpaceReplica {
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
+    this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
+    this.#eventAppendQueueStore = options.eventAppendQueueStore;
+    this.#eventAppendPacing = options.eventAppendPacing;
+    this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
+    // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
+    // predecessor replica's intents in the manager-shared store must
+    // discharge WITHOUT waiting for a fresh fire. The constructor's
+    // load kicks the drain iff rows exist; an empty load is inert (no
+    // session is established until something discharges).
+    this.#ensureEventAppendQueue();
   }
 
   did(): MemorySpace {
     return this.#space;
+  }
+
+  /**
+   * The scope INSTANCE key a local address keys under (see `docKey`):
+   * the address's explicit `scopeKey` when it names one; else the scope
+   * name resolved against `identity` (a served run's demand-supplied
+   * identity — the tx→replica seam) when given; else against the
+   * replica's own identity (every client, the OFF arm). An unresolvable
+   * scope keys by NAME.
+   */
+  instanceKey(
+    scope: CellScope | undefined,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): string {
+    if (explicit !== undefined) return explicit;
+    const name = normalizeCellScope(scope);
+    if (identity !== undefined) {
+      return canResolveScopeKey(name, identity)
+        ? resolveScopeKey(name, identity)
+        : name;
+    }
+    return this.#ownInstanceKey(name);
+  }
+
+  #ownInstanceKey(name: CellScope): string {
+    let keys = this.#ownInstanceKeys;
+    if (keys === undefined) {
+      keys = new Map();
+      const own = this.#scopeKeyIdentity();
+      for (const scope of ["space", "user", "session"] as const) {
+        keys.set(
+          scope,
+          canResolveScopeKey(scope, own) ? resolveScopeKey(scope, own) : scope,
+        );
+      }
+      this.#ownInstanceKeys = keys;
+    }
+    return keys.get(name) ?? name;
+  }
+
+  /** The doc key of a local address under `identity` (see instanceKey). */
+  #docKeyOf(address: LocalDocAddress, identity?: ScopeKeyIdentity): string {
+    return docKey(
+      address.id,
+      this.instanceKey(address.scope, identity, address.scopeKey),
+    );
+  }
+
+  /**
+   * The touched-doc entries of one operation batch (seal, verdict, frame):
+   * each carries the instance it applies to, so the notification
+   * differential snapshots THAT instance and the change addresses carry
+   * it. The key is attached only where the batch names an instance
+   * explicitly (an explicit run identity, a keyed frame) AND the scope is
+   * not `space` — never for own-identity batches, so an OFF-arm
+   * notification address is byte-identical to before.
+   */
+  #touchedOf(
+    operations: readonly { id: URI; scope?: CellScope; scopeKey?: ScopeKey }[],
+    identity?: ScopeKeyIdentity,
+  ): LocalDocAddress[] {
+    return operations.map((operation) => {
+      const explicit = operation.scopeKey ??
+        (identity !== undefined &&
+            normalizeCellScope(operation.scope) !== "space"
+          ? this.instanceKey(operation.scope, identity) as ScopeKey
+          : undefined);
+      return explicit === undefined
+        ? { id: operation.id, scope: operation.scope }
+        : { id: operation.id, scope: operation.scope, scopeKey: explicit };
+    });
   }
 
   redirectOverlappingReadsTo(
@@ -2239,34 +2683,45 @@ class SpaceReplica implements ISpaceReplica {
       uri: URI,
       selector: SchemaPathSelector,
       scope?: CellScope,
+      instance?: ScopeKey,
     ) => Promise<Result<Unit, PullError>>,
   ): void {
     this.#replacementRead = replacementRead;
   }
 
   get(entry: IMemoryAddress): State | undefined {
-    return this.getState(entry.id as URI, entry.scope);
+    return this.getState(
+      entry.id as URI,
+      entry.scope,
+      undefined,
+      entry.scopeKey,
+    );
   }
 
   async sync(
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, PullError>> {
     const replacementAtStart = this.#replacementRead;
-    const result = await this.pull([[
-      { id: uri, type: DOCUMENT_MIME as MIME, scope },
-      selector,
-    ]]);
+    // An instance-named load (stage A) carries its instance on the pull
+    // entry's address, so the watch root names it on the wire and the
+    // arriving doc keys under it; a plain load carries none.
+    const address = {
+      id: uri,
+      type: DOCUMENT_MIME as MIME,
+      scope,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
+    };
+    const result = await this.pull([[address, selector]]);
     const replacement = this.#replacementRead;
     if (replacementAtStart === undefined && replacement !== undefined) {
       return await replacement(
         uri,
-        normalizeSyncEntries([[
-          { id: uri, type: DOCUMENT_MIME, scope },
-          selector,
-        ]])[0][1],
+        normalizeSyncEntries([[address, selector]])[0][1],
         scope,
+        instance,
       );
     }
     return result;
@@ -2276,7 +2731,7 @@ class SpaceReplica implements ISpaceReplica {
     uri: URI,
     callback: (document: EntityDocument | undefined) => void,
   ): Cancel {
-    const key = docKey(uri);
+    const key = docKey(uri, "space");
     let subscribers = this.#sinks.get(key);
     if (!subscribers) {
       subscribers = new Set();
@@ -2307,13 +2762,32 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async synced(): Promise<void> {
-    if (
-      this.#schedulerObservationBatch.length > 0 ||
-      this.#schedulerObservationFlushPromise
-    ) {
-      await this.flushSchedulerObservationBatch();
-    }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  /**
+   * INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing. The serving loop's wave settle needs "requested input
+   * has arrived" — but a SEALED commit's settlement resolves only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering), so awaiting either is a deadlock by construction (broken
+   * only by the flush deadline — observed as every first wave of a
+   * burst flushing at T_flush). Client code keeps `synced()`:
+   * durability is exactly what a client barrier means.
+   *
+   * The stage-F residual — a foreign authored frame parked behind an
+   * own sealed commit could be claimed by W one wave early — is CLOSED
+   * as of Phase 2 (the plan's revisit (a)), by exclusion rather than by
+   * awaiting: this barrier still never waits on parked applications
+   * (the deadlock above), and the wave instead EXCLUDES still-shadowed
+   * seqs from its W advance via `unappliedForeignSeqFloor`, with the
+   * shadow-flip notification in `confirmPending` registering the
+   * dirtiness the moment the parked overlay leaves.
+   */
+  async inputSynced(): Promise<void> {
+    await Promise.all([...this.#syncPromises]);
   }
 
   /**
@@ -2466,79 +2940,181 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
-  async listSchedulerActionSnapshots(
-    query: SchedulerActionSnapshotQuery = {},
-  ): Promise<SchedulerSnapshotListResult> {
-    if (!getPersistentSchedulerStateConfig()) {
-      return { serverSeq: 0, snapshots: [] };
-    }
-    const { client, session } = await this.activeSessionHandle();
-    // Optional capability, negotiated at hello: a server that did not
-    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
-    // older build may not know the message at all) — treat as "no snapshots"
-    // so the resume path degrades to running fresh, instead of depending on
-    // a capability-specific RPC the server never offered.
-    if (client.serverFlags?.persistentSchedulerState !== true) {
-      return { serverSeq: 0, snapshots: [] };
-    }
-    return await session.listSchedulerActionSnapshots(query);
+  getDocument(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined {
+    return this.visibleDocument(uri, scope, identity);
   }
 
-  areSchedulerAddressesCurrentAtOrBelow(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean {
-    for (const address of addresses) {
-      if (address.space !== this.#space) return false;
-      const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
-      );
-      // Missing/unconfirmed docs cannot prove either the observation's inputs
-      // or its committed output surface are present in this replica.
-      if (record === undefined || record.confirmed.seq === 0) return false;
-      if (record.confirmed.seq > seq) return false;
-    }
-    return true;
+  /** Whether an optimistic local write for this doc is still pending — not
+   *  yet promoted into the confirmed mirror (a parked accept keeps it
+   *  pending until its marker arrives; CT-1927). */
+  hasPendingWrite(id: URI, scope?: CellScope): boolean {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
+    return record !== undefined && record.pending.length > 0;
   }
 
-  schedulerHasPendingWriteOverlapping(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean {
-    for (const address of addresses) {
-      if (address.space !== this.#space) continue;
-      const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
-      );
-      if (record !== undefined && record.pending.length > 0) return true;
+  /** ISpaceReplica.speculationRetirementView (server-execution v2
+   * Phase 2, speculation.md §4): the doc's confirmed seq plus every
+   * pending layer's localSeq — the overlay destination's retirement
+   * inputs. */
+  speculationRetirementView(
+    id: URI,
+    scope?: CellScope,
+  ): { confirmedSeq: number; pendingLocalSeqs: number[] } {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
+    if (record === undefined) {
+      return { confirmedSeq: 0, pendingLocalSeqs: [] };
     }
-    return false;
+    return {
+      confirmedSeq: record.confirmed.seq,
+      pendingLocalSeqs: [
+        ...new Set(record.pending.map((entry) => entry.localSeq)),
+      ],
+    };
   }
 
-  getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
-    return this.visibleDocument(uri, scope);
+  /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
+   * speculation.md §4): the store seq a local commit's accept committed
+   * at, or undefined while it is unsettled — or if it was rejected, or
+   * pruned from the bounded record (both read as "no ack floor": the
+   * entry falls back to its confirmed read basis). */
+  ackedSeqOf(localSeq: number): number | undefined {
+    return this.#ackedSeqsByLocalSeq.get(localSeq);
+  }
+
+  /**
+   * Resolves when the accepted commit at `localSeq` has been APPLIED to
+   * this replica's settled view — immediately when its accept was
+   * confirmed at verdict time, else when its PARKED accept promotes
+   * (marker coverage via noteCaughtUpLocalSeq, or marker-channel death)
+   * or dies with the parked set (reset/close, where the re-pull
+   * re-derives the durable state).
+   *
+   * Server-execution v2 stage G's effect-retirement read barrier
+   * (serving-loop.md §4): the outbox holds an effect's in-flight entry
+   * until every completion commit's writes are readable, so a stale
+   * re-admit of the same key dedupes instead of re-claiming against
+   * unabsorbed state and firing a second egress. Since F1a
+   * (settleSealedCommit → confirmPending), sealed commits — waves and
+   * effect completions alike — confirm at verdict time and never park,
+   * so for completions this resolves immediately: the barrier is the
+   * BELT over that structural guarantee, and the parked branch below
+   * remains for pushed (socket) commits under CT-1927.
+   *
+   * Callers sequence this AFTER the sealed commit's `settled` promise:
+   * the confirm (or, for pushed commits, settleAccept's park-or-confirm
+   * decision) runs inside settlement, so consulting the parked set
+   * before settlement would race it.
+   */
+  /**
+   * Queue one event append for this space (server-execution v2 Phase 3;
+   * events.md §1, §5): the client's ONLY computational commit under the
+   * flag. Fired-order discharge with retry across transport loss and
+   * session replacement; a duplicate above the stream's dedupe horizon
+   * resolves as delivered (`EventAppendDuplicateError` — events.md §5's
+   * duplicate-submission rule). The returned promise settles with the
+   * delivery outcome; rendering never waits on it (the echo is local).
+   */
+  enqueueEventAppend(
+    append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
+  ): Promise<EventAppendOutcome> {
+    return this.#ensureEventAppendQueue().enqueue(append);
+  }
+
+  /** Pending (undischarged) event intents — the offline queue's live
+   * content, bounded by pending-intent count (speculation.md §5). */
+  pendingEventAppends(): readonly QueuedEventAppend[] {
+    return this.#eventAppendQueue?.pending ?? [];
+  }
+
+  #ensureEventAppendQueue(): EventAppendQueue {
+    if (this.#eventAppendQueue === undefined) {
+      this.#eventAppendQueue = new EventAppendQueue({
+        space: this.#space,
+        transact: async (commit) => {
+          const { session } = await this.activeSessionHandle();
+          // The route-write marker rides the SAME beforeIssue hook as
+          // ordinary commits (verdict blocker, 2026-08-12): an event
+          // append is a stateful operation against this route, so once
+          // one has issued, canReplaceProvisionalReplica() must answer
+          // false — a late host hint may no longer swap the replica out
+          // underneath the queue and strand its traffic on a closed
+          // route.
+          return await session.transact(
+            commit,
+            () => this.markRouteWriteIssued(),
+          );
+        },
+        // Allocated at SEND time from the replica's one counter, so the
+        // increasing-localSeq send-order discipline (04-protocol §3.9)
+        // holds across event appends and ordinary commits alike.
+        nextLocalSeq: () => this.#nextLocalSeq++,
+        store: this.#eventAppendQueueStore,
+        pacing: this.#eventAppendPacing,
+      });
+    }
+    return this.#eventAppendQueue;
+  }
+
+  whenApplied(localSeq: number): Promise<void> {
+    if (!this.#parkedAccepts.has(localSeq)) return Promise.resolve();
+    let waiter = this.#appliedWaiters.get(localSeq);
+    if (waiter === undefined) {
+      waiter = Promise.withResolvers<void>();
+      this.#appliedWaiters.set(localSeq, waiter);
+    }
+    return waiter.promise;
+  }
+
+  private resolveAppliedWaiter(localSeq: number): void {
+    const waiter = this.#appliedWaiters.get(localSeq);
+    if (waiter !== undefined) {
+      this.#appliedWaiters.delete(localSeq);
+      waiter.resolve();
+    }
+  }
+
+  /**
+   * ISpaceReplica.unappliedForeignSeqFloor (server-execution v2 Phase 2's
+   * settle input barrier): the lowest inbound seq still shadowed by an
+   * own pending write, or `undefined` when nothing is. Prunes lazily —
+   * an entry whose doc no longer has pending writes has become visible
+   * (promotion fired the shadow-flip notification; a drop re-exposes the
+   * confirmed value through the rejection path's own re-runs), so it no
+   * longer bounds the wave's advance.
+   */
+  unappliedForeignSeqFloor(): number | undefined {
+    if (this.#shadowedForeignSeqs.size === 0) return undefined;
+    let floor: number | undefined;
+    for (const [key, seqs] of this.#shadowedForeignSeqs) {
+      const record = this.#docs.get(key);
+      if (
+        record === undefined || record.pending.length === 0 ||
+        seqs.size === 0
+      ) {
+        this.#shadowedForeignSeqs.delete(key);
+        continue;
+      }
+      for (const seq of seqs) {
+        if (floor === undefined || seq < floor) floor = seq;
+      }
+    }
+    return floor;
   }
 
   async close(): Promise<void> {
     this.#closed = true;
     this.#closeSignal.resolve();
+    this.#eventAppendQueue?.close();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     // Settle any queued (not-yet-sent) watch refresh first so its pull promise
     // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
     // for any refresh already in flight.
     this.cancelQueuedWatchRefresh();
-    // Send any batched scheduler observations so they reach the server, but do
-    // not await commit confirmation here. A commit whose response is withheld
-    // past dispose — the server holding it for a gated read that never arrives —
-    // never settles on its own, so awaiting it before the client teardown below
-    // would deadlock close(), just as awaiting an in-flight read would. Kicking
-    // the flush issues the observation commit into `#commitPromises`; the client
-    // teardown rejects every in-flight request, reads and commits alike, and the
-    // post-teardown drain settles them.
-    const observationFlush = (this.#schedulerObservationBatch.length > 0 ||
-        this.#schedulerObservationFlushPromise)
-      ? this.flushSchedulerObservationBatch()
-      : undefined;
     this.#watchView?.close();
     this.#watchView = null;
     // Also close the view the update consumer is bound to, in case it diverged
@@ -2574,14 +3150,15 @@ class SpaceReplica implements ISpaceReplica {
     // resolves. Suppressed verdicts (server responses superseded by a local
     // rejection) live outside #commitPromises and join the same drain.
     await Promise.allSettled([
-      ...(observationFlush ? [observationFlush] : []),
       ...this.#commitPromises,
       ...this.#suppressedVerdicts,
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   private resetConflictAdmissionState(): void {
@@ -2596,6 +3173,17 @@ class SpaceReplica implements ISpaceReplica {
       entry.settled.resolve();
     }
     this.#parkedAccepts.clear();
+    // Their applied-waiters resolve rather than hang: the accepted writes
+    // now arrive (or died) through the re-pull, so the barrier's question
+    // — "has the settled view moved past the accept?" — is answered.
+    for (const waiter of this.#appliedWaiters.values()) {
+      waiter.resolve();
+    }
+    this.#appliedWaiters.clear();
+    // Shadowed-foreign floors die with the marker space too: the re-pull
+    // re-derives the durable state, so nothing stays invisible.
+    this.#shadowedForeignSeqs.clear();
+    this.#ackedSeqsByLocalSeq.clear();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -2615,7 +3203,14 @@ class SpaceReplica implements ISpaceReplica {
         .filter((parked) => parked <= this.#caughtUpLocalSeq)
         .sort((left, right) => left - right);
       for (const parked of due) {
-        const entry = this.#parkedAccepts.get(parked)!;
+        // Re-entrancy guard (Phase 2): confirmPending's flag-ON
+        // shadow-flip notification runs subscriber callbacks
+        // synchronously, and a callback that re-enters the replica
+        // (reset, applyParkedAcceptsNow via a closing watch view) can
+        // consume parked entries out from under this loop — so the
+        // lookup tolerates an entry another frame already applied.
+        const entry = this.#parkedAccepts.get(parked);
+        if (entry === undefined) continue;
         this.#parkedAccepts.delete(parked);
         this.confirmPending(parked, entry.operations, entry.applied);
         entry.settled.resolve();
@@ -2668,6 +3263,7 @@ class SpaceReplica implements ISpaceReplica {
   closeNow(): void {
     this.#closed = true;
     this.#closeSignal.resolve();
+    this.#eventAppendQueue?.close();
     this.resetConflictAdmissionState();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -2689,37 +3285,65 @@ class SpaceReplica implements ISpaceReplica {
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   async load(
-    entries: [
-      { id: URI; type: MIME; scope?: CellScope },
-      SchemaPathSelector | undefined,
-    ][],
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     const known = entries
-      .map(([address]) => this.getState(address.id, address.scope))
+      .map(([address]) =>
+        this.getState(address.id, address.scope, undefined, address.scopeKey)
+      )
       .filter((state): state is State => state !== undefined);
     this.#subscription.next({
       type: "load",
       space: this.#space,
-      changes: Differential.load(known),
+      changes: Differential.load(known, this.#scopeKeyIdentity()),
     });
     return await this.pull(entries);
   }
 
   async pull(
-    entries: [
-      { id: URI; type: MIME; scope?: CellScope },
-      SchemaPathSelector | undefined,
-    ][],
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
       return { ok: {} };
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
+    // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
+    // (the F3 fix; protocol.md §2's grant-scoped read design): decided
+    // HERE, per caller, before the entries join the coalesced
+    // watch-refresh batch — the batch shares ONE pending promise across
+    // every concurrent caller, so a refusal thrown inside the batch
+    // (the refreshWatchSet backstop below) poisons innocent SPACE-scope
+    // foreign reads coalesced beside the offender: the load-bearing
+    // §2b free-read row would fail intermittently whenever any pattern
+    // persistently attempted one foreign scoped read. Refusing the
+    // OFFENDING caller's pull keeps the refusal action-scoped, the
+    // arc's standing refusal convention.
+    if (this.#refuseForeignScopedReads) {
+      for (const [address] of normalizedEntries) {
+        const scope = normalizeCellScope(address.scope) ?? "space";
+        if (scope !== "space") {
+          return {
+            error: toPullError(
+              new Error(
+                `foreign scoped read refused on the serving path: ` +
+                  `${address.id} (scope "${scope}") in ${this.#space} — ` +
+                  "a serving runtime reads foreign scoped instances only " +
+                  "under the grant-scoped read design (protocol.md §2; " +
+                  "delegated scoped reads are fail-closed until grant " +
+                  "resolution lands)",
+              ),
+            ),
+          };
+        }
+      }
+    }
     // Compose the dedup key from per-part hashes instead of hashing a fresh
     // wrapper object: hashOf's frozen-object cache is only consulted at entry
     // level, so embedding the (large, already canonical) selector schema in a
@@ -2733,6 +3357,13 @@ class SpaceReplica implements ISpaceReplica {
         normalizeCellScope(address.scope) ?? null,
         selector === undefined ? null : selector.path,
         selector?.schema === undefined ? null : hashStringOf(selector.schema),
+        // The explicit instance (stage A) is part of the sync identity:
+        // two instances of one doc are two syncs. `null` for the
+        // universal keyless case — the OFF-arm key TEXT gains a trailing
+        // `,null` per entry (this map is private, single-producer, never
+        // serialized; the PARTITION is unchanged: every keyless entry
+        // still dedupes exactly as before).
+        address.scopeKey ?? null,
       ]),
     );
     const existing = this.#syncTasks.get(key);
@@ -2757,6 +3388,9 @@ class SpaceReplica implements ISpaceReplica {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
       };
       const [superset, supersetPromise] = this.#watchSelectorTracker
         .getSupersetSelector(
@@ -2799,6 +3433,9 @@ class SpaceReplica implements ISpaceReplica {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
       };
       // The tracker promise is what FUTURE pulls covered by these selectors
       // await: their data is available once THIS fetch lands, independent of
@@ -2825,6 +3462,9 @@ class SpaceReplica implements ISpaceReplica {
             id: address.id,
             type: DOCUMENT_MIME,
             scope: normalizeCellScope(address.scope),
+            ...(address.scopeKey !== undefined
+              ? { scopeKey: address.scopeKey }
+              : {}),
           };
           this.#watchSelectorTracker.delete(
             baseAddress,
@@ -2840,9 +3480,6 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const schedulerObservation = getPersistentSchedulerStateConfig()
-      ? transaction.schedulerObservation
-      : undefined;
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
@@ -2876,7 +3513,7 @@ class SpaceReplica implements ISpaceReplica {
     const sqliteOps = transaction.sqliteOps ?? [];
 
     if (
-      operations.length === 0 && schedulerObservation === undefined &&
+      operations.length === 0 &&
       !preconditions?.length &&
       sqliteOps.length === 0
     ) {
@@ -2889,12 +3526,325 @@ class SpaceReplica implements ISpaceReplica {
         this.commitOperations(
           operations,
           source,
-          schedulerObservation,
           preconditions,
           sqliteOps,
           options,
         ),
     );
+  }
+
+  /**
+   * Seal a native commit into the optimistic overlay without pushing it
+   * (server-execution v2, serving-loop.md §3d): the local half of
+   * commitNative — normalize, build the client commit with its read set,
+   * apply pending, notify — with the store half deferred to `verdict`. The
+   * wave accumulator resolves the verdict at its commit step: `committed`
+   * promotes the pending writes at the wave commit's seq, `withdrawn`
+   * rolls them back through the same rejection path a refused push takes —
+   * EXCEPT the `superseded` variant (speculation.md §4's retirement),
+   * which routes through `finalizeSupersededSpeculation`: a
+   * SUCCESS-shaped drop that skips the rejection machinery, does not
+   * cascade-reject dependants (an authored commit that read the echo is
+   * decided by the store's CAS — and since the leg-C export refusal, a
+   * dependent basis naming the echo never exports at all), and settles
+   * ok. The pending overlay this leaves behind is the wave's layered
+   * view — later action runs read the sealed writes through the
+   * ordinary read path until the verdict settles them.
+   */
+  sealNative(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+    options?: { readonly speculative?: boolean },
+  ): SealedNativeCommit {
+    const preconditions = activeCommitPreconditions(transaction.preconditions);
+    const operations = transaction.operations
+      .filter((operation) => operation.type === DOCUMENT_MIME)
+      .map((operation) =>
+        operation.op === "delete"
+          ? {
+            op: "delete" as const,
+            id: operation.id,
+            scope: operation.scope,
+          }
+          : operation.op === "patch"
+          ? {
+            op: "patch" as const,
+            id: operation.id,
+            scope: operation.scope,
+            patches: operation.patches,
+            value: toExplicitDocument(operation.value),
+          }
+          : {
+            op: "set" as const,
+            id: operation.id,
+            scope: operation.scope,
+            value: toExplicitDocument(operation.value),
+          }
+      );
+    return this.sealOperations(
+      operations,
+      source,
+      preconditions,
+      transaction.sqliteOps ?? [],
+      verdict,
+      options,
+    );
+  }
+
+  private sealOperations(
+    operations: NativeCommitOperation[],
+    source: IStorageTransaction | undefined,
+    preconditions: readonly CommitPrecondition[],
+    sqliteOps: readonly SqliteOperation[],
+    verdict: Promise<SealedCommitVerdict>,
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+    },
+  ): SealedNativeCommit {
+    // The tx→replica identity seam (server-execution v2 stage A, OW17): a
+    // served per-instance run seals under ITS identity — its ops apply to
+    // that identity's local instances, its read set is built against
+    // those instances' pending stacks, and its verdict settles exactly
+    // them (the in-flight entry remembers the identity). Absent = the
+    // replica's own, byte-identical to before.
+    const identity = options?.identity;
+    const localSeq = this.#nextLocalSeq++;
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
+    const commit: ClientCommit = {
+      localSeq,
+      reads: this.buildReads(source, localSeq, identity),
+      // Cell ops first, folded SQLite ops last — the same commit shape
+      // commitOperations builds, so the wave batch is made of ordinary
+      // client commits.
+      operations: [
+        ...operations.map((operation) => {
+          switch (operation.op) {
+            case "delete":
+              return operation;
+            case "patch":
+              return {
+                op: "patch" as const,
+                id: operation.id,
+                scope: operation.scope,
+                patches: operation.patches,
+              };
+            case "set":
+              return {
+                op: "set" as const,
+                id: operation.id,
+                scope: operation.scope,
+                value: operation.value,
+              };
+          }
+        }),
+        ...sqliteOps,
+      ],
+      ...(preconditions.length > 0
+        ? { preconditions: [...preconditions] }
+        : {}),
+    };
+    const touched = this.#touchedOf(operations, identity);
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+
+    for (const operation of operations) {
+      this.applyPending(operation, localSeq, identity);
+    }
+
+    if (before !== undefined) {
+      const optimistic = before.compare(this);
+      this.#subscription.next({
+        type: "commit",
+        space: this.#space,
+        changes: optimistic,
+        source,
+      });
+      if (shouldNotifySinks) {
+        this.notifySinks(optimistic);
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+
+    const settled = this.settleSealedCommit(
+      localSeq,
+      operations,
+      commit,
+      source,
+      verdict,
+      identity,
+    );
+    if (options?.speculative !== true) {
+      // Durable sealed commits (the wave's) join the synced() barrier
+      // and the ordered-push outcome map as any commit does. A CLIENT
+      // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
+      // is process-memory only, never synced, never committed): a
+      // client settle must not wait on the echo's retirement, and no
+      // push ordering ever involves it. Its in-flight registration
+      // (inside settleSealedCommit) still happens, so reset sweeps and
+      // origin-drop cascades reach the echo.
+      this.#commitPromises.add(settled);
+      this.#commitOutcomeBySeq.set(
+        localSeq,
+        settled.catch(() => {}).finally(() => {
+          this.#commitOutcomeBySeq.delete(localSeq);
+        }),
+      );
+      settled.finally(() => {
+        this.#commitPromises.delete(settled);
+      });
+    } else {
+      // Track the speculative seq for the export refusal (speculation.md
+      // §6, RULED 2026-08-13): while any pending stack carries this
+      // layer, a pushed commit's read basis naming it is refused in
+      // commitOperations. Settlement (retirement or withdrawal) drops
+      // the pending layers before `settled` resolves, so removal here
+      // never races a stack that still names the seq.
+      this.#speculativeLocalSeqs.add(localSeq);
+      settled.catch(() => {}).finally(() => {
+        this.#speculativeLocalSeqs.delete(localSeq);
+      });
+    }
+    return { localSeq, commit, settled };
+  }
+
+  private async settleSealedCommit(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+    identity?: ScopeKeyIdentity,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // Registered unconditionally — unlike a pushed commit, a sealed commit
+    // needs the entry even with zero pending reads: reset() sweeps
+    // in-flight entries to reject them locally, and a sealed commit's
+    // verdict is held externally by the wave, so without the entry a reset
+    // would strand its pending writes until a verdict for a wave that no
+    // longer exists.
+    const inFlight = this.registerInFlightCommit(
+      localSeq,
+      operations,
+      commit,
+      source,
+      { alwaysRegister: true, identity },
+    )!;
+    try {
+      const outcome = await Promise.race([
+        verdict.then(
+          (v) => ({ verdict: v }),
+          // The accumulator's contract is to resolve every verdict; a
+          // rejection is a wave-machinery bug, mapped to a withdrawal so
+          // the pending writes still roll back instead of stranding.
+          (reason) => ({
+            verdict: {
+              withdrawn: {
+                message: `wave verdict rejected: ${
+                  reason instanceof Error ? reason.message : String(reason)
+                }`,
+              },
+            } satisfies SealedCommitVerdict,
+          }),
+        ),
+        inFlight.localRejection.promise.then((rejection) => ({ rejection })),
+      ]);
+      if ("rejection" in outcome) {
+        // A local rejection (dependency cascade, replica reset) beat the
+        // wave's verdict; the eventual verdict is moot. A late `committed`
+        // flags a wave that outlived its replica — the analogue of
+        // suppressLateVerdict's warn.
+        verdict.then((v) => {
+          if ("committed" in v) {
+            logger.warn("seal-late-commit", () => [
+              "wave committed a sealed commit after its local rejection; " +
+              "write not promoted",
+              { localSeq },
+            ]);
+          }
+        }, () => {});
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          outcome.rejection,
+          identity,
+        );
+      }
+      const v = outcome.verdict;
+      if ("withdrawn" in v) {
+        if (
+          (v.withdrawn as { superseded?: true }).superseded === true
+        ) {
+          // Speculation retirement (server-execution v2 Phase 2,
+          // speculation.md §4): a SUCCESS-shaped withdrawal — the
+          // authoritative derivation covers the echo, the store wins by
+          // construction. Drop the pending writes and notify the
+          // visible flip, but do NOT cascade-reject dependants (an
+          // authored commit that read the echo is decided by the
+          // store's CAS, not by the echo's lifecycle) and settle OK.
+          return this.finalizeSupersededSpeculation(
+            localSeq,
+            operations,
+            source,
+            identity,
+          );
+        }
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          this.makeLocalRejection(commit, v.withdrawn.message),
+          identity,
+        );
+      }
+      // Locally-committed verdicts confirm IMMEDIATELY — never parked
+      // (F1a, the completion-visibility wedge). A sealed commit's
+      // verdict is resolved by the co-hosted executor (wave.ts /
+      // space-server.ts) AFTER the engine applied the commit
+      // synchronously through the engine-wave sink: the verdict IS the
+      // store's answer, and verdict-time extrapolation is exactly as
+      // current as this replica can be. CT-1927's parking exists to
+      // keep a REMOTE mirror from promoting over missing foreign
+      // novelty ordered before its accept — but engine-plane commits
+      // bypass the server's transact path, which is the only place
+      // catch-up marker obligations are staged (`noteExecutorCommit`
+      // stages none), so a parked sealed accept's covering marker can
+      // NEVER arrive. Routing through settleAccept therefore parked
+      // these forever: `whenApplied` waiters never resolved, the
+      // outbox's readability-gated retirement never retired (one
+      // permanently-in-flight entry + one unresolved waiter leaked per
+      // served effect), and any A→B→A input cycle starved deduping
+      // against the dead entry. Residual extrapolation over foreign
+      // novelty self-heals through the engine's own dirtiness fan-out
+      // (`noteExecutorCommit` → frames), the same reconvergence
+      // per-doc-dropped seals already rely on (wave.ts §3d). Pushed
+      // (socket) commits keep full settleAccept semantics — remote
+      // parking is untouched.
+      this.confirmPending(localSeq, operations, {
+        seq: v.committed.seq,
+        branch: commit.branch ?? DEFAULT_BRANCH,
+        revisions: [],
+      }, identity);
+      return { ok: {} };
+    } finally {
+      this.settleInFlightCommit(localSeq);
+    }
   }
 
   reset(): void {
@@ -2914,7 +3864,9 @@ class SpaceReplica implements ISpaceReplica {
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
     this.#subscription.next({
       type: "reset",
       space: this.#space,
@@ -2922,9 +3874,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async refreshWatchSet(
-    entries: Iterable<
-      [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
-    >,
+    entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
@@ -2938,9 +3888,45 @@ class SpaceReplica implements ISpaceReplica {
         this.#settings.experimentalConcurrentWatchRefresh === true,
       );
       const rawEntries = [...entries];
-      const watchEntries = compactWatchEntries(rawEntries);
+      const watchEntries = compactWatchEntries(
+        rawEntries,
+        this.#scopeKeyIdentity(),
+      );
       if (watchEntries.length === 0) {
         return { ok: {} };
+      }
+      // Phase 5's delegated-scoped-read fail-closed refusal, producer
+      // side (protocol.md §2's grant-scoped read design; see
+      // ProviderOptions.refuseForeignScopedReads): a serving runtime's
+      // scoped read of a FOREIGN space never reaches the wire — the
+      // unnamed scoped root would resolve against the delegating
+      // service envelope (a silently empty instance), and the runner
+      // cannot yet name a per-run foreign instance on a subscription.
+      // The memory server's admission carries the co-hosted belt; this
+      // is the producer half, so the two land as one stack.
+      //
+      // BACKSTOP only (the F3 fix): the live refusal is ENTRY-scoped at
+      // pull() — per caller, before the entry joins the batch — because
+      // a throw HERE fails the whole coalesced batch (one shared
+      // pending promise), poisoning innocent space-scope reads beside
+      // the offender. Every watch entry flows through pull(), so this
+      // arm firing means a new path bypassed the entry refusal — a
+      // bug, kept loud rather than silently filtered (dropping the
+      // entry would resolve its caller OK without the data).
+      if (this.#refuseForeignScopedReads) {
+        for (const [address] of watchEntries) {
+          const scope = address.scope ?? "space";
+          if (scope !== "space") {
+            throw new Error(
+              `foreign scoped read refused on the serving path: ` +
+                `${address.id} (scope "${scope}") in ${this.#space} — ` +
+                "a serving runtime reads foreign scoped instances only " +
+                "under the grant-scoped read design (protocol.md §2; " +
+                "delegated scoped reads are fail-closed until grant " +
+                "resolution lands)",
+            );
+          }
+        }
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
@@ -2950,6 +3936,16 @@ class SpaceReplica implements ISpaceReplica {
           roots: [{
             id: address.id,
             scope: normalizeCellScope(address.scope),
+            // The runner's explicit-instance read (server-execution v2
+            // stage A): an instance-named load names its instance on the
+            // wire — lease-holder-only at admission (protocol.md §2's
+            // read row), which is exactly who issues one (a serving
+            // runtime's per-instance run). Own-identity loads name
+            // nothing: byte-identical roots, the no-key admission fast
+            // path.
+            ...(address.scopeKey !== undefined
+              ? { entityScopeKey: address.scopeKey }
+              : {}),
             selector,
           }],
         },
@@ -2992,7 +3988,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private enqueueWatchRefresh(
     type: "pull" | "integrate",
-    entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][],
+    entries: [WatchAddress, SchemaPathSelector][],
   ): Promise<Result<Unit, PullError>> {
     if (this.#queuedWatchRefresh !== null) {
       for (const [address, selector] of entries) {
@@ -3008,10 +4004,7 @@ class SpaceReplica implements ISpaceReplica {
       type,
       entries: new Map(entries.map(([address, selector]) => [
         watchIdForEntry(address, selector, ""),
-        [address, selector] as [
-          { id: URI; type: MIME; scope?: CellScope },
-          SchemaPathSelector,
-        ],
+        [address, selector] as [WatchAddress, SchemaPathSelector],
       ])),
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
@@ -3106,218 +4099,9 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private enqueueSchedulerObservationCommit(
-    schedulerObservation: FabricValue,
-    source?: IStorageTransaction,
-  ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (!getPersistentSchedulerStateConfig()) {
-      return Promise.resolve({ ok: {} });
-    }
-    // Known-unsupported server (hello already negotiated): drop the
-    // observation without batching. The flush-time gate below is the
-    // authoritative check; this just spares every action commit the
-    // batch/flush round once the session has established that scheduler
-    // payloads have nowhere to go.
-    if (
-      this.#sessionClient !== undefined &&
-      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
-    ) {
-      return Promise.resolve({ ok: {} });
-    }
-    const localSeq = this.#nextLocalSeq++;
-    const pending = Promise.withResolvers<
-      Result<Unit, StorageTransactionRejected>
-    >();
-    const entry: SchedulerObservationBatchEntry = {
-      commit: {
-        localSeq,
-        reads: this.buildReads(source, localSeq),
-        schedulerObservation,
-      },
-      pending,
-      source,
-      batchGeneration: this.#schedulerObservationBatchGeneration,
-    };
-    this.#schedulerObservationBatch.push(entry);
-    this.#unsettledSchedulerObservations.add(entry);
-    void pending.promise.then(() => {
-      this.#unsettledSchedulerObservations.delete(entry);
-    });
-    this.scheduleSchedulerObservationFlush();
-    return pending.promise;
-  }
-
-  private schedulerObservationDependenciesBefore(
-    localSeq: number,
-  ): Promise<Result<Unit, StorageTransactionRejected>>[] {
-    return [...this.#unsettledSchedulerObservations]
-      .filter((entry) => entry.commit.localSeq < localSeq)
-      .map((entry) => entry.pending.promise);
-  }
-
-  private scheduleSchedulerObservationFlush(): void {
-    if (this.#schedulerObservationFlushScheduled) {
-      return;
-    }
-    this.#schedulerObservationFlushScheduled = true;
-    queueMicrotask(() => {
-      this.#schedulerObservationFlushScheduled = false;
-      void this.flushSchedulerObservationBatch();
-    });
-  }
-
-  private async flushSchedulerObservationBatch(): Promise<
-    Result<Unit, StorageTransactionRejected>
-  > {
-    let lastResult: Result<Unit, StorageTransactionRejected> = { ok: {} };
-    let firstError: Result<Unit, StorageTransactionRejected> | undefined;
-    while (true) {
-      const activeFlush = this.#schedulerObservationFlushPromise;
-      if (activeFlush) {
-        lastResult = await activeFlush;
-        if ("error" in lastResult) {
-          firstError ??= lastResult;
-        }
-        continue;
-      }
-
-      if (this.#schedulerObservationBatch.length === 0) {
-        return firstError ?? lastResult;
-      }
-
-      lastResult = await this.startSchedulerObservationBatchFlush();
-      if ("error" in lastResult) {
-        firstError ??= lastResult;
-      }
-    }
-  }
-
-  private startSchedulerObservationBatchFlush(): Promise<
-    Result<Unit, StorageTransactionRejected>
-  > {
-    const batchGeneration = this.#schedulerObservationBatch[0].batchGeneration;
-    const nextGeneration = this.#schedulerObservationBatch.findIndex((entry) =>
-      entry.batchGeneration !== batchGeneration
-    );
-    const entries = this.#schedulerObservationBatch.splice(
-      0,
-      nextGeneration === -1
-        ? this.#schedulerObservationBatch.length
-        : nextGeneration,
-    );
-    const localSeq = this.#nextLocalSeq++;
-    const commit: ClientCommit = {
-      localSeq,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: entries.map((entry) => entry.commit),
-    };
-    const promise = (async (): Promise<
-      Result<Unit, StorageTransactionRejected>
-    > => {
-      // Persistent scheduler state is an OPTIONAL capability negotiated at
-      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
-      // different scheduler flags must still share memory data. A server that
-      // did not advertise it strips scheduler payloads at `transact`, so this
-      // observation-only commit would arrive as zero operations and be
-      // TERMINALLY rejected ("memory v2 commit requires at least one
-      // operation") — and the flush-before-semantic-commit ordering in
-      // pushCommit would then spread that rejection to every subsequent
-      // semantic commit (event handlers drop their writes without retry;
-      // the whole session's writes starve). Fail closed instead: drop the
-      // observations — the feature degrades to flag-off semantics (resumes
-      // re-run fresh) while semantic traffic proceeds untouched.
-      const { client } = await this.activeSessionHandle();
-      if (client.serverFlags?.persistentSchedulerState !== true) {
-        return { ok: {} };
-      }
-      // Same fail-closed degradation for the OTHER capability gap: against a
-      // server without `pendingReadStacks`, an observation whose read sat on
-      // MORE than one pending layer cannot be expressed soundly — the scalar
-      // wire would omit lower layers, and the old server could persist an
-      // observation that observed a dropped write (data commits get the
-      // pushCommit hold instead; observations are droppable bookkeeping, so
-      // dropping beats holding — a held envelope would chain verdict latency
-      // into every semantic commit awaiting this flush). Resolve the dropped
-      // entries {ok} and send the rest.
-      let wireEntries = entries;
-      if (client.serverFlags?.pendingReadStacks !== true) {
-        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
-          entry.commit.reads.pending.every((read) =>
-            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
-          );
-        wireEntries = entries.filter(expressible);
-        for (const entry of entries) {
-          if (!expressible(entry)) {
-            entry.pending.resolve({ ok: {} });
-          }
-        }
-        if (wireEntries.length === 0) {
-          return { ok: {} };
-        }
-      }
-      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
-        ...commit,
-        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
-      };
-      const routeSources: IStorageTransaction[] = [];
-      const prepareIssue = (issueCommit: ClientCommit): boolean => {
-        const issueEntries: SchedulerObservationBatchEntry[] = [];
-        for (const entry of wireEntries) {
-          const validation = entry.source?.validateReplicaRoutes?.();
-          if (validation?.error !== undefined) {
-            entry.pending.resolve({ error: validation.error });
-            continue;
-          }
-          issueEntries.push(entry);
-          if (
-            entry.source !== undefined &&
-            !routeSources.includes(entry.source)
-          ) {
-            routeSources.push(entry.source);
-          }
-        }
-        issueCommit.schedulerObservationBatch = issueEntries.map((entry) =>
-          entry.commit
-        );
-        return issueEntries.length > 0;
-      };
-      return await this.pushCommit(
-        localSeq,
-        [],
-        wireBatch,
-        undefined,
-        { routeSources, prepareIssue },
-      );
-    })()
-      .then((result) => {
-        for (const entry of entries) {
-          entry.pending.resolve(result);
-        }
-        return result;
-      }, (error) => {
-        const rejection = toRejectedError(error, commit, this.#space);
-        const result = { error: rejection };
-        for (const entry of entries) {
-          entry.pending.resolve(result);
-        }
-        return result;
-      });
-    this.#schedulerObservationFlushPromise = promise;
-    this.#commitPromises.add(promise);
-    promise.finally(() => {
-      this.#commitPromises.delete(promise);
-      if (this.#schedulerObservationFlushPromise === promise) {
-        this.#schedulerObservationFlushPromise = undefined;
-      }
-    });
-    return promise;
-  }
-
   private async commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
-    schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
     commitOptions?: TransactionCommitOptions,
@@ -3327,18 +4111,10 @@ class SpaceReplica implements ISpaceReplica {
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
     ) {
-      if (schedulerObservation === undefined) {
-        return { ok: {} };
-      }
-      return await this.enqueueSchedulerObservationCommit(
-        schedulerObservation,
-        source,
-      );
+      return { ok: {} };
     }
 
     const localSeq = this.#nextLocalSeq++;
-    // Observations created after this direct commit form a later batch.
-    this.#schedulerObservationBatchGeneration++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
@@ -3372,13 +4148,50 @@ class SpaceReplica implements ISpaceReplica {
           }),
           ...sqliteOps,
         ],
-        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
       }),
     );
-    const touched = operations.map((operation) => ({
+    // The export refusal (server-execution v2 Phase 2, speculation.md
+    // §6; RULED 2026-08-13): a commit basis naming a SPECULATIVE
+    // overlay layer must not reach the wire — the layer exists only in
+    // this process, so the server would reject the dependency as
+    // unresolved on every attempt (pre-fix: the observed
+    // `pending dependency not resolved` convergence-retry loop, ~43
+    // attempts across the 30s window per event). Refused HERE, before
+    // the optimistic apply, with a terminal-classified error: nothing
+    // renders, nothing reverts, nothing retries.
+    const speculativeLayers = this.speculativeLayersOf(commit);
+    if (speculativeLayers.length > 0) {
+      const rejection = this.makeSpeculativeBasisRefusal(
+        commit,
+        speculativeLayers,
+      );
+      logger.error("speculative-basis-refused", () => [
+        "commit refused before export: read basis names speculative " +
+        "overlay layer(s) (speculation.md §6)",
+        {
+          localSeq,
+          speculativeLayers: [...speculativeLayers],
+          reads: commit.reads.pending
+            .filter((read) => {
+              const layers = Array.isArray(read.localSeq)
+                ? read.localSeq
+                : [read.localSeq];
+              return layers.some((layer) => speculativeLayers.includes(layer));
+            })
+            .map((read) => read.id),
+        },
+      ]);
+      if (source !== undefined) {
+        notifyCommitRejected(source, rejection);
+      }
+      return { error: rejection };
+    }
+    // A pushed commit is the replica's own identity's (every client, the
+    // OFF arm): touched entries carry no explicit instance.
+    const touched: LocalDocAddress[] = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
     }));
@@ -3393,7 +4206,10 @@ class SpaceReplica implements ISpaceReplica {
         shouldNotifySubscribers
           ? Differential.checkout(
             this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            touched.map(({ id, scope, scopeKey }) =>
+              snapshotState(this, id, scope, scopeKey)
+            ),
+            this.#scopeKeyIdentity(),
           )
           : undefined,
     );
@@ -3429,7 +4245,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
-          { waitForSchedulerObservations: true, commitOptions },
+          { commitOptions },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3462,8 +4278,11 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    options: { alwaysRegister?: boolean; identity?: ScopeKeyIdentity } = {},
   ): InFlightCommit | undefined {
-    if (commit.reads.pending.length === 0) {
+    if (
+      commit.reads.pending.length === 0 && options.alwaysRegister !== true
+    ) {
       return undefined;
     }
     const dependencies = new Set<number>();
@@ -3482,6 +4301,7 @@ class SpaceReplica implements ISpaceReplica {
       operations,
       source,
       commit,
+      ...(options.identity !== undefined ? { identity: options.identity } : {}),
       localRejection: Promise.withResolvers<StorageTransactionRejected>(),
       settled: false,
     };
@@ -3559,18 +4379,15 @@ class SpaceReplica implements ISpaceReplica {
     options: {
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
-      waitForSchedulerObservations?: boolean;
       commitOptions?: TransactionCommitOptions;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
     const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
-    // Rejection receipt seals the fate for EVERY contributing transaction —
-    // for a batched scheduler-observation commit that is each issued entry's
-    // source, which `source` (undefined for the batch wrapper) does not
-    // carry. finalizeRejection's own notify covers the cascade paths that
-    // do not come through here; the once-guard makes the overlap free.
+    // Rejection receipt seals the fate for EVERY contributing transaction.
+    // finalizeRejection's own notify covers the cascade paths that do not
+    // come through here; the once-guard makes the overlap free.
     const notifyRejectionSources = (
       rejection: StorageTransactionRejected,
     ): void => {
@@ -3578,10 +4395,6 @@ class SpaceReplica implements ISpaceReplica {
         notifyCommitRejected(routeSource, rejection);
       }
     };
-    const schedulerObservationDependencies =
-      options.waitForSchedulerObservations === true
-        ? this.schedulerObservationDependenciesBefore(localSeq)
-        : [];
     // Register BEFORE any await: commitOperations calls pushCommit
     // synchronously after applyPending, so registration is atomic with the
     // optimistic write — a dependency drop can never slip between the two.
@@ -3652,8 +4465,8 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
-      // The push marker window covers observation flush + (re)dial + send +
-      // confirm: the full client-side cost of durably landing this commit.
+      // The push marker window covers (re)dial + send + confirm: the full
+      // client-side cost of durably landing this commit.
       // (space.did, commit.local_seq) joins to the server's memory.transact span.
       telemetry?.submit({
         type: "storage.push.start",
@@ -3663,17 +4476,6 @@ class SpaceReplica implements ISpaceReplica {
         spaceDid: this.#space,
       });
       try {
-        if (schedulerObservationDependencies.length > 0) {
-          const flushResults = await Promise.all(
-            schedulerObservationDependencies,
-          );
-          const rejection = flushResults.find((result) =>
-            result.error !== undefined
-          )?.error;
-          if (rejection !== undefined) {
-            throw new StorageTransactionRejectionError(rejection);
-          }
-        }
         const { client, session } = await this.activeSessionHandle();
         if (
           options.prepareIssue !== undefined &&
@@ -3824,9 +4626,34 @@ class SpaceReplica implements ISpaceReplica {
         }
         const schedulerDependencyRejection =
           cause instanceof StorageTransactionRejectionError ? cause : undefined;
-        const rejection = schedulerDependencyRejection !== undefined
+        let rejection = schedulerDependencyRejection !== undefined
           ? schedulerDependencyRejection.rejection
           : toRejectedError(cause, commit, this.#space);
+        // Leg-C belt (speculation.md §6): a ConflictError whose commit
+        // names one of THIS replica's speculative layers can never
+        // converge — the dependency never reaches the wire.
+        // commitOperations refuses the export up front, so reaching
+        // here means a build path slipped through; upgrade to the
+        // terminal refusal rather than letting the caller spin its
+        // retry window against a dependency that is never coming.
+        if (
+          schedulerDependencyRejection === undefined &&
+          rejection.name === "ConflictError"
+        ) {
+          const speculativeLayers = this.speculativeLayersOf(commit);
+          if (speculativeLayers.length > 0) {
+            logger.error("speculative-basis-exported", () => [
+              "a commit naming speculative overlay layer(s) reached the " +
+              "wire (the build-time refusal should have caught this); " +
+              "upgrading the rejection to the terminal refusal",
+              { localSeq, speculativeLayers },
+            ]);
+            rejection = this.makeSpeculativeBasisRefusal(
+              commit,
+              speculativeLayers,
+            );
+          }
+        }
         telemetry?.submit({
           type: "storage.push.error",
           id: pushOpId,
@@ -3917,6 +4744,61 @@ class SpaceReplica implements ISpaceReplica {
     });
   }
 
+  /**
+   * Speculation retirement (server-execution v2 Phase 2, speculation.md
+   * §4): drop a speculative sealed commit's pending writes and notify
+   * the visible flip to the authoritative value. finalizeRejection minus
+   * two deliberate absences — no conflict-read-repair wait (nothing
+   * conflicted) and NO dependency cascade (retirement is success-shaped:
+   * an authored commit that read the echo is decided by the store's CAS,
+   * and a downstream speculation retires on its own floor). The
+   * notification is an ordinary `integrate` (authoritative state became
+   * visible), not a `revert` (nothing failed).
+   */
+  private finalizeSupersededSpeculation(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): Result<Unit, StorageTransactionRejected> {
+    const touched = this.#touchedOf(operations, identity);
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    this.dropPending(localSeq);
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        // The flip carries the retiring echo's own transaction as its
+        // source (speculation.md §4's "own retirement is not a trigger"
+        // rider): the writer's scheduler node skips its own flip.
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+          ...(source !== undefined ? { source } : {}),
+        } as StorageNotification);
+        if (shouldNotifySinks) {
+          this.notifySinks(changes);
+        }
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+    return { ok: {} };
+  }
+
   // Shared rejection tail for both real conflicts and pre-empted commits: wait
   // for the caught-up read-repair, drop the optimistic pending write, and emit
   // the revert notification reflecting repaired confirmed state.
@@ -3925,6 +4807,7 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
+    identity?: ScopeKeyIdentity,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
@@ -3940,10 +4823,7 @@ class SpaceReplica implements ISpaceReplica {
       if (source !== undefined) {
         notifyCommitRejected(source, rejection);
       }
-      const touched = operations.map((operation) => ({
-        id: operation.id,
-        scope: operation.scope,
-      }));
+      const touched = this.#touchedOf(operations, identity);
       const hasSemanticOperations = operations.length > 0;
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
@@ -3952,7 +4832,10 @@ class SpaceReplica implements ISpaceReplica {
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,
-          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+          touched.map(({ id, scope, scopeKey }) =>
+            snapshotState(this, id, scope, scopeKey)
+          ),
+          this.#scopeKeyIdentity(),
         )
         : undefined;
       await this.waitForConflictReadRepair(rejection);
@@ -3965,10 +4848,10 @@ class SpaceReplica implements ISpaceReplica {
       this.cascadeDroppedDependency(localSeq);
       if (before !== undefined) {
         const changes = before.compare(this);
-        // The revert snapshots CURRENT confirmed state (which already includes
-        // any newer seq received by subscription since this commit started)
-        // and drops only this commit's pending write — so it should not stomp
-        // newer data. Counted to verify reverts stay bounded.
+        // The revert snapshots CURRENT confirmed state (which already
+        // includes any newer seq received by subscription since this commit
+        // started) and drops only this commit's pending write — so it should
+        // not stomp newer data. Counted to verify reverts stay bounded.
         logger.debug("commit-revert", () => [
           `revert after ${rejection.name ?? "rejection"}`,
         ]);
@@ -3995,6 +4878,9 @@ class SpaceReplica implements ISpaceReplica {
   private buildReads(
     source: IStorageTransaction | undefined,
     localSeq: number,
+    // The reading run's identity (a served per-instance seal): each read's
+    // pending layers and confirmed seq come from THAT instance's record.
+    identity?: ScopeKeyIdentity,
   ) {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
@@ -4027,7 +4913,9 @@ class SpaceReplica implements ISpaceReplica {
       nonRecursive: boolean,
       confirmedSeq?: number,
     ) => {
-      const record = this.#docs.get(docKey(id, scope));
+      const record = this.#docs.get(
+        docKey(id, this.instanceKey(scope, identity)),
+      );
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -4309,7 +5197,7 @@ class SpaceReplica implements ISpaceReplica {
    * (CT-2046 tracks enforcing that broadly).
    */
   isSchemaDocPersisted(hash: string): boolean {
-    const record = this.#docs.get(docKey(`cid:${hash}` as URI, undefined));
+    const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
@@ -4338,14 +5226,9 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
-    const hasAdoptionObservations = type === "integrate" &&
-      sync.observations !== undefined &&
-      sync.observations.length > 0 &&
-      getPersistentSchedulerStateConfig();
     if (
       sync.upserts.length === 0 &&
-      sync.removes.length === 0 &&
-      !hasAdoptionObservations
+      sync.removes.length === 0
     ) {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
@@ -4355,14 +5238,20 @@ class SpaceReplica implements ISpaceReplica {
     // delivery guarantee is rejected whole, never half-installed.
     this.#validateArrivedSchemaDocuments(sync);
 
-    const touched = [
+    // A keyed frame (a lease-holder session's — server-execution v2 stage
+    // A, OW17's wire leg) names each entry's instance; the replica keys
+    // the doc under it. An unkeyed frame resolves from the replica's own
+    // identity exactly as before.
+    const touched: LocalDocAddress[] = [
       ...sync.upserts.map((upsert) => ({
         id: upsert.id as URI,
         scope: upsert.scope,
+        ...(upsert.scopeKey !== undefined ? { scopeKey: upsert.scopeKey } : {}),
       })),
       ...sync.removes.map((remove) => ({
         id: remove.id as URI,
         scope: remove.scope,
+        ...(remove.scopeKey !== undefined ? { scopeKey: remove.scopeKey } : {}),
       })),
     ];
 
@@ -4371,30 +5260,114 @@ class SpaceReplica implements ISpaceReplica {
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
       )
       : undefined;
 
+    // Docs whose CONFIRMED seq this frame moved FORWARD — the arrival
+    // wake's payload (stage C tuning T2). Collected only while an
+    // observer is installed (a client overlay's), so every other replica
+    // pays one undefined check.
+    const arrived: LocalDocAddress[] | undefined =
+      this.speculationArrivalObserver !== undefined ? [] : undefined;
     for (const upsert of sync.upserts) {
-      const record = this.record(upsert.id as URI, upsert.scope);
+      const record = this.record(
+        upsert.id as URI,
+        upsert.scope,
+        undefined,
+        upsert.scopeKey,
+      );
       // Watch refreshes can arrive after local confirmations. Never move the
       // confirmed base backwards; pending replay depends on monotonic bases.
       if (upsert.seq < record.confirmed.seq) {
         continue;
       }
+      const previousConfirmedSeq = record.confirmed.seq;
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
       );
       record.materialized = undefined;
-      this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
+      if (arrived !== undefined && upsert.seq > previousConfirmedSeq) {
+        arrived.push({
+          id: upsert.id as URI,
+          scope: upsert.scope,
+          ...(upsert.scopeKey !== undefined
+            ? { scopeKey: upsert.scopeKey }
+            : {}),
+        });
+      }
+      const key = docKey(
+        upsert.id as URI,
+        this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+      );
+      this.#watchedIds.add(key);
+      // The settle input barrier's shadow case (Phase 2 revisit (a)):
+      // a FOREIGN value integrating UNDER an own pending write is
+      // invisible through the materialized view — and the change
+      // notification below misses it — until the pending entry promotes
+      // or drops. Record the seq so the serving loop's W advance
+      // excludes it (`unappliedForeignSeqFloor`). Three exemptions,
+      // each a non-novelty shape that would otherwise clamp W forever
+      // (or one wave behind) on a serving loop:
+      // - GENUINE NOVELTY ONLY — the upsert must move confirmed
+      //   FORWARD past what was already visible
+      //   (`upsert.seq > previousConfirmedSeq`): a same-seq re-upsert
+      //   (a watch-refresh replay, or the frame echo of a SEALED
+      //   commit that F1a already confirmed at verdict time) carries
+      //   nothing the replica has not integrated;
+      // - an OWN ECHO — an upsert whose seq IS one of the pending
+      //   accepts' ack seqs is the durable copy of the own write
+      //   itself (CT-1927's mixed-provenance frame);
+      // - a seq-0 ABSENT-DOC marker (the initial watch pull's "no
+      //   confirmed version" answer), which carries no novelty at all.
+      if (
+        upsert.seq > 0 &&
+        upsert.seq > previousConfirmedSeq &&
+        record.pending.length > 0 &&
+        !record.pending.some((entry) =>
+          this.#ackedSeqsByLocalSeq.get(entry.localSeq) === upsert.seq
+        )
+      ) {
+        // Record EVERY hidden seq (review thread r3739139487): the
+        // floor reads the doc's lowest — the wave's derivations read
+        // the materialized view from BEFORE the earliest hidden input,
+        // so W must not advance past it. The previous per-doc
+        // `Math.max` let a second foreign update under the same
+        // pending write raise the floor and pass the first (a
+        // derivedThrough claim over input nothing derived over), and
+        // buried a standing remove sentinel the same way.
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(upsert.seq);
+      }
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
-      const record = this.record(id, remove.scope);
+      const record = this.record(id, remove.scope, undefined, remove.scopeKey);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
-      this.#watchedIds.delete(docKey(id, remove.scope));
+      const key = docKey(
+        id,
+        this.instanceKey(remove.scope, undefined, remove.scopeKey),
+      );
+      this.#watchedIds.delete(key);
+      if (record.pending.length > 0) {
+        // A shadowed remove carries no seq on the wire: the sentinel 1
+        // holds W entirely until the shadow clears (see the field doc).
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(1);
+      }
     }
 
     // Parked accepts apply BEFORE the differential compare: when the frame
@@ -4420,21 +5393,23 @@ class SpaceReplica implements ISpaceReplica {
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
     }
-    // Subscription-carried scheduler observations — other clients' committed
-    // action runs for this sync window. Handed to the scheduler AFTER the
-    // integrate invalidation above (same synchronous turn, before the
-    // deferred dispatch), so adoption clears exactly the dirt these writes
-    // caused. See incremental-observation-adoption.md §4.
-    if (hasAdoptionObservations) {
-      this.#subscription.next({
-        type: "scheduler-observations",
-        space: this.#space,
-        observations: sync.observations!,
-        seqCurrentAtOrBelow: (addresses, seq) =>
-          this.areSchedulerAddressesCurrentAtOrBelow(addresses, seq),
-        hasPendingWriteOverlapping: (addresses) =>
-          this.schedulerHasPendingWriteOverlapping(addresses),
-      } as StorageNotification);
+    // The arrival wake (stage C tuning T2, speculation.md §4): AFTER the
+    // frame's own notifications, on a consistent replica — the overlay's
+    // sweep resolves verdicts (dropping its retired layers through the
+    // ordinary rollback path), which must not interleave with the
+    // integration above. Same containment posture as the ack observer.
+    if (
+      arrived !== undefined && arrived.length > 0 &&
+      this.speculationArrivalObserver !== undefined
+    ) {
+      try {
+        this.speculationArrivalObserver(arrived);
+      } catch (error) {
+        logger.error("speculation-arrival-observer-error", () => [
+          "speculationArrivalObserver threw during frame integration",
+          error,
+        ]);
+      }
     }
   }
 
@@ -4443,7 +5418,7 @@ class SpaceReplica implements ISpaceReplica {
   // server stages as the post-conflict catch-up point for these ids.
   private recordStaleFloor(commit: ClientCommit, localSeq: number): void {
     const mark = (id: string, scope?: CellScope) => {
-      const key = docKey(id as URI, scope);
+      const key = this.#docKeyOf({ id: id as URI, scope });
       const current = this.#staleFloor.get(key);
       if (current === undefined || current < localSeq) {
         this.#staleFloor.set(key, localSeq);
@@ -4471,7 +5446,9 @@ class SpaceReplica implements ISpaceReplica {
     }
     let threshold: number | undefined;
     const consider = (id: string, scope?: CellScope) => {
-      const floor = this.#staleFloor.get(docKey(id as URI, scope));
+      const floor = this.#staleFloor.get(
+        this.#docKeyOf({ id: id as URI, scope }),
+      );
       if (floor !== undefined && floor > this.#caughtUpLocalSeq) {
         threshold = threshold === undefined
           ? floor
@@ -4491,13 +5468,6 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     threshold: number,
   ): StorageTransactionRejected {
-    let firstId: URI | undefined;
-    for (const operation of commit.operations) {
-      if (operation.op !== "sqlite") {
-        firstId = operation.id as URI;
-        break;
-      }
-    }
     return {
       name: "ConflictError",
       message:
@@ -4506,11 +5476,7 @@ class SpaceReplica implements ISpaceReplica {
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
-        of: firstId ?? "of:unknown",
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
+        of: conflictEntityOf(commit),
       },
       // The catch-up that clears `threshold` is already in flight from the
       // earlier conflict; gate the retry directly on it (no provider round trip
@@ -4532,13 +5498,6 @@ class SpaceReplica implements ISpaceReplica {
     message: string,
     readyToRetry: () => Promise<void> = () => Promise.resolve(),
   ): StorageTransactionRejected {
-    let firstId: URI | undefined;
-    for (const operation of commit.operations) {
-      if (operation.op !== "sqlite") {
-        firstId = operation.id as URI;
-        break;
-      }
-    }
     return {
       name: "ConflictError",
       message,
@@ -4546,11 +5505,7 @@ class SpaceReplica implements ISpaceReplica {
       conflict: {
         space: this.#space,
         the: DOCUMENT_MIME,
-        of: firstId ?? "of:unknown",
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
+        of: conflictEntityOf(commit),
       },
       readyToRetry,
     };
@@ -4564,6 +5519,53 @@ class SpaceReplica implements ISpaceReplica {
       entry.commit,
       `pending dependency dropped locally: localSeq=${droppedLocalSeq}`,
     );
+  }
+
+  /** The SPECULATIVE overlay layers a commit's read basis names, if any
+   * (server-execution v2 Phase 2, speculation.md §6). Non-empty means
+   * the commit must not export: those localSeqs exist only in this
+   * process, so as wire pending-read dependencies they can NEVER
+   * resolve. */
+  private speculativeLayersOf(commit: ClientCommit): number[] {
+    if (this.#speculativeLocalSeqs.size === 0) return [];
+    const named = new Set<number>();
+    for (const read of commit.reads.pending) {
+      const layers = Array.isArray(read.localSeq)
+        ? read.localSeq
+        : [read.localSeq];
+      for (const layer of layers) {
+        if (this.#speculativeLocalSeqs.has(layer)) named.add(layer);
+      }
+    }
+    return [...named].sort((left, right) => left - right);
+  }
+
+  // The loud export refusal (speculation.md §6; RULED 2026-08-13): an
+  // authored/pushed commit whose read basis names a speculative overlay
+  // layer fails OUTRIGHT — terminal, never retried. Only the client can
+  // make this call: it knows which of its layers are speculative, while
+  // the server cannot distinguish a dependency that is never coming
+  // from one that has not arrived yet. Modeled on toRejectedError's
+  // terminal-name arm (RowLabelCommitError): a TransactionError shape
+  // whose name is in TERMINAL_REJECTION_NAMES, so the scheduler's
+  // disposition is `terminal` instead of a doomed backoff window.
+  private makeSpeculativeBasisRefusal(
+    commit: ClientCommit,
+    speculativeLayers: readonly number[],
+  ): StorageTransactionRejected {
+    const message =
+      `authored commit refused: its read basis names speculative overlay ` +
+      `layer(s) ${speculativeLayers.join(", ")} — client speculation ` +
+      `entries exist only in this process and can never resolve as wire ` +
+      `pending-read dependencies (server-execution v2 speculation.md §6). ` +
+      `The write is failed outright instead of retried; re-derivation ` +
+      `after the authoritative value lands is the recovery path.`;
+    return {
+      name: "SpeculativeBasisError",
+      message,
+      cause: { name: "SystemError", message, code: 409 },
+      transaction: commit,
+    } as unknown as StorageTransactionRejected;
   }
 
   /**
@@ -4705,8 +5707,13 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private record(id: URI, scope?: CellScope): DocumentRecord {
-    const key = docKey(id, scope);
+  private record(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): DocumentRecord {
+    const key = docKey(id, this.instanceKey(scope, identity, explicit));
     let record = this.#docs.get(key);
     if (!record) {
       record = {
@@ -4722,9 +5729,10 @@ class SpaceReplica implements ISpaceReplica {
   private applyPending(
     operation: NativeCommitOperation,
     localSeq: number,
+    identity?: ScopeKeyIdentity,
   ): void {
     const { id, scope, ...pending } = operation;
-    const record = this.record(id, scope);
+    const record = this.record(id, scope, identity);
     record.pending.push(pendingVersion(localSeq, pending));
   }
 
@@ -4733,12 +5741,61 @@ class SpaceReplica implements ISpaceReplica {
   // replica begins settlement and for servers that predate per-verdict markers
   // (verdictCatchUpMarkers absent: an older server stamps markers only for
   // conflicts, so parking would hang).
+  //
+  // PUSHED (socket) commits only: sealed commits — engine-plane commits by
+  // the co-hosted executor — settle through settleSealedCommit, which
+  // confirms immediately (F1a there explains why parking them wedged
+  // permanently: no marker is ever staged for an engine-plane commit).
   private settleAccept(
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
     resolveAtVerdict = false,
   ): Promise<void> {
+    // The retirement floor's ack record (speculation.md §4): known at
+    // VERDICT time, before any parking — a parked promotion changes when
+    // the value becomes visible, not that the origin acked.
+    this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
+    if (
+      this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
+    ) {
+      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
+      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
+    }
+    // The input barrier's own-echo race repair (Phase 2 revisit (a)):
+    // the frame can OUTRUN this verdict handler on the same socket, so
+    // an own-echo upsert may have been mis-recorded as shadowed foreign
+    // novelty before the ack above existed. A shadow whose seq IS this
+    // accept's seq on a doc this accept wrote is that mis-record — no
+    // foreign commit can share the seq — so lift EXACTLY that seq (the
+    // set structure keeps genuine foreign shadows recorded around the
+    // echo intact — r3739139487), or a quiet serving loop would clamp
+    // W forever against its own echo.
+    for (const operation of operations) {
+      const key = this.#docKeyOf(operation);
+      const seqs = this.#shadowedForeignSeqs.get(key);
+      if (seqs !== undefined && seqs.delete(applied.seq) && seqs.size === 0) {
+        this.#shadowedForeignSeqs.delete(key);
+      }
+    }
+    // The retirement wake for origin accepts (speculation.md §4;
+    // leg-C 2026-08-13): a sweep that ran while this verdict was in
+    // flight skipped its entries as blocked (unacked layer below), and
+    // the covering watermark event has already passed — without this
+    // wake a then-quiet space strands them forever. Rejected origins
+    // reach the overlay through the dependency cascade; ACCEPTS need
+    // this explicit signal. Guarded: an observer throw must not abort
+    // accept settlement (same containment posture as notifySinks).
+    if (this.speculationAckObserver !== undefined) {
+      try {
+        this.speculationAckObserver();
+      } catch (error) {
+        logger.error("speculation-ack-observer-error", () => [
+          "speculationAckObserver threw during accept settlement",
+          error,
+        ]);
+      }
+    }
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no
@@ -4807,15 +5864,51 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
+    // The identity the operations were sealed under (F1a's sealed-commit
+    // confirm; a pushed commit's is the replica's own).
+    identity?: ScopeKeyIdentity,
   ): void {
+    // The accept is being applied (immediately at verdict, or promoted
+    // off the parked set): release any read-barrier waiter (whenApplied).
+    this.resolveAppliedWaiter(localSeq);
     const keys = new Map(
-      operations.map((operation) => [
-        docKey(operation.id, operation.scope),
-        { id: operation.id, scope: operation.scope },
+      this.#touchedOf(operations, identity).map((touched) => [
+        this.#docKeyOf(touched),
+        touched,
       ]),
     );
-    for (const { id, scope } of keys.values()) {
-      const record = this.record(id, scope);
+    // The settle input barrier's SHADOW FLIP (Phase 2 revisit (a), flag
+    // ON only): when confirmed advanced PAST this accept while it was
+    // pending — foreign novelty integrated under the own overlay — the
+    // removal below makes the foreign value visible where the overlay
+    // was, and NO other path notifies (applySessionSync's differential
+    // ran while the overlay still masked the change). Fire the ordinary
+    // change notification for exactly the shadowed docs, so scheduler
+    // dirtiness registers BEFORE `unappliedForeignSeqFloor` lifts and
+    // the serving loop's next wave derives over the foreign value.
+    // Flag-gated: the OFF arm keeps today's silent flip byte-for-byte
+    // (the residual is self-healing there and the timing delta is not a
+    // recorded acceptance — see the Phase-2 PR's Flags).
+    const shadowTouched = getServerExecutionConfig()
+      ? [...keys.entries()]
+        .filter(([key]) => this.#shadowedForeignSeqs.has(key))
+        .map(([, address]) => address)
+      : [];
+    const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
+      this.hasNotificationSubscribers();
+    const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
+      this.hasSinkSubscribers(shadowTouched);
+    const shadowBefore = shouldNotifyShadowSubscribers
+      ? Differential.checkout(
+        this,
+        shadowTouched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    for (const { id, scope, scopeKey } of keys.values()) {
+      const record = this.record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
       );
@@ -4877,10 +5970,57 @@ class SpaceReplica implements ISpaceReplica {
 
       dropMaterializedSuffix(record, firstPendingIndex);
     }
+
+    // The shadow-flip notification (see the checkout above): compare the
+    // post-removal view and notify exactly the docs whose foreign value
+    // just became visible. Same pattern as applySessionSync's integrate
+    // notification.
+    if (shadowBefore !== undefined) {
+      const changes = shadowBefore.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        } as StorageNotification);
+        if (shouldNotifyShadowSinks) {
+          this.notifySinks(changes);
+        }
+      }
+    } else if (shouldNotifyShadowSinks) {
+      this.notifySinksForIds(shadowTouched);
+    }
+    // The wake (see the field doc): fired on the flip regardless of
+    // notification subscribers AND regardless of a value diff — an
+    // echo-equal flip still lifts `unappliedForeignSeqFloor`, which is
+    // the state the serving loop's clamped wait is parked on. Guarded:
+    // the observer is externally installed (SpaceServer), and a throw
+    // here would abort the caller's settlement loop over parked
+    // accepts mid-batch — some confirmed, others already deleted from
+    // the parked set with unresolved whenApplied waiters (same
+    // containment posture as notifySinksForIds' per-subscriber guard).
+    if (shadowTouched.length > 0) {
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during promotion",
+          error,
+        ]);
+      }
+    }
   }
 
   private dropPending(localSeq: number): void {
-    for (const record of this.#docs.values()) {
+    // A drop can LIFT the shadow floor without a promotion (review
+    // thread r3739416417): a rejected/rolled-back own write emptying a
+    // shadowed doc's pending set makes the foreign value visible and
+    // prunes the floor lazily — but only confirmPending fired the
+    // serving loop's wake, so a quiet clamped space stayed asleep
+    // until the input-wait timeout. Fire the same flag-gated wake when
+    // the drop empties a shadowed doc's pending set.
+    let shadowLifted = false;
+    for (const [key, record] of this.#docs.entries()) {
       const firstPendingIndex = record.pending.findIndex((entry) =>
         entry.localSeq === localSeq
       );
@@ -4891,14 +6031,36 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      if (
+        record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
+      ) {
+        shadowLifted = true;
+      }
+    }
+    if (shadowLifted && getServerExecutionConfig()) {
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during a pending drop",
+          error,
+        ]);
+      }
     }
   }
 
-  private visibleVersion(id: URI, scope?: CellScope): {
+  private visibleVersion(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): {
     record: DocumentRecord;
     version: MaterializedVersion;
   } | undefined {
-    const record = this.#docs.get(docKey(id, scope));
+    const record = this.#docs.get(
+      docKey(id, this.instanceKey(scope, identity, explicit)),
+    );
     if (!record) {
       return undefined;
     }
@@ -4912,16 +6074,25 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
-  private visibleValue(id: URI, scope?: CellScope): FabricValue | undefined {
-    const visible = this.visibleVersion(id, scope);
+  private visibleValue(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): FabricValue | undefined {
+    const visible = this.visibleVersion(id, scope, identity);
     if (!visible) {
       return undefined;
     }
     return transactionValueForVersion(visible.version);
   }
 
-  private getState(id: URI, scope?: CellScope): State | undefined {
-    const visible = this.visibleVersion(id, scope);
+  private getState(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): State | undefined {
+    const visible = this.visibleVersion(id, scope, identity, explicit);
     if (!visible) {
       return undefined;
     }
@@ -4930,13 +6101,14 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return {
-      ...assert({
-        the: DOCUMENT_MIME,
-        of: id,
-        is: value,
-        cause: null,
-      }),
+      the: DOCUMENT_MIME,
+      of: id,
+      is: value,
       scope: normalizeCellScope(scope),
+      // The explicit instance rides the state ONLY when the caller named
+      // one, so the differential keys and addresses it per instance; an
+      // own-identity read's state is byte-identical to before.
+      ...(explicit !== undefined ? { scopeKey: explicit } : {}),
       since: visible.record.confirmed.seq,
     } as State;
   }
@@ -4944,26 +6116,36 @@ class SpaceReplica implements ISpaceReplica {
   private visibleDocument(
     id: URI,
     scope?: CellScope,
+    identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
-    return this.visibleVersion(id, scope)?.version.value;
+    return this.visibleVersion(id, scope, identity)?.version.value;
   }
 
   private notifySinks(changes: IMergedChanges): void {
-    const touched = new Map<string, { id: URI; scope?: CellScope }>();
+    const touched = new Map<string, LocalDocAddress>();
     for (const change of changes) {
       const id = change.address.id as URI;
       const scope = change.address.scope;
-      touched.set(docKey(id, scope), { id, scope });
+      const scopeKey = change.address.scopeKey;
+      touched.set(
+        this.#docKeyOf({ id, scope, scopeKey }),
+        scopeKey === undefined ? { id, scope } : { id, scope, scopeKey },
+      );
     }
     this.notifySinksForIds(touched.values());
   }
 
   private notifySinksForIds(
-    entries: Iterable<{ id: URI; scope?: CellScope }>,
+    entries: Iterable<LocalDocAddress>,
   ): void {
-    for (const { id, scope } of entries) {
-      const current = this.visibleDocument(id, scope);
-      for (const callback of this.#sinks.get(docKey(id, scope)) ?? []) {
+    for (const { id, scope, scopeKey } of entries) {
+      const current = this.visibleVersion(id, scope, undefined, scopeKey)
+        ?.version.value;
+      for (
+        const callback
+          of this.#sinks.get(this.#docKeyOf({ id, scope, scopeKey })) ??
+            []
+      ) {
         try {
           callback(current);
         } catch (error) {
@@ -4984,10 +6166,10 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private hasSinkSubscribers(
-    entries: Iterable<{ id: URI; scope?: CellScope }>,
+    entries: Iterable<LocalDocAddress>,
   ): boolean {
-    for (const { id, scope } of entries) {
-      if ((this.#sinks.get(docKey(id, scope))?.size ?? 0) > 0) {
+    for (const entry of entries) {
+      if ((this.#sinks.get(this.#docKeyOf(entry))?.size ?? 0) > 0) {
         return true;
       }
     }
@@ -5028,6 +6210,10 @@ class SpaceReplica implements ISpaceReplica {
           // double-applies — their contribution.
           resolved.session.onSessionReplaced = () => {
             this.applyParkedAcceptsNow();
+            // A replaced session rejected its outstanding commits; queued
+            // event intents re-submit under fresh localSeqs (the target's
+            // eventId dedupe keeps a landed original sound — events.md §5).
+            this.#eventAppendQueue?.kick();
           };
           return resolved;
         },
@@ -5047,11 +6233,20 @@ const snapshotState = (
   replica: SpaceReplica,
   id: URI,
   scope?: CellScope,
+  scopeKey?: ScopeKey,
 ): State => {
-  return replica.get({ id, type: DOCUMENT_MIME, path: [], scope }) ??
+  return replica.get({
+    id,
+    type: DOCUMENT_MIME,
+    path: [],
+    scope,
+    ...(scopeKey !== undefined ? { scopeKey } : {}),
+  }) ??
     ({
-      ...unclaimed({ of: id, the: DOCUMENT_MIME }),
+      the: DOCUMENT_MIME,
+      of: id,
       scope: normalizeCellScope(scope),
+      ...(scopeKey !== undefined ? { scopeKey } : {}),
     } as State);
 };
 
@@ -5135,17 +6330,13 @@ const toRejectedError = (
       transaction: commit,
       // Conflict descriptor: for stale-read conflicts `of` is authoritative
       // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running (CT-1824).
-      // `the`/`expected`/`actual` remain placeholders.
+      // retrier can pull exactly that doc before re-running. `the` remains a
+      // placeholder.
       conflict: {
         space,
         the: DOCUMENT_MIME,
         of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
           firstOperationId ?? "of:unknown") as Entity,
-        expected: null,
-        actual: null,
-        existsInHistory: false,
-        history: [],
       },
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq

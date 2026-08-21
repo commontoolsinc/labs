@@ -4,12 +4,26 @@ import type { Browser as AstralBrowser, LaunchOptions } from "@astral/astral";
 
 import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
 
-Deno.test("isRetryableAstralLaunchError matches ETXTBSY browser-launch failures", () => {
+Deno.test("isRetryableAstralLaunchError matches transient browser-launch failures", () => {
   assertEquals(
     isRetryableAstralLaunchError(
       new Error("open '/tmp/chrome': Text file busy (os error 26)"),
     ),
     true,
+  );
+  assertEquals(
+    isRetryableAstralLaunchError(
+      new Error("Your binary refused to boot"),
+    ),
+    true,
+  );
+  assertEquals(
+    isRetryableAstralLaunchError(
+      new Error(
+        "Your binary refused to boot due to missing system dependencies",
+      ),
+    ),
+    false,
   );
   assertEquals(
     isRetryableAstralLaunchError(new Error("permission denied")),

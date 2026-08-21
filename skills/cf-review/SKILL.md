@@ -148,19 +148,19 @@ home.** Point to the module rather than trusting a symbol name remembered here �
 names drift, so confirm against the package's actual exports when you rely on it
 (this table is the highest-value _and_ highest-rot content in the skill):
 
-| Concern                                     | Canonical home                                                                                                | Do not                                                                                                                                            |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| stringifying fabric values for debug/log    | `@commonfabric/data-model/value-debug`                                                                        | `JSON.stringify()` on fabric data; it stringifies most non-plain objects as literally `{}`                                                        |
-| sorting strings for cross-platform          | `@commonfabric/utils/utf8`                                                                                    | use JavaScript `string1 < string2` (incorrect given UTF-16 surrogate code points), hand-roll or import a different sorting function               |
-| SHA-256 / content addressing                | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
-| hashing a fabric value or schema            | `@commonfabric/data-model/value-hash`, `@commonfabric/data-model/schema-hash`                                 | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
-| cloning a fabric value                      | `@commonfabric/data-model/value-clone`                                                                        | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on fabric / cell data — drops cell links, dies on circular `$UI` trees                   |
-| cloning a schema (for modification)         | `@commonfabric/data-model/schema-utils`, several useful functions available                                   | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
-| (de)serializing fabric values / wire format | `@commonfabric/data-model/codec-json`                                                                         | invent a parallel serializer / `toJSON` for fabric values                                                                                         |
-| cell ↔ link conversion                      | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (don't copy the internal `traverse*` helpers in `llm-dialog.ts`)                                                     |
-| identity / DID / keypairs                   | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
-| variable-length integer encoding            | `@commonfabric/leb128` (LEB128 or similar)                                                                    | hand-roll varint encode / decode                                                                                                                  |
-| Merkle-tree hashing                         | **N/A — we don't do Merkle-tree hashing** (we have content hashes in `data-model`, not a classic Merkle tree) | invent or import a Merkle-tree library unless specifically asked                                                                                  |
+| Concern                                      | Canonical home                                                                                                | Do not                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| stringifying `FabricValue`s for debug/log    | `@commonfabric/data-model/value-debug`                                                                        | `JSON.stringify()` on a `FabricValue`; it stringifies most non-plain objects as literally `{}`                                                    |
+| sorting strings for cross-platform           | `@commonfabric/utils/utf8`                                                                                    | use JavaScript `string1 < string2` (incorrect given UTF-16 surrogate code points), hand-roll or import a different sorting function               |
+| SHA-256 / content addressing                 | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
+| hashing a `FabricValue` or schema            | `@commonfabric/data-model/value-hash`, `@commonfabric/data-model/schema-hash`                                 | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
+| cloning a `FabricValue`                      | `@commonfabric/data-model/value-clone`                                                                        | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on `FabricValue` / cell data — drops cell links, dies on circular `$UI` trees            |
+| cloning a schema (for modification)          | `@commonfabric/data-model/schema-utils`, several useful functions available                                   | `structuredClone()` or `JSON.parse(JSON.stringify(...))`                                                                                          |
+| (de)serializing `FabricValue`s / wire format | `@commonfabric/data-model/codec-json`                                                                         | invent a parallel serializer / `toJSON` for `FabricValue`s                                                                                        |
+| cell ↔ link conversion                       | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (don't copy the internal `traverse*` helpers in `llm-dialog.ts`)                                                     |
+| identity / DID / keypairs                    | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
+| variable-length integer encoding             | `@commonfabric/leb128` (LEB128 or similar)                                                                    | hand-roll varint encode / decode                                                                                                                  |
+| Merkle-tree hashing                          | **N/A — we don't do Merkle-tree hashing** (we have content hashes in `data-model`, not a classic Merkle tree) | invent or import a Merkle-tree library unless specifically asked                                                                                  |
 
 `hash`, `serialize`, and `clone` are the three we re-fork most — the tree
 _already_ carries several SHA-256s (e.g. `content-hash` vs
@@ -281,6 +281,16 @@ of @`<handle>`"_ (use the human's real GitHub handle from `gh` / the PR context;
 omit the `@` if unsure) — via `gh pr review --comment`, or inline comments
 through the reviews API for Blocking / Improvements with Nits left in the
 summary. Skip posting when it isn't worth it.
+
+Anchor every finding to the context it responds to: a threaded reply
+(`gh api .../pulls/<n>/comments/<id>/replies`) when answering an existing
+thread, otherwise an inline comment on the file and line it addresses —
+`gh api repos/<owner>/<repo>/pulls/<n>/comments -F body=@file
+-f commit_id=<head-sha> -f path=<file> -F line=<n> -f side=RIGHT`.
+A top-level `gh pr comment` detaches the argument from what it argues about;
+reviewers read threads in-diff, and a floating comment is easy to miss and hard
+to answer in context. Find anchor lines by grepping the PR-head version of the
+file.
 
 ---
 

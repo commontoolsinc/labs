@@ -250,7 +250,13 @@ immediately.
 
 ## 11. Query / Traversal Reuse
 
-Keep using the shared traversal code from `packages/runner/src/traverse.ts`.
+Keep using the shared traversal code, reached through
+`@commonfabric/runner/graph-query`. That module holds the query driver:
+`GraphQueryWalk` over an `ObjectStorageManager` the storage side implements,
+and `schemaTrackerKey` for the key a walk records under. It is the whole of
+what storage code should import from the runtime for this purpose;
+[schema graph queries](../../features/schema-graph-queries.md) describes the
+exchange and what it costs.
 
 The server and client must continue to agree on entity reachability and graph
 membership. Reuse traversal logic rather than reimplementing a separate graph

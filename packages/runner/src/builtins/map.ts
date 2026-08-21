@@ -30,6 +30,7 @@ import { seedResultContainerWhenPullSettles } from "./list-result-container-seed
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { resumeSettleRunKind } from "./resume-republish.ts";
 import {
   exposedResultCell,
   outputSpotFromBinding,
@@ -100,6 +101,13 @@ export function map(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+  // The containing piece's root: every element sub-piece this coordinator
+  // starts is that piece's structure, so its actions' demand roots carry
+  // the parent's chain (server-execution v2 Phase 7's demand-root chain;
+  // RunnerRunOptions.parentPieceRootId) — a serving runtime resolves the
+  // element's demanded instances through the OUTER root a client watches
+  // instead of falling to the service identity (P7 review finding 4).
+  const parentPieceRootId = parentCell.getAsNormalizedFullLink().id;
 
   // Whether the writes that make `result` reachable are owed. The coordinator
   // keeps the container across reconciles, so one that stages those writes and
@@ -133,12 +141,10 @@ export function map(
   });
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
-  // runs until storage sync completes. This coordinator registers as
-  // resumeMode "always-run" with a synced-hold (it never rehydrates clean —
-  // see the return below), so its first reconcile runs against synced data;
-  // the per-element runs it starts carry the same intent, which is what lets
-  // each child rehydrate its own persisted state at registration. Elements
-  // added by later (post-resume) reconciles are fresh and must not wait.
+  // runs until storage sync completes: with a synced-hold, its first
+  // reconcile runs against synced data, and the per-element runs it starts
+  // carry the same intent. Elements added by later (post-resume) reconciles
+  // are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
 
   // Hold the durable container while the input list itself confirms. On a resume
@@ -154,6 +160,14 @@ export function map(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
+            // Out-of-band recovery write; the kind decision (bookkeeping
+            // on the serving posture, derivation on clients — the settle
+            // writes DERIVED content) is shared across map/filter/flatMap
+            // in resumeSettleRunKind (r3756175819).
+            runtime.stampServerRun(settleTx, {
+              actionId: `map/resume-settle/${parentCell.sourceURI}`,
+              kind: resumeSettleRunKind(runtime),
+            });
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
@@ -329,7 +343,10 @@ export function map(
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the probe read above is journaled). A
       // container that was never persisted has nothing to stream in, so the
-      // seed below ends the wait once the pull settles.
+      // seed below ends the wait once the pull settles. The id names the
+      // seed's out-of-band recovery write; the helper stamps it with the
+      // sanctioned bookkeeping kind (serving-loop.md §3d) so a SERVING
+      // runtime's wave accepts the seal. Same shape in filter.ts/flatmap.ts.
       const container = result;
       seedResultContainerWhenPullSettles(
         runtime,
@@ -337,6 +354,7 @@ export function map(
         () => active && result === container,
         container.sync(),
         logger,
+        `map/resume-seed/${parentCell.sourceURI}`,
       );
       return;
     }
@@ -413,6 +431,7 @@ export function map(
             {
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
+              parentPieceRootId,
             },
           );
           // The whole setup, every time, because issuing it takes the debt for
@@ -446,6 +465,7 @@ export function map(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            parentPieceRootId,
           },
         );
         linkElementCell(boundResultCell);
@@ -458,9 +478,7 @@ export function map(
     probeScoped(() => resultWithLog.set(newArrayValue));
   };
 
-  // Child-starting coordinator: never rehydrates clean on resume — the
-  // reconcile must run to re-attach the per-element children (which then
-  // rehydrate their own persisted state). See
-  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  // Child-starting coordinator: its reconcile must run on resume to
+  // re-attach the per-element children.
+  return { action: reconcile };
 }

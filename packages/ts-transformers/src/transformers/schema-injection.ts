@@ -2985,6 +2985,10 @@ function handlePatternSchemaInjection(
 
       // Use existing schema directly as input, create result schema from type
       const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+      context.state.recordPatternResultSchemaCall(
+        toSchemaResult,
+        node.expression,
+      );
       preserveUiContractHint(
         resultTypeNode,
         toSchemaResult,
@@ -3085,6 +3089,10 @@ function handlePatternSchemaInjection(
     resultTypeNode,
     checker,
     typeRegistry,
+  );
+  context.state.recordPatternResultSchemaCall(
+    resultSchemaCall,
+    node.expression,
   );
   if (
     unwrappedPatternReturnExpr &&

@@ -35,10 +35,6 @@ describe("isPatternSource", () => {
     expect(isPatternSource("packages/patterns/integration/foo.ts")).toBe(false);
     expect(isPatternSource("packages/patterns/tools/foo.ts")).toBe(false);
     expect(isPatternSource("packages/patterns/mod.ts")).toBe(false);
-    expect(isPatternSource("packages/patterns/scrabble/scrabble-words.ts"))
-      .toBe(
-        false,
-      );
   });
 });
 

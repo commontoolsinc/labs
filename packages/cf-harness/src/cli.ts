@@ -7,10 +7,7 @@ import {
   relative,
   resolve,
 } from "@std/path";
-import {
-  isAbsolute as isAbsoluteSandboxPath,
-  normalize as normalizeSandboxPath,
-} from "@std/path/posix";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -74,6 +71,14 @@ import {
 } from "./sandbox/docker-runsc.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import {
+  type CfHarnessHostMountConfig,
+  type CfHarnessHostMountMode,
+  hostMountsToAdditionalMounts,
+  parseHostMountSpecs,
+} from "./host-mounts.ts";
+
+export type { CfHarnessHostMountConfig, CfHarnessHostMountMode };
+import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
@@ -97,7 +102,7 @@ import {
   validateStructuredResultValue,
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
-import { normalizeCdpOrigin } from "./tools/browser-host-command-policy.ts";
+import { normalizeCdpOrigin } from "./contracts/browser-access.ts";
 import {
   defaultHarnessCredentialStorePath,
   FileHarnessCredentialStore,
@@ -251,15 +256,6 @@ export interface CfHarnessCliConfig {
   fabricMount?: string;
   fabricSession?: HarnessFabricSessionConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
-}
-
-export type CfHarnessHostMountMode = "readonly" | "writable";
-
-export interface CfHarnessHostMountConfig {
-  name: string;
-  hostPath: string;
-  sandboxPath: string;
-  mode: CfHarnessHostMountMode;
 }
 
 export interface CfHarnessStructuredResultConfig {
@@ -881,127 +877,6 @@ interface CfHarnessAllowedHostRoot {
   readOnly: boolean;
   name?: string;
 }
-
-const HOST_MOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-const normalizeSandboxMountPath = (path: string, label: string): string => {
-  const normalized = normalizeSandboxPath(path);
-  if (!isAbsoluteSandboxPath(normalized) || normalized === "/") {
-    throw new Error(`${label} must be an absolute non-root sandbox path`);
-  }
-  return normalized.length > 1 && normalized.endsWith("/")
-    ? normalized.slice(0, -1)
-    : normalized;
-};
-
-const parseHostMountSpecParts = (
-  spec: string,
-): Record<string, string> => {
-  const parts: Record<string, string> = {};
-  for (const segment of spec.split(",")) {
-    const trimmed = segment.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const index = trimmed.indexOf("=");
-    if (index <= 0) {
-      throw new Error(
-        "--host-mount entries must use key=value comma-separated fields",
-      );
-    }
-    const key = trimmed.slice(0, index).trim();
-    const value = trimmed.slice(index + 1).trim();
-    if (key.length === 0 || value.length === 0) {
-      throw new Error("--host-mount fields require non-empty keys and values");
-    }
-    if (parts[key] !== undefined) {
-      throw new Error(`--host-mount field repeated: ${key}`);
-    }
-    parts[key] = value;
-  }
-  return parts;
-};
-
-const realPathIfDirectory = async (
-  path: string,
-  label: string,
-): Promise<string> => {
-  let realPath: string;
-  try {
-    realPath = await Deno.realPath(path);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      throw new Error(`${label} must exist: ${path}`);
-    }
-    throw error;
-  }
-  const stat = await Deno.stat(realPath);
-  if (!stat.isDirectory) {
-    throw new Error(`${label} must be a directory: ${path}`);
-  }
-  if (realPath === dirname(realPath)) {
-    throw new Error(`${label} must not be the filesystem root`);
-  }
-  return realPath;
-};
-
-const parseHostMountSpec = async (
-  spec: string,
-  cwd: string,
-): Promise<CfHarnessHostMountConfig> => {
-  if (spec.trim().length === 0) {
-    throw new Error("--host-mount requires a non-empty spec");
-  }
-  const parts = parseHostMountSpecParts(spec);
-  const name = parts.name;
-  const source = parts.source;
-  const target = parts.target;
-  const mode = parts.mode ?? "readonly";
-  if (name === undefined || source === undefined || target === undefined) {
-    throw new Error(
-      "--host-mount requires name, source, and target fields",
-    );
-  }
-  if (!HOST_MOUNT_NAME_PATTERN.test(name)) {
-    throw new Error(
-      "--host-mount name must start with an alphanumeric character and contain only alphanumerics, dot, underscore, or dash",
-    );
-  }
-  if (mode !== "readonly" && mode !== "writable") {
-    throw new Error("--host-mount mode must be readonly or writable");
-  }
-  return {
-    name,
-    hostPath: await realPathIfDirectory(
-      isAbsolute(source) ? resolve(source) : resolve(cwd, source),
-      "--host-mount source",
-    ),
-    sandboxPath: normalizeSandboxMountPath(target, "--host-mount target"),
-    mode,
-  };
-};
-
-const parseHostMountSpecs = async (
-  input: string | readonly string[] | undefined,
-  cwd: string,
-): Promise<readonly CfHarnessHostMountConfig[]> => {
-  const specs = input === undefined
-    ? []
-    : Array.isArray(input)
-    ? input
-    : [input];
-  const mounts = await Promise.all(
-    specs.map((spec) => parseHostMountSpec(spec, cwd)),
-  );
-  const names = new Set<string>();
-  for (const mount of mounts) {
-    if (names.has(mount.name)) {
-      throw new Error(`--host-mount name repeated: ${mount.name}`);
-    }
-    names.add(mount.name);
-  }
-  return mounts;
-};
 
 const resolveHostPathThroughNearestRealParent = (hostPath: string): string => {
   const suffix: string[] = [];
@@ -1932,13 +1807,7 @@ const createAdditionalMountConfigs = (
       hostPath: config.fabricMount,
     }]
     : []),
-  ...config.hostMounts.map((mount) => ({
-    kind: "host-bind" as const,
-    name: mount.name,
-    hostPath: mount.hostPath,
-    sandboxPath: mount.sandboxPath,
-    readOnly: mount.mode === "readonly",
-  })),
+  ...hostMountsToAdditionalMounts(config.hostMounts),
 ];
 
 export const formatCfHarnessCliUsage = (): string => usage;
@@ -2271,10 +2140,24 @@ const summarizeToolCallArguments = (
     const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
     switch (toolName) {
       case "bash":
-      case "bash-no-sandbox":
         return typeof parsed.command === "string"
           ? `command=${JSON.stringify(parsed.command)}`
           : undefined;
+      case "browser": {
+        const action = typeof parsed.action === "string"
+          ? `action=${JSON.stringify(parsed.action)}`
+          : undefined;
+        const ref = typeof parsed.ref === "string"
+          ? `ref=${JSON.stringify(parsed.ref)}`
+          : undefined;
+        const url = typeof parsed.url === "string"
+          ? `url=${JSON.stringify(parsed.url)}`
+          : undefined;
+        const joined = [action, ref, url].filter((value): value is string =>
+          value !== undefined
+        ).join(" ");
+        return joined === "" ? undefined : joined;
+      }
       case "read_file":
         return typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`

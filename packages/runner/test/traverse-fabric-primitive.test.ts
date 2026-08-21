@@ -14,7 +14,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -28,6 +27,7 @@ import { processDefaultValue } from "../src/schema.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
+  createDefaultTraversalContext,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -36,6 +36,13 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 
 const signer = await Identity.fromPassphrase("fabric-safety traverse leaf");
 const space = signer.did();
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 describe("FabricPrimitive leaf routing in schema traversal", () => {
   let runtime: Runtime;
@@ -152,8 +159,8 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
   it("surfaces a FabricPrimitive under the generator's brand-requiring object schema", async () => {
     // The schema-generator emits this exact shape for a FabricBytes-typed
     // field: the nominal brand key is required, but it has no runtime
-    // existence — a fabric value satisfies it by construction. Regression
-    // guard for CT-1836's fetchBinary materialization.
+    // existence — a `FabricSpecialObject` satisfies it by construction.
+    // Regression guard for CT-1836's fetchBinary materialization.
     const schema = {
       type: "object",
       properties: {
@@ -198,7 +205,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     expect(got.blob).toBeInstanceOf(FabricBytes);
   });
 
-  it("returns a FabricPrimitive intact under its specific fabric-primitive type", async () => {
+  it("returns a `FabricPrimitive` intact under its specific type", async () => {
     const schema = {
       type: "object",
       properties: { blob: { type: "FabricBytes" } },
@@ -220,7 +227,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     ).toEqual([1, 2, 3]);
   });
 
-  it("rejects a FabricPrimitive under a different fabric-primitive type", async () => {
+  it("rejects a `FabricPrimitive` under a different `FabricPrimitive` type", async () => {
     // A FabricBytes is not a FabricHash: the specific types don't cross-match
     // even though both validate under "object".
     const schema = {
@@ -242,7 +249,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     expect(got).not.toHaveProperty("blob");
   });
 
-  it("rejects a plain record under a fabric-primitive type", async () => {
+  it("rejects a plain record under a `FabricPrimitive` type", async () => {
     // The subtype relation is one-way: "object" accepts a FabricBytes, but
     // "FabricBytes" does not accept a plain record.
     const schema = {
@@ -263,7 +270,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     expect(got).not.toHaveProperty("blob");
   });
 
-  it("matches the fabric-primitive branch of an anyOf", async () => {
+  it("matches the `FabricPrimitive` branch of an anyOf", async () => {
     const schema = {
       type: "object",
       properties: {
@@ -449,14 +456,17 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
       the: type,
       of: entity,
       is: { value },
-      cause: hashOf({ the: type, of: entity }),
       since: 1,
     });
     const selector: SchemaPathSelector = { path: ["value"], schema: true };
     const manager = new StoreObjectManager(store);
     const managedTx = new ManagedStorageTransaction(manager);
     const storeTx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(storeTx, selector);
+    const traverser = new SchemaObjectTraverser(
+      storeTx,
+      selector,
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+    );
 
     const { ok: result } = traverser.traverse({
       address: {
@@ -491,14 +501,17 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
       the: type,
       of: entity,
       is: { value },
-      cause: hashOf({ the: type, of: entity }),
       since: 1,
     });
     const selector: SchemaPathSelector = { path: ["value"], schema: true };
     const manager = new StoreObjectManager(store);
     const managedTx = new ManagedStorageTransaction(manager);
     const storeTx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(storeTx, selector);
+    const traverser = new SchemaObjectTraverser(
+      storeTx,
+      selector,
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+    );
 
     const { ok: result } = traverser.traverse({
       address: {

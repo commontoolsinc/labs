@@ -24,6 +24,13 @@ import { type JSONSchema } from "../src/builder/types.ts";
 import type { EventHandler } from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
+// The shaper keys are per scope INSTANCE (stage F); the tests resolve
+// against one fixed identity, mirroring the OFF arm's cardinality 1.
+const TEST_IDENTITY = {
+  principal: "did:test:shaper",
+  sessionId: "shaper-session",
+};
+
 const signer = await Identity.fromPassphrase("delivery shaping test");
 const space = signer.did();
 
@@ -122,6 +129,7 @@ function eventShaper(
         deliver,
         groupKey,
         eventLink,
+        TEST_IDENTITY,
         event,
         retries,
         onCommit,
@@ -366,6 +374,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 1 },
       true,
       undefined,
@@ -386,6 +395,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 1 },
       true,
       undefined,
@@ -395,6 +405,7 @@ describe("WakeShaper (unified engine)", () => {
       deliver,
       "piece-1",
       link("a"),
+      TEST_IDENTITY,
       { n: 2 },
       true,
       undefined,

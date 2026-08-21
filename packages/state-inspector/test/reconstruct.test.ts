@@ -224,7 +224,7 @@ Deno.test("state-inspector autopsy core", async (t) => {
         assertEquals(s.entities, 4);
         assertEquals(s.revisions, 8);
         assertEquals(s.ops, { set: 4, patch: 3, delete: 1 });
-        assertEquals(s.hasSchedulerTables, false);
+        assertEquals(s.hasSchedulerBasisTable, false);
       });
 
       await t.step("commits and history list the right rows", () => {

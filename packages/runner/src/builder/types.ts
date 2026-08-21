@@ -74,6 +74,7 @@ import type {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import type {
@@ -86,6 +87,16 @@ import type {
   toCompactDebugString,
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
+import {
+  CHIP_UI,
+  FRAMEWORK_RESULT_KEYS,
+  FS,
+  NAME,
+  TESTS,
+  TILE_UI,
+  TYPE,
+  UI,
+} from "@commonfabric/utils/framework-result-keys";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { ImplementationIdentity } from "../cfc/types.ts";
@@ -101,37 +112,11 @@ import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 
 // Define runtime constants here - actual runtime values
 
-// Should be Symbol("UI") or so, but this makes repeat() use these when
-// iterating over patterns.
-export const TYPE = "$TYPE";
-export const NAME = "$NAME";
-export const UI = "$UI";
-// UI variants (CT-1321): optional sibling renderings addressed alongside [UI].
-// chip = inline, tile = gallery/grid card; absent variants fail over to a
-// per-variant default (see uiVariant()), with [UI] as the universal floor.
-export const TILE_UI = "$TILE_UI";
-export const CHIP_UI = "$CHIP_UI";
-export const FS = "$FS";
-// The reserved key a test pattern addresses its test steps under; the test
-// runner reads `[TESTS]` off the pattern output.
-export const TESTS = "$TESTS";
-
-/**
- * Every reserved key the framework puts on a pattern result: the type marker,
- * the display name, the rendering variants, the filesystem view, and the test
- * steps. Their spellings belong to the framework rather than to anything the
- * pattern computed, which is what lets a reader that describes only the
- * computed fields excuse them by name instead of failing on them.
- */
-export const FRAMEWORK_RESULT_KEYS = [
-  TYPE,
-  NAME,
-  UI,
-  TILE_UI,
-  CHIP_UI,
-  FS,
-  TESTS,
-] as const;
+// The reserved result keys are spelled in `@commonfabric/utils`, where the
+// transformer that polices what a pattern may declare about them reads the
+// same list. They are re-exported here because this is the builder surface a
+// pattern sees them through.
+export { CHIP_UI, FRAMEWORK_RESULT_KEYS, FS, NAME, TESTS, TILE_UI, TYPE, UI };
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
@@ -501,6 +486,7 @@ export interface BuilderFunctionsAndConstants {
   FabricLink: typeof FabricLink;
   FabricBytes: typeof FabricBytes;
   FabricRegExp: typeof FabricRegExp;
+  FabricKeyPair: typeof FabricKeyPair;
   FabricError: typeof FabricError;
 
   // Debug stringifiers

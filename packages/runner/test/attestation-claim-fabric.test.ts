@@ -26,9 +26,7 @@ const replicaHolding = (storedValue: FabricValue): ISpaceReplica => {
     the: "application/json",
     of: "of:attest-claim-fabric",
     is: storedValue,
-    // A real cause hash is irrelevant to the value comparison under test.
-    cause: undefined,
-  } as State;
+  };
   return {
     did: () => "did:test:attest" as ReturnType<ISpaceReplica["did"]>,
     get: () => state,
@@ -56,7 +54,7 @@ describe("attestation claim(): Fabric-aware consistency check", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("reports StateInconsistency when the Fabric value actually changed (CT-1770)", () => {
+  it("reports StateInconsistency when the `FabricValue` actually changed (CT-1770)", () => {
     // The attested value and the stored value are distinct `FabricBytes` that
     // differ only in their (private `#fields`) byte content: a genuine change,
     // which must surface as the `StorageTransactionInconsistent` error the

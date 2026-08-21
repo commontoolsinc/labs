@@ -525,7 +525,7 @@ export class LLMClient {
 
     const endpoint = opts?.endpoint?.toString() ?? llmApiUrl;
     // TODO(danfuzz): `assertJsonTransportSafe` above covers the SCHEMA, but
-    // the request's `messages` cross unchecked: a fabric value in message
+    // the request's `messages` cross unchecked: a `FabricValue` in message
     // content (assembled runner-side from live cell reads) stringifies to
     // `{}` here, silently. The payload wants the same transport-safety
     // check the schema gets.
@@ -634,7 +634,7 @@ export class LLMClient {
 
     // TODO(danfuzz): same gap as `generateObject` above — tool input schemas
     // are checked with `assertJsonTransportSafe`, but the request's
-    // `messages`/`system` data is not, and a fabric value in it stringifies
+    // `messages`/`system` data is not, and a `FabricValue` in it stringifies
     // to `{}` here, silently.
     const response = await fetch(opts?.endpoint?.toString() ?? llmApiUrl, {
       method: "POST",

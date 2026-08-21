@@ -12,6 +12,7 @@
  * machinery to recompute the id with.
  */
 import { env } from "@commonfabric/integration";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertStringIncludes } from "@std/assert";
@@ -36,7 +37,7 @@ describe("note appendLink integration", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     cc = await initializePiecesController({
-      spaceName: SPACE_NAME,
+      space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
     });
@@ -56,6 +57,17 @@ describe("note appendLink integration", () => {
     // Keep both pieces reactive (pull mode) so handlers run on send.
     cancels.push(cc.getResult(host.getCell()).sink(() => {}));
     cancels.push(cc.getResult(target.getCell()).sink(() => {}));
+    // `create` resolves once the piece exists, not once its result has been
+    // derived: the pattern runs on whichever side the space's execution
+    // posture puts it, so under server execution the value arrives over the
+    // wire afterwards. Sending the event reads through the payload's link to
+    // hold it against the stream's contract, so the target has to be loaded
+    // before it can be linked to.
+    await waitForCellValue(
+      cc.runtime,
+      target.getCell(),
+      (v) => v !== undefined,
+    );
   });
 
   afterAll(async () => {

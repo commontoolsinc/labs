@@ -349,9 +349,16 @@ describe("sortAndCompactPaths", () => {
   });
 });
 
+// Identity entity keys resolve scoped addresses against (stage E); the
+// space-scoped addresses in these tests are identity-independent.
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 describe("addresssesToPathByEntity", () => {
   it("returns empty map for empty input", () => {
-    const result = addressesToPathByEntity([]);
+    const result = addressesToPathByEntity([], TEST_IDENTITY);
     expect(result.size).toBe(0);
   });
 
@@ -383,7 +390,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addressesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses, TEST_IDENTITY);
 
     expect(result.size).toBe(3);
     expect(
@@ -450,7 +457,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addressesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses, TEST_IDENTITY);
 
     expect(result.size).toBe(2);
 
@@ -491,7 +498,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addressesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses, TEST_IDENTITY);
 
     const paths = result.get(
       "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
@@ -555,7 +562,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addressesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses, TEST_IDENTITY);
 
     expect(result.size).toBe(4);
 

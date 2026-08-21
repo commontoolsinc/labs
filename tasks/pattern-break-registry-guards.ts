@@ -28,12 +28,13 @@
  * checked against the real tree in the same suite.
  */
 
+import { fromFileUrl } from "@std/path/from-file-url";
+
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 import {
   ACCEPTED_STATE_DROPS,
   patternKeyClaims,
 } from "./pattern-vintage-accepted-drops.ts";
-import { fromFileUrl } from "@std/path/from-file-url";
 import {
   reportUnmappedUrls,
   requiredPatternKeys,

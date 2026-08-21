@@ -49,7 +49,7 @@ export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
-  "bash-no-sandbox",
+  "browser",
   "read_file",
   "view_image",
   "read_skill_resource",
@@ -79,7 +79,7 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
-  "bash-no-sandbox",
+  "browser",
 ] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_SKILL_NAMES = [
   "agent-browser",

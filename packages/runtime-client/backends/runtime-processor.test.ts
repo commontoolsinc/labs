@@ -41,6 +41,7 @@ import {
   RequestType,
 } from "../protocol/mod.ts";
 import {
+  assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
@@ -2949,12 +2950,13 @@ describe("assertFabricLoggerFlags", () => {
     expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
   });
 
-  it("refuses a flag named with a key no fabric record carries", () => {
+  it("refuses a flag named with a key no `FabricPlainObject` carries", () => {
     // `__proto__` and `constructor` are refused as fabric keys deliberately,
     // and `1-fabric-values.md` specifies it. An IPC payload is a `FabricValue`
-    // per se -- the envelope as much as the metadata, a record of fabric values
-    // being one itself -- so a flag named one of them cannot cross, and saying
-    // so is the point rather than a limitation to route around.
+    // per se -- the envelope as much as the metadata, a record of
+    // `FabricValue`s being one itself -- so a flag named one of them cannot
+    // cross, and saying so is the point rather than a limitation to route
+    // around.
     const flags = { runner: { constructor: { "id:1": { a: 1 } } } };
 
     expect(() => assertFabricLoggerFlags(flags)).toThrow(
@@ -3097,6 +3099,65 @@ describe("RuntimeProcessor pattern coverage IPC", () => {
         type: RequestType.GetPatternCoverage,
       }),
     ).toEqual({ data: report });
+  });
+});
+
+describe("worker/host server-execution posture agreement (review 2026-08-11 m7)", () => {
+  it("threads the host's declared serverExecution flag through the params mapper verbatim", () => {
+    const params = browserWorkerParamsFromInitializationData(
+      {
+        apiUrl: "http://worker.test/",
+        identity: {} as never,
+        spaceDid: "did:key:space",
+        experimental: { serverExecution: true },
+      },
+      { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+        typeof browserWorkerParamsFromInitializationData
+      >[1],
+      { marker() {} } as unknown as Parameters<
+        typeof browserWorkerParamsFromInitializationData
+      >[2],
+    );
+    expect(params.experimental).toEqual({ serverExecution: true });
+  });
+
+  it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    assertServerExecutionPostureAgreement(
+      { serverExecution: true },
+      { experimental: { serverExecution: true } },
+    );
+    assertServerExecutionPostureAgreement(
+      undefined,
+      { experimental: { serverExecution: false } },
+    );
+    assertServerExecutionPostureAgreement(
+      {},
+      { experimental: {} },
+    );
+  });
+
+  it("refuses LOUDLY when the host declared ON but the worker resolved OFF (the silent F10 revert, now surfaced)", () => {
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        { serverExecution: true },
+        { experimental: { serverExecution: false } },
+      )
+    ).toThrow(/posture mismatch/);
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        { serverExecution: true },
+        { experimental: {} },
+      )
+    ).toThrow(/posture mismatch/);
+  });
+
+  it("refuses the mirrored divergence: a worker resolving ON under a host that declared nothing", () => {
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        undefined,
+        { experimental: { serverExecution: true } },
+      )
+    ).toThrow(/posture mismatch/);
   });
 });
 
