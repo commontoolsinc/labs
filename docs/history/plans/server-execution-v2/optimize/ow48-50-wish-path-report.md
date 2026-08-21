@@ -1,7 +1,8 @@
 ---
-status: active
+status: historical
 created: 2026-08-21
-reason: "OW48/OW49/OW50 served-wish-path seat report (optimize-on-main): OW48's premise refuted by reproduction — the local TransformerError was cross-instance contamination (API_URL defaulting to a stale localhost:8000 toolshed serving pre-#6019 sources), not #6098 × the ON serving compile; OW49 envelope evidence; OW50 failure-surfacing build."
+archived: 2026-08-21
+reason: "OW48/OW49/OW50 served-wish-path seat report (optimize-on-main): OW48's premise refuted by reproduction — the local TransformerError was cross-instance contamination (API_URL defaulting to a stale localhost:8000 toolshed serving pre-#6019 sources), not #6098 × the ON serving compile; OW49 envelope decoded with the CFC-owner recommendation; OW50 failure-surfacing built red-first."
 ---
 
 # OW48–OW50 — the profile-embed served-wish path (seats S-H, S-I, S-J)

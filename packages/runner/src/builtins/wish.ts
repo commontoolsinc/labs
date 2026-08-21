@@ -2043,6 +2043,16 @@ export function wish(
       const inFlightKey = `${link.space}/${link.id}`;
       if (wishFailureUIInFlight.has(inFlightKey)) return;
       wishFailureUIInFlight.add(inFlightKey);
+      // Deliberately NOT `scheduler.trackBackgroundTask` (unlike the sidecar
+      // launches below): quiescence waits on tracked tasks, and this chain
+      // must wait on quiescence — its conflict retries wait out the refused
+      // action's own bounded re-runs (which write the same doc) before
+      // re-deriving the error state, so tracking it would deadlock
+      // `runtime.idle()` against itself, and retrying without that wait
+      // collides with the action's retries until both budgets exhaust. The
+      // cost is bounded and benign: `idle()` can resolve a beat before the
+      // error surface lands, and the surface still arrives on the doc's
+      // ordinary change notification.
       void commitWishFailureUI(link, message)
         .catch((surfacingError) => {
           // The surfacing must never become a new unhandled failure itself
@@ -2113,8 +2123,10 @@ export function wish(
       attempt < 2 &&
       (isConflictRejection(error) || isStorageTransactionInconsistent(error))
     ) {
-      // Let the conflicting write settle locally, then re-derive the error
-      // state against it on a fresh transaction.
+      // Let the conflicting writers settle — including the refused action's
+      // own bounded re-runs against this doc — then re-derive the error
+      // state on a fresh transaction. This wait is why the chain must stay
+      // untracked (see the launch site above).
       await runtime.idle();
       return commitWishFailureUI(stateLink, message, attempt + 1);
     }
