@@ -759,11 +759,12 @@ describe("link-utils", () => {
   });
 
   describe("sanitizeSchemaForLinks through references", () => {
-    it("strips asCell from a document nested behind a second reference", () => {
+    it("re-externalizes a nested document the strip changed", () => {
       // Document B carries the marker; document A reaches it only by
       // reference. A sanitize that stops at the reference looks clean and
       // is not: the first reader to resolve B rediscovers the marker and
-      // mints a handle where a plain value is expected.
+      // mints a handle where a plain value is expected. The node must stay
+      // a reference, so the strip moves its target instead of inlining.
       const documentB = {
         type: "string",
         asCell: ["cell"],
@@ -779,15 +780,41 @@ describe("link-utils", () => {
 
       const sanitized = sanitizeSchemaForLinks(
         { $ref: `cid:${hashA}` } as unknown as JSONSchema,
-      );
+      ) as { properties: { name: { $ref?: string } } };
 
-      const serialized = JSON.stringify(sanitized);
-      expect(serialized).not.toContain("asCell");
-      expect(serialized).not.toContain("cid:");
-      expect(
-        (sanitized as { properties: { name: { type: string } } })
-          .properties.name.type,
-      ).toBe("string");
+      // The root resolves inline (re-externalized at the emission site);
+      // the nested position stays a REFERENCE — callers pin the served
+      // shape — moved off the tainted document.
+      const movedRef = sanitized.properties.name.$ref;
+      expect(typeof movedRef).toBe("string");
+      expect(movedRef).not.toBe(`cid:${hashB}`);
+      // The whole reachable closure is now marker-free.
+      const resolvedTarget = resolvedSchema(
+        sanitized.properties.name as JSONSchema,
+      );
+      expect(JSON.stringify(resolvedTarget)).not.toContain("asCell");
+      expect((resolvedTarget as { type?: string }).type).toBe("string");
+    });
+
+    it("keeps a reference to a clean document verbatim", () => {
+      const cleanDoc = {
+        type: "string",
+        title: "already-clean",
+      } as unknown as JSONSchema;
+      const hashClean = internSchemaAsTaggedHashString(cleanDoc);
+      registerSchemaDocument(hashClean, cleanDoc);
+      const container = {
+        type: "object",
+        properties: { note: { $ref: `cid:${hashClean}` } },
+      } as unknown as JSONSchema;
+      const hashContainer = internSchemaAsTaggedHashString(container);
+      registerSchemaDocument(hashContainer, container);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashContainer}` } as unknown as JSONSchema,
+      ) as { properties: { note: { $ref?: string } } };
+
+      expect(sanitized.properties.note.$ref).toBe(`cid:${hashClean}`);
     });
   });
 

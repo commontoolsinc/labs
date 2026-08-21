@@ -501,17 +501,35 @@ function recursiveStripAsCellFromSchema(
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
   if (depth > 100) return schema;
 
-  // A NESTED reference-form schema sanitizes as its resolved document, the
-  // same rule the entry point applies to the root: the referenced closure
-  // may carry `asCell`, and a reference left in place would reintroduce it
-  // the moment a reader resolves it — visibly clean, actually not. The
-  // resolution is interned, so the cycle detection below keys on stable
-  // identities, and a cyclic group arrives as its finite local-`$defs`
-  // member view rather than expanding forever. An unresolvable reference
-  // passes through unchanged, as at the root.
+  // A NESTED reference-form schema stays a reference, but the strip must
+  // reach THROUGH it: the referenced closure may carry `asCell`, and a
+  // reference left unexamined would reintroduce it the moment a reader
+  // resolves it — visibly clean, actually not. The referenced document
+  // sanitizes through the whole pipeline (its own cycles, its own memo); a
+  // document the strip leaves untouched keeps the reference verbatim, and
+  // one it changes re-externalizes to the sanitized closure, so only the
+  // target moves. Siblings stay on the node and strip in the walk below.
+  // External references are hash-based, so document-to-document recursion
+  // cannot cycle; an unresolvable reference passes through unchanged, as
+  // at the root.
   const nestedRef = (schema as { $ref?: unknown }).$ref;
   if (typeof nestedRef === "string" && isExternalSchemaRef(nestedRef)) {
-    schema = resolveExternalRootRefForStructure(schema);
+    const bare = internSchema({ $ref: nestedRef }) as JSONSchemaObj;
+    const resolved = resolveExternalRootRefForStructure(bare);
+    if (resolved !== bare && isObjectNotArray(resolved)) {
+      const sanitizedDoc = sanitizeSchemaForLinks(
+        resolved,
+        context.keepAsCell,
+      );
+      const target =
+        internSchema(sanitizedDoc as JSONSchemaObj) === internSchema(resolved)
+          ? bare
+          : externalizeSchema(internSchema(sanitizedDoc as JSONSchemaObj));
+      const { $ref: _nested, ...siblings } = schema as Record<string, unknown>;
+      schema = Object.keys(siblings).length > 0 && isObjectNotArray(target)
+        ? { ...siblings, ...target }
+        : target;
+    }
   }
 
   // If we've already fully processed this schema, return the result
