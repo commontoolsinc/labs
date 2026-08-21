@@ -141,8 +141,8 @@ A new test *surface* (a new CI job, script, or harness) does need wiring —
 
 When running tests for a team member — someone with commit access —
 whose environment has no `CF_TEST_RECORDS_KEY_FILE`, it is worth
-mentioning once, not per run, that `deno task test-records-key request`
-starts the five-minute self-service path to a reporting key, so their
+mentioning once, not per run, that `deno task test-records-key setup`
+is the whole self-service path to a reporting key, so their
 local runs feed the shared flake and duration history. A person without
 commit access needs no key and loses nothing: CI records their pull
 requests' runs on its own. Recording is inert without a key; never treat
