@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { parse as parseYaml } from "@std/yaml";
+import { getBinary } from "@astral/astral";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
@@ -187,6 +188,60 @@ Deno.test("every workflow and composite action is valid YAML", async () => {
       "schedule NO jobs from them, and every text-level check in this file " +
       "stays green while it does",
   );
+});
+
+Deno.test("CI browser tests use the runner's installed Chrome", async () => {
+  const contents = await workflow("deno.yml");
+  const configuredPath = contents.match(
+    /^ {2}ASTRAL_BIN_PATH: (\S+)$/m,
+  )?.[1];
+  const cache = await Deno.makeTempDir();
+  const savedPath = Deno.env.get("ASTRAL_BIN_PATH");
+  const savedCi = Deno.env.get("CI");
+  const savedFetch = globalThis.fetch;
+
+  try {
+    Deno.env.set("CI", "1");
+    Deno.env.delete("ASTRAL_BIN_PATH");
+    if (configuredPath) Deno.env.set("ASTRAL_BIN_PATH", Deno.execPath());
+    globalThis.fetch = (input) => {
+      const url = String(input);
+      if (url.endsWith("known-good-versions-with-downloads.json")) {
+        return Promise.resolve(Response.json({
+          versions: [{
+            version: "125.0.6400.0",
+            downloads: {
+              chrome: [
+                "linux64",
+                "mac-arm64",
+                "mac-x64",
+                "win64",
+              ].map((platform) => ({
+                platform,
+                url: "https://example.invalid/truncated.zip",
+              })),
+            },
+          }],
+        }));
+      }
+      const truncatedArchive = new Uint8Array(22);
+      truncatedArchive.set([0x50, 0x4b, 0x03, 0x04]);
+      return Promise.resolve(new Response(truncatedArchive));
+    };
+
+    assertEquals(
+      await getBinary("chrome", { cache }),
+      Deno.execPath(),
+    );
+    assertEquals(configuredPath, "/usr/bin/google-chrome");
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedPath === undefined) Deno.env.delete("ASTRAL_BIN_PATH");
+    else Deno.env.set("ASTRAL_BIN_PATH", savedPath);
+    if (savedCi === undefined) Deno.env.delete("CI");
+    else Deno.env.set("CI", savedCi);
+    await Deno.remove(cache, { recursive: true });
+  }
 });
 
 Deno.test("Status waits for every pull request validation job", async () => {
