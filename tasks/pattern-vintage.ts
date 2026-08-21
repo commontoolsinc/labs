@@ -129,6 +129,8 @@ import {
   describePinOutcome,
   isClean,
   relativeToRepo,
+  reportCapturesSuperseded,
+  reportDropsApplied,
   reportFailures,
   reportNothingReplayed,
   reportReplaySummary,
@@ -297,25 +299,11 @@ async function main() {
   }
 
   if (replay.capturesSuperseded.length > 0) {
-    const targets = [...new Set(replay.capturesSuperseded)].sort();
-    console.log(
-      `\nHeld ${targets.length} derived sub-pattern target(s) back, each ` +
-        `with the rule that held it: a hoist is derivation the updated ` +
-        `source re-runs and re-supplies (root contracts still gate):`,
-    );
-    for (const target of targets) {
-      console.log(`  ${target}`);
-    }
+    console.log(`\n${reportCapturesSuperseded(replay.capturesSuperseded)}`);
   }
 
   if (replay.dropsApplied.size > 0) {
-    console.log(
-      `\nHeld ${replay.dropsApplied.size} path(s) back from their vintage, ` +
-        `by accepted removal (tasks/pattern-vintage-accepted-drops.ts):`,
-    );
-    for (const pair of [...replay.dropsApplied].sort()) {
-      console.log(`  ${pair}`);
-    }
+    console.log(`\n${reportDropsApplied(replay.dropsApplied)}`);
   }
 
   // Which patterns this run is in a position to judge: a fixture's manifest
