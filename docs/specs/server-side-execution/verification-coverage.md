@@ -5187,28 +5187,34 @@ supply; OW29/OW32/OW34 closed):
     (red-first pin: `scheduler-idle-pattern-work.test.ts`); **S-C**
     heal-on-read: re-issue program materialization on adopt/open when
     the space lacks the program docs for a referenced patternIdentity
-    — **FLAGGED OPEN, not built** (the same pass): the re-issue's
-    SOURCE is an unstated semantic — the in-memory artifact index
-    retains evaluated exports, not the module bytes a
-    re-materialization needs, so healing needs either retained
-    closure bytes (a memory-policy decision), a cross-space donor
-    probe (which spaces may donate is a policy decision), or S-A's
-    server-side heal (which the rootcause already names as healing
-    broken spaces on next demand) — routed to the owner with the
-    OW31/S-A decision rather than filled. A binding CONSTRAINT for
-    any future S-C build, from OW31's build flags (their FLAG-4):
-    the detached compile flows — the `loadPatternByIdentity` repair
-    writeback and `compilePattern`'s own persist — carry NO wave-run
-    context and hence no §2b carriage, so a foreign-target re-issue
-    routed through them is refused fail-closed; an S-C design must
-    run where carriage or the client's OWN identity write authority
-    is available (the adopting user writing their own space), or
-    stay server-side with S-A's carriage-borne trigger. Trigger: lifts the
+    — **SKIPPED BY RULING (RULED 2026-08-21, owner: "agreed, let's
+    skip the fix then")**, on the evidence that S-C sits OFF the lift
+    critical path: the home-profile durability test's own contract
+    runs every create through `waitForRuntimeIdle` — S-B's barrier —
+    before any reload, so with S-A+S-B merged the loss window the
+    heal would repair is closed going forward; and the two
+    gate-evidence broken spaces (Ada's and Alan's — TWO, not three)
+    lived in EPHEMERAL TEST STORES, so production (flag OFF, no
+    served creates) holds no broken space and no one-off repair
+    exists or is needed. **Named residual (recorded, not owed)**: a
+    client that DIES before its create-flow commits flush — a window
+    of roughly hundreds of milliseconds — still orphans the space
+    with no healer: the server's repair path stays fail-closed (OW31
+    FLAG-4 — the detached compile flows carry no §2b carriage) and
+    the client never re-issues. DETECTOR: OW46's
+    `structureLoadStuck` counter names exactly this state. REVISIT
+    TRIGGER: a nonzero park count in real ON usage, or OW56 landing
+    (which dissolves the class), whichever comes first; the parked
+    WIP branch `claude/server-exec-v2-ow45-sc-heal` is the
+    shelf-ready start (client-side heal riding `replicateClosures`
+    under the client's own identity, green red-first runner pins,
+    serving posture pinned fail-closed; marked do-not-merge).
+    Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
-    (S-A landed with OW31's build, carriage arm; S-B lands here — the
-    joint lift run is the remaining evidence, and the optimize pass's
-    preview run had step 1 green in ~10 s with step 2 still red on the
-    cross-space module-run residual OW31's row carries).
+    JOINTLY with OW31's cf:module cross-space run residual — S-A and
+    S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
+    pass's joint preview run had step 1 green in ~10 s with step 2
+    red ONLY on that residual.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -5507,6 +5513,91 @@ supply; OW29/OW32/OW34 closed):
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
     posture landed.
+  - **OW56 — FUTURE (optimize-phase-future) — the server owns program
+    materialization AND compilation; clients wait (minted 2026-08-21
+    with the S-C ruling).** The owner's stated ideal, verbatim:
+
+    > ideally compilation happens on the server and clients just wait
+    > for it, but if that isn't the case yet, then let's mark this for
+    > a later improvement and do (b)
+
+    — owner, 2026-08-21 (option (b), the client-side heal, was
+    subsequently SKIPPED the same day by the follow-on ruling on the
+    lift-path evidence — the OW45 row carries it; the ideal STANDS as
+    the direction that dissolves the whole class: no client-written
+    program docs means no lost program commits, no die-before-flush
+    orphan window, and no client heal to design). Pairs with OW44's
+    ruled coupling (lazy client instantiation — the client not
+    running the pattern immediately — is the client half of the same
+    family; server-side compilation is the server half). It also
+    addresses the owner's newly-raised concerns beyond durability:
+    client-written TRANSPILED CODE INTEGRITY (who attests the bytes a
+    client compiled — adjacent to OW55's pattern-fetch trust surface)
+    and VERSION-UPDATE FRESHNESS (a client compiling on an old
+    runtime version writes stale-toolchain closures; an explorer is
+    mapping this now and its findings may extend this row). Trigger:
+    optimize-phase-future; closing it also retires the OW45 row's
+    named die-before-flush residual.
+
+    The write-topology explorer's two findings extend this row (explorer
+    map 2026-08-21, verified against main), ruled FOLLOW-UP not
+    flip-gating — owner: *"we're not in prod yet, so we can fix this as
+    follow-up."* — owner (Berni), 2026-08-21; both close with OW56, or
+    before it at the owner's discretion:
+
+    - **Finding 1 — cached transpiled code is client-writable,
+      server-executed-unverified.** The compiled-cache key
+      `compileCache:<runtimeVersion>/<sourceIdentity>` keys by SOURCE
+      identity and does NOT hash the JS bytes
+      (`docs/specs/module-loading.md` ~692-696). The serving runtime
+      reads a compiled entry and runs it with `trustedBodies: true` —
+      SES body re-verification SKIPPED — at `pattern-manager.ts`
+      :1010-1013 / :1260-1266 / :1465-1470. The only gate is the CFC
+      atom `COMPILED_INTEGRITY_ATOM` (`cf-compiled-by:cf-compiler`) read
+      from the doc's own labelMap (`cell-cache.ts` :1666-1688
+      `verifiedDoc`, :1271-1290 `cellCarriesIntegrity`) — plain unsigned
+      committed JSON, client-mintable through the honest compile-cache
+      builtin path (`prepare.ts` `gateRuntimeMintedIntegrity` returns it
+      unfiltered for `kind:"builtin"`) and writable directly at the
+      storage layer (memory has no doc-level label validation). The
+      SOURCE set IS content-verified (`cell-cache.ts` :539-670
+      `verifySourceDocs` recomputes the Merkle identity); the COMPILED
+      set is not — that asymmetry is the finding. Consequence: a client
+      can write an entry whose key claims source X with arbitrary bytes,
+      and the SpaceServer executes those bytes IN-PROCESS. This is the
+      DOCUMENTED accepted posture (`module-loading.md` :707-722,
+      "self-poisoning within a space, acceptable") — but that argument
+      was written for CLIENT-ONLY execution; under ON the poisoned bytes
+      run in the shared SpaceServer. Fail-open-to-recompile softens it:
+      a MISSING/invalid entry recompiles from verified source
+      (`tryColdLoadByIdentity` checks entryIdentity match + SES-verifies),
+      so DELETING a poisoned entry heals — OVERWRITING one does not.
+      Containment leak: closure replication copies compiled docs
+      cross-space on `.inSpace()`/content-cache-hit, re-stamping the
+      LABEL not the BYTES (`module-loading.md` :723-737). RECOMMENDED
+      follow-up fix (flagged, NOT committed): bind the bytes — make the
+      compiled key, or a co-stored digest the reader checks, a hash of
+      the JS, so honest-source/dishonest-bytes fails to a
+      recompile-from-verified-source miss; far smaller than full
+      server-only compilation and closes the forgery path. The spec's
+      named end-state (server-only compilation + real attestation,
+      `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
+    - **Finding 2 — version-update is a dual-write under ON, client AND
+      server, unarbitrated.** Both runtimes default
+      `systemPatternAutoUpdate: true` (shell `env.ts`; serving factory
+      `server-execution.ts` :160-172), so both run the pattern-updater
+      check/fetch/compile/persist and attempt the pointer swap; they
+      RACE — OCC-guarded so the loser fails clean (`pattern-updater.ts`
+      :326-338), content-addressed so double-writes converge. NOT a
+      correctness bug (freshness is safe either way); the cost is a
+      duplicated network fetch + full TS compile per piece per runtime,
+      and mismatched compiler fingerprints (shell-baked vs server
+      Deno-resolved) can land TWO compiled sets under two
+      `runtimeVersion` keys for one source. Recorded as an OW56-adjacent
+      efficiency follow-up. (The stale
+      `docs/development/EXPERIMENTAL_OPTIONS.md` line claiming
+      auto-update is "off server-side" is corrected in this PR;
+      `serving-loop.md` §3e already stated it correctly.)
 
 ## 4. Standing rule
 
