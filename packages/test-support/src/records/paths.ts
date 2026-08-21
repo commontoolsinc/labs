@@ -113,10 +113,37 @@ export function defaultSpoolRoot(
   return undefined;
 }
 
-/** The opaque agent label, when one is set. */
+/**
+ * Harnesses that drive an agent, and the name each is recorded under.
+ * A harness announces itself in the environment it hands the commands
+ * it runs, and the first of these that is present names the run's
+ * operator. The names are stable strings rather than anything the
+ * harness reports about itself, so a version bump does not split an
+ * agent's history in two.
+ */
+const AGENT_MARKERS: readonly { variable: string; label: string }[] = [
+  { variable: "CLAUDECODE", label: "claude-code" },
+  { variable: "CURSOR_AGENT", label: "cursor" },
+  { variable: "CODEX_SANDBOX", label: "codex" },
+  { variable: "AI_AGENT", label: "agent" },
+];
+
+/**
+ * The opaque agent label. CF_TEST_AGENT is what a person or a fleet
+ * sets deliberately, and nothing else overrides it. Without one, a run
+ * an agent started is labeled by the harness that started it, so an
+ * agent's runs are told apart from a person's without a variable having
+ * to be set in every checkout a fleet works in. A person's own terminal
+ * carries none of these and their runs stay unlabeled.
+ */
 export function agentLabel(
   env: Environment = Deno.env.get,
 ): string | undefined {
   const agent = readEnv(AGENT_VARIABLE, env);
-  return agent !== undefined && agent.length > 0 ? agent : undefined;
+  if (agent !== undefined && agent.length > 0) return agent;
+  for (const marker of AGENT_MARKERS) {
+    const value = readEnv(marker.variable, env);
+    if (value !== undefined && value.length > 0) return marker.label;
+  }
+  return undefined;
 }

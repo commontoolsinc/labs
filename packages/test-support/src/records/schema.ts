@@ -72,7 +72,10 @@ export interface RunContext {
   branch?: string;
   env: "ci" | "local";
   ci?: CiContext;
-  /** Opaque label for the operating agent, from CF_TEST_AGENT. */
+  /**
+   * Opaque label for the operating agent: CF_TEST_AGENT, or the
+   * harness a run was started under when that variable is unset.
+   */
   agent?: string;
   os: string;
   arch: string;

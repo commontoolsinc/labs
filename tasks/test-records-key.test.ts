@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 
 import {
+  agentConfigReport,
+  agentRemovalReport,
   collectCommand,
   defaultDeps,
   defaultGithubToken,
@@ -11,6 +13,7 @@ import {
   requestCommand,
   runCli,
   setupCommand,
+  uninstallCommand,
 } from "./test-records-key.ts";
 import {
   generateIdentity,
@@ -19,12 +22,36 @@ import {
   seal,
 } from "./test-records-crypto.ts";
 
-const KEY_TEXT = JSON.stringify({
-  client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
-  private_key: "pem",
-  token_uri: "https://oauth2.googleapis.com/token",
-  cf_username: "octocat",
-});
+/** A key file whose private key can actually sign, as a real one does. */
+async function signingKey(): Promise<string> {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  ) as CryptoKeyPair;
+  const pkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", pair.privateKey),
+  );
+  const base64 = btoa(String.fromCharCode(...pkcs8)).replace(
+    /(.{64})/g,
+    "$1\n",
+  );
+  return JSON.stringify({
+    client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
+    private_key:
+      `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`,
+    token_uri: "https://oauth2.googleapis.com/token",
+    cf_username: "octocat",
+  });
+}
+
+const KEY_TEXT = await signingKey();
+const OTHER_KEY_TEXT = await signingKey();
 
 function u16le(value: number): number[] {
   return [value & 0xff, (value >> 8) & 0xff];
@@ -137,6 +164,8 @@ function mintRun(
 interface StubOptions {
   login?: string;
   loginStatus?: number;
+  /** What the token endpoint says about the installed key. */
+  keyStatus?: number;
   /** One page of runs per listing call; the last repeats. */
   runPages?: Record<string, unknown>[][];
   runsStatus?: number;
@@ -172,6 +201,13 @@ describe("test-records-key", () => {
     withFetch(
       ((input: URL | RequestInfo) => {
         const url = String(input);
+        if (url.includes("oauth2.googleapis.com/token")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: "t" }), {
+              status: options.keyStatus ?? 200,
+            }),
+          );
+        }
         if (url.endsWith("/user")) {
           return Promise.resolve(
             new Response(
@@ -477,14 +513,14 @@ describe("test-records-key", () => {
         return inner(name);
       };
       await Deno.writeTextFile(
-        join(home, ".zshrc"),
+        join(home, ".zshenv"),
         'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
       );
 
       expect(await collectCommand(deps)).toBe(0);
 
       // The profile is a person's file: the line that disagrees stays.
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(
         'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
       );
     });
@@ -501,10 +537,10 @@ describe("test-records-key", () => {
       };
       const line = `export CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
         `test-records-key.json"\n`;
-      await Deno.writeTextFile(join(home, ".zshrc"), line);
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
 
       expect(await collectCommand(deps)).toBe(0);
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
     });
 
     it("keeps the key beside the identity under a plain home", async () => {
@@ -540,10 +576,10 @@ describe("test-records-key", () => {
       };
       const line = `CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
         `test-records-key.json"\n`;
-      await Deno.writeTextFile(join(home, ".zshrc"), line);
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
 
       expect(await collectCommand(deps)).toBe(0);
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
     });
 
     it("reports the login profile a shell reads and does not have", async () => {
@@ -571,6 +607,76 @@ describe("test-records-key", () => {
       await expect(collectCommand(deps)).rejects.toThrow(
         "Neither XDG_CONFIG_HOME nor HOME is set.",
       );
+    });
+
+    /** A workstation with an agent harness, holding this settings text. */
+    async function withHarness(settings?: string): Promise<string> {
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      const path = join(home, ".claude", "settings.json");
+      if (settings !== undefined) await Deno.writeTextFile(path, settings);
+      return path;
+    }
+
+    /** Where the key lands for these tests. */
+    function keyPath(): string {
+      return join(home, "common-fabric", "test-records-key.json");
+    }
+
+    it("passes the key file to an agent harness installed here", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+
+      expect(await collectCommand(deps)).toBe(0);
+
+      const settings = JSON.parse(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      );
+      expect(settings.env.CF_TEST_RECORDS_KEY_FILE).toBe(
+        join(home, "common-fabric", "test-records-key.json"),
+      );
+    });
+
+    it("says a harness already passes the key file on", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const settings = await withHarness(
+        JSON.stringify({ env: { CF_TEST_RECORDS_KEY_FILE: keyPath() } }),
+      );
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(JSON.parse(await Deno.readTextFile(settings))).toEqual({
+        env: { CF_TEST_RECORDS_KEY_FILE: keyPath() },
+      });
+    });
+
+    it("leaves a harness pointed at another key alone", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const text = JSON.stringify({
+        env: { CF_TEST_RECORDS_KEY_FILE: "/elsewhere.json" },
+      });
+      const settings = await withHarness(text);
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(settings)).toBe(text);
+    });
+
+    it("leaves a harness configuration that does not parse alone", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const settings = await withHarness("{ not json");
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(settings)).toBe("{ not json");
     });
 
     it("throws when the token cannot read the collector's login", async () => {
@@ -679,7 +785,7 @@ describe("test-records-key", () => {
         if (name === "SHELL") return "/bin/zsh";
         return inner(name);
       };
-      return join(home, ".zshrc");
+      return join(home, ".zshenv");
     }
 
     it("dispatches, waits for the run, installs, and exports the key", async () => {
@@ -889,7 +995,121 @@ describe("test-records-key", () => {
       expect(await Deno.readTextFile(profile)).toContain(
         "CF_TEST_RECORDS_KEY_FILE",
       );
-      expect(urls).toEqual([]);
+      // It asks what is going and whether the key still works, and
+      // starts nothing.
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com")))
+        .toBe(true);
+    });
+
+    it("takes up a run already going even with a key installed", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity, OTHER_KEY_TEXT);
+      const going = mintRun(identity.recipient, {
+        id: 11,
+        status: "in_progress",
+        conclusion: undefined,
+      });
+      withStub({
+        runPages: [[going], [mintRun(identity.recipient, { id: 11 })]],
+        ...published,
+      });
+
+      // The run was dispatched to replace this key, so standing down on
+      // the installed one is how a person ends up holding a dead key.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(OTHER_KEY_TEXT);
+    });
+
+    it("mints a replacement for a key that is no longer accepted", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity);
+      withStub({
+        keyStatus: 400,
+        runPages: [[mintRun(identity.recipient)]],
+        ...published,
+      });
+
+      // A mint that failed after revoking leaves a file naming a key
+      // nothing accepts; setup must not take it for a working one.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com"))).toBe(
+        true,
+      );
+    });
+
+    it("replaces a key file that cannot sign", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        JSON.stringify({
+          client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
+          private_key: "not a key",
+          token_uri: "https://oauth2.googleapis.com/token",
+          cf_username: "octocat",
+        }),
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      // Nothing will accept it, so there is no asking to be done.
+      expect(await setupCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+      expect(urls.some((line) => line.includes("oauth2.googleapis.com")))
+        .toBe(false);
+    });
+
+    it("keeps a key the endpoint could not be asked about", async () => {
+      await Deno.mkdir(join(home, "common-fabric"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      withStub({});
+      const inner = deps.fetchImpl;
+      deps.fetchImpl = ((input: URL | RequestInfo, init?: RequestInit) => {
+        if (String(input).includes("oauth2.googleapis.com")) {
+          return Promise.reject(new TypeError("connection refused"));
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
+    });
+
+    it("keeps a key it could not ask about", async () => {
+      await Deno.mkdir(join(home, "common-fabric"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      withStub({ keyStatus: 503 });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
     });
 
     it("mints a replacement when asked to rotate", async () => {
@@ -1115,6 +1335,275 @@ describe("test-records-key", () => {
     });
   });
 
+  describe("uninstallCommand()", () => {
+    /** A workstation that setup has been through. */
+    async function installed(): Promise<string> {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      await Deno.writeTextFile(join(home, ".zshenv"), "alias l=ls\n");
+      await collectCommand(deps);
+      return join(home, ".zshenv");
+    }
+
+    it("removes the key, the identity, and the export", async () => {
+      const profile = await installed();
+
+      expect(await uninstallCommand(deps)).toBe(0);
+
+      await expect(
+        Deno.stat(join(home, "common-fabric", "test-records-key.json")),
+      ).rejects.toThrow();
+      await expect(
+        Deno.stat(join(home, "common-fabric", "test-records-identity.json")),
+      ).rejects.toThrow();
+      expect(await Deno.readTextFile(profile)).toBe("alias l=ls\n");
+    });
+
+    it("stops an agent harness passing the key file on", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, ".claude", "settings.json"),
+        JSON.stringify({
+          theme: "auto",
+          env: {
+            CF_TEST_RECORDS_KEY_FILE: join(
+              home,
+              "common-fabric",
+              "test-records-key.json",
+            ),
+          },
+        }),
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+
+      expect(
+        JSON.parse(
+          await Deno.readTextFile(join(home, ".claude", "settings.json")),
+        ),
+      ).toEqual({ theme: "auto" });
+    });
+
+    it("keeps a harness pointed at a key this tool did not install", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      const text = JSON.stringify({
+        env: { CF_TEST_RECORDS_KEY_FILE: "/elsewhere.json" },
+      });
+      await Deno.writeTextFile(join(home, ".claude", "settings.json"), text);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      ).toBe(text);
+    });
+
+    it("reports a harness configuration it cannot read", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, ".claude", "settings.json"),
+        "{ not json",
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      ).toBe("{ not json");
+    });
+
+    it("leaves the directory when something else is in it", async () => {
+      await installed();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "something-else.json"),
+        "{}",
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "something-else.json"),
+        ),
+      ).toBe("{}");
+    });
+
+    it("keeps the key when the profile cannot be taken apart", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      // A profile that cannot be replaced: the removal fails, and the
+      // key it names must still be there afterwards.
+      await Deno.remove(join(home, ".zshenv"));
+      await Deno.mkdir(join(home, ".zshenv", "inside"), { recursive: true });
+
+      await expect(uninstallCommand(deps)).rejects.toThrow();
+
+      expect(
+        (await Deno.stat(join(home, "common-fabric", "test-records-key.json")))
+          .isFile,
+      ).toBe(true);
+    });
+
+    it("says which file it could not remove", async () => {
+      withStub({});
+      // A directory where the key file goes is not something a delete
+      // of the key file can take away.
+      await Deno.mkdir(
+        join(home, "common-fabric", "test-records-key.json", "inside"),
+        { recursive: true },
+      );
+
+      await expect(uninstallCommand(deps)).rejects.toThrow("Cannot remove");
+    });
+
+    it("says so when there was nothing to remove", async () => {
+      withStub({});
+      expect(await uninstallCommand(deps)).toBe(0);
+    });
+
+    it("does not claim recording stopped when a line was kept", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.writeTextFile(
+        join(home, ".zshenv"),
+        `export CF_TEST_RECORDS_KEY_FILE="/elsewhere.json"\n`,
+      );
+      const said: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => said.push(line);
+      try {
+        expect(await uninstallCommand(deps)).toBe(0);
+      } finally {
+        console.log = log;
+      }
+
+      const report = said.join("\n");
+      expect(report).toContain("What this tool could take back is gone.");
+      expect(report).not.toContain("Every new shell records nothing.");
+    });
+
+    it("keeps an export the tool did not write", async () => {
+      withStub({});
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      const line = `export CF_TEST_RECORDS_KEY_FILE="/elsewhere.json"\n`;
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
+    });
+
+    it("leaves spools of records that were never shipped", async () => {
+      await installed();
+      const spools = join(home, "spools");
+      await Deno.mkdir(join(spools, "run-1"), { recursive: true });
+      const inner = deps.env;
+      deps.env = (name) =>
+        name === "CF_TEST_RECORDS_SPOOL_ROOT" ? spools : inner(name);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect((await Deno.stat(join(spools, "run-1"))).isDirectory).toBe(true);
+    });
+  });
+
+  describe("agentConfigReport()", () => {
+    const update = (
+      outcome: "added" | "present" | "conflict" | "changed" | "unreadable",
+      existing?: string,
+    ) => ({
+      harness: "Claude Code",
+      path: "/h/.claude/settings.json",
+      outcome,
+      ...(existing !== undefined ? { existing } : {}),
+    });
+
+    it("says the harness carries the key file", () => {
+      expect(agentConfigReport(update("added"), "/k.json")).toContain(
+        "Claude Code passes CF_TEST_RECORDS_KEY_FILE",
+      );
+      expect(agentConfigReport(update("present"), "/k.json")).toContain(
+        "already passes the key file on",
+      );
+    });
+
+    it("quotes back a value it would not write over", () => {
+      const report = agentConfigReport(update("conflict", "/other"), "/k.json");
+      expect(report).toContain("/other");
+      expect(report).toContain("Left alone.");
+    });
+
+    it("says nothing was written when the file moved under it", () => {
+      expect(agentConfigReport(update("changed"), "/k.json")).toContain(
+        "changed while this was writing",
+      );
+    });
+
+    it("hands back the line to add when the file does not parse", () => {
+      expect(agentConfigReport(update("unreadable"), "/k.json")).toContain(
+        '"CF_TEST_RECORDS_KEY_FILE": "/k.json"',
+      );
+    });
+  });
+
+  describe("agentRemovalReport()", () => {
+    const removal = (
+      outcome: "removed" | "kept" | "changed" | "unreadable",
+      existing?: string,
+    ) => ({
+      harness: "Claude Code",
+      path: "/h/.claude/settings.json",
+      outcome,
+      ...(existing !== undefined ? { existing } : {}),
+    });
+
+    it("says the harness has stopped carrying the key file", () => {
+      expect(agentRemovalReport(removal("removed"))).toContain(
+        "no longer passes CF_TEST_RECORDS_KEY_FILE on",
+      );
+    });
+
+    it("says why a value stayed", () => {
+      const report = agentRemovalReport(removal("kept", "/other"));
+      expect(report).toContain("/other");
+      expect(report).toContain("not the key this tool installed");
+    });
+
+    it("says nothing was written when the file moved under it", () => {
+      expect(agentRemovalReport(removal("changed"))).toContain(
+        "changed while this was writing",
+      );
+    });
+
+    it("says what to do by hand when the file does not parse", () => {
+      expect(agentRemovalReport(removal("unreadable"))).toContain(
+        'out of its "env" by hand',
+      );
+    });
+  });
+
   describe("runCli()", () => {
     it("returns 2 and prints usage for a command it does not have", async () => {
       withStub({});
@@ -1127,6 +1616,12 @@ describe("test-records-key", () => {
       expect(await runCli(["setup", "--wat"], deps)).toBe(2);
       expect(await runCli(["request", "--wat"], deps)).toBe(2);
       expect(await runCli(["collect", "--wat"], deps)).toBe(2);
+      expect(await runCli(["uninstall", "--wat"], deps)).toBe(2);
+    });
+
+    it("runs uninstall", async () => {
+      withStub({});
+      expect(await runCli(["uninstall"], deps)).toBe(0);
     });
 
     it("returns 1 and reports a failure a person can hit", async () => {
