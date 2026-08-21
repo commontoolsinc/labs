@@ -5,8 +5,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import {
   executeWorkerRequest,
   formatConsoleMessage,
@@ -113,7 +112,7 @@ try {
       data: {
         did: identity.did(),
         toolshedUrl: "https://background-piece-service.invalid",
-        encodedIdentity: realmFromFabricValue(identity.keyPair),
+        encodedIdentity: realmValueFromKeyPair(identity.keyPair),
       },
     },
     handlers,

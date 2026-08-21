@@ -1,8 +1,7 @@
 import { assert } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 
 import { isWorkerIPCRequest } from "../src/worker-ipc.ts";
 
@@ -15,7 +14,7 @@ describe("isWorkerIPCRequest", () => {
   it("validates initialize messages", async () => {
     const did = "did:key:abc";
     const toolshedUrl = "http://localhost:8000";
-    const encodedIdentity = realmFromFabricValue(
+    const encodedIdentity = realmValueFromKeyPair(
       (await Identity.generate({ implementation: "noble" })).keyPair,
     );
     assert(

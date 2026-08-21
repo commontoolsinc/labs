@@ -8,7 +8,11 @@
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { DID, Identity } from "@commonfabric/identity";
+import {
+  type DID,
+  type Identity,
+  realmValueFromKeyPair,
+} from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
@@ -140,9 +144,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      identity: realmFromFabricValue(options.identity.keyPair),
+      identity: realmValueFromKeyPair(options.identity.keyPair),
       spaceIdentity: options.spaceIdentity &&
-        realmFromFabricValue(options.spaceIdentity.keyPair),
+        realmValueFromKeyPair(options.spaceIdentity.keyPair),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,

@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
@@ -87,6 +87,16 @@ describe("AppState", () => {
     assertEquals(await resolveIdentity(undefined), undefined);
     assert(await resolveIdentity(identity) === identity);
     assertEquals((await resolveIdentity(encoded))?.did(), identity.did());
+  });
+
+  it("refuses an encoding that is not a key pair", async () => {
+    // Well-formed in the format and wrong as a payload, which is the case a
+    // string arriving over the page boundary can actually be in.
+    await assertRejects(
+      () => resolveIdentity(jsonFromFabricValue("not a key pair")),
+      Error,
+      "not a key pair",
+    );
   });
 
   it("serialize", async () => {

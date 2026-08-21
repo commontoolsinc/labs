@@ -28,9 +28,11 @@
  */
 
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
-import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
-import { createSession, Identity } from "@commonfabric/identity";
+import {
+  createSession,
+  Identity,
+  keyPairFromRealmValue,
+} from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   type Cell,
@@ -268,13 +270,12 @@ const handlers: Record<
    * participant pattern, and return the classified step list.
    */
   async init(args) {
-    const keyPair = fabricFromRealmValue(args.identity as RealmEncodedValue);
-
-    if (!(keyPair instanceof FabricKeyPair)) {
-      throw new Error("Initialization `identity` is not a key pair.");
-    }
-
-    const identity = await Identity.fromKeyPair(keyPair);
+    const identity = await Identity.fromKeyPair(
+      keyPairFromRealmValue(
+        args.identity as RealmEncodedValue,
+        "Initialization `identity`",
+      ),
+    );
     const session = await createSession({
       identity,
       spaceName: args.spaceName as string,

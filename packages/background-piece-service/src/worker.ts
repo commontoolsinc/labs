@@ -1,9 +1,8 @@
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
-import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import {
   createSession,
   type DID,
   Identity,
+  keyPairFromRealmValue,
   Session,
 } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -156,13 +155,12 @@ export async function initialize(
   }
 
   const { did, toolshedUrl, experimental } = data;
-  const keyPair = fabricFromRealmValue(data.encodedIdentity);
-
-  if (!(keyPair instanceof FabricKeyPair)) {
-    throw new Error("Initialization `encodedIdentity` is not a key pair.");
-  }
-
-  const identity = await Identity.fromKeyPair(keyPair);
+  const identity = await Identity.fromKeyPair(
+    keyPairFromRealmValue(
+      data.encodedIdentity,
+      "Initialization `encodedIdentity`",
+    ),
+  );
   const apiUrl = new URL(toolshedUrl);
 
   // Initialize session
