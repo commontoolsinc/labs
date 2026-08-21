@@ -326,10 +326,13 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
         "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
         "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
-        "(2026-08-21); lifts when OW45 closes and the file greens ON " +
-        "(the optimize pass's joint run had step 1 green in ~10 s and " +
-        "step 2 still red on the cross-space module-run residual OW31's " +
-        "row carries); the flip PR needs this list EMPTY.",
+        "(2026-08-21), OW45's client half too (S-B merged; S-C SKIPPED " +
+        "by owner ruling 2026-08-21 — off the lift critical path, the " +
+        "test's own idle-barrier contract covers every create before " +
+        "any reload); lifts when OW31's cf:module cross-space run " +
+        "residual closes and the file greens ON (the optimize pass's " +
+        "joint run had step 1 green in ~10 s and step 2 red ONLY on " +
+        "that residual); the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",

@@ -5187,28 +5187,34 @@ supply; OW29/OW32/OW34 closed):
     (red-first pin: `scheduler-idle-pattern-work.test.ts`); **S-C**
     heal-on-read: re-issue program materialization on adopt/open when
     the space lacks the program docs for a referenced patternIdentity
-    — **FLAGGED OPEN, not built** (the same pass): the re-issue's
-    SOURCE is an unstated semantic — the in-memory artifact index
-    retains evaluated exports, not the module bytes a
-    re-materialization needs, so healing needs either retained
-    closure bytes (a memory-policy decision), a cross-space donor
-    probe (which spaces may donate is a policy decision), or S-A's
-    server-side heal (which the rootcause already names as healing
-    broken spaces on next demand) — routed to the owner with the
-    OW31/S-A decision rather than filled. A binding CONSTRAINT for
-    any future S-C build, from OW31's build flags (their FLAG-4):
-    the detached compile flows — the `loadPatternByIdentity` repair
-    writeback and `compilePattern`'s own persist — carry NO wave-run
-    context and hence no §2b carriage, so a foreign-target re-issue
-    routed through them is refused fail-closed; an S-C design must
-    run where carriage or the client's OWN identity write authority
-    is available (the adopting user writing their own space), or
-    stay server-side with S-A's carriage-borne trigger. Trigger: lifts the
+    — **SKIPPED BY RULING (RULED 2026-08-21, owner: "agreed, let's
+    skip the fix then")**, on the evidence that S-C sits OFF the lift
+    critical path: the home-profile durability test's own contract
+    runs every create through `waitForRuntimeIdle` — S-B's barrier —
+    before any reload, so with S-A+S-B merged the loss window the
+    heal would repair is closed going forward; and the two
+    gate-evidence broken spaces (Ada's and Alan's — TWO, not three)
+    lived in EPHEMERAL TEST STORES, so production (flag OFF, no
+    served creates) holds no broken space and no one-off repair
+    exists or is needed. **Named residual (recorded, not owed)**: a
+    client that DIES before its create-flow commits flush — a window
+    of roughly hundreds of milliseconds — still orphans the space
+    with no healer: the server's repair path stays fail-closed (OW31
+    FLAG-4 — the detached compile flows carry no §2b carriage) and
+    the client never re-issues. DETECTOR: OW46's
+    `structureLoadStuck` counter names exactly this state. REVISIT
+    TRIGGER: a nonzero park count in real ON usage, or OW56 landing
+    (which dissolves the class), whichever comes first; the parked
+    WIP branch `claude/server-exec-v2-ow45-sc-heal` is the
+    shelf-ready start (client-side heal riding `replicateClosures`
+    under the client's own identity, green red-first runner pins,
+    serving posture pinned fail-closed; marked do-not-merge).
+    Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
-    (S-A landed with OW31's build, carriage arm; S-B lands here — the
-    joint lift run is the remaining evidence, and the optimize pass's
-    preview run had step 1 green in ~10 s with step 2 still red on the
-    cross-space module-run residual OW31's row carries).
+    JOINTLY with OW31's cf:module cross-space run residual — S-A and
+    S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
+    pass's joint preview run had step 1 green in ~10 s with step 2
+    red ONLY on that residual.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -5507,6 +5513,31 @@ supply; OW29/OW32/OW34 closed):
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
     posture landed.
+  - **OW56 — FUTURE (optimize-phase-future) — the server owns program
+    materialization AND compilation; clients wait (minted 2026-08-21
+    with the S-C ruling).** The owner's stated ideal, verbatim:
+
+    > ideally compilation happens on the server and clients just wait
+    > for it, but if that isn't the case yet, then let's mark this for
+    > a later improvement and do (b)
+
+    — owner, 2026-08-21 (option (b), the client-side heal, was
+    subsequently SKIPPED the same day by the follow-on ruling on the
+    lift-path evidence — the OW45 row carries it; the ideal STANDS as
+    the direction that dissolves the whole class: no client-written
+    program docs means no lost program commits, no die-before-flush
+    orphan window, and no client heal to design). Pairs with OW44's
+    ruled coupling (lazy client instantiation — the client not
+    running the pattern immediately — is the client half of the same
+    family; server-side compilation is the server half). It also
+    addresses the owner's newly-raised concerns beyond durability:
+    client-written TRANSPILED CODE INTEGRITY (who attests the bytes a
+    client compiled — adjacent to OW55's pattern-fetch trust surface)
+    and VERSION-UPDATE FRESHNESS (a client compiling on an old
+    runtime version writes stale-toolchain closures; an explorer is
+    mapping this now and its findings may extend this row). Trigger:
+    optimize-phase-future; closing it also retires the OW45 row's
+    named die-before-flush residual.
 
 ## 4. Standing rule
 
