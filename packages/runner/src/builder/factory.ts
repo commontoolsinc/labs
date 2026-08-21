@@ -310,11 +310,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     UiDisclosure,
 
     // `FabricSpecialObject` classes -- runtime values backing the type
-    // declarations
-    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-    // checks in patterns. `FabricSpecialObject` is abstract; it is bound for
-    // `instanceof` only. Listed in declaration order, so this list and the
-    // declarations in api/index.ts can be compared directly.
+    // declarations in api/index.ts. Enables `new FabricEpochNsec(...)` and
+    // `instanceof` checks in patterns. `FabricSpecialObject` is abstract; it is
+    // bound for `instanceof` only. Listed in declaration order, so this list
+    // and the declarations in api/index.ts can be compared directly.
     FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
