@@ -1,7 +1,4 @@
-import type {
-  FabricKeyPair as ApiFabricKeyPair,
-  FabricKeyPairConstructor as ApiFabricKeyPairConstructor,
-} from "@commonfabric/api";
+import type { FabricKeyPair as ApiFabricKeyPair } from "@commonfabric/api";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -85,8 +82,7 @@ type RealmHandleState = {
  * state is elided by the debug renderer, so a private key does not reach a log
  * through a `console.log()` of the value that holds it.
  */
-export class FabricKeyPair extends BaseFabricPrimitive
-  implements ApiFabricKeyPair {
+export class FabricKeyPair extends BaseFabricPrimitive {
   /** The algorithm name. */
   readonly #algorithm: string;
 
@@ -490,7 +486,30 @@ export class FabricKeyPair extends BaseFabricPrimitive
   }
 }
 
-// Compile-time check that the exported `FabricKeyPair` constructor matches the
-// `FabricKeyPairConstructor` declared in `@commonfabric/api`. This catches
-// drift between the public type contract and this implementation.
-FabricKeyPair satisfies ApiFabricKeyPairConstructor;
+// Compile-time drift guards against the `@commonfabric/api` declarations, in
+// two halves.
+//
+// The instance surface compares directly. Assignability is covariant on member
+// types, so this class -- nominal, holding private fields -- satisfies the
+// structural declaration, and a member the declaration names that is missing
+// here or typed differently fails this line. It does NOT catch the other
+// direction: a public member here that the declaration omits passes silently,
+// and needs adding there by hand.
+FabricKeyPair.prototype satisfies ApiFabricKeyPair;
+
+// The constructor cannot be compared that way. A construct signature's
+// parameters are checked contravariantly, so satisfying
+// `FabricKeyPairConstructor` would require the declaration's parameter type to
+// be assignable to this class's. The declaration says `FabricBytes`, meaning
+// the class of that name, and nothing structural is ever assignable to a class
+// holding a private field -- so the only parameter that could satisfy it is
+// one naming the declaration rather than the class, which is backwards for an
+// implementation. Each form the declaration promises is therefore exercised
+// instead: dropping an overload, or narrowing one, stops this compiling.
+(() => {
+  const bytes = new FabricBytes(new Uint8Array());
+
+  new FabricKeyPair(undefined as unknown as CryptoKeyPair);
+  new FabricKeyPair("Ed25519", bytes, bytes);
+  new FabricKeyPair("Ed25519", new Uint8Array(), new Uint8Array());
+});

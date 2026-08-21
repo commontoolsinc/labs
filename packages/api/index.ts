@@ -254,8 +254,8 @@ export interface FabricKeyPairConstructor {
   new (pair: CryptoKeyPair): FabricKeyPair;
   new (
     algorithm: string,
-    publicKey: Uint8Array,
-    privateKey: Uint8Array,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
   ): FabricKeyPair;
   prototype: FabricKeyPair;
 }
