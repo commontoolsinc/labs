@@ -44,6 +44,7 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -134,6 +135,12 @@ describe("Topics create, on screen against off screen", () => {
       const cancel = demandBoard(cc, board);
       if (cancel) sinkCancels.push(cancel);
     }
+
+    // Both boards reach the server before any browser asks for one. A piece
+    // this process has created but not yet synced is one the shell answers for
+    // with "No data at cell", and the run then spends its whole budget in a
+    // wait for a card that was never going to arrive.
+    await cc.synced();
   });
 
   afterAll(async () => {
@@ -150,6 +157,10 @@ describe("Topics create, on screen against off screen", () => {
         : { spaceName: SPACE_NAME },
       identity,
     });
+    // Routed and loaded before anything is timed. Asserting the view here is
+    // what makes a piece that cannot load fail as a failed load, rather than
+    // as every subsequent text wait running to its safety net.
+    if (RENDER) await waitForPieceView(page, SPACE_NAME, rendered.id);
     await waitForRuntimeIdle(page);
 
     for (let index = 0; index < SIZE; index++) {
