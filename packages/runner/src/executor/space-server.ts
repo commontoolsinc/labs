@@ -2721,6 +2721,12 @@ export class SpaceServer implements TransactionSealDestination {
       this.#pendingStructureLoads.delete(key);
       this.#terminalStructureLoads.delete(key);
       this.#rearmedAwaitingSettle.delete(key);
+      // The stuck-streak entry retires with the rest of the per-key
+      // load state (review finding): a departed root's streak would
+      // otherwise linger for the space's whole life, and a later
+      // re-demand of the same key would resume an obsolete streak
+      // instead of starting a fresh episode.
+      this.#structureLoadDeferralStreaks.delete(key);
       runtime.scheduler.leaveDemandedEntity(addressOf(key));
     }
     // ENTERED keys and pairs. A NEW key ENTERS the demanded entity (0→1
@@ -2975,20 +2981,13 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** One structure-load attempt for a demanded root (stage P2-F): the
-   * demanded INSTANCE is tried first (a scoped result doc may carry
-   * its own per-instance pattern pointer), and a scoped no-meta miss
-   * falls back to the SPACE instance — piece structure is shared (one
-   * graph; instances are data slots, scopes.md §2), so a scoped demand
-   * on a shared-structure piece must load through the broad slot
-   * rather than churn forever on its meta-less instance doc. */
   /** Track one root's consecutive-deferral streak and surface the
    * STUCK crossing (OW46): count `stats.structureLoadStuck` once at
    * `STRUCTURE_LOAD_STUCK_AFTER`, and WARN there and at each doubling
    * of the streak (8, 16, 32, …) so a forever-parked root keeps
    * showing up without per-cycle log spam. The streak is cleared by
-   * the resolution arms (started / terminal / never-a-piece), never
-   * here. */
+   * the resolution arms (started / terminal / never-a-piece) and by
+   * demand departure, never here. */
   #noteStructureLoadDeferral(
     key: string,
     rootId: string,
@@ -3014,6 +3013,13 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
+  /** One structure-load attempt for a demanded root (stage P2-F): the
+   * demanded INSTANCE is tried first (a scoped result doc may carry
+   * its own per-instance pattern pointer), and a scoped no-meta miss
+   * falls back to the SPACE instance — piece structure is shared (one
+   * graph; instances are data slots, scopes.md §2), so a scoped demand
+   * on a shared-structure piece must load through the broad slot
+   * rather than churn forever on its meta-less instance doc. */
   async #attemptStructureLoad(
     runtime: Runtime,
     root: { id: string; scope?: string },

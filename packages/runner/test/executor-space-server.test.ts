@@ -919,36 +919,59 @@ describe("stage G SpaceServer recovery seams", () => {
     // the threshold — not before (stuck stays 0 while the streak is
     // short: a routine creation-race deferral never trips it), and only
     // ONCE for the one stuck root no matter how far past the threshold
-    // the cycles run.
-    for (
-      let i = 0;
-      stats.structureLoadDeferred < STRUCTURE_LOAD_STUCK_AFTER + 4 && i < 40;
-      i++
-    ) {
-      if (stats.structureLoadDeferred < STRUCTURE_LOAD_STUCK_AFTER) {
-        expect(stats.structureLoadStuck).toBe(0);
+    // the cycles run — driven past the first DOUBLING (2× the
+    // threshold) so the doubling re-warn path runs while the crossing
+    // counter provably does not re-count. The warn is observed through
+    // the console the logger writes to.
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes("structure-load-stuck")) warns.push(line);
+      originalWarn.apply(console, args);
+    };
+    try {
+      for (
+        let i = 0;
+        stats.structureLoadDeferred < 2 * STRUCTURE_LOAD_STUCK_AFTER + 2 &&
+        i < 60;
+        i++
+      ) {
+        if (stats.structureLoadDeferred < STRUCTURE_LOAD_STUCK_AFTER) {
+          expect(stats.structureLoadStuck).toBe(0);
+          expect(warns.length).toBe(0);
+        }
+        const applied = await server.writeDocument(
+          space,
+          `of:ow46-noise-${i}`,
+          { n: i },
+        );
+        created.enqueueCommit({
+          space,
+          seq: applied.seq,
+          class: "system",
+          sessionId: "session:ow46-noise",
+          writes: [{ id: `of:ow46-noise-${i}`, scopeKey: "space" }],
+        });
+        await waitUntil(
+          () => created.watermark >= applied.seq,
+          `noise cycle ${i} to settle`,
+        );
       }
-      const applied = await server.writeDocument(
-        space,
-        `of:ow46-noise-${i}`,
-        { n: i },
-      );
-      created.enqueueCommit({
-        space,
-        seq: applied.seq,
-        class: "system",
-        sessionId: "session:ow46-noise",
-        writes: [{ id: `of:ow46-noise-${i}`, scopeKey: "space" }],
-      });
-      await waitUntil(
-        () => created.watermark >= applied.seq,
-        `noise cycle ${i} to settle`,
-      );
+    } finally {
+      console.warn = originalWarn;
     }
     expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(
-      STRUCTURE_LOAD_STUCK_AFTER,
+      2 * STRUCTURE_LOAD_STUCK_AFTER,
     );
     expect(stats.structureLoadStuck).toBe(1);
+    // The warn fired at the crossing (8) and again at the doubling
+    // (16) — visible persistence without per-cycle spam — and each
+    // line names the root.
+    expect(warns.length).toBe(2);
+    for (const line of warns) {
+      expect(line).toContain("of:ow46-stuck-root");
+    }
     expect(stats.structureLoadFailures).toBe(0);
     expect(stats.structureLoadTerminal).toBe(0);
   });
