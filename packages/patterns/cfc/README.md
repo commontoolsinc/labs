@@ -151,6 +151,28 @@ subject drawn from the pattern's own list of them, and where a subject can be
 renamed or removed, refuse the change rather than leave a role pointing at
 someone who is no longer there.
 
+Two of these describe this runtime rather than the CFC specification, and an
+author who goes looking for them in the specification will not find them. The
+specification checks a write target's `requiredIntegrity` against the written
+value alone (`commontoolsinc/specs` `cfc/08-12-store-label-monotonicity.md`
+§8.12.4.1), and scopes the shared-witness rule to the reads at or below the
+annotated path (`cfc/08-10-validation-at-boundaries.md` §8.10.3). This runtime
+screens a floored write against every labeled read that preceded it in the
+transaction, which is stronger, and which is what leaves two atoms in one flow
+with no way to satisfy each other. Entries become documents of their own because
+of how this runtime stores a value written into a labeled location; the remedy
+of labeling each entry is what the specification's link-carried label component
+expects either way (`cfc/08-12-store-label-monotonicity.md` §8.12.8).
+
+One more shape is worth knowing before designing around it. The specification
+composes write authority as a **set** of handler identities, one per handler
+declaring that it writes the path (`cfc/08-15-write-authority.md` §8.15.2). The
+authoring surface here names a single binding, so every operation on a protected
+path has to reach that path through one handler. Operations that would otherwise
+carry their own authorization end up as events into it, and their authorization
+has to be decided by the caller, before the state the handler would need to
+check it against has moved.
+
 `packages/patterns/factory-outputs/parking-coordinator/main.tsx` follows all
 five. `packages/patterns/lobby/main.tsx` binds its registry to a reviewed
 handler the same way, with profiles rather than names as role subjects.
