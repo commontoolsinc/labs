@@ -1014,6 +1014,14 @@ export class StorageManager implements IStorageManager {
     return [...this.#providers.keys()];
   }
 
+  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+    // Already-open replicas only: creating a provider is a session-level
+    // side effect no elision probe should carry. A space this manager has
+    // not opened answers false, and false stages.
+    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+      false;
+  }
+
   open(space: MemorySpace): IStorageProvider {
     // A manager reused after close() starts a new session; retention
     // follows it.

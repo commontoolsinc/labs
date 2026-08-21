@@ -1706,6 +1706,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
+      // Confirmed-persistence elision: a document the space's server
+      // already holds needs no re-delivery, and content addressing makes
+      // the confirmed copy immutable, so the skip cannot race a change.
+      // Server-CONFIRMED only — a pending local write is no evidence the
+      // server holds it — and per-space: the dedupe set above stays
+      // per-transaction on purpose (sibling transactions never carry
+      // ordering dependencies on each other's uncommitted writes).
+      if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
         logger.warn("schema-doc-materialize", () => [

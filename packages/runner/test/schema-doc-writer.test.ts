@@ -199,6 +199,81 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("elides a closure the space's server has confirmed", async () => {
+    // Confirmed-persistence elision: once the server acknowledged a commit
+    // carrying the documents, a later transaction referencing the same
+    // closure stages nothing — content addressing makes the confirmed copy
+    // immutable, so the skip cannot race a change.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { elidedField: { type: "string" } },
+    };
+    const sigilA = sigilFor(schema);
+    const first = writer.edit();
+    first.writeValueOrThrow(
+      { space, id: "of:elide-a" as URI, scope: "space", path: [] },
+      { person: sigilA },
+    );
+    expect((await first.commit()).ok).toBeDefined();
+    await writerStorage.synced();
+
+    const sigilB = sigilFor(schema);
+    const second = writer.edit();
+    second.writeValueOrThrow(
+      { space, id: "of:elide-b" as URI, scope: "space", path: [] },
+      { person: sigilB },
+    );
+    const staged = [...second.getWriteDetails?.(space) ?? []].map((detail) =>
+      detail.address.id
+    );
+    expect(staged.some((id) => id.startsWith("cid:"))).toBe(false);
+    expect((await second.commit()).ok).toBeDefined();
+  });
+
+  it("stages for a replica that has not confirmed the closure", async () => {
+    // The elision keys on THIS replica's server-confirmed state, not on
+    // the registry: a fresh manager against the same server has confirmed
+    // nothing, so its writer re-delivers — and the commit boundary accepts
+    // the content-identical re-set.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { restagedField: { type: "string" } },
+    };
+    const sigilA = sigilFor(schema);
+    const first = writer.edit();
+    first.writeValueOrThrow(
+      { space, id: "of:restage-a" as URI, scope: "space", path: [] },
+      { person: sigilA },
+    );
+    expect((await first.commit()).ok).toBeDefined();
+    await writerStorage.synced();
+
+    const otherStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const other = new Runtime({
+      storageManager: otherStorage,
+      apiUrl: new URL(import.meta.url),
+      experimental: { contentAddressedSchemas: true },
+    });
+    try {
+      const sigilB = sigilFor(schema);
+      const tx = other.edit();
+      tx.writeValueOrThrow(
+        { space, id: "of:restage-b" as URI, scope: "space", path: [] },
+        { person: sigilB },
+      );
+      const staged = [...tx.getWriteDetails?.(space) ?? []].map((detail) =>
+        detail.address.id
+      );
+      expect(staged.some((id) => id.startsWith("cid:"))).toBe(true);
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await other.dispose();
+      await otherStorage.close();
+    }
+  });
+
   it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {
