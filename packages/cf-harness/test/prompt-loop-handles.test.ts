@@ -23,6 +23,10 @@ import {
   createHarnessHandleTable,
   mintAddressHandle,
 } from "../src/handle-table.ts";
+import {
+  createHarnessResolvedValueRegister,
+  RESOLVED_VALUE_PLACEHOLDER,
+} from "../src/contracts/resolved-value-register.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
   SandboxCommandRequest,
@@ -231,6 +235,45 @@ describe("prompt-loop address handles", () => {
     expect(
       result.runState.handleTable?.entries.map((entry) => entry.token).sort(),
     ).toEqual([expectedTokenA, expectedTokenB].sort());
+  });
+
+  it("withholds a materialized value that contains an address, whole, rather than tokenizing part of it", async () => {
+    // Scrubbing runs before tokenizing at this boundary. The other order
+    // rewrites the address inside the value first, and what is left no longer
+    // matches what the register holds, so the rest of the value reaches the
+    // model beside a freshly minted token.
+    const runId = "run-handles-scrub-before-swap";
+    const materialized = `see ${URI_A} for the rest`;
+    const register = createHarnessResolvedValueRegister();
+    register.record(materialized);
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime([
+          {
+            stdout: `the page echoed: ${materialized}\n`,
+            stderr: "",
+            exitCode: 0,
+          },
+        ]),
+        resolvedValueRegister: register,
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      fetchFn: scriptedFetch([
+        bashCallTurn("call-1", "cat page.txt"),
+        finalTurn("Done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Read the page." });
+
+    const toolContent = lastToolMessageContent(result.transcript);
+    expect(toolContent).toContain(RESOLVED_VALUE_PLACEHOLDER);
+    expect(toolContent).not.toContain("for the rest");
+    expect(toolContent).not.toContain(HASH_A);
+    expect(toolContent).not.toContain("cfh:a:");
   });
 
   it("resolves a token in the next turn's tool input to the canonical address before dispatch", async () => {

@@ -1,6 +1,7 @@
 /**
  * Unit tests for resolving a handle into the value it stands for: the
- * addresses and tokens that resolve, the refusals for a reference that names
+ * addresses and tokens that resolve, the rule that only a reference this run
+ * holds a handle to resolves at all, the refusals for a reference that names
  * nothing readable, and the rule that no message ever renders the referent.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -19,6 +20,7 @@ import {
   type HandleValueResolutionContext,
   resolveHandleValue,
 } from "../src/tools/handle-values.ts";
+import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness handle values");
 
@@ -52,9 +54,24 @@ describe("handle-values", () => {
     await storageManager?.close();
   });
 
-  const context = (): HandleValueResolutionContext => ({
+  const context = (
+    handleTable?: HarnessHandleTable,
+  ): HandleValueResolutionContext => ({
     getFabricSession: () => Promise.resolve({ pieces }),
+    ...(handleTable !== undefined ? { handleTable } : {}),
   });
+
+  /**
+   * A table holding a handle to `ref`, which is what makes the reference one
+   * the run may resolve. Every address a run was given arrives this way; an
+   * address that did not is one the model composed.
+   */
+  const tableHolding = async (ref: string): Promise<HarnessHandleTable> =>
+    (await mintAddressHandle(
+      createHarnessHandleTable("handle-values-run"),
+      ref,
+    ))
+      .table;
 
   /** An address in the run's space holding `value`, or holding nothing. */
   const seedRef = async (cause: string, value?: unknown): Promise<string> => {
@@ -71,10 +88,10 @@ describe("handle-values", () => {
   };
 
   describe("resolveHandleValue", () => {
-    it("returns the string the address holds", async () => {
+    it("returns the string behind an address this run holds a handle to", async () => {
       const ref = await seedRef("traveller-name", "Ada Lovelace");
       const resolution = await resolveHandleValue(
-        context(),
+        context(await tableHolding(ref)),
         ref,
         "browser valueHandle",
       );
@@ -131,9 +148,39 @@ describe("handle-values", () => {
       );
     });
 
-    it("returns an error for an address in another space", async () => {
+    it("refuses a same-space address this run holds no handle to", async () => {
+      // The inbound swap has already turned tokens into addresses by the time
+      // a tool runs, so an address the model typed is indistinguishable from
+      // an expanded token except by the table. Reading this one would be a
+      // read of any cell in the space.
+      const held = await seedRef("held-value", "Ada Lovelace");
+      const unheld = await seedRef("another-users-value", "hunter2");
+      const resolution = await resolveHandleValue(
+        context(await tableHolding(held)),
+        unheld,
+        "browser valueHandle",
+      );
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle does not name a handle this run holds",
+      );
+    });
+
+    it("refuses an address when the run has no handle table at all", async () => {
+      const ref = await seedRef("traveller-name", "Ada Lovelace");
       const resolution = await resolveHandleValue(
         context(),
+        ref,
+        "browser valueHandle",
+      );
+      expect(resolution.error).toBe(
+        "browser valueHandle does not name a handle this run holds",
+      );
+    });
+
+    it("returns an error for an address in another space", async () => {
+      const resolution = await resolveHandleValue(
+        context(await tableHolding(FOREIGN_REF)),
         FOREIGN_REF,
         "browser valueHandle",
       );
@@ -156,7 +203,7 @@ describe("handle-values", () => {
     it("returns an error for an address that holds nothing", async () => {
       const ref = await seedRef("never-written");
       const resolution = await resolveHandleValue(
-        context(),
+        context(await tableHolding(ref)),
         ref,
         "browser valueHandle",
       );
@@ -169,7 +216,7 @@ describe("handle-values", () => {
     it("returns an error naming the type, not the value, for a non-string referent", async () => {
       const ref = await seedRef("structured-value", { account: "12345678" });
       const resolution = await resolveHandleValue(
-        context(),
+        context(await tableHolding(ref)),
         ref,
         "browser valueHandle",
       );
@@ -184,7 +231,7 @@ describe("handle-values", () => {
     it("returns an error naming the type, not the value, for a numeric referent", async () => {
       const ref = await seedRef("numeric-value", 12345678);
       const resolution = await resolveHandleValue(
-        context(),
+        context(await tableHolding(ref)),
         ref,
         "browser valueHandle",
       );

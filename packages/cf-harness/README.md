@@ -1138,18 +1138,43 @@ browser profile has no verb to arrive through.
 A field that takes a value has a sibling that takes a handle: `valueHandle` for
 `fill`, `type`, and `select`, and `urlHandle` for `open`. The handle is resolved
 trusted-side at the moment of use, so the model composes the action while
-holding only a reference, and the value it stands for never enters the
-conversation. A value-bearing field and its handle sibling are alternatives —
-set together, the call is refused rather than one winning silently. Once a run
-materializes a value this way, that exact string is scrubbed out of model-facing
+holding only a reference and the value never enters the conversation. A
+value-bearing field and its handle sibling are alternatives — set together, the
+call is refused rather than one winning silently.
+
+Two checks stand between a handle and a materialized value, and both refuse by
+default. The reference must be one the run actually holds: the inbound swap
+rewrites a handle token into an address before a tool sees it, so an expanded
+token and an address the model composed are indistinguishable by then, and only
+membership in the run's handle table tells them apart. And the destination must
+be allowlisted: `--handle-value-origin` names the origins where a value may be
+spent, the page's own origin is read immediately before a `fill`, `type`, or
+`select`, and a `urlHandle` is checked against the origin it resolves to. A run
+with no allowlist cannot materialize a handle at all.
+
+That destination check is a policy control, not a race-free guarantee, and the
+distinction matters. The origin is read and then the value is typed; a page that
+navigates in between — a redirect, or another child driving the same leased
+browser — is not caught. The allowlist is also per-run rather than per-handle,
+so any allowlisted origin can receive any handle the run holds: allowing a mail
+origin for a mail credential does not stop a banking credential going there too.
+Binding permitted destinations to the handle itself, at mint time, is the shape
+that closes both, and it is not what this does.
+
+Once a run materializes a value, that string is scrubbed out of model-facing
 tool output for the rest of the run, at the same boundary where addresses become
-handle tokens. That scrub is a backstop against the obvious return path — a
-later snapshot, a skill script driving the same browser, a failing command's
-stderr — and not a containment boundary: it matches strings, so a value the page
-transformed (HTML-escaped, case-changed, split across elements) passes through
-it. What a handle buys is that the model never held the value and could not
-choose where it went; keeping a materialized value out of model context for good
-needs the labels on the data to govern the read.
+handle tokens. The scrub is a backstop against the obvious return path — a later
+snapshot, a skill script driving the same browser, a failing command's stderr —
+and not a containment boundary. It matches strings, so a value the page
+transformed (HTML-escaped, case-changed, split across elements) passes through,
+and values below a few characters are recorded but never matched, because
+matching them would blank unrelated text without protecting anything.
+
+So what a handle buys is bounded, and worth stating exactly: the model never
+holds the value, cannot read it back through the obvious paths, and can only
+spend it at an origin an operator named in advance. It does not buy that the
+value reached the destination the operator had in mind. Containment that holds
+has to come from the labels on the data governing both the read and the release.
 
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not

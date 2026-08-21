@@ -1,13 +1,22 @@
 /**
- * Turning a handle the model holds into the value it stands for, trusted-side
+ * Turning a handle the run holds into the value it stands for, trusted-side
  * and at the point of use.
  *
  * A tool field that takes a value has a sibling that takes a handle instead.
  * The model writes the handle token; the prompt loop's inbound swap rewrites
  * it into the canonical LLM-friendly link string before the tool runs, so
- * what arrives here is normally an address. Either spelling is accepted —
- * a token is looked up in the run's handle table first — and neither the
- * value nor anything derived from it appears in a message this returns.
+ * what arrives here is normally an address. Either spelling is accepted, and
+ * neither the value nor anything derived from it appears in a message this
+ * returns.
+ *
+ * Accepting either spelling is why the reference is checked against the run's
+ * handle table rather than read on sight. The inbound swap has already turned
+ * tokens into addresses by the time a tool runs, so a tool cannot tell an
+ * address that arrived that way from one the model wrote out itself — guessed,
+ * or read off a page. Membership in the table is what separates them: a handle
+ * this run was given has an entry, an address the model composed does not, and
+ * only the first resolves. Without that check a handle field is a general read
+ * of every cell in the run's space.
  *
  * The caller is responsible for the other half of the contract: recording the
  * resolved value in the run's
@@ -17,7 +26,11 @@
  */
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 
-import { resolveHandleToken } from "../handle-table.ts";
+import {
+  handleRefAddressKey,
+  resolveHandleRef,
+  resolveHandleToken,
+} from "../handle-table.ts";
 import { ADDRESS_HANDLE_TOKEN_PREFIX } from "../contracts/handle-table.ts";
 import type { HarnessToolContext } from "./types.ts";
 
@@ -33,6 +46,25 @@ export type HandleValueResolutionContext = Pick<
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * The origin of `url` when it is an http(s) URL, and `undefined` otherwise.
+ * Origin is the whole of what a destination check compares and the whole of
+ * what a refusal about one may name: it says where a value would go without
+ * carrying the path, query, or fragment a caller chose.
+ */
+export const httpOriginOf = (url: string): string | undefined => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return undefined;
+  }
+  return parsed.origin;
+};
 
 /**
  * The string value behind `handle`, or an explanation of why the run cannot
@@ -60,14 +92,22 @@ export const resolveHandleValue = async (
         `${label} requires a fabric session to resolve a handle, and this run has none`,
     };
   }
-  const ref = trimmed.startsWith(ADDRESS_HANDLE_TOKEN_PREFIX)
-    ? (context.handleTable === undefined
-      ? undefined
-      : resolveHandleToken(context.handleTable, trimmed)?.ref)
-    : trimmed;
-  if (ref === undefined) {
+  const isToken = trimmed.startsWith(ADDRESS_HANDLE_TOKEN_PREFIX);
+  if (!isToken && handleRefAddressKey(trimmed) === undefined) {
+    return { error: `${label} does not name a reference this run holds` };
+  }
+  // Both spellings go through the table, and for the same reason: what
+  // reaches a tool is an address either way, so holding the handle is the
+  // only thing that distinguishes a delegated reference from a composed one.
+  const entry = context.handleTable === undefined
+    ? undefined
+    : (isToken
+      ? resolveHandleToken(context.handleTable, trimmed)
+      : resolveHandleRef(context.handleTable, trimmed));
+  if (entry === undefined) {
     return { error: `${label} does not name a handle this run holds` };
   }
+  const ref = entry.ref;
   let pieces;
   try {
     pieces = (await context.getFabricSession()).pieces;
