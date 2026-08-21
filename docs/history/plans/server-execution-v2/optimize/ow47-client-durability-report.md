@@ -438,3 +438,23 @@ PR 1's original battery: the tasks/ suite wasn't run. The same CI run's
 lane timeout) is on the OFF default lane where the OW47 filter is a
 no-op (`#speculativeLocalSeqs` empty under OFF) and main passed at the
 same head — watched on the updated-head run alongside shard 7.
+
+Attribution ledger for the ON-lane browser flakes seen across this
+pass's PR runs, closed by the ritual (exact assert → sibling runs →
+reach → local reproduction): (1) `cfc-group-chat-demo-multi-runtime`
+"bob's post-lockdown message arrives at alice" 30 s timeout, ONE CI
+occurrence (PR 1 run 1, shard 7) — 6/6 green locally on the true ON
+topology (3 at the PR tip, 3 on the joint merge), green in PR 1 run 2;
+(2) `cfc-staged-publish` "#stage-pill → saved" 5 m timeout, TWO CI
+occurrences (PR 1 run 2 and PR 3, both shard 9) — 0 failures in 9
+main runs, GREEN in PR 1 run 1 whose runtime diff is identical to run
+2's (the delta was docs + the tasks pin test), and 5/5 green locally
+across the joint tree (1) and the PR 3 tree (4/4, fresh store); (3)
+`cfc-spec-gallery`, ONE occurrence on MAIN's own e04fb3460 run with
+the next two main runs green. Every occurrence is a served-round-trip
+wait on a loaded CI runner; no occurrence reproduces locally; no
+failing log carries this pass's mechanism signatures (no
+`speculative-basis-refused`, no barrier hang). Verdict: the lane
+class's known load flakiness (the first-ON-CI-gate's own caveat),
+NOT attributed to these diffs; failed shards re-run rather than
+patched around.
