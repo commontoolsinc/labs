@@ -72,7 +72,7 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
     packages: ["api", "data-model"],
     reason:
       "api's cfc module freezes values with data-model's deep-freeze, while " +
-      "data-model's Fabric value classes are typed by api.",
+      "data-model's `FabricSpecialObject` classes are typed by api.",
   },
   {
     packages: ["memory", "runner"],

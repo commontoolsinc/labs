@@ -193,8 +193,9 @@ must use the threshold when deciding which form to emit.
 The hashed form applies everywhere this spec encodes a string via the
 `TAG_STRING` layout: standalone strings (this section), `symbol` keys
 (Section 4.6), object keys (Section 4.13), `FabricInstance` type tags
-(Section 4.14), `FabricHash` algorithm tags (Section 4.11), and
-`FabricRegExp` source/flags/flavor strings (Section 4.16).
+(Section 4.14), `FabricHash` algorithm tags (Section 4.11),
+`FabricRegExp` source/flags/flavor strings (Section 4.16), and
+`FabricKeyPair` algorithm names (Section 4.17).
 
 ### 4.5 `bigint`
 
@@ -397,10 +398,10 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `FabricBytes`,
-> `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, and `FabricRegExp` are
-> **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
-> encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, and 4.16
-> respectively). These are all `FabricPrimitive` subclasses — at this
+> `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricRegExp`, and
+> `FabricKeyPair` are **not** hashed via `TAG_INSTANCE`. Each has a dedicated
+> type tag and is encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, 4.16
+> and 4.17 respectively). These are all `FabricPrimitive` subclasses — at this
 > layer they are hashed from their own stored values, not via their wire
 > codecs.
 
@@ -451,6 +452,36 @@ The three strings are fed in order — source, then flags, then flavor — with 
 enclosing container and no `TAG_END` terminator, since the field count is
 fixed. Distinct regex dialects with identical source and flags therefore
 produce distinct hashes (the `flavor` field disambiguates them).
+
+### 4.17 `FabricKeyPair`
+
+```
+Bytes: TAG_KEY_PAIR  ALGORITHM_STRING  PUBLIC_KEY      PRIVATE_KEY
+       0x2C          <string, §4.4>    <bytes, §4.8>   <bytes, §4.8>
+```
+
+`FabricKeyPair` represents an asymmetric key pair. It is a `FabricPrimitive`
+subclass and has a dedicated type tag; it is hashed from its own stored values
+(below) and is **not** hashed via `TAG_INSTANCE`.
+
+- **Algorithm**: The algorithm name (e.g. `"Ed25519"`), encoded as a complete
+  tagged string value per Section 4.4.
+- **Public key**: The public key's bytes, encoded as a complete tagged
+  `FabricBytes` value per Section 4.8 — `TAG_BYTES`, a LEB128 length, then the
+  raw bytes.
+- **Private key**: The private key's bytes, in the same form.
+
+The three fields are fed in order — algorithm, then public key, then private
+key — with no enclosing container and no `TAG_END` terminator, since the field
+count is fixed. The two keys are self-delimiting through their own length
+prefixes, so a pair holding the two keys the other way round hashes
+differently.
+
+**Only a pair holding key material has a hash.** A `FabricKeyPair` holding
+`CryptoKey` handles has no hash at all, and computing one throws: its material
+is by construction unreachable, and its algorithm name alone is shared by every
+key of that algorithm, so hashing that would give distinct keys one identity.
+See `1-fabric-values.md` Section 1.4.11.
 
 ---
 
@@ -633,7 +664,32 @@ Full byte stream:
 24 06 65 73 32 30 32 35
 ```
 
-### 7.13 `[1, , 3]` (sparse array)
+### 7.13 `FabricKeyPair("Ed25519", [DE AD], [BE EF 01])`
+
+`FabricKeyPair` is a `FabricPrimitive` with the dedicated tag `TAG_KEY_PAIR`
+(`0x2C`); it is hashed by feeding its algorithm name and then its two keys —
+public first, then private — in that order (Section 4.17). The algorithm name
+is under the 64-byte threshold, so it uses the direct string form; each key is
+a complete tagged `FabricBytes` value.
+
+- KeyPair tag: `2C`
+- Algorithm `"Ed25519"` (7 bytes UTF-8): `24 07 45 64 32 35 35 31 39`
+- Public key (2 bytes): `25 02 DE AD`
+- Private key (3 bytes): `25 03 BE EF 01`
+
+There is no enclosing object and no `TAG_END` terminator — the three fields are
+fed positionally. The two keys carry their own length prefixes, so a pair
+holding them the other way round produces a different byte stream.
+
+Full byte stream:
+```
+2C
+24 07 45 64 32 35 35 31 39
+25 02 DE AD
+25 03 BE EF 01
+```
+
+### 7.14 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
@@ -652,7 +708,7 @@ Full byte stream:
 00
 ```
 
-### 7.14 `[]` (empty array)
+### 7.15 `[]` (empty array)
 
 ```
 10 00
@@ -660,7 +716,7 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.15 `{ a: 1, b: 2 }` (object)
+### 7.16 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
@@ -682,7 +738,7 @@ Full byte stream:
 00
 ```
 
-### 7.16 `{}` (empty object)
+### 7.17 `{}` (empty object)
 
 ```
 11 00
@@ -690,7 +746,7 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.17 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.18 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
@@ -698,7 +754,7 @@ These three arrays produce different byte streams at the middle element:
 - `[1, , 3]`: middle element is `01 01` (`TAG_HOLE` + run of 1)
 - `[1, null, 3]`: middle element is `20` (`TAG_NULL`)
 
-### 7.18 Long string (hashed form)
+### 7.19 Long string (hashed form)
 
 A string whose UTF-8 encoding exceeds 64 bytes uses the hashed form (Section
 4.4). Let `S` be any such string and let `H = SHA-256(utf8(S))` be its 32-byte
@@ -718,8 +774,9 @@ hashed form.
 This rule applies to every string the hasher feeds, including standalone
 strings (Section 4.4), `symbol` keys (Section 4.6), object keys (Section
 4.13), `FabricInstance` type tags (Section 4.14), `FabricHash`
-algorithm tags (Section 4.11), and `FabricRegExp` source/flags/flavor
-strings (Section 4.16). The threshold is evaluated per-string
+algorithm tags (Section 4.11), `FabricRegExp` source/flags/flavor
+strings (Section 4.16), and `FabricKeyPair` algorithm names
+(Section 4.17). The threshold is evaluated per-string
 independently: an object may mix short keys (direct form) and long keys
 (hashed form) in the same key-value sequence.
 
@@ -734,9 +791,11 @@ The following JavaScript values must never be passed to the hasher:
   (`Symbol.for(key)`) **are** hashable; see Section 4.6. The required
   error message is `"Cannot hash unique (uninterned) symbol"`.
 - **`Function` values** — opaque closures with no portable representation.
+- **A `FabricKeyPair` holding `CryptoKey` handles** — the keys' material is
+  unreachable, so the value has no content to hash; see Section 4.17.
 
-A conforming implementation should throw an error if it encounters either
-of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
+A conforming implementation should throw an error if it encounters any of
+these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
 **not** rejected; they have well-defined byte encodings — see Section
 4.3.)
 

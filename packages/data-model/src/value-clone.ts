@@ -197,6 +197,7 @@ export function cloneHelper(
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDay:
     case NATIVE_TAGS.FabricBytes:
+    case NATIVE_TAGS.FabricKeyPair:
     case NATIVE_TAGS.FabricRegExp:
     case NATIVE_TAGS.Hash:
       return value;

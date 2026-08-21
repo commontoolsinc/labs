@@ -23,7 +23,7 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  * `SerializedForm` are the same type.
  *
  * The union names what this format emits, which is narrower than everything
- * cloning accepts. Four arms are worth calling out:
+ * cloning accepts. Five arms are worth calling out:
  *
  * * `bigint` and `undefined` appear directly, as do `-0`, `NaN` and
  *   `±Infinity` under `number`. Cloning carries each as itself.
@@ -38,6 +38,12 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  *   this: a `FabricBytes` encodes to one directly, and a `FabricHash` to one
  *   beside its algorithm tag. A bare `Uint8Array` is therefore not a form this
  *   format emits, and `decodeValue()` refuses one.
+ * * `CryptoKey` appears, because a key that cannot be exported can still be
+ *   carried. Cloning preserves one whole, extractability and algorithm
+ *   intact, which is what lets a `FabricKeyPair` holding handles cross at all
+ *   -- and only here: no format that writes bytes down can represent it. Like
+ *   `ArrayBuffer`, it reaches the transport only inside a terminal codec's
+ *   state, so the walk never descends into one.
  * * An array is both the tagged form and the outer envelope -- see
  *   {@link RealmTaggedValue} and {@link RealmEncodedValue}. Neither is
  *   distinguishable by shape from a payload's own arrays, and neither is meant
@@ -56,6 +62,7 @@ export type RealmCodecValue =
   | bigint
   | string
   | ArrayBuffer
+  | CryptoKey
   | readonly RealmCodecValue[]
   | RealmTaggedValue
   | { readonly [key: string]: RealmCodecValue };

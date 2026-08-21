@@ -12,6 +12,7 @@ import {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
@@ -323,6 +324,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricLink,
     FabricBytes,
     FabricRegExp,
+    FabricKeyPair,
     FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)

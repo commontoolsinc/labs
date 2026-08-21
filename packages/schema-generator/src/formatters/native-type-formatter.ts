@@ -30,6 +30,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   FabricEpochDay: { type: "FabricEpochDay" },
   FabricEpochNsec: { type: "FabricEpochNsec" },
   FabricHash: { type: "FabricHash" },
+  FabricKeyPair: { type: "FabricKeyPair" },
   FabricRegExp: { type: "FabricRegExp" },
   // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },

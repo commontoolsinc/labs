@@ -29,6 +29,7 @@ import {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -54,6 +55,7 @@ const expectedBindings: Record<string, unknown> = {
   FabricLink,
   FabricBytes,
   FabricRegExp,
+  FabricKeyPair,
   FabricError,
 };
 
@@ -138,6 +140,28 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
       expect(instance.flavor).toBe("es2025");
       expect(instance.source).toBe("a.c");
       expect(instance.flags).toBe("s");
+    });
+  });
+
+  describe("FabricKeyPair", () => {
+    it("constructs an instance from an algorithm name and key bytes", () => {
+      const BoundFabricKeyPair = commonfabric
+        .FabricKeyPair as typeof FabricKeyPair;
+      const instance = new BoundFabricKeyPair(
+        "ExampleAlgorithm",
+        new Uint8Array([1, 2, 3]),
+        new Uint8Array([4, 5, 6]),
+      );
+
+      expect(instance).toBeInstanceOf(FabricKeyPair);
+      expect(instance.algorithm).toBe("ExampleAlgorithm");
+      expect(instance.hasMaterial).toBe(true);
+      expect(instance.publicKeyBytes.slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      expect(instance.privateKeyBytes.slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
     });
   });
 
