@@ -274,7 +274,7 @@ sigil, and the sigil is what lets a short form be safely compressed:
 
 | Form | Means |
 | --- | --- |
-| `#42` | member 42 of the collection this text is in |
+| `#42` | member 42 of the collection being read through |
 | `#top-42` | member 42 of the collection bound to `top` in scope |
 | `#work/top-42` | the same, with the binding named explicitly |
 | `#@<space>/top-42` | fully qualified; depends on no binding |
@@ -289,11 +289,19 @@ name in its segments, so nothing is lost between them.
 
 ### The bare form
 
-`#42` names no collection. It is relative, cannot be wrong about which
-collection it means, and is well defined only where the surrounding context
-resolves to exactly one collection. Rendering a member gives that context; a
-view holding several collections does not, and there the bare form is an error
-rather than a guess.
+`#42` names no collection. It is relative, and what it is relative *to* is the
+rendering context — the collection a reader is reading through. It is not a
+property of the item the text sits in: an item may be a member of several
+collections at once, so the item cannot settle the question and does not try.
+
+A context reading through exactly one collection gives the bare form its
+meaning. A context that does not — a view holding several collections, or any
+surface where the reader's path in is unknown — makes it an error rather than a
+guess.
+
+An author's context settles it the same way. Typing `#42` while reading through
+a collection resolves against that collection, and canonicalizing on write
+stores the result, so the bare form never has to be re-decided later.
 
 ## Rendering
 
