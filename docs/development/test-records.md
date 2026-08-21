@@ -1,8 +1,10 @@
 # Test-run records
 
-Every execution of every test in this repository produces one record — its
-identity, outcome, and duration — shipped with the run's context to a public
-store. [The spec](../specs/test-records.md) is the contract (identity
+Every top-level test run with recording enabled produces one record per test —
+its identity, outcome, and duration — shipped with the run's context to a
+public store. A repository test that drives a harness as a library over fixture
+files produces its own record, not records for the fixture runs.
+[The spec](../specs/test-records.md) is the contract (identity
 rules, line formats, store guarantees, trust boundaries), and the
 reasoning that produced it is in [the archived
 plan](../history/plans/test-run-telemetry.md). This document is how the

@@ -20,7 +20,7 @@ import { inspect } from "./inspect.ts";
 import { invocationSession } from "./invocation-session.ts";
 import { piece, pieceDataCommand } from "./piece.ts";
 import { space } from "./space.ts";
-import { test } from "./test-command.ts";
+import { createTestCommand } from "./test-command.ts";
 import { view } from "./view.ts";
 import { wish } from "./wish.ts";
 
@@ -181,7 +181,7 @@ export const main = new Command()
   .command("id", identity)
   .command("init", init)
   .command("invocation-session", invocationSession)
-  .command("test", test)
+  .command("test", createTestCommand({ recordResults: true }))
   .command("wish", wish)
   // The top-level spellings of the piece data commands: the same builders
   // the `piece` chain mounts under the same names, so `cf get` and
