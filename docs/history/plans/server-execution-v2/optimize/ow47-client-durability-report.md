@@ -244,6 +244,15 @@ hazard):**
   memory-v2-transaction-path, memory-v2-sync-under-pending,
   blind-write-structural-precondition, memory-v2-stacked-commit — 94
   passed, 0 failed (with the runner suite's `--preload=test/clock-preload.ts`).
+- OFF arm (the shipped default, must be preserved): `cellset-lww.test.ts`
+  OFF green (standalone in-process topology — what the OFF lane
+  effectively runs for this harness family);
+  `cfc-group-chat-demo.test.ts` OFF green in 14 s with the S-G wait in
+  (full browser topology: felt shell dev server + OFF toolshed proxying
+  it, the start-local-dev shape). A first OFF attempt failed at
+  NAVIGATION ("no x-root-view") — environmental (dev toolshed without a
+  shell build), before any touched line; green once the shell was
+  served.
 
 **S-F disposition — no separate defect:** every commit()-entered write
 is tracked at the transaction chokepoint
