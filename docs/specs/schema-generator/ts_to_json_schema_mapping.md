@@ -210,9 +210,10 @@ same-named types emit `$ref`s to it.
 `NATIVE_TYPE_SCHEMAS` (`src/formatters/native-type-formatter.ts`), as of
 this writing: `VNode` →
 `{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
-and `Uint8Array` → `{ type: "object" }`; the six fabric-primitive classes
+and `Uint8Array` → `{ type: "object" }`; the six `FabricPrimitive` classes
 (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`,
-`FabricKeyPair`, `FabricRegExp`) → `{ type: "<Name>" }` (the fabric-primitive schema
+`FabricKeyPair`, `FabricRegExp`) → `{ type: "<Name>" }` (the `FabricPrimitive`
+schema
 vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
 `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
@@ -223,15 +224,15 @@ vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
 The three mapped to `{ type: "object" }` are native TS types with a canonical
 fabric form: a `Date` is stored as a `FabricEpochNsec`, a `RegExp` as a
 `FabricRegExp`, and a `Uint8Array` as a `FabricBytes`. They deliberately do
-NOT adopt the fabric-primitive type names: a field authored against a native
+NOT adopt the `FabricPrimitive` type names: a field authored against a native
 TS type can hold a raw native value on the way into the fabric boundary, and
-the fabric-primitive types validate by prototype only. `"object"` accepts the
+the `FabricPrimitive` types validate by prototype only. `"object"` accepts the
 stored fabric form, so a value stored as one reads back intact — where
 `{ type: "string" }` projects the read to `undefined`. `URL` is the exception
 that stays a string, because it converts to a plain string rather than to a
-fabric object.
+`FabricPrimitive`.
 
-A field authored against a fabric-primitive class ITSELF (`blob: FabricBytes`)
+A field authored against a `FabricPrimitive` class ITSELF (`blob: FabricBytes`)
 emits that class's schema-vocabulary name, a leaf with no `properties`, no
 `required`, and no `$defs` hoisting. Validation is by prototype
 (`schemaTypeOfFabricPrimitive`,
@@ -246,7 +247,7 @@ than stored. `true` is the status quo for them, not an endorsement.
 Guard: the lib-declared subset (`LIB_DECLARED_NATIVE_TYPES` — `Date`
 through `BigUint64Array`, and `RegExp`) is claimed only when declared in a default-lib or
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
-`interface Date {…}` is not swallowed. The fabric-primitive names are claimed
+`interface Date {…}` is not swallowed. The `FabricPrimitive` names are claimed
 only when the type carries the `FabricSpecialObject` nominal brand
 (`declaresFabricSpecialObjectBrand`), and named-type hoisting
 (`getNamedTypeKey`, `type-utils.ts`) classifies by the same test, so an

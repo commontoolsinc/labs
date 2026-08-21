@@ -128,13 +128,13 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
   payload `7F F8 00 00 00 00 00 00`. Any input NaN bit pattern (signaling,
   quiet, with arbitrary payload bits) hashes via this canonical 8-byte
   sequence. This ensures all NaN values produce identical hashes, matching
-  fabric value-equality, under which all `NaN`s are equal (`Object.is(NaN,
+  `FabricValue` equality, under which all `NaN`s are equal (`Object.is(NaN,
   NaN)` is `true`; see `1-fabric-values.md` Section 6.7). Note this is
   distinct from the `===` operator, under which a `NaN` compares unequal even
   to itself.
 
 > **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
-> reach this layer depends on the fabric-value conversion gate; see
+> reach this layer depends on the `FabricValue` conversion gate; see
 > `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
 > hasher's contract regardless of how the values arrived.
 
@@ -244,7 +244,7 @@ hashes, while inheriting the short/long string-encoding delegation
 unchanged.
 
 > **Conversion-gate cross-reference.** Whether a symbol value reaches this
-> layer depends on the fabric-value conversion gate; see
+> layer depends on the `FabricValue` conversion gate; see
 > `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
 > hasher's contract regardless of how the value arrived.
 

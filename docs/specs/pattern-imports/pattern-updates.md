@@ -380,7 +380,7 @@ the two paths cannot drift apart on what "compatible" means.
 - One refusal is policy, not shape drift: a baseline that describes a fabric
   special object structurally — an object schema whose `required` carries the
   `FabricSpecialObject` brand key, the emission of pre-vocabulary
-  compilations — is not accepted against the fabric-primitive type name
+  compilations — is not accepted against the `FabricPrimitive` type name
   (`{ type: "FabricBytes" }` and friends) the same authored field compiles to
   today, even with the source unchanged. Stored values re-stage verbatim
   across an update, so a structural inhabitant of the wrong kind would

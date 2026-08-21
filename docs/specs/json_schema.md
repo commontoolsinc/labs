@@ -204,13 +204,13 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   gets it.
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
-- Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDay"`,
+- `FabricPrimitive` types — `"FabricBytes"`, `"FabricEpochDay"`,
   `"FabricEpochNsec"`, `"FabricHash"`, `"FabricKeyPair"`, `"FabricRegExp"` —
   each naming a
   concrete `FabricPrimitive` class from the data-model. A value matches by
   prototype (`instanceof`), not by structure: these values are opaque leaves
   with no enumerable properties, and they are never property-walked.
-  Each fabric-primitive type is a subtype of `"object"` (the way `"integer"`
+  Each `FabricPrimitive` type is a subtype of `"object"` (the way `"integer"`
   is a subtype of `"number"`): a `FabricBytes` value satisfies both
   `{ "type": "FabricBytes" }` and `{ "type": "object" }`, while a plain
   object satisfies only the latter. One structural keyword gates the subtype
@@ -222,8 +222,8 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
   schemas from pre-vocabulary compilations name in `required` (current
   generator emissions omit it everywhere), has no runtime existence and
-  counts as present on any fabric value. Property sub-schemas are still not walked
-  against a primitive: presence is checked, shapes are not, so
+  counts as present on any `FabricSpecialObject`. Property sub-schemas are
+  still not walked against a primitive: presence is checked, shapes are not, so
   `{ "type": "object", "properties": { "source": { "type": "number" } } }`
   matches a `FabricRegExp` even though its `source` is a string. Schemas
   generated from the real class types cannot express such a mismatch; only

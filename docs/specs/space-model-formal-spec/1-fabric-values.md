@@ -61,7 +61,7 @@ layer (Section 8) and represented in `FabricValue` trees as `FabricInstance`
 wrapper classes (Section 1.4).
 
 > **Package note:** The data model implementation lives in
-> `packages/data-model/`. The fabric-value types and the base classes
+> `packages/data-model/`. The `FabricValue` types and the base classes
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) in `fabric-bases/`, on `BaseFabricInstance` alongside the
@@ -108,7 +108,7 @@ type FabricValue =
   | boolean
   | number    // any number, including `-0`, `NaN`, and `±Infinity`; see Section 1.3
   | string
-  | undefined // first-class fabric value; requires tagged representation in formats lacking native `undefined`
+  | undefined // first-class `FabricValue`; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
   | symbol    // registry-interned symbols only (`Symbol.keyFor(s)` returns a string); see Section 1.3
 
@@ -172,7 +172,7 @@ elaboration of one implementation arm.
 >
 > - `symbol` — **Conditionally** part of the universe. Registry-interned
 >   symbols (`Symbol.for(key)`, where `Symbol.keyFor(s)` returns a string)
->   are first-class fabric values: they are portable across realms and
+>   are first-class `FabricValue`s: they are portable across realms and
 >   processes via their registry key. **Unique** symbols (`Symbol(desc)`,
 >   where `Symbol.keyFor(s)` returns `undefined`) have no portable
 >   representation and are rejected. The TypeScript `symbol` type cannot
@@ -181,7 +181,7 @@ elaboration of one implementation arm.
 >   and 5). Symbol-keyed *properties* on plain objects are a separate
 >   matter — see Section 1.5 (Recursive Containers / Objects).
 > - `function` — Functions are opaque closures with no portable representation.
->   They are explicitly **not** representable as fabric values, eliciting a
+>   They are explicitly **not** representable as `FabricValue`s, eliciting a
 >   thrown error from `fabricFromNativeValue()` and a `false` return value from
 >   `isValidFabricConvertibleValue()`. (`FabricInstance`s are not functions in
 >   this sense — they are class instances whose encoding is handled by their
@@ -189,7 +189,7 @@ elaboration of one implementation arm.
 >
 >   A proposed, deliberately narrow exception adds a `FabricFactory` arm for
 >   builder-created factories and codec-decoded factory shells admitted to the
->   internal data-model brand table. The function itself is the Fabric value
+>   internal data-model brand table. The function itself is the `FabricValue`
 >   and encodes through `Factory@1`; there is no non-callable wrapper class.
 >   This data-type brand does not grant executable trust, which is established
 >   separately by resolving a content-addressed builder artifact. The exception
@@ -281,12 +281,12 @@ function-valued member is not representable.
 | `boolean` | None | `true` or `false` |
 | `number` | None | Any IEEE 754 binary64 value, including `-0`, `NaN`, and `±Infinity`. See the callout below. |
 | `string` | None | Unicode text |
-| `undefined` | None | First-class fabric value; see note below |
+| `undefined` | None | First-class `FabricValue`; see note below |
 | `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 3 of `3-json-encoding.md`) |
 | `symbol` | Registry-interned only | Only symbols for which `Symbol.keyFor(s)` returns a string (i.e., `Symbol.for(key)` symbols) are admitted. Unique symbols (`Symbol(desc)`) are rejected. See the callout below. |
 
 > **`undefined` as a first-class fabric value.** `undefined` is a first-class
-> fabric value that round-trips faithfully through encoding. Because most
+> `FabricValue` that round-trips faithfully through encoding. Because most
 > wire formats (including JSON) have no native `undefined` representation, the
 > codec system uses a dedicated tagged form for `undefined` — the same
 > tagged form regardless of context (array element, object property value, or
@@ -1109,7 +1109,7 @@ content-addressing schemes. The algorithm tag is part of the content ID's
 identity — two `FabricHash` instances with the same hash bytes but
 different algorithm tags are distinct values.
 
-Like every fabric primitive, `FabricHash` hosts a `[JSON_CODEC]` (tag
+Like every `FabricPrimitive`, `FabricHash` hosts a `[JSON_CODEC]` (tag
 `Hash@1`).
 Its encoded state is `{ tag, hash }` — the algorithm tag plus the hash as
 an unpadded base64url string (i.e., `.hashString`); `canDecode()` refuses a
@@ -1274,7 +1274,8 @@ whose whole purpose is that its material cannot be extracted.
 
 `FabricLink` is a fabric-native `FabricInstance` — like the wrapper classes of
 Sections 1.4.2–1.4.4, but not wrapping any native JS type — that represents a
-**link**: the modern, object-shaped form of a reference to fabric data. It
+**link**: the modern, object-shaped form of a reference to data stored in the
+fabric. It
 wraps a single **payload**, a plain object (`FabricPlainObject`) of addressing
 fields, as its sole nested `FabricValue`.
 
@@ -1352,7 +1353,7 @@ Section 4.5.
 > native objects. Code that needs the underlying native type uses
 > `nativeFromFabricValue()` (Section 8) as a separate step.
 >
-> **File organization.** Each fabric-instance and fabric-primitive class
+> **File organization.** Each `FabricInstance` and `FabricPrimitive` class
 > lives in its own file: the `FabricInstance` subclasses (including the
 > native object wrappers `FabricError`, `FabricMap`, `FabricSet`
 > and the explicit-tag-value family) under
@@ -1374,7 +1375,7 @@ Section 4.5.
   change that. Plain objects are governed by the same principle; see the
   object rule below.
 - May be dense or sparse
-- Elements may be `undefined` (a first-class fabric value; see Section 1.3)
+- Elements may be `undefined` (a first-class `FabricValue`; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
   (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
@@ -1422,15 +1423,16 @@ Section 4.5.
   live code rather than an inert value, and a non-enumerable key causes
   rejection because it has no representation as a property name in
   name-driven copying or encoding
-- Values must be valid fabric values; properties whose value is `undefined` are preserved
+- Values must be valid `FabricValue`s; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - **Host restriction, not a model rule:** the property names `__proto__` and
   `constructor` cause rejection in the JavaScript implementation. See the
   callout below
 - Decoding produces regular plain objects, which is the only object
-  shape a fabric value has
+  shape a `FabricValue` has
 
-> **Property names this implementation reserves.** A fabric record's keys are
+> **Property names this implementation reserves.** A `FabricPlainObject`'s keys
+> are
 > strings, and the model attaches no meaning to any particular one: a property
 > name is data. Two names are nonetheless refused by the JavaScript
 > implementation, `__proto__` and `constructor`, for two different reasons —
@@ -1484,7 +1486,8 @@ to a different graph than the one encoded, with nothing at either end saying
 so.
 
 **Conversion is decided separately from encoding, and refuses a cycle.**
-`fabricFromNativeValue()` builds a fabric value out of native data, and will not
+`fabricFromNativeValue()` builds a `FabricValue` out of native data, and will
+not
 build one containing a cycle; it preserves shared references, so the converted
 form for a given original is reused and structural sharing survives. That is a
 third answer under the same rule, not an exception to it: membership admits a
@@ -1498,7 +1501,7 @@ objects are `===` to each other is a further promise, which an engine states
 only if it makes it.
 
 Cycles *across* documents are a separate matter, and are supported whatever an
-engine does within one. They are written as explicit links (fabric instances
+engine does within one. They are written as explicit links (`FabricInstance`s
 referencing other documents), so two cells may reference each other and form a
 cycle in the broader data graph without any single cell's content containing
 one.
@@ -1574,7 +1577,7 @@ export const JSON_CODEC: unique symbol =
 // file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
- * Well-known symbol for deeply freezing a fabric instance in place. The
+ * Well-known symbol for deeply freezing a `FabricInstance` in place. The
  * implementation freezes the instance's own internal slot(s) and recurses
  * into any nested `FabricValue`s via a `subFreeze` callback supplied by the
  * generic `deepFreeze()` utility. See Section 8.6.
@@ -1582,7 +1585,7 @@ export const JSON_CODEC: unique symbol =
 export const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
 
 /**
- * Well-known symbol for checking whether a fabric instance is already
+ * Well-known symbol for checking whether a `FabricInstance` is already
  * deeply frozen, without mutating it. The side-effect-free sibling of
  * `[DEEP_FREEZE]`: verifies the instance's own internal slot(s) are in
  * canonical deep-frozen form and recurses into any nested `FabricValue`s
@@ -1631,7 +1634,7 @@ class-side `[CODEC]` (Section 2.4).
  * value types.
  *
  * This is the pure abstract protocol — the `instanceof`-able contract that
- * external code is written against. Concrete fabric-instance classes
+ * external code is written against. Concrete `FabricInstance` classes
  * extend `BaseFabricInstance` (a subclass of this one) rather than this
  * class directly; `BaseFabricInstance` is where shared template-method
  * scaffolding (such as `shallowClone()`) lives.
@@ -1775,7 +1778,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > implementation detail of the data-model package. External code written
 > against `FabricInstance` is therefore stable against changes to the
 > template-method scaffolding, and the `instanceof FabricInstance` brand
-> check still catches every concrete fabric-instance value.
+> check still catches every concrete `FabricInstance` value.
 
 ### 2.4 Codec Protocol
 
@@ -1926,7 +1929,7 @@ export interface FabricCodec<Encoded> {
 
 /**
  * A codec whose essential state is **nonterminal**: it is itself made of
- * fabric values, which the walker goes on to expand in turn. Instantiating
+ * `FabricValue`s, which the walker goes on to expand in turn. Instantiating
  * `FabricCodec` at `FabricValue` is what says so, because that is the
  * walker's own input domain. One instance serves every wire format.
  */
@@ -2025,7 +2028,7 @@ works over the whole of `Encoded` leaves it at the default.
 subclass of `BaseTerminalCodec` declared at `FabricValue` would satisfy the
 nonterminal half of every signature while classifying as terminal at run time,
 and its state would reach the wire unexpanded. Nothing enforces this; a codec
-whose state is made of fabric values extends `BaseNonterminalCodec`.
+whose state is made of `FabricValue`s extends `BaseNonterminalCodec`.
 
 Lookup goes through **`codecOf(value, altCodec?)`**
 (`codec-common/codecOf.ts`), which returns a value's class's `[CODEC]`,
@@ -2294,7 +2297,7 @@ The system follows an **immutable-forward** design:
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
 - Decoding always produces regular plain objects, that being the only
-  object shape a fabric value has.
+  object shape a `FabricValue` has.
 
 This immutability guarantee enables safe sharing of decoded values and
 aligns with the reactive system's assumption that values don't mutate in place.
@@ -3062,7 +3065,7 @@ recognizer for text in it, live one layer down in
 // file: packages/data-model/src/codecs.ts
 
 /**
- * Encodes a fabric value to a JSON string in the standard `FabricValue`
+ * Encodes a `FabricValue` to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag
  * `fvj1:`.
  */
@@ -3114,7 +3117,7 @@ The `memory` package wraps these at its encoding boundary
 
 ### 4.9 Fabric Value Conversion
 
-The native-to-fabric-value boundary is managed by
+The native-to-`FabricValue` boundary is managed by
 `packages/data-model/native-conversion.ts`. This module provides
 `fabricFromNativeValue()` / `nativeFromFabricValue()` functions that bridge
 the left layer (JS wild west) and the middle layer (`FabricValue`) at the
@@ -3143,7 +3146,7 @@ export function fabricFromNativeValue(
 ): FabricValue;
 
 /**
- * Convert a fabric value back to native form, unwrapping fabric wrappers
+ * Convert a `FabricValue` back to native form, unwrapping fabric wrappers
  * back to native JS types (Section 8.4).
  */
 export function nativeFromFabricValue(
@@ -3167,7 +3170,7 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
-| `fabric-bases/` | The abstract bases a concrete fabric value extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
+| `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
 | `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
@@ -3175,7 +3178,7 @@ The implementation is split across several files for separation of concerns:
 
 ## 5. JSON Encoding for Special Types
 
-The JSON encoding for fabric values — the `/<Type>@<Version>` wire format,
+The JSON encoding for `FabricValue`s — the `/<Type>@<Version>` wire format,
 type encodings, escaping mechanisms, and the `/`-key reservation rule — is
 specified in a dedicated document:
 
@@ -3266,7 +3269,7 @@ regardless of nibble range.
 // file: packages/data-model/value-hash.ts
 
 /**
- * Compute a hash for a fabric value. The hash is encoding-independent:
+ * Compute a hash for a `FabricValue`. The hash is encoding-independent:
  * the same identity whether later serialized to JSON, CBOR, or any
  * other format.
  *
@@ -3452,7 +3455,7 @@ most current version of the data. Hashes are not used as entity addresses.
 `FabricValue`s are compared for logical (content) equality by
 `valueEqual(a: FabricValue, b: FabricValue): boolean`. This is the equality
 the reactive system's change-detection and no-op gates depend on, and the
-equality that `Map` / `Set` key behavior over fabric values is expected to
+equality that `Map` / `Set` key behavior over `FabricValue`s is expected to
 follow.
 
 **Governing principle.** Value-equality follows `Object.is()` at the primitive
@@ -3463,7 +3466,7 @@ names, and the two disagree in exactly the two cases the hashing layer already
 distinguishes:
 
 - **`-0` ≠ `+0`.** `Object.is(-0, +0)` is `false`, so `-0` and `+0` are
-  distinct fabric values and hash distinctly (Section 6.4;
+  distinct `FabricValue`s and hash distinctly (Section 6.4;
   `2-hash-byte-format.md` Section 4.3). (`===` would conflate them, treating
   `-0 === +0` as `true`.)
 - **All `NaN`s are value-equal.** `Object.is(NaN, NaN)` is `true`, so every
@@ -3477,7 +3480,7 @@ Every other primitive falls through to ordinary same-value equality:
 else, and likewise for `string`, `boolean`, `bigint`, interned `symbol`,
 `null`, and `undefined`.
 
-**Objects, arrays, and instances.** Non-primitive fabric values are compared
+**Objects, arrays, and instances.** Non-primitive `FabricValue`s are compared
 by canonical content hash: `valueEqual(a, b)` holds exactly when
 `hashStringOf(a) === hashStringOf(b)` (Section 6.4). Because the content hash
 reflects logical content and carries the primitive-leaf distinctions above, a
@@ -4222,7 +4225,7 @@ spec from being implementable.
   that `Cell.getRaw()` and `Cell.setRaw()` should traffic in `FabricValue`
   (middle layer), not arbitrary native JS values (wild west). A usage survey
   of all call sites in the codebase found that every existing caller operates
-  on well-defined fabric data (plain objects, arrays, strings, links, stream
+  on well-defined `FabricValue`s (plain objects, arrays, strings, links, stream
   markers) — no call site stores or retrieves raw native types like `Error`,
   `Date`, `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods.
   Formalizing this contract (e.g., refining the type parameter `T` of

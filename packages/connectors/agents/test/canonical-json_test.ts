@@ -17,7 +17,7 @@ import {
   planStableArrayCells,
 } from "../src/array-cell-identity.ts";
 
-Deno.test("connector hashes distinguish Fabric values that JSON conflates", async () => {
+Deno.test("connector hashes distinguish `FabricValue`s that JSON conflates", async () => {
   assertNotEquals(
     await hashStableArrayValue([{ id: "event", detail: undefined }]),
     await hashStableArrayValue([{ id: "event" }]),
@@ -61,7 +61,7 @@ Deno.test("connector hashes match independently stored array children", async ()
   );
 });
 
-Deno.test("connector hashes preserve native Fabric values", async () => {
+Deno.test("connector hashes preserve native `FabricValue`s", async () => {
   assertNotEquals(
     await hashStableArrayValue(new Date(0)),
     await hashStableArrayValue(new Date(1)),
@@ -85,7 +85,7 @@ Deno.test("deeply nested arrays are hashed without repeated planning", async () 
   );
 });
 
-Deno.test("stable plans freeze modern Fabric links", async () => {
+Deno.test("stable plans freeze modern `FabricLink`s", async () => {
   setModernCellRepConfig(true);
   try {
     const payload = { path: ["before"] };
@@ -116,7 +116,7 @@ Deno.test("stable plans freeze modern Fabric links", async () => {
   }
 });
 
-Deno.test("stable plans privately capture mutable Fabric instances", async () => {
+Deno.test("stable plans privately capture mutable `FabricInstance`s", async () => {
   setModernCellRepConfig(true);
   try {
     const linkPayload = { path: ["before"] };
@@ -155,7 +155,7 @@ Deno.test("stable plans privately capture mutable Fabric instances", async () =>
     const materialized = materializeStableArrayCells(
       plan,
       () => {
-        throw new Error("Fabric instance unexpectedly became an array cell");
+        throw new Error("`FabricInstance` unexpectedly became an array cell");
       },
     ) as {
       error: FabricError;

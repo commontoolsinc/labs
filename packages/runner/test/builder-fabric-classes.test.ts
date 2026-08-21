@@ -1,10 +1,10 @@
 /**
- * The Fabric value classes reach pattern code as `export declare const`s in
- * `api/index.ts`, but the runtime values behind those declarations are bound
- * separately, in `builder/factory.ts`. The two sides are maintained by hand, so
- * a class can be declared without being bound -- which type-checks when the
- * pattern is compiled and then fails once it actually runs. These tests pin the
- * runtime half against the declared half.
+ * The `FabricSpecialObject` classes reach pattern code as `export declare
+ * const`s in `api/index.ts`, but the runtime values behind those declarations
+ * are bound separately, in `builder/factory.ts`. The two sides are maintained
+ * by hand, so a class can be declared without being bound -- which type-checks
+ * when the pattern is compiled and then fails once it actually runs. These
+ * tests pin the runtime half against the declared half.
  *
  * `types/commonfabric.d.ts` is a symlink to `api/index.ts`, and is the exact
  * artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
@@ -59,7 +59,7 @@ const expectedBindings: Record<string, unknown> = {
   FabricError,
 };
 
-describe("commonfabric Fabric value classes", () => {
+describe("commonfabric `FabricSpecialObject` classes", () => {
   // Viewed as a plain record on purpose: the question here is what the builder
   // surface carries at runtime, which is exactly what its static type cannot
   // answer.

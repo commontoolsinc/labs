@@ -165,7 +165,7 @@ function walk(
       // it, so it is not an offender.
       //
       // A hole is a separate matter, reported by the element loop below: JSON
-      // cannot carry one, while a fabric value can. The two checks disagree
+      // cannot carry one, while a `FabricValue` can. The two checks disagree
       // there on purpose.
       for (const key of Object.getOwnPropertyNames(obj)) {
         if ((key !== "length") && !isArrayIndexPropertyName(key)) {

@@ -305,7 +305,7 @@ describe("to-encodable-form", () => {
 
     it("leaves ordinary containers alone", () => {
       // The conversion above must not reach an inert plain object or an array;
-      // those are already fabric values and are walked, not converted.
+      // those are already `FabricValue`s and are walked, not converted.
       const obj = withAliasBindings({ a: 1, b: "x" } as any) as any;
       expect(obj).toEqual({ a: 1, b: "x" });
       expect(obj.constructor).toBe(Object);

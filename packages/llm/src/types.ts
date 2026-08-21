@@ -84,7 +84,7 @@ export type LLMToolResult = {
  * Request metadata. This crosses a JSON boundary to a general LLM API, so
  * values must be values ordinary JSON serialization carries faithfully -- not
  * merely `FabricValue`s, which admit `bigint`, interned symbols, `NaN` / `-0`,
- * and fabric primitives that no model API can receive.
+ * and `FabricPrimitive`s that no model API can receive.
  *
  * `isLLMRequestMetadata()` is the authority: it checks with `isPureJson()`. An `undefined` value means "absent" -- JSON
  * drops such a key, so it never crosses the boundary and is not checked.

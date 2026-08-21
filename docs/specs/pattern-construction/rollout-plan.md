@@ -119,7 +119,7 @@
   - [ ] Extract generic `$patternRef` binding/setup behavior independently of
     graph snapshots and reactive-interpreter work
   - [ ] Make pattern, module/lift, and handler factories directly branded
-    `Factory@1` Fabric values
+    `Factory@1` `FabricValue`s
   - [ ] Add factory schemas, symbolic invocation, and generic cold resolution
   - [ ] Add nested-pattern closure conversion with a separate params root and
     one transformer-only `.curry(params)` operation

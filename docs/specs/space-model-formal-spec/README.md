@@ -22,7 +22,7 @@ This spec covers:
 - **Realm-crossing encoding** -- the wire format for a structured-clone
   transport: the envelope and the marker that identifies it, per-type
   encodings, the ownership contract on decode, and what the format refuses
-- **Hashing** (Section 6) -- content-based identity for fabric values
+- **Hashing** (Section 6) -- content-based identity for `FabricValue`s
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
 Out of scope: CRDT-based storage layer, network sync protocols, the reactive
@@ -37,7 +37,7 @@ system, schemas.
 - [2-hash-byte-format.md](./2-hash-byte-format.md) --
   Byte-level encoding for the hash algorithm.
 - [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
-  fabric values: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
+  `FabricValue`s: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
   objects, standard type encodings, detection, escaping, and the `/`-key
   reservation rule.
 - [4-realm-encoding.md](./4-realm-encoding.md) -- The realm-crossing wire

@@ -25,7 +25,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
- * `cloneIfNecessary()` deep-clones via the fabric value machinery
+ * `cloneIfNecessary()` deep-clones via the `FabricValue` machinery
  * (`FabricInstance.deepClone()` for wrappers), preserving the class.
  * Its default options (`{ frozen: true, deep: true }`) return an
  * already-deep-frozen input by identity, so replayed engine passes over a

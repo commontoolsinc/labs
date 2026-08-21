@@ -42,8 +42,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * The nominal brand key declared on `FabricSpecialObject`. It exists only in
  * the type system — a runtime instance never carries the key; `instanceof
  * FabricSpecialObject` is its runtime form. Schema `required` presence
- * checks must therefore treat this key as satisfied by any fabric value
- * rather than probing for it with `in`.
+ * checks must therefore treat this key as satisfied by any
+ * `FabricSpecialObject` rather than probing for it with `in`.
  */
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
@@ -87,7 +87,7 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
-/** Abstract base class for fabric primitive types. */
+/** Abstract base class for `FabricPrimitive` types. */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
 export interface FabricPrimitiveConstructor {
@@ -286,7 +286,7 @@ export type FabricErrorState = {
 };
 
 /**
- * An error carried as fabric data. Extends `FabricInstance` (not
+ * An error carried as a `FabricValue`. Extends `FabricInstance` (not
  * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
  * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
  * rather than a leaf.
@@ -346,13 +346,13 @@ export type FabricValue =
   | FabricPlainObject
   | undefined;
 
-/** A fabric value other than `null` or `undefined`. */
+/** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** Read-only array of fabric values. */
+/** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
-/** Read-only object/record of fabric values. */
+/** Read-only object/record of `FabricValue`s. */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
 
@@ -1862,12 +1862,13 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 export type MutableJSONValue = Mutable<JSONValue>;
 
 /**
- * Fabric-primitive validation types -- a non-standard addition to the JSON
+ * `FabricPrimitive` validation types -- a non-standard addition to the JSON
  * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
  * class from the data-model, and a value matches by prototype (`instanceof`),
- * not by structure. `"object"` also accepts these values -- every fabric
- * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
- * a `"number"` schema -- so schemas that predate this vocabulary keep working.
+ * not by structure. `"object"` also accepts these values -- every
+ * `FabricPrimitive` is a subtype of `"object"` the way an `"integer"` value
+ * satisfies a `"number"` schema -- so schemas that predate this vocabulary keep
+ * working.
  */
 export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
   [

@@ -12,7 +12,7 @@ import { isReactiveMarker } from "../src/builder/types.ts";
 import { normalizeSandboxResult } from "../src/sandbox/result-normalization.ts";
 
 describe("normalizeSandboxResult", () => {
-  it("canonicalizes native leaves into Fabric values", () => {
+  it("canonicalizes native leaves into `FabricValue`s", () => {
     const input = {
       bytes: new Uint8Array([1, 2, 3]),
       date: new Date(1_234),
@@ -100,8 +100,8 @@ describe("normalizeSandboxResult", () => {
   it("re-roots a bare null-prototype record, nested included", () => {
     // `Object.create(null)` is an ordinary way to build a dictionary, and a
     // pattern may return one. This boundary is a canonicalizing copy, so it
-    // leaves in the one shape a fabric record has, rather than being carried
-    // across intact and refused later by the conversion functions.
+    // leaves in the one shape a `FabricPlainObject` has, rather than being
+    // carried across intact and refused later by the conversion functions.
     const inner = Object.create(null) as Record<string, unknown>;
     inner.v = 42;
     const outer = Object.create(null) as Record<string, unknown>;

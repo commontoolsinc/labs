@@ -1,6 +1,6 @@
 # Realm-Crossing Encoding for Fabric Values
 
-This document specifies the wire format used to carry fabric values between
+This document specifies the wire format used to carry `FabricValue`s between
 realms over a structured-clone transport — `structuredClone()` and
 `postMessage()` — including the outer envelope and its marker, the tagged
 form, per-type encodings, the ownership contract on decode, and what the
@@ -129,7 +129,7 @@ subtree through unchanged, into a data position. A long-lived marker sitting
 there would be read as a tagged form, and user data would decode as a tagged
 value.
 
-The marker must itself be an encodable fabric value, for that same reason: a
+The marker must itself be an encodable `FabricValue`, for that same reason: a
 value holding an earlier call's marker has to encode without complaint, being
 ordinary data.
 
@@ -292,7 +292,7 @@ itself, which is what the transport requirement in Section 1.1 asks for.
 
 Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
 `ProblematicValue`, and every `FabricInstance` — encode the same way under both
-formats, their state being fabric values all the way down.
+formats, their state being `FabricValue`s all the way down.
 
 ## 4. Cycles and Shared References
 
