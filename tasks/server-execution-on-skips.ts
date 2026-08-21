@@ -246,7 +246,12 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "represents-principal name the service signer, not Alice — so CFC " +
         "authorship verification stays 'unverified' forever; this IS the " +
         "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence. Local " +
+        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
+        "build LANDED 2026-08-21, but the authorship labels come from " +
+        "the runtime-level CFC trust snapshot (storageManager.as), not " +
+        "the memory-plane carriage that build landed, so this shape does " +
+        "NOT lift on it alone (the flagged CFC-attribution residual in " +
+        "OW31's register row; OW34's family). Local " +
         "shape (Bob's send click): Bob's messageDraft $value binding " +
         "write into the serve-owned user-scope instance doc NEVER reaches " +
         "the store (0/4 runs incl. a 300 s probe; his session committed " +
@@ -301,8 +306,10 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
         "hole — the identical demand derived the name wherever the " +
         "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half is the owed OW31/§2b build " +
-        "(S-A); the client barriers and heal-on-read are " +
+        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
+        "OW31's build — the replicate trigger's writebacks now ride the " +
+        "instantiating run's §2b carriage; the client barriers and " +
+        "heal-on-read are " +
         "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
         "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
         "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +

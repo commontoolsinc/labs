@@ -1349,7 +1349,10 @@ export class SpaceServer implements TransactionSealDestination {
               `${verdict.reason} (protocol.md §2b)`,
             ]);
           }
-          return verdict.granted;
+          // The FULL verdict, not just the boolean (OW31 B4): the wave
+          // retains the `via` arm so the commit step forces a
+          // `creation`-granted target's genesis ACL before the sink.
+          return verdict;
         },
         onForeignWriteRefusal: () => {
           this.#options.stats.foreignWriteRefusals += 1;
@@ -1385,13 +1388,33 @@ export class SpaceServer implements TransactionSealDestination {
    * only; a space node demanded by anyone carries none. HANDLER runs are
    * unchanged (the event's server-stamped `firedAt` is their explicit
    * actor — LD1; the in-process LT6 shape inherits the origin's pair).
-   * Never for `bookkeeping`: the loop's own writes are service-identity
-   * writes that carry addressing and NO acting principal (protocol.md
-   * §1's "The SpaceServer's own writes"). */
+   * Never DERIVED for `bookkeeping`: the loop's own writes are
+   * service-identity writes that carry addressing and NO acting
+   * principal (protocol.md §1's "The SpaceServer's own writes") — with
+   * ONE explicit exception: a bookkeeping run carrying `info.delegated`
+   * (OW31 seat S-A — the compile-cache / program materialization
+   * writeback into a piece's own space) is stamped with the TRIGGERING
+   * run's carriage verbatim, so the crossing rides §2b's delegated
+   * admission instead of being refused carriage-less. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     const principal = info.scopeKeyIdentity?.principal;
     const attributionFromScope = info.kind === "derivation" &&
       info.acting === undefined && principal !== undefined;
+    // The S-A carriage (OW31; protocol.md §2b): a bookkeeping run
+    // sanctioned to cross — the compile-cache / program materialization
+    // writeback into the piece's own space — carries the TRIGGERING
+    // run's delegated carriage verbatim. Everything below that reads
+    // `info.acting`/mints a capabilityRef is bypassed for it: the
+    // carriage is the trigger's, never derived here.
+    if (info.kind === "bookkeeping" && info.delegated !== undefined) {
+      stampWaveRunContext(tx, {
+        actionId: info.actionId,
+        kind: info.kind,
+        acting: info.delegated.acting,
+        capabilityRef: info.delegated.capabilityRef,
+      });
+      return;
+    }
     const acting = info.kind !== "bookkeeping" && !attributionFromScope &&
         principal !== undefined
       ? {
@@ -3417,6 +3440,37 @@ export class SpaceServer implements TransactionSealDestination {
     // wave's foreign provisioning targets BEFORE the commit step — the
     // sink's engineFor is synchronous. Same host, same process.
     await this.#resolveForeignEngines(closing);
+
+    // OW31 B4 (RULED 2026-08-18; protocol.md §2's genesis clause): for
+    // every foreign target this wave was granted via the `creation`
+    // arm, force the fresh space's GENESIS ACL — signed by the space's
+    // own keys, naming the acting user OWNER — BEFORE the sink applies
+    // the data batch, so the space's commit #1 IS the ACL commit
+    // (INV-13's precedence, mirrored onto the engine-direct plane; the
+    // sink refuses a foreign batch into a seq-0/no-ACL engine as the
+    // backstop). The forcing is the provider mount's own bootstrap
+    // (`#createInitializedSession`): an in-process loopback round trip,
+    // idempotent on replay (the ACL exists → the bootstrap skips, and
+    // the accept gate re-granted via `acl` through the owner). Failure
+    // is isolated per space, exactly like a failed engine resolution:
+    // the sink's refusal then fails the contributions targeting the
+    // space (requeue for events, drop for derivations) and the wave
+    // commits the rest.
+    for (const creationSpace of closing.creationGrantedForeignSpaces()) {
+      try {
+        await this.#runtime!.storageManager.ensureSpaceInitialized?.(
+          creationSpace,
+        );
+      } catch (error) {
+        logger.warn("foreign-genesis-forcing-failed", () => [
+          `forcing the genesis ACL of creation-granted foreign space ` +
+          `${creationSpace} failed; its contributions will be refused ` +
+          `by the sink's INV-13 mirror and replay (OW31 B4; ` +
+          "protocol.md §2b)",
+          error,
+        ]);
+      }
+    }
 
     const derivedThrough = !exhausted && advanceSealed
       ? advanceTo
