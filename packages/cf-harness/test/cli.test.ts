@@ -3816,18 +3816,18 @@ Deno.test("runCfHarnessCli fails early when no API key is configured", async () 
 });
 
 Deno.test("runCfHarnessCli refuses a run that selected no model provider", async () => {
-  const providerSettingsStore = {
-    inspect: () => Promise.resolve({ state: "missing" as const }),
-    initialize: () => Promise.reject(new Error("unused")),
-    set: () => Promise.reject(new Error("unused")),
-  };
+  // No store is injected, so the run reads the harness home the CLI resolves
+  // for itself — the one place an operator's persisted selection would be.
+  const home = await Deno.makeTempDir({ prefix: "cf-harness-no-provider-" });
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
     ["--prompt", "hello"],
     {
       io,
-      env: { CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for" },
-      providerSettingsStore,
+      env: {
+        CF_HARNESS_HOME: home,
+        CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for",
+      },
       createModelClient: () => {
         throw new Error("unselected provider must not reach a model client");
       },
