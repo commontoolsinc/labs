@@ -18,7 +18,7 @@ import type { TerminalCodec } from "./interface.ts";
  * are the same type, so a subclass declared at `FabricValue` satisfies the
  * nonterminal half of every signature while classifying as terminal at run
  * time, and its state would reach the wire unexpanded. A codec whose state is
- * made of fabric values extends {@link BaseNonterminalCodec}.
+ * made of `FabricValue`s extends {@link BaseNonterminalCodec}.
  */
 export abstract class BaseTerminalCodec<
   Encoded,

@@ -41,10 +41,11 @@ append-only, no-double-mapping, acyclic rules.
   set it themselves when they own a run. Never point two concurrent runs
   at one directory by hand — each run owns its own spool.
 - `CF_TEST_RECORDS_KEY_FILE` — a personal reporting key
-  (see below). Its presence is the local opt-in: with it, `deno task
-  test`, `deno task integration`, and `deno task run-recorded` stamp a
-  spool, ship it when the run ends, and sweep any orphaned spools a killed
-  run left behind.
+  (see below), exported from the login shell's profile by
+  `deno task test-records-key setup`. Its presence is the local opt-in:
+  with it, `deno task test`, `deno task integration`, and `deno task
+  run-recorded` stamp a spool, ship it when the run ends, and sweep any
+  orphaned spools a killed run left behind.
 - `CF_TEST_AGENT` — an opaque label for the operating agent, recorded
   verbatim in the run context. Set it to tell an agent fleet's runs apart
   from a person's; it is never required.
@@ -65,34 +66,67 @@ a couple of minutes. Contributing without commit access? Then keys are
 simply not part of your workflow yet, and skipping them costs you
 nothing: your local tests run identically without one, and CI records
 your pull requests' runs on its own, no key involved. The day you have
-commit access, the same two commands below are yours.
+commit access, the one command below is yours.
 
-A key takes only a GitHub identity:
+A key takes only a GitHub identity, and one command:
+
+```
+deno task test-records-key setup
+```
+
+generates a delivery identity, dispatches the minting workflow, watches
+until the run delivers, installs the key file with owner-only
+permissions, and exports `CF_TEST_RECORDS_KEY_FILE` from the login
+shell's profile — every shell opened after that records. A profile that
+already sets the variable is reported and left alone, whether it points
+somewhere else or sets it without exporting it, and so is a login
+profile that does not exist yet, since creating one is what stops a
+login shell reading the file it falls back to. Rerun the command and it
+takes up whatever run is already minting for you rather than starting a
+second one, which is what makes an interrupted setup resume.
+
+The dispatch is the authorization check, which is why it takes
+repository write access.
+With a token that can only read, the command prints the workflow page to
+open in a browser and the recipient string to paste into it, then keeps
+watching for the run that click starts. The wait has no bound, since a
+run takes as long as it takes; Ctrl-C stops watching and running the
+command again picks up where it left off. Run it on a workstation that
+already holds a key and it re-checks the shell profile rather than
+minting a second one.
+
+`request` and `collect` are the same path in two invocations, for
+somewhere a watching command is unwanted — a shell without a terminal to
+interrupt, or a delivery collected on a different day than it was asked
+for:
 
 ```
 deno task test-records-key request
-```
-
-generates a delivery identity and dispatches the minting workflow — the
-dispatch is the authorization check, which is why it takes repository
-write access. With a token that can only read, the tool instead prints
-the workflow page to open in a browser and the recipient string to paste
-into it. Once the run finishes:
-
-```
 deno task test-records-key collect
 ```
 
-downloads the sealed delivery, installs the key file with owner-only
-permissions, and prints the `CF_TEST_RECORDS_KEY_FILE` line to add to your
-shell. Keys stay valid while you stay active: a daily janitor disables the
-accounts of people with no pull-request activity for a month and re-enables
-them when they return — the same key file simply starts working again.
+The key travels sealed. The delivery identity is an X25519 key pair whose
+public half is the `cfr1...` recipient string the tool prints and the
+workflow takes as its input; the private half stays in
+`~/.config/common-fabric/test-records-identity.json` and never leaves the
+workstation. The workflow seals the minted key to that recipient —
+ephemeral-sender X25519, HKDF-SHA256, AES-256-GCM, with both public keys
+bound into the derivation — and publishes the box as a workflow artifact
+named by the recipient's fingerprint. Everyone who can read the
+repository's artifacts, GitHub included, holds a box that only the
+requester's stored identity opens. What comes out is then checked
+against the collector's own GitHub login, so a key minted for one person
+does not install for another.
 
-You hold one live key: minting revokes the previous ones, so running
-`request` again is how a lost or leaked key is rotated, and a second
-machine gets the existing key file copied to it rather than a fresh
-mint that would kill the first machine's.
+Keys stay valid while you stay active: a daily janitor disables the
+accounts of people with no pull-request activity for a month and
+re-enables them when they return — the same key file simply starts
+working again.
+
+You hold one live key: minting revokes the previous ones, so
+`deno task test-records-key setup --rotate` is how a lost or leaked key
+is rotated, and a second machine gets the existing key file copied to it
+rather than a fresh mint that would kill the first machine's.
 
 ## How records move
 

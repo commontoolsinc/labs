@@ -1,5 +1,5 @@
 /**
- * A `Set` as a fabric instance, which is at present only half a value.
+ * A `Set` as a `FabricInstance`, which is at present only half a value.
  *
  * Native conversion is the part that works: a frozen form is produced on
  * request, an already-frozen one is passed through rather than rebuilt, and a

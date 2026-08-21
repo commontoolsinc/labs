@@ -60,7 +60,7 @@ can run their own spaces or use hosted versions.
      [Installing `cf` on PATH](./packages/cli/README.md#installing-cf-on-path).
 5. Start local dev servers: `./scripts/start-local-dev.sh`
 6. Access the application at <http://localhost:8000>
-7. Team members: get a test-reporting key (`deno task test-records-key request`)
+7. Team members: get a test-reporting key (`deno task test-records-key setup`)
    so your local test runs feed the shared flake and duration history — see
    [test-records.md](./docs/development/test-records.md). Contributing without
    commit access? Then there is nothing to set up here: tests run identically

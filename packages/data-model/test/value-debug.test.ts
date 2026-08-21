@@ -136,12 +136,12 @@ describe("value-debug", () => {
       expect(toCompactDebugString(inst)).toBe("/Error(...)");
     });
 
-    it("renders a `FabricPrimive` in `/Name` form", () => {
+    it("renders a `FabricPrimitive` in `/Name` form", () => {
       const inst = new FabricEpochNsec(123456789n);
       expect(toCompactDebugString(inst)).toBe("/EpochNsec(...)");
     });
 
-    it("renders a non-plain non-fabric objectg in `new Name` form", () => {
+    it("renders a non-plain non-`FabricSpecialObject` in `new Name` form", () => {
       const inst = new Set();
       expect(toCompactDebugString(inst)).toBe("new Set(...)");
     });
@@ -484,7 +484,7 @@ describe("value-debug", () => {
         .toBe("FabricPrimitive (FabricRegExp)");
     });
 
-    it("renders non-fabric class instances with their constructor name", () => {
+    it("renders a non-`FabricSpecialObject` instance with its constructor name", () => {
       expect(toDebugKindString(new Date())).toBe("Date");
       expect(toDebugKindString(new Map())).toBe("Map");
       expect(toDebugKindString(new Set())).toBe("Set");

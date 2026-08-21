@@ -1,5 +1,5 @@
 /**
- * This module is the canonical public surface for the fabric value types: the
+ * This module is the canonical public surface for the `FabricValue` types: the
  * type declarations, the `FabricInstance` base class, and the functions that
  * operate on them. Those are spread across several modules, not all of which
  * the package exports on their own, and a caller should not have to know which

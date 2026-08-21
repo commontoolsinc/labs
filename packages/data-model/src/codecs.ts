@@ -75,7 +75,7 @@ export function newDefaultJsonCodecEngine(
 const jsonCodecEngine = newDefaultJsonCodecEngine();
 
 /**
- * Encodes a fabric value to a JSON string in the standard `FabricValue`
+ * Encodes a `FabricValue` to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
  * substituted, which throws if anything asks it for a cell.
@@ -162,7 +162,7 @@ export function newDefaultRealmCodecEngine(
 const realmCodecEngine = newDefaultRealmCodecEngine();
 
 /**
- * Encodes a fabric value into the realm-crossing transport form: a value that
+ * Encodes a `FabricValue` into the realm-crossing transport form: a value that
  * `structuredClone()` or `postMessage()` carries to another realm without
  * loss. The result is `[marker, tree]`, and the tree inside shares whatever
  * structure of `value` needed no encoding.

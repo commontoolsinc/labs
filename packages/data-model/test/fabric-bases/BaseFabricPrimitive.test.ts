@@ -49,7 +49,7 @@ describe("BaseFabricPrimitive", () => {
       expect(BaseFabricPrimitive.isInstance(new ProbePrimitive())).toBe(true);
     });
 
-    it("is `false` for non-fabric values", () => {
+    it("is `false` for a `FabricValue` that is not a `BaseFabricPrimitive`", () => {
       expect(BaseFabricPrimitive.isInstance(null)).toBe(false);
       expect(BaseFabricPrimitive.isInstance(42)).toBe(false);
       expect(BaseFabricPrimitive.isInstance("x")).toBe(false);

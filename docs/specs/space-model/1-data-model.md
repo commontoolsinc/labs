@@ -19,7 +19,7 @@ representation.
 
 ### Base Types
 
-Fabric values are JSON-compatible with specific constraints:
+`FabricValue`s are JSON-compatible with specific constraints:
 
 | Type | Notes |
 |------|-------|
@@ -27,8 +27,8 @@ Fabric values are JSON-compatible with specific constraints:
 | `boolean` | `true` or `false` |
 | `number` | Any IEEE 754 binary64 value, including `-0`, `NaN`, and `±Infinity` (see Numbers below). |
 | `string` | Unicode text |
-| `array` | Ordered sequence of fabric values |
-| `object` | String-keyed map of fabric values |
+| `array` | Ordered sequence of `FabricValue`s |
+| `object` | String-keyed map of `FabricValue`s |
 
 #### Numbers
 
@@ -45,12 +45,13 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 - May be dense or sparse; holes are preserved, and are distinct from an
   explicitly-stored `undefined`
-- Elements may be `undefined`, that being a first-class fabric value
-- Non-index keys cause rejection as non-fabric, `length` aside: named
+- Elements may be `undefined`, that being a first-class `FabricValue`
+- Non-index keys cause rejection as a non-`FabricValue`, `length` aside:
+  named
   (string-keyed) and symbol-keyed properties alike, whether or not they are
   enumerable
 - Every present index must hold a *data* property; an accessor-backed
-  (getter and/or setter) index causes rejection as non-fabric
+  (getter and/or setter) index causes rejection as a non-`FabricValue`
 
 See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
 authoritative statement of these rules.
@@ -59,18 +60,18 @@ authoritative statement of these rules.
 
 - Direct `Object` instances only: the prototype must be `Object.prototype`
   itself, so class instances and null-prototype objects alike cause rejection
-- Keys must be strings; symbol keys cause rejection as non-fabric
+- Keys must be strings; symbol keys cause rejection as a non-`FabricValue`
 - Every property must be an enumerable *data* property; accessor-backed
-  (getter and/or setter) and non-enumerable properties cause rejection as
-  non-fabric
+  (getter and/or setter) and non-enumerable properties cause rejection as a
+  non-`FabricValue`
 - The names `__proto__` and `constructor` cause rejection in the JavaScript
   implementation. This is a reservation of that implementation — one name its
   copy loops cannot rebuild, one that its other boundaries already refuse —
   rather than a rule of the model; see Section 1.5 of
   `space-model-formal-spec/1-fabric-values.md`
-- Values must be valid fabric values
+- Values must be valid `FabricValue`s
 - Decoding produces regular plain objects, which is the only object
-  shape a fabric value has
+  shape a `FabricValue` has
 
 ### Special Values
 
@@ -95,10 +96,10 @@ These types cannot be stored directly:
 
 #### Symbols
 
-Symbol handling at the fabric-value conversion gate:
+Symbol handling at the `FabricValue` conversion gate:
 
 - Registry-interned symbols (`Symbol.for(key)`, where `Symbol.keyFor(s)`
-  returns a string) are first-class fabric values, portable across realms
+  returns a string) are first-class `FabricValue`s, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
   ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
@@ -377,7 +378,7 @@ interface FabricCodec<Encoded> {
   ): FabricValue;
 }
 
-// Nonterminal: state made of fabric values, which the walker expands in
+// Nonterminal: state made of `FabricValue`s, which the walker expands in
 // turn. One such instance can serve every wire format.
 type NonterminalCodec = FabricCodec<FabricValue>;
 
@@ -490,7 +491,7 @@ The system aims for an **immutable-forward** design:
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
 - Decoding always produces regular plain objects, that being the only
-  object shape a fabric value has
+  object shape a `FabricValue` has
 
 This immutability guarantee enables safe sharing of decoded values and
 aligns with the reactive system's assumption that values don't mutate in place.
@@ -697,7 +698,7 @@ types more directly — for example, using CBOR's native byte array rather than 
 
 #### Encoding Prefix: `fvj1:`
 
-Every encoded fabric value carries a literal `fvj1:` prefix in front of the
+Every encoded `FabricValue` carries a literal `fvj1:` prefix in front of the
 JSON itself. The prefix lets a recipient distinguish, at a glance, JSON that
 came from the fabric encoder from arbitrary JSON of unrelated origin.
 "`fvj1`" stands for "Fabric Value JSON, version 1"; the trailing version

@@ -1,5 +1,5 @@
 /**
- * A link as a fabric instance: a payload object wrapped so that it can carry
+ * A link as a `FabricInstance`: a payload object wrapped so that it can carry
  * arbitrary nested values, a stored schema among them.
  *
  * Being an instance rather than a primitive is the first consequence -- a link

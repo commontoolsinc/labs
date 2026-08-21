@@ -80,7 +80,7 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
   /**
    * Type guard for `BaseFabricPrimitive`, which also enforces the invariant
    * that every `FabricPrimitive` is in fact a `BaseFabricPrimitive`. Concrete
-   * fabric-primitive classes are required to extend `BaseFabricPrimitive`
+   * `FabricPrimitive` classes are required to extend `BaseFabricPrimitive`
    * (never `FabricPrimitive` directly), so a value that is a `FabricPrimitive`
    * but not a `BaseFabricPrimitive` indicates a broken subclass. Mirrors
    * `BaseFabricInstance.isInstance()`.

@@ -14,7 +14,7 @@ import {
 } from "./wire-text.ts";
 
 /**
- * One act of decoding this format's JSON text back into fabric values.
+ * One act of decoding this format's JSON text back into `FabricValue`s.
  *
  * The tree this walks comes from a parse, so it cannot be handed a cycle and
  * enters no node: the act's in-progress set is never allocated. What it does
@@ -47,7 +47,7 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
   }
 
   /**
-   * Decodes a codec-value tree back into fabric values. See Section 4.5 of
+   * Decodes a codec-value tree back into `FabricValue`s. See Section 4.5 of
    * the formal spec.
    *
    * Frozen-ness contract: values returned via the codec dispatch arm are

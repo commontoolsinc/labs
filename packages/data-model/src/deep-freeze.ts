@@ -6,7 +6,7 @@
  * primitive never needs asking at all. Both fast paths run before any per-walk
  * state is allocated, so the cheap path costs nothing.
  *
- * A fabric instance keeps its contents private, so neither walk can descend
+ * A `FabricInstance` keeps its contents private, so neither walk can descend
  * into one directly. Each calls the instance's own protocol member and passes
  * recursion back in, which is what keeps the cycle tracking and the cache
  * shared across that boundary instead of restarting inside it.
@@ -125,7 +125,7 @@ export function isDeepFrozen(value: unknown): boolean {
     let result = true;
 
     if (BaseFabricInstance.isInstance(obj)) {
-      // A fabric instance's logical contents are not its enumerable own-props
+      // A `FabricInstance`'s logical contents are not its enumerable own-props
       // (e.g. a `FabricError` keeps its custom properties in a private extras
       // `Map`), so it answers the deep-frozen question via its
       // `[IS_DEEP_FROZEN]` protocol member -- the side-effect-free sibling of
@@ -171,7 +171,7 @@ export function isDeepFrozen(value: unknown): boolean {
  *
  * 1. Necessarily- or already-known-deep-frozen value (primitives,
  *    `FabricPrimitive`s, and cached objects): short-circuit unchanged.
- * 2. Fabric instance: delegate generically to its `[DEEP_FREEZE]` protocol
+ * 2. `FabricInstance`: delegate generically to its `[DEEP_FREEZE]` protocol
  *    member, handing recursion through as the `subFreeze` callback. The
  *    dispatch gates via `BaseFabricInstance.isInstance()` (where the member is
  *    declared) -- it operates generically and does not enumerate concrete
@@ -227,7 +227,7 @@ export function deepFreeze<T>(value: T): T {
     }
     inProgress.add(obj);
 
-    // Arm 2: a fabric instance freezes itself in place via its `[DEEP_FREEZE]`
+    // Arm 2: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
     // protocol member. `freeze` is handed in as the `subFreeze` callback: it
     // closes over `inProgress`, so the impl's recursion into nested
     // `FabricValue`s shares cycle state with this call -- the participating

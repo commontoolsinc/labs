@@ -1,5 +1,5 @@
 /**
- * A `Map` as a fabric instance, which is at present only half a value.
+ * A `Map` as a `FabricInstance`, which is at present only half a value.
  *
  * Native conversion is the part that works: a frozen form is produced on
  * request, an already-frozen one is handed back rather than rebuilt, and a

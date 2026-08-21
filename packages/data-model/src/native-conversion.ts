@@ -1,16 +1,16 @@
 /**
- * The boundary between native JS values and fabric values, in both
+ * The boundary between native JS values and `FabricValue`s, in both
  * directions, along with the predicate saying in advance whether a value can
  * cross it.
  *
  * Inbound, anything not representable is refused rather than approximated: a
  * `Map`, a class instance, an unrecognized type all throw, on the principle
  * that a wrong value is worse than none. A value that is already a deep-frozen
- * fabric value crosses by identity instead of being rebuilt, and a cycle is
+ * `FabricValue` crosses by identity instead of being rebuilt, and a cycle is
  * detected rather than followed.
  *
  * Outbound, a wrapper is unwrapped to the native type it stands for, while a
- * fabric instance with no native counterpart passes through untouched. Both
+ * `FabricInstance` with no native counterpart passes through untouched. Both
  * directions take the result's freeze state as an argument; on the way out, a
  * class defined to be always frozen comes back frozen regardless of what was
  * asked for.
@@ -139,9 +139,9 @@ export function shallowCleanArray(
  *
  * The result is always `Object.prototype`-based, so a null-prototype input
  * comes back with an ordinary prototype. That re-rooting is the point for such
- * an input: a fabric record has exactly one shape, so this is how a caller
- * holding a null-prototype object says it means to shed the prototype rather
- * than have the conversion functions refuse the value.
+ * an input: a `FabricPlainObject` has exactly one shape, so this is how a
+ * caller holding a null-prototype object says it means to shed the prototype
+ * rather than have the conversion functions refuse the value.
  *
  * @param value The object to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -153,7 +153,7 @@ export function shallowCleanPlainObject(
   // `Object.entries()` yields exactly the enumerable string keys, which is the
   // set being kept, so rebuilding from it drops symbol keys and non-enumerable
   // string keys alike. A key holding `undefined` is still a present key and
-  // survives as one, `undefined` being a fabric value in its own right.
+  // survives as one, `undefined` being a `FabricValue` in its own right.
   const result = Object.fromEntries(Object.entries(value));
 
   if (frozen) {
@@ -168,7 +168,7 @@ export function shallowCleanPlainObject(
  * "wild-west" native JS instances that the conversion layer wraps into a
  * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
  *
- * Arrays, plain objects, and system-defined special primitives are recognized
+ * Arrays, plain objects, and system-defined `FabricPrimitive`s are recognized
  * by `tagFromNativeValue()` but are _not_ `FabricNativeObject`s -- they have
  * their own handling paths in the conversion layer.
  *
@@ -228,7 +228,7 @@ export function shallowFabricFromNativeValue(
   const tag = tagFromNativeValue(value);
 
   switch (tag) {
-    // Special primitives are direct `FabricValue` members -- always frozen,
+    // `FabricPrimitive`s are direct `FabricValue` members -- always frozen,
     // pass through as-is regardless of the `freeze` argument.
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDay:
@@ -367,8 +367,8 @@ export function shallowFabricFromNativeValue(
             "Not representable as a `FabricValue`: function",
           );
         case "symbol":
-          // Registry-interned symbols are valid fabric primitives; unique
-          // ones have no portable representation and are rejected.
+          // Registry-interned symbols are valid `FabricValue`s; unique ones
+          // have no portable representation and are rejected.
           if (Symbol.keyFor(value) === undefined) {
             throw new Error(
               "Not representable as a `FabricValue`: unique (uninterned) " +

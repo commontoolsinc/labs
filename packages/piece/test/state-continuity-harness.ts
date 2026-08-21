@@ -32,7 +32,7 @@ import { fromFileUrl } from "@std/path/from-file-url";
 
 // The comparison's two leaf cases. A materialized root is not plain data: at an
 // `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
-// a fabric special object (bytes, an epoch). Neither survives a structural
+// a `FabricSpecialObject` (bytes, an epoch). Neither survives a structural
 // comparison unaided — see `comparableState`.
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
@@ -628,7 +628,7 @@ function isVNode(value: object): boolean {
  *   here to the DOCUMENT the cell points at, which is the durable thing about
  *   it: a stream that moved to a different doc still shows up, and the schema
  *   is deliberately dropped, being a view rather than data.
- * - **A fabric special object** (`FabricBytes`, an epoch). These hold their
+ * - **A `FabricSpecialObject`** (`FabricBytes`, an epoch). These hold their
  *   state in private fields, so a structural comparison sees two objects with
  *   no properties and calls them equal REGARDLESS of contents —
  *   `deepEqual`'s own documentation says so, and it is the quietest way a
@@ -1028,7 +1028,7 @@ export interface StateFinding {
  * and reads-as-something checks instead.
  *
  * Everything else is compared by SHAPE rather than by name. A value the
- * comparison cannot see through — a live cell, a fabric special object, a
+ * comparison cannot see through — a live cell, a `FabricSpecialObject`, a
  * cycle, a rendering — is reduced by `comparableState` on both sides rather
  * than skipped.
  *
@@ -1053,7 +1053,7 @@ export interface StateFinding {
  * exists for. Both comparators work once the reduction has run, and this one is
  * kept because it needs no value to be a well-formed `FabricValue` and
  * short-circuits instead of hashing a whole VNode tree; the one class it cannot
- * judge, a fabric special object with its state in private fields, is reduced
+ * judge, a `FabricSpecialObject` with its state in private fields, is reduced
  * to a content hash before it gets here rather than being compared by it.
  */
 export function strandedKeys(
