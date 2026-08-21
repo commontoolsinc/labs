@@ -690,7 +690,7 @@ function mergeSchemaDefaultsInternal(
       return valuePresent ? value : defaults;
     }
     // Defaults only fill absent values or recursively merge plain records. A
-    // defined scalar, sparse array, Fabric special object, or sigil link is
+    // defined scalar, sparse array, `FabricSpecialObject`, or sigil link is
     // durable user state, not an empty object to replace with defaults.
     if (
       valuePresent &&

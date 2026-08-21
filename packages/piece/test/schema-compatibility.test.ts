@@ -2213,7 +2213,7 @@ describe("piece schema compatibility", () => {
   });
 
   describe("`FabricPrimitive` schema vocabulary transitions", () => {
-    // The schema generator used to describe a fabric special object
+    // The schema generator used to describe a `FabricSpecialObject`
     // structurally: an object schema whose `required` carries the
     // `FabricSpecialObject` nominal brand key. It now emits the
     // `FabricPrimitive` type name instead. That transition is refused, for
