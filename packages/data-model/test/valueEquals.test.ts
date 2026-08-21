@@ -4,7 +4,7 @@
  *
  * Two values are comparable only once they are the same kind of thing, so a
  * plain object and an array are unequal without their contents being consulted
- * at all, as are two fabric values of different concrete classes. The cases
+ * at all, as are two `FabricValue`s of different concrete classes. The cases
  * walk that branch deliberately rather than sampling it.
  *
  * Frozen state must not change a result, which is what the matrix over it is

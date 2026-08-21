@@ -5245,27 +5245,73 @@ supply; OW29/OW32/OW34 closed):
     surfaces where the wish UI belongs. Trigger: rides the
     OW48/OW49 fix arc (detectability; not itself the lift condition).
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam).** A note.tsx lift callback's input
-    arrives `undefined` under ON where the OFF arm always supplies it
-    — `TypeError: Cannot read properties of undefined (reading
-    'split')` at `notes/reference-block.ts:62`, caught by the
-    integration console gate (the same console error W4 §6.2 recorded
-    on the note workload's rc=1, here fatal). Owed: root-cause which
-    ON read shape reaches the lift undefined (served value vintage,
-    schema default not applied, or arrival ordering) and fix at the
-    producer or the lift contract. Trigger: lifts the
+    ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
+    optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
+    established by elimination; the exact failing hop is inferred,
+    not traced — the report's evidence-status block draws the line);
+    the fix fork is
+    FLAGGED for the owner.** The undefined read is a scheduler lift
+    on a freshly SERVED-instantiated note (default-app's menuNewNote
+    runs authoritatively in the wave; the client's speculative child
+    is refused at piece-start commit and carries different
+    handler-frame ids per speculation.md §4 W2.1) evaluated while its
+    input's link chain — through the piece's result/process doc to
+    the schema-default-only `pendingEdit` cell — is still
+    materializing in the reading runtime's replica view: the
+    mid-chain resolution yields `undefined` and the leaf schema's
+    `default: null` is never consulted (every leaf default site is
+    null-safe; the undefined enters above the leaf). NOT client-only:
+    the toolshed's own serving runtime hits the identical TypeError
+    in its pull-settle loop (no overlay, no runtime-client protocol
+    in that stack), amid `event-view-lag` replica-view warnings.
+    Racy, load-sensitive (1/6 local browser runs; W4's loaded bench
+    2-for-2 at n=20); single-creation headless flows never hit it.
+    Not served-value vintage; "schema default not applied" only as
+    the symptom of the chain dying early. Owed: the OWNER's call on
+    the fix fork — (1) defer-on-unresolved-chain in the runner
+    (speculation.md §2's client-side PENDING sentence arguably
+    already states it; the serving-runtime equivalent is UNSTATED —
+    new spec wording + scheduler-semantics blast radius), vs (2)
+    "lifts tolerate undefined during arrival" (a pattern-contract
+    change: under OFF a schema-defaulted input never reads
+    undefined) — then the fix red-first on the ruled arm. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow51-undefined-read-report.md. Trigger: lifts the
     `integration/default-app.test.ts` ON skip.
-  - **OW52 — the convergence-storm ON loss (landed 23/40).** Under
-    the TRUE ON topology the storm step (2×20 pipelined `post` events,
-    `idle:false`, per writer) leaves the non-writing observer at
-    landed=23/40 — a REAL loss (the pre-fix mixed posture refused all
-    40, masking it); the file's 3 element-schema tests are green.
-    WHERE the 17 die — append admission, queue, dispatch, or
-    consequence commit under pipelined contention — is UNTRIAGED; the
-    (α) exactly-once invariants say nothing about append-side loss
-    under storm depth. Owed: the triage and the fix. Trigger: lifts
-    the `integration/convergence-storm.test.ts` step entry (green
-    5/5).
+  - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
+    (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The
+    full 40-event accounting (serving-loop counters + the space's
+    sqlite commit log) cleared every candidate seam: append admission
+    40/40 (`events.appended`), drain/dispatch 40/40
+    (`events.processed`, `skippedIdempotent` 0, purge/orphan counters
+    0), consequences EXACTLY-ONCE (all 40 eventIds across 10 derived
+    commits, zero duplicates — the (α) invariant held at storm depth),
+    all 40 array appends durable, and the observer CONVERGES to 40/40
+    (~2–3 s of serving drain; 16 waves, 9 deadline-cut — the honest
+    flush deadline's routine shape, serving-loop.md §3). Per-wave
+    coalescing (`coalescedPerWaveMax` 11) collapses wave boundaries
+    only, never handler runs — no coalescing-by-design ambiguity. The
+    red was the HARNESS: the served-topology `settle()` had no
+    server-drain step (the OFF arm's `server.idle()`), so a fixed
+    round count of idle/barrier hops raced the drain and the assert
+    read a mid-drain head. Fixed in the harness (test infrastructure,
+    no product semantics): `MultiRuntimeHarness.settle`'s
+    toolshed-backed arm waits, bounded, for each session's
+    outstanding-intent set to empty — speculation.md §4 step 2's
+    arrived-terminal-consequence retirement,
+    `Runtime.speculationOverlay.pendingIntentCount` — before the
+    barrier, restoring the arms' settle agreement for FIRST-ORDER
+    consequences (server-side cascade children are no session's
+    intent and ride the barrier rounds — the storm has none; budget
+    exhaustion warns loudly so a slow-box mid-drain red
+    self-identifies instead of re-opening this row). Step green ON
+    5/5 + file 4/4 ON and OFF; the step entry LIFTED. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow52-storm-loss-report.md. Recorded, not decided (adjacent):
+    whether the PRODUCT's idle vocabulary should carry an
+    intent-quiescence barrier under ON (OFF's idle implies own-send
+    consequence visibility; ON's does not) — a spec question beside
+    OW47's pending-commit-barrier seat, surfaced in the report.
   - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
     semantic asserts under the TRUE ON topology: db-owner — a SECOND
     user's runtime re-mints itself as the sqlite db handle owner

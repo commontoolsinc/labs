@@ -146,7 +146,7 @@ describe("BaseFabricInstance", () => {
       expect(BaseFabricInstance.isInstance(new Probe("t"))).toBe(true);
     });
 
-    it("is `false` for non-fabric values", () => {
+    it("is `false` for a `FabricValue` that is not a `BaseFabricInstance`", () => {
       expect(BaseFabricInstance.isInstance(null)).toBe(false);
       expect(BaseFabricInstance.isInstance(42)).toBe(false);
       expect(BaseFabricInstance.isInstance("x")).toBe(false);

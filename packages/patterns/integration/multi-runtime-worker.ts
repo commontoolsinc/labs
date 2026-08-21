@@ -3,49 +3,48 @@
  *
  * Each worker owns ONE full client stack — Identity, StorageManager, Runtime,
  * PiecesController — in its own JS realm, exactly like one browser tab. The
- * main thread orchestrates via a tiny request/response protocol.
+ * main thread orchestrates via a tiny request/response protocol, whose shapes
+ * and conversions live in `./multi-runtime-ipc.ts`.
+ *
+ * This is a worker entry point: loading it installs a `self.onmessage`
+ * handler. Nothing outside a worker may import a value from here, which is
+ * what the protocol module is for.
  */
 
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import {
+  type FabricValue,
+  isValidFabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { Cell } from "@commonfabric/runner";
-import type { SchedulerGraphSnapshot } from "@commonfabric/runner";
 import {
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import { Identity, type KeyPairRaw } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   initializePiecesController,
   type PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import {
+  keyPairRawFromFabric,
+  type RuntimeDiagnosticsSnapshot,
+  type TrustedUiDescriptor,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./multi-runtime-ipc.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isObjectNotArray } from "@commonfabric/utils/types";
-
-export interface WorkerRequest {
-  id: number;
-  cmd: string;
-  args: Record<string, unknown>;
-}
-
-export type WorkerResponse =
-  | { id: number; ok: unknown }
-  | { id: number; error: string };
-
-export interface TrustedUiDescriptor {
-  /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
-  surface: string;
-  /** `data-ui-action` of the control inside the surface. */
-  action: string;
-}
-
-export interface RuntimeDiagnosticsSnapshot {
-  graph: SchedulerGraphSnapshot;
-  settleStatsHistory: unknown[];
-  actionRunTrace: unknown[];
-}
 
 let cc: PiecesController | undefined;
 let piece: PieceController | undefined;
@@ -81,25 +80,6 @@ async function attachPiece(next: PieceController): Promise<void> {
   resultSinkCancel?.();
   // Keep the result graph subscribed so server pushes reach this runtime.
   resultSinkCancel = result().sink(() => {});
-}
-
-/**
- * Make `value` postMessage-safe: keep JSON data, drop functions/cells,
- * stringify bigints (JSON.stringify throws on them).
- */
-function sanitizeForTransfer(value: unknown): unknown {
-  // TODO(danfuzz): most of what reaches here is a `FabricValue` read from a
-  // cell, and this narrows it to the JSON-compatible subset -- a
-  // `FabricPrimitive` becomes `{}`, a `bigint` becomes its own decimal text.
-  // A test that asserted on either would be asserting on the damage. The
-  // crossing is `postMessage`, so `codec-realm` carries the whole domain, and
-  // the harness decodes on the other side.
-  if (value === undefined) return undefined;
-  return JSON.parse(JSON.stringify(value, (_key, entry) => {
-    if (typeof entry === "function") return undefined;
-    if (typeof entry === "bigint") return entry.toString();
-    return entry;
-  }));
 }
 
 // Test-only network shaping: wrap this realm's WebSocket so every frame (both
@@ -218,10 +198,12 @@ async function maybeAttachOtelBridge(identity: Identity): Promise<void> {
 
 const handlers: Record<
   string,
-  (args: Record<string, unknown>) => Promise<unknown>
+  (args: Record<string, unknown>) => Promise<FabricValue>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
-    const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
+  async init({ identity: keyPair, spaceName, apiUrl, diagnostics, wsDelayMs }) {
+    const identity = await Identity.deserialize(
+      keyPairRawFromFabric(keyPair as FabricKeyPair),
+    );
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
@@ -337,12 +319,12 @@ const handlers: Record<
       error?: { name?: string; message?: string };
     };
     if (doIdle !== false) await idle();
-    return sanitizeForTransfer({
+    return {
       ok: !res?.error,
       error: res?.error
         ? { name: res.error.name, message: res.error.message }
         : undefined,
-    });
+    };
   },
 
   // Faithful mirror of RuntimeProcessor.handleCellPush / CellHandle.push: a
@@ -366,12 +348,12 @@ const handlers: Record<
       error?: { name?: string; message?: string };
     };
     if (doIdle !== false) await idle();
-    return sanitizeForTransfer({
+    return {
       ok: !res?.error,
       error: res?.error
         ? { name: res.error.name, message: res.error.message }
         : undefined,
-    });
+    };
   },
 
   async read({ path }) {
@@ -381,7 +363,7 @@ const handlers: Record<
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    return sanitizeForTransfer(cell.get());
+    return cell.get();
   },
 
   /**
@@ -397,7 +379,7 @@ const handlers: Record<
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    return sanitizeForTransfer(cell.resolveAsCell().getRaw());
+    return cell.resolveAsCell().getRaw();
   },
 
   /**
@@ -414,12 +396,12 @@ const handlers: Record<
     }
     const resolved = cell.resolveAsCell();
     const link = resolved.getAsNormalizedFullLink();
-    return sanitizeForTransfer({
+    return {
       id: link.id,
       space: link.space,
       scope: link.scope,
       path: link.path,
-    });
+    };
   },
 
   // Raw replica read: a storage-transaction read at an explicit address,
@@ -435,18 +417,48 @@ const handlers: Record<
       type: "application/json",
       path: (path ?? []) as string[],
       ...(scope !== undefined ? { scope: scope as never } : {}),
-    } as never) as { ok?: { value?: unknown }; error?: { message?: string } };
+    } as never) as {
+      ok?: { value?: FabricValue };
+      error?: { message?: string };
+    };
     await tx.commit();
-    return sanitizeForTransfer({
+    return {
       ok: res.error === undefined,
       value: res.ok?.value,
       error: res.error?.message,
-    });
+    };
   },
 
   async idle() {
     await idle();
     return {};
+  },
+
+  // Wait until this runtime has NO outstanding event intents: every event it
+  // fired has reached a terminal consequence (consequenced, errored, dropped,
+  // or refused) AND that consequence has arrived back here — speculation.md
+  // §4 step 2's retirement, whose outstanding set the overlay maintains
+  // (`Runtime.speculationOverlay.pendingIntentCount`). Under the served (ON)
+  // topology this is the client-observable "the server has drained my sends"
+  // signal the harness settle uses in place of the in-process server's
+  // `idle()` (see MultiRuntimeHarness.settle). Resolves `{ pending: 0 }` on
+  // quiescence, or with the still-outstanding count once `timeoutMs`
+  // elapses — the caller's settle round proceeds and the test's own assert
+  // speaks, so a wedged consequence degrades loudly instead of hanging the
+  // harness. The OFF arm has no overlay and resolves immediately.
+  async eventQuiescence({ timeoutMs }) {
+    const runtime = controller().runtime;
+    const budget = typeof timeoutMs === "number" ? timeoutMs : 10_000;
+    const deadline = Date.now() + budget;
+    for (;;) {
+      const pending = runtime.speculationOverlay?.pendingIntentCount ?? 0;
+      if (pending === 0) return { pending: 0 };
+      if (Date.now() >= deadline) return { pending };
+      // Plain timer wait: consequence pushes arrive on the WebSocket and the
+      // overlay's intent listener runs in a microtask on the replica
+      // notification, so nothing here needs nudging — just time.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   },
 
   // Force an ordered-after round trip on every open space connection, so any
@@ -461,18 +473,29 @@ const handlers: Record<
   async diagnostics() {
     await idle();
     const scheduler = controller().runtime.scheduler;
-    return sanitizeForTransfer(
-      {
-        graph: scheduler.getGraphSnapshot(),
-        settleStatsHistory: scheduler.getSettleStatsHistory(),
-        actionRunTrace: scheduler.getActionRunTrace(),
-      } satisfies RuntimeDiagnosticsSnapshot,
-    );
+    return {
+      graph: scheduler.getGraphSnapshot(),
+      settleStatsHistory: scheduler.getSettleStatsHistory(),
+      actionRunTrace: scheduler.getActionRunTrace(),
+    } satisfies RuntimeDiagnosticsSnapshot;
   },
 
   async loggerCounts() {
     await idle();
-    return getLoggerCountsBreakdown();
+    const counts = getLoggerCountsBreakdown();
+    // The declaration cannot say this is a `FabricValue`: `LoggerBreakdown` is
+    // an index signature intersected with `total`, and `LogCounts` beneath it
+    // is an interface. Nor can `utils` be where that is said, `data-model`
+    // depending on it. So the question is settled by checking, the same way
+    // `assertFabricLoggerFlags()` settles it for the flag breakdown the
+    // runtime connection sends.
+    if (!isValidFabricValue(counts)) {
+      throw new Error(
+        "Cannot send logger counts across this boundary, not being a " +
+          `\`FabricValue\`: ${backtickQuote(toCompactDebugString(counts))}`,
+      );
+    }
+    return counts;
   },
 
   async dispose() {
@@ -489,21 +512,42 @@ const handlers: Record<
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const { id, cmd, args } = event.data;
-  const handler = handlers[cmd];
   const respond = (response: WorkerResponse) =>
     (self as unknown as Worker).postMessage(response);
+  const fail = (error: unknown) =>
+    respond({
+      id,
+      error: error instanceof Error
+        ? `${error.message}\n${error.stack ?? ""}`
+        : String(error),
+    });
+
+  const handler = handlers[cmd];
   if (!handler) {
     respond({ id, error: `unknown command "${cmd}"` });
     return;
   }
-  handler(args).then(
-    (ok) => respond({ id, ok }),
-    (error: unknown) =>
-      respond({
-        id,
-        error: error instanceof Error
-          ? `${error.message}\n${error.stack ?? ""}`
-          : String(error),
-      }),
+
+  // Every step from here is answered rather than thrown. A decode refuses a
+  // payload it cannot read and an encode refuses an answer outside the
+  // `FabricValue` domain, and either one thrown out of this listener would
+  // leave the caller waiting on a response that is never coming.
+  let decoded: Record<string, unknown>;
+  try {
+    decoded = fabricFromRealmValue(args) as Record<string, unknown>;
+  } catch (error) {
+    fail(error);
+    return;
+  }
+
+  handler(decoded).then(
+    (ok) => {
+      try {
+        respond({ id, ok: realmFromFabricValue(ok) });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    fail,
   );
 };

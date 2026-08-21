@@ -110,8 +110,14 @@ removes one line and leaves five. A block wants the `-start` / `-stop` pair.
 
 The directive reaches the lcov report and not merely the terminal one, which
 is what makes it usable here: the ignored lines carry no `DA:` records at all,
-so `LF` drops with `LH` and the CI ratchet sees nothing uncovered rather than
-seeing a gap it has been told to forgive.
+so `LF` falls while `LH` stays put — the lines removed were uncovered ones,
+never counted in `LH` to begin with — and the CI ratchet sees nothing
+uncovered rather than seeing a gap it has been told to forgive.
+
+Measure a "before" figure while the source still lacks the directive. The
+ignore directives are applied when `deno coverage` builds the **report**, not
+when `deno test` writes the profile, so re-running `deno coverage` over a
+profile collected earlier still reports the post-directive numbers.
 
 **What this is not for.** It suppresses a measurement, so it is only honest
 where the measurement is meaningless — code that *cannot* execute, by

@@ -253,10 +253,13 @@ export const fuse = new Command()
   .name("fuse")
   .description(fuseDescription)
   .default("help")
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
+  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric server instance.", {
     prefix: "CF_",
   })
-  .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
+  .globalOption(
+    "-a,--api-url <url:string>",
+    "URL of the fabric server instance.",
+  )
   .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
     prefix: "CF_",
   })

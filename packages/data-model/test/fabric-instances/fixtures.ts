@@ -1,5 +1,5 @@
 /**
- * Shared doubles for the fabric-instance tests: a live environment that
+ * Shared doubles for the `FabricInstance` tests: a live environment that
  * refuses to resolve a cell, and the two recursion callbacks for driving the
  * freeze protocols by hand.
  *

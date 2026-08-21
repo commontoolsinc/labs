@@ -1,5 +1,5 @@
 /**
- * A nanosecond timestamp as a fabric primitive: always frozen, wrapping a
+ * A nanosecond timestamp as a `FabricPrimitive`: always frozen, wrapping a
  * `bigint`, and encoded to a flat base64 string.
  *
  * Holding a `bigint` rather than a number is the reason the class exists, so

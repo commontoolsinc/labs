@@ -12,7 +12,7 @@
  * array whose structure is inadmissible makes it return `false` where a plain
  * frozen-ness test would have said `true`.
  *
- * A fabric instance is reached through its own protocol member rather than by
+ * A `FabricInstance` is reached through its own protocol member rather than by
  * enumeration, and a primitive short-circuits ahead of all of it.
  */
 
@@ -61,7 +61,7 @@ describe("deep-freeze", () => {
 
     describe("functions (opaque immutable leaves)", () => {
       // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
-      // leaf -- a code reference, not fabric data -- so general-purpose callers
+      // leaf -- a code reference, not a `FabricValue` -- so general-purpose
       // that freeze objects-with-methods keep working. A function's internal
       // `prototype` and closure state stays mutable, which the opacity does not
       // and cannot cover.
@@ -426,7 +426,8 @@ describe("deep-freeze", () => {
     it("returns `false` for a frozen object with a getter", () => {
       // Freezing an object does not make an accessor inert: a read still
       // executes it and can return a different value every time. Such an
-      // object must not be granted the deep-frozen-fabric-value trust level.
+      // object must not be granted the trust level of a deep-frozen
+      // `FabricValue`.
       const obj = { a: 1 };
       Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
       Object.freeze(obj);
@@ -491,7 +492,7 @@ describe("deep-freeze", () => {
   });
 
   describe("`isValidDeepFrozenFabricValue()` identity cache", () => {
-    it("does not revalidate an already-proven frozen Fabric value", () => {
+    it("does not revalidate an already-proven frozen `FabricValue`", () => {
       let childReads = 0;
       const child = Object.freeze({ value: 1 });
       const value = new Proxy(Object.freeze({ child }), {

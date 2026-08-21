@@ -39,6 +39,24 @@ export type ServingLoopStats = {
   authoredSeen: number;
   effectAcks: number;
   derivedCommits: number;
+  /** `derivedCommits`, attributed per space (the space DID as the key).
+   * The process-wide total cannot scope a delta to the space under test
+   * on a shared host — another space's serving activity in the window
+   * (a drain-settle quiescence advance from an earlier test's space, a
+   * parked space reactivating) is indistinguishable from the watched
+   * space's waves — which is what the sx2-events coalescing observation
+   * and OW52-style loss accounting both need. Bounded like
+   * `settle.series`: at most {@link DERIVED_COMMITS_BY_SPACE_MAX}
+   * spaces tracked; a commit for a NEW space beyond the cap evicts the
+   * oldest-tracked row, folding its count into
+   * `derivedCommitsBySpaceDropped` so the total stays conserved
+   * (tracked rows + the fold = `derivedCommits`). Bump through
+   * {@link bumpDerivedCommits} only, which keeps total and row in
+   * lockstep. */
+  derivedCommitsBySpace: Record<string, number>;
+  /** Counts folded out of `derivedCommitsBySpace` by the cap eviction
+   * (never a lost commit — the process-wide total keeps them). */
+  derivedCommitsBySpaceDropped: number;
   /** Demanded-structure loads that THREW (serving-loop.md §1: a value
    * the server cannot serve is counted AND surfaced here, not just
    * logged). Counted per attempt; the loop retries the root on each
@@ -331,6 +349,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   authoredSeen: 0,
   effectAcks: 0,
   derivedCommits: 0,
+  derivedCommitsBySpace: {},
+  derivedCommitsBySpaceDropped: 0,
   structureLoadFailures: 0,
   structureLoadDeferred: 0,
   structureLoadTerminal: 0,
@@ -377,6 +397,37 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
   lease: { held: 0, lost: 0 },
 });
+
+/** The `derivedCommitsBySpace` cap (the settle.series bounding
+ * discipline, applied to a keyed map: oldest-inserted row evicted). A
+ * long-lived host serves many short-lived spaces; the map must not grow
+ * with them. */
+export const DERIVED_COMMITS_BY_SPACE_MAX = 256;
+
+/** The ONE way to count a derived commit: bumps the process-wide total
+ * and the space's row together (a site that bumped one but not the
+ * other would silently break the conservation the per-space block
+ * promises — tracked rows + dropped fold = total). Evicts the
+ * oldest-tracked space's row into `derivedCommitsBySpaceDropped` when a
+ * NEW space arrives past {@link DERIVED_COMMITS_BY_SPACE_MAX}. */
+export const bumpDerivedCommits = (
+  stats: ServingLoopStats,
+  space: string,
+): void => {
+  stats.derivedCommits += 1;
+  const bySpace = stats.derivedCommitsBySpace;
+  if (bySpace[space] === undefined) {
+    const keys = Object.keys(bySpace);
+    if (keys.length >= DERIVED_COMMITS_BY_SPACE_MAX) {
+      // Insertion order is the eviction order (string keys preserve it).
+      const oldest = keys[0];
+      stats.derivedCommitsBySpaceDropped += bySpace[oldest];
+      delete bySpace[oldest];
+    }
+    bySpace[space] = 0;
+  }
+  bySpace[space] += 1;
+};
 
 // One provider per process (the ExecutorHost registers itself); the
 // health route reads through this seam so toolshed needs no reference to

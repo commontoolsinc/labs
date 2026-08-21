@@ -178,7 +178,7 @@ export interface FabricCodec<Encoded> {
 
 /**
  * A codec whose essential state is **nonterminal**: it is itself made of
- * fabric values, which the walker goes on to expand in turn. The sense is the
+ * `FabricValue`s, which the walker goes on to expand in turn. The sense is the
  * one formal grammars give the word -- a state that arrives here is not an
  * answer but something that must be rewritten further before it is one.
  *

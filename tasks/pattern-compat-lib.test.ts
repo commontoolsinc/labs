@@ -408,7 +408,8 @@ describe("partitionAcceptedBreaks", () => {
     }`,
   });
   const REMOVED = "result.crossrefs: existing result field was removed";
-  const UNRELATED = "argument.seed: existing argument field was removed";
+  const UNRELATED =
+    "argument.seed: newly required argument field has no default";
   const accepted = new Map<string, ReadonlySet<string>>([
     [acceptedBreakKey("a.tsx", "old"), new Set(["result.crossrefs"])],
   ]);
