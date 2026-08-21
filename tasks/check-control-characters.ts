@@ -256,8 +256,14 @@ export async function blobContents(
   // produced.
   const output = command.output();
   const writer = command.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(ids.join("\n") + "\n"));
-  await writer.close();
+  try {
+    await writer.write(new TextEncoder().encode(ids.join("\n") + "\n"));
+    await writer.close();
+  } catch {
+    // A git that exits before reading its input closes the pipe mid-write.
+    // Its exit status, not the pipe error, is what happened; the check below
+    // reports it.
+  }
 
   const { success, stdout } = await output;
   if (!success) throw new Error("git cat-file failed");
