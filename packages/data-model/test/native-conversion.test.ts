@@ -1,5 +1,5 @@
 /**
- * Converting between native JS values and fabric values, in both directions
+ * Converting between native JS values and `FabricValue`s, in both directions
  * and at both depths, plus the predicate saying in advance whether a value
  * will make it across.
  *
@@ -44,12 +44,17 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import {
   type FabricConvertibleValue,
   FabricInstance,
+  type FabricPrimitive,
   type FabricValue,
 } from "@/interface.ts";
 import {
@@ -710,11 +715,53 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("passes Fabric values through", () => {
-      it("passes a `FabricPrimitive` value through unchanged", () => {
-        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-        expect(shallowFabricFromNativeValue(bytes)).toBe(bytes);
+    describe("passes `FabricValue`s through", () => {
+      // One instance per concrete primitive class, checked against
+      // `codecClasses()` for exact membership. A single class would not do:
+      // the pass-through is a `switch` with one `case` per class and a
+      // throwing `default`, so a class missing a `case` is invisible to any
+      // test that only ever hands it a different one.
+      const PRIMITIVES: readonly FabricPrimitive[] = [
+        new FabricBytes(new Uint8Array([1, 2, 3])),
+        new FabricEpochDay(1n),
+        new FabricEpochNsec(1n),
+        new FabricHash(new Uint8Array(32), "fid1"),
+        new FabricKeyPair(
+          "ExampleAlgorithm",
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+        ),
+        new FabricRegExp(/x/),
+      ];
+
+      it("covers every registered primitive class", () => {
+        const covered = new Set(PRIMITIVES.map((p) => p.constructor));
+        expect(covered.size).toBe(PRIMITIVES.length);
+        for (const cls of codecClasses()) {
+          expect(covered.has(cls)).toBe(true);
+        }
+        expect(codecClasses().length).toBe(PRIMITIVES.length);
       });
+
+      for (const value of PRIMITIVES) {
+        const name = value.constructor.name;
+
+        it(`passes a \`${name}\` through unchanged`, () => {
+          expect(shallowFabricFromNativeValue(value)).toBe(value);
+        });
+
+        // `freeze: false` skips the deep-frozen identity shortcut in
+        // `fabricFromNativeValue()`, which is what the sandbox boundary
+        // passes for an action result, so it reaches the `switch` that
+        // `shallowFabricFromNativeValue()` shares.
+        it(`carries a \`${name}\` nested in an object, unfrozen`, () => {
+          const result = fabricFromNativeValue({ v: value }, false) as {
+            v: unknown;
+          };
+
+          expect(result.v).toBe(value);
+        });
+      }
 
       it("passes a frozen `FabricInstance` value through unchanged", () => {
         const fe = Object.freeze(
@@ -858,7 +905,7 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are fabric primitives and
+    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
     // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
       it("passes an interned symbol through", () => {
@@ -1086,7 +1133,7 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("passes Fabric values through", () => {
+    describe("passes `FabricValue`s through", () => {
       it("returns a `FabricPrimitive` value as-is", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
         expect(fabricFromNativeValue(bytes)).toBe(bytes);
@@ -1237,14 +1284,14 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("throws for non-fabric nested values", () => {
+    describe("throws for nested non-`FabricValue`s", () => {
       it("throws for nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ val: Symbol("test") })).toThrow(
           "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
-      it("throws for deeply nested non-fabric value", () => {
+      it("throws for a deeply nested non-`FabricValue`", () => {
         expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
           .toThrow(
             "Not representable as a `FabricValue`: unique (uninterned) symbol",
@@ -1752,7 +1799,7 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are fabric primitives and
+    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
     // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
       it("passes an interned symbol through", () => {
@@ -1996,7 +2043,7 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("fabric values", () => {
+    describe("`FabricValue`s", () => {
       it("returns `true` for `FabricInstance` (e.g. `FabricError`) values", () => {
         expect(
           isValidFabricConvertibleValue(
@@ -2016,12 +2063,12 @@ describe("native-conversion", () => {
     });
 
     describe("containers", () => {
-      it("returns `true` for plain objects with fabric values", () => {
+      it("returns `true` for plain objects with `FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({ a: 1, b: "hello", c: null }))
           .toBe(true);
       });
 
-      it("returns `true` for arrays with fabric values", () => {
+      it("returns `true` for arrays with `FabricValue`s", () => {
         expect(isValidFabricConvertibleValue([1, "hello", null, true])).toBe(
           true,
         );
@@ -2049,17 +2096,17 @@ describe("native-conversion", () => {
           .toBe(true);
       });
 
-      it("returns `false` for objects with non-fabric nested values", () => {
+      it("returns `false` for objects with nested non-`FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({ a: 1, b: Symbol("bad") })).toBe(
           false,
         );
       });
 
-      it("returns `false` for arrays with non-fabric elements", () => {
+      it("returns `false` for arrays with non-`FabricValue` elements", () => {
         expect(isValidFabricConvertibleValue([1, Symbol("bad")])).toBe(false);
       });
 
-      it("returns `false` for deeply nested non-fabric values", () => {
+      it("returns `false` for deeply nested non-`FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({
           a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
         })).toBe(false);

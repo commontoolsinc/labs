@@ -260,7 +260,7 @@ export function schemaForValueType(
       } else if (Array.isArray(value)) {
         return getBasicSchema("array");
       } else if (value instanceof FabricPrimitive) {
-        // A fabric primitive gets its specific type name (e.g.
+        // A `FabricPrimitive` gets its specific type name (e.g.
         // "FabricBytes") rather than "object": it is an opaque leaf, so
         // "object" would invite structural keywords that cannot apply.
         return getBasicSchema(schemaTypeOfFabricPrimitive(value));

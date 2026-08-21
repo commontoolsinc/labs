@@ -35,11 +35,10 @@ describe("shapableWakeGroupKey", () => {
     ).toBe(`${instanceKey}|input`);
   });
 
-  // Deferring a server push's wake would move its mark-dirty off the sync's
-  // synchronous turn, so adoptRemoteObservations would find no dirt to clear and
-  // the receiver would re-run every computation the writer already ran. See
-  // shapableWakeGroupKey and docs/specs/scheduler-v2/incremental-observation-adoption.md.
-  it("never shapes server pushes (pull / integrate) — adoption needs them synchronous", () => {
+  // Server pushes stay unshaped: the adoption-era reason is deleted with the
+  // observation machinery (server-execution v2 stage C), and re-deciding the
+  // shaping is a separate open question. See shapableWakeGroupKey.
+  it("never shapes server pushes (pull / integrate)", () => {
     expect(shapableWakeGroupKey(state, notif("pull"), withPiece)).toBe(
       undefined,
     );

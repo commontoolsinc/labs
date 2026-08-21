@@ -124,6 +124,10 @@ function makeRuntime(options: FakeEditOptions = {}): {
       const ok = fn(tx);
       return Promise.resolve({ ok });
     },
+    // The republisher declares its run context (serving-loop.md §3d's
+    // bookkeeping stamp) before writing; the unit-fake runtime accepts
+    // the stamp and does nothing with it, like the OFF arm.
+    stampServerRun() {},
     storageManager: {
       trackUntilSettled(work: Promise<unknown>) {
         tracked.push(work);

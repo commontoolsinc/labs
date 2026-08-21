@@ -1063,8 +1063,8 @@ describe("piece schema compatibility", () => {
       .toThrow(/result\.doubled/);
   });
 
-  it("rejects removing existing argument or result fields", () => {
-    const missingArgument = pattern(
+  it("accepts dropping an argument field the pattern no longer reads", () => {
+    const droppedArgument = pattern(
       {
         type: "object",
         properties: { value: { type: "number" } },
@@ -1073,9 +1073,28 @@ describe("piece schema compatibility", () => {
       oldPattern.resultSchema,
     );
     expect(() =>
-      assertPatternSchemasBackwardCompatible(oldPattern, missingArgument)
-    ).toThrow(/argument\.format: existing argument field was removed/);
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).not.toThrow();
+  });
 
+  it("rejects dropping an argument field a closed candidate cannot hold", () => {
+    const droppedArgument = pattern(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(oldPattern, droppedArgument)
+    ).toThrow(
+      /argument\.format: source field is rejected by the target object/,
+    );
+  });
+
+  it("rejects removing an existing result field", () => {
     const missingResult = pattern(
       oldPattern.argumentSchema,
       {
@@ -1235,7 +1254,7 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
-  it("treats fabric-primitive types as subtypes of object (one-way)", () => {
+  it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.
     expect(() =>
@@ -2212,15 +2231,15 @@ describe("piece schema compatibility", () => {
     }
   });
 
-  describe("fabric-primitive schema vocabulary transitions", () => {
-    // The schema generator used to describe a fabric special object
+  describe("`FabricPrimitive` schema vocabulary transitions", () => {
+    // The schema generator used to describe a `FabricSpecialObject`
     // structurally: an object schema whose `required` carries the
     // `FabricSpecialObject` nominal brand key. It now emits the
-    // fabric-primitive type name instead. That transition is refused, for
+    // `FabricPrimitive` type name instead. That transition is refused, for
     // pattern evolution too: the structural schema admits values by shape
     // (a plain record carrying the brand key as an own property, or a
     // primitive of another class whose members cover `required`), the
-    // fabric-primitive-typed schema matches by prototype, and a pattern
+    // `FabricPrimitive`-typed schema matches by prototype, and a pattern
     // update rewrites stored data verbatim -- so any such value would
     // survive the update only to be rejected by every subsequent read.
     // See the note in `schemaSubsetIssue`.
@@ -2237,7 +2256,7 @@ describe("piece schema compatibility", () => {
       required: ["blob"],
     });
 
-    it("refuses an argument field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+    it("refuses an argument field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(withField(oldBytes), true),
@@ -2246,10 +2265,10 @@ describe("piece schema compatibility", () => {
       ).toThrow(/type object is not accepted/);
     });
 
-    it("accepts a result field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+    it("accepts a result field moving from the brand-marked structural emission to its `FabricPrimitive` type", () => {
       // The result direction proves candidate-within-previous: the new
       // schema's population is prototype-matched primitives, and every one
-      // satisfies the old structural contract (fabric-primitive types are
+      // satisfies the old structural contract (`FabricPrimitive` types are
       // subtypes of "object", members are present via `in`, and the brand
       // is exempt for instances). Nothing is stranded, so no allowance is
       // involved -- this holds through the ordinary subset machinery.
@@ -2277,7 +2296,7 @@ describe("piece schema compatibility", () => {
       }
     });
 
-    it("refuses a plain object schema without the brand against a fabric-primitive type", () => {
+    it("refuses a plain object schema without the brand against a `FabricPrimitive` type", () => {
       const plainObject: JSONSchema = {
         type: "object",
         properties: { length: { type: "number" } },

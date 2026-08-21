@@ -331,7 +331,7 @@ describe("cloneIfNecessary()", () => {
   describe(`\`null\` prototype canonicalization`, () => {
     // A null-prototype object is not a `FabricValue`, so none can arrive here
     // by any validating route. Should one reach this function anyway, the
-    // clone leaves in the shape a fabric record has -- the same canonicalizing
+    // clone leaves in the shape a `FabricPlainObject` has -- the same
     // answer the array case gives an `Array` subclass -- rather than
     // propagating a shape the model has no representation for.
     function nullProto(
@@ -391,18 +391,20 @@ describe("cloneIfNecessary()", () => {
       const epoch = new FabricEpochNsec(1234567890n);
       Object.freeze(epoch);
       const result = cloneIfNecessary(epoch);
-      expect(result).toBe(epoch); // identity -- special primitives are immutable
+      // Identity: a `FabricPrimitive` is immutable.
+      expect(result).toBe(epoch);
     });
 
     it("passes through `FabricEpochNsec` when `frozen=false`", () => {
       const epoch = new FabricEpochNsec(42n);
       Object.freeze(epoch);
-      // frozen parameter is irrelevant for special primitives
+      // The `frozen` parameter is irrelevant for a `FabricPrimitive`.
       const result = cloneIfNecessary(
         epoch,
         { frozen: false },
       );
-      expect(result).toBe(epoch); // identity -- special primitives are immutable
+      // Identity: a `FabricPrimitive` is immutable.
+      expect(result).toBe(epoch);
     });
 
     it("passes through `FabricEpochNsec` nested in an object", () => {

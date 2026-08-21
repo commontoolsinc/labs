@@ -97,12 +97,22 @@ export function enqueueSinkRequestPostCommitEffect(
   request: FabricValue,
   kind: string,
   flush: (tx: IExtendedStorageTransaction) => void | Promise<void>,
+  options?: {
+    /** Dedupe/outbox key override. The effectful builtins pass their
+     * PER-TARGET key (executor/effect-completion.ts `effectTargetKey`:
+     * `<effectId>@<result-cell id>`) so two DISTINCT nodes issuing
+     * byte-identical inputs each keep their own effect — colliding on
+     * the bare effectId dropped the second node's closure and wedged
+     * its cells pending forever (the stage-G round-2 headline). The
+     * CFC policy-input `effectId` stays unscoped either way. */
+    idempotencyKey?: string;
+  },
 ): void {
   const policyInput = createSinkRequestPolicyInput(sink, effectId, request);
   tx.recordCfcWritePolicyInput(policyInput);
   tx.enqueuePostCommitEffect({
     id: effectId,
-    idempotencyKey: effectId,
+    idempotencyKey: options?.idempotencyKey ?? effectId,
     kind,
     flush: async (committedTx) => {
       const reason = verifySinkRequestRelease(

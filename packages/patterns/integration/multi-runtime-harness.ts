@@ -18,36 +18,41 @@
  * process is its own realm. The storage server is self-hosted in-process
  * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
  * `apiUrl` to target a running toolshed instead.
+ *
+ * POSTURE (server-execution v2): the self-hosted standalone server has no
+ * serving host — no ExecutorHost, no serving loop — and its engine reads
+ * this realm's ambient flag, which nothing here enables. Under the ON
+ * posture that combination is a MIXED topology no deployment produces:
+ * the worker clients resolve `EXPERIMENTAL_SERVER_EXECUTION=true` from
+ * env and send event appends, and the in-process engine's OFF-arm
+ * admission refuses them deterministically ("the OFF arm has no
+ * event-append admission"), so every cross-session consequence silently
+ * never happens (first observed on the first CI run of the ON pattern
+ * lanes, 2026-08-21). So when the environment resolves the ON posture
+ * (the canonical env mapping, else the first-party default) and no
+ * explicit `apiUrl` was passed, the harness targets the integration
+ * environment's toolshed (`env.API_URL`) — the real ON topology, serving
+ * loop included — instead of self-hosting. The OFF arm is byte-identical
+ * to before: flag unset or false keeps the in-process standalone server.
  */
 
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
-import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import type {
-  RuntimeDiagnosticsSnapshot,
-  TrustedUiDescriptor,
-  WorkerRequest,
-  WorkerResponse,
-} from "./multi-runtime-worker.ts";
-
-// The self-hosted storage server lives in THIS realm, while every runtime
-// lives in a worker realm whose Runtime constructor propagates the
-// EXPERIMENTAL_* env flags into the memory module's ambient config. No
-// Runtime is ever constructed in the harness realm, so a flag-ON test run
-// would otherwise leave the SERVER side of the flag off — a client/server
-// capability skew the harness does not intend to model (skewed peers now
-// degrade gracefully, so the suite would silently test flag-off semantics).
-// Mirror toolshed (whose in-process Runtime sets the ambient flag for its
-// memory route) by propagating the canonical env mapping. Re-asserted per
-// harness creation: any Runtime constructed later in this realm re-derives
-// the ambient flag from ITS options and would stomp a load-time value.
-function propagateExperimentalEnvToServerRealm(): void {
-  const experimental = experimentalOptionsFromEnv(Deno.env.get);
-  if (experimental.persistentSchedulerState !== undefined) {
-    setPersistentSchedulerStateConfig(experimental.persistentSchedulerState);
-  }
-}
+import {
+  fabricFromKeyPairRaw,
+  type RuntimeDiagnosticsSnapshot,
+  type TrustedUiDescriptor,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./multi-runtime-ipc.ts";
 
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
@@ -83,7 +88,7 @@ export interface MultiRuntimeHarnessOptions {
    */
   dataFilePaths?: readonly string[];
   /** Optional initial pattern input for the bootstrap-created piece. */
-  input?: Record<string, unknown>;
+  input?: Record<string, FabricValue>;
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
@@ -103,7 +108,7 @@ class WorkerClient {
   #nextId = 1;
   #pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    { resolve: (value: FabricValue) => void; reject: (error: Error) => void }
   >();
   readonly label: string;
 
@@ -122,7 +127,13 @@ class WorkerClient {
           new Error(`[${this.label}] ${event.data.error}`),
         );
       } else {
-        pending.resolve(event.data.ok);
+        try {
+          pending.resolve(fabricFromRealmValue(event.data.ok));
+        } catch (error) {
+          pending.reject(
+            new Error(`[${this.label}] undecodable answer`, { cause: error }),
+          );
+        }
       }
     };
     this.#worker.onerror = (event) => {
@@ -134,10 +145,23 @@ class WorkerClient {
     };
   }
 
-  call(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  /**
+   * Calls `cmd` in the worker realm, answering with what it returns.
+   *
+   * `args` and the answer each cross as one `codec-realm` encoding, so both
+   * carry the whole `FabricValue` domain.
+   */
+  call(
+    cmd: string,
+    args: Record<string, FabricValue> = {},
+  ): Promise<FabricValue> {
     const id = this.#nextId++;
-    const request: WorkerRequest = { id, cmd, args };
-    return new Promise((resolve, reject) => {
+    const request: WorkerRequest = {
+      id,
+      cmd,
+      args: realmFromFabricValue(args),
+    };
+    return new Promise<FabricValue>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(
@@ -187,7 +211,7 @@ export class MultiRuntimeSession {
    */
   async send(
     handler: string,
-    event: unknown = {},
+    event: FabricValue = {},
     trustedUi?: TrustedUiDescriptor,
     opts: { idle?: boolean } = {},
   ): Promise<void> {
@@ -208,7 +232,7 @@ export class MultiRuntimeSession {
    */
   async set(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("set", {
@@ -226,7 +250,7 @@ export class MultiRuntimeSession {
    */
   async push(
     path: (string | number)[],
-    value: unknown,
+    value: FabricValue,
     opts: { idle?: boolean } = {},
   ): Promise<{ ok: boolean; error?: { name?: string; message?: string } }> {
     return await this.#client.call("push", {
@@ -237,14 +261,14 @@ export class MultiRuntimeSession {
   }
 
   /** Read a value from the piece result, pulling fresh state first. */
-  async read(path: (string | number)[] = []): Promise<unknown> {
+  async read(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("read", { path });
   }
 
   /** Read the RAW stored value at `path` (links resolved to the target cell,
    *  no result-schema shaping) — for state the declared schema does not
    *  carry, e.g. a query result's `requestHash`. */
-  async readRaw(path: (string | number)[] = []): Promise<unknown> {
+  async readRaw(path: (string | number)[] = []): Promise<FabricValue> {
     return await this.#client.call("readRaw", { path });
   }
 
@@ -270,12 +294,12 @@ export class MultiRuntimeSession {
       id: string;
       space: string;
       path?: (string | number)[];
-      scope?: unknown;
+      scope?: FabricValue;
     },
-  ): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  ): Promise<{ ok: boolean; value?: FabricValue; error?: string }> {
     return await this.#client.call("rawRead", address) as {
       ok: boolean;
-      value?: unknown;
+      value?: FabricValue;
       error?: string;
     };
   }
@@ -345,10 +369,18 @@ export class MultiRuntimeHarness {
     if (options.sessions.length === 0) {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
-    propagateExperimentalEnvToServerRealm();
     const spaceName = options.spaceName ?? crypto.randomUUID();
-    const server = options.apiUrl ? undefined : StandaloneMemoryServer.start();
-    const apiUrl = (options.apiUrl ?? server!.url).href;
+    // The ON posture needs a serving host, which the standalone in-process
+    // server does not have — see the header's POSTURE block. Resolve the
+    // posture exactly like a deployed entry point (canonical env mapping,
+    // else the first-party default) and pick the backend accordingly.
+    const serverExecutionOn =
+      experimentalOptionsFromEnv(Deno.env.get).serverExecution ??
+        SERVER_EXECUTION_DEFAULT_ENABLED;
+    const targetUrl = options.apiUrl ??
+      (serverExecutionOn ? new URL(env.API_URL) : undefined);
+    const server = targetUrl ? undefined : StandaloneMemoryServer.start();
+    const apiUrl = (targetUrl ?? server!.url).href;
 
     const sessions: MultiRuntimeSession[] = [];
     let bootstrap: WorkerClient | undefined;
@@ -364,7 +396,7 @@ export class MultiRuntimeHarness {
           );
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
-          rawIdentity: identity.serialize(),
+          identity: fabricFromKeyPairRaw(identity.serialize()),
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
@@ -384,7 +416,7 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
-        rawIdentity: sessions[0].identity.serialize(),
+        identity: fabricFromKeyPairRaw(sessions[0].identity.serialize()),
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,

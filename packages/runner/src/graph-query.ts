@@ -16,6 +16,7 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
@@ -89,6 +90,14 @@ export type GraphQueryWalkOptions = {
    * it already covers.
    */
   schemaTracker: MapSetStringToPathSelectors;
+  /**
+   * The acting identity the walk's tracker keys resolve scoped addresses
+   * against (key-vocabulary.md §1 sites 5–6): coverage proven for one scope
+   * INSTANCE is not coverage of another. The identity arrives with the work
+   * — the memory server's query path supplies the querying session's —
+   * never from ambient state (key-vocabulary.md §3).
+   */
+  identity: ScopeKeyIdentity;
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
   /** Counters to add into. */
@@ -107,6 +116,7 @@ export type GraphQueryWalkOptions = {
 export class GraphQueryWalk {
   readonly #manager: ObjectStorageManager;
   readonly #space: MemorySpace;
+  readonly #identity: ScopeKeyIdentity;
   readonly #context: TraversalContext;
   readonly #memo: SchemaMemo;
   readonly stats: GraphQueryWalkStats;
@@ -114,9 +124,11 @@ export class GraphQueryWalk {
   constructor(options: GraphQueryWalkOptions) {
     this.#manager = options.manager;
     this.#space = options.space;
+    this.#identity = options.identity;
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
       options.schemaTracker,
+      options.identity,
       true,
     );
     this.#memo = options.memo ?? createSchemaMemo();
@@ -127,16 +139,27 @@ export class GraphQueryWalk {
    * Walks `document` under `selector`, recording every document the schema
    * reaches — including the metadata documents a reader needs to interpret
    * them — in the walk's schema tracker.
+   *
+   * The document records under `schemaTrackerKey` over the walk's identity
+   * unless the caller passes `docKey`: a caller that named an explicit
+   * scope INSTANCE (protocol.md §2's read row — a query root carrying
+   * `entityScopeKey`) records under THAT instance's key rather than one
+   * resolved from the acting identity.
    */
-  visit(document: IAttestation, selector: SchemaPathSelector): void {
+  visit(
+    document: IAttestation,
+    selector: SchemaPathSelector,
+    docKey?: `${string}/${ScopeKey}/${string}`,
+  ): void {
     const effectiveSelector = selector.schema === undefined
       ? { ...selector, schema: false }
       : selector;
 
-    const docKey = schemaTrackerKey(
+    docKey ??= schemaTrackerKey(
       this.#space,
       document.address.id,
       document.address.scope,
+      this.#identity,
     );
     const internedSelector = internPathSelector(effectiveSelector);
     if (

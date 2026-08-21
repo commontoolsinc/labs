@@ -17,7 +17,7 @@
  * `codec-json/` holds the four that JSON needs.
  *
  * The one abstract base here is `BaseCodecEngine`, what an ENGINE extends, one
- * per wire format -- the thing that walks fabric values and drives their
+ * per wire format -- the thing that walks `FabricValue`s and drives their
  * codecs. What such a value itself extends is a different question with a
  * different answer, and lives in `fabric-bases/`.
  *

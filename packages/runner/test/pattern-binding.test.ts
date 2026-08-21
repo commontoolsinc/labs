@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
+import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+} from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -311,6 +315,100 @@ describe("pattern-binding", () => {
           },
         ),
       ).toBe(true);
+    });
+
+    it("RAGGED redirect (fan-out stage B): a SESSION discovery below an EXISTING user redirect re-points the run's own USER slot, never the SHARED space slot — a sibling principal's next read still resolves the user instance, not a session instance of a node that is user-scoped for them", () => {
+      // The independent review's F3 asked for a deterministic unit pin
+      // here: the E2E (c)/(f-walk) shapes are timing-sensitive, and the
+      // revert-to-shared-slot mutation (M9) survived 3/4 there. This
+      // exercises exactly the flag-gated branch.
+      setServerExecutionConfig(true);
+      try {
+        const output = runtime.getCell<{ value: unknown }>(
+          space,
+          "ragged redirect output",
+          undefined,
+          tx,
+        );
+        output.set({ value: null });
+        const argumentCellLink = getMetaCell(output, "argument", tx)
+          .getAsNormalizedFullLink();
+        const source = runtime.getCell<string>(
+          space,
+          "ragged redirect source",
+          undefined,
+          tx,
+        );
+        source.set("secret");
+
+        const spaceSlot = output.key("value");
+        const userSlot = runtime.getCellFromLink(
+          { ...spaceSlot.getAsNormalizedFullLink(), scope: "user" },
+          undefined,
+          tx,
+        );
+        const sessionSlot = runtime.getCellFromLink(
+          { ...spaceSlot.getAsNormalizedFullLink(), scope: "session" },
+          undefined,
+          tx,
+        );
+
+        // Hop 1: a USER-scope discovery — the shared space slot narrows
+        // to user (structural top hop). Every principal follows it.
+        sendValueToBinding(
+          tx,
+          output,
+          argumentCellLink,
+          spaceSlot.getAsWriteRedirectLink(),
+          source,
+          { narrowestReadScope: "user" },
+        );
+        // The space slot points at the USER instance.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(spaceSlot.getRaw() as never, spaceSlot)!,
+            userSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+
+        // Hop 2: a SESSION discovery for THIS run. The ragged fix points
+        // the run's own USER slot at the session instance — NOT the
+        // shared space slot (which M9 reverts to, re-pointing the slot
+        // every other principal follows at a session instance of a node
+        // that is user-scoped for them).
+        sendValueToBinding(
+          tx,
+          output,
+          argumentCellLink,
+          spaceSlot.getAsWriteRedirectLink(),
+          source,
+          { narrowestReadScope: "session" },
+        );
+
+        // The SHARED space slot is UNCHANGED — still → user.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(spaceSlot.getRaw() as never, spaceSlot)!,
+            userSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+        // The run's own USER slot now → session.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(userSlot.getRaw() as never, userSlot)!,
+            sessionSlot.getAsNormalizedFullLink(),
+          ),
+        ).toBe(true);
+        // The value lands at the SESSION instance.
+        expect(
+          areNormalizedLinksSame(
+            parseLink(sessionSlot.getRaw() as never, sessionSlot)!,
+            { ...source.getAsNormalizedFullLink(), path: [] },
+          ),
+        ).toBe(true);
+      } finally {
+        resetServerExecutionConfig();
+      }
     });
 
     it("does not stamp scoped asCell alias schemas onto write redirect links", () => {

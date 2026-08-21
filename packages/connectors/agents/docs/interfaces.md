@@ -122,7 +122,7 @@ session read succeeded, and every snapshot reported itself complete.
 `prepareSession(sourceId, snapshot, targetChunkBytes?)` is available when a host
 or another target needs the connector's stable key, chunks, and hashes without
 publishing to Fabric. It captures the summary, provider events, and normalized
-messages as immutable Fabric values before it measures chunks or computes
+messages as immutable `FabricValue`s before it measures chunks or computes
 hashes. The returned chunks contain those captured event values.
 
 ### Fabric connection and target
@@ -553,7 +553,7 @@ capabilities, up to 12 recent normalized message previews, a live manifest cell
 link, content hash, and synchronization status. The lifecycle fields describe
 provider state. Synchronization status describes the connector's published copy.
 
-The manifest and chunk fields are stored as Fabric links rather than copied
+The manifest and chunk fields are stored as `FabricLink`s rather than copied
 objects. A consumer whose schema declares those fields as `Cell` values can read
 one session graph without hydrating every session represented by the index. The
 target rejects an index containing an entry without `formatVersion: 1`. It does
@@ -637,12 +637,12 @@ or child value gets its own cell-to-link and native-to-Fabric conversion. These
 are the same conversion boundaries used when the graph is written.
 
 `stableFabricValue()` performs this conversion for both hashing and graph
-writes. It replaces connector-owned cells with complete Fabric links. It then
-captures native plain data as immutable Fabric data. Native `toJSON()` methods
-and property getters run during this capture. Later hashing and writing use the
-captured result, so a mutable native object cannot change between those steps.
-Shared JavaScript references retain their Fabric value semantics and do not
-become path-only links. Circular values and arrays with enumerable named
+writes. It replaces connector-owned cells with complete `FabricLink`s. It then
+captures native plain data as immutable `FabricValue`s. Native `toJSON()`
+methods and property getters run during this capture. Later hashing and writing
+use the captured result, so a mutable native object cannot change between those
+steps. Shared JavaScript references retain their `FabricValue` semantics and do
+not become path-only links. Circular values and arrays with enumerable named
 properties are rejected at this boundary because they have no supported Fabric
 representation. Supported Fabric protocol instances are captured as private
 immutable values. Links and errors are rebuilt around captured state. Unknown
@@ -650,12 +650,12 @@ and problematic tagged values receive the same treatment because their general
 deep-clone methods are not yet implemented. This includes links returned by
 connector-owned cells in the modern cell representation. Mutating an original
 instance, nested state, link, or link payload cannot change a planned hash or
-graph. Captured Fabric links are atomic planner values. Arrays inside a link
+graph. Captured `FabricLink`s are atomic planner values. Arrays inside a link
 payload, including a cell subpath, are not split into child cells.
 
-The Fabric value hash distinguishes undefined values, sparse array holes,
+The `FabricValue` hash distinguishes undefined values, sparse array holes,
 special numbers, bigints, bytes, dates, regular expressions, errors, and other
-accepted Fabric values. Object key order does not affect the hash. Array order
+accepted `FabricValue`s. Object key order does not affect the hash. Array order
 is preserved.
 
 ### Graph commits and hydration
@@ -667,7 +667,7 @@ each deterministic child and places the returned cell in that object.
 
 The materializer writes each child through the graph's runtime edit transaction
 and returns the child cell. The parent conversion replaces that cell with its
-Fabric link. Nested children are written before the child that links to them.
+`FabricLink`. Nested children are written before the child that links to them.
 
 Existing object values use the same field-write approach as Loom's stable graph
 helper. Each property is written at its own path under the cell's `value` field.
@@ -693,7 +693,7 @@ chunks before a manifest cannot mutate the graph reachable from the prior
 manifest.
 
 `readStableCellGraphValue()` synchronizes a root cell and recursively hydrates
-Fabric links. It caches repeated links within one read and synchronizes at most
+`FabricLink`s. It caches repeated links within one read and synchronizes at most
 50 array children concurrently.
 
 Its optional fourth argument accepts `preserveLinkFields`. A link stored under a
@@ -820,7 +820,7 @@ receipts.
 The optional receipt `result` is stored as an `fvj1:` Fabric JSON string inside
 the outer ledger JSON file. The ledger decodes that string before returning a
 receipt. This preserves `undefined`, big integers, special numbers, links, and
-other Fabric values across process restarts.
+other `FabricValue`s across process restarts.
 
 Writes are serialized. Receipts are sorted by command ID. Every committed write
 increments `generation`. On Unix systems, the ledger writes an indented

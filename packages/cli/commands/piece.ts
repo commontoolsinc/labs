@@ -1308,8 +1308,8 @@ export function targetOptions(
       : cmd.env(name, description, { prefix: "CF_" });
   option("-q,--quiet", "Suppress hints and next-step suggestions");
   option("-u,--url <url:string>", "URL representing a host, space, and piece.");
-  env("CF_API_URL=<url:string>", "URL of the fabric instance.");
-  option("-a,--api-url <url:string>", "URL of the fabric instance.");
+  env("CF_API_URL=<url:string>", "URL of the fabric server instance.");
+  option("-a,--api-url <url:string>", "URL of the fabric server instance.");
   env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.");
   option("-i,--identity <path:string>", "Path to an identity keyfile.");
   option("-s,--space <space:string>", "The space name or DID");

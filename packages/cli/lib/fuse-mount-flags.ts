@@ -70,7 +70,7 @@ const MOUNT_FLAG_SPECS: FlagSpecs<FuseMountFlags> = {
     flag: "--api-url",
     arity: "value",
     valueLabel: "<url>",
-    help: "URL of the fabric instance",
+    help: "URL of the fabric server instance",
   },
   identity: {
     flag: "--identity",

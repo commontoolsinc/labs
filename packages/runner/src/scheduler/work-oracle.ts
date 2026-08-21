@@ -75,14 +75,6 @@ export interface PullSchedulingState {
   // correctness gates); a convergence-backoff deferral means the wave has not
   // settled and its re-run still owes a downstream effect its converged value.
   readonly isConvergenceBackoffDeferred: (action: Action) => boolean;
-  // True while ANY initial rehydration is in flight (resume from persisted
-  // state). The runnable-seed set is status-based, and reload sync-fills mark
-  // resuming never-ran/invalid nodes — so without a barrier the settle runs
-  // them fresh (racing/aborting their resume) and re-renders downstream
-  // effects in waves. Holding ALL pull work until resumes resolve reproduces
-  // the rehydrate-first-then-one-settle ordering. idle() already awaits the
-  // resume background tasks, so this never reports idle early.
-  readonly hasPendingInitialRehydrations: () => boolean;
 }
 
 export function isInvalidOrNeverRan(record: SchedulerNode): boolean {
@@ -150,13 +142,6 @@ export interface PullWorkAssessment {
 export function assessPullWork(
   state: PullSchedulingState,
 ): PullWorkAssessment {
-  // Rehydration barrier: no pull work runs until in-flight resumes resolve.
-  // idle() awaits those background tasks separately, so this does not report
-  // idle prematurely.
-  if (state.hasPendingInitialRehydrations()) {
-    return { runnableNow: false, deferredIdleBlocking: false };
-  }
-
   const now = performance.now();
   let nextWakeAt: number | undefined;
   let deferredIdleBlocking = false;

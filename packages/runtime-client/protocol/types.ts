@@ -188,10 +188,17 @@ export type InitializationData = {
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;
-    persistentSchedulerState?: boolean;
     // Roll a space's system root pattern (home included) forward in place
     // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;
+    // Server-execution v2 (docs/specs/server-side-execution/). The host
+    // DECLARES its posture here so the worker runs the same arm — the
+    // flag previously rode only as an untyped excess property, and any
+    // typed re-packaging silently reverted a worker to OFF while the
+    // host diverted (F10 alive and dead across realms; review
+    // 2026-08-11 m7). The worker refuses initialization when its
+    // resolved posture disagrees with this declaration.
+    serverExecution?: boolean;
     // Link writers emit cid: schema-document references, with each closure
     // materialized in the carrying transaction (content-addressed schemas
     // Phase 1). Default on; an explicit false is the rollback override.

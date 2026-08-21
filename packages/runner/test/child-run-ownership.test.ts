@@ -10,6 +10,7 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
 // Each drives the public API only: a parent pattern, a child reached through
@@ -18,14 +19,19 @@ import { Runtime } from "../src/runtime.ts";
 const signer = await Identity.fromPassphrase("child run ownership");
 const space = signer.did();
 
-function key(cell: Cell<unknown>) {
-  const link = cell.getAsNormalizedFullLink();
-  return `${link.space}/${link.scope}/${link.id}` as const;
-}
-
 describe("child run ownership", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+
+  // The registration key the runner indexes cancels by: the scope segment is
+  // the runtime's scope INSTANCE (resolveScopeKey), not the raw scope name
+  // (stage E re-keying) — entityKey is the shared constructor for the format.
+  function key(cell: Cell<unknown>) {
+    return entityKey(
+      cell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
+  }
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });

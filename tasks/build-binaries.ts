@@ -462,6 +462,18 @@ export async function prepareWorkspace(
   const buildInfo = {
     commitSha: Deno.env.get("COMMIT_SHA") ?? "",
     builtAt: new Date().toISOString(),
+    // The server-execution v2 posture the browser shell BAKES (an esbuild
+    // define read from this same environment in packages/shell/felt.config.ts
+    // when buildShell runs below): the raw `EXPERIMENTAL_SERVER_EXECUTION`
+    // value, or null when unset — the shell then follows the first-party
+    // default. Surfaced on toolshed's /api/meta as `shellServerExecutionDefine`
+    // so CI's explicit-ON lanes can verify the binary they run actually
+    // carries an ON-built shell (docs/specs/server-side-execution/testing.md
+    // §2; the shell define is baked, so an ON lane on a default-built binary
+    // would silently be a mixed posture). Written to both markers because
+    // they are one file written twice; only the toolshed embeds the shell.
+    shellServerExecutionDefine: Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") ??
+      null,
   };
   const serialized = JSON.stringify(buildInfo, null, 2) + "\n";
   await Deno.writeTextFile(config.toolshedEnvPath(), serialized);

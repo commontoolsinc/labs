@@ -95,8 +95,8 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | `systemPatternAutoUpdate`: post-instantiation background source check; pre-bootstrap default-root reconcile; schema-compat gate; pointer write | `pattern-updater.ts:70-531` (`80-122`, `442-465`, `476-511`), hook `runner.ts:2133-2146`; flag `docs/development/EXPERIMENTAL_OPTIONS.md` §systemPatternAutoUpdate | none | GAP |
-| 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2158-2341` (`2202`, `2168-2200`, `2259-2317`) | none | GAP |
+| 40 | `systemPatternAutoUpdate`: post-instantiation background source check; pre-bootstrap default-root reconcile; schema-compat gate; pointer write | `pattern-updater.ts:70-531` (`80-122`, `442-465`, `476-511`), hook `runner.ts:2306-2318`; flag `docs/development/EXPERIMENTAL_OPTIONS.md` §systemPatternAutoUpdate | serving-loop.md §3e | COVERED (stage F: the serving-runtime factory enables the flag server-side; the check half's source probe against a fully-local store is the flagged stage-F residual) |
+| 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2331-2513` (`2375-2512`, `2340-2379`, `2418-2490`) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts:623-748`, `6578-6903` | none (authored data; rides along) | COVERED |
 
 ### 1g. Built-ins
@@ -118,7 +118,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:761`, `786`, `968-972`; `runner.ts:4733-4748` | protocol §2b | COVERED |
+| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:664`, `690`, `963`; `runner.ts:4698-4713` | protocol §2b | COVERED |
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
 | 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | scopes.md (RULED 2026-08-02) | CHANGED |
@@ -229,8 +229,9 @@ non-conflict retry (row 16), the disposition *classification*
 conflict re-queue (`run.ts:165-213`) and the event-commit backoff
 window (`events.ts:1372-1386`) — with one deriver there is no
 concurrent deriver to conflict with; the mid-wave authored race is
-handled by the §3d per-doc CAS drop (`wave.supersededWrites`), and a
-dropped write recomputes next wave. Survives client-side: the whole
+handled by the §3d per-doc CAS drop (`wave.supersededWrites`);
+recompute after a drop is dependency-only (serving-loop.md §3d,
+RULED 2026-08-05), never a re-arm. Survives client-side: the whole
 backpressure stack, now applied to *authored* commits only (UI
 bindings, event appends). `CommitConvergenceError` remains the
 client's terminal surface. events §5 covers duplicate-submit; it does
@@ -481,7 +482,7 @@ shared `scope_key` vocabulary, key-vocabulary.md §3) and LD5 (the
 lease-holder read row, protocol.md §2).
 scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s
 session-fed admission path (`applyCommit`,
-`packages/memory/v2/server.ts:2128-2132` → `engine.ts:5374-5375`)
+`packages/memory/v2/server.ts:2060-2063` → `engine.ts:2031-2032`)
 narrows to
 authored commits only; derived admission stays the lease check.
 Effects still run under the capability handle's grant (README
@@ -516,15 +517,20 @@ exist on main (`scopeSummary`, `contextKey`, replay table) — the
 Phase 0 main-surface audit (plan §Phase 0) should record this
 mapping's inventory as that audit.
 
-**N62 (observation adoption).** Adoption exists so N client runtimes
-don't all re-run what one already ran — the multi-client symptom v2
+**N62 (observation adoption).** Adoption existed so N client runtimes
+didn't all re-run what one already ran — the multi-client symptom v2
 removes at the root. Under the flag clients no longer run committed
 derivations at all (reload is read-and-render, §3b), so adoption has
 nothing to adopt; server-side there is no second runtime to adopt
-from. Delete under ON; keep OFF-arm. The one caveat: the sync-path
-comment in `scheduler/invalidation.ts:39-49` (pushes must stay
-unshaped for adoption) loses its reason once adoption goes — re-check
-the shaping decision (N10) then.
+from. DELETED in Phase 1 stage C.2, ahead of the original
+delete-under-ON/keep-OFF-arm disposition: the stage's D7 protocol
+deletions (serving-loop §3b) removed the feature's entire substrate —
+the persisted rows it listed, the hello negotiation that gated it, and
+the commit carriage that fed it — so keeping the receive path would
+have kept dead code no server could ever feed. The caveat that came
+with the disposition still stands: the sync-path comment in
+`scheduler/invalidation.ts` (pushes had to stay unshaped for adoption)
+lost its reason, so the shaping decision is due a re-check (N10).
 
 **N64 (execution_lease does not exist).** serving-loop §Anchors and
 §2 describe `execution_lease` as "an existing table"; it is not in

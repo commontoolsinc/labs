@@ -24,6 +24,47 @@ export type EchoReport = {
   error?: string;
 };
 
+/**
+ * Facts about a decoded key pair, read structurally on the far side: which
+ * state it arrived in, and what its two keys are there.
+ */
+function keyPairFacts(pair: unknown): Record<string, unknown> | undefined {
+  if (pair === undefined) {
+    return undefined;
+  }
+
+  const { algorithm, hasMaterial } = pair as {
+    algorithm: string;
+    hasMaterial: boolean;
+  };
+
+  if (hasMaterial) {
+    const { publicKeyBytes, privateKeyBytes } = pair as {
+      publicKeyBytes: { slice(): Uint8Array };
+      privateKeyBytes: { slice(): Uint8Array };
+    };
+    return {
+      algorithm,
+      hasMaterial,
+      publicKey: [...publicKeyBytes.slice()],
+      privateKey: [...privateKeyBytes.slice()],
+    };
+  }
+
+  const { publicKey, privateKey } =
+    (pair as { cryptoKeyPair: CryptoKeyPair }).cryptoKeyPair;
+
+  return {
+    algorithm,
+    hasMaterial,
+    publicKeyClass: publicKey?.constructor?.name,
+    privateKeyClass: privateKey?.constructor?.name,
+    privateKeyType: privateKey?.type,
+    privateKeyExtractable: privateKey?.extractable,
+    privateKeyUsages: privateKey?.usages,
+  };
+}
+
 self.onmessage = (ev: MessageEvent) => {
   try {
     const value = fabricFromRealmValue(ev.data as RealmEncodedValue) as Record<
@@ -82,6 +123,7 @@ self.onmessage = (ev: MessageEvent) => {
           lookalikeTag: Array.isArray(value.lookalike)
             ? value.lookalike[1]
             : undefined,
+          keyPair: keyPairFacts(value.keyPair),
         },
       } satisfies EchoReport,
     );

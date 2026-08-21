@@ -67,10 +67,12 @@ function createRuntime(identity: Identity, base: URL): Runtime {
       memoryHost: new URL(base),
     }),
     experimental: {
+      // Server-execution v2 posture (testing.md §2): this test serves
+      // toolshed's `app.ts` IN-PROCESS with NO ExecutorHost — a
+      // single-process harness whose client is OFF BY CONSTRUCTION,
+      // whatever EXPERIMENTAL_SERVER_EXECUTION says (P7 review finding 7:
+      // only the tests that talk to the lane's toolshed declare it).
       modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
-      persistentSchedulerState: readExperimentalFlag(
-        "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-      ),
     },
   });
 }

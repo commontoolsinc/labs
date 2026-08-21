@@ -25,6 +25,7 @@ import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 //
@@ -53,6 +54,7 @@ const TAG_EPOCH_DAY = 0x28;
 const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
+const TAG_KEY_PAIR = 0x2c;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -78,6 +80,7 @@ const TAG_EPOCH_DAY_BYTES = new Uint8Array([TAG_EPOCH_DAY]);
 const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
+const TAG_KEY_PAIR_BYTES = new Uint8Array([TAG_KEY_PAIR]);
 
 //
 // Core: recursive value feeding
@@ -248,7 +251,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (special primitives, `FabricInstance`, `Array`,
+ * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
  * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).
@@ -315,6 +318,23 @@ function feedObjectValue(
       hasher.update(getStringRep(codec.tagForValue(fabInst)));
       const state = codec.encode(fabInst);
       feedValue(hasher, state);
+      return;
+    }
+
+    case NATIVE_TAGS.FabricKeyPair: {
+      const fab = value as FabricKeyPair;
+      if (!fab.hasMaterial) {
+        // A pair holding handles has no content to hash: its material is
+        // unreachable, and the algorithm alone is shared by every key that
+        // uses it.
+        throw new Error(
+          "`hashOf()`: cannot hash a key pair that holds handles.",
+        );
+      }
+      hasher.update(TAG_KEY_PAIR_BYTES);
+      feedValue(hasher, fab.algorithm);
+      feedValue(hasher, fab.publicKeyBytes);
+      feedValue(hasher, fab.privateKeyBytes);
       return;
     }
 

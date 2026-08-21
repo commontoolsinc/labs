@@ -17,7 +17,7 @@ export function setPatternCell(
   const parentPattern = patternCell.getRaw();
   if (parentPattern !== undefined) {
     // A `Cell`'s type parameter is always `FabricValue`-compatible, so
-    // `getRaw()` yields a fabric value. `Cell<unknown>` just cannot say so;
+    // `getRaw()` yields a `FabricValue`. `Cell<unknown>` just cannot say so;
     // constraining `Cell<T extends FabricValue>` is what would remove this.
     resultCell.setMetaRaw("pattern", parentPattern as FabricValue);
   }

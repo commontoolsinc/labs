@@ -11,7 +11,7 @@ const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
 
 // The `#now/N` grid ticks on a recurring wall-clock-boundary timer. These cases
-// observe the grid value advancing across a second, driving the beat with
+// observe the grid value advancing across a boundary, driving the beat with
 // `clock.tick` and reading the coarsened value before and after. They are split
 // out of `wish.test.ts` because the grid's heartbeat and its shared result cell
 // carry state across a suite's cases: run alongside the ~30 other `#now` cases,
@@ -169,5 +169,78 @@ describe("interval #now wish", () => {
     expect(updated).toBeGreaterThan(initial!);
 
     runtime.runner.stop(resultCell);
+  });
+
+  it("brings a stale grid cell forward when the timer is re-acquired", async () => {
+    // The grid cell outlives the timer that ticks it: the last release stops
+    // the timer and drops the registry entry, leaving the cell holding the
+    // instant it last ticked. A later acquire therefore visits a cell that is
+    // behind the grid once the clock crossed a boundary in between, and the
+    // acquire brings it forward at once. A minute grid keeps the next boundary
+    // far enough away that the acquire's own write is the only one this case
+    // can see.
+    const INTERVAL_MS = 60_000;
+    const coarsen = (ms: number) => Math.floor(ms / INTERVAL_MS) * INTERVAL_MS;
+
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/60" }) };
+    });
+
+    const firstResultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "stale grid first result",
+      undefined,
+      tx,
+    );
+    const first = runtime.run(tx, wishPattern, {}, firstResultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await first.pull();
+    const stale = first.key("nowValue").get()?.result;
+    expect(stale).toBe(coarsen(Date.now()));
+
+    // Last user gone: the timer stops, so nothing writes the cell across the
+    // minute boundary that follows and it falls a grid instant behind.
+    runtime.runner.stop(firstResultCell);
+    await runtime.idle();
+    await clock.tick(INTERVAL_MS);
+    const current = coarsen(Date.now());
+    expect(current).toBeGreaterThan(stale!);
+
+    // The shared cell, addressed the way the timer addresses it, so that the
+    // writes the re-acquire makes can be read in order.
+    const gridCell = runtime.getCell<number>(
+      space,
+      { wish: { now: true, interval: INTERVAL_MS } },
+      undefined,
+      tx,
+    );
+    const observed: (number | undefined)[] = [];
+    const cancelSink = gridCell.sink((value) => {
+      observed.push(value);
+    });
+
+    const secondResultCell = runtime.getCell<
+      { nowValue?: { result?: number } }
+    >(
+      space,
+      "stale grid second result",
+      undefined,
+      tx,
+    );
+    const second = runtime.run(tx, wishPattern, {}, secondResultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await second.pull();
+    cancelSink();
+
+    // Still inside the grid instant the acquire saw, so no boundary timer can
+    // have fired: the second write is the acquire's own.
+    expect(coarsen(Date.now())).toBe(current);
+    expect(observed).toEqual([stale, current]);
+
+    runtime.runner.stop(secondResultCell);
   });
 });

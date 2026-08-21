@@ -35,6 +35,10 @@ import {
 } from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
+import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
@@ -310,9 +314,27 @@ function createUpdatePartialCallback(
           return;
         }
 
-        // Wait for scheduler to be idle, then commit the batched update
+        // Wait for scheduler to be idle, then commit the batched update.
+        //
+        // Deliberately NOT marked as an effect completion (server-execution
+        // v2 stage G): protocol.md §6 rules settled-result-only commits —
+        // "partials never become commits" under the flag, and the interim
+        // loss of token streaming is ACCEPTED (owner, 2026-08-02). In the
+        // serving posture UNDER THE FLAG the partial is SKIPPED before a
+        // transaction is minted — the same ruled outcome the
+        // unstamped-seal refusal produced here before, without spending a
+        // refused seal, so §3d's `unstampedSealRefusals` counter stays an
+        // undeclared-commit-path signal instead of counting this accepted
+        // baseline. The OFF arm commits it exactly as today — INCLUDING a
+        // serving-posture runtime with the flag off (review thread
+        // r3756175835: posture alone dropped OFF-arm partials, an
+        // unrecorded OFF-arm delta).
         runtime.idle().then(() => {
-          if (completed || thisRun !== getCurrentRun()) {
+          if (
+            completed || thisRun !== getCurrentRun() ||
+            (runtime.servingPosture &&
+              runtime.experimental.serverExecution === true)
+          ) {
             return;
           }
           return runtime.editWithRetry((tx) => {
@@ -460,6 +482,12 @@ async function handleLLMError<T, P>(
   getCurrentRun: () => number,
   thisRun: number,
   resetPreviousHash: () => void,
+  /** The served-effect id this error writeback completes
+   * (`<sink>:<hash>` — the enqueue id). Marks the write as an
+   * effect-completion transaction under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4's error-shaped
+   * results); inert everywhere else. */
+  effectKey?: string,
 ): Promise<void> {
   if (thisRun !== getCurrentRun()) return;
 
@@ -470,6 +498,7 @@ async function handleLLMError<T, P>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     pendingCell.withTx(tx).set(false);
     errorCell.withTx(tx).set(message);
     resultCell.withTx(tx).set(undefined as T);
@@ -548,6 +577,10 @@ function enqueuePostCommitLLMWork(
   tx: IExtendedStorageTransaction,
   sink: string,
   id: string,
+  /** The PER-TARGET outbox/dedupe key (effectTargetKey of `id` and the
+   * builtin's result cell) — distinct nodes with identical inputs must
+   * not collide on `id` alone (stage-G round-2 headline). */
+  idempotencyKey: string,
   kind: string,
   request: any,
   start: () => void,
@@ -561,6 +594,7 @@ function enqueuePostCommitLLMWork(
     () => {
       start();
     },
+    { idempotencyKey },
   );
 }
 
@@ -729,7 +763,25 @@ export function llm(
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    const currentRequestHash = requestHashWithLog.get();
+    if (hash === previousCallHash || hash === currentRequestHash) {
+      // The §4 memo hit, gated on SETTLED state like the sibling
+      // builtins (generateText/generateObject; round-2 thread 8): a
+      // hit is a re-evaluation that resolved from a stored key WITH a
+      // result or error-shaped result landed. The old gate counted a
+      // settled same-runtime re-evaluation as in-flight dedupe (hash
+      // === previousCallHash, which completion never clears) and a
+      // bare unsettled claim (stored hash, no result yet) as a hit —
+      // both miscounts for Phase 2's gate arithmetic.
+      if (
+        hash === currentRequestHash &&
+        (resultWithLog.get() !== undefined ||
+          errorWithLog.get() !== undefined)
+      ) {
+        runtime.effectMemoObserver?.({ kind: "hit", id: `llm:${hash}` });
+      }
+      return;
+    }
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
@@ -766,10 +818,12 @@ export function llm(
 
     // Build tool catalog if tools are present, then start execution after the
     // transaction commits.
+    const effectKey = effectTargetKey(`llm:${hash}`, resultCell);
     enqueuePostCommitLLMWork(
       tx,
       "llm",
       `llm:${hash}`,
+      effectKey,
       "llm-start",
       requestSnapshot,
       () => {
@@ -807,6 +861,7 @@ export function llm(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields —
                     // `result`/`partial` carry `LlmDerived`; the control-state
                     // fields (pending/error/requestHash/grounding) do not.
@@ -867,6 +922,7 @@ export function llm(
                 // may have already set previousCallHash to its own hash.
                 if (hash === previousCallHash) previousCallHash = undefined;
               },
+              effectKey,
             )
           ),
           parentCell,
@@ -1087,6 +1143,9 @@ export function generateText(
       (currentResult !== undefined || currentError !== undefined) &&
       hash === currentRequestHash
     ) {
+      // The §4 memo hit (server-execution v2): stored key matches — the
+      // stored result (or error-shaped result) is the value; no re-fire.
+      runtime.effectMemoObserver?.({ kind: "hit", id: `generateText:${hash}` });
       return;
     }
 
@@ -1134,10 +1193,12 @@ export function generateText(
         thisRun,
       );
 
+    const effectKey = effectTargetKey(`generateText:${hash}`, resultCell);
     enqueuePostCommitLLMWork(
       tx,
       "generateText",
       `generateText:${hash}`,
+      effectKey,
       "generateText-start",
       requestSnapshot,
       () => {
@@ -1172,6 +1233,7 @@ export function generateText(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields.
                     attributeModelOutputWrite(tx, runtime, "generateText");
                     resultCell.key("pending").withTx(tx).set(false);
@@ -1230,6 +1292,7 @@ export function generateText(
                 // may have already set previousCallHash to its own hash.
                 if (hash === previousCallHash) previousCallHash = undefined;
               },
+              effectKey,
             )
           ),
           parentCell,
@@ -1485,6 +1548,7 @@ export function generateObject<T extends Record<string, unknown>>(
         ),
       );
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1508,6 +1572,11 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        // The §4 memo hit (server-execution v2): no re-fire.
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `generateObject:${hash}`,
+        });
         logGenerateObject("skip-cached", toolsRequestSummary);
         return;
       }
@@ -1567,6 +1636,7 @@ export function generateObject<T extends Record<string, unknown>>(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -1751,6 +1821,7 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
+                markEffectCompletion(tx, effectKey);
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
                 // the persist-time evidence gate trusts them (audit S4). The
@@ -1814,6 +1885,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 () => {
                   previousCallHash = undefined;
                 },
+                effectKey,
               );
             }),
             parentCell,
@@ -1849,6 +1921,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schemaSanitizePromptInjection,
       });
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1871,6 +1944,11 @@ export function generateObject<T extends Record<string, unknown>>(
         (currentResult !== undefined || currentError !== undefined) &&
         hash === currentRequestHash
       ) {
+        // The §4 memo hit (server-execution v2): no re-fire.
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `generateObject:${hash}`,
+        });
         logGenerateObject("skip-cached", directRequestSummary);
         return;
       }
@@ -1924,6 +2002,7 @@ export function generateObject<T extends Record<string, unknown>>(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -2016,6 +2095,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 await runtime.idle();
 
                 await runtime.editWithRetry((tx) => {
+                  markEffectCompletion(tx, effectKey);
                   // The InjectionSafe annotations on resultSchema are minted by
                   // the trusted sanitizer; attribute this write to the builtin
                   // so the persist-time evidence gate trusts them (audit S4).
@@ -2074,6 +2154,7 @@ export function generateObject<T extends Record<string, unknown>>(
                   () => {
                     previousCallHash = undefined;
                   },
+                  effectKey,
                 );
               }),
             parentCell,

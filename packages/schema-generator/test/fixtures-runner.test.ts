@@ -133,7 +133,7 @@ defineFixtureSuite<SchemaResult, string>({
       );
     }
 
-    // A generated schema is a fabric value; `normalizeArrayOrdering` is typed
+    // A generated schema is a `FabricValue`; `normalizeArrayOrdering` is typed
     // loosely because it walks arbitrary structure.
     const normalizedActual = normalizeArrayOrdering(
       actual.normalized,
@@ -290,8 +290,8 @@ Deno.test("plain JSON would lose exactly those values", () => {
   assertThrows(() => JSON.stringify({ v: 1n }), TypeError);
 });
 
-Deno.test("golden compare keeps Fabric special objects distinct, not flattened to {}", () => {
-  // Both normalizers walk objects by key. A Fabric special object has no
+Deno.test("golden compare keeps `FabricSpecialObject`s distinct, not flattened to {}", () => {
+  // Both normalizers walk objects by key. A `FabricSpecialObject` has no
   // enumerable own properties, so walking it flattens it to `{}` -- and then
   // `valueEqual` sees only `{}` on each side and calls two different values
   // equal. That is exactly the silent agreement this whole harness exists to

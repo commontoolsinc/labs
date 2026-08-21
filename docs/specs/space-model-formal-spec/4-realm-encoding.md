@@ -1,6 +1,6 @@
 # Realm-Crossing Encoding for Fabric Values
 
-This document specifies the wire format used to carry fabric values between
+This document specifies the wire format used to carry `FabricValue`s between
 realms over a structured-clone transport — `structuredClone()` and
 `postMessage()` — including the outer envelope and its marker, the tagged
 form, per-type encodings, the ownership contract on decode, and what the
@@ -40,7 +40,8 @@ A transport carrying this format must:
 
 1. **Preserve the types this format emits**: `null`, `undefined`, `boolean`,
    `number` (including `-0`, `NaN` and `±Infinity`), `bigint`, `string`,
-   `ArrayBuffer`, arrays, and plain objects.
+   `ArrayBuffer`, `CryptoKey`, arrays, and plain objects. A `CryptoKey` must
+   arrive with its algorithm, its key type, and its extractability unchanged.
 2. **Preserve a sparse array's length and its absent indices**, so that a hole
    crosses as a hole (Section 3.2).
 3. **Preserve object reference identity, in both directions.** One object
@@ -108,15 +109,15 @@ a payload:
   living only in encoder-private state and in the tagged forms the walk is
   building.
 
-For a value that satisfies the fabric contract, age alone settles it: a fabric
-record's own properties are enumerable data properties, an accessor-backed one
-causing rejection (Section 1.5 of
+For a value that satisfies the fabric contract, age alone settles it: a
+`FabricPlainObject`'s own properties are enumerable data properties, an
+accessor-backed one causing rejection (Section 1.5 of
 [1-fabric-values.md](./1-fabric-values.md)), so its contents are all in
 existence before the walk starts, and none of them can be the marker. **The
 confinement requirement is what makes the argument hold without resting on
-that.** An encoder is handed values by callers, not by the type system; a
-value carrying live code — an accessor that runs mid-walk, after the marker
-exists — is outside the model, and confinement means such a value still has
+that.** An encoder is handed values by callers, not by the type system; a value
+carrying live code — an accessor that runs mid-walk, after the marker exists —
+is outside the model, and confinement means such a value still has
 nowhere to read the marker from. It is stated as a requirement rather than
 left to inertness because a rule that fails open on out-of-model input is not
 worth much.
@@ -128,7 +129,7 @@ subtree through unchanged, into a data position. A long-lived marker sitting
 there would be read as a tagged form, and user data would decode as a tagged
 value.
 
-The marker must itself be an encodable fabric value, for that same reason: a
+The marker must itself be an encodable `FabricValue`, for that same reason: a
 value holding an earlier call's marker has to encode without complaint, being
 ordinary data.
 
@@ -252,6 +253,7 @@ form.
 | `FabricHash` | `Hash@1` | `{ tag: string, hash: ArrayBuffer }` |
 | `FabricEpochDay` | `EpochDay@1` | `bigint` |
 | `FabricEpochNsec` | `EpochNsec@1` | `bigint` |
+| `FabricKeyPair` | `KeyPair@1` | `{ algorithm: string, publicKey: ArrayBuffer, privateKey: ArrayBuffer }`, or `{ publicKey: CryptoKey, privateKey: CryptoKey }` |
 | `FabricRegExp` | `RegExp@1` | `{ source, flags, flavor }` |
 | `symbol` | `Symbol@1` | `string` (the registry key) |
 
@@ -272,9 +274,25 @@ to the class. `FabricHash` differs on **both** axes at once: terminal here and
 nonterminal under JSON, and carrying its hash as a bare `ArrayBuffer` where
 JSON carries base64url text.
 
+`FabricKeyPair` differs from the others in that its state depends on the value
+rather than only on its class. A pair holding key material encodes to two
+`ArrayBuffer`s beside the algorithm name; a pair holding `CryptoKey` handles
+encodes to those keys themselves, and carries no algorithm, each key naming its
+own. A decoder tells the two apart by the type in the key slots.
+
+That second state is the reason this format admits `CryptoKey` at all. A
+non-extractable key's material is reachable through no synchronous call and, by
+construction, through no call whatever, so a format that writes bytes down
+cannot represent one: the JSON encoding refuses a pair in that state
+(Section 3 of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`)
+and its hash is
+undefined (Section 4.17 of
+[2-hash-byte-format.md](./2-hash-byte-format.md)). Here the key crosses as
+itself, which is what the transport requirement in Section 1.1 asks for.
+
 Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
 `ProblematicValue`, and every `FabricInstance` — encode the same way under both
-formats, their state being fabric values all the way down.
+formats, their state being `FabricValue`s all the way down.
 
 ## 4. Cycles and Shared References
 

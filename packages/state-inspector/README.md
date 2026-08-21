@@ -205,21 +205,10 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
 
 ## Known characteristics
 
-- **Scheduler tables are usually absent** on disk (present only when
-  `persistentSchedulerState` was enabled). The entity-history surface always
-  works and every scheduler-dependent query degrades gracefully — absence is
-  normal, not a broken DB.
-- **Scheduler context qualification is inspected literally.** The exported
-  `schedulerDetails(space, options?)` API reports one of `absent`,
-  `legacy-unclassified`, `partial`, or `context-qualified`, and exposes the raw
-  `execution_context_key`, `read_scope_key`, and `write_scope_key` columns from
-  observation, snapshot, action-state, and read/write-index rows.
-  `context-qualified` uses the memory engine's exact schema gate, including
-  ownership keys, lookup indexes, and composite foreign keys; qualifier columns
-  alone are reported as `partial`. A missing column is returned as `null`; the
-  inspector never guesses that a legacy row belongs to the shared `space`
-  context. This is currently an API surface, not a standalone `cf inspect`
-  subcommand.
+- **The scheduler basis index is the only durable scheduler state** besides the
+  watermark machinery (serving-loop.md §3b). The summary surface reports its
+  presence and row count; a pre-migration snapshot without the table degrades
+  gracefully — absence is a store from before the migration, not a broken DB.
 - **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
   marked rather than shown as clean. A count at a round cap may be truncated —
   narrow with flags or a per-entity command.

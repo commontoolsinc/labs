@@ -29,6 +29,8 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
  *    dropped or mis-mapped.
  */
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
 type PresetName = keyof typeof runtimePresets;
 const PRESET_NAMES = Object.keys(runtimePresets) as PresetName[];
 
@@ -107,6 +109,11 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   patternCoverage: { treat: "absent" },
   onPatternInstantiated: { treat: "absent" },
   fetch: { treat: "absent" },
+  // Server-execution v2 Phase 2: only the SpaceServer's hand-rolled
+  // runtime factory marks the serving posture; no preset ever sets it —
+  // a preset-built runtime under the flag is a speculating client by
+  // construction.
+  servingPosture: { treat: "absent" },
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {
@@ -123,6 +130,18 @@ describe("runtimePresets conformance (CT-1814)", () => {
             if (key === "experimental" && preset === "unitTest") {
               // unitTest defaulted it; every other preset got the sentinel.
               expect(output.experimental).toEqual({});
+            } else if (
+              key === "experimental" &&
+              (preset === "productionServer" || preset === "remoteClient")
+            ) {
+              // The DEPLOYED-TOPOLOGY presets carry the sentinel PLUS the
+              // first-party server-execution default for an unset flag
+              // (server-execution v2 Phase 7's flip; the single-process
+              // presets keep the constructor default — the OFF baseline).
+              expect(output.experimental).toEqual({
+                ...experimental,
+                serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
+              });
             } else {
               expect(output[key], context).toBe(
                 minimalCore[
@@ -319,11 +338,11 @@ describe("runtimePresets conformance (CT-1814)", () => {
     it("parses canonical values and leaves unset flags to their defaults", () => {
       const env: Record<string, string> = {
         EXPERIMENTAL_MODERN_CELL_REP: "true",
-        EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "false",
+        EXPERIMENTAL_SERVER_EXECUTION: "true",
       };
       expect(experimentalOptionsFromEnv((name) => env[name])).toEqual({
         modernCellRep: true,
-        persistentSchedulerState: false,
+        serverExecution: true,
       });
       expect(experimentalOptionsFromEnv(() => undefined)).toEqual({});
     });

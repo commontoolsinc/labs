@@ -29,6 +29,11 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
+import {
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -73,23 +78,23 @@ import {
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
-import type {
-  Activity,
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemoryAddress,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  ReadError,
-  StorageTransactionStatus,
-  WriteError,
-  WriterError,
+import {
+  type Activity,
+  type CommitError,
+  createReadOnlyTransactionError,
+  type IAttestation,
+  type IExtendedStorageTransaction,
+  type IMemoryAddress,
+  type IMemorySpaceAddress,
+  type InactiveTransactionError,
+  type IReadOptions,
+  type IStorageTransaction,
+  type ITransactionJournal,
+  type ReadError,
+  type StorageTransactionStatus,
+  type WriteError,
+  type WriterError,
 } from "./storage/interface.ts";
-import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import {
   excludeReadFromConflict,
   ignoreReadForScheduling,
@@ -256,6 +261,34 @@ function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
   }t${keyComponent(address.type ?? "application/json")}p${
     pathKey(address.path)
   }`;
+}
+
+/**
+ * The `link` half of the read path's memo key.
+ *
+ * The query path keys on address plus schema alone, which is sound there
+ * because `StandardObjectCreator` ignores the `link` argument. The read path's
+ * `TransformObjectCreator` builds the value it returns OUT of that link — the
+ * cell handle it mints, the back-to-cell annotation it attaches, the CFC label
+ * view it rebases — so two visits to one address under one schema can answer
+ * differently when they arrive by different links, and the link belongs in the
+ * key.
+ *
+ * Every member that creator can reach is spelled out, not just the ones
+ * `areNormalizedLinksSame` compares: that comparison decides which cell a link
+ * NAMES, and this key decides what a traversal RETURNS, which the reading lens
+ * and the follow caps both enter into.
+ */
+function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
+  if (link === undefined) return "-";
+  const caps = link.scopeCaps === undefined || link.scopeCaps.length === 0
+    ? ""
+    : link.scopeCaps.map((cap) => `${cap.depth}:${cap.scope}`).join(",");
+  return `s${keyComponent(link.space)}c${keyComponent(link.scope ?? "space")}i${
+    keyComponent(link.id)
+  }p${pathKey(link.path)}o${link.overwrite ?? "-"}h${
+    link.schema === undefined ? "-" : hashSchema(link.schema)
+  }k${caps}`;
 }
 
 /**
@@ -1209,6 +1242,16 @@ export type PointerCycleTracker = CompoundCycleTracker<
 export type TraversalContext = {
   tracker: PointerCycleTracker;
   schemaTracker: MapSet<string, SchemaPathSelector>;
+  /**
+   * The acting identity this traversal's schema-tracker keys resolve
+   * scoped addresses against (key-vocabulary.md §1 sites 5–6): coverage
+   * proven for one scope INSTANCE is not coverage of another, so tracker
+   * keys carry the shared scope_key, built from this identity. The
+   * identity arrives with the work — a client traversal supplies its
+   * runtime's own session (`Runtime.scopeKeyIdentity`); the memory
+   * server's query path supplies the querying session's.
+   */
+  scopeKeyIdentity: ScopeKeyIdentity;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
   /**
@@ -1248,6 +1291,7 @@ export type TraversalContext = {
 export function createTraversalContext(
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
   onMissingLinkTarget?: (
@@ -1260,6 +1304,7 @@ export function createTraversalContext(
   return {
     tracker,
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1269,6 +1314,7 @@ export function createTraversalContext(
 }
 
 export function createDefaultTraversalContext(
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
@@ -1284,6 +1330,7 @@ export function createDefaultTraversalContext(
       JSONSchema | undefined
     >(),
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1589,10 +1636,13 @@ function getNormalizedLink(
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
+  // `context` is required: it carries the traversal's acting identity
+  // (scopeKeyIdentity), which no default could supply — identity arrives
+  // with the work, never from ambient state (key-vocabulary.md §3).
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    protected context: TraversalContext = createDefaultTraversalContext(),
+    protected context: TraversalContext,
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
   ) {
@@ -1894,6 +1944,23 @@ export abstract class BaseObjectTraverser {
     if (link?.id === undefined) {
       return false;
     }
+    // OFF-ARM NEUTRALITY (stage E, deliberate): coverage is only ever
+    // consulted for links that DECLARE a scope. The pre-stage-E key here
+    // interpolated `link.scope` raw, so an unscoped link produced an
+    // "undefined" scope segment that never matched the tracker's
+    // normalized entries — the covered-skip paths (which replace a
+    // repeat link's value with `null` in traverseCells mode) never fired
+    // for unscoped links, and consumers of traversed values (the html
+    // reconciler's cell reads) rely on that. Re-keying must not widen
+    // when the skip fires (testing.md §2: the OFF arm stays
+    // byte-identical), so the old never-matches outcome is kept
+    // explicitly. Enabling the coverage memo for unscoped links is a
+    // separate, deliberate change — gated on first resolving the html
+    // reconciler's `get({ traverseCells: true })` value consumption —
+    // never a side effect of re-keying.
+    if (link.scope === undefined) {
+      return false;
+    }
 
     const targetSelector = narrowAndCombineSelectorForLink(
       doc.address.path,
@@ -1904,7 +1971,10 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.scope}/${link.id}`,
+      // Same key construction as getTrackerKey (key-vocabulary.md §1
+      // site 5): coverage proven for one scope instance is not coverage
+      // of another.
+      getTrackerKey(link, this.context.scopeKeyIdentity),
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -2177,34 +2247,38 @@ function reportMissingLinkTarget(
 }
 
 /**
- * Get a string to use as a key for the specified address
- *
- * @param address an IMemorySpaceAddress
+ * Schema-tracker key for an address: one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), built from the traversal's acting
+ * identity via the shared scope_key constructor.
  */
 function getTrackerKey(
-  address: IMemorySpaceAddress,
+  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+  identity: ScopeKeyIdentity,
 ): string {
-  return schemaTrackerKey(address.space, address.id, address.scope);
+  return schemaTrackerKey(address.space, address.id, address.scope, identity);
 }
 
 /**
  * Key under which a document's reached selectors are recorded in a schema
- * tracker. An absent scope keys as `space`, matching how storage defaults one.
+ * tracker: `space/scope_key/id`, one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), the scope_key resolved from the address's
+ * scope and the traversal's acting identity via the shared constructor (an
+ * absent scope resolves to `space`, matching how storage defaults one).
  *
  * Every writer of a tracker key builds it here, as does the query side that
- * looks one up. `isLinkedDocumentCovered` is the exception: it builds its
- * lookup key from a link's own `scope` without that default, so a link whose
- * scope is absent looks up a key no writer produces and the coverage check
- * answers "not covered". That is why it is spelled out there rather than
- * calling this — routing it through here changes which documents a traversal
- * re-walks, which is a behavioral change rather than a tidy-up.
+ * looks one up (`toDocKey` in `packages/memory/v2/query.ts`).
+ * `isLinkedDocumentCovered` consults it only for links that DECLARE a
+ * scope: an unscoped link refuses coverage explicitly rather than looking
+ * up a key no writer produces — see the OFF-ARM NEUTRALITY note at that
+ * site for why widening that is a deliberate change, not a tidy-up.
  */
 export function schemaTrackerKey(
   space: string,
   id: string,
-  scope?: CellScope | null,
-): `${string}/${CellScope}/${string}` {
-  return `${space}/${scope ?? "space"}/${id}`;
+  scope: CellScope | null | undefined,
+  identity: ScopeKeyIdentity,
+): `${string}/${ScopeKey}/${string}` {
+  return `${space}/${resolveScopeKey(scope ?? undefined, identity)}/${id}`;
 }
 
 /**
@@ -2451,7 +2525,7 @@ function trackVisitedDoc(
   // and update our targetDoc
   if (selector !== undefined) {
     context.schemaTracker.add(
-      getTrackerKey(target),
+      getTrackerKey(target, context.scopeKeyIdentity),
       internPathSelector(selector),
     );
   }
@@ -2482,6 +2556,7 @@ function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
 ): IMemorySpaceAttestation[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
@@ -2508,6 +2583,7 @@ function loadMetaLinkedDoc(
           tx,
           valueEntry,
           schemaTracker,
+          identity,
           manifestEntry.link,
         );
         if (item !== undefined) {
@@ -2533,6 +2609,7 @@ function loadMetaLinkedDoc(
       tx,
       valueEntry,
       schemaTracker,
+      identity,
       linkObj,
     );
     if (item !== undefined) {
@@ -2546,6 +2623,7 @@ function loadMetaLinkedDocFromLink(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
   linkObj: SigilLink,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
@@ -2564,7 +2642,7 @@ function loadMetaLinkedDocFromLink(
   // tracked too, or nothing would re-run this load when it arrives. The
   // read itself is deliberately not a scheduling read: delivery
   // reactivity rides the tracker, not the runner scheduler.
-  const docKey = getTrackerKey(address);
+  const docKey = getTrackerKey(address, identity);
   schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
@@ -2642,7 +2720,7 @@ function loadSchemaDocClosure(
       scope: "space" as const,
       path: [],
     };
-    const key = getTrackerKey(address);
+    const key = getTrackerKey(address, context.scopeKeyIdentity);
     if (context.schemaDocsLoaded.has(key)) continue;
     context.schemaDocsLoaded.add(key);
     // A plain read: loads the document AND records the dependency, so an
@@ -2710,7 +2788,10 @@ export function loadMetaLinkedDocs(
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
 ) {
-  const valueEntryKey = getTrackerKey(valueEntry.address);
+  const valueEntryKey = getTrackerKey(
+    valueEntry.address,
+    context.scopeKeyIdentity,
+  );
   if (context.metaDocsVisited.has(valueEntryKey)) {
     return;
   }
@@ -2733,13 +2814,17 @@ export function loadMetaLinkedDocs(
         currentDoc,
         meta,
         context.schemaTracker,
+        context.scopeKeyIdentity,
       );
       for (const linkedDoc of linkedDocs) {
         // Don't recurse into invalid docs or cid docs
         if (linkedDoc.address.id.startsWith("cid:")) {
           continue;
         }
-        const linkedDocKey = getTrackerKey(linkedDoc.address);
+        const linkedDocKey = getTrackerKey(
+          linkedDoc.address,
+          context.scopeKeyIdentity,
+        );
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
         pendingDocs.push(linkedDoc);
@@ -2859,7 +2944,7 @@ export function schemaTypeMatchesValueType(
 ): boolean {
   // Integer is a subtype of number: an integer value satisfies either schema,
   // while a fractional number only satisfies a number schema. Likewise, each
-  // fabric-primitive type is a subtype of "object": a `FabricBytes` value
+  // `FabricPrimitive` type is a subtype of "object": a `FabricBytes` value
   // satisfies both `{type: "FabricBytes"}` and `{type: "object"}`, while a
   // plain record only satisfies the latter.
   return schemaType === valueType ||
@@ -2884,7 +2969,7 @@ function narrowSubtypeIntersection(
   }
 
   // The subtype pairs mirror schemaTypeMatchesValueType: integer under
-  // number, and each fabric-primitive type under "object". An intersection
+  // number, and each `FabricPrimitive` type under "object". An intersection
   // keeps the narrower member of the pair.
   let narrowed = false;
   const intersection = new Set<JSONSchemaTypes>();
@@ -3245,6 +3330,53 @@ export function createSchemaMemo(): SchemaMemo {
   return new Map();
 }
 
+// The single-identity tripwire on shared schema memos (key-vocabulary.md
+// §5's identity-bound invariant, OW10): `schemaMemoAddressKey` has no
+// identity component, so ONE memo instance may only ever be traversed
+// under ONE identity — schema narrowing memoized under one principal's
+// traversal would otherwise leak into another's (value-bleed). Every
+// sharing scope today is single-identity by construction
+// (`TrackedGraphState.memo` is bound to its manager; the query path's
+// sharedMemo instances are per call); this guard is what keeps a future
+// sharing change from silently becoming value-bleed rather than a loud
+// error. Bindings live in a side table so the memo type stays a plain
+// Map.
+const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
+
+const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
+  // Injective over the pair: JSON escapes every delimiter, and `null`
+  // keeps an ABSENT component distinct from an empty string. A raw
+  // `\0`-joined key let two DISTINCT identities collide (a NUL inside a
+  // segment; undefined vs ""), and a collision here is exactly the
+  // cross-identity sharing this tripwire exists to make loud.
+  JSON.stringify([identity.principal ?? null, identity.sessionId ?? null]);
+
+/**
+ * Bind a shared schema memo to the traversing identity, or throw if it
+ * was already bound to a DIFFERENT one. Called at the one choke point
+ * where a shared memo meets a traversal (the SchemaObjectTraverser
+ * constructor), so no cross-identity sharing path can exist without
+ * tripping it.
+ */
+export function assertSchemaMemoIdentity(
+  memo: SchemaMemo,
+  identity: ScopeKeyIdentity,
+): void {
+  const key = schemaMemoIdentityKey(identity);
+  const bound = schemaMemoIdentityBindings.get(memo);
+  if (bound === undefined) {
+    schemaMemoIdentityBindings.set(memo, key);
+    return;
+  }
+  if (bound !== key) {
+    throw new Error(
+      "shared schema memo traversed under a second identity — sharing " +
+        "one memo across identities is FORBIDDEN (value-bleed; " +
+        "key-vocabulary.md §5's identity-bound invariant)",
+    );
+  }
+}
+
 export class SchemaObjectTraverser<V extends FabricValue>
   extends BaseObjectTraverser {
   private sharedSchemaMemo?: SchemaMemo;
@@ -3252,11 +3384,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    context: TraversalContext = createDefaultTraversalContext(),
+    context: TraversalContext,
     objectCreator?: IObjectCreator<V>,
     sharedSchemaMemo?: SchemaMemo,
   ) {
     super(tx, selector, context, objectCreator);
+    if (sharedSchemaMemo !== undefined) {
+      // OW10: a shared memo binds to its first traversal's identity and
+      // refuses any other (value-bleed tripwire — see
+      // assertSchemaMemoIdentity).
+      assertSchemaMemoIdentity(sharedSchemaMemo, context.scopeKeyIdentity);
+    }
     this.sharedSchemaMemo = sharedSchemaMemo;
   }
 
@@ -3278,11 +3416,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private diagnostics = traverseDiagnosticsEnabled();
   private maxDepth = 0;
   private currentDepth = 0;
-  // Memoization cache for traverseWithSchema: key → result
-  // Only used when traverseCells=true (query path) where the link
-  // parameter doesn't affect the result (StandardObjectCreator ignores it).
-  // When sharedSchemaMemo is provided, it's used instead (persists across
-  // multiple traverse() calls for the same selectSchema query).
+  // Memoization cache for traverseWithSchema: key → result, scoped to one
+  // traverse() call and cleared at the start of each.
+  // The query path may instead use sharedSchemaMemo, which persists across
+  // the traverse() calls of one selectSchema query; the read path never does,
+  // because its entries are only sound within the traversal that made them.
   private schemaMemo = new Map<
     string,
     TraverseResult<FabricValue>
@@ -3351,10 +3489,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.maxDepth = 0;
     this.currentDepth = 0;
     this.schemaMemoHits = 0;
-    // Only clear private memo, not shared
-    if (!this.sharedSchemaMemo) {
-      this.schemaMemo.clear();
-    }
+    // The private memo is per-traversal on both paths — the read path holds
+    // its entries there precisely because they must not outlive the
+    // traversal that recorded their reads — so it is cleared unconditionally.
+    // The shared one belongs to the query and is left alone.
+    this.schemaMemo.clear();
     // A selector schema carrying external refs needs its schema documents
     // loaded before traversal resolves against them; a selector whose
     // closure this space does not hold selects nothing (the delivery
@@ -3371,7 +3510,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(
-      getTrackerKey(doc.address),
+      getTrackerKey(doc.address, this.context.scopeKeyIdentity),
       internPathSelector(this.selector),
     );
     // Flag the top level read of doc for the scheduler
@@ -3540,23 +3679,32 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
     }
     try {
-      // Memoize by doc address + schema for the query path (traverseCells=true).
-      // In the query path, StandardObjectCreator ignores the link param,
-      // so the result is fully determined by address + schema.
-      if (this.traverseCells) {
-        const memo = this.activeMemo;
-        const memoKey = schemaMemoAddressKey(doc.address) + "|" +
-          hashSchema(schema);
-        const cached = memo.get(memoKey);
-        if (cached !== undefined) {
-          this.schemaMemoHits++;
-          return cached;
-        }
-        const result = this._traverseWithSchemaInner(doc, schema, link);
-        memo.set(memoKey, result);
-        return result;
+      // Both paths memoize by doc address + schema. The read path adds the
+      // link, the one input its object creator reads and the query path's
+      // ignores (see schemaMemoLinkKey).
+      //
+      // A hit skips a subtree, and with it the scheduler reads and tracker
+      // entries that subtree records. That is sound because a hit means this
+      // exact key was already traversed IN THIS TRAVERSAL: the first visit
+      // registered those reads, and registering the same addresses again adds
+      // nothing to the transaction's read set. It is also why the read path
+      // memoizes into `schemaMemo` and never into a shared one — an entry
+      // living past its traversal would answer a later traversal that never
+      // recorded its reads, under a `TransformObjectCreator` whose base link
+      // and CFC label view belong to a different materialization.
+      const memo = this.traverseCells ? this.activeMemo : this.schemaMemo;
+      const memoKey = this.traverseCells
+        ? schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema)
+        : schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema) + "|" +
+          schemaMemoLinkKey(link);
+      const cached = memo.get(memoKey);
+      if (cached !== undefined) {
+        this.schemaMemoHits++;
+        return cached;
       }
-      return this._traverseWithSchemaInner(doc, schema, link);
+      const result = this._traverseWithSchemaInner(doc, schema, link);
+      memo.set(memoKey, result);
+      return result;
     } finally {
       this.currentDepth--;
     }
@@ -3672,8 +3820,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
-              // A fabric value's surface is class accessors, so its
-              // membership test is prototype-chain `in`; the nominal brand
+              // A `FabricSpecialObject`'s surface is class accessors, so
+              // its membership test is prototype-chain `in`; the nominal brand
               // key has no runtime existence and is satisfied by
               // construction (removable with the other brand exemptions
               // once the generator skips the brand — see
@@ -5077,8 +5225,8 @@ export function canBranchMatch(
       Array.isArray(resolved.required)
     ) {
       for (const req of resolved.required) {
-        // A fabric value's surface is class accessors, so its membership
-        // test is prototype-chain `in`; the nominal brand key has no
+        // A `FabricSpecialObject`'s surface is class accessors, so its
+        // membership test is prototype-chain `in`; the nominal brand key has no
         // runtime existence and is satisfied by construction (removable
         // with the other brand exemptions once the generator skips the
         // brand — see opaqueLeafMissesRequired's doc comment).
@@ -5118,7 +5266,7 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * is redeploy-gated: pattern update refuses the structural-to-vocabulary
  * transition (`packages/piece/src/schema-compatibility.ts`), so such a
  * schema persists until its piece is redeployed. A
- * fabric-primitive-typed schema is not gated here (its type never
+ * `FabricPrimitive`-typed schema is not gated here (its type never
  * includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
@@ -5155,7 +5303,7 @@ function getPlainJsonType(
   if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
-  // A fabric primitive reports its specific type name; a schema saying
+  // A `FabricPrimitive` reports its specific type name; a schema saying
   // `"object"` still accepts it via schemaTypeMatchesValueType's subtype rule.
   if (value instanceof FabricPrimitive) {
     return schemaTypeOfFabricPrimitive(value);

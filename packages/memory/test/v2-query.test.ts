@@ -6,6 +6,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { encodeMemoryBoundary } from "../v2.ts";
 import {
   applyCommit,
   close,
@@ -14,6 +16,7 @@ import {
   open,
 } from "../v2/engine.ts";
 import {
+  EngineObjectManager,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
@@ -21,11 +24,10 @@ import {
   queryGraph,
   refreshTrackedGraph,
   toDirtyKey,
+  toDocKey,
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
-import { encodeMemoryBoundary } from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -49,16 +51,46 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
-Deno.test("memory v2 query keys require explicit scope", () => {
+Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
+  // The doc-key constructor builds the middle segment from the shared
+  // scope_key vocabulary, resolved against the querying session's
+  // identity; fromDocKey recovers the scope NAME from the instance key.
+  const identity = { principal: "did:key:alice", sessionId: "sess-1" };
   assertEquals(
-    fromDocKey("did:key:space/user/of:doc"),
+    toDocKey("did:key:space", "of:doc", "user", identity),
+    "did:key:space/user:did%3Akey%3Aalice/of:doc",
+  );
+  assertEquals(
+    fromDocKey(toDocKey("did:key:space", "of:doc", "user", identity)),
     {
       space: "did:key:space",
       scope: "user",
+      scopeKey: "user:did%3Akey%3Aalice",
       id: "of:doc",
     },
   );
-  assertEquals(fromDirtyKey("session\0of:doc"), {
+  assertEquals(
+    fromDocKey(toDocKey("did:key:space", "of:doc", "session", identity)),
+    {
+      space: "did:key:space",
+      scope: "session",
+      scopeKey: "session:did%3Akey%3Aalice:sess-1",
+      id: "of:doc",
+    },
+  );
+  assertEquals(
+    fromDocKey("did:key:space/space/of:doc"),
+    {
+      space: "did:key:space",
+      scope: "space",
+      scopeKey: "space",
+      id: "of:doc",
+    },
+  );
+  // Dirtiness keys by scope INSTANCE too (stage F's M4 re-key): the
+  // dirty key's first segment is the shared scope_key vocabulary.
+  assertEquals(fromDirtyKey("session:did%3Akey%3Aalice:sess-1\0of:doc"), {
+    scopeKey: "session:did%3Akey%3Aalice:sess-1",
     scope: "session",
     id: "of:doc",
   });
@@ -67,6 +99,18 @@ Deno.test("memory v2 query keys require explicit scope", () => {
     () => fromDocKey("did:key:space/of:doc" as never),
     Error,
     "invalid memory v2 query doc key",
+  );
+  // A scope NAME is not an instance key: the un-keyed user/session forms
+  // are invalid once the vocabulary is per instance.
+  assertThrows(
+    () => fromDocKey("did:key:space/user/of:doc" as never),
+    Error,
+    "invalid memory v2 query doc key",
+  );
+  assertThrows(
+    () => fromDirtyKey("session\0of:doc"),
+    Error,
+    "invalid memory v2 dirty key",
   );
   assertThrows(
     () => fromDirtyKey("of:doc"),
@@ -1236,6 +1280,48 @@ Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () =>
         },
       },
     }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("loadedAddresses preserves entity ids containing '/' (the cache key is scopeKey/id/type; only the scopeKey prefix is delimiter-safe)", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    // An id with '/' segments — URI-shaped ids carry them routinely.
+    const id = "data:app/notes/2026";
+    applyCommit(engine, {
+      sessionId: "session:1",
+      space: "did:key:space",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: { value: { n: 1 } },
+        }],
+      },
+      invocation: invocationFor(1),
+      authorization,
+    });
+    const manager = new EngineObjectManager(engine, "");
+    const loaded = manager.load({ id });
+    assertExists(loaded);
+    const addresses = manager.loadedAddresses();
+    assertEquals(addresses.length, 1);
+    assertEquals(
+      addresses[0],
+      {
+        id,
+        type: "application/json",
+        scope: "space",
+        scopeKey: "space",
+      },
+      "a slash-bearing id must round-trip through loadedAddresses " +
+        "unsplit (extension bookkeeping keys off these addresses)",
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

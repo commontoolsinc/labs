@@ -1,11 +1,16 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { type NormalizedFullLink } from "../link-utils.ts";
 import {
   isRendererTrustedEvent,
   propagateRendererTrustedEvent,
 } from "../cfc/ui-contract.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { ServedEventDispatch } from "./types.ts";
 
 // Wake shaping (timing side-channel mitigation, see
 // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md). The moment a pattern observes
@@ -269,6 +274,15 @@ export interface DeliverOpts {
    * events (the only shapable class) are never injection sites, so this is
    * defensive plumbing, not a live path. */
   runtimeInjectedEventKeys?: readonly string[];
+  /** The serving drain's per-event carriage (Phase 3), carried through a
+   * held delivery unchanged — same defensive plumbing as above (drained
+   * store entries are never renderer-trusted, so shaping never holds
+   * them in practice). */
+  served?: ServedEventDispatch;
+  /** The client-echo cascade thread (QueuedEvent.parentEventId), carried
+   * through a held delivery unchanged — defensive plumbing like `served`
+   * (a cascade send from a handler frame is never renderer-trusted). */
+  parentEventId?: string;
 }
 
 export type DeliverFn = (
@@ -337,11 +351,19 @@ export function stripClockFields(event: unknown): unknown {
   return scrubClockFields(event);
 }
 
-function linkKey(link: NormalizedFullLink): string {
+function linkKey(
+  link: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
+): string {
   // Mirror the identity used by areNormalizedLinksSame (space, scope, id, and
-  // element-wise path). JSON-encode the path so distinct paths cannot collide
-  // (e.g. ["a","b"] vs ["a b"]).
-  return `${link.space}|${link.scope ?? "space"}|${link.id}|${
+  // element-wise path), with the scope segment resolved to the scope INSTANCE
+  // (key-vocabulary.md §5's stage-F serving-hazard list): name-keyed, shaper
+  // groups collapsed across principals — cross-principal budget consumption
+  // and a timing channel correlating one principal's activity with another's
+  // wakes. At cardinality 1 the resolved instance partitions exactly as the
+  // name did (key-vocabulary.md §2). JSON-encode the path so distinct paths
+  // cannot collide (e.g. ["a","b"] vs ["a b"]).
+  return `${link.space}|${resolveScopeKey(link.scope, identity)}|${link.id}|${
     JSON.stringify(link.path)
   }`;
 }
@@ -381,6 +403,7 @@ export function holdShapedEvent(
   deliver: DeliverFn,
   groupKey: string | undefined,
   eventLink: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
   event: unknown,
   retries: boolean,
   onCommit: ((tx: IExtendedStorageTransaction) => void) | undefined,
@@ -399,14 +422,31 @@ export function holdShapedEvent(
   // Injection provenance rides the hold unchanged, so a shaped delivery
   // cannot silently strip the closed-world gate's exemption.
   const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
+  // The served carriage rides too (round-2 thread T31): its own doc
+  // promises "carried through a held delivery unchanged", and dropping
+  // it here would strip the acting identity / stream-entry location /
+  // failure hook from a shaped served dispatch.
+  const served = opts.served;
   shaper.hold({
-    groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink)),
+    // FLAGGED (PR #5439 thread r3731191482, unresolved semantic): the
+    // fallback linkKey resolves the scope instance from the RUNTIME's
+    // identity. On a serving runtime that is the ambient service
+    // identity, so same-id scoped streams from different principals
+    // would share one throttle bucket (cross-principal budget coupling
+    // and a timing channel). The correct partition is the EVENT ACTOR's
+    // identity — which does not exist as data until Phase 3 puts events
+    // on the wire with a server-stamped `firedAt` actor (events.md;
+    // plan Phase 3). Phase 1 has no server-side event producers, so the
+    // coupling has no instances yet; when Phase 3 lands the actor
+    // carriage, thread it here in place of the runtime identity.
+    groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink, identity)),
     deliver: () =>
       deliver(eventLink, stripped, retries, onCommit, {
         eventId,
         originTx,
         time,
         runtimeInjectedEventKeys,
+        served,
       }),
   });
 }

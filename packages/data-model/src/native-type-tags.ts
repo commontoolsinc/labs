@@ -16,6 +16,7 @@
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
@@ -45,6 +46,7 @@ export const NATIVE_TAGS = Object.freeze(
     EpochDay: "EpochDay",
     Hash: "Hash",
     FabricBytes: "FabricBytes",
+    FabricKeyPair: "FabricKeyPair",
     FabricRegExp: "FabricRegExp",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
@@ -71,7 +73,7 @@ export function isNativeError(value: unknown): value is Error {
 /**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
- * special primitives), or `null` otherwise.
+ * `FabricPrimitive`s), or `null` otherwise.
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
@@ -115,6 +117,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.EpochDay;
     case FabricHash:
       return NATIVE_TAGS.Hash;
+    case FabricKeyPair:
+      return NATIVE_TAGS.FabricKeyPair;
     case FabricRegExp:
       return NATIVE_TAGS.FabricRegExp;
 

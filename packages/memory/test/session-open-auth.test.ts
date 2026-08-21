@@ -76,7 +76,7 @@ describe("wireAuthorizationOf", () => {
 
   it("rejects a signature that is not `FabricBytes`", () => {
     // Raw bytes are what the in-process `Signature<T>` looks like; the wire
-    // form must be the fabric primitive, so this must not narrow.
+    // form must be the `FabricPrimitive`, so this must not narrow.
     assertEquals(
       wireAuthorizationOf({ signature: new Uint8Array([1, 2, 3]) }),
       undefined,

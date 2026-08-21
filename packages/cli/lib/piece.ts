@@ -69,11 +69,15 @@ import {
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { caseFold } from "unicode-case-folding";
 
-import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
+import { isHandlerCell } from "../../fuse/callables.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
   buildPieceDescription,
@@ -1640,15 +1644,46 @@ export async function applyPieceInput(config: PieceConfig, input: object) {
   await piece.setInput(input);
 }
 
-function getCallableValue(rootValue: unknown, callableName: string): unknown {
-  if (
-    typeof rootValue !== "object" ||
-    rootValue === null ||
-    Array.isArray(rootValue)
-  ) {
-    return undefined;
-  }
-  return (rootValue as Record<string, unknown>)[callableName];
+/**
+ * The schema that reads a root's stored names without materializing any of
+ * them: `asCell` mints a handle at each property instead of following the
+ * link under it, so the read stops at the root's own document.
+ *
+ * Enumeration cost is therefore independent of what the piece holds. `get()`
+ * on the root projects the WHOLE root instead — on a piece result, every
+ * document the result type reaches — which is a board-sized read for an
+ * answer that is a handful of top-level names.
+ */
+const STORED_NAMES_SCHEMA = {
+  type: "object",
+  additionalProperties: { asCell: ["cell"] },
+} as const satisfies JSONSchema;
+
+/**
+ * One handle per name `rootCell` stores, keyed by the name.
+ *
+ * Used for enumeration only. Which of these names is callable is decided by
+ * {@link detectCallableKind} against the name's own `asSchemaFromLinks()`
+ * cell, so no classification rests on the cast made here.
+ *
+ * These are the names the root STORES, which is wider than the names a
+ * declared result type carries: a stored name that type omits appears here
+ * and not in a schema-filtered read. The listing walk wants that width —
+ * classification is the verdict, and a candidate storing no stream is
+ * dropped exactly as a data field is — and it is the same gap the graph-name
+ * sweep closes from the other side.
+ */
+function storedNameCells(
+  rootCell: Cell<unknown> | undefined,
+): Record<string, Cell<unknown>> {
+  if (rootCell === undefined) return {};
+  // A read that fails is reported, not absorbed. A storage, sync, or
+  // permission failure here means the names are unknown, and a listing that
+  // turned that into "no names" would present a shortened surface as the
+  // whole one — the same thing the `incomplete` mark exists to prevent for
+  // the pattern.
+  const named = rootCell.asSchema(STORED_NAMES_SCHEMA).get();
+  return isObjectNotArray(named) ? named : {};
 }
 
 async function tryResolvePieceCallableAt(
@@ -1660,10 +1695,12 @@ async function tryResolvePieceCallableAt(
 ): Promise<ResolvedPieceCallable | null> {
   const rootCell = await piece[cellProp].getCell();
   const callableCell = rootCell.key(callableName).asSchemaFromLinks();
-  const callableKind = detectCallableKind(
-    getCallableValue(rootCell.get?.(), callableName),
-    callableCell,
-  );
+  // Classified from the name's own cell. `detectCallableKind` reads that cell
+  // for the stored signal itself, so it needs no value alongside it: the only
+  // way to supply one is to project the whole root and pluck one property out
+  // of it, which costs a full materialization to learn what the cell already
+  // answers.
+  const callableKind = detectCallableKind(undefined, callableCell);
   if (!callableKind) {
     return null;
   }
@@ -1781,10 +1818,7 @@ async function tryResolveLivePieceToolCallable(
   await pieces.runtime.idle();
 
   const callableCell = liveResult.key(callableName).asSchemaFromLinks();
-  const callableKind = detectCallableKind(
-    getCallableValue(liveResult.get?.(), callableName),
-    callableCell,
-  );
+  const callableKind = detectCallableKind(undefined, callableCell);
   return callableKind === "tool" ? callableCell : null;
 }
 
@@ -3059,20 +3093,17 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   for (const cellProp of ["result", "input"] as const) {
     const rootCell = await piece[cellProp].getCell();
     if (cellProp === "result") resultRoot = rootCell;
-    const value = rootCell.get?.();
+    const storedNames = storedNameCells(rootCell);
     const schema = rootCell.schema;
     const schemaKeys =
       isObjectOrArray(schema) && isObjectOrArray(schema.properties)
         ? Object.keys(schema.properties)
         : [];
-    const valueKeys = isObjectOrArray(value) ? Object.keys(value) : [];
+    const valueKeys = Object.keys(storedNames);
     for (const name of new Set([...valueKeys, ...schemaKeys])) {
       if (listings.has(name)) continue; // result shadows input, like call
       const callableCell = rootCell.key(name).asSchemaFromLinks();
-      const kind = detectCallableKind(
-        getCallableValue(value, name),
-        callableCell,
-      );
+      const kind = detectCallableKind(undefined, callableCell);
       if (!kind) {
         rejected.add(name);
         continue;
@@ -3165,20 +3196,17 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
-  const pieceValue = pieceCell?.get?.();
+  const pieceNames = storedNameCells(pieceCell);
   // A row already on the result cell has won rank 1 and has nothing to learn
   // here; anything else is still open to a result-side classification.
   const openToResultSide = (name: string) =>
     listings.get(name)?.on !== "result";
-  if (isObjectOrArray(pieceValue)) {
-    for (const name of Object.keys(pieceValue)) {
-      if (openToResultSide(name)) rejected.add(name);
-    }
+  for (const name of Object.keys(pieceNames)) {
+    if (openToResultSide(name)) rejected.add(name);
   }
   for (const name of graphNames) {
     if (openToResultSide(name)) rejected.add(name);
   }
-  const resultRootValue = resultRoot?.get?.();
   if (resultRoot) {
     for (const name of rejected) {
       const existing = listings.get(name);
@@ -3198,12 +3226,18 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
       // `??` would let any non-null value on the result view, ordinary data
       // included, hide a stream sentinel stored at the same name on the piece
       // root.
-      const resultSideKind = detectCallableKind(
-        getCallableValue(resultRootValue, name),
-        callableCell,
-      );
+      // Each stored signal is asked of the cell that carries it: the result
+      // view's through the result root's cell for this name, the piece
+      // root's through the piece root's own, built the same way. Reusing one
+      // cell for both and varying only a value handed alongside it is the
+      // coalescing this comment forbids, spelled a different way — it asks
+      // the result side twice.
+      const resultSideKind = detectCallableKind(undefined, callableCell);
+      const pieceSideCell = pieceCell?.key?.(name)?.asSchemaFromLinks?.();
       const kind = resultSideKind ??
-        detectCallableKind(getCallableValue(pieceValue, name), callableCell);
+        (pieceSideCell === undefined
+          ? null
+          : detectCallableKind(undefined, pieceSideCell));
       if (!kind) continue;
       // Rank 3 does not displace rank 2: an input row stands unless the RESULT
       // cell itself classified the name, whatever the piece root stores at it.
@@ -3892,10 +3926,17 @@ async function classifyReadPathVerb(
       : rootCell;
     const child = parentCell.key(name);
     const derived = child.asSchemaFromLinks?.() ?? child;
-    if (
-      isStreamValue(getCallableValue(parentCell.get?.(), name)) ||
-      isHandlerCell(derived)
-    ) {
+    // Both definite signals come off the child, which is where they live, and
+    // `detectCallableKind` is where reading them for a link-derived cell is
+    // already written down. What this guard adds is that only a handler
+    // refuses: a tool binding is readable data and reads normally, so a
+    // "tool" verdict falls through exactly as a null one does.
+    //
+    // The parent is never read, so this guard costs the same on a piece
+    // holding a thousand rows as on an empty one. A projected parent could
+    // not answer the question in any case: a verb reaches its parent as a
+    // LINK, so a pluck out of one is a link payload and never the sentinel.
+    if (detectCallableKind(undefined, derived) === "handler") {
       return { verb: name, callable: path.length === 1 };
     }
     return null;

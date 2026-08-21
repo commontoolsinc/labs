@@ -2,11 +2,13 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   IExtendedStorageTransaction,
   IPreconditionFailedError,
@@ -39,12 +41,13 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
-import type {
-  Action,
-  EventHandler,
-  EventPreflightTraceContext,
-  QueuedEvent,
-  ReactivityLog,
+import {
+  type Action,
+  type EventHandler,
+  type EventPreflightTraceContext,
+  LT1_LATE_SEAL_REFUSED,
+  type QueuedEvent,
+  type ReactivityLog,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -163,10 +166,33 @@ function notifyEventDropped(
   args: {
     readonly eventLink: NormalizedFullLink;
     readonly onCommit?: QueuedEvent["onCommit"];
+    readonly served?: QueuedEvent["served"];
   },
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
+  options: { quiet?: boolean } = {},
 ): void {
-  logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  if (options.quiet === true) {
+    // A routine, counted pre-dispatch removal (the serving loop's LT1
+    // leftover purge, stage C build W3): debug, not warn.
+    logger.debug("scheduler", () => [reason, { eventLink: args.eventLink }]);
+  } else {
+    logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  }
+  // The serving drain's terminal arms (events.md §5): `dropped` — no
+  // runnable handler, the drain writes the dropped-event notice as the
+  // event's consequence and advances the stream past it (non-wedging);
+  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
+  // consequence is written and a later wave re-drains the entry.
+  try {
+    args.served?.onFailure?.({ kind: servedKind, message: reason });
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event drop callback:",
+      callbackError,
+    );
+  }
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -193,6 +219,8 @@ export function dropQueuedEvent(
     & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
   event: QueuedEvent,
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
+  options: { quiet?: boolean } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -201,7 +229,7 @@ export function dropQueuedEvent(
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
-  notifyEventDropped(state, event, reason);
+  notifyEventDropped(state, event, reason, servedKind, options);
 }
 
 function findEventHandler(
@@ -246,6 +274,8 @@ function readyQueuedEvent(args: {
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): QueuedEvent {
   return {
     id: args.id,
@@ -260,6 +290,8 @@ function readyQueuedEvent(args: {
     runtimeInjectedEventKeys: args.runtimeInjectedEventKeys,
     retry: args.retries,
     onCommit: args.onCommit,
+    served: args.served,
+    parentEventId: args.parentEventId,
   };
 }
 
@@ -316,6 +348,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): void {
   // `eventId` here is an already-durable delivery id, used verbatim — an
   // ingress caller's opaque idempotency key is bound to its stream earlier,
@@ -344,7 +378,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       // The matching (stream, handler) count can only reach the cap once the
       // whole queue is at it, so this O(queue) scan runs only after a backlog
       // has already formed — ordinary enqueue stays O(1).
-      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM
+      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM &&
+      // Events-down (server-execution v2 Phase 3; events.md §2): the
+      // last-wins collapse would DESTROY durable intent ids — the root
+      // fire's committed append id, a cascade id bound for
+      // `consequenceOf` — so under the flag collapse is DISABLED and
+      // backpressure is shaped at the binding layer instead (README
+      // §3.8; ledger L8 records the collapse-but-list alternative).
+      state.runtime.experimental.serverExecution !== true
     ) {
       let pending = 0;
       let lastSameOrigin: QueuedEvent | undefined;
@@ -477,13 +518,26 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           queuedEvent.handler = loadedHandler;
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
           delete queuedEvent.handlerLoadPending;
-        } else {
+        } else if (started) {
+          // The piece ran and registered NOTHING for this stream —
+          // events.md §5's drop predicate ("no runnable handler").
           dropQueuedEvent(
             state,
             queuedEvent,
-            started
-              ? `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`
-              : `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`,
+          );
+        } else {
+          // The piece could not be STARTED — for a served (drained)
+          // event this is a cold-view deferral (the creation-race
+          // shape), never the drop predicate: the durable entry stays
+          // pending and a later wave re-drains it. Client-side the
+          // distinction is moot (no durable entry to re-drain) and the
+          // drop keeps its existing shape.
+          dropQueuedEvent(
+            state,
+            queuedEvent,
+            `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
         }
       } catch (error) {
@@ -493,6 +547,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
+          queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
       } finally {
         state.queueExecution();
@@ -581,6 +636,14 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  /** The transient-demander preflight (fan-out stage B, review F2):
+   * re-arm the fanned-out nodes in a served handler's closure whose
+   * instance for the actor is not current. Undefined off the serving
+   * posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
   readonly setEventPassDemandRefresh: (
     refresh: ((demand: Set<Action>) => void) | undefined,
   ) => void;
@@ -624,6 +687,16 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  /** The transient-demander preflight (server-execution v2 fan-out
+   * stage B, review F2): re-arm the fanned-out nodes in a served
+   * handler's closure whose instance for the ACTOR is not current, so
+   * the actor's own per-user derivation is materialized before the
+   * handler reads it. Returns the re-armed nodes (the event waits on
+   * them). Undefined off the serving posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
     deps: ReactivityLog,
@@ -654,6 +727,21 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
+  // A SERVED event's dependency probe reads AS the event's server-stamped
+  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
+  // LD1): the handler run will read that actor's instances of every
+  // scoped input, so the probe must name the SAME instances — its absent
+  // reads then kick instance-named loads, and the pending-load park below
+  // holds the head event on exactly those loads (an at-most-once handler
+  // must not run against the service instance's empty draft — the R7
+  // wall). Absent on every client-side event, byte-identical there.
+  const firedAt = queuedEvent.served?.firedAt;
+  if (firedAt?.user !== undefined) {
+    depTx.tx.scopeKeyIdentity = {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as never;
+  }
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -785,6 +873,46 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  // The transient-demander preflight (server-execution v2 fan-out stage B,
+  // design §B5's motivating case; independent review F2). A SERVED event's
+  // actor whose handler reads a per-user DERIVATION she does not watch has
+  // no instance of that node — the node is node-level CLEAN (it ran for
+  // the watchers), so the invalid-upstream pass above found nothing, and
+  // the handler would read the actor's MISSING instance (its argument
+  // fails the schema, the run is silently skipped, the entry marked
+  // consequenced with no error — silent event loss). B7 made cleanliness
+  // per instance: re-arm the fanned-out nodes in the handler's closure
+  // whose instance for THIS actor is not current, materializing her own
+  // instance (as her transient demand) before the handler runs. The
+  // handler then reads a current instance instead of losing its event.
+  // Runs even when the node-level pass already skipped (a dirty input can
+  // coexist with a never-run actor instance — the review's dirty-input
+  // variant); the two schedule the same node, and the fan-out loop runs
+  // both the dirty watcher instance and the actor's uncomputed one. Off
+  // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
+  // this is inert.
+  const actorFiredAt = queuedEvent.served?.firedAt;
+  if (
+    !shouldSkipEvent && actorFiredAt?.user !== undefined &&
+    state.rearmNotCurrentFanOutForActor !== undefined
+  ) {
+    const actor: ScopeKeyIdentity = {
+      principal: actorFiredAt.user,
+      ...(actorFiredAt.session !== undefined &&
+          actorFiredAt.session !== "server"
+        ? { sessionId: actorFiredAt.session as never }
+        : {}),
+    };
+    const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
+    if (rearmed.length > 0) {
+      for (const dep of rearmed) {
+        state.pendingActions.add(dep);
+        state.eventBlockingDeps.add(dep);
+      }
+      shouldSkipEvent = true;
+    }
+  }
+
   // Replica-staleness gate (CT-1795): with no invalid upstream left, an
   // address the closure depends on may still have a load in flight — the
   // wish shape, where a computation settles CLEAN on a provisional value
@@ -891,6 +1019,11 @@ export async function processPullQueuedEventDuringExecute(
           deps,
           invalidDeps,
         ),
+      ...(state.rearmNotCurrentFanOutForActor !== undefined
+        ? {
+          rearmNotCurrentFanOutForActor: state.rearmNotCurrentFanOutForActor,
+        }
+        : {}),
       collectPendingLoadParkKeys: (event, deps) =>
         state.collectPendingLoadParkKeys(event, deps),
       parkHeadEventForLoads: (event, keys) =>
@@ -1015,7 +1148,21 @@ export async function dispatchQueuedEvent(state: {
   // surface as the handler's own read failure, not silently drop the event.
   if (typeof handler.presyncInputs === "function") {
     try {
-      await handler.presyncInputs(eventValue);
+      // A served event's presync loads the event actor's instances (stage
+      // A — see EventHandler.presyncInputs); a client-side event passes
+      // nothing, byte-identical to before.
+      const firedAt = queuedEvent.served?.firedAt;
+      await handler.presyncInputs(
+        eventValue,
+        firedAt?.user !== undefined
+          ? {
+            principal: firedAt.user,
+            sessionId: firedAt.session === "server"
+              ? undefined
+              : firedAt.session,
+          } as never
+          : undefined,
+      );
     } catch (error) {
       logger.warn(
         "scheduler",
@@ -1043,6 +1190,96 @@ export async function dispatchQueuedEvent(state: {
   tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
   tx.tx.immediate = true;
   tx.tx.sourceAction = action;
+  // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
+  // choke point — a serving runtime's installed stamper attaches the wave
+  // run context (kind event-handler, the durable event id) before the
+  // handler runs. A no-op everywhere else. The action identity is the
+  // HANDLER's durable id (`handlerId`, computed above): the queued
+  // `action` is a per-event wrapper closure, and stamping IT hands the
+  // basis index a non-durable identity — the wrapper's inferred name
+  // collapses every handler onto one constant id (rows overwrite across
+  // handlers), while the requeue paths' anonymous wrappers split rows
+  // per event; scheduler_basis requires "durable ... restart-stable"
+  // (serving-loop.md §3b).
+  const served = queuedEvent.served;
+  //
+  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+  // 2026-08-03: "an event emitted by ANY run carries that run's acting
+  // identity — events run as the session they originated from"): a
+  // server-side event whose ORIGIN transaction ran under a stamped
+  // per-run identity hands that identity to the handler run, so a
+  // cascade rooted in a demanded (user, session) derivation preserves
+  // the acting pair hop by hop instead of blanking to the userless
+  // service fallback. Off the serving posture `waveRunContextOf` finds
+  // no stamp and this is inert. Phase 3's events carry the
+  // server-stamped `firedAt` through their own carriage (`served`,
+  // below), and that explicit carriage WINS where it speaks: a drained
+  // entry's stamp is the event's own durable actor, while the origin
+  // inheritance covers the in-process queueEvent shapes that carry no
+  // served stamp.
+  const originContext = queuedEvent.originTx !== undefined
+    ? waveRunContextOf(queuedEvent.originTx)
+    : undefined;
+  state.runtime.stampServerRun(tx, {
+    actionId: handlerId,
+    kind: "event-handler",
+    eventId: queuedEvent.id,
+    // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
+    // the emitter's own eventId, threaded from the emission's
+    // dispatch carriage so the wave can roll a cascade child back
+    // with its requeued parent. The client-echo thread
+    // (QueuedEvent.parentEventId, independent review M1) carries the
+    // same fact on a flag-ON client's speculative cascade, where the
+    // navigate capture derives its ATTEMPT-MINTED tag from it
+    // (navigate-context.ts) — the speculation stamp is never a wave
+    // context, so the fold semantics stay server-only.
+    ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
+      ? {
+        parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
+      }
+      : {}),
+    ...(served?.firedAt !== undefined
+      ? {
+        // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
+        // event's server-stamped actor — its scoped reads and writes
+        // resolve against the acting identity, and the attribution
+        // annotations carry it. A run with NO acting user carries no
+        // attribution at all (protocol.md §1); a sessionless chain
+        // supplies no session component, so a session-scoped write
+        // fails closed in resolveScopeKey (events.md §2's
+        // sessionless-actor error).
+        ...(served.firedAt.user !== undefined
+          ? {
+            acting: {
+              user: served.firedAt.user,
+              ...(served.firedAt.session !== undefined &&
+                  served.firedAt.session !== "server"
+                ? { session: served.firedAt.session }
+                : {}),
+            },
+          }
+          : {}),
+        scopeKeyIdentity: {
+          principal: served.firedAt.user,
+          sessionId: served.firedAt.session === "server"
+            ? undefined
+            : served.firedAt.session,
+        } as never,
+      }
+      : originContext?.scopeKeyIdentity !== undefined
+      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+      : {}),
+    ...(originContext?.actionScopeKey !== undefined
+      ? { actionScopeKey: originContext.actionScopeKey }
+      : {}),
+    ...(served?.streamEntry !== undefined
+      ? { streamEntry: served.streamEntry }
+      : {}),
+    // The LT1 in-process copy's appending-wave identity (stage C build
+    // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
+    // stamper to the wave that carries this event's durable entry.
+    ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
+  });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
       queuedEvent.originTx,
@@ -1051,7 +1288,14 @@ export async function dispatchQueuedEvent(state: {
     if (
       originLocalSeq !== undefined &&
       state.lineageStatus(queuedEvent.originTx) === "pending" &&
-      state.runtime.experimental.commitPreconditions === true
+      state.runtime.experimental.commitPreconditions === true &&
+      // Events-down (runtime-mapping N26): the receipt/precondition
+      // exactly-once machinery is SUBSUMED by the stream's
+      // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
+      // be active for the same event. Under the flag the handler run is
+      // a diverted echo (client) or a wave-sealed run (server) — its
+      // tx never carries wire preconditions.
+      state.runtime.experimental.serverExecution !== true
     ) {
       tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
         kind: "origin-committed",
@@ -1182,6 +1426,22 @@ export async function dispatchQueuedEvent(state: {
         if (tx.status().status === "ready") {
           tx.abort(error);
         }
+        // The serving drain's ERROR arm (events.md §5): the handler
+        // threw server-side — the error IS the consequence. The
+        // handler tx (with its consequenced mark) aborted above; the
+        // drain seals the error consequence in its own transaction.
+        try {
+          served?.onFailure?.({
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } catch (callbackError) {
+          logger.error(
+            "schedule-error",
+            "Error in served event failure callback:",
+            callbackError,
+          );
+        }
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
@@ -1206,6 +1466,34 @@ export async function dispatchQueuedEvent(state: {
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
     const handleCommitResult = (error: EventCommitError | undefined): void => {
+      if (
+        served !== undefined && error !== undefined &&
+        isLt1LateSealRefusal(error)
+      ) {
+        // The serving loop REFUSED this LT1 in-process copy's seal
+        // because it completed outside its appending wave (stage C
+        // build W3, (α); events.md §4's one-entry-one-completed-run
+        // sentence): the invariant working, not a failed commit — the
+        // durable entry is the truth and the drain delivers it with a
+        // streamEntry. Settle the copy quietly (no retry, no warn; the
+        // SpaceServer counted it — `events.lt1LateSealsRefused`). This
+        // early return also SKIPS the `scheduler.event.commit` telemetry
+        // submit below for the refused copy (deliberate: the copy is
+        // not a commit outcome; the drain's copy of the same entry
+        // reports its own).
+        logger.debug("lt1-late-seal-refused", () => [
+          `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
+          "appending wave and was refused; the drain delivers the entry",
+        ]);
+        runFinalCommitCallback();
+        return;
+      }
+      if (served !== undefined && error !== undefined) {
+        logger.warn("served-event-commit-failed", () => [
+          `served event ${queuedEvent.id} commit failed`,
+          error,
+        ]);
+      }
       const permanentRejection = error && isPermanentRejection(error)
         ? error.precondition
         : undefined;
@@ -1473,6 +1761,14 @@ type CommitDisposition =
  * way — a stale basis is bounded by the retry window, and a non-stale-basis
  * rejection drops on the first attempt.
  */
+/** Whether a served event's commit error is the serving loop's
+ * LT1-late-seal refusal (stage C build W3, (α)) — carried as the
+ * `reason` Error's message, the sentinel `LT1_LATE_SEAL_REFUSED`. */
+function isLt1LateSealRefusal(error: EventCommitError): boolean {
+  const reason = (error as { reason?: unknown }).reason;
+  return reason instanceof Error && reason.message === LT1_LATE_SEAL_REFUSED;
+}
+
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,

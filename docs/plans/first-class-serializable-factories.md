@@ -222,7 +222,7 @@ Expected implementation and test files:
   factories are recognized through `tryFactoryState()`, and unbranded functions
   remain invalid. Codec dispatch remains the serialization layer's job.
 - [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
-  `FabricFactory` is the only valid function-shaped Fabric value.
+  `FabricFactory` is the only valid function-shaped `FabricValue`.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
   shortcut that treats functions as already frozen.
@@ -412,7 +412,7 @@ Expected files and tests:
 - [ ] Ensure `asFactory` composes correctly with refs/definitions and does not
   silently become `asCell`.
 - [ ] Add public type assertions in `packages/api/test/factory-input-types.test.ts`
-  and `packages/api/index.test.ts` proving factories are Fabric values, schema
+  and `packages/api/index.test.ts` proving factories are `FabricValue`s, schema
   inference preserves their generics, and `.curry` is unavailable.
 
 ### WP2.2 — Generate schemas for all factory kinds
@@ -1102,7 +1102,7 @@ progress.
 - [ ] Every content-addressed pattern/module/handler factory round-trips as a
   directly callable-after-materialization `Factory@1`; non-resolvable
   factories fail durable encoding.
-- [ ] Arbitrary JavaScript functions remain invalid Fabric values.
+- [ ] Arbitrary JavaScript functions remain invalid `FabricValue`s.
 - [ ] Factory-valued inputs, outputs, stored values, and captures invoke through
   one dynamic runner path.
 - [ ] Nested patterns preserve lexical semantics through callback argument 1

@@ -8,6 +8,7 @@ import type {
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
+import { dirtyFanOutAll, dirtyFanOutForCause } from "./fan-out.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
 import { shaperInstanceGroupKey } from "./wake-shaping.ts";
 import type {
@@ -36,23 +37,18 @@ export function hasRegisteredTriggers(
 // Only interactive input (renderer `$value` keystrokes) is shaped here, under a
 // per-pattern `|input` bucket.
 //
-// Server pushes (`pull`/`integrate`) are deliberately NOT shaped, because
-// deferring them breaks incremental observation adoption
-// (docs/specs/scheduler-v2/incremental-observation-adoption.md). Adoption
-// requires the push's readers to be marked dirty SYNCHRONOUSLY: a sync delivers
-// its `integrate` notification and the writer's `scheduler-observations` in the
-// same synchronous turn, and adoption clears exactly the dirt that integrate
-// just created (see adoptRemoteObservations in facade.ts). Holding the wake
-// moves the mark-dirty to a later macrotask, so adoption finds nothing to clear
-// and the receiver re-runs every computation the writer already ran instead of
-// adopting it. The two cannot both hold at this seam — the shaper's hold IS the
-// mark-dirty — so the push path stays synchronous.
+// Server pushes (`pull`/`integrate`) are NOT shaped. The original reason —
+// observation adoption needed the push's readers marked dirty synchronously —
+// deleted with the adoption machinery (server-execution v2 Phase 1 stage C;
+// runtime-mapping.md N62), so whether pushes should now be shaped is an open
+// re-check (N10), not something this comment decides.
 //
-// The security cost is small and was already the design's stated position: a
-// pattern cannot drive server pushes at sub-second cadence (it has no way to
-// make the server push faster than real network traffic arrives), which is the
-// same network-bounded assumption the separate `|push` bucket already rested on.
-// See the channel-5 row in docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+// The security cost of leaving them unshaped is small and was already the
+// design's stated position: a pattern cannot drive server pushes at
+// sub-second cadence (it has no way to make the server push faster than real
+// network traffic arrives), which is the same network-bounded assumption the
+// separate `|push` bucket already rested on. See the channel-5 row in
+// docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
 export function shapableWakeGroupKey(
   state: StorageNotificationState,
   notification: StorageNotification,
@@ -162,7 +158,14 @@ export function processStorageNotification(
       const actionType = actionIsEffect ? "effect" : "computation";
       const pendingBefore = state.pending.has(action);
       const dirtyBefore = state.isInvalid(action);
-      const isOwnCommitSource = notification.type === "commit" &&
+      // Own-commit-source skip (spec scheduler-v2 P5), and its
+      // speculation twin (server-execution v2, speculation.md §4 — the
+      // "own retirement is not a trigger" rider, RULED 2026-08-16): the
+      // `integrate` a retiring echo produces carries the echo's own
+      // transaction as `source`, so the writer does not re-run for the
+      // flip of its OWN output to the authoritative value.
+      const isOwnCommitSource =
+        (notification.type === "commit" || notification.type === "integrate") &&
         notification.source !== undefined &&
         notification.source.sourceAction === action;
       const plan = planPullTriggeredAction({
@@ -232,21 +235,47 @@ export function collectTriggeredActionsForChange(
   return state.collectTriggeredActionsForChange(space, change);
 }
 
+export interface MarkInvalidOptions {
+  /** Server-execution v2 fan-out stage B (B7): how a fanned-out node's
+   * per-instance dirtiness responds to an UNTARGETED invalidation (no
+   * cause). "all" (the default) dirties every instance — the
+   * conservative meaning of "this node must run". "keep" leaves the
+   * instance record alone: the caller already dirtied exactly the
+   * instances that must re-run (a retried instance's own key; an
+   * arriving demander, whose instances have never run and so are not
+   * clean), and the siblings stay current. A CAUSE-bearing invalidation
+   * ignores this: the cause names its instance (or all). */
+  fanOutInstances?: "all" | "keep";
+}
+
 /**
  * Record an invalidating address on `record`. Consumed by the next run,
  * whose transaction joins the addresses' labels into the flow-label
  * derivation: the decision to run now was influenced by the changed values
  * even if that run's branch never re-reads them.
+ *
+ * On a fanned-out node (stage B) the cause also decides WHICH instances
+ * re-run (B7, precise per-instance dirtiness): a keyed cause dirties the
+ * instances whose reads covered that instance; an unkeyed one, or no
+ * cause at all, dirties every instance unless the caller says "keep".
  */
 export function markInvalid(
   nodes: NodeRegistry,
   action: Action,
   cause?: IMemorySpaceAddress,
+  options: MarkInvalidOptions = {},
 ): void {
   const record = nodes.get(action);
   if (!record) return;
   if (cause !== undefined) {
     addInvalidCause(record, cause);
+  }
+  if (record.fanOut !== undefined) {
+    if (cause !== undefined) {
+      dirtyFanOutForCause(record.fanOut, cause);
+    } else if (options.fanOutInstances !== "keep") {
+      dirtyFanOutAll(record.fanOut);
+    }
   }
   // Status transition goes through the registry so the invalid-node index
   // stays in lockstep; never-ran nodes keep their status (already indexed).

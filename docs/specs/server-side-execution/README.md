@@ -27,7 +27,7 @@ domain:
 | [`protocol.md`](protocol.md) | commit classes, the whole admission table, push, watermark, client-effect channel, wire discipline | 1–4 |
 | [`builtins.md`](builtins.md) | per-built-in contracts: placement, memo keys, navigateTo split, deferred list | 1, 4, 5 |
 | [`testing.md`](testing.md) | harness rules, CI arms, watermark-based settling, counter gates per phase | all |
-| [`scenario-traces.md`](scenario-traces.md) | VERIFICATION INSTRUMENT (non-normative): twelve canonical end-to-end journeys traced cell by cell with citations; gaps/flags/contradictions feed the rulings ledger; re-run after every ruling batch | all |
+| [`scenario-traces.md`](scenario-traces.md) | VERIFICATION INSTRUMENT (non-normative): fifteen canonical end-to-end journeys traced cell by cell with citations; gaps/flags/contradictions feed the rulings ledger; re-run after every ruling batch | all |
 | [`field-provenance.md`](field-provenance.md) | VERIFICATION INSTRUMENT (non-normative): per-field producer→carrier→consumer→retirement chains, closure-checked across six path families — the bottom-up complement to the traces | all |
 | [`verification-coverage.md`](verification-coverage.md) | VERIFICATION REGISTER (non-normative): every binding rule mapped to the instrument that checks it, or to an adjudicated reason none does; the owed list with phase triggers; the stopping criterion for spec-time verification | all |
 | [`runtime-mapping.md`](runtime-mapping.md) | today's runtime, behavior by behavior → its v2 placement, statused COVERED/CHANGED/GAP | all |
@@ -81,10 +81,12 @@ invariant it actually is:
 malicious client holding today's write authority on a doc can still
 author into it — derived-output docs and the watermark doc included
 (forgery possible, accepted for now). v2 defines the outcome rather
-than a defense: the intruding write is ordinary authored input and
-the next wave recomputes over it (protocol.md §1). **v2 adds no
-security guarantees beyond today's unless trivial (owner,
-2026-08-02); tightening is future work.**
+than a defense: the intruding write is ordinary authored input;
+recompute over it is NOT automatic — it follows serving-loop.md
+§3d's dependency-only rule (RULED 2026-08-05), so a derivation that
+never reads the doc it writes is not re-armed by the intrusion
+(protocol.md §1). **v2 adds no security guarantees beyond today's
+unless trivial (owner, 2026-08-02); tightening is future work.**
 
 The egress rule falls out of the same line: **speculate on anything you can
 throw away; never on anything you can't take back.** A derived value is
@@ -305,7 +307,14 @@ arbitrary cells, CFC-at-client-commit, and conflict handling between
 client handler writes and server derivations — all machinery that
 dissolves the day handlers move. The survival test fails it.
 
-Ruled YES by the owner 2026-08-02: events-down from day one. So in v2:
+Ruled YES by the owner 2026-08-02: events-down from day one. "Day one"
+binds the ARCHITECTURE (v2 is built toward events-down; no
+client-write-admission machinery is invested in), not the flip's
+calendar: the ROLLOUT stages it as F10's interim — client handler
+WRITES keep committing authored-class until Phase 3 lands the events
+channel (protocol.md §1's `authored` row; the Phase-2 flag ON serves
+derivations while handlers stay client-committed). So in v2, at
+Phase 3:
 
 - A handler firing on the client commits **only the event** (payload +
   target stream). Admission is an append-capability check.
@@ -382,6 +391,19 @@ session-scoped client act. The wiring:
   already isolates workers; v2 adds the budgets.
 - **Backpressure**: event floods (key-repeat driving `stream.send()`)
   are rate-shaped at the binding layer before they become commits.
+  *Implementation (OW27, RULED (a) by the owner 2026-08-15; Phase 7):
+  the client's event-append queue PACES per stream — a token bucket per
+  stream between the queue and the wire, `burst` sends immediate,
+  sustained sends at `ratePerSecond`, a flood HELD in that stream's
+  fired order and never dropped (events are intent). Streams are
+  INDEPENDENT (ruled 2026-08-16 with the P7 review): a paced stream
+  holds only its own later sends — the queue sends the earliest-fired
+  entry whose stream has a token, so a flood on one stream never delays
+  another stream's sends (no cross-stream head-of-line hold), while
+  each stream's own fired order stays exact. The default posture 20/s
+  sustained, 20 burst, is a dial —* `DEFAULT_EVENT_APPEND_PACING` *in
+  `packages/runner/src/storage/event-append-queue.ts` — flagged for the
+  owner. The OFF arm never constructs the queue.*
 
 ## 4. Measured constraints (what the learning run bought)
 
@@ -428,14 +450,13 @@ intent, the following have no decision left to make:
 - the arc's write-firewall-as-admission (write bounding moves to handle
   grant time; client computational commits narrow to event appends)
 
-Two entries are live on MAIN, not only on the archived branches:
+Two entries lived on MAIN, not only on the archived branches:
 `completeSchedulerScopeSummary`/`completeActionScopeSummary` emission
-and its consumers, and
-`persistentSchedulerState`'s observation tables (full-JSON payloads,
-OFF by default). For those two, "delete" is live Phase 1 deletion work
-on main — tracked in the plan, which carries the measured size —
-not merely "do not rebuild"; the
-observation tables reduce to the v2 basis index
+and its consumers, and `persistentSchedulerState`'s observation tables
+(full-JSON payloads, OFF by default). For those two, "delete" was live
+Phase 1 stage C deletion work on main, not merely "do not rebuild":
+the certificate surface deleted at its transformer source and every
+consumer, and the observation tables reduced to the v2 basis index
 (serving-loop.md §3b).
 
 Anything on this list that seems needed during the rebuild triggers the
@@ -478,14 +499,13 @@ Still open:
   entries retire when v2 lands its single flag.
 - The pre-arc, still-live behavior specs this document leans on:
   [`scheduler-v2/`](../scheduler-v2/), [`memory-v2/`](../memory-v2/).
-- [`persistent-scheduler-state.md`](../persistent-scheduler-state.md)
-  does NOT return to its pre-arc scope, as an earlier draft of this
-  section claimed. Phase 1 stage C drops the entire PERSISTED form it
-  specifies — the observation, snapshot, replay, read-index,
-  write-index, action-state and context-floor tables — and REPLACES
+- [`persistent-scheduler-state.md`](../../history/specs/persistent-scheduler-state.md)
+  did NOT return to its pre-arc scope, as an earlier draft of this
+  section claimed. Phase 1 stage C dropped the entire PERSISTED form it
+  specified — the observation, snapshot, replay, read-index,
+  write-index, action-state and context-floor tables — and REPLACED
   it with the v2 basis index (serving-loop.md §3b). What the feature
   decided (warm start from recorded reads) survives in a new schema
-  under a new owner; the spec that describes the old form archives
-  when stage C lands, along with
-  [`scheduler-v2/per-doc-rehydration.md`](../scheduler-v2/per-doc-rehydration.md)'s
-  account of it.
+  under a new owner; the spec describing the old form is archived, along
+  with the persisted-form account extracted from
+  [`scheduler-v2/per-doc-rehydration.md`](../scheduler-v2/per-doc-rehydration.md).

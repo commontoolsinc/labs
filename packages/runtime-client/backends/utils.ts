@@ -109,7 +109,7 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
  *
  * Nothing reaches the throw today, de facto rather than by construction: no
  * flag gates it, and every producer that raises a flag with metadata passes
- * fabric data -- one of them a cell's own raw value.
+ * a `FabricValue` -- one of them a cell's own raw value.
  */
 export function assertFabricLoggerFlags(
   breakdown: LoggerFlagsBreakdown,

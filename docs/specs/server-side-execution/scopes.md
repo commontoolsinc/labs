@@ -10,22 +10,24 @@ scope-mechanics scout pass of 2026-08-02 (§Anchors, §7). Read
 [serving-loop.md](serving-loop.md) vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified 2026-08-02, scout pass)
+## Anchors (scout pass 2026-08-02; re-verified 2026-08-05)
 
 Today's scope machinery, pinned read-only by the scout. Paths are
 relative to `packages/runner/src/` unless another package is named;
-runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
+runtime-mapping.md rows 49/56/57/60 remain the mapping rows. Line
+anchors resolve against THIS branch's tree; §7's inventory of main's
+machinery marks the cites that resolve only against main.
 
 - **Lattice and enum**: `scope.ts:11`; `narrowestScope` picks the
   narrowest by rank (`scope.ts:129-139`).
 - **Discovered output scope**: a per-transaction ratchet,
   `narrowestReadScope`
-  (`storage/extended-storage-transaction.ts:273`, `827-847`) — every
+  (`storage/extended-storage-transaction.ts:275`, `858-871`) — every
   read, link hops included, ratchets it. The runner resets it before
-  reading inputs (`runner.ts:5515`), reads the floor after the fn
-  returns (`runner.ts:5598`), and derives `effectiveOutputScope`
-  from it (`runner.ts:5062-5066`).
-- **The narrowing redirect write**: `pattern-binding.ts:281-307` —
+  reading inputs (`runner.ts:5572`), reads the floor after the fn
+  returns (`runner.ts:5655`), and derives `effectiveOutputScope`
+  from it (`runner.ts:5074-5084`).
+- **The narrowing redirect write**: `pattern-binding.ts:279-305` —
   when the discovered scope is narrower than the resolved binding,
   the runtime writes the value at `{...ref, scope: outputScope}`
   (same space, same doc id, same path — only the scope differs) and
@@ -34,28 +36,32 @@ runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
   `{scope: "user"|"session", id: <same doc id>}` (asserted by
   `packages/runner/test/pattern-scope.test.ts:2837-2848`).
 - **Declared-scope redirects** (schema `asCell: [{kind, scope}]`):
-  `data-updating.ts:646-692`; eager redirects for omitted scoped
-  properties `data-updating.ts:1478-1517`.
+  `data-updating.ts:681-727`; eager redirects for omitted scoped
+  properties `data-updating.ts:1516-1583`.
 - **Scoped-slot writes outside the declared surface**: warn-only
   diagnostics, with per-user/per-session writes exempted
-  (`scheduler/run.ts:616-654`, exemption `631-638`).
+  (`scheduler/run.ts:619-657`, exemption `633-640`).
 - **Session-scoped result cells**: the runner keeps result cells per
-  scope, `previousResultCellRef.byScope` (`runner.ts:5068-5092`);
+  scope, `previousResultCellRef.byScope` (`runner.ts:5086-5110`);
   `navigateTo`'s result cell is session-scoped
-  (`builtins/navigate-to.ts:46`).
+  (`builtins/navigate-to.ts:45`).
 - **Instance addressing**: scope never changes the doc id. Storage
   rows are keyed `(branch, id, scope_key)`
-  (`packages/memory/v2/engine.ts:368-403`), with scope keys
+  (`packages/memory/v2/engine.ts:160`, `:177`), with scope keys
   `'space'`, `'user:<principal>'`,
-  `'session:<principal>:<sessionId>'`, resolved by `resolveScopeKey`
-  (`engine.ts:98-126`) from the authenticated session.
-- **Dirtiness**: storage-side reader matching is by exact
-  `scope_key` (`packages/memory/v2/engine.ts:3024-3066`); the
-  client dependency graph is keyed by scope NAME only —
-  `${space}/${scope}/${id}` (`entityKey`,
-  `scheduler/keys.ts:5-9`). The full inventory of key-construction
-  sites that carry the scope NAME is
-  [key-vocabulary.md](key-vocabulary.md).
+  `'session:<principal>:<sessionId>'` — the shared vocabulary
+  `resolveScopeKey` in the wire-shape module
+  (`packages/memory/v2.ts:120-147`; LD3, key-vocabulary.md §3) —
+  resolved from the authenticated session at admission for
+  `authored` traffic.
+- **Dirtiness**: the server's query/watch tracking and the client
+  dependency graph are keyed per scope INSTANCE via the shared
+  vocabulary (`entityKey`, `scheduler/keys.ts:26-33`;
+  `packages/memory/v2/query.ts`'s `toDocKey` — stage E, §7 M2), and
+  since stage F the wake/sync path keys dirtiness AND delivery per
+  instance too (`toDirtyKey` = `${scope_key}\0${id}` — §7 M4,
+  landed). The full inventory of instance-keyed construction sites
+  is [key-vocabulary.md](key-vocabulary.md).
 
 ## 1. North star
 
@@ -152,17 +158,68 @@ faced them:
   lands on the serving loop with no prior art in the client
   scheduler. Do NOT port client-era cardinality assumptions into
   the fan-out path.
+- **Whose demand a broad subscription is (RULED 2026-08-16, the
+  fan-out run-supply design §A/§I.1; landed by fan-out stage B): a
+  principal's demand expressed at a BROAD (space-scoped) address is
+  demand for THAT principal's instance of every node that narrows
+  beneath it.** The demand registry therefore records the demanding
+  (user, session) pair on space-scoped roots too — every watch a
+  client holds is identity-bearing demand — and a node's instance
+  set is derived from its DISCOVERED scope × its demand roots'
+  demanders: while a node has read nothing scoped it runs ONCE, as a
+  PROBE (the smallest demanding pair, resolution scaffolding only —
+  no annotation depends on it; a space node runs once regardless of
+  demander count, never as the service identity); once a run
+  discovers `user` it runs once per demanding principal, and once a
+  run discovers `session` for a principal it runs once per demanding
+  session of THAT principal (ragged, per the amendment below). The
+  discovering run writes the redirect and its own instance and, in the
+  SAME wave, its demanded siblings run too (the discovery re-arm) — W
+  waits on them like on any demanded work. A demander who ARRIVES
+  after a node narrowed finds no instance of their own; the registry's
+  new pair re-arms the narrowed nodes beneath the root for THAT
+  demander only (the arrival re-arm — later demand, protocol.md §4).
+  Demand-paced still: instances come only from demanders (never "all
+  known principals"), and an eager/idle-scheduled node NOBODY demands
+  with an identity keeps the wave-level fallback and, if it narrows,
+  writes the service identity's inert instance — accepted and counted
+  (`undemandedNarrowingRuns`; RULED 2026-08-16, design §I.4). The
+  event actor is a TRANSIENT demander of the event's target piece for
+  the dispatch's preflight (RULED 2026-08-16, design §I.5): the actor's
+  own instance of a scoped input her handler reads is materialized
+  before the handler runs even if the actor watches nothing — never
+  another principal's. The preflight tests instance-level currency, not
+  node-level: a per-user node the WATCHERS made node-level clean can
+  still be MISSING the actor's instance (B7 made cleanliness per
+  instance), so "not current for the actor" — never run at the node's
+  ratchet for her — is what re-arms it (fix round 2026-08-17, review
+  F2; `Scheduler.rearmNotCurrentFanOutForActor`). Without it the
+  handler read her missing instance and lost its event silently.
 
-**Monotonicity (owner-ruled): narrowing is for everyone or no one.**
-User-scoped for one user means user-scoped for ALL users; within a
-user, session-scoped for one session means session-scoped for all
-of that user's sessions. The reason is structural, not policy: the
-link INTO the narrower scope is itself shared state AT the broader
-scope — all of a user's sessions read the same user-level doc, all
-users read the same space-level doc — so one written redirect
-narrows the node for every reader of that address at once. Instance
-sets are therefore CLEAN PRODUCTS over principals, NEVER ragged
-(narrow for some principals, broad for others).
+**Monotonicity (owner-ruled; AMENDED — RULED 2026-08-16, the fan-out
+design panel's Lens 1): narrowing is for everyone or no one AT THE
+SPACE→USER HOP; below it, narrowing may be RAGGED per principal.**
+User-scoped for one user means user-scoped for ALL users, and the
+reason is structural: the link INTO the user scope is shared state AT
+the space scope — all users read the same space-level doc — so one
+written redirect narrows the node for every reader of that address at
+once. The second hop is NOT structural: the link INTO a session
+instance is written into ONE user's instance (`X/user:A` → session),
+and another user's instance (`X/user:B`) is a different doc that
+carries no such link — so a node whose per-user branch reads
+session-scoped state for A and only user-scoped state for B is
+session-scoped for A and user-scoped for B, simultaneously and stably
+(reachable by ordinary data-dependent code: a per-user flag deciding
+whether a per-session value is read). Within ONE user, sessions still
+narrow together (a user-level fact reaches all of that user's
+sessions). Instance sets are therefore clean products over principals
+at the top hop and MAY be ragged below it; a per-node scope level
+cannot represent that — instance addresses carry the FULL
+(scope-kind, principal) address, which is what the serving replica,
+the wire, and the basis index key by (fan-out stage A, OW17), and
+"the node's known scope only narrows" is a POLICY over such
+addresses (stage B's run supply), never a structural fact below the
+top hop.
 
 **Permanence (ruled by code): narrowing NEVER widens back.** A
 written redirect is permanent. Rewrites MUST NOT strip stored
@@ -261,7 +318,14 @@ an answer (it would resolve `user:<serviceDID>` and silently read an
 empty instance — protocol.md §2). The rule: a derivation runs PER
 DEMANDED INSTANCE, and the DEMAND supplies the identity — a
 subscribing client demands its own instance, and the run reads and
-writes as that instance. Before any narrowing, a node runs at SPACE
+writes as that instance. When a space demand and a scoped demand
+coexist on one root, the run set is exactly the identity-bearing
+demand entries: the space demand rides those runs (the space
+consumer reads the run's value) and mints no separate userless run,
+so the root's derived writes carry the scoped demander's acting
+annotation — recorded, not read (protocol.md §1; its "a space-scope
+derivation carries none" is the NO-identity-bearing-demand case).
+Before any narrowing, a node runs at SPACE
 scope and needs no principal at all. Handlers are the other case and
 take the event's actor, above. Those are the only two sources.
 
@@ -269,6 +333,34 @@ An event MAY operate ENTIRELY within user or session scope: when
 the state a handler modifies is user- or session-scoped, its
 consequences are too, and a purely session-local interaction (this
 session's UI state) never escapes its scope by accident.
+
+**The declared-scope invariant (owner thread, 2026-08-17).** The two
+paragraphs above cover DISCOVERED scope (a run learns its scope by
+reading). A `PerUser`/`PerSession` slot is the OTHER kind — its scope
+is DECLARED on the argument schema, and it narrows through the
+EAGER-REDIRECT pass (`data-updating.ts:1478-1517` / `:1545`): when an
+object is written through a schema whose child declares a narrower
+scope, the child's `space→…` redirect is materialized even if the
+value omits the key, so a later schema-less write (a handler's
+`draft.set(…)`) follows the redirect into the narrower instance. The
+invariant that makes this safe was never written down and is added
+here: **a declared scope must be VISIBLE TO THE WRITE PATH at the top
+level of the slot's own schema.** `ContextualFlowControl.getSchemaScope
+Cap` reads only the top level, so a scope declared inside an
+`anyOf`/`oneOf` branch (`PerUser<T> | undefined` spelled with the union
+OUTSIDE the wrapper) is invisible to the write side — `declaredCellScope`
+and `foldDeclaredScopeIntoLinkSchema` miss it while the READ side folds
+it in (`link-resolution.ts:132`, `schema.ts:1603`), so reads and writes
+disagree and the slot lands on the SPACE row. This is a **today** bug on
+main, NOT created by served handler writes: the eager pass narrows the
+ordinary `PerUser<T>` shape correctly (verified on both main and the
+fan-out-B tree — the redirect is written), and served execution merely
+EXPOSES a violation as cross-user sharing rather than causing it.
+Corpus reachability is nil (all 165 declarations put the union inside
+the wrapper), so it is a latent trap; the enforcement is a
+SCHEMA-GENERATOR guard that throws when a scope wrapper ends up a union
+member (owned by the main-side scope-handler-write thread, 2026-08-17 —
+verification-coverage.md's flag row), not a v2 write-path change.
 
 ## 6. Effectful built-ins: once per scope instance (S5)
 
@@ -291,14 +383,20 @@ The scout inventory (2026-08-02) surfaced five load-bearing
 assumptions in today's scope machinery. All five hold for a client
 that computes ONLY ITS OWN instance and break for a SpaceServer
 deriving EVERY instance (§1). Each is live code, not spec debt;
-Phases 1–5 meet them wherever scoped state appears.
+Phases 1–5 meet them wherever scoped state appears. Cites resolve
+against this branch's tree except where marked `main`: those name
+machinery the landed stages have already deleted or replaced here,
+kept because the assumption they document is main's.
 
 - **M1 — Scope is discovered by running AS (principal, session).**
   Discovery is ambient per-transaction state
-  (`storage/extended-storage-transaction.ts:273`): a run's scope is
+  (`storage/extended-storage-transaction.ts:275`): a run's scope is
   learned by BEING the principal+session whose reads ratchet it,
   and the floor ratchet assumes monotone evidence per fingerprint
-  (`packages/memory/v2/engine.ts:3990-4004`). → v2: the server must
+  (main `packages/memory/v2/engine.ts:3990-4004` — the floor
+  machinery is deleted on this branch with the observation
+  reduction; closing note, migration drop at `engine.ts:1221`).
+  → v2: the server must
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
   The READ side is the half R-Q6b did not cover, and it is now
@@ -313,31 +411,34 @@ Phases 1–5 meet them wherever scoped state appears.
   the same one equality check as derived writes. Without it a
   SpaceServer read under its service envelope resolves
   `user:<serviceDID>` and returns an EMPTY instance silently:
-  `resolveScopeKey` (`packages/memory/v2/engine.ts:98-126`) throws
+  `resolveScopeKey` (`packages/memory/v2.ts:120-147`) throws
   on a MISSING principal, never on a wrong one. Which identity a
   run assumes is §5's run-identity rule.
-- **M2 — Every in-memory identity key uses the scope NAME, never
-  the scope_key.** `getDocKey` (`runner.ts:3201-3204`), `entityKey`
-  (`scheduler/keys.ts:5-9`), `byScope` (`runner.ts:708`,
-  `5068-5092`, `5456`) — all `${space}/${scope}/${id}`, sound only
-  at cardinality 1; per-instance keying exists only in storage
-  columns. Three subsystems is an UNDERCOUNT: the same scope-NAME
-  key shape is built at `data-updating.ts:102` (`seedMemoKey`),
-  `traverse.ts:1693` and `traverse.ts:1962` (`getTrackerKey`),
-  `storage/v2.ts:1247` (pending-load key),
-  `storage/transaction/address.ts:4` (`toString`), and
-  `scheduler/graph-snapshot.ts:245` (`formatAddress`). All nine
-  sites, with their required instance dimension and OFF-arm-neutral
-  form, are inventoried in
-  [key-vocabulary.md](key-vocabulary.md). → v2: the scheduler, the
-  dependency graph, and the basis index must re-key per instance —
-  the single biggest scope cost of the arc.
+- **M2 — Every in-memory identity key used the scope NAME, never
+  the scope_key** — sound only at cardinality 1; per-instance
+  keying existed only in storage columns. Three subsystems was an
+  UNDERCOUNT: the closure of storage-row-aligned identity
+  construction is NINE construction sites, inventoried with their
+  required instance dimension in
+  [key-vocabulary.md](key-vocabulary.md). → v2, RESOLVED for the
+  storage-row-aligned closure (stage E, landed dark): the nine
+  sites key per instance via the shared scope_key vocabulary,
+  built from an explicitly supplied identity — the runtime's own
+  authenticated session at OFF-arm cardinality 1, so the partition
+  is unchanged until stage F supplies per-run identities
+  (key-vocabulary.md §1–§2). The remainder — the name-keyed
+  boundary surface, key-vocabulary.md §5 — re-keys with stage F:
+  wire-coupled sites with M4's push re-key, serving-identity sites
+  with M1's per-run identities (key-vocabulary.md §4's tripwires
+  police both inventories).
 - **M3 — There is no all-principals write path.** `resolveScopeKey`
   is fed from the authenticated session at admission (`applyCommit`
   threads principal + sessionId,
-  `packages/memory/v2/server.ts:2128-2132`, into
-  `engine.ts:5374-5375`), and mirrors refuse to
-  re-derive scope context (`engine.ts:2580-2596`): a scoped write
+  `packages/memory/v2/server.ts:2060-2063`, into
+  `engine.ts:2031-2032`), and mirrors refuse to
+  re-derive scope context (main `engine.ts:2580-2596`,
+  `upsertMirroredSchedulerObservation` — mirror machinery deleted
+  on this branch with the observation reduction): a scoped write
   requires that instance's principal. → v2, RESOLVED (R-Q6b,
   2026-08-02): derived commits carry an explicit `scope_key` on
   every scoped write WITHIN the commit (protocol.md §1, §7), so
@@ -345,17 +446,28 @@ Phases 1–5 meet them wherever scoped state appears.
   only. Admission for derived stays the lease equality check,
   unchanged — no per-principal admission, no delegated-capability
   extension to scoped derived writes.
-- **M4 — Wake/sync dirties by scope NAME.** Storage-side reader
-  matching is exact-scope_key
-  (`packages/memory/v2/engine.ts:3024-3066`), but the wake/sync
-  path keys dirtiness by `(id, scope-name)` (`server.ts:3233-3239`)
-  — fine while each session re-evaluates only itself, quadratic
-  waste once one server hosts every instance. → v2: the push path
-  must key by scope_key.
+- **M4 — Wake/sync dirtied by scope NAME — RESOLVED (stage F,
+  landed dark).** Storage-side reader matching is exact-scope_key
+  (main `packages/memory/v2/engine.ts:3024-3066`,
+  `findSchedulerReadersForWrite` — deleted on this branch with the
+  observation reduction; the branch's query/watch tracking is
+  scope_key-keyed, M2), and the wake/sync path now keys dirtiness
+  AND delivery by scope INSTANCE (`toDirtyKey` =
+  `${scope_key}\0${id}`, `packages/memory/v2/query.ts`; the session
+  cache and tracked-id sets carry instance keys, and the wire frames
+  are stripped back to scope names — key-vocabulary.md §5's
+  re-keyed list). The name-keyed form was fine while each session
+  re-evaluated only itself and collapsed instances once one server
+  hosts them all; with the re-key, one principal's commit touches
+  only the sessions tracking THAT instance (protocol.md §3's
+  applicable set falls out structurally, since a session's graph
+  evaluates under its own identity).
 - **M5 — Retention assumes instances are cheap to re-derive per
   owner.** Session EXECUTION CONTEXTS are capped at 32 per action
-  (`packages/memory/v2/engine.ts:55`); session DATA rows are never
-  GC'd — nothing retires session data today. → v2: §3's
+  (main `packages/memory/v2/engine.ts:55`,
+  `MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION` — the
+  machinery it bounds is deleted on this branch); session DATA rows
+  are never GC'd — nothing retires session data today. → v2: §3's
   durable-with-retirement needs an actual GC design (§8 item 2),
   and a server owning ALL instances cannot have its working set
   silently evicted.
@@ -398,7 +510,7 @@ citations use it):
    cover NON-SESSION keys (S8): narrowing strands basis rows at
    `space` and `user:<p>` keys that no session retirement ever
    touches, and main's 32-per-action execution-context cap
-   (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
+   (main `packages/memory/v2/engine.ts:55`) dies with the dropped tables
    while `scheduler_basis` specifies no bound of its own. The
    deletion rule in serving-loop.md §3b keeps the stranding from
    growing without bound in the narrowing case; a retirement design
@@ -413,8 +525,15 @@ FORBIDDEN in v2 scope code (additive to serving-loop.md §8):
   leases;
 - a client committing ANY scoped derived instance, its own included
   (the overlay is a scoped instance's only client-side home);
-- ragged instance sets as a steady state — a node narrow for some
-  principals and broad for others;
+- ragged instance sets AT THE TOP (space→user) HOP as a steady state —
+  narrowing to `user` is UNIFORM across principals at that hop (§2). But
+  raggedness BELOW the hop — a node at `session` depth for one principal
+  and `user` for another, simultaneously and stably (a per-user branch
+  reading session-scoped state for A and only user-scoped state for B) —
+  is the RULED stage-B mechanism (§2 amendment, 2026-08-16; design §5
+  item 10), NOT forbidden: instance addresses carry the full
+  (scope-kind, principal) pair and "the node's known scope only narrows"
+  is a per-(node, principal) policy over them;
 - static scope inference (compile-time or load-time) feeding
   placement, admission, or fan-out;
 - per-scope or per-instance watermarks (W stays one integer —

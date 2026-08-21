@@ -12,6 +12,7 @@ import {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
@@ -309,11 +310,11 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     UiPromptSlot,
     UiDisclosure,
 
-    // Fabric value classes -- runtime values backing the type declarations
-    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-    // checks in patterns. `FabricSpecialObject` is abstract; it is bound for
-    // `instanceof` only. Listed in declaration order, so this list and the
-    // declarations in api/index.ts can be compared directly.
+    // `FabricSpecialObject` classes -- runtime values backing the type
+    // declarations in api/index.ts. Enables `new FabricEpochNsec(...)` and
+    // `instanceof` checks in patterns. `FabricSpecialObject` is abstract; it is
+    // bound for `instanceof` only. Listed in declaration order, so this list
+    // and the declarations in api/index.ts can be compared directly.
     FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
@@ -323,6 +324,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricLink,
     FabricBytes,
     FabricRegExp,
+    FabricKeyPair,
     FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)

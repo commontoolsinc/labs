@@ -8,8 +8,10 @@ import { Runtime } from "../src/runtime.ts";
 
 // Identity is derived from content-addressed provenance, never from the
 // sidecar-backed debug source. These integration tests pin the externally
-// observable scheduler IDs/fingerprints now that the old `.src` garbling seam
-// no longer exists.
+// observable scheduler IDs now that the old `.src` garbling seam no longer
+// exists. (`.src`-independence of the CFC verified-implementation identity
+// is pinned in `cfc-implementation-identity.test.ts`; fingerprint
+// content-addressing in the content-addressed-identity suites.)
 
 const signer = await Identity.fromPassphrase("src identity invariant");
 const space = signer.did();
@@ -18,37 +20,22 @@ function newRuntime(storageManager: ReturnType<typeof StorageManager.emulate>) {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    experimental: { persistentSchedulerState: true },
   });
 }
 
-async function collectIdentities(
+/**
+ * The durable identity of every registered scheduler action for this
+ * pattern, read from the live scheduler graph. Restart-stable action
+ * identity stays load-bearing for server-execution v2 (the basis index's
+ * `action` column — serving-loop.md §3b), so this invariant keeps its
+ * guard even with the persisted-observation instrument deleted.
+ */
+function collectIdentities(
   runtime: Runtime,
-): Promise<{ actionId: string; fingerprint: string }[]> {
-  const provider = runtime.storageManager.open(space) as {
-    listSchedulerActionSnapshots?: (
-      query: Record<string, unknown>,
-    ) => Promise<{
-      snapshots: {
-        observation: {
-          actionId?: string;
-          implementationFingerprint?: string;
-        };
-      }[];
-    }>;
-  };
-  const result = await provider.listSchedulerActionSnapshots!({
-    ownerSpace: space,
-    limit: 1000,
-  });
-  return result.snapshots
-    .filter((snapshot) =>
-      (snapshot.observation.actionId ?? "").startsWith("cf:module/")
-    )
-    .map((snapshot) => ({
-      actionId: snapshot.observation.actionId!,
-      fingerprint: snapshot.observation.implementationFingerprint ?? "",
-    }))
+): { actionId: string }[] {
+  return runtime.scheduler.getGraphSnapshot().nodes
+    .map((node) => ({ actionId: node.id }))
+    .filter(({ actionId }) => actionId.startsWith("cf:module/"))
     .sort((a, b) => a.actionId.localeCompare(b.actionId));
 }
 
@@ -57,7 +44,7 @@ async function runAndCollect(
   resultId: string,
   argument: Record<string, number>,
   expected: unknown,
-): Promise<{ actionId: string; fingerprint: string }[]> {
+): Promise<{ actionId: string }[]> {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = newRuntime(storageManager);
   try {
@@ -72,7 +59,7 @@ async function runAndCollect(
     }
     await runtime.storageManager.synced();
     expect(resultCell.getAsQueryResult()).toEqual(expected);
-    return await collectIdentities(runtime);
+    return collectIdentities(runtime);
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -111,11 +98,9 @@ Deno.test(
     expect(new Set(identities.map(({ actionId }) => actionId)).size).toBe(
       identities.length,
     );
-    for (const { actionId, fingerprint } of identities) {
+    for (const { actionId } of identities) {
       expect(actionId).toMatch(/^cf:module\//);
       expect(actionId).not.toMatch(/:\d+:\d+$/);
-      expect(fingerprint).toMatch(/^impl:cf:module\//);
-      expect(fingerprint).not.toMatch(/:\d+:\d+$/);
     }
   },
 );
@@ -148,11 +133,9 @@ Deno.test(
 
     expect(identities.length).toBe(2);
     expect(new Set(identities.map(({ actionId }) => actionId)).size).toBe(2);
-    for (const { actionId, fingerprint } of identities) {
+    for (const { actionId } of identities) {
       expect(actionId).toMatch(/^cf:module\/[^:]+:dbl:[^:]+$/);
-      expect(fingerprint).toMatch(/^impl:cf:module\/[^:]+:dbl$/);
+      expect(actionId).not.toMatch(/:\d+:\d+$/);
     }
-    expect(new Set(identities.map(({ fingerprint }) => fingerprint)).size)
-      .toBe(1);
   },
 );

@@ -26,6 +26,13 @@ import { describe, expect, it } from "./scheduler-test-utils.ts";
 const signer = await Identity.fromPassphrase("scheduler-cfc-trigger-reads");
 const space = signer.did() as MemorySpace;
 
+// Identity entity keys resolve scoped addresses against (stage E).
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+const identityThunk = () => TEST_IDENTITY;
+
 function makeChange(
   address: Partial<IMemoryChange["address"]> & { id: string },
 ): IMemoryChange {
@@ -111,6 +118,7 @@ function makeNotificationState(args: {
       return record?.status === "invalid" || record?.status === "never-ran";
     },
     materializerIndex: {
+      scopeKeyIdentity: identityThunk,
       materializersByEntity: new Map(),
       effects: new Set(),
       getMaterializerWriteEnvelopes: () => undefined,
@@ -145,7 +153,7 @@ function makeCommitNotification(
 }
 
 function makeTriggerIndexFor(action: Action): SchedulerTriggerIndex {
-  const triggerIndex = new SchedulerTriggerIndex();
+  const triggerIndex = new SchedulerTriggerIndex(identityThunk);
   const read: IMemorySpaceAddress = {
     space,
     scope: "space",

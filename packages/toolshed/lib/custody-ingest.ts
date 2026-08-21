@@ -65,8 +65,9 @@ const digestOf = (payload: unknown): string =>
 
 // A fresh, independent deep-mutable copy of a cell value, so an in-place
 // `mutate` callback can't touch the transaction's working copy before the
-// explicit `set`. Uses the canonical fabric-value clone (force-copy everything,
-// leave it mutable); never a JSON round-trip, which mangles fabric primitives.
+// explicit `set`. Uses the canonical `FabricValue` clone (force-copy
+// everything, leave it mutable); never a JSON round-trip, which mangles a
+// `FabricPrimitive`.
 const cloneValue = <T>(value: T | undefined): T | undefined =>
   value === undefined ? undefined : cloneIfNecessary(value as FabricValue, {
     frozen: false,

@@ -16,6 +16,7 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   CompoundCycleTracker,
+  createDefaultTraversalContext,
   IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
@@ -32,6 +33,13 @@ import {
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
@@ -39,7 +47,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function storeWith(

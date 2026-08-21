@@ -7,6 +7,7 @@ import {
   displayNameFor,
   ensurePersonFolder,
   ensureServiceAccount,
+  isAccountNotVisible,
   isGitHubUsername,
   mintKey,
   parseMintArgs,
@@ -185,6 +186,89 @@ describe("test-records-mint", () => {
         "sa@x",
       );
       expect(log.length).toBe(2);
+    });
+
+    it("grants once the account has reached Cloud Storage", async () => {
+      const log: { method: string; url: string; body?: string }[] = [];
+      let waits = 0;
+      await ensurePersonFolder(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: {} },
+            { status: 200, json: { bindings: [], etag: "e1" } },
+            {
+              status: 400,
+              json: {
+                error: {
+                  code: 400,
+                  message: "Service account sa@x does not exist.",
+                },
+              },
+            },
+            { status: 200, json: {} },
+          ], log),
+          awaitVisibility: () => {
+            waits++;
+            return Promise.resolve();
+          },
+        },
+        "cf-ci-metadata",
+        "labs/test-records",
+        "octocat",
+        "sa@x",
+      );
+      expect(waits).toBe(1);
+      expect(log.length).toBe(4);
+      expect(log[3]?.method).toBe("PUT");
+    });
+
+    it("throws for a grant refused on any other ground", async () => {
+      const log: { method: string; url: string; body?: string }[] = [];
+      await expect(ensurePersonFolder(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: {} },
+            { status: 200, json: { bindings: [], etag: "e1" } },
+            { status: 403, json: { error: { message: "forbidden" } } },
+          ], log),
+          awaitVisibility: () => {
+            throw new Error("no wait expected");
+          },
+        },
+        "cf-ci-metadata",
+        "labs/test-records",
+        "octocat",
+        "sa@x",
+      )).rejects.toThrow("granting roles/storage.objectCreator");
+    });
+  });
+
+  describe("isAccountNotVisible()", () => {
+    it("returns true for a create the service has not seen yet", () => {
+      expect(isAccountNotVisible(
+        400,
+        { error: { message: "Service account sa@x does not exist." } },
+        "sa@x",
+      )).toBe(true);
+      expect(isAccountNotVisible(404, "sa@x does not exist", "sa@x"))
+        .toBe(true);
+    });
+
+    it("returns false for any other refusal", () => {
+      expect(isAccountNotVisible(403, { error: { message: "no" } }, "sa@x"))
+        .toBe(false);
+      expect(isAccountNotVisible(
+        400,
+        { error: { message: "Service account other@x does not exist." } },
+        "sa@x",
+      )).toBe(false);
+      expect(isAccountNotVisible(
+        400,
+        { error: { message: "Role roles/storage.objectCreator is not valid" } },
+        "sa@x",
+      )).toBe(false);
     });
   });
 

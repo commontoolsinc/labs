@@ -1,9 +1,9 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
-
-import { getTopFrame } from "../builder/pattern.ts";
+import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
+import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
   areNormalizedLinksSame,
@@ -42,9 +42,12 @@ import {
   MAX_ACTION_STATS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
-import type { ExecuteContinuationState } from "./continuation.ts";
-import { applyPullExecuteContinuation } from "./continuation.ts";
 import {
+  applyPullExecuteContinuation,
+  type ExecuteContinuationState,
+} from "./continuation.ts";
+import {
+  collectDirectWritersForLog,
   type DependencyGraphState,
   isLive,
   notifyNodeLivenessChange,
@@ -52,7 +55,7 @@ import {
   setNodeProvisionalDemand,
   updateDependentEdgesForLog,
 } from "./dependency-graph.ts";
-import { type DependencyUpdateState } from "./dependency-updates.ts";
+import type { DependencyUpdateState } from "./dependency-updates.ts";
 import {
   type DiagnosisRecord,
   runSchedulerDiagnosis,
@@ -70,12 +73,31 @@ import {
   recordTriggerTrace as recordTriggerTraceState,
   type SchedulerActionIdentityState,
 } from "./diagnostics.ts";
+import { keyAtRatchet } from "./fan-out.ts";
+import { SchedulerMaterializers } from "./materializers.ts";
+import {
+  CELL_GROUP_PREFIX,
+  type DeliverFn,
+  holdShapedCell,
+  holdShapedEvent,
+  shaperInstanceGroupKey,
+  shouldShapeDelivery,
+  WakeShaper,
+} from "./wake-shaping.ts";
+import { SchedulerWriteIndex } from "./scheduling-writes.ts";
+import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
+import {
+  SchedulerTriggerIndex,
+  SchedulerTriggerSubscriptions,
+  type TriggerSubscriptionState,
+} from "./trigger-index.ts";
 import {
   collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
   collectPendingLoadParkKeys as collectPendingLoadParkKeysState,
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
+import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
@@ -97,76 +119,11 @@ import {
   type SettlingTracker,
   summarizeNonSettlingWindow,
 } from "./execution.ts";
-import { SchedulerGates } from "./gates.ts";
-import {
-  buildSchedulerGraphSnapshot,
-  type SchedulerGraphSnapshotState,
-} from "./graph-snapshot.ts";
-import {
-  markInvalid as markInvalidRecord,
-  processStorageNotification,
-  type StorageNotificationState,
-} from "./invalidation.ts";
-import { entityKey } from "./keys.ts";
-import { SpeculationLineage } from "./lineage.ts";
-import { SchedulerMaterializers } from "./materializers.ts";
-import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
-import {
-  isSchedulerActionObservation,
-  type PersistedSchedulerObservationSnapshot,
-  type SchedulerActionObservation,
-} from "./persistent-observation.ts";
-import {
-  resolveRegistrationSurface,
-  resubscribePullSchedulerAction,
-  type SchedulerSubscribeActionState,
-  type SchedulerSubscriptionState,
-  type SchedulerUnsubscribeActionState,
-  subscribePullSchedulerAction,
-  unsubscribeSchedulerAction,
-} from "./registration.ts";
-import {
-  runSchedulerAction,
-  type SchedulerActionRunState,
-  schedulerImplementationFingerprint,
-  schedulerRuntimeFingerprint,
-} from "./run.ts";
-import { SchedulerWriteIndex } from "./scheduling-writes.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   runPullSchedulerSettleLoop,
 } from "./settle.ts";
-import {
-  type ActionTimingState,
-  getActionStats as getActionStatsFromState,
-} from "./timing.ts";
-import {
-  SchedulerTriggerIndex,
-  SchedulerTriggerSubscriptions,
-  type TriggerSubscriptionState,
-} from "./trigger-index.ts";
-import type {
-  Action,
-  ActionRunTraceEntry,
-  EventHandler,
-  EventPreflightTraceContext,
-  QueuedEvent,
-  ReactivityLog,
-  SchedulerObservationIdentity,
-  SettleStats,
-  SettleStatsHistoryEntry,
-  TelemetryAnnotations,
-  TriggerTraceEntry,
-} from "./types.ts";
-import {
-  CELL_GROUP_PREFIX,
-  type DeliverFn,
-  holdShapedCell,
-  holdShapedEvent,
-  shaperInstanceGroupKey,
-  shouldShapeDelivery,
-  WakeShaper,
-} from "./wake-shaping.ts";
+import { CooperativeYield } from "./cooperative-yield.ts";
 import {
   type DirtyPullRunnableState,
   type DirtyPullRunnableStateWithDebounce,
@@ -175,7 +132,46 @@ import {
   type PendingPullRunnableState,
   type PullSchedulingState,
 } from "./work-oracle.ts";
-
+import { SchedulerGates } from "./gates.ts";
+import {
+  markInvalid as markInvalidRecord,
+  type MarkInvalidOptions,
+  processStorageNotification,
+  type StorageNotificationState,
+} from "./invalidation.ts";
+import {
+  resubscribePullSchedulerAction,
+  type SchedulerSubscribeActionState,
+  type SchedulerSubscriptionState,
+  type SchedulerUnsubscribeActionState,
+  subscribePullSchedulerAction,
+  unsubscribeSchedulerAction,
+} from "./registration.ts";
+import {
+  buildSchedulerGraphSnapshot,
+  type SchedulerGraphSnapshotState,
+} from "./graph-snapshot.ts";
+import { entityKey, entityNameKey } from "./keys.ts";
+import { SpeculationLineage } from "./lineage.ts";
+import {
+  type ActionTimingState,
+  getActionStats as getActionStatsFromState,
+} from "./timing.ts";
+import type {
+  Action,
+  ActionRunTraceEntry,
+  EventHandler,
+  EventPreflightTraceContext,
+  QueuedEvent,
+  ReactivityLog,
+  SchedulerObservationIdentity,
+  ServedEventDispatch,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
+  TelemetryAnnotations,
+  TriggerTraceEntry,
+} from "./types.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -185,119 +181,6 @@ const logger = getLogger("scheduler", {
 
 type FilterStatsState = { filtered: number; executed: number };
 
-const schedulerContextRank = (contextKey: string): number =>
-  contextKey === "space"
-    ? 0
-    : contextKey.startsWith("user:")
-    ? 1
-    : contextKey.startsWith("session:")
-    ? 2
-    : -1;
-
-const schedulerAddressScopeRank = (address: IMemorySpaceAddress): number =>
-  (address.scope ?? "space") === "session"
-    ? 2
-    : (address.scope ?? "space") === "user"
-    ? 1
-    : 0;
-
-const schedulerEnvelopeCovers = (
-  envelope: IMemorySpaceAddress,
-  address: IMemorySpaceAddress,
-): boolean =>
-  envelope.space === address.space &&
-  envelope.id === address.id &&
-  (envelope.scope ?? "space") === (address.scope ?? "space") &&
-  envelope.path.length <= address.path.length &&
-  envelope.path.every((segment, index) => segment === address.path[index]);
-
-const observationMinimumContextRank = (
-  observation: SchedulerActionObservation,
-): number => {
-  const summary = observation.completeActionScopeSummary;
-  if (!summary || !observation.implementationFingerprint.startsWith("impl:")) {
-    return 2;
-  }
-  const pieceScope = summary.piece.scope ?? "space";
-  if (
-    summary.piece.space !== observation.ownerSpace ||
-    `${pieceScope}:${summary.piece.id}` !== observation.pieceId
-  ) {
-    return 2;
-  }
-  let rank = pieceScope === "session" ? 2 : pieceScope === "user" ? 1 : 0;
-  let crossesSpace = false;
-  for (
-    const address of [
-      ...summary.reads,
-      ...summary.writes,
-      ...summary.materializerWriteEnvelopes,
-      ...summary.directOutputs,
-    ]
-  ) {
-    crossesSpace ||= address.space !== summary.piece.space;
-    rank = Math.max(rank, schedulerAddressScopeRank(address));
-  }
-  if (crossesSpace && rank === 0) return 2;
-
-  const runtimeGroups: Array<[
-    readonly IMemorySpaceAddress[],
-    readonly IMemorySpaceAddress[],
-  ]> = [
-    [
-      [...observation.reads, ...observation.shallowReads],
-      summary.reads,
-    ],
-    [
-      [
-        ...observation.actualChangedWrites,
-        ...observation.currentKnownWrites,
-        ...(observation.declaredWrites ?? []),
-        ...(observation.ignoredSchedulingWrites ?? []),
-      ],
-      [
-        ...summary.writes,
-        ...summary.materializerWriteEnvelopes,
-        ...summary.directOutputs,
-      ],
-    ],
-    [
-      observation.materializerWriteEnvelopes,
-      summary.materializerWriteEnvelopes,
-    ],
-  ];
-  for (const [observed, envelopes] of runtimeGroups) {
-    for (const address of observed) {
-      if (
-        !envelopes.some((envelope) =>
-          schedulerEnvelopeCovers(envelope, address)
-        )
-      ) {
-        return 2;
-      }
-      rank = Math.max(rank, schedulerAddressScopeRank(address));
-    }
-  }
-  return rank;
-};
-
-type SchedulerStorageRehydrationOptions =
-  & SchedulerObservationIdentity
-  & {
-    space: MemorySpace;
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >;
-    addressesCurrentAtOrBelow?: (
-      addresses: readonly IMemorySpaceAddress[],
-      seq: number,
-    ) => boolean;
-    hasPendingWriteOverlapping?: (
-      addresses: readonly IMemorySpaceAddress[],
-    ) => boolean;
-  };
-
 type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
   isEffect?: boolean;
@@ -305,12 +188,9 @@ type SchedulerRegisterOptions = {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
-  rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
   // Hold the action's initial run until its space finishes syncing (bounded by
   // timeoutMs), so a resumed re-derivation reads confirmed-loaded inputs
-  // instead of racing the data. Applies whenever the action did NOT rehydrate
-  // from a snapshot: the flag-off resume path, and the flag-on degrade path
-  // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
+  // instead of racing the data. See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
   // Tag the action with its owning pattern instance without rehydrating from
   // storage. Pattern readers then always carry a pieceId, used to group shaped
@@ -319,10 +199,6 @@ type SchedulerRegisterOptions = {
   observationIdentity?: SchedulerObservationIdentity & {
     space?: MemorySpace;
   };
-  // "always-run": never rehydrate this action clean on resume — its run has
-  // instantiation side effects (starting child runs) that a clean skip would
-  // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  resumeMode?: "always-run";
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -354,35 +230,6 @@ function normalizeRegistrationArgs(
     dependencies: dependenciesOrOptions,
     options,
   };
-}
-
-function observationIdentityKey(
-  identity: {
-    ownerSpace?: string;
-    branch: string;
-    pieceId: string;
-    processGeneration: number;
-    actionId: string;
-  },
-): string {
-  return [
-    identity.ownerSpace ?? "",
-    identity.branch,
-    identity.pieceId,
-    String(identity.processGeneration),
-    identity.actionId,
-  ].join("\0");
-}
-
-function observationAdoptionAddresses(
-  observation: SchedulerActionObservation,
-): IMemorySpaceAddress[] {
-  return [
-    ...observation.reads,
-    ...observation.shallowReads,
-    ...observation.actualChangedWrites,
-    ...(observation.currentKnownWrites ?? []),
-  ];
 }
 
 // Re-export types that tests expect from scheduler
@@ -426,7 +273,12 @@ export class Scheduler {
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
-  private triggerIndex = new SchedulerTriggerIndex();
+  // Thunk, not a captured value: keys must always resolve against the
+  // runtime's CURRENT authenticated session (one source of truth), and a
+  // field initializer runs before constructor parameter properties assign.
+  private triggerIndex = new SchedulerTriggerIndex(
+    () => this.runtime.scopeKeyIdentity,
+  );
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
   private offBudgetRetries = new WeakMap<Action, number>();
@@ -501,7 +353,10 @@ export class Scheduler {
     queueExecution: () => this.queueExecution(),
   });
   private writeIndex!: SchedulerWriteIndex;
-  private materializers = new SchedulerMaterializers(this.nodes.effects);
+  private materializers = new SchedulerMaterializers(
+    this.nodes.effects,
+    () => this.runtime.scopeKeyIdentity,
+  );
   private eventPreflightDependencyState!: EventPreflightDependencyState;
   // Filter stats for diagnostics
   private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
@@ -517,24 +372,6 @@ export class Scheduler {
   private eventPreflightTelemetryEnabled = false;
   private eventPassDemandRefresh?: (demand: Set<Action>) => void;
   private storageNotificationState!: StorageNotificationState;
-  // Full durable-identity index for incremental observation adoption
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): a remote
-  // observation names its action by id; the nodes registry is a WeakMap, so
-  // adoption keeps this registration-scoped map. Action ids are only unique
-  // within a piece; owner space, branch and generation are part of the durable
-  // identity and must participate in lookup as well.
-  private actionsByObservationIdentity = new Map<string, Action>();
-
-  // Actions registered with resumeMode "always-run" — the map/filter/flatMap
-  // coordinators that must run their reconcile to (re)register per-element
-  // children. Live adoption must exclude them for the SAME reason register()
-  // excludes them on reload: adopting one clean skips the reconcile, so a
-  // remotely-appended row's child action is never registered and that row's
-  // reactivity is dead. Object-keyed (once a coordinator, always a
-  // coordinator) and the only failure direction is refusing a safe adoption,
-  // so a stale membership just runs the action locally — never incorrect.
-  private alwaysRunActions = new WeakSet<Action>();
-
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
@@ -586,12 +423,6 @@ export class Scheduler {
   // distinguish a genuine concurrent refresh from a load kicked by preflight
   // itself (the latter must not re-arm the same event forever).
   private preflightPendingLoadGenerations = new Map<string, number>();
-  // Depth of the initial-rehydration apply window (the rehydration barrier reads
-  // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
-  // resume a synchronous snapshot apply at registration, so this is >0 only
-  // inside applyPreloadedInitialActionRehydration; backgroundTasks holds work
-  // that must not pause pull scheduling, such as an event-driven piece start.
-  private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
@@ -601,6 +432,12 @@ export class Scheduler {
   private graphSnapshotState!: SchedulerGraphSnapshotState;
   private settleLoopState!: SchedulerSettleLoopState;
   private executeContinuationState!: ExecuteContinuationState;
+  // The serving posture's cooperative macrotask yield (server-execution
+  // v2 stage C tuning T3, cooperative-yield.ts): constructed ONLY for a
+  // serving runtime, so the OFF arm and flag-ON clients keep their
+  // settle loops' exact microtask shape. Its observer is the runtime's
+  // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
+  private readonly cooperativeYield: CooperativeYield | undefined;
 
   // ============================================================
   // Public API
@@ -611,6 +448,11 @@ export class Scheduler {
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
+    if (runtime.servingPosture) {
+      const yielder = new CooperativeYield();
+      yielder.onYield = () => runtime.servingYieldObserver?.();
+      this.cooperativeYield = yielder;
+    }
     this.initializeSchedulerState();
 
     this.consoleHandler = consoleHandler ||
@@ -698,33 +540,12 @@ export class Scheduler {
       dependenciesOrOptions,
       maybeOptions,
     );
-    const { rehydrateFromStorage } = options;
-    const previousObservationIdentityKey = this
-      .observationIdentityKeyForAction(action);
-    // Tag the action with its owning pattern instance. rehydrateFromStorage
-    // carries this only under persistent scheduler state; observationIdentity
-    // is set unconditionally so pattern readers always carry a pieceId (used to
-    // group shaped cell-flip wakes by instance and to distinguish pattern
-    // readers from internal machinery — plan B).
-    if (rehydrateFromStorage) {
-      this.setActionObservationIdentity(action, rehydrateFromStorage);
-    } else if (options.observationIdentity) {
+    // Tag the action with its owning pattern instance so pattern readers
+    // always carry a pieceId (used to group shaped cell-flip wakes by
+    // instance and to distinguish pattern readers from internal machinery —
+    // plan B).
+    if (options.observationIdentity) {
       this.setActionObservationIdentity(action, options.observationIdentity);
-    }
-    const observationIdentityKey = this.observationIdentityKeyForAction(action);
-    if (
-      previousObservationIdentityKey !== undefined &&
-      previousObservationIdentityKey !== observationIdentityKey &&
-      this.actionsByObservationIdentity.get(previousObservationIdentityKey) ===
-        action
-    ) {
-      this.actionsByObservationIdentity.delete(previousObservationIdentityKey);
-    }
-    if (observationIdentityKey !== undefined) {
-      this.actionsByObservationIdentity.set(observationIdentityKey, action);
-    }
-    if (options.resumeMode === "always-run") {
-      this.alwaysRunActions.add(action);
     }
     const subscribeOptions = {
       isEffect: options.isEffect,
@@ -740,24 +561,7 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    // Rehydration and the synced-hold are independent: apply the snapshot when
-    // one is preloaded for this action (unless the action declares it must
-    // always run on resume), and hold the initial run of any action that did
-    // NOT rehydrate. A snapshot miss thus degrades to the same synced-hold
-    // fresh run the flag-off path gets, instead of racing the data.
-    let rehydrated = false;
-    const snapshotsByActionId = rehydrateFromStorage?.snapshotsByActionId;
-    if (
-      rehydrateFromStorage &&
-      snapshotsByActionId &&
-      options.resumeMode !== "always-run"
-    ) {
-      rehydrated = this.applyPreloadedInitialActionRehydration(
-        action,
-        { ...rehydrateFromStorage, snapshotsByActionId },
-      );
-    }
-    if (!rehydrated && options.awaitSyncBeforeInitialRun) {
+    if (options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
     return cancel;
@@ -857,301 +661,6 @@ export class Scheduler {
     );
   }
 
-  rehydrateActionFromObservation(
-    action: Action,
-    snapshot: PersistedSchedulerObservationSnapshot,
-  ): boolean {
-    const actionId = this.getActionId(action);
-    const { observation } = snapshot;
-    if (observation.actionId !== actionId) {
-      return false;
-    }
-
-    // Annotation first; otherwise restore the persisted live surface —
-    // mirroring registration, where subscribe's ReactivityLog supplies the
-    // surface for annotation-less actions.
-    const surface = resolveRegistrationSurface(action, {
-      reads: [],
-      shallowReads: [],
-      writes: observation.currentKnownWrites ?? [],
-    });
-    if (observation.actionKind !== "effect" && surface.length > 0) {
-      this.writeIndex.setSurface(action, surface);
-      registerDependentsForWriterSurface(
-        this.dependencyGraphState,
-        action,
-        surface,
-      );
-    }
-
-    this.resubscribe(action, {
-      reads: observation.reads,
-      shallowReads: observation.shallowReads,
-      writes: [],
-    }, {
-      isEffect: observation.actionKind === "effect",
-    });
-    if (observation.materializerWriteEnvelopes.length > 0) {
-      // Becoming a materializer makes the action a demand root, which the
-      // liveness graph only learns about when it is told.
-      const record = this.nodes.get(action);
-      const wasLive = record
-        ? isLive(this.dependencyGraphState, record)
-        : false;
-      this.materializers.registerAddresses(
-        action,
-        observation.materializerWriteEnvelopes,
-      );
-      notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
-    }
-
-    const { actionOptions } = observation;
-    if (actionOptions?.debounceMs !== undefined) {
-      this.gates.setDebounce(action, actionOptions.debounceMs);
-    }
-    if (actionOptions?.noDebounce !== undefined) {
-      this.gates.setNoDebounce(action, actionOptions.noDebounce);
-    }
-    if (actionOptions?.throttleMs !== undefined) {
-      this.gates.setThrottle(action, actionOptions.throttleMs);
-    }
-
-    if (
-      observation.status === "failed" ||
-      snapshot.directDirtySeq !== undefined ||
-      snapshot.staleSeq !== undefined ||
-      snapshot.unknownReason !== undefined
-    ) {
-      this.markAndScheduleInvalidAction(action);
-      return true;
-    }
-
-    const record = this.nodes.get(action);
-    if (record) {
-      this.nodes.setStatus(action, "clean");
-      record.invalidCauses = [];
-    }
-    this.pending.delete(action);
-    return true;
-  }
-
-  // Returns whether the action actually rehydrated from its snapshot; a miss
-  // (no snapshot for this actionId, fingerprint mismatch, malformed payload)
-  // leaves the action on the normal initial-run path.
-  private selectSchedulerSnapshotCandidate(
-    action: Action,
-    candidates: readonly PersistedSchedulerObservationSnapshot[],
-  ): PersistedSchedulerObservationSnapshot | undefined {
-    let selected: PersistedSchedulerObservationSnapshot | undefined;
-    let selectedRank = -1;
-    for (const candidate of candidates) {
-      const observation = candidate.observation;
-      if (
-        !isSchedulerActionObservation(observation) ||
-        !this.observationMatchesCurrentAction(action, observation)
-      ) {
-        continue;
-      }
-      const contextRank = schedulerContextRank(
-        candidate.executionContextKey,
-      );
-      if (
-        contextRank < observationMinimumContextRank(observation) ||
-        contextRank <= selectedRank
-      ) {
-        continue;
-      }
-      selected = candidate;
-      selectedRank = contextRank;
-    }
-    return selected;
-  }
-
-  private applyPreloadedInitialActionRehydration(
-    action: Action,
-    rehydration: SchedulerStorageRehydrationOptions & {
-      snapshotsByActionId: ReadonlyMap<
-        string,
-        readonly PersistedSchedulerObservationSnapshot[]
-      >;
-    },
-  ): boolean {
-    // Engage the rehydration barrier for the duration of the apply: if
-    // rehydrateActionFromObservation triggers a synchronous settle, no pull
-    // seed may promote this resuming action before its status is restored.
-    this.initialRehydrationInFlight++;
-    try {
-      const candidates = rehydration.snapshotsByActionId.get(
-        this.getActionId(action),
-      ) ?? [];
-      const snapshot = this.selectSchedulerSnapshotCandidate(
-        action,
-        candidates,
-      );
-      if (!snapshot) {
-        logger.debug("rehydrate/fallback-run/no-match", () => []);
-        return false;
-      }
-      const addresses = observationAdoptionAddresses(snapshot.observation);
-      if (
-        rehydration.addressesCurrentAtOrBelow?.(
-            addresses,
-            snapshot.observation.observedAtSeq,
-          ) === true &&
-        rehydration.hasPendingWriteOverlapping?.(addresses) !== true &&
-        this.rehydrateActionFromObservation(action, snapshot)
-      ) {
-        logger.debug("rehydrate/ok", () => []);
-        return true;
-      }
-
-      logger.debug("rehydrate/fallback-run/no-match", () => []);
-      return false;
-    } finally {
-      this.initialRehydrationInFlight--;
-    }
-  }
-
-  // Incremental observation adoption
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): apply
-  // another client's committed action observations to the local equivalent
-  // actions instead of re-running them. Called by the storage layer after a
-  // subscription push's writes have been applied (and their readers marked
-  // dirty), before the next scheduling pass dispatches — adoption clears
-  // exactly the dirt those writes caused for actions the writer already ran.
-  //
-  // The caller supplies the storage-side checks: `readsCurrentAtSeq` (no doc
-  // in the read set has a local commit newer than the observation — else the
-  // action is genuinely stale relative to state the writer did not observe)
-  // and `hasPendingLocalWriteOverlapping` (a local uncommitted write makes
-  // the local view diverge from the writer's basis — run normally).
-  //
-  // An adoption that races a mid-flight local run is harmless: the run's
-  // completion resubscribes from its own log and re-sets clean, an
-  // equivalent view (deterministic action over the same committed reads).
-  // Returns the number of actions adopted.
-  adoptRemoteObservations(
-    snapshots: readonly PersistedSchedulerObservationSnapshot[],
-    oracle: {
-      readsCurrentAtSeq(
-        reads: readonly IMemorySpaceAddress[],
-        seq: number,
-      ): boolean;
-      hasPendingLocalWriteOverlapping(
-        reads: readonly IMemorySpaceAddress[],
-      ): boolean;
-    },
-  ): number {
-    const candidatesByAction = new Map<
-      Action,
-      PersistedSchedulerObservationSnapshot[]
-    >();
-    for (const snapshot of snapshots) {
-      const observation = snapshot.observation;
-      if (!isSchedulerActionObservation(observation)) continue;
-      // Computations only: effects render locally, and event handlers only
-      // run at their origin.
-      if (observation.actionKind !== "computation") continue;
-      const action = this.actionsByObservationIdentity.get(
-        observationIdentityKey(observation),
-      );
-      if (!action) continue;
-      // Only live registrations adopt. `nodes.get` cannot decide that: a
-      // removed record stays in the registry so its ordinal and parent survive
-      // a re-registration window, so it answers for a node that is no longer
-      // scheduled. Registration is the question being asked.
-      if (!this.nodes.isComputation(action)) continue;
-      if (this.nodes.isKnownEffect(action)) continue;
-      // Never adopt a child-starting coordinator clean: its reconcile is what
-      // (re)registers per-element children, so skipping it strands a remotely
-      // appended row unregistered — the reload path's always-run guard, live.
-      if (this.alwaysRunActions.has(action)) {
-        logger.debug("adopt/miss/always-run", () => [observation.actionId]);
-        continue;
-      }
-      let candidates = candidatesByAction.get(action);
-      if (!candidates) {
-        candidates = [];
-        candidatesByAction.set(action, candidates);
-      }
-      candidates.push(snapshot);
-    }
-
-    let adopted = 0;
-    for (const [action, candidates] of candidatesByAction) {
-      const snapshot = this.selectSchedulerSnapshotCandidate(
-        action,
-        candidates,
-      );
-      if (!snapshot) {
-        continue;
-      }
-      const observation = snapshot.observation;
-      // A dirty/failed narrower row wins candidate selection and forces the
-      // receiver to run normally; never fall back to a clean broader row.
-      if (
-        observation.status !== "success" ||
-        snapshot.directDirtySeq !== undefined ||
-        snapshot.staleSeq !== undefined ||
-        snapshot.unknownReason !== undefined
-      ) {
-        continue;
-      }
-      const addresses = observationAdoptionAddresses(observation);
-      if (!oracle.readsCurrentAtSeq(addresses, observation.observedAtSeq)) {
-        logger.debug("adopt/miss/stale-reads", () => [observation.actionId]);
-        continue;
-      }
-      if (oracle.hasPendingLocalWriteOverlapping(addresses)) {
-        logger.debug("adopt/miss/local-pending", () => [observation.actionId]);
-        continue;
-      }
-      // Same barrier as registration-time rehydration: no pull seed may
-      // promote the action while its status is being restored.
-      this.initialRehydrationInFlight++;
-      try {
-        if (this.rehydrateActionFromObservation(action, snapshot)) {
-          adopted++;
-          logger.debug("adopt/ok", () => [observation.actionId]);
-        }
-      } finally {
-        this.initialRehydrationInFlight--;
-      }
-    }
-    return adopted;
-  }
-
-  private observationMatchesCurrentAction(
-    action: Action,
-    observation: SchedulerActionObservation,
-  ): boolean {
-    const actionId = this.getActionId(action);
-    if (observation.actionId !== actionId) {
-      logger.debug("rehydrate/miss/action-id", () => []);
-      return false;
-    }
-
-    const identity = (action as Partial<TelemetryAnnotations>)
-      .schedulerObservationIdentity;
-    if (
-      identity === undefined ||
-      identity.ownerSpace !== observation.ownerSpace ||
-      (identity.branch ?? "") !== observation.branch ||
-      identity.pieceId !== observation.pieceId ||
-      (identity.processGeneration ?? 0) !== observation.processGeneration
-    ) {
-      logger.debug("rehydrate/miss/identity", () => []);
-      return false;
-    }
-
-    const telemetry = getSchedulerActionTelemetryInfo(action);
-    const matches = observation.implementationFingerprint ===
-        schedulerImplementationFingerprint(action, actionId, telemetry) &&
-      observation.runtimeFingerprint === schedulerRuntimeFingerprint();
-    if (!matches) logger.debug("rehydrate/miss/fingerprint", () => []);
-    return matches;
-  }
-
   private setActionObservationIdentity(
     action: Action,
     identity: SchedulerObservationIdentity & { space?: MemorySpace },
@@ -1163,22 +672,15 @@ export class Scheduler {
       ...(identity.processGeneration !== undefined
         ? { processGeneration: identity.processGeneration }
         : {}),
+      ...(identity.pieceRootId !== undefined
+        ? { pieceRootId: identity.pieceRootId }
+        : {}),
+      // Phase 7: the ancestor chain the run supply resolves a nested
+      // piece's demanded instances through (scheduler/types.ts).
+      ...(identity.demandRootIds !== undefined
+        ? { demandRootIds: identity.demandRootIds }
+        : {}),
     };
-  }
-
-  private observationIdentityKeyForAction(action: Action): string | undefined {
-    const identity = (action as Partial<TelemetryAnnotations>)
-      .schedulerObservationIdentity;
-    if (identity === undefined || identity.ownerSpace === undefined) {
-      return undefined;
-    }
-    return observationIdentityKey({
-      ownerSpace: identity.ownerSpace,
-      branch: identity.branch ?? "",
-      pieceId: identity.pieceId,
-      processGeneration: identity.processGeneration ?? 0,
-      actionId: this.getActionId(action),
-    });
   }
 
   unsubscribe(
@@ -1187,19 +689,6 @@ export class Scheduler {
   ): void {
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
-    // Drop the adoption index entry only if it still points at this action
-    // (a re-registration may have overwritten it, and that entry belongs to
-    // the action that replaced this one). The key is derived from annotations
-    // carried on the action itself, so an entry outlives its action if either
-    // of those ever changes under it; the adoption path checks registration
-    // before applying, which leaves such an entry inert.
-    const identityKey = this.observationIdentityKeyForAction(action);
-    if (
-      identityKey !== undefined &&
-      this.actionsByObservationIdentity.get(identityKey) === action
-    ) {
-      this.actionsByObservationIdentity.delete(identityKey);
-    }
   }
 
   async run(action: Action): Promise<any> {
@@ -1263,6 +752,33 @@ export class Scheduler {
   // idle(), never resolves for a system that genuinely never settles.
   idleWithPendingCommits(): Promise<void> {
     return this.waitForQuiescence(true);
+  }
+
+  /**
+   * Whether the scheduler is quiescent RIGHT NOW (server-execution v2
+   * stage F): nothing running, nothing scheduled, no queued events, no
+   * held wakes, no background tasks, no runnable pull work. The serving
+   * loop's settle cycle probes this between idle() and synced() passes
+   * — idle() alone can resolve while a sync frame is mid-flight, and
+   * the frame's notification re-dirties the graph.
+   */
+  isIdle(): boolean {
+    return !this.runningPromise &&
+      this.backgroundTasks.size === 0 &&
+      !this.wakeShaper.hasPending() &&
+      this.eventQueue.length === 0 &&
+      !this.scheduled &&
+      !this.hasRunnablePullWork();
+  }
+
+  /**
+   * Whether a time-gate wake timer is armed (server-execution v2
+   * stage F; runtime-mapping N9): the SpaceServer's parking policy
+   * treats a pending gate wake as "not idle" rather than losing
+   * trailing debounce flushes on park.
+   */
+  hasArmedGateWake(): boolean {
+    return this.gates.hasWakeTimer();
   }
 
   private waitForQuiescence(awaitPendingCommits: boolean): Promise<void> {
@@ -1378,6 +894,349 @@ export class Scheduler {
     this.markAndScheduleInvalidAction(action);
   }
 
+  /**
+   * The ARRIVAL RE-ARM (server-execution v2 fan-out stage B, design §A/
+   * §B3): a demander who arrives after a node has narrowed finds no
+   * instance of their own — a clean node never re-runs for a demander
+   * that did not exist when it last ran — so the SpaceServer calls this
+   * when its demand registry gains a (principal, session) pair for a
+   * root. Every NARROWED node whose demand roots intersect `rootIds` is
+   * marked invalid and queued, with its per-instance record KEPT: only
+   * the arriving principal's instances are not clean, so only those run
+   * (B7 — the siblings stay current). A node that has not narrowed needs
+   * nothing (its one output is shared); a node that never ran will run
+   * for everyone when demanded. Returns the number of nodes re-armed.
+   */
+  invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
+    const roots = new Set(rootIds);
+    let rearmed = 0;
+    for (const record of this.nodes.nodes()) {
+      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
+      const identity = (record.action as Partial<TelemetryAnnotations>)
+        .schedulerObservationIdentity;
+      const demandRootIds = identity?.demandRootIds ??
+        (identity?.pieceRootId !== undefined
+          ? [identity.pieceRootId]
+          : undefined);
+      if (demandRootIds === undefined) continue;
+      if (!demandRootIds.some((id) => roots.has(id))) continue;
+      this.markActionInvalid(record.action, undefined, {
+        fanOutInstances: "keep",
+      });
+      this.pending.add(record.action);
+      rearmed += 1;
+    }
+    if (rearmed > 0) this.queueExecution();
+    return rearmed;
+  }
+
+  /**
+   * The event actor as a TRANSIENT demander (server-execution v2 fan-out
+   * stage B, RULED 2026-08-16 — design §B5/§I.5): the `firedAt` pairs of
+   * the SERVED events currently queued whose handler's demand roots
+   * intersect `rootIds`. The SpaceServer's demander resolver folds them
+   * in, so a dispatch's preflight recompute of a dirty scoped input
+   * materializes the ACTOR's own instance even when the actor watches
+   * nothing (the actor holds append authority on the stream — never
+   * another principal's instance). Empty off the serving posture (no
+   * queued event carries `served`).
+   */
+  transientEventDemandersFor(
+    rootIds: readonly string[],
+  ): ScopeKeyIdentity[] {
+    if (this.eventQueue.length === 0) return [];
+    const roots = new Set(rootIds);
+    const demanders: ScopeKeyIdentity[] = [];
+    for (const queued of this.eventQueue) {
+      const firedAt = queued.served?.firedAt;
+      if (firedAt?.user === undefined) continue;
+      const identity = (queued.handler as Partial<TelemetryAnnotations>)
+        .schedulerObservationIdentity;
+      const demandRootIds = identity?.demandRootIds ??
+        (identity?.pieceRootId !== undefined
+          ? [identity.pieceRootId]
+          : undefined);
+      if (demandRootIds === undefined) continue;
+      if (!demandRootIds.some((id) => roots.has(id))) continue;
+      demanders.push({
+        principal: firedAt.user,
+        ...(firedAt.session !== undefined && firedAt.session !== "server"
+          ? { sessionId: firedAt.session as never }
+          : {}),
+      });
+    }
+    return demanders;
+  }
+
+  /**
+   * The transient-demander PREFLIGHT (server-execution v2 fan-out stage
+   * B, design §B5's motivating case; independent review F2): before a
+   * SERVED event's handler runs, re-arm every fanned-out node in the
+   * handler's dependency closure whose instance FOR THE ACTOR is NOT
+   * CURRENT — never run at the node's ratchet for that principal. B7 made
+   * cleanliness per instance, so a node the watchers made node-level
+   * clean can still be missing the actor's instance entirely; the
+   * node-level preflight (`collectInvalidUpstreamForLog`) asks only
+   * whether the NODE is invalid, so the actor's own per-user derivation
+   * was never materialized and her handler read an empty instance —
+   * refused as a schema mismatch and marked consequenced with no error
+   * (silent event loss). This is the arrival re-arm applied to the
+   * event's transient demander (already folded into the demanders by
+   * `transientEventDemandersFor`, pinned by (j)): mark the node invalid
+   * KEEPING the sibling instances clean, so its next run derives the
+   * instance set — now including the actor's transient demand — and runs
+   * only the actor's uncomputed instance (B7). Returns the re-armed
+   * nodes; the caller holds the event until they run (its handler then
+   * reads a current instance). Empty when the actor's instances are all
+   * current (or the actor cannot key an instance — a sessionless actor
+   * at session depth, which resolveScopeKey fails closed on downstream).
+   *
+   * Direct writers of the handler's reads only — the shape the ruling
+   * names (a handler reading a per-user derivation). A per-user node
+   * TRANSITIVELY upstream of the handler's closure (read through an
+   * intervening derivation) is not reached here; that broader cone is
+   * the node-level path's inverted walk, which this does not duplicate
+   * (the transitive not-current-for-actor case stays a documented gap,
+   * scopes.md §2 — narrow in practice, the watchers' walk covers the
+   * rendering shape). No-op off the serving posture: only a served
+   * event carries an actor, and only a served node has a `fanOut`
+   * record.
+   */
+  rearmNotCurrentFanOutForActor(
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ): Action[] {
+    const directWriters = collectDirectWritersForLog({
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
+      writersByEntity: this.writeIndex.writersByEntity,
+      effects: this.nodes.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+    }, deps);
+    const rearmed: Action[] = [];
+    for (const writer of directWriters) {
+      const record = this.nodes.get(writer);
+      if (record?.fanOut === undefined) continue;
+      const actorKey = keyAtRatchet(record.fanOut, actor);
+      if (actorKey === undefined) continue;
+      // Current for the actor: her instance ran at the ratchet and no
+      // cause dirtied it — nothing to materialize.
+      if (record.fanOut.clean.has(actorKey)) continue;
+      this.markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
+      this.pending.add(writer);
+      rearmed.push(writer);
+    }
+    if (rearmed.length > 0) this.queueExecution();
+    return rearmed;
+  }
+
+  // ============================================================
+  // The (d′) standing `demandedWriters` root kind and the
+  // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
+  // serving-loop.md §1). The SpaceServer's demand pass calls these on
+  // registry DELTAS; nothing here is reached off the serving posture (the
+  // registration hook installs lazily on the first `enterDemandedEntity`,
+  // so a plain client runtime's `demandedWriters` set stays empty — T9′).
+  // ============================================================
+
+  /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
+   * the writer index's vocabulary: two instances of one doc, `user:alice`
+   * and `user:bob`, name ONE entity whose one node writes both). The
+   * count is the number of registry instance keys naming the entity. */
+  private readonly demandedEntityRefs = new Map<SpaceScopeAndURI, number>();
+  /** Per-runtime enter/leave/re-arm tallies. The SpaceServer reads the
+   * enter/leave DELTA per pass and folds it into its space-lived
+   * `stats.demand` accumulators (these reset with the runtime on a
+   * reactivation, so they are a per-tenure source, not the total). */
+  readonly demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
+  private demandedWriterHookInstalled = false;
+
+  private installDemandedWriterHook(): void {
+    if (this.demandedWriterHookInstalled) return;
+    this.demandedWriterHookInstalled = true;
+    // The REGISTRATION / UNREGISTRATION bracket (§2.4): a writer whose
+    // surface gains a demanded entity enters the root set; one that loses
+    // its last demanded entity leaves it. Bracketed like every other root
+    // flip (serving-loop.md §8: capture wasLive → flip → notify).
+    this.writeIndex.onWriterEntitiesChanged = (action, added, removed) => {
+      let touchesDemand = false;
+      for (const entity of added) {
+        if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+          touchesDemand = true;
+          break;
+        }
+      }
+      if (!touchesDemand) {
+        for (const entity of removed) {
+          if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+            touchesDemand = true;
+            break;
+          }
+        }
+      }
+      if (!touchesDemand) return;
+      this.reconcileDemandedWriter(action);
+    };
+  }
+
+  /** Recompute whether `action` is a demanded writer from its CURRENT
+   * write entities and the demanded entity refs; bracket the flip. */
+  private reconcileDemandedWriter(action: Action): void {
+    const entities = this.writeIndex.actionWriteEntities.get(action);
+    let shouldBeRoot = false;
+    if (entities !== undefined) {
+      for (const entity of entities) {
+        if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+          shouldBeRoot = true;
+          break;
+        }
+      }
+    }
+    const isRoot = this.nodes.isDemandedWriter(action);
+    if (shouldBeRoot === isRoot) return;
+    const record = this.nodes.get(action);
+    const wasLive = record !== undefined &&
+      isLive(this.dependencyGraphState, record);
+    if (shouldBeRoot) {
+      this.nodes.demandedWriters.add(action);
+      this.demandRootCounters.enters += 1;
+    } else {
+      this.nodes.demandedWriters.delete(action);
+      this.demandRootCounters.leaves += 1;
+    }
+    if (record === undefined) return;
+    notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
+    if (
+      shouldBeRoot && this.isLiveAction(action) && this.isInvalidAction(action)
+    ) {
+      // A dirty / never-ran node that just became live is a runnable seed
+      // (work-oracle: dirty ∧ live); make sure the loop wakes for it.
+      this.pending.add(action);
+      this.queueExecution();
+    }
+  }
+
+  /** ENTER: a demanded instance key `(space, id, scope)` entered the
+   * SpaceServer's registry (design §2.2 step 2). Refcounted per entity;
+   * the 0→1 transition marks every current writer of the entity a demand
+   * root (bracketed). Returns the writers (for the currency check). */
+  enterDemandedEntity(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+  ): Action[] {
+    this.installDemandedWriterHook();
+    const entity = entityNameKey(address as never);
+    const before = this.demandedEntityRefs.get(entity) ?? 0;
+    this.demandedEntityRefs.set(entity, before + 1);
+    const writers = [...(this.writeIndex.writersByEntity.get(entity) ?? [])];
+    if (before === 0) {
+      for (const writer of writers) this.reconcileDemandedWriter(writer);
+    }
+    return writers;
+  }
+
+  /** LEAVE: the last session tracking the instance key left (R-D's
+   * coarse boundary — never early). The 1→0 transition releases the
+   * writers' root status (bracketed; `withdrawDemandFrom` re-derives from
+   * the remaining roots). */
+  leaveDemandedEntity(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+  ): void {
+    const entity = entityNameKey(address as never);
+    const before = this.demandedEntityRefs.get(entity) ?? 0;
+    if (before <= 1) {
+      this.demandedEntityRefs.delete(entity);
+      for (const writer of this.writeIndex.writersByEntity.get(entity) ?? []) {
+        this.reconcileDemandedWriter(writer);
+      }
+    } else {
+      this.demandedEntityRefs.set(entity, before - 1);
+    }
+  }
+
+  /** The CURRENCY CHECK for one (instance key, demanding pair) row
+   * (design §2.2 step 3): for each writer of the entity, is the writer's
+   * instance FOR THIS PAIR current — ran at the ratchet and no cause
+   * dirtied it since (B7's clean bit)? Not current ⇒ re-arm with the
+   * sibling instances kept — the `rearmNotCurrentFanOutForActor` shape
+   * applied to a demanding pair. A writer with NO fan-out record is
+   * current iff clean (it never ran under the serving posture with a
+   * principal-bearing demander, or ran unnarrowed); a dirty/never-ran one
+   * is already a runnable seed once live (enter made it live). Returns
+   * the number of writers re-armed. */
+  rearmNotCurrentForDemander(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+    demander: ScopeKeyIdentity,
+  ): number {
+    const entity = entityNameKey(address as never);
+    const writers = this.writeIndex.writersByEntity.get(entity);
+    if (writers === undefined || writers.size === 0) return 0;
+    let rearmed = 0;
+    for (const writer of writers) {
+      const record = this.nodes.get(writer);
+      if (record === undefined) continue;
+      if (record.fanOut === undefined) continue;
+      const pairKey = keyAtRatchet(record.fanOut, demander);
+      if (pairKey === undefined) continue;
+      if (record.fanOut.clean.has(pairKey)) continue;
+      this.markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
+      this.pending.add(writer);
+      rearmed += 1;
+    }
+    if (rearmed > 0) {
+      this.demandRootCounters.notCurrentRearms += rearmed;
+      this.queueExecution();
+    }
+    return rearmed;
+  }
+
+  /** DIAGNOSTIC: the standing demanded-writer root set's size (T9′: empty
+   * off the serving posture). */
+  get demandedWriterCount(): number {
+    return this.nodes.demandedWriters.size;
+  }
+
+  /** DIAGNOSTIC: the demanded entity refcount map's size. */
+  get demandedEntityCount(): number {
+    return this.demandedEntityRefs.size;
+  }
+
+  /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope
+   * ratchet and per-instance state — or undefined off the fan-out path.
+   * Takes the action or its id (the trace's `actionId`). */
+  fanOutStateOf(action: Action | string): {
+    narrowed: boolean;
+    sessionPrincipals: string[];
+    instanceKeys: string[];
+    cleanKeys: string[];
+  } | undefined {
+    const record = typeof action === "string"
+      ? [...this.nodes.nodes()].find((candidate) =>
+        this.getActionId(candidate.action) === action
+      )
+      : this.nodes.get(action);
+    const state = record?.fanOut;
+    if (state === undefined) return undefined;
+    return {
+      narrowed: state.narrowed,
+      sessionPrincipals: [...state.sessionPrincipals],
+      instanceKeys: [...state.instances.keys()],
+      cleanKeys: [...state.clean],
+    };
+  }
+
+  /** The bound yield hook handed to the settle loop (stage C tuning T3):
+   * a promise to await when the slice is spent, else undefined. Defined
+   * only when `cooperativeYield` exists. */
+  private readonly cooperativeYieldBetweenRuns = ():
+    | Promise<void>
+    | undefined => this.cooperativeYield?.maybeYield();
+
+  /** DIAGNOSTIC (tests): the serving posture's cooperative yielder, if
+   * this scheduler has one. */
+  get servingYield(): CooperativeYield | undefined {
+    return this.cooperativeYield;
+  }
+
   queueExecution(): void {
     if (this.disposed) return;
     if (this.scheduled) {
@@ -1417,6 +1276,16 @@ export class Scheduler {
        * `StreamSendOptions` (cell.ts).
        */
       runtimeInjectedEventKeys?: readonly string[];
+      /** Server-execution v2 Phase 3: the serving drain's per-event
+       * carriage — acting identity, the durable stream entry, and the
+       * failure hook (QueuedEvent.served). Passed only by the
+       * SpaceServer's drain; absent everywhere client-side. */
+      served?: ServedEventDispatch;
+      /** The client-echo cascade thread (QueuedEvent.parentEventId):
+       * the emitting run's event id, passed by cell.ts's plain
+       * queueEvent for a send from within a speculation-stamped
+       * handler run. Kept OFF `served` — see QueuedEvent. */
+      parentEventId?: string;
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -1442,6 +1311,7 @@ export class Scheduler {
         this.shapedEventDeliver,
         this.pieceIdForEventLink(eventLink),
         eventLink,
+        this.runtime.scopeKeyIdentity,
         event,
         retries,
         onCommit,
@@ -1450,6 +1320,8 @@ export class Scheduler {
           originTx: opts.originTx,
           time,
           runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+          served: opts.served,
+          parentEventId: opts.parentEventId,
         },
       );
       return;
@@ -1464,6 +1336,8 @@ export class Scheduler {
       originTx: opts.originTx,
       time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+      served: opts.served,
+      parentEventId: opts.parentEventId,
     });
   }
 
@@ -1486,6 +1360,8 @@ export class Scheduler {
       originTx: opts.originTx,
       time: opts.time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+      served: opts.served,
+      parentEventId: opts.parentEventId,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's
@@ -1975,6 +1851,10 @@ export class Scheduler {
   private async execute(): Promise<void> {
     if (this.disposed) return;
     logger.timeStart("scheduler", "execute");
+    // Each execute pass starts in a fresh macrotask (queueTask): restart
+    // the serving posture's yield slice so idle time between passes never
+    // reads as spent work (stage C tuning T3).
+    this.cooperativeYield?.noteMacrotaskBoundary();
 
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
@@ -2239,11 +2119,12 @@ export class Scheduler {
   }
 
   private createWriteIndex(): SchedulerWriteIndex {
-    return new SchedulerWriteIndex();
+    return new SchedulerWriteIndex(() => this.runtime.scopeKeyIdentity);
   }
 
   private createEventPreflightDependencyState(): EventPreflightDependencyState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getTrace: () => this.eventPreflightTraceContext,
       nodes: this.nodes,
       pending: this.pending,
@@ -2262,6 +2143,7 @@ export class Scheduler {
 
   private createDependencyGraphState(): DependencyGraphState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       triggerIndex: this.triggerIndex,
       writersByEntity: this.writeIndex.writersByEntity,
       dependencies: this.dependencies,
@@ -2339,32 +2221,6 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
-    if (notification.type === "scheduler-observations") {
-      // Subscription-carried observations arrive AFTER their sync's
-      // integrate notification (same synchronous turn): the writes have been
-      // applied and their readers marked dirty; adoption now clears the dirt
-      // the writer already resolved, before the deferred dispatch runs.
-      // Payload validation happens inside adoptRemoteObservations.
-      this.adoptRemoteObservations(
-        notification.observations.map((row) => ({
-          executionContextKey: row.executionContextKey,
-          observation: row.observation as SchedulerActionObservation,
-          ...(row.directDirtySeq !== undefined
-            ? { directDirtySeq: row.directDirtySeq }
-            : {}),
-          ...(row.staleSeq !== undefined ? { staleSeq: row.staleSeq } : {}),
-          ...(row.unknownReason !== undefined
-            ? { unknownReason: row.unknownReason }
-            : {}),
-        })),
-        {
-          readsCurrentAtSeq: notification.seqCurrentAtOrBelow,
-          hasPendingLocalWriteOverlapping:
-            notification.hasPendingWriteOverlapping,
-        },
-      );
-      return;
-    }
     processStorageNotification(
       this.storageNotificationState,
       notification,
@@ -2416,7 +2272,6 @@ export class Scheduler {
       // post-phase-7). MUST NOT read backgroundTasks: that set holds work such
       // as an event-driven piece start (events.ts) or a sidecar pattern launch,
       // so gating on it would pause all pull scheduling on every one of them.
-      hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
       // Per-node convergence episode state prevents one exhausted subgraph
       // from releasing idle for unrelated work.
       isConvergenceHoldActive: (action) => this.isConvergenceHoldActive(action),
@@ -2517,6 +2372,7 @@ export class Scheduler {
 
   private createSettleLoopState(): SchedulerSettleLoopState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getCollectSettleStats: () => this.collectSettleStats,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
@@ -2544,6 +2400,10 @@ export class Scheduler {
         this.gates.clearComputationDebounceState(action),
       isLiveAction: (action) => this.isLiveAction(action),
       runAction: (action) => this.run(action),
+      // Stage C tuning T3: only a serving runtime yields between runs.
+      ...(this.cooperativeYield !== undefined
+        ? { yieldBetweenRuns: this.cooperativeYieldBetweenRuns }
+        : {}),
     };
   }
 
@@ -2627,6 +2487,17 @@ export class Scheduler {
           deps,
           invalidDeps,
         ),
+      // The transient-demander preflight (fan-out stage B, review F2):
+      // only a serving runtime has fan-out records and served actors, so
+      // the OFF arm and a flag-ON client leave this undefined (inert).
+      ...(this.runtime.servingPosture
+        ? {
+          rearmNotCurrentFanOutForActor: (
+            deps: ReactivityLog,
+            actor: ScopeKeyIdentity,
+          ) => this.rearmNotCurrentFanOutForActor(deps, actor),
+        }
+        : {}),
       setEventPassDemandRefresh: (refresh) => {
         this.eventPassDemandRefresh = refresh;
       },
@@ -2690,7 +2561,8 @@ export class Scheduler {
       markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
-      markInvalid: (target) => this.markActionInvalid(target),
+      markInvalid: (target, options) =>
+        this.markActionInvalid(target, undefined, options),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;
@@ -2705,6 +2577,7 @@ export class Scheduler {
 
   private createGraphSnapshotState(): SchedulerGraphSnapshotState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,
@@ -2789,10 +2662,11 @@ export class Scheduler {
   private markActionInvalid(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options?: MarkInvalidOptions,
   ): void {
     const record = this.nodes.get(action);
     if (!record) return;
-    markInvalidRecord(this.nodes, action, cause);
+    markInvalidRecord(this.nodes, action, cause, options);
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration, retry), so
@@ -2876,7 +2750,7 @@ export class Scheduler {
       const address of this.runtime.storageManager.pendingLoadAddresses?.() ??
         []
     ) {
-      const key = entityKey(address);
+      const key = entityKey(address, this.runtime.scopeKeyIdentity);
       this.preflightPendingLoadGenerations.set(
         key,
         this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0,
@@ -2928,7 +2802,11 @@ export class Scheduler {
     this.queueExecution();
   }
 
-  private dropEvent(event: QueuedEvent, reason: string): void {
+  private dropEvent(
+    event: QueuedEvent,
+    reason: string,
+    options: { quiet?: boolean } = {},
+  ): void {
     if (this.headEventLoadPark?.eventId === event.id) {
       this.headEventLoadPark = null;
     }
@@ -2945,7 +2823,36 @@ export class Scheduler {
       },
       event,
       reason,
+      "dropped",
+      options,
     );
+  }
+
+  /**
+   * Remove every QUEUED event matching `predicate` — queued, held at the
+   * head for a load, or mid-presync at the head, never one whose
+   * dispatch has shifted it off the queue — through the pre-dispatch
+   * drop chokepoint (`dropQueuedEvent`: lineage released, the final-
+   * outcome guard honored, a head dispatch parked in presync bails when
+   * it finds itself no longer at the head). Returns how many were
+   * removed. Server-execution v2 stage C build W3, (α1): the serving
+   * loop calls this at its flush-deadline decision to purge the LT1
+   * in-process leftovers (`served !== undefined && served.streamEntry
+   * === undefined`) whose wave is closing — the durable entry is the
+   * truth and the next drain re-runs it WITH a `streamEntry`
+   * (events.md §4). Quiet: the purge is routine and counted
+   * (`events.lt1LeftoversPurged`), not a dropped-event warning. The OFF
+   * arm never calls it.
+   */
+  purgeQueuedEvents(
+    predicate: (event: QueuedEvent) => boolean,
+    reason: string,
+  ): number {
+    const matches = this.eventQueue.filter(predicate);
+    for (const event of matches) {
+      this.dropEvent(event, reason, { quiet: true });
+    }
+    return matches.length;
   }
 
   private isHeadEventLoadParked(event: QueuedEvent): boolean {

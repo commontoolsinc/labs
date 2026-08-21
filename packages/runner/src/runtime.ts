@@ -8,13 +8,17 @@ import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  acquireServerExecutionEnabler,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
-  getPersistentSchedulerStateConfig,
+  getServerExecutionConfig,
   resetCommitPreconditionsConfig,
-  resetPersistentSchedulerStateConfig,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+  serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
-  setPersistentSchedulerStateConfig,
+  setServerExecutionConfig,
   setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
@@ -29,9 +33,18 @@ import {
 } from "@commonfabric/utils/async-local-store";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
-
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
+import type {
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  MemorySpace,
+  TransactionSealDestination,
+  URI,
+} from "./storage/interface.ts";
 import type {
   AnyCell,
   Frame,
@@ -49,6 +62,30 @@ import {
   isCell,
   schemaCellScope,
 } from "./cell.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import {
+  SpeculationOverlayDestination,
+  stampSpeculationRunContext,
+} from "./speculation/overlay-destination.ts";
+import { EffectsChannel } from "./speculation/effects-channel.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import { Action, Scheduler } from "./scheduler.ts";
+import {
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { Engine } from "./harness/index.ts";
+import {
+  CellLink,
+  inlineExternalSchemaRefsInValue,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { addressKey } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -78,22 +115,9 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import { createRef, EntityId } from "./create-ref.ts";
 import type { ConsoleMethod } from "./harness/console.ts";
-import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
-import { addressKey } from "./link-types.ts";
-import {
-  CellLink,
-  inlineExternalSchemaRefsInValue,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
@@ -101,32 +125,17 @@ import { PatternUpdater } from "./pattern-updater.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
-import { Action, Scheduler } from "./scheduler.ts";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
+import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { toURI } from "./uri-utils.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import type {
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  MemorySpace,
-  URI,
-} from "./storage/interface.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import type {
-  WriteStackTraceEntry,
-  WriteStackTraceMatcher,
-} from "./storage/write-stack-trace.ts";
 import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
+  type WriteStackTraceEntry,
+  type WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import {
@@ -134,8 +143,6 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { toURI } from "./uri-utils.ts";
-
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -195,7 +202,7 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
- * independent piece of the new fabric-value pipeline so that the features
+ * independent piece of the new `FabricValue` pipeline so that the features
  * can be enabled incrementally. Passed via `RuntimeOptions.experimental`;
  * lower-layer flags are propagated to their ambient control points, while
  * runtime-owned flags remain scoped to the Runtime instance.
@@ -220,8 +227,6 @@ export interface ExperimentalOptions {
    * unconditionally. Defaults to off.
    */
   contentAddressedSchemas?: boolean | undefined;
-  /** Persist scheduler observations and use them for scheduler rehydration. */
-  persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
@@ -262,6 +267,15 @@ export interface ExperimentalOptions {
    * docs/specs/pattern-imports/pattern-updates.md.
    */
   systemPatternAutoUpdate?: boolean | undefined;
+  /**
+   * Server-execution v2 (docs/specs/server-side-execution/): one flag, two
+   * states. OFF is today's behavior byte-for-byte. ON is the v2 posture as
+   * its stages land — in it, per-class commit admission is enforced by the
+   * memory server (protocol.md §2) and the deferred `stream-data` built-in
+   * is disabled with a runtime error (builtins.md §5). Deliberately named
+   * unlike v1's SERVER_PRIMARY_EXECUTION so archived docs never alias it.
+   */
+  serverExecution?: boolean | undefined;
 }
 
 /**
@@ -329,6 +343,89 @@ export type PatternInstantiationObserver = (
   instantiation: PatternInstantiation,
 ) => void;
 
+/**
+ * What the scheduler knows about a run when it mints the run's
+ * transaction (server-execution v2 stage F): the durable action identity
+ * (restart-stable — `implementationHash:instanceKey`, the basis index's
+ * `action` column) and the run's kind. The serving loop's stamper
+ * enriches this with per-run identity (M1) and attaches the wave run
+ * context (serving-loop.md §3d).
+ */
+export type ServerRunInfo = {
+  actionId: string;
+  /** `bookkeeping` is the sanctioned internal stamp kind
+   * (serving-loop.md §3d, RULED 2026-08-05) for runtime-internal commit
+   * paths that are neither derivations nor handler runs — the
+   * pattern-swap setup write today; the loop's own watermark write uses
+   * it directly. */
+  kind: "derivation" | "event-handler" | "bookkeeping";
+  /** The dispatched event's durable id (event-handler runs). */
+  eventId?: string;
+  /** The emitting run's durable event id for a same-wave cascade
+   * (C8d; review 2026-08-11 M2): threaded from the emission's
+   * dispatch carriage (ServedEventDispatch.parentEventId) through
+   * the SpaceServer's stamper into the wave run context, where the
+   * requeue closure folds a cascade child into its requeued
+   * parent's rollback. */
+  parentEventId?: string;
+  /**
+   * The run's PER-RUN DEMANDED identity (M1, scopes.md §5: a derivation
+   * runs per demanded instance and the DEMAND supplies the identity).
+   * Phase 2 completes the SEAM: the SpaceServer's stamper passes it
+   * through to the wave run context, the run's scoped reads resolve
+   * against it (the tx-carried identity at the traversal sites), its
+   * result cells key by it, and its seal/basis/carriage carry it. The
+   * SUPPLY — the scheduler running a scoped action once per demanded
+   * instance and filling this field per run — is the owed
+   * scheduler-instance-dimension follow-up; absent, a run resolves via
+   * the wave-level identity (Phase 1's cardinality-1 fallback).
+   */
+  scopeKeyIdentity?: ScopeKeyIdentity;
+  /** The instance key the demanded run serves (resolved from
+   * `scopeKeyIdentity` over the demanded root's scope), for basis-row
+   * keying (serving-loop.md §3b's `action_scope_key`). */
+  actionScopeKey?: ScopeKey;
+  /** The ACTING identity of an event-handler run (Phase 3, LD1;
+   * events.md §2, protocol.md §2): the server-stamped `firedAt` actor
+   * the drain resolved from the stream entry — handlers keep the
+   * event's actor (scopes.md §5). Carried into the wave run context's
+   * attribution annotations. `session` is absent for a sessionless
+   * chain (`firedAt.session = "server"`). */
+  acting?: { user: string; session?: string };
+  /** The durable stream entry a drained event-handler run consequences
+   * (Phase 3; events.md §4): the serving stamper writes the entry's
+   * `consequenced` mark INTO the run's own transaction, so the mark and
+   * the handler's consequences commit — and roll back — together (the
+   * same-transaction atomicity events.md §4 requires; a requeued
+   * contribution takes its mark with it). */
+  streamEntry?: { sidecarId: string; index: number; seq: number };
+  /** The LT1 same-space in-process copy's emitter transaction
+   * (ServedEventDispatch.lt1; stage C build W3, (α)): the SpaceServer's
+   * stamper resolves it to the copy's APPENDING wave (the wave the
+   * emitter sealed into) and refuses the copy's own seal into any
+   * other wave (events.md §4). Absent on the drain's
+   * `streamEntry`-bearing copies and on every client-side event. */
+  lt1?: { emitterTx: IExtendedStorageTransaction };
+};
+
+/**
+ * The per-(action × instance) run SUPPLY's demander resolver
+ * (server-execution v2 stage P2-F, reshaped by fan-out stage B): given an
+ * action's DEMAND ROOTS, the (principal, session) pairs whose watches
+ * reach them — at ANY address, a space-scoped root watch included
+ * (scopes.md §2's mechanism sentence: a principal's demand at a broad
+ * address is demand for that principal's instance of every node that
+ * narrows beneath it). The scheduler derives the INSTANCE set from these
+ * demanders and the node's known-scope ratchet (scheduler/fan-out.ts) —
+ * the resolver no longer decides an instance from the demand's own
+ * scope (P2-F's over-keying, F10). Instances live in keys/basis/stamps
+ * and the node's fan-out record, never as extra dependency-graph nodes
+ * (the spec-model's C11b).
+ */
+export type ServerRunDemanderResolver = (
+  pieceRootIds: readonly string[],
+) => readonly ScopeKeyIdentity[];
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -349,6 +446,20 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+  /**
+   * Server-execution v2 (serving-loop.md §3): mark THIS runtime as the
+   * SERVING posture — the SpaceServer's own runtime, whose seal
+   * destination is the wave machinery installed at activation. A serving
+   * runtime NEVER defaults to the Phase-2 client speculation overlay:
+   * its pre-activation structure loads and factory-time runs must commit
+   * through the loopback plane (the wave destination takes over at
+   * activation, and stage F's unstamped-seal refusal guards the gap).
+   * Every OTHER runtime under the flag — clients, and non-serving
+   * server-side utilities — defaults to the speculation overlay and
+   * thereby loses the derivation-commit path by construction
+   * (speculation.md; the Phase 2 posture). Ignored in the OFF arm.
+   */
+  servingPosture?: boolean;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   /**
@@ -500,6 +611,11 @@ export interface RuntimeOptions {
 
 export interface CfcRuntimeStats {
   cfcRelevantTx: number;
+  /** Stage C tuning T1: flow-label relevance probes actually EVALUATED
+   * (`flowLabelWorkExists`) vs answered from the transaction's memoized
+   * negative verdict. Measurement only. */
+  flowLabelProbesComputed: number;
+  flowLabelProbeMemoHits: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -532,6 +648,8 @@ export interface CfcRuntimeStats {
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcRelevantTx: 0,
+  flowLabelProbesComputed: 0,
+  flowLabelProbeMemoHits: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -690,7 +808,73 @@ export class Runtime {
   readonly fetch: RuntimeFetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+  // The transaction seal destination (server-execution v2, serving-loop.md
+  // §3d): installed only on a serving runtime under
+  // EXPERIMENTAL_SERVER_EXECUTION, by the wave machinery around each wave.
+  // While installed, every transaction edit() creates closes by sealing
+  // into it instead of committing to the store. Never installed on a
+  // client or in the OFF arm — installSealDestination throws off the flag.
+  #transactionSealDestination: TransactionSealDestination | undefined;
+  // The serving loop's run stamper (installed WITH the destination): the
+  // scheduler hands it each run's durable action id + kind, and it
+  // attaches the wave run context before the tx seals.
+  #serverRunStamper:
+    | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
+    | undefined;
+  // The per-(action × instance) run-supply resolver (installed WITH the
+  // destination, stage P2-F): an action's demand roots (its piece root
+  // plus the ancestor roots that instantiated it — Phase 7) → the
+  // demanded instances the SpaceServer's registry holds for any of them.
+  #serverRunDemanderResolver:
+    | ServerRunDemanderResolver
+    | undefined;
+  // The client speculation overlay (server-execution v2 Phase 2,
+  // speculation.md): the DEFAULT seal destination of every runtime under
+  // the flag that has no wave destination installed. Created lazily on
+  // the first edit(); derivation-kind runs redirect their writes into
+  // the replica's pending overlay through it — the structural removal of
+  // the client derivation-commit path. Never created in the OFF arm.
+  #speculationOverlay: SpeculationOverlayDestination | undefined;
+  /** The client-effect channel (server-execution v2 Phase 4,
+   * protocol.md §5) — constructed for flag-ON non-serving runtimes. */
+  #effectsChannel: EffectsChannel | undefined;
+  /** The exact spaceOpenObserver closure THIS runtime installed on the
+   * (possibly shared) storage manager — dispose clears the manager
+   * hook only on identity match, so a later runtime's own hook
+   * survives an earlier runtime's teardown (independent review
+   * NOTE-a: R1.dispose after R2's construction must not drop R2's
+   * subscriptions). */
+  #installedSpaceOpenObserver: ((space: MemorySpace) => void) | undefined;
+  // Whether THIS runtime explicitly set the serverExecution flag at
+  // construction (the only case its dispose participates in the
+  // process-global ambient lifecycle — see the constructor's propagation
+  // note).
+  #explicitServerExecution: boolean | undefined;
+  // The enabler release for an explicitly-ENABLED runtime. The count
+  // itself lives with the flag (memory/v2.ts, shared with the
+  // ExecutorHost): dispose releases and the flag resets only when the
+  // LAST live enabler goes — a parked space's dispose must not un-claim
+  // `derived` for every other owner's in-flight wave commit (the
+  // admission plane reads the ambient value).
+  #serverExecutionRelease: (() => void) | undefined;
+  /** Serving posture (RuntimeOptions.servingPosture): true only for the
+   * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
+   * default (a serving runtime never speculates). */
+  readonly servingPosture: boolean;
   readonly userIdentityDID: DID;
+
+  /**
+   * The identity this runtime's in-memory instance keys resolve scoped
+   * addresses against (key-vocabulary.md §2): its own authenticated
+   * session, read through from the storage manager. In the OFF arm every
+   * run acts as this one identity — scoped cardinality is 1 per runtime —
+   * which is the structural neutrality argument for the stage-E
+   * re-keying. Server-side per-run identities (the demand's, the stamped
+   * `firedAt`'s) arrive with stage F's run contexts, not from here.
+   */
+  get scopeKeyIdentity(): ScopeKeyIdentity {
+    return this.storageManager.scopeKeyIdentity();
+  }
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
@@ -966,11 +1150,11 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernCellRep: undefined,
-      persistentSchedulerState: undefined,
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
       lazyMaterialization: undefined,
+      serverExecution: undefined,
       ...options.experimental,
     };
 
@@ -1022,156 +1206,207 @@ export class Runtime {
       // flag, the table stays off for the process.
       setSyncSchemaTableConfig(false);
     }
-    setPersistentSchedulerStateConfig(
-      this.experimental.persistentSchedulerState,
-    );
-    this.experimental.persistentSchedulerState =
-      getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
-    this.commitBackpressure = resolveCommitBackpressure(
-      options.commitBackpressure,
-    );
-
-    this.id = options.storageManager.id;
-    this.apiUrl = new URL(options.apiUrl);
-    // Validate eagerly, mirroring the storage layer's resolver: a
-    // malformed host should fail at configuration time naming the
-    // space, not mid-builtin as a bare Invalid URL.
-    const normalizedSpaceHostMap: Record<string, string> = {};
-    for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
-      let route: URL;
-      try {
-        route = normalizeSpaceHost(host);
-      } catch (cause) {
-        if (!(cause instanceof SpaceHostValidationError)) throw cause;
-        throw new Error(
-          `Invalid spaceHostMap entry for ${space}`,
-          { cause },
-        );
+    // Propagate only when EXPLICITLY set (stage F): a co-hosted serving
+    // process (toolshed under the ON arm) constructs runtimes for many
+    // purposes, and an unconditional `undefined -> false` write from any
+    // flag-less construction would stomp the process-global ambient flag
+    // the memory server's derived admission reads — silently un-claiming
+    // `derived` mid-serve. In a process where nothing enables the flag
+    // the ambient default is already false, so the OFF arm is unchanged.
+    if (this.experimental.serverExecution !== undefined) {
+      this.#explicitServerExecution = this.experimental.serverExecution;
+      if (this.experimental.serverExecution === true) {
+        this.#serverExecutionRelease = acquireServerExecutionEnabler();
+      } else if (serverExecutionEnablerCount() === 0) {
+        // Explicit false writes the ambient flag ONLY while no enabler
+        // is live: a co-hosted non-serving runtime must not un-claim
+        // `derived` for a live serving runtime's in-flight wave commits.
+        // (With no enabler the ambient default is already false; the
+        // write keeps the direct-set test seam overridable.)
+        setServerExecutionConfig(false);
       }
-      normalizedSpaceHostMap[space] = route.toString();
     }
-    // Snapshot + freeze: the map is fixed for the runtime's lifetime
-    // (the per-space provider cache and routing decisions assume
-    // space → host never changes), so a caller mutating their object
-    // after construction must not change routing.
-    this.spaceHostMap = options.spaceHostMap
-      ? Object.freeze(normalizedSpaceHostMap)
-      : undefined;
-    // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
-    // preserving the existing behavior where a test overrides the global AFTER
-    // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
-    // mock is used as-is.
-    this.fetch = options.fetch ??
-      ((input, init) => globalThis.fetch(input, init));
-    this.staticCache = isDeno()
-      ? StaticCache.fromFileSystem()
-      : new StaticCache(new URL("/static", this.apiUrl));
+    // The runtime's OWN posture: its explicit value verbatim; only a
+    // flag-less construction reads the ambient state through.
+    this.experimental.serverExecution = this.#explicitServerExecution ??
+      getServerExecutionConfig();
+    this.servingPosture = options.servingPosture === true;
+    // Everything below can throw (URL parsing, host validation, engine
+    // construction). The enabler claimed above is process-global state,
+    // so a THROWING construction must roll it back — a leaked enabler
+    // would pin the ambient flag for the process lifetime.
+    try {
+      this.commitBackpressure = resolveCommitBackpressure(
+        options.commitBackpressure,
+      );
 
-    this.telemetry = options.telemetry ?? new RuntimeTelemetry();
+      this.id = options.storageManager.id;
+      this.apiUrl = new URL(options.apiUrl);
+      // Validate eagerly, mirroring the storage layer's resolver: a
+      // malformed host should fail at configuration time naming the
+      // space, not mid-builtin as a bare Invalid URL.
+      const normalizedSpaceHostMap: Record<string, string> = {};
+      for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
+        let route: URL;
+        try {
+          route = normalizeSpaceHost(host);
+        } catch (cause) {
+          if (!(cause instanceof SpaceHostValidationError)) throw cause;
+          throw new Error(
+            `Invalid spaceHostMap entry for ${space}`,
+            { cause },
+          );
+        }
+        normalizedSpaceHostMap[space] = route.toString();
+      }
+      // Snapshot + freeze: the map is fixed for the runtime's lifetime
+      // (the per-space provider cache and routing decisions assume
+      // space → host never changes), so a caller mutating their object
+      // after construction must not change routing.
+      this.spaceHostMap = options.spaceHostMap
+        ? Object.freeze(normalizedSpaceHostMap)
+        : undefined;
+      // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
+      // preserving the existing behavior where a test overrides the global AFTER
+      // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
+      // mock is used as-is.
+      this.fetch = options.fetch ??
+        ((input, init) => globalThis.fetch(input, init));
+      this.staticCache = isDeno()
+        ? StaticCache.fromFileSystem()
+        : new StaticCache(new URL("/static", this.apiUrl));
 
-    // Create harness first (no dependencies on other services)
-    this.harness = new Engine(this, {
-      hideInternalStackFrames: options.hideInternalStackFrames,
-    });
+      this.telemetry = options.telemetry ?? new RuntimeTelemetry();
 
-    this.storageManager = options.storageManager;
-    // Hand the storage layer the telemetry bus so it can emit the
-    // storage.push/pull markers (duck-typed: only the v2 StorageManager
-    // implements it; emulated/test managers simply don't have the method).
-    (this.storageManager as {
-      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
-    }).setTelemetry?.(this.telemetry);
-    this.moduleByteCache = options.moduleByteCache;
-    this.patternCoverage = options.patternCoverage;
-    // Validated + digested + frozen before the trust-snapshot provider
-    // default below, whose `revision` covers the config digest (a trust
-    // config change must invalidate prepared digests like any other
-    // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
-    this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
-    const actingPrincipal = options.storageManager.as.did() as DID;
-    const trustRevision = this.cfcTrustConfig === undefined
-      ? this.id
-      : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
-    this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
-      id: `principal:${actingPrincipal}`,
-      actingPrincipal,
-      revision: trustRevision,
-    }));
-    this.userIdentityDID = options.storageManager.as.did() as DID;
-    this.moduleRegistry = new ModuleRegistry(this);
-    this.patternManager = new PatternManager(this);
-    this.patternUpdater = new PatternUpdater(this);
-    this.runner = new Runner(this);
-    this.onPatternInstantiated = options.onPatternInstantiated;
-    this.cfcEnforcementMode = options.cfcEnforcementMode ??
-      "enforce-explicit";
-    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-    this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-    this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
-    this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-      "off";
-    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
-    this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
-    // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
-    // be able to mutate it (per-sink array or the map) after construction to
-    // change what egresses are allowed (review on #3993).
-    this.cfcSinkMaxConfidentiality = Object.freeze(
-      Object.fromEntries(
-        Object.entries(
-          options.cfcSinkMaxConfidentiality ?? DEFAULT_SINK_MAX_CONFIDENTIALITY,
-        ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
-      ),
-    );
-    // Validates + digests + deep-freezes; throws on malformed records so a
-    // config error surfaces at boot, not as a silently inert rule (same
-    // eager-validation posture as the spaceHostMap URLs above).
-    this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
-
-    // Create core services with dependencies injected
-    this.scheduler = new Scheduler(
-      this,
-      options.consoleHandler,
-      options.errorHandlers,
-    );
-
-    // Register built-in modules with runtime injection
-    registerBuiltins(this);
-
-    // Set this runtime as the current runtime for global cell compatibility
-    // Removed setCurrentRuntime call - no longer using singleton pattern
-
-    // Set the navigate callback
-    this.navigateCallback = options.navigateCallback;
-    this.pieceCreatedCallback = options.pieceCreatedCallback;
-
-    // Handle pattern environment configuration. Only set the (process-global)
-    // pattern environment when a host explicitly provides one — setting it
-    // unconditionally from every Runtime would let the last-constructed runtime
-    // clobber the apiUrl other runtimes' patterns see. Hosts that run patterns
-    // server-side (the toolshed) pass `patternEnvironment` so handler `fetch`es
-    // reach the right toolshed rather than the hardcoded `localhost:<port>`
-    // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
-    if (options.patternEnvironment) {
-      setPatternEnvironment(options.patternEnvironment);
-    }
-
-    if (options.debug) {
-      console.log("Runtime initialized with services:", {
-        scheduler: !!this.scheduler,
-        storageManager: !!this.storageManager,
-        patternManager: !!this.patternManager,
-        moduleRegistry: !!this.moduleRegistry,
-        harness: !!this.harness,
-        runner: !!this.runner,
-        telemetry: !!this.telemetry,
+      // Create harness first (no dependencies on other services)
+      this.harness = new Engine(this, {
+        hideInternalStackFrames: options.hideInternalStackFrames,
       });
-    }
 
-    // Push a default frame with this runtime so builder functions can access it
-    this.defaultFrame = pushFrame({ runtime: this });
+      this.storageManager = options.storageManager;
+      // Hand the storage layer the telemetry bus so it can emit the
+      // storage.push/pull markers (duck-typed: only the v2 StorageManager
+      // implements it; emulated/test managers simply don't have the method).
+      (this.storageManager as {
+        setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+      }).setTelemetry?.(this.telemetry);
+      this.moduleByteCache = options.moduleByteCache;
+      this.patternCoverage = options.patternCoverage;
+      // Validated + digested + frozen before the trust-snapshot provider
+      // default below, whose `revision` covers the config digest (a trust
+      // config change must invalidate prepared digests like any other
+      // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
+      this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
+      const actingPrincipal = options.storageManager.as.did() as DID;
+      const trustRevision = this.cfcTrustConfig === undefined
+        ? this.id
+        : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
+      this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
+        id: `principal:${actingPrincipal}`,
+        actingPrincipal,
+        revision: trustRevision,
+      }));
+      this.userIdentityDID = options.storageManager.as.did() as DID;
+      this.moduleRegistry = new ModuleRegistry(this);
+      this.patternManager = new PatternManager(this);
+      this.patternUpdater = new PatternUpdater(this);
+      this.runner = new Runner(this);
+      this.onPatternInstantiated = options.onPatternInstantiated;
+      this.cfcEnforcementMode = options.cfcEnforcementMode ??
+        "enforce-explicit";
+      this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
+      this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
+      this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+      this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+      this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
+        "off";
+      this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
+      // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
+      // be able to mutate it (per-sink array or the map) after construction to
+      // change what egresses are allowed (review on #3993).
+      this.cfcSinkMaxConfidentiality = Object.freeze(
+        Object.fromEntries(
+          Object.entries(
+            options.cfcSinkMaxConfidentiality ??
+              DEFAULT_SINK_MAX_CONFIDENTIALITY,
+          ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
+        ),
+      );
+      // Validates + digests + deep-freezes; throws on malformed records so a
+      // config error surfaces at boot, not as a silently inert rule (same
+      // eager-validation posture as the spaceHostMap URLs above).
+      this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
+
+      // Create core services with dependencies injected
+      this.scheduler = new Scheduler(
+        this,
+        options.consoleHandler,
+        options.errorHandlers,
+      );
+
+      // Register built-in modules with runtime injection
+      registerBuiltins(this);
+
+      // Set this runtime as the current runtime for global cell compatibility
+      // Removed setCurrentRuntime call - no longer using singleton pattern
+
+      // Set the navigate callback
+      this.navigateCallback = options.navigateCallback;
+      this.pieceCreatedCallback = options.pieceCreatedCallback;
+
+      // The client-effect channel (server-execution v2 Phase 4,
+      // protocol.md §5): every flag-ON NON-serving runtime subscribes to
+      // its session's effects-doc instance per space — the enact/ack duty
+      // the Phase-4 posture adds. The serving runtime never enacts (the
+      // SpaceServer computes intents; clients enact), and the OFF arm
+      // pays nothing here.
+      if (
+        this.experimental.serverExecution === true && !this.servingPosture
+      ) {
+        const channel = new EffectsChannel(this);
+        this.#effectsChannel = channel;
+        const manager = this.storageManager;
+        const observer = (space: MemorySpace) =>
+          channel.ensureSubscribed(space);
+        this.#installedSpaceOpenObserver = observer;
+        manager.spaceOpenObserver = observer;
+        for (const space of manager.openedSpaces?.() ?? []) {
+          channel.ensureSubscribed(space);
+        }
+      }
+
+      // Handle pattern environment configuration. Only set the (process-global)
+      // pattern environment when a host explicitly provides one — setting it
+      // unconditionally from every Runtime would let the last-constructed runtime
+      // clobber the apiUrl other runtimes' patterns see. Hosts that run patterns
+      // server-side (the toolshed) pass `patternEnvironment` so handler `fetch`es
+      // reach the right toolshed rather than the hardcoded `localhost:<port>`
+      // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
+      if (options.patternEnvironment) {
+        setPatternEnvironment(options.patternEnvironment);
+      }
+
+      if (options.debug) {
+        console.log("Runtime initialized with services:", {
+          scheduler: !!this.scheduler,
+          storageManager: !!this.storageManager,
+          patternManager: !!this.patternManager,
+          moduleRegistry: !!this.moduleRegistry,
+          harness: !!this.harness,
+          runner: !!this.runner,
+          telemetry: !!this.telemetry,
+        });
+      }
+
+      // Push a default frame with this runtime so builder functions can access it
+      this.defaultFrame = pushFrame({ runtime: this });
+    } catch (error) {
+      this.#releaseServerExecutionEnabler();
+      throw error;
+    }
   }
 
   /**
@@ -1199,6 +1434,82 @@ export class Runtime {
   #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
+   * Serving-loop observer of async builtin work (server-execution v2
+   * stage G): the SpaceServer's outbox installs one on the serving
+   * runtime so effect work registered during a flush's synchronous
+   * prefix counts toward the §7 outbox counters. Undefined everywhere
+   * else — the OFF arm and client runtimes pay one undefined check.
+   */
+  asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
+
+  /**
+   * Serving-loop observer of effect-memo hits (server-execution v2
+   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
+   * effectful builtins report an evaluation that resolved from the
+   * stored request hash — no effect fired. Installed by the
+   * SpaceServer on the serving runtime; undefined everywhere else (the
+   * OFF arm pays one optional call).
+   */
+  effectMemoObserver:
+    | ((event: { kind: "hit"; id: string }) => void)
+    | undefined;
+
+  /**
+   * The served `navigateTo` connectivity probe (server-execution v2
+   * Phase 4; builtins.md §4's LT3 ruling): whether (principal,
+   * sessionId) holds a live session on the serving space — the intent
+   * write requires the acting session CONNECTED to the COMPUTING space,
+   * else there is no channel to deliver the intent on. Installed by the
+   * SpaceServer at activation on the serving runtime; undefined
+   * everywhere else (the served half then skips the check — unit
+   * fixtures without a memory server co-host).
+   */
+  connectedSessionProbe:
+    | ((principal: string, sessionId: string) => boolean)
+    | undefined;
+
+  /**
+   * Count a served navigate-intent seal failure (server-execution v2
+   * Phase 4; serving-loop.md §7's `servedIntentSealFailures`): the
+   * builtin's intent tx resolved `{ error }` (or rejected) at its seal.
+   * Installed by the SpaceServer at activation on the serving runtime —
+   * the counter's home is the serving loop's stats block — and
+   * undefined everywhere else (the failure is still logged loudly by
+   * the builtin either way).
+   */
+  notifyServedIntentSealFailure: (() => void) | undefined;
+
+  /**
+   * Server-execution v2 stage P2-F (the F1 fold-in, RULED 2026-08-13):
+   * a PIECE-START setup/instantiation commit that fails — refused at
+   * the wave seal, withdrawn, or rejected — surfaces here. The start
+   * path is deliberately fire-and-forget (start() resolves before its
+   * commit settles), so without this seam the refusal Result was
+   * SWALLOWED and the piece silently ran against stale setup. The
+   * SpaceServer installs the observer at activation and counts the
+   * failure into §7's `structureLoadFailures` (a demanded-structure
+   * load that failed, asynchronously); the runner's loud error log
+   * rides the same reporting call in every arm.
+   */
+  pieceStartCommitFailureObserver:
+    | ((failure: { actionId: string; error: unknown }) => void)
+    | undefined;
+
+  /**
+   * Server-execution v2 stage C tuning (T3; serving-loop.md §2/§3): the
+   * serving scheduler's mid-wave hook. A SERVING runtime's scheduler
+   * yields one macrotask between runs whenever its slice of continuous
+   * work is spent (scheduler/cooperative-yield.ts — that is what makes the
+   * wave's flush deadline honest and lets the lease-renew and push-flush
+   * timers fire mid-settle), and calls this observer synchronously at
+   * every such yield. The SpaceServer installs it at activation to renew
+   * the lease mid-wave once the wave has run longer than TTL/3 — a renew
+   * that never depends on the timer queue being serviced. Undefined
+   * everywhere else (the OFF arm and clients construct no yielder at all).
+   */
+  servingYieldObserver: (() => void) | undefined;
+
+  /**
    * Register an in-flight async builtin operation so `settled()` waits for it
    * instead of racing the post-commit flush. The scheduler registers an
    * effect-bearing commit's promise here (a race-free barrier — the flush runs
@@ -1213,6 +1524,7 @@ export class Runtime {
    * runtime. Omit it only for work that belongs to no single run.
    */
   trackAsyncWork(promise: Promise<unknown>, owner?: Cell<any>): void {
+    this.asyncWorkObserver?.(promise);
     const tracked = promise.then(() => {}, () => {});
     const ownerKey = owner === undefined
       ? undefined
@@ -1380,6 +1692,19 @@ export class Runtime {
     { closeStorage = true }: { closeStorage?: boolean } = {},
   ): Promise<void> {
     try {
+      await this.#disposeInner(closeStorage);
+    } finally {
+      // Exception-safe: a rejecting teardown step must not leak the
+      // process-global enabler (the reset would then never fire).
+      this.#releaseServerExecutionEnabler();
+    }
+
+    // Clear the current runtime reference
+    // Removed setCurrentRuntime call - no longer using singleton pattern
+  }
+
+  async #disposeInner(closeStorage: boolean): Promise<void> {
+    try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
       // a sqlite RPC runs from a post-commit outbox flush and writes its result
@@ -1412,6 +1737,29 @@ export class Runtime {
       // Stop all running docs
       this.runner.stopAll();
 
+      // The speculation overlay dies with the runtime (speculation.md §1:
+      // process-memory only): withdraw its live entries and release the
+      // watermark sinks BEFORE the storage sessions they read through
+      // close.
+      this.#speculationOverlay?.close();
+      this.#speculationOverlay = undefined;
+      this.#effectsChannel?.close();
+      this.#effectsChannel = undefined;
+      // Release the manager-side hook — but only when the installed hook
+      // is OUR OWN (identity match): a later runtime constructed over the
+      // SAME manager (the LT8 second life) has already replaced it, and
+      // clearing unconditionally would drop THAT runtime's hook — its
+      // channel would miss every space opened after this dispose
+      // (independent review NOTE-a).
+      if (
+        this.#installedSpaceOpenObserver !== undefined &&
+        this.storageManager.spaceOpenObserver ===
+          this.#installedSpaceOpenObserver
+      ) {
+        this.storageManager.spaceOpenObserver = undefined;
+      }
+      this.#installedSpaceOpenObserver = undefined;
+
       // Background source checks are deliberately outside the scheduler. Abort
       // and settle them before the storage sessions they may write through close.
       await this.patternUpdater.dispose();
@@ -1437,19 +1785,16 @@ export class Runtime {
       await this.scheduler.idle();
     } finally {
       // Released whatever happened above. `storageManager.close()` can reject
-      // — through a provider's `replica.close()` — and it is the one await here
-      // that can. Every statement below is synchronous field-clearing that
-      // cannot fail in turn, so running them on the error path costs nothing
-      // while skipping them strands the process: the config resets are
-      // PROCESS-GLOBAL, and one skipped leaves a non-default experimental flag
-      // set for every runtime built afterwards, with nothing to put it back.
+      // — through a provider's `replica.close()` — and it is the one await
+      // here that can. Every statement below is synchronous field-clearing
+      // that cannot fail in turn, so running them on the error path costs
+      // nothing while skipping them strands the process: the config resets
+      // are PROCESS-GLOBAL, and one skipped leaves a non-default experimental
+      // flag set for every runtime built afterwards, with nothing to put it
+      // back.
       //
-      // The error still propagates. What changes is how much has been released
-      // by the time it does, not whether disposal fails.
-      //
-      // The unsubscribes come last, and after the final `idle()` above, because
-      // a subscriber removed earlier would miss notifications the settling work
-      // still depends on.
+      // The error still propagates. What changes is how much has been
+      // released by the time it does, not whether disposal fails.
       this.scheduler.dispose();
       this.runner.dispose();
 
@@ -1459,17 +1804,31 @@ export class Runtime {
         this.defaultFrame = undefined;
       }
 
-      // Dispose the Engine (clears compiler/runtime state and the console hook)
+      // Dispose the Engine (clears compiler/runtime state and the console
+      // hook)
       this.harness.dispose();
 
-      // Reset experimental config to defaults.
+      // Reset experimental config to defaults. serverExecution releases
+      // this runtime's ENABLER (stage F): the flag resets only when the
+      // last live enabler process-wide goes — disposing a flag-less
+      // runtime, or parking one serving runtime of several, must not clear
+      // the ambient flag other owners and the memory server's admission
+      // still depend on (mid-wave `derived` commits would be refused as
+      // unclaimable). A single-runtime test keeps its stage-A cleanup
+      // contract: the last enabler's dispose resets. Released in
+      // #releaseServerExecutionEnabler (also called from the dispose
+      // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
-      resetPersistentSchedulerStateConfig();
       resetCommitPreconditionsConfig();
     }
+  }
 
-    // Clear the current runtime reference
-    // Removed setCurrentRuntime call - no longer using singleton pattern
+  /** Release this runtime's server-execution enabler (idempotent — the
+   * handle guards re-entry; dispose() may run twice). */
+  #releaseServerExecutionEnabler(): void {
+    const release = this.#serverExecutionRelease;
+    this.#serverExecutionRelease = undefined;
+    release?.();
   }
 
   async [Symbol.asyncDispose]() {
@@ -1512,6 +1871,10 @@ export class Runtime {
         this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
+      },
+      onFlowLabelProbe: (outcome) => {
+        if (outcome === "memo") this.cfcStats.flowLabelProbeMemoHits += 1;
+        else this.cfcStats.flowLabelProbesComputed += 1;
       },
       onPreparedTx: () => {
         this.cfcStats.cfcPreparedTx += 1;
@@ -1564,7 +1927,164 @@ export class Runtime {
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
+    wrapped.configureSealDestination(
+      this.#transactionSealDestination ?? this.#speculationDestination(),
+    );
     return wrapped;
+  }
+
+  /**
+   * The default seal destination under EXPERIMENTAL_SERVER_EXECUTION
+   * (server-execution v2 Phase 2): a runtime with NO wave destination
+   * installed — every client, and any non-serving server-side runtime —
+   * seals its stamped derivation-kind runs into the speculation overlay
+   * instead of committing them (speculation.md; the by-construction
+   * removal of the client derivation-commit path). OFF arm: undefined —
+   * transactions commit exactly as today.
+   */
+  #speculationDestination(): SpeculationOverlayDestination | undefined {
+    if (this.experimental.serverExecution !== true) return undefined;
+    if (this.servingPosture) return undefined;
+    this.#speculationOverlay ??= new SpeculationOverlayDestination(this);
+    return this.#speculationOverlay;
+  }
+
+  /** DIAGNOSTIC (tests): the lazily-created speculation overlay, if this
+   * runtime has one. */
+  get speculationOverlay(): SpeculationOverlayDestination | undefined {
+    return this.#speculationOverlay;
+  }
+
+  /** The client-effect channel of a flag-ON non-serving runtime
+   * (server-execution v2 Phase 4, protocol.md §5): the overlay's
+   * optimistic navigateTo enactment records its nonce here, and the
+   * channel acks the authoritative intent without re-enacting.
+   * Undefined in the OFF arm and on serving runtimes. */
+  get effectsChannel(): EffectsChannel | undefined {
+    return this.#effectsChannel;
+  }
+
+  /**
+   * Install the transaction seal destination (server-execution v2,
+   * serving-loop.md §3d): every transaction edit() creates while one is
+   * installed closes by sealing into it instead of committing to the store.
+   * Only the wave machinery of a serving runtime installs one, around each
+   * wave; waves are serial per space, so a second install while one is
+   * live is a bug, not a hand-over.
+   */
+  installSealDestination(
+    destination: TransactionSealDestination,
+    options: {
+      /** The serving loop's run stamper (serving-loop.md §3d, RULED
+       * 2026-08-05: every server-side commit path declares its run
+       * context before it seals). The scheduler calls
+       * {@link stampServerRun} at its two dispatch choke points with
+       * what IT knows — the durable action id and the run's kind — and
+       * the stamper (the SpaceServer) enriches with per-run identity
+       * and attaches the wave run context. */
+      runStamper?: (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => void;
+      /** The per-(action × instance) run SUPPLY (server-execution v2
+       * stage P2-F; fan-out stage B): resolves an action's demand roots
+       * to the DEMANDERS the SpaceServer's registry holds for them. The
+       * scheduler consults this at its reactive-action choke point and
+       * runs the action once per demanded INSTANCE — derived from the
+       * demanders and the node's known-scope ratchet — stamping each run
+       * with that instance's identity (scopes.md §5: the DEMAND supplies
+       * the run identity). Absent (or returning nothing) the run keeps
+       * the wave-level fallback — the Phase-1 cardinality-1 posture. */
+      runDemanderResolver?: ServerRunDemanderResolver;
+    } = {},
+  ): void {
+    if (this.experimental.serverExecution !== true) {
+      throw new Error(
+        "A transaction seal destination requires EXPERIMENTAL_SERVER_EXECUTION " +
+          "(docs/specs/server-side-execution/serving-loop.md §3d); the OFF arm " +
+          "commits to the store",
+      );
+    }
+    if (this.#transactionSealDestination !== undefined) {
+      throw new Error(
+        "A transaction seal destination is already installed; waves are " +
+          "serial per space (serving-loop.md §3)",
+      );
+    }
+    this.#transactionSealDestination = destination;
+    this.#serverRunStamper = options.runStamper;
+    this.#serverRunDemanderResolver = options.runDemanderResolver;
+  }
+
+  /** The installed seal destination (the serving loop), if any —
+   * Phase 3's send site dispatches cross-space event staging through
+   * it (cell.ts's serving branch; events.md §2's cross-space arm). */
+  get installedSealDestination(): TransactionSealDestination | undefined {
+    return this.#transactionSealDestination;
+  }
+
+  /** Whether a seal destination is installed — the ON-arm SERVING
+   * posture (a flag-ON client speculating has none). Consumers branch
+   * durability-sensitive side effects on this (the pattern swap defers
+   * teardown to wave settlement only when sealing is in effect). */
+  get sealDestinationInstalled(): boolean {
+    return this.#transactionSealDestination !== undefined;
+  }
+
+  /** Remove the installed seal destination (the wave closed or aborted). */
+  clearSealDestination(): void {
+    this.#transactionSealDestination = undefined;
+    this.#serverRunStamper = undefined;
+    this.#serverRunDemanderResolver = undefined;
+  }
+
+  /**
+   * The DEMANDERS a scheduler action's DEMAND ROOTS currently have (the
+   * per-(action × instance) run SUPPLY, stage P2-F / fan-out stage B):
+   * its own piece root plus every ancestor piece root that instantiated
+   * it (`SchedulerObservationIdentity.demandRootIds`, Phase 7 — a nested
+   * piece is demanded through the outer piece the client watches).
+   * Undefined everywhere except a serving runtime whose SpaceServer
+   * installed a resolver — the OFF arm and client speculation pay one
+   * undefined check. The scheduler derives the instance set from the
+   * demanders and the node's known-scope ratchet and runs the action once
+   * per instance (instances live in keys/basis/stamps and the node's
+   * fan-out record, never as extra graph nodes — C11b); an empty return
+   * keeps the single wave-identity run.
+   */
+  serverRunDemandersFor(
+    pieceRootIds: readonly string[],
+  ): readonly ScopeKeyIdentity[] | undefined {
+    return this.#serverRunDemanderResolver?.(pieceRootIds);
+  }
+
+  /**
+   * Stamp a scheduler-driven run's wave context (serving-loop.md §3d).
+   * With a wave destination installed, the stamper (the SpaceServer)
+   * attaches the wave run context. With NONE installed but the flag ON —
+   * client speculation (Phase 2) — the run's kind is recorded on the
+   * SPECULATION stamp instead, so the overlay destination can route
+   * derivation-kind runs into the overlay while handler and bookkeeping
+   * runs keep committing (speculation.md; the wave stamp stays a
+   * server-only signal). The OFF arm pays one undefined check and
+   * stamps nothing. The scheduler calls this at exactly its
+   * transaction-minting choke points, so a destination sees every
+   * scheduler run stamped and the seal-time unstamped refusal is
+   * reserved for genuinely undeclared commit paths.
+   */
+  stampServerRun(
+    tx: IExtendedStorageTransaction,
+    info: ServerRunInfo,
+  ): void {
+    if (this.#serverRunStamper !== undefined) {
+      this.#serverRunStamper(tx, info);
+      return;
+    }
+    if (
+      this.experimental.serverExecution === true && !this.servingPosture
+    ) {
+      stampSpeculationRunContext(tx, info);
+    }
   }
 
   // (space, scope, id) triples for which a missing-link-target load has been
@@ -1592,26 +2112,49 @@ export class Runtime {
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,
     sourceSpace?: MemorySpace,
+    /** The reading run's identity when the read is a served per-instance
+     * run's (server-execution v2 stage A — the runner's explicit-instance
+     * read): the load then NAMES that principal's instance, keyed apart
+     * from the runtime's own. Absent = the runtime's own identity, the
+     * pre-stage-A path byte for byte. */
+    identity?: ScopeKeyIdentity,
   ): void {
     const { space, id, scope } = link;
-    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
+    // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
+    // serving-hazard list): name-keyed, A's kick suppressed B's load and
+    // B's absent read never healed at cardinality > 1. Resolved against
+    // the runtime's own identity — the OFF arm's one identity, so the
+    // partition is unchanged at cardinality 1 (key-vocabulary.md §2) — or
+    // against the served run's identity for a per-instance read (stage
+    // A): each demanded instance's absent read kicks its own load.
+    const key = `${space}\0${
+      resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
+    }\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
     const mgr = this.storageManager;
     const reserved = sameSpace &&
-      mgr.shouldPullDoc?.(space, id, scope) === true;
+      mgr.shouldPullDoc?.(space, id, scope, identity) === true;
     if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
+    const load = identity === undefined
+      ? this.getCellFromLink(link).sync()
+      // The instance-named load: the storage manager names the run's
+      // instance on the wire (lease-holder-only at admission) and lands
+      // the doc under it; an own-identity run takes the ordinary sync.
+      : mgr.syncCell(this.getCellFromLink(link), {
+        scopeKeyIdentity: identity,
+      });
     mgr.trackUntilSettled(
-      this.getCellFromLink(link).sync().catch(() => {
+      load.catch(() => {
         // Allow a retry on failure (e.g. transient disconnect): clear this
         // dedup set, and hand back the storage manager's reservation when
         // THIS kick took it — a cross-space kick never reserved, and must
         // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
-        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
       }),
     );
   }
@@ -1804,10 +2347,13 @@ export class Runtime {
     }
     // Flow-label relevance is computed, not caller-marked (S16): the
     // laundering txs are exactly the ones nothing marked relevant.
+    // Stage C tuning T1: probed ONCE per transaction activity epoch — the
+    // commit chokepoint re-uses this call's negative verdict (see
+    // IExtendedStorageTransaction.probeFlowLabelWork).
     if (
       !state.relevant &&
       state.flowLabelsMode !== "off" &&
-      flowLabelWorkExists(tx)
+      (tx.probeFlowLabelWork?.() ?? flowLabelWorkExists(tx))
     ) {
       tx.markCfcRelevant("flow-labels");
     }
@@ -2102,12 +2648,67 @@ export class Runtime {
     );
   }
 
+  /**
+   * The principal whose HOME SPACE a home-space resolution targets —
+   * the wish builtin's `#favorites`/`#profile` family (server-execution
+   * v2 Phase 5; builtins.md §5's per-demanding-identity wish
+   * resolution, RULED 2026-08-14):
+   *
+   * - On a CLIENT (and the whole OFF arm): the runtime's own user —
+   *   cardinality 1, today's behavior byte-for-byte.
+   * - On a SERVING runtime: the RUN's identity — the demand-supplied
+   *   instance identity (P2-F's run supply) or the event's stamped
+   *   actor — read from the transaction's stamped wave run context.
+   *   NEVER the runtime's own identity: that is the SERVICE identity,
+   *   and resolving it was the lunch-wall trap (a wish materializing
+   *   against the service home space — a foreign wave write).
+   * - On a serving runtime with NO acting run identity (a space-scope
+   *   run with no demanding principal): undefined — the caller
+   *   refuses loudly rather than falling back to the service DID.
+   */
+  homeSpacePrincipalFor(
+    tx?: IExtendedStorageTransaction,
+  ): DID | undefined {
+    if (!this.servingPosture) return this.userIdentityDID;
+    const context = tx === undefined ? undefined : waveRunContextOf(tx);
+    const principal = context?.scopeKeyIdentity?.principal ??
+      context?.acting?.user;
+    if (principal !== undefined && tx !== undefined) {
+      // IDENTITY CONSUMPTION is a user-scoped read (server-execution v2
+      // fan-out stage B, design §F's third ratchet source — RULED
+      // 2026-08-16): resolving WHOSE home space this run targets makes
+      // the run's value per demanding principal by construction — a
+      // served `#profile` wish that reads no scoped doc but provisions
+      // into the demander's home space is a USER-scoped node, so its
+      // scope-derived attribution carries the user and its provisioning
+      // rides the `demanded-run:<user>` carriage. The transaction's
+      // read-scope ratchet is what the seal and the scheduler's
+      // known-scope ratchet learn from; it only ever narrows.
+      if (scopeRank(tx.getNarrowestReadScope()) < scopeRank("user")) {
+        tx.resetNarrowestReadScope("user");
+      }
+    }
+    return principal as DID | undefined;
+  }
+
   getHomeSpaceCell(
     tx?: IExtendedStorageTransaction,
   ): Cell<SpaceCellContents> {
+    const principal = this.homeSpacePrincipalFor(tx);
+    if (principal === undefined) {
+      // Serving posture with no demanding identity (see
+      // homeSpacePrincipalFor): fail closed — never the service DID.
+      throw new Error(
+        "home-space resolution on a serving runtime requires the run's " +
+          "demanding identity (builtins.md §5's per-demanding-identity " +
+          "wish resolution; scopes.md §5 — the demand supplies the " +
+          "identity); refusing to resolve the SERVICE identity's home " +
+          "space",
+      );
+    }
     return this.getCell(
-      this.userIdentityDID,
-      this.userIdentityDID,
+      principal,
+      principal,
       spaceCellSchema,
       tx,
     ) as Cell<SpaceCellContents>;

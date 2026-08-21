@@ -74,6 +74,7 @@ import type {
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import type {
@@ -475,7 +476,8 @@ export interface BuilderFunctionsAndConstants {
   UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
-  // Fabric value classes, in the order they are declared in api/index.ts.
+  // `FabricSpecialObject` classes, in the order they are declared in
+  // api/index.ts.
   FabricSpecialObject: typeof FabricSpecialObject;
   FabricInstance: typeof FabricInstance;
   FabricPrimitive: typeof FabricPrimitive;
@@ -485,6 +487,7 @@ export interface BuilderFunctionsAndConstants {
   FabricLink: typeof FabricLink;
   FabricBytes: typeof FabricBytes;
   FabricRegExp: typeof FabricRegExp;
+  FabricKeyPair: typeof FabricKeyPair;
   FabricError: typeof FabricError;
 
   // Debug stringifiers

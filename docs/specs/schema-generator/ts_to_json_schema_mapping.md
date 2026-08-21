@@ -150,7 +150,7 @@ by any repo test.
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property | skip: `type-utils.ts`, `object-formatter.ts`; exception: `object-formatter.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
-| Fabric-primitive class (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricRegExp` carrying the `FabricSpecialObject` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
+| `FabricPrimitive` class (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricKeyPair`, `FabricRegExp` carrying the `FabricSpecialObject` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
 | `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
@@ -210,9 +210,10 @@ same-named types emit `$ref`s to it.
 `NATIVE_TYPE_SCHEMAS` (`src/formatters/native-type-formatter.ts`), as of
 this writing: `VNode` →
 `{ $ref: "https://commonfabric.org/schemas/vnode.json" }`; `Date`, `RegExp`,
-and `Uint8Array` → `{ type: "object" }`; the five fabric-primitive classes
+and `Uint8Array` → `{ type: "object" }`; the six `FabricPrimitive` classes
 (`FabricBytes`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`,
-`FabricRegExp`) → `{ type: "<Name>" }` (the fabric-primitive schema
+`FabricKeyPair`, `FabricRegExp`) → `{ type: "<Name>" }` (the `FabricPrimitive`
+schema
 vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
 `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
@@ -223,15 +224,15 @@ vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
 The three mapped to `{ type: "object" }` are native TS types with a canonical
 fabric form: a `Date` is stored as a `FabricEpochNsec`, a `RegExp` as a
 `FabricRegExp`, and a `Uint8Array` as a `FabricBytes`. They deliberately do
-NOT adopt the fabric-primitive type names: a field authored against a native
+NOT adopt the `FabricPrimitive` type names: a field authored against a native
 TS type can hold a raw native value on the way into the fabric boundary, and
-the fabric-primitive types validate by prototype only. `"object"` accepts the
+the `FabricPrimitive` types validate by prototype only. `"object"` accepts the
 stored fabric form, so a value stored as one reads back intact — where
 `{ type: "string" }` projects the read to `undefined`. `URL` is the exception
 that stays a string, because it converts to a plain string rather than to a
-fabric object.
+`FabricPrimitive`.
 
-A field authored against a fabric-primitive class ITSELF (`blob: FabricBytes`)
+A field authored against a `FabricPrimitive` class ITSELF (`blob: FabricBytes`)
 emits that class's schema-vocabulary name, a leaf with no `properties`, no
 `required`, and no `$defs` hoisting. Validation is by prototype
 (`schemaTypeOfFabricPrimitive`,
@@ -246,7 +247,7 @@ than stored. `true` is the status quo for them, not an endorsement.
 Guard: the lib-declared subset (`LIB_DECLARED_NATIVE_TYPES` — `Date`
 through `BigUint64Array`, and `RegExp`) is claimed only when declared in a default-lib or
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
-`interface Date {…}` is not swallowed. The fabric-primitive names are claimed
+`interface Date {…}` is not swallowed. The `FabricPrimitive` names are claimed
 only when the type carries the `FabricSpecialObject` nominal brand
 (`declaresFabricSpecialObjectBrand`), and named-type hoisting
 (`getNamedTypeKey`, `type-utils.ts`) classifies by the same test, so an

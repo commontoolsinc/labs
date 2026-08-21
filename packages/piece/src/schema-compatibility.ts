@@ -241,9 +241,14 @@ const ifcWithoutVolatileWriterIdentity = (ifc: unknown): unknown => {
  * contracts of the currently running pattern.
  *
  * Arguments are contravariant and results are covariant. Open argument objects
- * may still gain optional/defaulted named fields as the piece-evolution policy.
- * What keeps that allowance sound is a second check at update time rather than
- * anything provable here: pattern setup re-stages the piece's stored argument
+ * may still gain optional/defaulted named fields as the piece-evolution policy,
+ * and may drop named fields the pattern no longer reads — a demand given up
+ * leaves a writer's value unread, where a dropped result field breaks a reader,
+ * so only the result side preserves its named fields outright. A candidate that
+ * cannot hold a dropped field's value is still refused, by the ordinary
+ * named-property proof against its additionalProperties contract. What keeps
+ * those allowances sound is a second check at update time rather than anything
+ * provable here: pattern setup re-stages the piece's stored argument
  * against the incoming schema and validates it inside the setup transaction, so
  * an update whose durable argument the new schema cannot read is refused
  * instead of landing over unreadable state. Two sites do the checking, and the
@@ -492,14 +497,14 @@ function schemaSubsetIssue(
     }
 
     // A brand-marked structural emission (the pre-vocabulary generator's
-    // shape for a fabric special object) moving to a fabric-primitive-typed
+    // shape for a `FabricSpecialObject`) moving to a `FabricPrimitive`-typed
     // schema is deliberately NOT allowed through here, even under
     // `allowEvolutionPolicy`. The structural schema is an ordinary object
     // schema, so its value population is decided structurally: a plain
     // record carrying the brand key as an own property satisfies it, and the
     // presence-only `required` checks admit primitives of other classes
     // (`FabricHash` has `length`, so it inhabits the `FabricBytes` emission).
-    // A fabric-primitive-typed schema matches by prototype, and a pattern
+    // A `FabricPrimitive`-typed schema matches by prototype, and a pattern
     // update rewrites the stored argument verbatim -- nothing converts -- so
     // every such inhabitant would survive the update only to be rejected by
     // reads. The transition therefore narrows for every class, and it is
@@ -670,15 +675,21 @@ function objectSubsetIssue(
     ? source.patternProperties
     : target.patternProperties;
 
-  // Pattern evolution preserves named fields as part of the public contract,
-  // even when the candidate object is otherwise open. A durable-link subset
-  // proof is different: a source may name additional fields that an open
-  // target accepts through patternProperties/additionalProperties. Treating
-  // those fields as "removed" rejects valid Fabric projections such as $FS.
-  if (context.defaultComparison === "evolution") {
+  // A result's named fields are the contract consumers read, so evolution
+  // preserves every one of them even when the candidate object is otherwise
+  // open. An argument's are not: dropping one gives up a demand, which leaves a
+  // writer's value unread rather than breaking a reader. What the stored
+  // argument still needs — that the candidate can hold the value the piece
+  // already carries — the named-property proof below decides per field,
+  // accepting it under an open candidate and reporting it under a closed one. A
+  // durable-link subset proof reaches that same proof from the other side: a
+  // source may name additional fields that an open target accepts through
+  // patternProperties/additionalProperties, and treating those as "removed"
+  // rejects valid Fabric projections such as $FS.
+  if (context.defaultComparison === "evolution" && context.role === "result") {
     for (const property of Object.keys(previousProperties)) {
       if (Object.hasOwn(candidateProperties, property)) continue;
-      return `${path}.${property}: existing ${context.role} field was removed`;
+      return `${path}.${property}: existing result field was removed`;
     }
   }
 
@@ -987,7 +998,7 @@ function typeSubsetIssue(
     !targetTypes.some((targetType) =>
       sourceType === targetType ||
       (sourceType === "integer" && targetType === "number") ||
-      // Each fabric-primitive type is a subtype of "object" (mirrors
+      // Each `FabricPrimitive` type is a subtype of "object" (mirrors
       // schemaTypeMatchesValueType in the runner's traverse).
       (isFabricPrimitiveSchemaType(sourceType) && targetType === "object")
     )

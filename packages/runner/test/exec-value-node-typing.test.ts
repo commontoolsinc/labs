@@ -37,7 +37,7 @@ describe("serialized node binding typing", () => {
     const _nestedAsJson: JSONValue = { blob: bytes };
 
     // Assert assignability rather than mutate: these values are frozen-ish
-    // fabric data, and the declarations above are the actual test.
+    // `FabricValue`s, and the declarations above are the actual test.
     expect(bare).toBeInstanceOf(FabricBytes);
     expect((nested as { blob: unknown }).blob).toBeInstanceOf(FabricBytes);
   });

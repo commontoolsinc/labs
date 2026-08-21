@@ -8,10 +8,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
-import {
-  getPersistentSchedulerStateConfig,
-  type SchedulerActionSnapshotCursor,
-} from "@commonfabric/memory/v2";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -77,6 +73,18 @@ import {
 } from "./link-utils.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import {
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import {
+  navigateEventContextFromRunInfo,
+  navigateEventContextOf,
+  setNavigateEventContext,
+} from "./builtins/navigate-context.ts";
+import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
+import {
   causalFormOfBinding,
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
@@ -87,10 +95,6 @@ import { PatternManager } from "./pattern-manager.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
-import {
-  isSchedulerActionObservation,
-  type PersistedSchedulerObservationSnapshot,
-} from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -99,7 +103,6 @@ import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import type {
   IExtendedStorageTransaction,
-  IStorageProvider,
   IStorageSubscription,
   MemorySpace,
   URI,
@@ -211,7 +214,7 @@ type StartAttempt = {
   readonly preResolutionStopKeys: Set<string>;
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
-  targetKey?: `${MemorySpace}/${CellScope}/${URI}`;
+  targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -846,40 +849,27 @@ type JavaScriptNodeContext = BoundNodeIO & {
 };
 
 type JavaScriptActionResultCells = {
-  byScope: Map<CellScope, Cell<any>>;
+  // One result cell PER SCOPE INSTANCE, keyed by the shared scope_key
+  // vocabulary (key-vocabulary.md §1 site 3) — never by the scope NAME:
+  // on a serving runtime `byScope.get("session")` would return ONE cell
+  // where the server needs one per session. The keys are built from the
+  // acting identity at lookup time; in the OFF arm that is the runtime's
+  // own session, so exactly one instance exists per scope name and the
+  // map partitions as the name-keyed form did.
+  byScope: Map<ScopeKey, Cell<any>>;
 };
 
 type SchedulerRehydrationSubscriptionOptions = {
-  rehydrateFromStorage?: {
-    space: MemorySpace;
-    pieceId: string;
-    processGeneration: number;
-    // Resumed from a synced state: propagated so container-minting builtins and
-    // cross-space child runs defer their initial runs until sync too.
-    awaitSync?: boolean;
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >;
-    addressesCurrentAtOrBelow?: NonNullable<
-      IStorageProvider["areSchedulerAddressesCurrentAtOrBelow"]
-    >;
-    hasPendingWriteOverlapping?: NonNullable<
-      IStorageProvider["schedulerHasPendingWriteOverlapping"]
-    >;
-  };
-  // The owning pattern instance for this reader, set unconditionally (not only
-  // under persistent scheduler state) so the scheduler can group a pattern's
-  // shaped cell-flip wakes by instance (timing side-channel mitigation, plan B)
-  // and tell a pattern reader from internal machinery.
+  // The owning pattern instance for this reader, set unconditionally so the
+  // scheduler can group a pattern's shaped cell-flip wakes by instance
+  // (timing side-channel mitigation, plan B) and tell a pattern reader from
+  // internal machinery.
   observationIdentity?: {
     pieceId: string;
     ownerSpace: MemorySpace;
   };
-  // Defer initial action runs until the space finishes syncing, without
-  // restoring persisted scheduler state. Set for resumed patterns when
-  // persistent scheduler state is disabled, so re-running actions read
-  // confirmed-loaded inputs.
+  // Defer initial action runs until the space finishes syncing, so
+  // re-running actions read confirmed-loaded inputs.
   awaitSyncBeforeInitialRun?: {
     space: MemorySpace;
   };
@@ -891,8 +881,7 @@ type SchedulerRehydrationSubscriptionOptions = {
 function defersInitialRunUntilSynced(
   options: SchedulerRehydrationSubscriptionOptions,
 ): boolean {
-  return !!(options.rehydrateFromStorage?.awaitSync ||
-    options.awaitSyncBeforeInitialRun);
+  return !!options.awaitSyncBeforeInitialRun;
 }
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
@@ -905,6 +894,13 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  // The piece root that INSTANTIATED this piece (a nested pattern node's
+  // parent, a result-as-pattern child's producing piece). Its actions'
+  // demand roots (`SchedulerObservationIdentity.demandRootIds`) become the
+  // parent's chain plus this root, so the serving loop's per-(action ×
+  // instance) run supply resolves a nested piece's demanded instances
+  // through the OUTER piece a client watches (server-execution v2 Phase 7).
+  parentPieceRootId?: string;
 };
 
 // Placeholder standing in for an argument slot whose stored raw value is a
@@ -1233,7 +1229,7 @@ function dedupeNormalizedLinks(
 }
 
 export class Runner {
-  readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
+  readonly cancels = new Map<`${MemorySpace}/${ScopeKey}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
   // outside the scheduler, like PatternUpdater's checks — dispose() settles
@@ -1255,11 +1251,11 @@ export class Runner {
   // for that reason — a result key names one result document, and a pattern
   // that keeps starting and stopping children adds keys it will never revisit.
   private locallyPreparedResults = new BoundedKeyMap<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
   private locallyStoppedResults = new BoundedKeyMap<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
@@ -1268,56 +1264,37 @@ export class Runner {
   // create-only receipt guard rejects the duplicate. It is not a replacement
   // for the system-wide commit precondition.
   private locallyCommittedHandlerResultStarts = new Set<
-    `${MemorySpace}/${CellScope}/${URI}`
+    `${MemorySpace}/${ScopeKey}/${URI}`
   >();
   // Results started in their own right rather than as part of an enclosing
   // pattern, which is what navigating to a nested result does. An enclosing
   // pattern releasing such a result leaves it running; only stopping it
   // directly ends it.
   private independentlyStartedResults = new Set<
-    `${MemorySpace}/${CellScope}/${URI}`
+    `${MemorySpace}/${ScopeKey}/${URI}`
   >();
   // Commit-gated starts that have not installed a registration yet, indexed by
   // result so an explicit stop can tombstone them before installation.
   private pendingDeferredStarts = new Map<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
   >();
-  // Map whose key is the result cell's full key, and whose values are a hash
+  // Two-level memo of what each result cell holds: outer key the result
+  // DOC (space/id), inner key the resolved scope INSTANCE, value a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
-  // compares to decide whether a returned sub-pattern has changed.
+  // compares to decide whether a returned sub-pattern has changed. The
+  // inner key is the SAME per-run resolved ScopeKey that selects the
+  // byScope result cell (review thread r3739139481): a serving runtime
+  // materializes one child per demanded instance, and a doc-level (or
+  // service-identity-resolved) key made the SECOND demanded instance
+  // look "unchanged" and skip its child materialization. The outer
+  // doc key is what change notifications can name (they carry scope by
+  // NAME, which cannot address per-run instances), so eviction drops
+  // the whole doc's entry -- over-eviction across instances is safe:
+  // re-preparing an unchanged pattern is idempotent.
   private resultPatternCache = new Map<
-    `${MemorySpace}/${CellScope}/${URI}`,
-    string
-  >();
-  // Per-transaction accumulator of cross-space child spaces, so that when a
-  // parent materializes several `Child.inSpace(...)` results into different
-  // spaces we commit ALL child spaces before the parent (the parent's link to
-  // each child must never be durable before that child's target). Each call
-  // re-supplies the full order rather than replacing it with just the latest
-  // child + parent. Keyed weakly by transaction so it is reclaimed with the tx.
-  // Per-doc rehydration (docs/specs/scheduler-v2/per-doc-rehydration.md):
-  // one space-wide snapshot listing per resumed boot, bucketed per piece doc
-  // (`${scope}:${id}` of each piece's result cell). Descendants started with
-  // resume intent consume their own bucket synchronously at registration.
-  // Replaced by the next top-level resume load for the space; the in-flight
-  // map single-flights concurrent resumes onto one listing.
-  private resumeSnapshotsBySpace = new Map<
-    MemorySpace,
-    ReadonlyMap<
-      string,
-      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    >
-  >();
-  private resumeSnapshotLoads = new Map<
-    MemorySpace,
-    Promise<
-      | ReadonlyMap<
-        string,
-        ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-      >
-      | undefined
-    >
+    `${MemorySpace}/${URI}`,
+    Map<ScopeKey, string>
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
   // A later explicit start captures the new epoch and may proceed normally.
@@ -1378,10 +1355,21 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
+            // The notification names the DOC (scope arrives by NAME,
+            // which cannot address a per-run scope instance on a
+            // serving runtime — r3739139481), so eviction drops the
+            // doc's WHOLE entry: every instance's memo clears, and the
+            // over-eviction is safe — re-preparing an unchanged
+            // pattern commits no differing bytes
+            // (writeJavaScriptActionResult's unchanged path is
+            // idempotent). This also keeps the stage-E healing: no
+            // scope segment in the key means no raw-vs-normalized
+            // mismatch can make eviction silently miss an entry. The
+            // eviction-on-notification CONTRACT is what the storage
+            // subscription exists for and is pinned by the "clears
+            // cached patterns when storage notifies of changes" test.
             this.resultPatternCache.delete(
-              `${space}/${
-                change.address.scope ?? "space"
-              }/${change.address.id}`,
+              `${space}/${change.address.id}`,
             );
           }
         } else if (notification.type === "reset") {
@@ -2455,6 +2443,8 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      // See RunnerRunOptions.parentPieceRootId.
+      parentPieceRootId?: string;
     } = {},
   ): Cancel {
     const {
@@ -2515,16 +2505,33 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      if (shouldCommit) {
+        // Self-minted instantiation tx (the hot-swap watcher's
+        // swapToPattern arm reaches here tx-less): runtime-internal
+        // piece machinery with no scheduler run around it, so stamp the
+        // sanctioned bookkeeping kind (serving-loop.md §3d, RULED
+        // 2026-08-05) like the sibling setup write in swapToPattern
+        // below. A PROVIDED tx keeps its caller's stamp — never
+        // restamped here. No-op off the serving posture.
+        this.runtime.stampServerRun(actualTx, {
+          actionId: `piece-instantiate/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+      }
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
       // piece identity rather than replaying the old implementation's cache.
       const schedulerRehydration = initialSchedulerRehydrationAvailable
         ? options.schedulerRehydration ?? this.schedulerRehydrationOptions(
           resultCell,
-          undefined,
           options.awaitSyncBeforeInitialRun,
+          options.parentPieceRootId,
         )
-        : this.schedulerRehydrationOptions(resultCell);
+        : this.schedulerRehydrationOptions(
+          resultCell,
+          undefined,
+          options.parentPieceRootId,
+        );
       initialSchedulerRehydrationAvailable = false;
       try {
         for (const node of pattern.nodes) {
@@ -2557,7 +2564,21 @@ export class Runner {
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);
-          actualTx.commit();
+          // Fire-and-forget by design (start() resolves before the
+          // commit settles), but NEVER swallowed (stage P2-F, the F1
+          // fold-in — RULED 2026-08-13): a refused or failed
+          // instantiation commit means the piece is running against
+          // writes that never landed, so the failure surfaces loudly
+          // and, on a serving runtime, counted.
+          const instantiateActionId =
+            `piece-instantiate/${resultCell.sourceURI}`;
+          actualTx.commit().then(({ error }) => {
+            if (error !== undefined) {
+              this.reportPieceStartCommitFailure(instantiateActionId, error);
+            }
+          }).catch((error) => {
+            this.reportPieceStartCommitFailure(instantiateActionId, error);
+          });
         }
       }
     };
@@ -2581,32 +2602,120 @@ export class Runner {
       ) => {
         const pattern = this.resolveToPattern(loaded as Pattern);
         const setupTx = this.runtime.edit();
-        try {
-          this.applySetupState(
-            setupTx,
-            pattern,
-            newRef,
-            {
-              sameStoredSetup: false,
-              restageStoredArgument: true,
-              storedSetupMatches: false,
-            },
-            undefined,
-            resultCell,
-          );
-          this.runtime.prepareTxForCommit(setupTx);
-          setupTx.commit();
-        } catch (error) {
-          logger.error(
-            "pattern-swap-setup-error",
-            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-            error,
-          );
+        // Server-execution v2 stage F (serving-loop.md §3d): under an
+        // installed seal destination every commit path declares its run
+        // context; the swap's setup write is runtime-internal
+        // bookkeeping. A no-op everywhere else. The action identity is
+        // per PIECE (the swapped result cell's stable address), not per
+        // {identity, symbol}: two pieces swapping to one pattern must
+        // not share a basis action (their rows would overwrite each
+        // other under §3b's per-(action, instance) replacement), while
+        // consecutive swaps of ONE piece overwrite — bounded, exactly
+        // the S4-friendly shape.
+        const pieceLink = resultCell.getAsNormalizedFullLink();
+        this.runtime.stampServerRun(setupTx, {
+          actionId: `pattern-swap/${pieceLink.space}/${
+            pieceLink.scope ?? "space"
+          }/${pieceLink.id}`,
+          kind: "bookkeeping",
+        });
+        const finishSwap = () => {
+          cancelNodes?.();
+          instantiatePattern(pattern);
+          runningRef = newRef;
+        };
+        if (!this.runtime.sealDestinationInstalled) {
+          // The OFF arm (and ON-arm client speculation): today's
+          // behavior, byte for byte — setup commits to the store and the
+          // swap proceeds synchronously.
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            setupTx.commit();
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          finishSwap();
           return;
         }
-        cancelNodes?.();
-        instantiatePattern(pattern);
-        runningRef = newRef;
+        // ON-arm serving: the setup seals into the wave, and the wave
+        // can still WITHDRAW it at the commit step (a conflict drop, a
+        // lease-lost abort) AFTER commit() resolved — so the running
+        // graph is replaced only once the setup is DURABLY accepted
+        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
+        // running against withdrawn setup is the "Handler used as lift"
+        // failure class, while old-graph-plus-new-pointer is a coherent
+        // not-yet-swapped state a later pointer write (or reactivation)
+        // repairs.
+        void (async () => {
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            const committed = await setupTx.commit();
+            if (committed.error !== undefined) {
+              logger.error(
+                "pattern-swap-setup-error",
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                committed.error,
+              );
+              return;
+            }
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          const settlement = waveSettlementOf(setupTx);
+          if (settlement !== undefined) {
+            const settled = await settlement;
+            if (settled.error !== undefined) {
+              logger.warn(
+                "pattern-swap-setup-withdrawn",
+                () => [
+                  `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was withdrawn by the wave; the running pattern is preserved`,
+                  settled.error,
+                ],
+              );
+              return;
+            }
+          }
+          // Liveness + supersession: the piece may have stopped, the
+          // runtime cycled, or a NEWER pointer write swapped past this
+          // one while the settlement was pending.
+          if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+          if (currentPatternKey !== patternIdentityKey(newRef)) return;
+          finishSwap();
+        })();
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -2677,6 +2786,16 @@ export class Runner {
                 ) {
                   const revertRef = runningRef;
                   const rollForward = this.runtime.editWithRetry((tx) => {
+                    // Async pointer repair from the meta watcher's load
+                    // promise — no scheduler run stamps it; bookkeeping
+                    // per serving-loop.md §3d (the serving runtime runs
+                    // with systemPatternAutoUpdate, so this path is
+                    // live server-side).
+                    this.runtime.stampServerRun(tx, {
+                      actionId:
+                        `pattern-pointer-rollforward/${resultCell.sourceURI}`,
+                      kind: "bookkeeping",
+                    });
                     const cur = asPatternIdentityRef(
                       resultCell.withTx(tx).getMetaRaw("patternIdentity", {
                         meta: ignoreReadForScheduling,
@@ -2800,6 +2919,13 @@ export class Runner {
         // precondition read or prepare throwing) aborts the tx and rethrows the
         // ORIGINAL instantiate error, so the piece is left exactly as it was.
         const repairTx = this.runtime.edit();
+        // Self-minted repair tx inside startCore — piece machinery with
+        // no scheduler run around it; bookkeeping per serving-loop.md
+        // §3d (reachable server-side via the demand loader's start).
+        this.runtime.stampServerRun(repairTx, {
+          actionId: `piece-start-repair/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
         try {
           // Precondition: the pinned identity must still equal the ref diagnosed
           // above. A concurrent updater or boot may have moved it; re-running
@@ -2863,10 +2989,20 @@ export class Runner {
           this.allCancels.delete(cancel);
           cancel();
         };
+        const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
         repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) teardownAfterFailedCommit();
+          if (result.error) {
+            // Surfaced BEFORE the teardown (stage P2-F, the F1
+            // fold-in): the pre-P2-F path tore the registration down
+            // silently — correct liveness, invisible failure.
+            this.reportPieceStartCommitFailure(repairActionId, result.error);
+            teardownAfterFailedCommit();
+          }
         });
-        repairTx.commit().catch(() => teardownAfterFailedCommit());
+        repairTx.commit().catch((error) => {
+          this.reportPieceStartCommitFailure(repairActionId, error);
+          teardownAfterFailedCommit();
+        });
       }
     };
 
@@ -3138,17 +3274,6 @@ export class Runner {
         return await this.doStart(rootCell, seenCells, attempt);
       }
 
-      const snapshotsStart = performance.now();
-      const snapshotsByActionId = await this
-        .loadSchedulerRehydrationSnapshots(rootCell, attempt.lifecycleEpoch);
-      if (!this.isStartAttemptCurrent(attempt)) return false;
-      logger.time(snapshotsStart, "start", "loadRehydrationSnapshots");
-      // The listing is another asynchronous gap. If patternIdentity changed,
-      // its snapshots and resolved implementation belong to the old pattern;
-      // re-enter doStart before installing either one.
-      if (!patternIdentityStillCurrent()) {
-        return await this.doStart(rootCell, seenCells, attempt);
-      }
       // we may already be in the midst of starting this, so don't start again
       if (this.cancels.has(this.getDocKey(rootCell))) {
         return true;
@@ -3161,7 +3286,6 @@ export class Runner {
           schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
-            snapshotsByActionId,
             // Resumed from a synced state (it just awaited
             // syncCellsForRunningPattern): hold each action's initial run
             // until the space finishes syncing so we don't race the data
@@ -3195,6 +3319,7 @@ export class Runner {
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      parentPieceRootId: options.parentPieceRootId,
     });
   }
 
@@ -3241,7 +3366,7 @@ export class Runner {
   }
 
   private cancelPendingDeferredStarts(
-    key: `${MemorySpace}/${CellScope}/${URI}`,
+    key: `${MemorySpace}/${ScopeKey}/${URI}`,
   ): void {
     const pending = this.pendingDeferredStarts.get(key);
     if (pending === undefined) return;
@@ -3255,6 +3380,7 @@ export class Runner {
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
+    speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
@@ -3270,6 +3396,39 @@ export class Runner {
       if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
+      // Minted inside a commit callback — by definition outside any
+      // scheduler run; the deferred start's node wiring is piece
+      // machinery, stamped bookkeeping per serving-loop.md §3d. A
+      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
+      // speculative-consequence stamp (2026-08-13): it is a handler
+      // CONSEQUENCE (the receipt + result wrapper of a speculative
+      // echo), so it stamps event-handler-kind and the overlay
+      // diverts it — committing it authored would race the SERVING
+      // side's own deferred start for the create-only receipt, and a
+      // client win would suppress the served navigateTo (no intent
+      // would ever be computed). §3d's bookkeeping-only rule governs
+      // internal writes at the wave seal destination, which this
+      // client-side start tx never reaches. The serving side and the
+      // OFF arm keep bookkeeping.
+      this.runtime.stampServerRun(startTx, {
+        actionId: `piece-start/${resultLink.id}`,
+        ...(speculativeConsequence !== undefined
+          ? {
+            kind: "event-handler" as const,
+            eventId: speculativeConsequence.eventId,
+          }
+          : { kind: "bookkeeping" as const }),
+      });
+      // Phase 4 (builtins.md §4): a deferred start minted from an
+      // EVENT-HANDLER run carries that run's event context across to
+      // the start tx, so a navigateTo instantiated under it can address
+      // the firing session (navigate-context.ts's capture point 1).
+      const navigateContext = navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         undefined,
@@ -3328,6 +3487,7 @@ export class Runner {
     inputs: FabricValue,
     pullOnceAfterStart = false,
     markCreateOnlyResult = false,
+    speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
@@ -3342,6 +3502,30 @@ export class Runner {
       if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
+      // Minted inside a commit callback — outside any scheduler run;
+      // bookkeeping per serving-loop.md §3d, like the deferred start
+      // above (and with the same §3d-RULED speculative-consequence
+      // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
+      // is a speculative handler CONSEQUENCE and diverts to the
+      // overlay instead of racing the serving side's receipt create).
+      this.runtime.stampServerRun(startTx, {
+        actionId: `piece-start/${resultLink.id}`,
+        ...(speculativeConsequence !== undefined
+          ? {
+            kind: "event-handler" as const,
+            eventId: speculativeConsequence.eventId,
+          }
+          : { kind: "bookkeeping" as const }),
+      });
+      // Phase 4 (builtins.md §4): carry the instantiating event-handler
+      // run's event context to the start tx — capture point 1, as in
+      // startAfterSuccessfulCommit above.
+      const navigateContext = navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         pattern.resultSchema,
@@ -3471,6 +3655,16 @@ export class Runner {
     options: RunnerRunOptions = {},
   ): RunResult<R> {
     const tx = providedTx ?? this.runtime.edit();
+    if (providedTx === undefined) {
+      // Self-minted fallback arm (reached e.g. from wish's async
+      // suggestion-pattern fetch continuation): setup + start writes
+      // with no scheduler run around them; bookkeeping per
+      // serving-loop.md §3d. A provided tx keeps its caller's stamp.
+      this.runtime.stampServerRun(tx, {
+        actionId: `piece-run/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+    }
     const sourceKey = getTxDebugActionId(tx) ?? "none";
 
     triggerFlowLogger.debug(`runner-run/${sourceKey}`, () => [
@@ -3611,6 +3805,13 @@ export class Runner {
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
+        // runSynced's own setup tx (async surface, e.g. compileAndRun's
+        // continuation on a served run): no scheduler run around it;
+        // bookkeeping per serving-loop.md §3d.
+        this.runtime.stampServerRun(tx, {
+          actionId: `piece-run-synced/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
         assertExpectedPatternIdentity(resultCell.withTx(tx));
         setupRes = this.setupInternal(
           tx,
@@ -3695,9 +3896,15 @@ export class Runner {
       : resultCell;
   }
 
-  private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
+  // Result-pattern cache key, per scope INSTANCE (key-vocabulary.md §1
+  // site 2): two instances of one doc may resolve to different patterns,
+  // so the key carries the shared scope_key, resolved against the
+  // runtime's own session (the OFF arm's one identity).
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${ScopeKey}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
-    return `${space}/${scope}/${id}`;
+    return `${space}/${
+      resolveScopeKey(scope, this.runtime.scopeKeyIdentity)
+    }/${id}`;
   }
 
   // The scheduler observation identity (pieceId + owning space) for a piece's
@@ -3705,190 +3912,104 @@ export class Runner {
   // group and rate-cap a pattern's wakes; without it, cell-flip shaping (plan B)
   // silently does not apply to the piece. It is derived purely from the result
   // cell, so it is available even when scheduler state is not rehydrated.
-  private schedulerObservationIdentity(resultCell: Cell<any>) {
+  // The pieceId bucket is per scope INSTANCE (key-vocabulary.md §5's
+  // stage-F serving-hazard list): name-keyed buckets collapse shaper
+  // groups and rate caps across principals — cross-principal budget
+  // consumption, and a timing channel correlating one principal's
+  // activity with another's wakes. Resolved against the runtime's own
+  // identity; partition-unchanged at cardinality 1 (key-vocabulary.md
+  // §2 — the resolver also normalizes the raw `undefined:` form the
+  // previous string interpolation produced for scope-less links, which
+  // merges with `space:`, the same instance by definition).
+  /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
+   * setup/instantiation commit failure is fire-and-forget by design but
+   * NEVER silent — loud in every arm, and handed to the serving
+   * runtime's installed observer (the SpaceServer counts it into §7's
+   * structureLoadFailures). */
+  private reportPieceStartCommitFailure(
+    actionId: string,
+    error: unknown,
+  ): void {
+    logger.error("piece-start-commit-failed", () => [
+      `piece-start commit ${actionId} failed; the started graph's setup ` +
+      "writes did not land (stage P2-F, F1)",
+      error,
+    ]);
+    try {
+      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
+    } catch (observerError) {
+      logger.warn("piece-start-commit-observer-failed", () => [
+        "pieceStartCommitFailureObserver threw",
+        observerError,
+      ]);
+    }
+  }
+
+  /**
+   * The demand-root CHAIN of a piece root (server-execution v2 Phase 7):
+   * the roots of every ancestor piece that instantiated it, ending in
+   * itself. Recorded when a piece starts under a known parent
+   * (`RunnerRunOptions.parentPieceRootId`); a root started with no
+   * parent (a top-level piece, or a resume whose parent is unknown) keeps
+   * whatever chain an earlier parent-driven start recorded, else stands
+   * alone. Only ever grows per root — a nested piece re-started
+   * standalone (a client navigating to it) must not lose the outer
+   * demand it is also served under.
+   */
+  private demandRootChains = new Map<string, readonly string[]>();
+
+  private demandRootChainFor(
+    id: string,
+    parentPieceRootId?: string,
+  ): readonly string[] {
+    const known = this.demandRootChains.get(id);
+    if (parentPieceRootId === undefined || parentPieceRootId === id) {
+      return known ?? [id];
+    }
+    const parentChain = this.demandRootChains.get(parentPieceRootId) ??
+      [parentPieceRootId];
+    const merged = new Set<string>([...(known ?? []), ...parentChain, id]);
+    const chain = [...merged];
+    this.demandRootChains.set(id, chain);
+    return chain;
+  }
+
+  private schedulerObservationIdentity(
+    resultCell: Cell<any>,
+    parentPieceRootId?: string,
+  ) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
-    return { pieceId: `${scope}:${id}`, ownerSpace: space };
+    const demandRootIds = this.demandRootChainFor(id, parentPieceRootId);
+    return {
+      pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
+      ownerSpace: space,
+      // The RAW root doc id, un-prefixed, for the per-(action × instance)
+      // run supply (server-execution v2 stage P2-F): the scheduler
+      // resolves this piece's demanded instances through it.
+      pieceRootId: id,
+      // Phase 7: plus the ancestor roots that instantiated it — a nested
+      // piece is demanded through the outer piece the client watches.
+      ...(demandRootIds.length > 1 ? { demandRootIds } : {}),
+    };
   }
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >,
     awaitSync?: boolean,
+    parentPieceRootId?: string,
   ): SchedulerRehydrationSubscriptionOptions {
-    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
-    const observationIdentity = this.schedulerObservationIdentity(resultCell);
-    if (!getPersistentSchedulerStateConfig()) {
-      // Persistent scheduler state is off: actions always re-run on resume.
-      // When resuming from a synced state, hold the initial run until the space
-      // is synced so re-derivations read confirmed-loaded inputs.
-      return {
-        observationIdentity,
-        ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
-      };
-    }
-    // Per-doc restore: a piece started with resume intent (awaitSync) but no
-    // explicitly threaded snapshots — a sub-pattern node or a per-element
-    // child run — looks up its own bucket from the boot's space-wide listing,
-    // keyed by the doc it derives. See per-doc-rehydration.md §3.2.
-    const pieceId = `${scope}:${id}`;
-    const snapshots = snapshotsByActionId ??
-      (awaitSync
-        ? this.resumeSnapshotsBySpace.get(space)?.get(pieceId)
-        : undefined);
-    const provider = this.runtime.storageManager.open(space);
-    const addressesCurrentAtOrBelow = provider
-      .areSchedulerAddressesCurrentAtOrBelow?.bind(provider);
-    const hasPendingWriteOverlapping = provider
-      .schedulerHasPendingWriteOverlapping?.bind(provider);
+    const { space } = resultCell.getAsNormalizedFullLink();
+    const observationIdentity = this.schedulerObservationIdentity(
+      resultCell,
+      parentPieceRootId,
+    );
+    // Actions always re-run on resume. When resuming from a synced state,
+    // hold the initial run until the space is synced so re-derivations read
+    // confirmed-loaded inputs.
     return {
       observationIdentity,
-      rehydrateFromStorage: {
-        space,
-        pieceId,
-        processGeneration: 0,
-        ...(awaitSync ? { awaitSync: true } : {}),
-        ...(snapshots !== undefined ? { snapshotsByActionId: snapshots } : {}),
-        ...(addressesCurrentAtOrBelow !== undefined
-          ? { addressesCurrentAtOrBelow }
-          : {}),
-        ...(hasPendingWriteOverlapping !== undefined
-          ? { hasPendingWriteOverlapping }
-          : {}),
-      },
-      // Resume intent also arms the synced-hold: any action that does not
-      // rehydrate from a snapshot (miss, fingerprint mismatch, or an
-      // always-run coordinator) holds its initial run until the space syncs
-      // instead of racing the data — restoring flag-off parity for children.
       ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
     };
-  }
-
-  private async loadSchedulerRehydrationSnapshots(
-    resultCell: Cell<any>,
-    lifecycleEpoch: number,
-  ): Promise<
-    | ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    | undefined
-  > {
-    if (!getPersistentSchedulerStateConfig()) {
-      return undefined;
-    }
-    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
-    const byPiece = await this.loadResumeSnapshotsForSpace(
-      space,
-      lifecycleEpoch,
-    );
-    return byPiece?.get(`${scope}:${id}`);
-  }
-
-  // One space-wide snapshot listing per resumed boot, bucketed per piece doc.
-  // Concurrent resumes of the same space share one in-flight listing; a later
-  // resume refreshes (replaces) the cached buckets. Descendant registrations
-  // read the cache synchronously via schedulerRehydrationOptions, so the
-  // resume phase stays "load once, then register" (spec §9.2) for the whole
-  // piece tree — no per-child async lookups.
-  private loadResumeSnapshotsForSpace(
-    space: MemorySpace,
-    lifecycleEpoch: number,
-  ): Promise<
-    | ReadonlyMap<
-      string,
-      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    >
-    | undefined
-  > {
-    const inFlight = this.resumeSnapshotLoads.get(space);
-    if (inFlight) return inFlight;
-
-    const provider = this.runtime.storageManager.open(space);
-    const listSnapshots = provider.listSchedulerActionSnapshots;
-    if (!listSnapshots) {
-      return Promise.resolve(undefined);
-    }
-
-    const load = (async () => {
-      const byPiece = new Map<
-        string,
-        Map<string, PersistedSchedulerObservationSnapshot[]>
-      >();
-      // A transient listing failure must degrade to "resume fresh" rather
-      // than hard-failing start(): returning undefined runs the boot without
-      // rehydrating persisted observations.
-      try {
-        let cursor: SchedulerActionSnapshotCursor | undefined;
-        let listingServerSeq: number | undefined;
-        do {
-          if (lifecycleEpoch !== this.lifecycleEpoch) return undefined;
-          const page = await listSnapshots.call(provider, {
-            ownerSpace: space,
-            processGeneration: 0,
-            ...(cursor ? { cursor } : {}),
-          });
-          if (listingServerSeq === undefined) {
-            listingServerSeq = page.serverSeq;
-          } else if (page.serverSeq !== listingServerSeq) {
-            throw new Error(
-              `scheduler snapshot listing changed epoch (${listingServerSeq} -> ${page.serverSeq})`,
-            );
-          }
-          for (const snapshot of page.snapshots) {
-            if (!isSchedulerActionObservation(snapshot.observation)) continue;
-            const { pieceId, actionId } = snapshot.observation;
-            let byAction = byPiece.get(pieceId);
-            if (!byAction) {
-              byAction = new Map();
-              byPiece.set(pieceId, byAction);
-            }
-            const candidates = byAction.get(actionId) ?? [];
-            candidates.push({
-              executionContextKey: snapshot.executionContextKey,
-              observation: snapshot.observation,
-              ...(snapshot.directDirtySeq !== undefined
-                ? { directDirtySeq: snapshot.directDirtySeq }
-                : {}),
-              ...(snapshot.staleSeq !== undefined
-                ? { staleSeq: snapshot.staleSeq }
-                : {}),
-              ...(snapshot.unknownReason !== undefined
-                ? { unknownReason: snapshot.unknownReason }
-                : {}),
-            });
-            byAction.set(actionId, candidates);
-          }
-          cursor = page.nextCursor;
-        } while (cursor !== undefined);
-        // Close the list/register gap: catch this replica up through at least
-        // the listing epoch before any synchronous snapshot apply. Tracked
-        // inputs and outputs can then be checked against their observation seq
-        // without missing a write that landed during pagination.
-        await provider.synced();
-        if (lifecycleEpoch !== this.lifecycleEpoch) return undefined;
-      } catch (error) {
-        logger.warn(
-          "Failed to list scheduler rehydration snapshots; resuming fresh",
-          error,
-        );
-        return undefined;
-      }
-      return byPiece;
-    })();
-
-    this.resumeSnapshotLoads.set(space, load);
-    load.then((byPiece) => {
-      if (lifecycleEpoch !== this.lifecycleEpoch) return;
-      // Failure degrades the WHOLE boot to resume-fresh: drop any stale cache
-      // so descendants do not rehydrate from a previous boot's listing.
-      if (byPiece) this.resumeSnapshotsBySpace.set(space, byPiece);
-      else this.resumeSnapshotsBySpace.delete(space);
-    }).finally(() => {
-      if (this.resumeSnapshotLoads.get(space) === load) {
-        this.resumeSnapshotLoads.delete(space);
-      }
-    });
-    return load;
   }
 
   /** Load the stored argument and return a transaction guard for that state. */
@@ -4449,7 +4570,7 @@ export class Runner {
    */
   private isStartAttemptCurrentFor(
     attempt: StartAttempt,
-    key: `${MemorySpace}/${CellScope}/${URI}`,
+    key: `${MemorySpace}/${ScopeKey}/${URI}`,
   ): boolean {
     if (attempt.lifecycleEpoch !== this.lifecycleEpoch) return false;
     if (attempt.preResolutionStopKeys.has(key)) return false;
@@ -4497,8 +4618,6 @@ export class Runner {
     // storage teardown, but they can neither publish a cache nor call
     // startCore under the new epoch.
     this.lifecycleEpoch++;
-    this.resumeSnapshotsBySpace.clear();
-    this.resumeSnapshotLoads.clear();
     this.independentlyStartedResults.clear();
     for (const key of [...this.pendingDeferredStarts.keys()]) {
       this.cancelPendingDeferredStarts(key);
@@ -5388,7 +5507,14 @@ export class Runner {
       tx,
     );
     const receiptsEnabled =
-      this.runtime.experimental.commitPreconditions === true;
+      this.runtime.experimental.commitPreconditions === true &&
+      // Events-down (server-execution v2 Phase 3; runtime-mapping N26):
+      // receipt create-only exactly-once is SUBSUMED by the stream's
+      // `eventWatermark` (events.md §4), and the two mechanisms must not
+      // be active for the same event — client handler runs divert to the
+      // overlay anyway, and a serving run's create-only mark would ride
+      // the WAVE commit as a precondition the watermark already covers.
+      this.runtime.experimental.serverExecution !== true;
     // Expose the handling's receipt address on the transaction, where the
     // sender's commit callback can read it (verb contract WS-D). Stashed
     // before the branches so BOTH outcomes carry it: a committed handling
@@ -5480,6 +5606,21 @@ export class Runner {
     const deferForNavigate = this.handlerResultPatternHasNavigateTo(
       resultPattern,
     );
+    // Phase 4 (protocol.md §5): on a flag-ON CLIENT, a navigate-bearing
+    // result's deferred start is a SPECULATIVE handler consequence — it
+    // must divert to the overlay with its event's id, never commit the
+    // receipt authored (the serving side owns the durable create; see
+    // startAfterSuccessfulCommit's stamp comment). Wave-stamped
+    // (serving) and unstamped (OFF-arm) handler runs pass nothing.
+    const speculativeConsequence = deferForNavigate &&
+        waveRunContextOf(tx) === undefined
+      ? (() => {
+        const info = navigateEventContextFromRunInfo(
+          speculationRunContextOf(tx),
+        );
+        return info !== undefined ? { eventId: info.eventId } : undefined;
+      })()
+      : undefined;
 
     if (deferForNavigate && result === undefined) {
       // navigateTo results are commit-gated (startAfterSuccessfulCommit);
@@ -5491,6 +5632,7 @@ export class Runner {
         undefined,
         true,
         true,
+        speculativeConsequence,
       );
       addCancel(cancelDeferredStart);
       this.runtime.scheduler.lineage.recordPieceStop(
@@ -5510,6 +5652,7 @@ export class Runner {
           patternResultCell.space,
           cause,
           true,
+          speculativeConsequence,
         );
         cancelDeferredStart = setup.cancelDeferredStart;
         return setup.resultCell;
@@ -5520,13 +5663,26 @@ export class Runner {
           resultPattern,
           undefined,
           receiptCell,
+          {
+            // Phase 7: a result-as-pattern child's demand roots include
+            // the producing piece's chain (see RunnerRunOptions).
+            parentPieceRootId: patternResultCell.getAsNormalizedFullLink()
+              .id,
+          },
         );
         installedCancel = run.installedCancel;
         cancelDeferredStart = run.cancelDeferredStart;
         return run.resultCell;
       })();
 
-    if (!deferForNavigate) {
+    if (!deferForNavigate && receiptsEnabled) {
+      // Gated like every other receipt write above (round-2 thread
+      // T27): under serverExecution the receipt create-only mechanism
+      // is subsumed by the stream's eventWatermark and MUST NOT ride a
+      // serving run's wave commit — an ungated mark here left the
+      // create-only precondition active alongside the watermark, so a
+      // duplicate derived run aborted on receipt-exists instead of
+      // coalescing to the watermark.
       tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
     }
 
@@ -5610,6 +5766,7 @@ export class Runner {
     resultSpace: MemorySpace,
     cause: Record<string, any>,
     markCreateOnlyResult = false,
+    speculativeConsequence?: { eventId: string },
   ): DeferredStartResult<any> {
     const resultCell = this.runtime.getCell(
       resultSpace,
@@ -5638,6 +5795,7 @@ export class Runner {
         resultSetup.pattern,
         {},
         this.patternNeedsOneShotPull(resultSetup.pattern),
+        speculativeConsequence,
       )
       : undefined;
     return { resultCell, cancelDeferredStart };
@@ -5722,9 +5880,17 @@ export class Runner {
       schemaCellScope(resultPattern.resultSchema),
       narrowestReadScope,
     ]);
-    // See if the resultCell was already in this effective output scope
-    const previousScopedResultCell = previousResultCellRef.byScope.get(
+    // See if the resultCell was already in this effective output INSTANCE
+    // (the discovered scope name resolved against the run's acting
+    // identity — the runtime's own session in the OFF arm; a served
+    // run's DEMAND-SUPPLIED identity when the wave run context carries
+    // one — M1's per-run threading, server-execution v2 Phase 2).
+    const effectiveOutputScopeKey = resolveScopeKey(
       effectiveOutputScope,
+      waveRunContextOf(tx)?.scopeKeyIdentity ?? this.runtime.scopeKeyIdentity,
+    );
+    const previousScopedResultCell = previousResultCellRef.byScope.get(
+      effectiveOutputScopeKey,
     );
     if (previousScopedResultCell === undefined) {
       const baseResultCell = this.runtime.getCell(
@@ -5743,7 +5909,10 @@ export class Runner {
           },
           tx,
         );
-      previousResultCellRef.byScope.set(effectiveOutputScope, newResultCell);
+      previousResultCellRef.byScope.set(
+        effectiveOutputScopeKey,
+        newResultCell,
+      );
       resultCell = newResultCell;
     } else {
       resultCell = previousScopedResultCell;
@@ -5762,12 +5931,25 @@ export class Runner {
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );
-    const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    // Keyed doc-then-INSTANCE, the instance being the SAME per-run
+    // resolved key that selected the byScope cell above (r3739139481):
+    // a doc-level or service-identity-resolved key made the second
+    // demanded instance's run read the first's memo as "unchanged" and
+    // skip its child materialization.
+    const resultDocLink = resultCell.getAsNormalizedFullLink();
+    const cacheDocKey =
+      `${resultDocLink.space}/${resultDocLink.id}` as `${MemorySpace}/${URI}`;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheDocKey)
+      ?.get(effectiveOutputScopeKey);
     const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternKey);
+      let instanceMemos = this.resultPatternCache.get(cacheDocKey);
+      if (instanceMemos === undefined) {
+        instanceMemos = new Map();
+        this.resultPatternCache.set(cacheDocKey, instanceMemos);
+      }
+      instanceMemos.set(effectiveOutputScopeKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -5793,8 +5975,10 @@ export class Runner {
         // A rollback carries a release's authority, not a stop's: it lets go
         // of the registration this materialization installed and is not
         // authoritative over a lifetime or a start it does not own.
-        if (this.resultPatternCache.get(cacheKey) === resultPatternKey) {
-          this.resultPatternCache.delete(cacheKey);
+        const memos = this.resultPatternCache.get(cacheDocKey);
+        if (memos?.get(effectiveOutputScopeKey) === resultPatternKey) {
+          memos.delete(effectiveOutputScopeKey);
+          if (memos.size === 0) this.resultPatternCache.delete(cacheDocKey);
         }
         this.releaseChild(resultCell, undefined);
       });
@@ -6017,7 +6201,7 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any): Promise<void> => {
+      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -6033,7 +6217,16 @@ export class Runner {
         const collect = (value: unknown, depth: number): void => {
           if (depth > 16) return;
           if (isCell(value)) {
-            promises.push(value.sync());
+            promises.push(
+              identity === undefined
+                ? value.sync()
+                // A served event's presync loads the ACTOR's instances of
+                // the handler's scoped inputs (stage A — the runner's
+                // explicit-instance read; see EventHandler.presyncInputs).
+                : this.runtime.storageManager.syncCell(value, {
+                  scopeKeyIdentity: identity,
+                }),
+            );
             return;
           }
           // NOTE: materialized records all carry the back-to-cell symbol, so
@@ -6069,8 +6262,15 @@ export class Runner {
       module,
       pattern,
       schedulerObservationIdentity: {
-        pieceId: `${instanceLink.scope ?? "space"}:${instanceLink.id}`,
+        // Per scope INSTANCE, matching schedulerObservationIdentity above
+        // (key-vocabulary.md §5's stage-F list).
+        pieceId: `${
+          resolveScopeKey(instanceLink.scope, this.runtime.scopeKeyIdentity)
+        }:${instanceLink.id}`,
         ownerSpace: instanceLink.space,
+        // Raw root id for the per-(action × instance) run supply
+        // (stage P2-F).
+        pieceRootId: instanceLink.id,
       },
       ...(presyncInputs !== undefined && { presyncInputs }),
     });
@@ -6904,6 +7104,20 @@ export class Runner {
     const builtinAction = isRawBuiltinResult(builtinResult)
       ? builtinResult.action
       : builtinResult;
+    // Phase 4 (builtins.md §4; navigate-context.ts's capture point 2):
+    // tag the builtin's action with the event context its instantiation
+    // was a consequence of — the deferred start's carried context, or
+    // the instantiating handler tx's own stamp when the result pattern
+    // runs under it directly. The builtin's later scheduler runs (which
+    // stamp as ordinary derivations) read the tag off the action. OFF
+    // arm: both sources are undefined; one WeakMap miss.
+    const navigateContext = navigateEventContextOf(tx) ??
+      navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+    if (navigateContext !== undefined) {
+      setNavigateEventContext(builtinAction, navigateContext);
+    }
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
       ? builtinResult.isEffect
       : undefined;
@@ -6922,9 +7136,6 @@ export class Runner {
     const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.useDeclaredReadsAsDependencies
       : false;
-    const builtinResumeMode = isRawBuiltinResult(builtinResult)
-      ? builtinResult.resumeMode
-      : undefined;
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
@@ -7008,9 +7219,6 @@ export class Runner {
       debounce,
       noDebounce,
       throttle,
-      ...(builtinResumeMode !== undefined
-        ? { resumeMode: builtinResumeMode }
-        : {}),
       ...schedulerRehydration,
     };
 
@@ -7242,6 +7450,10 @@ export class Runner {
         awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
           schedulerRehydration,
         ),
+        // Phase 7: the child's demand roots include this parent's chain
+        // (the run supply resolves the nested piece's instances through
+        // the outer root a client watches).
+        parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
       },
     );
 

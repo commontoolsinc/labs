@@ -1,0 +1,1323 @@
+[
+ {
+  "run": "abl-f5",
+  "workload": "chat",
+  "arm": "on",
+  "load_before": "{ 11.25 9.31 18.37 }",
+  "load_after": null,
+  "test_rc": null,
+  "test_wall_s": null,
+  "start_utc": "2026-08-18T02:06:20Z",
+  "end_utc": null,
+  "toolshed_pid": "91663",
+  "gitSha": "fadc2efb1",
+  "shellDefine": "true",
+  "passed": false,
+  "client_actionRuns": [],
+  "client_commitConflicts": [],
+  "store": {
+   "commits": 143,
+   "by_class": {
+    "authored": 50,
+    "derived": 93
+   },
+   "sessions": 9,
+   "spaces": 3,
+   "main_space_commits": 135,
+   "main_space_by_class": {
+    "authored": 48,
+    "derived": 87
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:06:35",
+    "2026-08-18 02:16:11"
+   ]
+  }
+ },
+ {
+  "run": "l1",
+  "workload": "lunch",
+  "arm": "on",
+  "load_before": "{ 3.97 4.31 6.23 }",
+  "load_after": "{ 3.53 3.91 5.37 }",
+  "test_rc": "1",
+  "test_wall_s": "363",
+  "start_utc": "2026-08-18T02:45:19Z",
+  "end_utc": "2026-08-18T02:51:28Z",
+  "toolshed_pid": "82939",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "fail_wait": "body -> 2 love it",
+  "steps": {
+   "navigate + login both": 1767,
+   "both active space roots ready": 1348,
+   "both runtimes idle": 190,
+   "host name filled": 23,
+   "host joined (name in roster)": 35,
+   "both join lands (count reaches 2)": 1652,
+   "option A propagates to both": 7873,
+   "both cast green concurrently": 22943,
+   "both browsers see 2 love it (merge)": 300030
+  },
+  "sl": {
+   "waves": 44,
+   "wavesBudgetExhausted": 40,
+   "authoredSeen": 25,
+   "effectAcks": 0,
+   "derivedCommits": 43,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 160,
+   "structureLoadRearmed": 25,
+   "watermarkLag": 1,
+   "demandArrivals": 19,
+   "activeSpaces": 3,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 0,
+   "events": {
+    "appended": 9,
+    "processed": 11,
+    "coalescedPerWaveMax": 2,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 2,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 2,
+    "completed": 2,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 17,
+    "followerSessions": 11,
+    "mixedFlushes": 7
+   },
+   "lease": {
+    "held": 3,
+    "lost": 0
+   }
+  },
+  "ratio_sec4": 1.72,
+  "store": {
+   "commits": 68,
+   "by_class": {
+    "authored": 25,
+    "derived": 43
+   },
+   "sessions": 9,
+   "spaces": 3,
+   "main_space_commits": 64,
+   "main_space_by_class": {
+    "authored": 23,
+    "derived": 41
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:45:26",
+    "2026-08-18 02:50:00"
+   ]
+  }
+ },
+ {
+  "run": "l1a",
+  "workload": "lunch",
+  "arm": "off",
+  "load_before": "{ 2.95 4.17 6.25 }",
+  "load_after": "{ 3.97 4.31 6.23 }",
+  "test_rc": "0",
+  "test_wall_s": "23",
+  "start_utc": "2026-08-18T02:44:52Z",
+  "end_utc": "2026-08-18T02:45:19Z",
+  "toolshed_pid": "81860",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "steps": {
+   "navigate + login both": 1339,
+   "both active space roots ready": 1232,
+   "both runtimes idle": 311,
+   "host name filled": 62,
+   "host joined (name in roster)": 39,
+   "both join lands (count reaches 2)": 11,
+   "option A propagates to both": 80,
+   "both cast green concurrently": 843,
+   "both browsers see 2 love it (merge)": 100,
+   "both voters' swatches visible on both browsers": 1,
+   "option B vote lands (3 votes); option A unchanged": 182
+  },
+  "store": {
+   "commits": 398,
+   "by_class": {
+    "authored": 398
+   },
+   "sessions": 8,
+   "spaces": 3,
+   "main_space_commits": 394,
+   "main_space_by_class": {
+    "authored": 394
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:45:02",
+    "2026-08-18 02:45:16"
+   ]
+  }
+ },
+ {
+  "run": "l1b",
+  "workload": "lunch",
+  "arm": "off",
+  "load_before": "{ 3.41 3.88 5.35 }",
+  "load_after": "{ 3.27 3.84 5.31 }",
+  "test_rc": "0",
+  "test_wall_s": "12",
+  "start_utc": "2026-08-18T02:51:28Z",
+  "end_utc": "2026-08-18T02:51:44Z",
+  "toolshed_pid": "1749",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "steps": {
+   "navigate + login both": 931,
+   "both active space roots ready": 894,
+   "both runtimes idle": 256,
+   "host name filled": 48,
+   "host joined (name in roster)": 27,
+   "both join lands (count reaches 2)": 14,
+   "option A propagates to both": 53,
+   "both cast green concurrently": 440,
+   "both browsers see 2 love it (merge)": 84,
+   "both voters' swatches visible on both browsers": 1,
+   "option B vote lands (3 votes); option A unchanged": 257
+  },
+  "store": {
+   "commits": 398,
+   "by_class": {
+    "authored": 398
+   },
+   "sessions": 8,
+   "spaces": 3,
+   "main_space_commits": 394,
+   "main_space_by_class": {
+    "authored": 394
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:51:31",
+    "2026-08-18 02:51:42"
+   ]
+  }
+ },
+ {
+  "run": "n1",
+  "workload": "note",
+  "arm": "on",
+  "load_before": "{ 5.45 7.59 12.04 }",
+  "load_after": "{ 7.36 6.47 9.26 }",
+  "test_rc": "1",
+  "test_wall_s": "502",
+  "start_utc": "2026-08-18T02:22:24Z",
+  "end_utc": "2026-08-18T02:30:50Z",
+  "toolshed_pid": "30307",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "n": 20,
+  "totals": {
+   "minMs": 1649.332,
+   "avgMs": 21545.869,
+   "p50Ms": 12645.369,
+   "p95Ms": 50076.773,
+   "maxMs": 87074.171
+  },
+  "createToView": {
+   "minMs": 1591.866,
+   "avgMs": 11036.277,
+   "p50Ms": 8926.822,
+   "p95Ms": 23335.393,
+   "maxMs": 24914.693
+  },
+  "returnToHome": {
+   "minMs": 57.466,
+   "avgMs": 10509.592,
+   "p50Ms": 3550.495,
+   "p95Ms": 26741.38,
+   "maxMs": 62159.478
+  },
+  "raw": [
+   1649.332,
+   2413.408,
+   4584.22,
+   6002.861,
+   7716.696,
+   9092.906,
+   8354.595,
+   9591.571,
+   12645.369,
+   10775.873,
+   13714.77,
+   21916.045,
+   25091.393,
+   28147.155,
+   30448.558,
+   21088.529,
+   36271.539,
+   44261.624,
+   50076.773,
+   87074.171
+  ],
+  "raw_createToView": [
+   1591.866,
+   2304.775,
+   3122.11,
+   4209.861,
+   5085.616,
+   5542.411,
+   5771.215,
+   7328.699,
+   11009.245,
+   8926.822,
+   6377.713,
+   10374.332,
+   15017.754,
+   13760.723,
+   15240.056,
+   16687.834,
+   19151.341,
+   20973.089,
+   23335.393,
+   24914.693
+  ],
+  "sl": {
+   "waves": 298,
+   "wavesBudgetExhausted": 169,
+   "authoredSeen": 128,
+   "effectAcks": 21,
+   "derivedCommits": 297,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 334,
+   "structureLoadRearmed": 114,
+   "watermarkLag": 3,
+   "demandArrivals": 0,
+   "activeSpaces": 2,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 57,
+   "events": {
+    "appended": 93,
+    "processed": 95,
+    "coalescedPerWaveMax": 2,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 0,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 0,
+    "followerSessions": 0,
+    "mixedFlushes": 0
+   },
+   "lease": {
+    "held": 4,
+    "lost": 0
+   }
+  },
+  "ratio_sec4": 2.776,
+  "store": {
+   "commits": 425,
+   "by_class": {
+    "authored": 128,
+    "derived": 297
+   },
+   "sessions": 10,
+   "spaces": 4,
+   "main_space_commits": 352,
+   "main_space_by_class": {
+    "authored": 105,
+    "derived": 247
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:22:28",
+    "2026-08-18 02:28:45"
+   ]
+  }
+ },
+ {
+  "run": "n1a",
+  "workload": "note",
+  "arm": "off",
+  "load_before": "{ 3.42 8.45 12.93 }",
+  "load_after": "{ 5.66 7.66 12.09 }",
+  "test_rc": "0",
+  "test_wall_s": "105",
+  "start_utc": "2026-08-18T02:20:35Z",
+  "end_utc": "2026-08-18T02:22:24Z",
+  "toolshed_pid": "27324",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "n": 20,
+  "totals": {
+   "minMs": 499.526,
+   "avgMs": 4218.301,
+   "p50Ms": 3502.745,
+   "p95Ms": 9798.263,
+   "maxMs": 10478.48
+  },
+  "createToView": {
+   "minMs": 323.728,
+   "avgMs": 921.58,
+   "p50Ms": 1085.07,
+   "p95Ms": 1496.388,
+   "maxMs": 1510.734
+  },
+  "returnToHome": {
+   "minMs": 55.574,
+   "avgMs": 3296.721,
+   "p50Ms": 2427.426,
+   "p95Ms": 8636.415,
+   "maxMs": 8967.746
+  },
+  "raw": [
+   503.056,
+   499.526,
+   552.197,
+   673.933,
+   775.36,
+   972.909,
+   1174.049,
+   2428.954,
+   2876.441,
+   3716.094,
+   3502.745,
+   5434.695,
+   6383.107,
+   7362.602,
+   6298.652,
+   6868.008,
+   6869.245,
+   7197.709,
+   9798.263,
+   10478.48
+  ],
+  "raw_createToView": [
+   447.482,
+   399.921,
+   377.07,
+   376.726,
+   332.531,
+   375.616,
+   323.728,
+   1185.51,
+   1242.826,
+   1210.527,
+   1075.319,
+   1496.388,
+   1278.659,
+   1325.199,
+   1090.861,
+   1117.529,
+   1085.07,
+   1018.06,
+   1161.848,
+   1510.734
+  ],
+  "store": {
+   "commits": 989,
+   "by_class": {
+    "authored": 989
+   },
+   "sessions": 6,
+   "spaces": 4,
+   "main_space_commits": 801,
+   "main_space_by_class": {
+    "authored": 801
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:20:42",
+    "2026-08-18 02:22:02"
+   ]
+  }
+ },
+ {
+  "run": "n1b",
+  "workload": "note",
+  "arm": "off",
+  "load_before": "{ 6.85 6.38 9.21 }",
+  "load_after": "{ 4.76 5.87 8.73 }",
+  "test_rc": "0",
+  "test_wall_s": "91",
+  "start_utc": "2026-08-18T02:30:50Z",
+  "end_utc": "2026-08-18T02:32:26Z",
+  "toolshed_pid": "51447",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "n": 20,
+  "totals": {
+   "minMs": 603.168,
+   "avgMs": 3750.132,
+   "p50Ms": 3998.346,
+   "p95Ms": 7725.6,
+   "maxMs": 9912.49
+  },
+  "createToView": {
+   "minMs": 315.336,
+   "avgMs": 954.013,
+   "p50Ms": 1171.003,
+   "p95Ms": 1328.373,
+   "maxMs": 1685.662
+  },
+  "returnToHome": {
+   "minMs": 101.002,
+   "avgMs": 2796.119,
+   "p50Ms": 2669.974,
+   "p95Ms": 6541.832,
+   "maxMs": 8226.828
+  },
+  "raw": [
+   863.252,
+   603.168,
+   739.109,
+   829.168,
+   1217.555,
+   1362.36,
+   1605.001,
+   2028.129,
+   3218.257,
+   3998.346,
+   4120.369,
+   4316.394,
+   4549.945,
+   4543.447,
+   4769.23,
+   5340.298,
+   5799.873,
+   7460.647,
+   7725.6,
+   9912.49
+  ],
+  "raw_createToView": [
+   762.25,
+   450.245,
+   498.074,
+   395.175,
+   557.485,
+   511.207,
+   315.336,
+   343.145,
+   1268.513,
+   1328.373,
+   1139.627,
+   1243.58,
+   1223.169,
+   1284.539,
+   1171.003,
+   1246.601,
+   1213.886,
+   1258.63,
+   1183.767,
+   1685.662
+  ],
+  "store": {
+   "commits": 971,
+   "by_class": {
+    "authored": 971
+   },
+   "sessions": 6,
+   "spaces": 4,
+   "main_space_commits": 783,
+   "main_space_by_class": {
+    "authored": 783
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:30:55",
+    "2026-08-18 02:32:08"
+   ]
+  }
+ },
+ {
+  "run": "n2",
+  "workload": "note",
+  "arm": "on",
+  "load_before": "{ 3.27 3.77 5.24 }",
+  "load_after": "{ 3.84 3.33 4.18 }",
+  "test_rc": "124",
+  "test_wall_s": "780",
+  "start_utc": "2026-08-18T02:52:10Z",
+  "end_utc": "2026-08-18T03:05:14Z",
+  "toolshed_pid": "3068",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "sl": {
+   "waves": 214,
+   "wavesBudgetExhausted": 109,
+   "authoredSeen": 96,
+   "effectAcks": 18,
+   "derivedCommits": 214,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 184,
+   "structureLoadRearmed": 85,
+   "watermarkLag": 0,
+   "demandArrivals": 0,
+   "activeSpaces": 0,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 42,
+   "events": {
+    "appended": 72,
+    "processed": 74,
+    "coalescedPerWaveMax": 1,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 0,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 0,
+    "followerSessions": 0,
+    "mixedFlushes": 0
+   },
+   "lease": {
+    "held": 2,
+    "lost": 0
+   }
+  },
+  "ratio_sec4": 2.744,
+  "store": {
+   "commits": 310,
+   "by_class": {
+    "authored": 96,
+    "derived": 214
+   },
+   "sessions": 5,
+   "spaces": 2,
+   "main_space_commits": 308,
+   "main_space_by_class": {
+    "authored": 95,
+    "derived": 213
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:52:13",
+    "2026-08-18 02:57:19"
+   ]
+  }
+ },
+ {
+  "run": "n2b",
+  "workload": "note",
+  "arm": "off",
+  "load_before": "{ 3.69 3.30 4.16 }",
+  "load_after": "{ 5.47 4.12 4.37 }",
+  "test_rc": "0",
+  "test_wall_s": "115",
+  "start_utc": "2026-08-18T03:05:14Z",
+  "end_utc": "2026-08-18T03:07:14Z",
+  "toolshed_pid": "31135",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "n": 20,
+  "totals": {
+   "minMs": 651.905,
+   "avgMs": 4660.755,
+   "p50Ms": 4026.525,
+   "p95Ms": 11931.946,
+   "maxMs": 12184.838
+  },
+  "createToView": {
+   "minMs": 275.337,
+   "avgMs": 894.225,
+   "p50Ms": 1090.235,
+   "p95Ms": 1365.913,
+   "maxMs": 1447.97
+  },
+  "returnToHome": {
+   "minMs": 88.284,
+   "avgMs": 3766.53,
+   "p50Ms": 2820.681,
+   "p95Ms": 10703.298,
+   "maxMs": 10954.645
+  },
+  "raw": [
+   703.573,
+   651.905,
+   885.439,
+   1172.087,
+   1288.006,
+   1230.608,
+   1500.688,
+   1857.614,
+   2275.005,
+   4026.525,
+   4521.998,
+   5547.705,
+   6811.238,
+   8409.102,
+   9368.828,
+   6934.798,
+   5632.002,
+   6281.185,
+   11931.946,
+   12184.838
+  ],
+  "raw_createToView": [
+   615.288,
+   509.421,
+   555.646,
+   593.255,
+   646.386,
+   427.698,
+   345.599,
+   275.337,
+   276.21,
+   1205.844,
+   1117.636,
+   1282.139,
+   1300.035,
+   1365.913,
+   1090.235,
+   1447.97,
+   1143.69,
+   1227.354,
+   1228.648,
+   1230.193
+  ],
+  "store": {
+   "commits": 989,
+   "by_class": {
+    "authored": 989
+   },
+   "sessions": 6,
+   "spaces": 4,
+   "main_space_commits": 801,
+   "main_space_by_class": {
+    "authored": 801
+   },
+   "main_space_first_last": [
+    "2026-08-18 03:05:19",
+    "2026-08-18 03:06:47"
+   ]
+  }
+ },
+ {
+  "run": "smoke0",
+  "workload": "chat",
+  "arm": "off",
+  "load_before": "{ 9.20 20.58 47.44 }",
+  "load_after": "{ 10.48 19.48 45.80 }",
+  "test_rc": "0",
+  "test_wall_s": "33",
+  "start_utc": "2026-08-18T01:43:15Z",
+  "end_utc": "2026-08-18T01:43:54Z",
+  "toolshed_pid": "32168",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "series_arm": "OFF",
+  "n": 3,
+  "median": 394,
+  "q1": 360,
+  "q3": 677,
+  "mn": 360,
+  "mx": 677,
+  "delay": 500,
+  "load_in_test": "10.48/19.48/45.80",
+  "raw": [
+   677,
+   360,
+   394
+  ],
+  "p50": 394,
+  "p95": 677,
+  "mean": 477,
+  "steps": {
+   "navigate + login all profiles": 926,
+   "runtime idle (all)": 5,
+   "initial 'No profile' (all)": 1526,
+   "Alice save + own status": 527,
+   "Bob sees Alice before save": 8,
+   "Bob save + own status": 915,
+   "cross-browser name propagation (all pairs)": 13,
+   "message propagation (first -> all)": 47,
+   "lockdown propagation (first -> others)": 4,
+   "post-lockdown message (non-admin -> admin)": 7,
+   "room propagation (first -> all)": 7
+  },
+  "client_actionRuns": [
+   486,
+   538
+  ],
+  "client_commitConflicts": [
+   30,
+   48
+  ],
+  "store": {
+   "commits": 251,
+   "by_class": {
+    "authored": 251
+   },
+   "sessions": 6,
+   "spaces": 3,
+   "main_space_commits": 249,
+   "main_space_by_class": {
+    "authored": 249
+   },
+   "main_space_first_last": [
+    "2026-08-18 01:43:33",
+    "2026-08-18 01:43:51"
+   ]
+  }
+ },
+ {
+  "run": "smoke0",
+  "workload": "chat",
+  "arm": "on",
+  "load_before": "{ 10.56 18.78 44.79 }",
+  "load_after": "{ 18.51 19.49 35.77 }",
+  "test_rc": "1",
+  "test_wall_s": "368",
+  "start_utc": "2026-08-18T01:44:15Z",
+  "end_utc": "2026-08-18T01:50:30Z",
+  "toolshed_pid": "37227",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "fail_wait": "#group-chat-manager-chip -> Can manage admins",
+  "steps": {
+   "navigate + login all profiles": 947,
+   "runtime idle (all)": 5,
+   "initial 'No profile' (all)": 2146,
+   "Alice save + own status": 5688,
+   "Bob sees Alice before save": 5975,
+   "Bob save + own status": 3175,
+   "cross-browser name propagation (all pairs)": 7211,
+   "message propagation (first -> all)": 7045
+  },
+  "client_actionRuns": [
+   348,
+   251
+  ],
+  "client_commitConflicts": [
+   0,
+   0
+  ],
+  "sl": {
+   "waves": 35,
+   "wavesBudgetExhausted": 26,
+   "authoredSeen": 20,
+   "effectAcks": 0,
+   "derivedCommits": 35,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 80,
+   "structureLoadRearmed": 21,
+   "watermarkLag": 2,
+   "demandArrivals": 15,
+   "activeSpaces": 3,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 0,
+   "events": {
+    "appended": 6,
+    "processed": 6,
+    "coalescedPerWaveMax": 1,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 0,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 20,
+    "followerSessions": 12,
+    "mixedFlushes": 8
+   },
+   "lease": {
+    "held": 3,
+    "lost": 0
+   }
+  },
+  "ratio_sec4": 1.75,
+  "store": {
+   "commits": 55,
+   "by_class": {
+    "authored": 20,
+    "derived": 35
+   },
+   "sessions": 9,
+   "spaces": 3,
+   "main_space_commits": 51,
+   "main_space_by_class": {
+    "authored": 18,
+    "derived": 33
+   },
+   "main_space_first_last": [
+    "2026-08-18 01:44:22",
+    "2026-08-18 01:45:25"
+   ]
+  }
+ },
+ {
+  "run": "t1",
+  "workload": "chat",
+  "arm": "on",
+  "load_before": "{ 5.73 12.86 26.88 }",
+  "load_after": "{ 6.23 8.25 20.02 }",
+  "test_rc": "1",
+  "test_wall_s": "340",
+  "start_utc": "2026-08-18T01:57:53Z",
+  "end_utc": "2026-08-18T02:03:39Z",
+  "toolshed_pid": "69255",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "fail_wait": "#group-chat-manager-chip -> Can manage admins",
+  "steps": {
+   "navigate + login all profiles": 610,
+   "runtime idle (all)": 4,
+   "initial 'No profile' (all)": 1242,
+   "Alice save + own status": 2182,
+   "Bob sees Alice before save": 2,
+   "Bob save + own status": 1717,
+   "cross-browser name propagation (all pairs)": 4521,
+   "message propagation (first -> all)": 3026
+  },
+  "client_actionRuns": [
+   341,
+   252
+  ],
+  "client_commitConflicts": [
+   0,
+   0
+  ],
+  "sl": {
+   "waves": 36,
+   "wavesBudgetExhausted": 19,
+   "authoredSeen": 20,
+   "effectAcks": 0,
+   "derivedCommits": 36,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 80,
+   "structureLoadRearmed": 21,
+   "watermarkLag": 3,
+   "demandArrivals": 17,
+   "activeSpaces": 3,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 0,
+   "events": {
+    "appended": 6,
+    "processed": 6,
+    "coalescedPerWaveMax": 1,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 0,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 18,
+    "followerSessions": 10,
+    "mixedFlushes": 7
+   },
+   "lease": {
+    "held": 3,
+    "lost": 0
+   }
+  },
+  "ratio_sec4": 1.8,
+  "store": {
+   "commits": 56,
+   "by_class": {
+    "authored": 20,
+    "derived": 36
+   },
+   "sessions": 9,
+   "spaces": 3,
+   "main_space_commits": 52,
+   "main_space_by_class": {
+    "authored": 18,
+    "derived": 34
+   },
+   "main_space_first_last": [
+    "2026-08-18 01:57:58",
+    "2026-08-18 01:58:35"
+   ]
+  }
+ },
+ {
+  "run": "t1a",
+  "workload": "chat",
+  "arm": "off",
+  "load_before": "{ 4.03 14.27 28.45 }",
+  "load_after": "{ 6.05 13.05 27.03 }",
+  "test_rc": "0",
+  "test_wall_s": "61",
+  "start_utc": "2026-08-18T01:56:48Z",
+  "end_utc": "2026-08-18T01:57:53Z",
+  "toolshed_pid": "66834",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "series_arm": "OFF",
+  "n": 20,
+  "median": 328,
+  "q1": 295,
+  "q3": 482,
+  "mn": 162,
+  "mx": 1069,
+  "delay": 2000,
+  "load_in_test": "6.05/13.05/27.03",
+  "raw": [
+   492,
+   162,
+   247,
+   311,
+   329,
+   286,
+   312,
+   411,
+   299,
+   275,
+   295,
+   293,
+   507,
+   825,
+   1069,
+   312,
+   328,
+   395,
+   482,
+   373
+  ],
+  "p50": 328,
+  "p95": 1069,
+  "mean": 400.1,
+  "steps": {
+   "navigate + login all profiles": 467,
+   "runtime idle (all)": 3,
+   "initial 'No profile' (all)": 1101,
+   "Alice save + own status": 323,
+   "Bob sees Alice before save": 3,
+   "Bob save + own status": 377,
+   "cross-browser name propagation (all pairs)": 6,
+   "message propagation (first -> all)": 28,
+   "lockdown propagation (first -> others)": 4,
+   "post-lockdown message (non-admin -> admin)": 21,
+   "room propagation (first -> all)": 3
+  },
+  "client_actionRuns": [
+   957,
+   1301
+  ],
+  "client_commitConflicts": [
+   14,
+   214
+  ],
+  "store": {
+   "commits": 608,
+   "by_class": {
+    "authored": 608
+   },
+   "sessions": 6,
+   "spaces": 3,
+   "main_space_commits": 606,
+   "main_space_by_class": {
+    "authored": 606
+   },
+   "main_space_first_last": [
+    "2026-08-18 01:56:52",
+    "2026-08-18 01:57:50"
+   ]
+  }
+ },
+ {
+  "run": "t1b",
+  "workload": "chat",
+  "arm": "off",
+  "load_before": "{ 6.21 8.21 19.94 }",
+  "load_after": "{ 9.27 8.71 19.20 }",
+  "test_rc": "0",
+  "test_wall_s": "66",
+  "start_utc": "2026-08-18T02:03:39Z",
+  "end_utc": "2026-08-18T02:04:49Z",
+  "toolshed_pid": "82702",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "series_arm": "OFF",
+  "n": 20,
+  "median": 477,
+  "q1": 373,
+  "q3": 645,
+  "mn": 288,
+  "mx": 921,
+  "delay": 2000,
+  "load_in_test": "8.60/8.57/19.21",
+  "raw": [
+   559,
+   373,
+   354,
+   288,
+   441,
+   371,
+   365,
+   381,
+   300,
+   381,
+   645,
+   477,
+   461,
+   683,
+   921,
+   584,
+   698,
+   572,
+   702,
+   526
+  ],
+  "p50": 477,
+  "p95": 921,
+  "mean": 504.1,
+  "steps": {
+   "navigate + login all profiles": 635,
+   "runtime idle (all)": 5,
+   "initial 'No profile' (all)": 1467,
+   "Alice save + own status": 442,
+   "Bob sees Alice before save": 4,
+   "Bob save + own status": 498,
+   "cross-browser name propagation (all pairs)": 15,
+   "message propagation (first -> all)": 42,
+   "lockdown propagation (first -> others)": 4,
+   "post-lockdown message (non-admin -> admin)": 26,
+   "room propagation (first -> all)": 4
+  },
+  "client_actionRuns": [
+   948,
+   1344
+  ],
+  "client_commitConflicts": [
+   14,
+   219
+  ],
+  "store": {
+   "commits": 608,
+   "by_class": {
+    "authored": 608
+   },
+   "sessions": 6,
+   "spaces": 3,
+   "main_space_commits": 606,
+   "main_space_by_class": {
+    "authored": 606
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:03:43",
+    "2026-08-18 02:04:47"
+   ]
+  }
+ },
+ {
+  "run": "t2",
+  "workload": "chat",
+  "arm": "on",
+  "load_before": "{ 3.90 5.56 8.52 }",
+  "load_after": "{ 2.94 4.39 6.48 }",
+  "test_rc": "124",
+  "test_wall_s": "600",
+  "start_utc": "2026-08-18T02:32:54Z",
+  "end_utc": "2026-08-18T02:43:51Z",
+  "toolshed_pid": "54792",
+  "gitSha": "59b5329ae",
+  "shellDefine": "true",
+  "passed": false,
+  "client_actionRuns": [],
+  "client_commitConflicts": [],
+  "sl": {
+   "waves": 119,
+   "wavesBudgetExhausted": 99,
+   "authoredSeen": 62,
+   "effectAcks": 0,
+   "derivedCommits": 108,
+   "supersededWrites": 0,
+   "structureLoadDeferred": 0,
+   "structureLoadTerminal": 382,
+   "structureLoadRearmed": 38,
+   "watermarkLag": 4,
+   "demandArrivals": 57,
+   "activeSpaces": 3,
+   "reactivationBackoffs": 0,
+   "parkDisposeTimeouts": 0,
+   "undemandedNarrowingRuns": 0,
+   "events": {
+    "appended": 27,
+    "processed": 38,
+    "coalescedPerWaveMax": 1,
+    "skippedIdempotent": 0
+   },
+   "memo": {
+    "hits": 0,
+    "misses": 0,
+    "inflight": 0
+   },
+   "outbox": {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "budgetDeferrals": 0
+   },
+   "push": {
+    "prioritizedSessions": 83,
+    "followerSessions": 33,
+    "mixedFlushes": 29
+   },
+   "lease": {
+    "held": 3,
+    "lost": 33
+   }
+  },
+  "ratio_sec4": 1.742,
+  "store": {
+   "commits": 171,
+   "by_class": {
+    "authored": 62,
+    "derived": 109
+   },
+   "sessions": 9,
+   "spaces": 3,
+   "main_space_commits": 167,
+   "main_space_by_class": {
+    "authored": 60,
+    "derived": 107
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:32:59",
+    "2026-08-18 02:43:48"
+   ]
+  }
+ },
+ {
+  "run": "t2b",
+  "workload": "chat",
+  "arm": "off",
+  "load_before": "{ 2.94 4.39 6.48 }",
+  "load_after": "{ 3.21 4.25 6.28 }",
+  "test_rc": "0",
+  "test_wall_s": "57",
+  "start_utc": "2026-08-18T02:43:51Z",
+  "end_utc": "2026-08-18T02:44:52Z",
+  "toolshed_pid": "80190",
+  "gitSha": "59b5329ae",
+  "shellDefine": null,
+  "passed": true,
+  "series_arm": "OFF",
+  "n": 20,
+  "median": 227,
+  "q1": 212,
+  "q3": 275,
+  "mn": 167,
+  "mx": 498,
+  "delay": 2000,
+  "load_in_test": "3.21/4.25/6.28",
+  "raw": [
+   383,
+   167,
+   227,
+   178,
+   182,
+   181,
+   187,
+   236,
+   213,
+   227,
+   212,
+   221,
+   237,
+   380,
+   498,
+   271,
+   216,
+   267,
+   377,
+   275
+  ],
+  "p50": 227,
+  "p95": 498,
+  "mean": 256.8,
+  "steps": {
+   "navigate + login all profiles": 552,
+   "runtime idle (all)": 3,
+   "initial 'No profile' (all)": 1097,
+   "Alice save + own status": 283,
+   "Bob sees Alice before save": 2,
+   "Bob save + own status": 303,
+   "cross-browser name propagation (all pairs)": 5,
+   "message propagation (first -> all)": 4,
+   "lockdown propagation (first -> others)": 3,
+   "post-lockdown message (non-admin -> admin)": 24,
+   "room propagation (first -> all)": 3
+  },
+  "client_actionRuns": [
+   957,
+   1267
+  ],
+  "client_commitConflicts": [
+   15,
+   204
+  ],
+  "store": {
+   "commits": 608,
+   "by_class": {
+    "authored": 608
+   },
+   "sessions": 6,
+   "spaces": 3,
+   "main_space_commits": 606,
+   "main_space_by_class": {
+    "authored": 606
+   },
+   "main_space_first_last": [
+    "2026-08-18 02:43:54",
+    "2026-08-18 02:44:50"
+   ]
+  }
+ }
+]

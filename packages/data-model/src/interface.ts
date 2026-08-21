@@ -41,7 +41,7 @@ export abstract class FabricSpecialObject {
 }
 
 //
-// Fabric instance protocol
+// `FabricInstance` protocol
 //
 
 /**
@@ -49,7 +49,7 @@ export abstract class FabricSpecialObject {
  * See Section 2.3 of the formal spec.
  *
  * This is the pure abstract protocol -- the `instanceof`-able contract that
- * external code is written against. Concrete fabric-instance classes in the
+ * external code is written against. Concrete `FabricInstance` classes in the
  * data-model extend `BaseFabricInstance` (a subclass of this one) rather
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
@@ -96,7 +96,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 }
 
 //
-// Fabric primitive base class
+// `FabricPrimitive` base class
 //
 
 /**
@@ -106,7 +106,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * content IDs, byte sequences, and similar.
  *
  * This class enables a single `instanceof` check where code needs to handle
- * any special primitive uniformly.
+ * any `FabricPrimitive` uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).
  * Each leaf subclass must call `Object.freeze(this)` at the end of its
@@ -139,7 +139,7 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
  * The non-object values (`bigint` and the other scalars) are direct members of
  * the union instead, not routed through that arm. Some native types are
- * converted to fabric primitives during conversion.
+ * converted to `FabricPrimitive`s during conversion.
  *
  * `undefined` is preserved.
  *
@@ -152,16 +152,16 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * refused: `Symbol.keyFor(value) !== undefined`.
  *
  * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
- * state truthfully and permanently. In particular, a fabric record or array is
- * data-only: it must not expose an own accessor (getter/setter) whose result
- * can contradict, or change after, the value's frozen state -- once a
- * `FabricValue` graph is deeply frozen, its contents are fixed. (For a
- * `FabricInstance`, the analogous obligation is on its `[IS_DEEP_FROZEN]`
- * report; see `BaseFabricInstance`.) The rest of the system -- the data model
- * in general and `isDeepFrozen()` specifically, but also the entire codebase
- * that _uses_ the data model -- relies on this to cache deep-frozen proofs by
- * root identity without re-validating; a value that violates it can corrupt
- * data-model invariants, as any broken contract can.
+ * state truthfully and permanently. In particular, a `FabricPlainObject` or
+ * `FabricArray` is data-only: it must not expose an own accessor
+ * (getter/setter) whose result can contradict, or change after, the value's
+ * frozen state -- once a `FabricValue` graph is deeply frozen, its contents are
+ * fixed. (For a `FabricInstance`, the analogous obligation is on its
+ * `[IS_DEEP_FROZEN]` report; see `BaseFabricInstance`.) The rest of the system
+ * -- the data model in general and `isDeepFrozen()` specifically, but also the
+ * entire codebase that _uses_ the data model -- relies on this to cache
+ * deep-frozen proofs by root identity without re-validating; a value that
+ * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
   // -- Primitives --
@@ -179,14 +179,14 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** A fabric value other than `null` or `undefined`. */
+/** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** Read-only array of fabric values. */
+/** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
- * Object/record of fabric values.
+ * Object/record of `FabricValue`s.
  *
  * The names `__proto__` and `constructor` are refused at the boundaries where
  * values enter or leave storage, so no `FabricPlainObject` carries one. The
@@ -210,14 +210,14 @@ export type FabricValueLayer =
   | unknown[]
   | Record<string, unknown>;
 
-/** A mutable array root whose elements remain fabric values. */
+/** A mutable array root whose elements remain `FabricValue`s. */
 export type MutableFabricArrayLayer = FabricValue[];
 
-/** A mutable record root whose values remain fabric values. */
+/** A mutable record root whose values remain `FabricValue`s. */
 export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
 
 /**
- * A fabric value with a mutable root container. Nested containers remain
+ * A `FabricValue` with a mutable root container. Nested containers remain
  * ordinary (readonly) `FabricValue`s, so this models a single construction
  * layer rather than a deep thaw.
  */
@@ -230,8 +230,8 @@ export type MutableFabricValueLayer =
  * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `unknown`, so callers can hand it already-fabric data or raw native
- * JS objects alike, and whatever it cannot represent is rejected there rather
+ * accepts `unknown`, so callers can hand it `FabricValue`s or raw native JS
+ * objects alike, and whatever it cannot represent is rejected there rather
  * than excluded by the signature. The conversion produces `FabricInstance`
  * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
  *
