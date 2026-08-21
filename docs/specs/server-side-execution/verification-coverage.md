@@ -5440,8 +5440,25 @@ supply; OW29/OW32/OW34 closed):
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam): CLOSED (2026-08-21) — the RULED
-    unresolved-input lift semantics, built.** The undefined read was
+    ON read-semantics seam): STILL OPEN — the ruled semantics are
+    BUILT + PINNED (red-first), but the refusal's SCOPE is a design
+    problem (the CLOSED claim below was PREMATURE; corrected
+    2026-08-21 wind-down).** The naive fix (refuse on EVERY
+    data-derived dead-end, gated by `viaLinkHop`) fires in BOTH arms
+    and BREAKS real patterns — the OFF `topics` lift crashes on
+    `undefined` (`.trim`), OFF `parking-coordinator` never
+    materializes, several ON pattern shards likewise (#6179 CI on the
+    green-behind-`dfe9086dc` base). What is settled and preserved: the
+    owner's ruling (below), the red-first pin
+    (`unresolved-input-lift.test.ts`), the spec RULED text
+    (speculation.md §2). The OPEN piece — how to scope the refusal to
+    the true unresolved-input case without refusing the large
+    legitimate-absent population — and the candidate designs are in
+    `docs/history/plans/server-execution-v2/optimize/
+    ow51-build-report.md` §6. Do not merge #6179 until resolved. The
+    rest of this row (the mechanism, the ruling quote, the lift) is
+    the built-not-merged state:
+    The undefined read was
     a scheduler lift whose input LINK CHAIN dead-ended at a doc the
     replica could not serve yet (a note's `pendingEdit` reached
     through the piece's result/process doc during a freshly

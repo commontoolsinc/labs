@@ -2,10 +2,17 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW51 build: the RULED option (a) — the serving runtime matches the client's unresolved-input lift semantics exactly, and the ruled lift-throw semantic (a specific tx-abort error handled like an unresolved input: output undefined, re-trigger on any so-far read change) lands on both sides; the default-app surface greens ON and its skip lifts."
+reason: "OW51 build: the RULED option (a) unresolved-input lift semantics are BUILT and PINNED (red-first), but the CARRIER + REFUSAL-SCOPE is an OPEN design question — the naive implementation (refuse on EVERY data-derived dead-end, gated by viaLinkHop) fires far too broadly and BREAKS real patterns in BOTH arms (§6). Semantics preserved; carrier/scope to be redesigned next session. Do not merge #6179."
 ---
 
 # OW51 build — the ruled unresolved-input lift semantics
+
+> **STATUS (2026-08-21, wind-down): SEMANTICS BUILT + PINNED; CARRIER /
+> REFUSAL-SCOPE DESIGN OPEN — do not merge #6179.** The red-first pin
+> (`unresolved-input-lift.test.ts`) and the ruling are preserved. The
+> naive fix as-built refuses on EVERY data-derived dead-end and breaks
+> real patterns broadly (§6 — the CI blast radius). The open question
+> and alternative designs are in §6.
 
 ## 0. The ruling (2026-08-21)
 
@@ -259,3 +266,89 @@ STEP skip bound to **OW45** (`tasks/server-execution-on-skips.ts` +
 the in-file guard in `default-app.test.ts`), exactly the pattern
 cellset-lww / convergence-storm used. The OW51 register row is CLOSED
 with the ruling quoted and the caution-4 residual named.
+
+## 6. STOP-AND-SURFACE: the refusal fires too broadly — the OPEN design problem
+
+The fix landed the ruled SEMANTICS and passed every NARROW pin
+(`unresolved-input-lift.test.ts` green; default-app ON 10/10, zero
+`splitDefinitions`; schema-view 66/66; the 11 sigil-link assertion
+updates; product-code-observability of `viaLinkHop` = NONE, §3). But
+its first full CI run on the real suites (#6179, head 1a2b78326)
+revealed a BROAD product-behavior regression — the STOP-AND-SURFACE
+condition the coordinator named.
+
+**What broke (main was fully green behind `dfe9086dc`; my change is
+the only delta):** 16 job failures, the load-bearing ones in the
+PATTERN INTEGRATION lanes of BOTH arms —
+
+- **OFF `topics` pattern** (`topics/main.tsx:306`): a lift crashed
+  `TypeError: Cannot read properties of undefined (reading 'trim')` —
+  the OW51 crash CLASS, but NOW, in OFF, where it did not crash on
+  main.
+- **OFF `parking-coordinator-admin-view`**: a value never
+  materialized (5m timeout — the never-heal shape).
+- Several ON pattern shards, same family.
+
+**The mechanism.** `viaLinkHop` marks essentially EVERY sigil-parsed
+link as data-derived, and the lazy read runs in BOTH arms
+(`lazyMaterialization` defaults on regardless of server-execution). So
+the refusal (`pendingHopDoc && value===undefined && no default`) fires
+on the LARGE population of legitimate reads of a data-derived link
+whose target is momentarily or expectedly absent — not just the narrow
+OW51 case (a served-instantiated note's input chain mid-arrival).
+Disposing those runs cascades `undefined` into downstream lifts (the
+`.trim` crash) and stalls derivations that would otherwise heal through
+the normal derive cycle rather than the refusal's re-trigger. The
+narrow runner UNIT tests do not exercise this population and pass
+locally; the real PATTERNS do and break. (The runner CI reds this run —
+doc-map, cooperative-yield, cfc-policy-of-label, cell-notification-
+shaping, ensure-piece-running, oncommit-race — were separately verified
+as FLAKES: all pass locally with the preload; the LLM-mock and
+connection-refused signatures are infra. Only the pattern-integration
+family is the real regression.)
+
+**Why the narrow pins missed it.** The pin constructs the exact OW51
+shape (a hop-target dead-end that then arrives) and asserts the
+disposition. It does NOT sample the broad population of data-derived
+reads that dead-end for OTHER reasons (a genuinely-absent optional
+target the pattern already tolerates, a target that heals via ordinary
+derivation, a read racing a write in the same tick). The refusal is
+correct for the pin's shape and wrong for much of that population.
+
+**The OPEN design question (for next session):** how to scope the
+refusal to the true unresolved-input case WITHOUT refusing the large
+legitimate-absent population. Candidate directions, none built:
+
+1. **Narrow the trigger, not the carrier.** The refusal should fire
+   only when the target is EXPECTED to arrive (a served
+   instantiation's not-yet-materialized doc), not for any absent
+   data-derived target. Signals to explore: whether a pull was
+   actually kicked AND is outstanding for the dead-end doc (an
+   in-flight expectation), the serving posture + a wave-arrival marker,
+   or a "this doc is expected" bit set by the served-instantiation path
+   specifically — rather than the blanket "sigil-parsed = data-derived".
+2. **Carry the provenance outside the link object** — e.g. in the
+   read-scope journal / reactivity log for the specific read, so the
+   decision is per-READ-context rather than a property on every
+   parsed link (also removes the test-assertion churn of §3).
+3. **Confine the behavior to the ON arm** — the OW51 crash is a
+   served-runtime + served-instantiation phenomenon; if the refusal
+   guarded on `servingPosture`/`serverExecution`, OFF patterns keep
+   today's undefined-returning behavior and only the served path
+   refuses. (Trades away the "server matches client EXACTLY" letter of
+   the ruling for not regressing OFF — an owner call, since the ruling
+   said match exactly.)
+4. **A tighter value/schema condition** — refuse only when the
+   dead-end is the reader's DIRECT input root under a non-optional,
+   non-defaulted, non-nullable schema AND the read is a
+   scheduler-driven lift (not an incidental resolve), narrowing the
+   population.
+
+**What is preserved regardless (nothing lost by deferring):** the
+owner's ruling (§0), the red-first pin capturing the semantics
+(`unresolved-input-lift.test.ts`), the spec RULED text (speculation.md
+§2), the triage root cause (`ow51-undefined-read-report.md`), and this
+analysis. `#6179` stays "semantics built + pinned, carrier/scope OPEN
+— do not merge"; the OW51 register row's CLOSED status is PREMATURE
+given this finding and should read OPEN until the scope is resolved
+(corrected in the same commit as this section).
