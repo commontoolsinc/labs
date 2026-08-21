@@ -14,7 +14,11 @@ sx2-events.test.ts`, assert `derivedDelta < N` ("rapid-fire coalescing:
 10 derived commits for 10 events must stay well under N"),
 intermittently red on the ON pattern lane on unrelated PRs; re-run
 clears it. Their measurements: CI passing runs log exactly 7, the
-failing run 10; locally 4–5 over ~20 runs.
+failing run 10; locally 4–5 over ~20 runs. Additional evidence (the
+owner's ON-flake census, 2026-08-21 — 123 runs, 25 ON failures, its
+item 4): one more CI occurrence at 15:25Z on #6136 with the
+same-commit rerun green — the load-ratio shape exactly as analyzed
+below; the disposition (owner ruling on the gate) is unchanged.
 
 Relation to OW52, stated first because the two were plausibly one
 question: they are NOT. The OW52 storm accounting
