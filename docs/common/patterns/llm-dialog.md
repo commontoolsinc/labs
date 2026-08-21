@@ -22,18 +22,19 @@ is added after the catalog is built, whenever a `resultSchema` is present. So
 `builtinTools: false` alone does not guarantee that only pattern-supplied
 tools are advertised.
 
-## A tool named like a built-in is a collision, not a clean override
+## A tool named like a built-in shadows it
 
-The two halves disagree, so do not rely on this. Catalog construction records
-the external tool's model-facing definition first and then writes the built-in
-definition over it at the same name, while dispatch resolves the external
-catalog first. On a collision the model therefore sees the **built-in's**
-schema and description, but a call is executed against the **external** tool —
-which can invoke it with the wrong input shape.
+A pattern tool may carry a built-in's name. Dispatch resolves the pattern's
+tools first, so the pattern's tool is what runs, and every description of the
+tools names that same tool: the model is offered its schema and description,
+the UI lists it, and the CFC gates read their policy from its declaration. The
+built-in becomes unreachable under that name, and the runtime logs a warning
+saying so.
 
-Treat a name collision with a built-in as a bug to avoid: name pattern tools
-distinctly from `read`, `invoke`, `schema`, `pin`, `unpin`, and
-`updateArgument`.
+Shadowing is therefore safe but rarely what you want, since it costs the
+built-in. Give a tool its own name unless you mean to replace `read`,
+`invoke`, `schema`, `pin`, `unpin`, or `updateArgument` — and if a built-in
+seems to have gone missing, check the log for a shadowing warning.
 
 ## A tool that writes caller state must be a handler
 
