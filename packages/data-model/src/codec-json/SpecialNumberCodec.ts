@@ -49,7 +49,7 @@ export class SpecialNumberCodec
   }
 
   /** @inheritDoc */
-  encode(value: number): SpecialNumberState {
+  encode(value: number, _env: LiveEnvironment): SpecialNumberState {
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "+Infinity";
     if (value === -Infinity) return "-Infinity";

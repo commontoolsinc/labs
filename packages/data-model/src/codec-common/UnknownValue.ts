@@ -116,7 +116,7 @@ export class UnknownValue extends BaseFabricInstance {
       }
 
       /** @inheritDoc */
-      encode(value: UnknownValue): FabricValue {
+      encode(value: UnknownValue, _env: LiveEnvironment): FabricValue {
         return value.state;
       }
 

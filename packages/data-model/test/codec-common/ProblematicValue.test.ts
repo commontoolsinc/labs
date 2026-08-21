@@ -189,11 +189,12 @@ describe("ProblematicValue", () => {
         it("returns the tag, state, and error together", () => {
           const pv = new ProblematicValue("Weird@7", { x: 1 }, "oops");
 
-          expect(ProblematicValue[CODEC].encode(pv)).toEqual({
-            tag: "Weird@7",
-            state: { x: 1 },
-            error: "oops",
-          });
+          expect(ProblematicValue[CODEC].encode(pv, NULL_LIVE_ENVIRONMENT))
+            .toEqual({
+              tag: "Weird@7",
+              state: { x: 1 },
+              error: "oops",
+            });
         });
       });
 

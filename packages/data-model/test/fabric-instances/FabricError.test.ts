@@ -118,9 +118,11 @@ describe("FabricError", () => {
     });
 
     describe("`[CODEC]` `encode()` state", () => {
+      const env = NULL_LIVE_ENVIRONMENT;
+
       it("returns `type`, `name=null` (common case), `message`, `stack`", () => {
         const se = FabricError.fromNativeError(new Error("hello"));
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -132,7 +134,7 @@ describe("FabricError", () => {
 
       it("sets `name` to `null` when `type === name` (`TypeError`)", () => {
         const se = FabricError.fromNativeError(new TypeError("bad"));
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -144,7 +146,7 @@ describe("FabricError", () => {
         const err = new TypeError("bad");
         err.name = "CustomName";
         const se = FabricError.fromNativeError(err);
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -157,7 +159,7 @@ describe("FabricError", () => {
         const outer = FabricError.fromNativeError(
           new Error("outer", { cause: inner }),
         );
-        const state = FabricError[CODEC].encode(outer) as Record<
+        const state = FabricError[CODEC].encode(outer, env) as Record<
           string,
           FabricValue
         >;
@@ -169,7 +171,7 @@ describe("FabricError", () => {
         (err as unknown as Record<string, unknown>).code = 42;
         (err as unknown as Record<string, unknown>).detail = "more info";
         const se = FabricError.fromNativeError(err);
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -184,7 +186,7 @@ describe("FabricError", () => {
           enumerable: true,
         });
         const se = FabricError.fromNativeError(err);
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -200,7 +202,7 @@ describe("FabricError", () => {
         });
         (err as unknown as Record<string, unknown>).name = "Error";
         const se = FabricError.fromNativeError(err);
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -211,7 +213,7 @@ describe("FabricError", () => {
         const err = new Error("no stack");
         err.stack = undefined;
         const se = FabricError.fromNativeError(err);
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -224,7 +226,7 @@ describe("FabricError", () => {
         (original as unknown as Record<string, unknown>).code = 42;
         const se = FabricError.fromNativeError(original);
 
-        const state = FabricError[CODEC].encode(se);
+        const state = FabricError[CODEC].encode(se, env);
         const restored = FabricError[CODEC].decode(
           CODEC_TYPE_TAGS.Error,
           state,
@@ -241,7 +243,7 @@ describe("FabricError", () => {
         original.name = "SpecialType";
         const se = FabricError.fromNativeError(original);
 
-        const state = FabricError[CODEC].encode(se) as Record<
+        const state = FabricError[CODEC].encode(se, env) as Record<
           string,
           FabricValue
         >;
@@ -566,7 +568,7 @@ describe("FabricError", () => {
       describe("encode()", () => {
         it("encodes a basic `FabricError` to its `{ type, name, message }` state", () => {
           const se = FabricError.fromNativeError(new Error("test"));
-          const state = codec.encode(se) as Record<string, unknown>;
+          const state = codec.encode(se, env) as Record<string, unknown>;
           expect(state.type).toBe("Error");
           expect(state.name).toBe(null); // null = same as type (common case)
           expect(state.message).toBe("test");
@@ -575,7 +577,7 @@ describe("FabricError", () => {
         it("encodes `name: null` when `name` matches `type` (`TypeError`)", () => {
           // TypeError: name === constructor.name === "TypeError".
           const se = FabricError.fromNativeError(new TypeError("type check"));
-          const state = codec.encode(se) as Record<string, unknown>;
+          const state = codec.encode(se, env) as Record<string, unknown>;
           expect(state.type).toBe("TypeError");
           expect(state.name).toBe(null); // null = same as type
           expect(state.message).toBe("type check");
@@ -585,7 +587,7 @@ describe("FabricError", () => {
           const err = new Error("custom");
           err.name = "MyCustomError";
           const se = FabricError.fromNativeError(err);
-          const state = codec.encode(se) as Record<string, unknown>;
+          const state = codec.encode(se, env) as Record<string, unknown>;
           expect(state.type).toBe("Error");
           expect(state.name).toBe("MyCustomError");
           expect(state.message).toBe("custom");
@@ -723,7 +725,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(new Error("hello"));
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
@@ -736,7 +738,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(new TypeError("bad type"));
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
@@ -751,7 +753,7 @@ describe("FabricError", () => {
           );
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded).toBeInstanceOf(FabricError);
@@ -766,7 +768,7 @@ describe("FabricError", () => {
           );
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(outer),
+            codec.encode(outer, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("outer");
@@ -786,7 +788,7 @@ describe("FabricError", () => {
           const outerSe = FabricError.fromNativeError(outerErr);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(outerSe),
+            codec.encode(outerSe, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("outer");
@@ -801,7 +803,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.message).toBe("oops");
@@ -819,7 +821,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.name).toBe("MyCustomError");
@@ -830,7 +832,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(new TypeError("rt"));
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.toNativeValue(true)).toBeInstanceOf(TypeError);
@@ -847,7 +849,7 @@ describe("FabricError", () => {
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(se),
+            codec.encode(se, env),
             env,
           ) as unknown as FabricError;
           expect(decoded.toNativeValue(true)).toBeInstanceOf(Error);

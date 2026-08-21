@@ -39,7 +39,7 @@ describe("UndefinedCodec", () => {
 
     describe("encode()", () => {
       it("encodes `undefined` to `null` state", () => {
-        expect(codec.encode(undefined)).toBe(null);
+        expect(codec.encode(undefined, env)).toBe(null);
       });
     });
 
@@ -64,7 +64,7 @@ describe("UndefinedCodec", () => {
       it("round-trips `undefined` via encode -> decode", () => {
         const decoded = codec.decode(
           expectedTag,
-          codec.encode(undefined),
+          codec.encode(undefined, env),
           env,
         );
         expect(decoded).toBe(undefined);

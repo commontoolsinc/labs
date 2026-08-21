@@ -221,7 +221,7 @@ describe("FabricHash", () => {
       describe("encode()", () => {
         it("encodes to a `{ tag, hash }` object", () => {
           const cid = new FabricHash(SAMPLE_HASH, "fid1");
-          expect(codec.encode(cid)).toEqual({
+          expect(codec.encode(cid, env)).toEqual({
             tag: "fid1",
             hash: cid.hashString,
           });
@@ -275,7 +275,7 @@ describe("FabricHash", () => {
           const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(cid),
+            codec.encode(cid, env),
             env,
           );
           expect(decoded).toBeInstanceOf(FabricHash);

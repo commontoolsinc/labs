@@ -2,7 +2,10 @@ import { ensureDir } from "@std/fs";
 import { dirname, join } from "@std/path";
 
 import type { CellScope, JSONSchema } from "@commonfabric/api";
-import { codecOf } from "@commonfabric/data-model/codec-common";
+import {
+  codecOf,
+  NULL_LIVE_ENVIRONMENT,
+} from "@commonfabric/data-model/codec-common";
 import {
   FabricPrimitive,
   FabricSpecialObject,
@@ -1146,7 +1149,9 @@ async function searchTextMatches(
         // contributes nothing here. For anything else, a missing codec is a
         // real fault and `codecOf()` throws, which the `catch` reports.
         if (!(current instanceof FabricPrimitive)) {
-          representations.push({ value: codecOf(current).encode(current) });
+          representations.push({
+            value: codecOf(current).encode(current, NULL_LIVE_ENVIRONMENT),
+          });
         }
       } catch (error) {
         reportReadError?.(error);

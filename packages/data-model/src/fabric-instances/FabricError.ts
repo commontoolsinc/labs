@@ -389,7 +389,7 @@ export class FabricError extends FabricNativeWrapper<Error>
     );
     return codec.decode(
       CODEC_TYPE_TAGS.Error,
-      codec.encode(this),
+      codec.encode(this, liveEnvironment),
       liveEnvironment,
     ) as FabricError;
   }
@@ -435,7 +435,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       }
 
       /** @inheritDoc */
-      encode(value: FabricError): FabricPlainObject {
+      encode(value: FabricError, _env: LiveEnvironment): FabricPlainObject {
         const state: Record<string, FabricValue> = {
           type: value.type,
           name: value.name === value.type ? null : value.name,
