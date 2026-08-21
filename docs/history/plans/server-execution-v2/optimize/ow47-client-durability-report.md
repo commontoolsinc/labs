@@ -317,17 +317,22 @@ proven by the 300 s probe — but removes the test-side mis-aim).
   barrier covers program materialization.
   `Scheduler.idleWithPendingCommits` (the runtime-client `handleIdle`
   target of `waitForRuntimeIdle`; also `settled()`/`settledFor`) now
-  awaits the pattern manager's in-flight by-identity loads and
-  compile-cache write-backs, joint-fixpoint with pending commits;
-  plain `idle()` stays reactive-only (serving-loop settle probes
-  untouched). Red-first pins in `scheduler-idle-pattern-work.test.ts`
-  (both failed pre-fix). Registration timing traced: loads register in
-  their first awaits (before any storage read), write-backs at
-  `persistCompileCacheTracked` entry; initiators (piece starts, event
-  handlers, awaited IPC requests) are covered until registration
-  lands. A pre-existing wish.test.ts red in the battery was
-  attributed to the unmodified base (byte-identical at c911a660f)
-  before proceeding.
+  awaits the pattern manager's pending work through THREE registries —
+  `inProgressCompilations` (added on both reviewers' P1: the
+  compile-and-run builtin launches `compileOrGetPattern` as a FLOATING
+  promise, so during the TypeScript compile nothing else holds the
+  scheduler; it registers synchronously and resolves only after
+  persistence), the in-flight by-identity loads, and the compile-cache
+  write-backs — joint-fixpoint with pending commits; plain `idle()`
+  stays reactive-only (serving-loop settle probes untouched).
+  Red-first pins in `scheduler-idle-pattern-work.test.ts` (both failed
+  pre-fix; the compilation half added with the review fix).
+  Registration timing traced: loads register in their first awaits
+  (before any storage read), write-backs at
+  `persistCompileCacheTracked` entry, compilations synchronously at
+  `compileOrGetPattern`. A pre-existing wish.test.ts red in the
+  battery was attributed to the unmodified base (byte-identical at
+  c911a660f) before proceeding.
 - **S-C — FLAGGED OPEN, deliberately NOT built** (the register row
   carries the flag): the heal-on-read re-issue's SOURCE is an
   unstated semantic. Findings that ground the flag: the in-memory
