@@ -852,7 +852,7 @@ jobs:
   # explicit-`false` = the OFF regression guard on an OFF-built binary).
   package-integration-test-server-execution-on:
     name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     needs: ["build-toolshed-on"]
     strategy:
@@ -1337,7 +1337,7 @@ jobs:
   # depend on the flag).
   pattern-integration-test-server-execution-on:
     name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     needs: ["build-toolshed-on"]
     strategy:
