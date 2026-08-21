@@ -39,8 +39,10 @@ import type { Engine } from "@commonfabric/memory/v2/engine";
 import {
   applyCommit,
   applyWaveCommit,
+  readState,
   selectDocHead,
   selectWritePathsSince,
+  serverSeq,
   WaveCommitConflictError,
   WavePreconditionError,
 } from "@commonfabric/memory/v2/engine";
@@ -186,6 +188,39 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         // validates completeness, and scoped writes key from the CARRIED
         // identity. Idempotent by deterministic destination ids — no
         // wave-basis re-verification and no basis rows.
+        //
+        // INV-13 mirrored on the engine-direct plane (OW31 B4, RULED
+        // 2026-08-18; protocol.md §2's genesis clause): a foreign batch
+        // never lands in a FRESH store ahead of its genesis ACL — the
+        // space's commit #1 is the ACL, signed by the space's own keys
+        // and naming the acting user OWNER. The session plane enforces
+        // this in `#validateAclCommit`'s precedence clause; the sink is
+        // the only other committer, and before this refusal it silently
+        // bypassed the invariant (a served `.inSpace()` create whose
+        // data commit won the race with the provider mount's genesis
+        // minted an ACL-less space). The wave commit step forces the
+        // genesis for every creation-granted target before applying, so
+        // hitting this refusal means the forcing failed or no bootstrap
+        // authority exists — foreign failure ⇒ home withheld ⇒ replay
+        // (§2b's existing failure semantics). Populated ACL-less legacy
+        // spaces (serverSeq > 0) are not this refusal's subject — the
+        // accept gate already fails closed on them.
+        if (
+          serverSeq(engine) === 0 &&
+          readState(engine, { id: `of:${batch.space}` }) === null
+        ) {
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: `foreign wave batch into fresh space ` +
+                `${batch.space} refused: the space requires its genesis ` +
+                "ACL commit — signed by the space identity, naming the " +
+                "acting user OWNER — before any data commit (INV-13 " +
+                "mirrored at the sink; OW31, protocol.md §2's genesis " +
+                "clause, §2b)",
+            },
+          });
+        }
         //
         // A scoped write with NO delegated carriage is still REFUSED,
         // not silently mis-keyed: the plain path would key it from the

@@ -1019,6 +1019,19 @@ export class StorageManager implements IStorageManager {
     return { principal: this.as.did(), sessionId: this.#sessionId };
   }
 
+  /**
+   * Force `space`'s provider session — and with it, on a bootstrap-capable
+   * session factory, the fresh-space ACL genesis (`#createInitializedSession`)
+   * — to have completed (OW31 B4; protocol.md §2b's genesis clause). The
+   * serving loop's wave commit step calls this for every `creation`-granted
+   * foreign target BEFORE the sink applies its data batch, so the space's
+   * commit #1 is its ACL. Idempotent: an already-mounted session (or an
+   * already-initialized space) resolves immediately.
+   */
+  async ensureSpaceInitialized(space: MemorySpace): Promise<void> {
+    await this.open(space).ensureSession?.();
+  }
+
   /** IStorageManager (server-execution v2 Phase 4): first-open observer
    * — the flag-ON client effects channel subscribes per space through
    * it. Assigned post-construction by the Runtime; undefined otherwise. */

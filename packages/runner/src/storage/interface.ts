@@ -183,6 +183,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   registerSpaceIdentity?(identity: Signer, options?: { owner?: string }): void;
 
   /**
+   * Force `space`'s provider session — and with it any fresh-space ACL
+   * genesis the manager's session factory performs — to have completed
+   * (OW31 B4). Optional: managers without ACL bootstrap support resolve
+   * after a plain session mount; the serving loop's commit step calls it
+   * for `creation`-granted foreign targets so the genesis lands before
+   * the sink's data batch (protocol.md §2b's genesis clause).
+   */
+  ensureSpaceInitialized?(space: MemorySpace): Promise<void>;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;
