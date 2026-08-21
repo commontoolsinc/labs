@@ -15,6 +15,7 @@ import {
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
   lookupSchemaDocument,
+  onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
@@ -351,10 +352,20 @@ export enum KeepAsCell {
 // Values are always deep-frozen OBJECT schemas: boolean/undefined inputs take
 // the early return and never reach the memo, and outputs are frozen before
 // caching (their sub-trees are shared across callers).
-const _sanitizeCache = new WeakMap<
+//
+// Dropped on the registry-clear transition, per the registry's rule for
+// resolution-success memos: a sanitized result can EMBED references the
+// strip minted (re-externalized sanitized documents), and those documents
+// live in the epoch's registry. A result cached in one epoch would keep
+// stamping references the next epoch's writer cannot stage — the link
+// would ship without its closure, and the stored schema would go cold.
+let _sanitizeCache = new WeakMap<
   object,
   Map<KeepAsCell, JSONSchema & object>
 >();
+onSchemaRegistryClear(() => {
+  _sanitizeCache = new WeakMap();
+});
 
 /**
  * Traverse schema and remove all asCell flags.
