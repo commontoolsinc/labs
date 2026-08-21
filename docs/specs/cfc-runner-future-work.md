@@ -263,9 +263,13 @@ Not new machinery so much as turning the system on:
   both modes in
   [`cfc-writer-fit.test.ts`](../../packages/runner/test/cfc-writer-fit.test.ts).
   What remains is picking the conforming default deployment states from that
-  matrix's §3 progression and moving the shipped hosts onto them; strict
-  presupposes `cfcFlowLabels: persist`, since the writer-fit measurement exists
-  only where the flow join is stamped.
+  matrix's §3 progression and moving the shipped hosts onto them. Strict
+  presupposes `cfcFlowLabels: persist`: §18.6.3's conformance matrix marks
+  `enforce-strict` without `persist` non-conforming, and the writer-fit
+  measurement exists only where the flow join is stamped. §18.6.3 also puts the
+  standard-profile display ceiling (§8.10.6) on the strict rung, where the
+  runner has it as a host-passed option the enforcement ladder does not reach —
+  so a deployment that moves to strict does not thereby get it.
 - **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
   **no host populates it**, and it admits atoms by raw structural equality rather
   than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).
