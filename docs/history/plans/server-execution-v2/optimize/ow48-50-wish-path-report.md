@@ -386,6 +386,11 @@ modeled refusal's retry behavior — CFC-adjacent, flagged not filled).
   (closed), OW49 annotated with the decoded envelope + the
   poison-pill finding + the recommendation pointer (still FLAGGED,
   CFC-owner), OW50 closed as built (this PR), each pointing here.
+  The review fix round minted two further rows: **OW54** (the
+  served-EVENT prep-crash consequence regression, review F1 —
+  trigger: the OW49 fix arc or profile-embed's lift) and **OW55**
+  (the API_URL pattern-fetch trust surface, review F7 — follow-up
+  class, closed by a ruled posture).
 
 ## 5. Verification inventory
 

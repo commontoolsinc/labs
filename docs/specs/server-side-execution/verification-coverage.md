@@ -5271,6 +5271,59 @@ supply; OW29/OW32/OW34 closed):
     `integration/sqlite-db-owner-multi-runtime.test.ts` and
     `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
     skips.
+  - **OW54 — a served EVENT whose commit-prep crashes seals NO
+    consequence (adversarial review of PR #6157, F1 —
+    CONFIRMED-by-trace; minted 2026-08-21).** Pre-#6157, a prep crash
+    on the EVENT path threw out of `prepareTxForCommit` inside the
+    event finalize, was caught by the `.catch((error) =>
+    finalize(error))` chain, and took the handler-error arm —
+    `served.onFailure({kind: "error"})` sealed an ERROR consequence
+    and the durable LT1 entry was consequenced. With OW50's totality
+    (`prepareCfc` records the crash as a modeled pre-storage
+    rejection), the same crash now classifies on the event path as a
+    give-up "non-retryable" disposition: `runFinalCommitCallback()` +
+    `reportDroppedCfcRejectedWrite`, but NO `served.onFailure` and
+    nothing seals a consequence (the pre-storage rejection returns
+    before the `#sealDestination.seal` branch). The drain-in-flight
+    guard releases in the "queued" state, the durable entry stays
+    unconsequenced, and the post-wave re-arm re-drains it — "the wave
+    IS the retry cadence" — so a DETERMINISTIC prep crash (the OW49
+    poison-envelope class) is a forever re-drain, and under #6158's
+    settle wait the unretired client intent pays the full bounded
+    quiescence timeout per settle round (bounded and loud by design,
+    but every round). Scope honesty: the give-up-without-consequence
+    gap PRE-EXISTS for modeled CFC refusals; what changed is that the
+    CRASH class — previously the one class that DID seal an error
+    consequence — joins it. Exposure today: none live (the poisoned
+    class is reactive wish docs; profile-embed is skipped ON). Owed:
+    seal an error consequence for a served event whose commit is
+    refused pre-storage with a deterministic CFC reason (mirror the
+    terminal arm's honesty), or route CFC pre-storage rejections on
+    served events through `served.onFailure({kind: "error"})` — the
+    events seal path is (α)-critical, so the fix belongs to a
+    deliberate pass, not a side-swipe. Trigger: the OW49 fix arc or
+    the `integration/profile-embed.test.ts` ON-skip lift, whichever
+    comes first.
+  - **OW55 — the serving runtimes' pattern-fetch trust surface
+    (adversarial review of PR #6157, F7; the OW48 investigation's
+    security-adjacent residual; minted 2026-08-21).** Under ON,
+    `env.API_URL` alone decides which server the serving runtimes
+    fetch and compile system patterns from (`startServerExecutionHost`
+    hands it to every serving runtime; the wish sidecars and the
+    pattern updater fetch `apiUrl + api/patterns/system/…`), and its
+    DEFAULT names another process's port (localhost:8000). A
+    stale-but-healthy neighbor on that port produced the entire OW48
+    misdiagnosis: pre-#6019 bytes compiled by current transformers,
+    silent wish-path kills that presented as a main defect. The
+    cross-vintage case is the demonstrated one; the cross-ORIGIN case
+    is the security-adjacent one (whose bytes does the server
+    compile?). Owed: a deliberate posture — pin the serving runtimes'
+    pattern source to self when co-hosted, or verify the served
+    `?identity` against the local patterns route — plus a
+    local-repro runbook note (API_URL/MEMORY_URL must be set
+    explicitly when the default port is occupied). Follow-up class
+    (flip-follow-up family): no lift trigger; close with the ruled
+    posture landed.
 
 ## 4. Standing rule
 
