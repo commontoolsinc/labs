@@ -1188,10 +1188,18 @@ describe("cli piece parsing", () => {
     // caller to their schema, when the answer is `cf piece call`. The stored
     // {$stream: true} sentinel is a definite signal, so the verb refusal
     // wins over whatever the selector threw.
-    const targetCell = {};
+    // What a real cell answers for a verb: the parent stores a LINK at the
+    // name, so the child's stored value is that link and it is the
+    // link-derived cell that answers as a stream. The sentinel never appears
+    // in the parent's projected value at all.
+    const targetCell = {
+      getRaw: () => ({ "/": "stream-link" }),
+      isStream: () => true,
+      asSchemaFromLinks: () => targetCell,
+    };
     const rootCell = {
       key: () => targetCell,
-      get: () => ({ addNote: { $stream: true } }),
+      get: () => ({ addNote: { "/": "stream-link" } }),
     };
     const controller = {
       get: () =>
@@ -1715,6 +1723,66 @@ describe("cli piece parsing", () => {
       ).rejects.toThrow(/use 'cf call/);
     });
 
+    it("classifies a verb path without projecting the whole parent", async () => {
+      // Cost, pinned as behavior: this guard runs on every read that carries
+      // a selection, so its cost must not depend on what the parent holds.
+      // Projecting the parent walks every document a piece result reaches to
+      // answer a question about one property. Every parent here refuses
+      // `get()` outright, so the guard reaches its verdict only off the child.
+      //
+      // Both definite signals are put through that: a verb stored as a LINK,
+      // where the link-derived cell is what answers as a stream, and a verb
+      // stored INLINE, where nothing is link-derived and the child's own
+      // stored `{$stream: true}` is the only evidence there is. Both are
+      // reached without a parent read at all.
+      const refuseParent = () => {
+        throw new Error("projected the whole parent");
+      };
+      const linkedVerb = {
+        getRaw: () => ({ "/": "stream-link" }),
+        isStream: () => true,
+        asSchemaFromLinks: () => linkedVerb,
+      };
+      const inlineVerb = {
+        getRaw: () => ({ $stream: true }),
+        isStream: () => false,
+        asSchemaFromLinks: () => inlineVerb,
+      };
+      const pieceWithChild = (child: unknown) => ({
+        result: {
+          get: () => Promise.resolve(undefined),
+          getCell: () =>
+            Promise.resolve({ get: refuseParent, key: () => child }),
+        },
+      });
+
+      for (const child of [linkedVerb, inlineVerb]) {
+        const error = await getCellValue(
+          config,
+          ["addTopic"],
+          {},
+          guardDeps(pieceWithChild(child)),
+        ).catch((error) => error);
+        expect(error).toBeInstanceOf(PieceVerbReadError);
+        expect((error as Error).message).toContain("cf call");
+      }
+
+      // And a data field under the same parent still reads: refusing on
+      // anything a child merely holds would make every read a refusal.
+      const dataChild = {
+        getRaw: () => ({ rows: [1, 2, 3] }),
+        isStream: () => false,
+        asSchemaFromLinks: () => dataChild,
+      };
+      const read = await getCellValue(
+        config,
+        ["addTopic"],
+        {},
+        guardDeps(pieceWithChild(dataChild)),
+      ).catch((error) => error);
+      expect(read).not.toBeInstanceOf(PieceVerbReadError);
+    });
+
     it("refuses on the stored schema marker even when the value reads empty", async () => {
       // The second definite signal: the link-derived schema answers as a
       // stream while the read value is an empty object (the marker survives
@@ -1790,7 +1858,10 @@ describe("cli piece parsing", () => {
       // result. The verb refusal has to win over the projection error.
       const verbCell = {
         schema: { type: "object" },
+        // The parent stores a link at the name, so that is the child's stored
+        // value, and the link-derived cell is what answers as a stream.
         getRaw: () => ({ "/": "stream-link" }),
+        isStream: () => true,
         asSchemaFromLinks: () => verbCell,
       };
       const rootCell = {
@@ -1799,7 +1870,7 @@ describe("cli piece parsing", () => {
           properties: { addTopic: { type: "object" } },
           required: ["addTopic"],
         },
-        get: () => ({ addTopic: { $stream: true } }),
+        get: () => ({ addTopic: { "/": "stream-link" } }),
         key: () => verbCell,
       };
       const piece = {
@@ -1827,7 +1898,10 @@ describe("cli piece parsing", () => {
       // stream to project is the same mistake whichever route it takes.
       const verbCell = {
         schema: { type: "object" },
+        // The parent stores a link at the name, so that is the child's stored
+        // value, and the link-derived cell is what answers as a stream.
         getRaw: () => ({ "/": "stream-link" }),
+        isStream: () => true,
         asSchemaFromLinks: () => verbCell,
       };
       const rootCell = {
@@ -1836,7 +1910,7 @@ describe("cli piece parsing", () => {
           properties: { addTopic: { type: "object" } },
           required: ["addTopic"],
         },
-        get: () => ({ addTopic: { $stream: true } }),
+        get: () => ({ addTopic: { "/": "stream-link" } }),
         key: () => verbCell,
       };
       const piece = {
