@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 
 import {
+  agentConfigReport,
+  agentRemovalReport,
   collectCommand,
   defaultDeps,
   defaultGithubToken,
@@ -13,6 +15,10 @@ import {
   setupCommand,
   uninstallCommand,
 } from "./test-records-key.ts";
+import {
+  AGENT_HARNESSES,
+  type AgentHarness,
+} from "./test-records-agent-config.ts";
 import {
   generateIdentity,
   type KeyDeliveryIdentity,
@@ -1296,6 +1302,23 @@ describe("test-records-key", () => {
       ).toBe("{}");
     });
 
+    it("keeps the key when the profile cannot be taken apart", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      // A profile that cannot be replaced: the removal fails, and the
+      // key it names must still be there afterwards.
+      await Deno.remove(join(home, ".zshenv"));
+      await Deno.mkdir(join(home, ".zshenv", "inside"), { recursive: true });
+
+      await expect(uninstallCommand(deps)).rejects.toThrow();
+
+      expect(
+        (await Deno.stat(join(home, "common-fabric", "test-records-key.json")))
+          .isFile,
+      ).toBe(true);
+    });
+
     it("says which file it could not remove", async () => {
       withStub({});
       // A directory where the key file goes is not something a delete
@@ -1331,7 +1354,7 @@ describe("test-records-key", () => {
       }
 
       const report = said.join("\n");
-      expect(report).toContain("What this tool put here is gone.");
+      expect(report).toContain("What this tool could take back is gone.");
       expect(report).not.toContain("Every new shell records nothing.");
     });
 
@@ -1360,6 +1383,81 @@ describe("test-records-key", () => {
 
       expect(await uninstallCommand(deps)).toBe(0);
       expect((await Deno.stat(join(spools, "run-1"))).isDirectory).toBe(true);
+    });
+  });
+
+  describe("agentConfigReport()", () => {
+    const update = (
+      outcome: "added" | "present" | "conflict" | "changed" | "unreadable",
+      existing?: string,
+    ) => ({
+      harness: "Claude Code",
+      path: "/h/.claude/settings.json",
+      outcome,
+      ...(existing !== undefined ? { existing } : {}),
+    });
+
+    it("says the harness carries the key file", () => {
+      expect(agentConfigReport(update("added"), "/k.json")).toContain(
+        "Claude Code passes CF_TEST_RECORDS_KEY_FILE",
+      );
+      expect(agentConfigReport(update("present"), "/k.json")).toContain(
+        "already passes the key file on",
+      );
+    });
+
+    it("quotes back a value it would not write over", () => {
+      const report = agentConfigReport(update("conflict", "/other"), "/k.json");
+      expect(report).toContain("/other");
+      expect(report).toContain("Left alone.");
+    });
+
+    it("says nothing was written when the file moved under it", () => {
+      expect(agentConfigReport(update("changed"), "/k.json")).toContain(
+        "changed while this was writing",
+      );
+    });
+
+    it("hands back the line to add when the file does not parse", () => {
+      expect(agentConfigReport(update("unreadable"), "/k.json")).toContain(
+        '"CF_TEST_RECORDS_KEY_FILE": "/k.json"',
+      );
+    });
+  });
+
+  describe("agentRemovalReport()", () => {
+    const removal = (
+      outcome: "removed" | "kept" | "changed" | "unreadable",
+      existing?: string,
+    ) => ({
+      harness: "Claude Code",
+      path: "/h/.claude/settings.json",
+      outcome,
+      ...(existing !== undefined ? { existing } : {}),
+    });
+
+    it("says the harness has stopped carrying the key file", () => {
+      expect(agentRemovalReport(removal("removed"))).toContain(
+        "no longer passes CF_TEST_RECORDS_KEY_FILE on",
+      );
+    });
+
+    it("says why a value stayed", () => {
+      const report = agentRemovalReport(removal("kept", "/other"));
+      expect(report).toContain("/other");
+      expect(report).toContain("not the key this tool installed");
+    });
+
+    it("says nothing was written when the file moved under it", () => {
+      expect(agentRemovalReport(removal("changed"))).toContain(
+        "changed while this was writing",
+      );
+    });
+
+    it("says what to do by hand when the file does not parse", () => {
+      expect(agentRemovalReport(removal("unreadable"))).toContain(
+        'out of its "env" by hand',
+      );
     });
   });
 

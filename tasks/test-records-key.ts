@@ -49,6 +49,7 @@ import {
 } from "./test-records-config.ts";
 import { readZip } from "./test-records-zip.ts";
 import {
+  type AgentConfigRemoval,
   type AgentConfigUpdate,
   exportFromAgentConfigs,
   unexportFromAgentConfigs,
@@ -578,6 +579,9 @@ async function exportKeyFile(
 No shell profile to update. Export the key file yourself:
 
     ${RECORDS_KEY_FILE_VARIABLE}=${path}`);
+    // A workstation with no profile to write can still be running an
+    // agent, whose harness carries the variable instead.
+    await exportAgentConfigs(deps, path);
     return updates;
   }
   const kind = shellKind(deps.env);
@@ -622,6 +626,61 @@ Every new shell records its test runs. For the one you are in:
   return updates;
 }
 
+/** What one harness configuration's update says to a person. */
+export function agentConfigReport(
+  update: AgentConfigUpdate,
+  path: string,
+): string {
+  switch (update.outcome) {
+    case "added":
+      return `${update.harness} passes ${RECORDS_KEY_FILE_VARIABLE} to what ` +
+        `it runs (${update.path})`;
+    case "present":
+      return `${update.harness} already passes the key file on.`;
+    case "conflict":
+      return `
+${update.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${update.harness} as
+
+    ${update.existing}
+
+Left alone. Point it at ${path} to record from this key.`;
+    case "changed":
+      return `
+${update.path} changed while this was writing, so ${update.harness} was
+left as it stands. Run the command again.`;
+    case "unreadable":
+      return `
+${update.path} does not parse as JSON, so ${update.harness} was left
+alone. Add this to its "env" once the file is readable again:
+
+    "${RECORDS_KEY_FILE_VARIABLE}": "${path}"`;
+  }
+}
+
+/** What one harness configuration's removal says to a person. */
+export function agentRemovalReport(removal: AgentConfigRemoval): string {
+  switch (removal.outcome) {
+    case "removed":
+      return `${removal.harness} no longer passes ` +
+        `${RECORDS_KEY_FILE_VARIABLE} on (${removal.path})`;
+    case "kept":
+      return `
+${removal.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${removal.harness} as
+
+    ${removal.existing}
+
+Left alone. It is not the key this tool installed.`;
+    case "changed":
+      return `
+${removal.path} changed while this was writing, so ${removal.harness} was
+left as it stands. Run the command again.`;
+    case "unreadable":
+      return `
+${removal.path} does not parse as JSON, so ${removal.harness} was left
+alone. Take ${RECORDS_KEY_FILE_VARIABLE} out of its "env" by hand.`;
+  }
+}
+
 /**
  * Carries the key file into the configuration of every agent harness
  * installed here. A shell profile covers an agent whose commands go
@@ -636,29 +695,7 @@ async function exportAgentConfigs(
     path,
     deps.env,
   );
-  for (const update of updates) {
-    if (update.outcome === "added") {
-      console.log(
-        `${update.harness} passes ${RECORDS_KEY_FILE_VARIABLE} to what it ` +
-          `runs (${update.path})`,
-      );
-    } else if (update.outcome === "present") {
-      console.log(`${update.harness} already passes the key file on.`);
-    } else if (update.outcome === "conflict") {
-      console.log(`
-${update.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${update.harness} as
-
-    ${update.existing}
-
-Left alone. Point it at ${path} to record from this key.`);
-    } else {
-      console.log(`
-${update.path} does not parse as JSON, so ${update.harness} was left
-alone. Add this to its "env" once the file is readable again:
-
-    "${RECORDS_KEY_FILE_VARIABLE}": "${path}"`);
-    }
-  }
+  for (const update of updates) console.log(agentConfigReport(update, path));
   return updates;
 }
 
@@ -979,16 +1016,13 @@ export async function uninstallCommand(
 ): Promise<number> {
   const key = keyFilePath(deps.env);
   const identity = identityPath(deps.env);
-  const removedKey = await removeFile(key);
-  if (removedKey) console.log(`Removed ${key}`);
-  const removedIdentity = await removeFile(identity);
-  if (removedIdentity) console.log(`Removed ${identity}`);
-  // The directory goes only when this tool leaves it empty; anything
-  // else in there belongs to something other than test records.
-  await Deno.remove(configDir(deps.env)).catch(() => {});
 
+  // What names the key comes apart before the key itself. A removal
+  // that fails part way then leaves a workstation that still records,
+  // rather than one pointing every shell at a file that is gone.
   const removals = await unexportFromProfiles(
     RECORDS_KEY_FILE_VARIABLE,
+    key,
     deps.env,
   );
   for (const removal of removals) {
@@ -1012,25 +1046,15 @@ Left alone. Recording continues from whatever key that names.`);
     key,
     deps.env,
   );
-  for (const config of configs) {
-    if (config.outcome === "removed") {
-      console.log(
-        `${config.harness} no longer passes ${RECORDS_KEY_FILE_VARIABLE} on ` +
-          `(${config.path})`,
-      );
-    } else if (config.outcome === "kept") {
-      console.log(`
-${config.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${config.harness} as
+  for (const config of configs) console.log(agentRemovalReport(config));
 
-    ${config.existing}
-
-Left alone. It is not the key this tool installed.`);
-    } else {
-      console.log(`
-${config.path} does not parse as JSON, so ${config.harness} was left
-alone. Take ${RECORDS_KEY_FILE_VARIABLE} out of its "env" by hand.`);
-    }
-  }
+  const removedKey = await removeFile(key);
+  if (removedKey) console.log(`Removed ${key}`);
+  const removedIdentity = await removeFile(identity);
+  if (removedIdentity) console.log(`Removed ${identity}`);
+  // The directory goes only when this tool leaves it empty; anything
+  // else in there belongs to something other than test records.
+  await Deno.remove(configDir(deps.env)).catch(() => {});
 
   const removed = removedKey || removedIdentity ||
     removals.some((removal) => removal.outcome === "removed") ||
@@ -1059,7 +1083,7 @@ A later key ships them; remove that directory to throw them away.`);
   console.log(`
 ${
     kept
-      ? "What this tool put here is gone."
+      ? "What this tool could take back is gone."
       : "Every new shell records nothing."
   } Two things this does not do.
 

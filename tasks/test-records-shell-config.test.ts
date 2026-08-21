@@ -13,6 +13,7 @@ import {
   profileCandidates,
   profilesToInspect,
   reloadHint,
+  replaceFile,
   shellKind,
   stripMarkedBlock,
   unexportFromProfiles,
@@ -26,9 +27,11 @@ function environment(values: Record<string, string>): Environment {
 
 describe("test-records-shell-config", () => {
   let home: string;
+  let KEY_PATH: string;
 
   beforeEach(async () => {
     home = await Deno.makeTempDir({ prefix: "test-records-profile-" });
+    KEY_PATH = join(home, "k.json");
   });
 
   afterEach(async () => {
@@ -104,9 +107,9 @@ describe("test-records-shell-config", () => {
   });
 
   describe("profilesToInspect()", () => {
-    it("returns the zsh profile read after the one written", () => {
+    it("returns every zsh profile read after the one written", () => {
       expect(profilesToInspect(environment({ SHELL: "/bin/zsh", HOME: "/h" })))
-        .toEqual(["/h/.zshrc"]);
+        .toEqual(["/h/.zprofile", "/h/.zshrc", "/h/.zlogin"]);
     });
 
     it("returns nothing for a shell with one profile", () => {
@@ -208,6 +211,14 @@ describe("test-records-shell-config", () => {
     it("reports an assignment that is never exported", () => {
       expect(parseSetting(`${VARIABLE}=/k.json\n`, VARIABLE)).toEqual({
         line: `${VARIABLE}=/k.json`,
+        exported: false,
+        value: "/k.json",
+      });
+    });
+
+    it("reads a fish set with no flags as not exported", () => {
+      expect(parseSetting(`set ${VARIABLE} "/k.json"\n`, VARIABLE)).toEqual({
+        line: `set ${VARIABLE} "/k.json"`,
         exported: false,
         value: "/k.json",
       });
@@ -466,9 +477,11 @@ describe("test-records-shell-config", () => {
   });
 
   describe("stripMarkedBlock()", () => {
+    const WRITTEN = `export ${VARIABLE}="/k.json"`;
+
     it("takes out the marker, its line, and the blank line before it", () => {
-      const text = `alias l=ls\n\n${MARKER}\nexport ${VARIABLE}="/k.json"\n`;
-      expect(stripMarkedBlock(text, VARIABLE)).toEqual({
+      const text = `alias l=ls\n\n${MARKER}\n${WRITTEN}\n`;
+      expect(stripMarkedBlock(text, WRITTEN)).toEqual({
         text: "alias l=ls\n",
         removed: true,
       });
@@ -476,15 +489,23 @@ describe("test-records-shell-config", () => {
 
     it("leaves a marker that introduces something else", () => {
       const text = `${MARKER}\necho hello\n`;
-      expect(stripMarkedBlock(text, VARIABLE)).toEqual({
+      expect(stripMarkedBlock(text, WRITTEN)).toEqual({
+        text,
+        removed: false,
+      });
+    });
+
+    it("leaves a marked line a person has since edited", () => {
+      const text = `${MARKER}\nexport ${VARIABLE}="/somewhere/else.json"\n`;
+      expect(stripMarkedBlock(text, WRITTEN)).toEqual({
         text,
         removed: false,
       });
     });
 
     it("leaves a line the tool did not write", () => {
-      const text = `export ${VARIABLE}="/k.json"\n`;
-      expect(stripMarkedBlock(text, VARIABLE)).toEqual({
+      const text = `${WRITTEN}\n`;
+      expect(stripMarkedBlock(text, WRITTEN)).toEqual({
         text,
         removed: false,
       });
@@ -498,15 +519,11 @@ describe("test-records-shell-config", () => {
 
     it("removes what it wrote and leaves the rest of the file", async () => {
       await Deno.writeTextFile(join(home, ".zshrc"), "alias l=ls\n");
-      await exportFromProfiles(
-        VARIABLE,
-        join(home, "k.json"),
-        zshEnv(),
-        "darwin",
-      );
+      await exportFromProfiles(VARIABLE, KEY_PATH, zshEnv(), "darwin");
 
       const removals = await unexportFromProfiles(
         VARIABLE,
+        KEY_PATH,
         zshEnv(),
         "darwin",
       );
@@ -528,6 +545,7 @@ describe("test-records-shell-config", () => {
 
       const removals = await unexportFromProfiles(
         VARIABLE,
+        KEY_PATH,
         zshEnv(),
         "darwin",
       );
@@ -544,18 +562,19 @@ describe("test-records-shell-config", () => {
 
     it("returns nothing when no profile mentions it", async () => {
       await Deno.writeTextFile(join(home, ".zshenv"), "alias l=ls\n");
-      expect(await unexportFromProfiles(VARIABLE, zshEnv(), "darwin"))
+      expect(await unexportFromProfiles(VARIABLE, KEY_PATH, zshEnv(), "darwin"))
         .toEqual([]);
     });
 
     it("removes from a profile it only reads as well", async () => {
       await Deno.writeTextFile(
         join(home, ".zshrc"),
-        `${MARKER}\nexport ${VARIABLE}="/k.json"\n`,
+        `${MARKER}\nexport ${VARIABLE}="$HOME/k.json"\n`,
       );
 
       const removals = await unexportFromProfiles(
         VARIABLE,
+        KEY_PATH,
         zshEnv(),
         "darwin",
       );
@@ -563,6 +582,27 @@ describe("test-records-shell-config", () => {
       expect(removals).toEqual([
         { path: join(home, ".zshrc"), outcome: "removed" },
       ]);
+    });
+  });
+
+  describe("replaceFile()", () => {
+    it("writes a file that is not there yet", async () => {
+      const path = join(home, "fresh.txt");
+
+      await replaceFile(path, "hello\n");
+
+      expect(await Deno.readTextFile(path)).toBe("hello\n");
+    });
+
+    it("keeps the permissions a file already had", async () => {
+      const path = join(home, "kept.txt");
+      await Deno.writeTextFile(path, "before\n");
+      await Deno.chmod(path, 0o600);
+
+      await replaceFile(path, "after\n");
+
+      expect(await Deno.readTextFile(path)).toBe("after\n");
+      expect((await Deno.stat(path)).mode! & 0o777).toBe(0o600);
     });
   });
 

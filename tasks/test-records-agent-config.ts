@@ -39,6 +39,17 @@ export const AGENT_HARNESSES: readonly AgentHarness[] = [
   },
 ];
 
+/**
+ * Replaces a configuration file, answering false where it declined to
+ * because the file is no longer the one that was read. Injectable so a
+ * test can have it decline.
+ */
+export type ConfigWriter = (
+  path: string,
+  config: Record<string, unknown>,
+  before: string | undefined,
+) => Promise<boolean>;
+
 /** What one harness configuration's update did. */
 export type AgentConfigOutcome =
   /** The variable was written into the configuration. */
@@ -48,7 +59,9 @@ export type AgentConfigOutcome =
   /** It carries the variable with another value; nothing was written. */
   | "conflict"
   /** The file does not parse, so nothing was written. */
-  | "unreadable";
+  | "unreadable"
+  /** The file changed while this was writing, so nothing was written. */
+  | "changed";
 
 export interface AgentConfigUpdate {
   harness: string;
@@ -62,9 +75,14 @@ export interface AgentConfigUpdate {
 export type AgentConfigRemoval = {
   harness: string;
   path: string;
-  outcome: "removed" | "kept" | "unreadable";
+  outcome: "removed" | "kept" | "unreadable" | "changed";
   existing?: string;
 };
+
+/** A configuration value as a person should see it quoted back. */
+function describe(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value) ?? "nothing";
+}
 
 function homeDirectory(env: Environment): string | undefined {
   return readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
@@ -91,46 +109,85 @@ export async function installedHarnesses(
   return installed;
 }
 
-/** The configuration a file holds, or undefined when it holds none. */
-async function readConfig(
-  path: string,
-): Promise<Record<string, unknown> | undefined | "unreadable"> {
+/** What a configuration file holds, and the text it was read from. */
+type ConfigRead =
+  | { kind: "missing" }
+  | { kind: "unreadable" }
+  | {
+    kind: "config";
+    config: Record<string, unknown>;
+    text: string;
+  };
+
+async function readConfig(path: string): Promise<ConfigRead> {
   let text: string;
   try {
     text = await Deno.readTextFile(path);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return undefined;
-    return "unreadable";
+    if (error instanceof Deno.errors.NotFound) return { kind: "missing" };
+    return { kind: "unreadable" };
   }
-  if (text.trim().length === 0) return {};
+  if (text.trim().length === 0) return { kind: "config", config: {}, text };
   try {
     const parsed = JSON.parse(text);
     return typeof parsed === "object" && parsed !== null &&
         !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : "unreadable";
+      ? { kind: "config", config: parsed as Record<string, unknown>, text }
+      : { kind: "unreadable" };
   } catch {
-    return "unreadable";
+    return { kind: "unreadable" };
   }
 }
 
 /**
  * Writes configuration through a temporary file in the same directory,
- * so what a harness reads is never a half-written file.
+ * so what a harness reads is never a half-written file. The file's own
+ * permissions carry over: a configuration somebody keeps readable only
+ * by themselves stays that way, rather than taking whatever a fresh
+ * file gets from the umask.
+ *
+ * The text the configuration was read from is checked again before the
+ * rename. A harness writing its own settings between the two is rare
+ * and losing what it wrote would be silent, so the write stands down
+ * and says so instead.
  */
-async function writeConfig(
+export async function writeConfig(
   path: string,
   config: Record<string, unknown>,
-): Promise<void> {
+  before: string | undefined,
+): Promise<boolean> {
   const temporary = `${path}.${crypto.randomUUID()}.tmp`;
   await Deno.mkdir(dirname(path), { recursive: true });
   try {
     await Deno.writeTextFile(temporary, JSON.stringify(config, null, 2) + "\n");
+    const mode = await fileMode(path);
+    if (mode !== undefined) await Deno.chmod(temporary, mode).catch(() => {});
+    if (await readText(path) !== before) return false;
     await Deno.rename(temporary, path);
+    return true;
   } finally {
     // The rename takes the temporary file's name away, so this removes
     // one only when the write or the rename did not get that far.
     await Deno.remove(temporary).catch(() => {});
+  }
+}
+
+/** The permission bits of a file that is already there. */
+async function fileMode(path: string): Promise<number | undefined> {
+  try {
+    const mode = (await Deno.stat(path)).mode;
+    return mode === null || mode === undefined ? undefined : mode & 0o7777;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A file's text, or undefined where there is no file. */
+async function readText(path: string): Promise<string | undefined> {
+  try {
+    return await Deno.readTextFile(path);
+  } catch {
+    return undefined;
   }
 }
 
@@ -154,6 +211,7 @@ export async function exportFromAgentConfigs(
   value: string,
   env: Environment = Deno.env.get,
   harnesses: readonly AgentHarness[] = AGENT_HARNESSES,
+  write: ConfigWriter = writeConfig,
 ): Promise<AgentConfigUpdate[]> {
   const updates: AgentConfigUpdate[] = [];
   for (
@@ -162,48 +220,68 @@ export async function exportFromAgentConfigs(
       harnesses,
     )
   ) {
-    const config = await readConfig(path);
-    if (config === "unreadable") {
+    const read = await readConfig(path);
+    if (read.kind === "unreadable") {
       updates.push({ harness: harness.name, path, outcome: "unreadable" });
       continue;
     }
-    const held = config ?? {};
+    const held = read.kind === "config" ? read.config : {};
+    const before = read.kind === "config" ? read.text : undefined;
     const block = envBlock(held);
     if (block === undefined) {
       updates.push({ harness: harness.name, path, outcome: "unreadable" });
       continue;
     }
     const existing = block[name];
-    if (typeof existing === "string" && existing !== value) {
-      updates.push({
-        harness: harness.name,
-        path,
-        outcome: "conflict",
-        existing,
-      });
-      continue;
-    }
     if (existing === value) {
       updates.push({ harness: harness.name, path, outcome: "present" });
       continue;
     }
-    await writeConfig(path, { ...held, env: { ...block, [name]: value } });
-    updates.push({ harness: harness.name, path, outcome: "added" });
+    if (existing !== undefined) {
+      // Whatever it is — another path, a null, a number — it is not what
+      // this tool wrote, and writing over it would take away something
+      // nothing here can put back.
+      updates.push({
+        harness: harness.name,
+        path,
+        outcome: "conflict",
+        existing: describe(existing),
+      });
+      continue;
+    }
+    const wrote = await write(
+      path,
+      { ...held, env: { ...block, [name]: value } },
+      before,
+    );
+    updates.push({
+      harness: harness.name,
+      path,
+      outcome: wrote ? "added" : "changed",
+    });
   }
   return updates;
 }
 
 /**
  * Takes one variable back out of every installed harness's
- * configuration, leaving a value this tool did not write in place. An
- * env block with nothing left in it goes too, so the file returns to
- * the shape it had.
+ * configuration, leaving a value naming anything else in place. An env
+ * block with nothing left in it goes too, so the file returns to the
+ * shape it had.
+ *
+ * What comes out is decided by the value, not by a record of who wrote
+ * it: an entry naming the key file is removed whether this tool put it
+ * there or a person did. That is the same answer either way, because
+ * the key file is being deleted in the same breath, and an entry naming
+ * a file that is gone would hand every command the harness runs a
+ * variable pointing at nothing.
  */
 export async function unexportFromAgentConfigs(
   name: string,
   value: string,
   env: Environment = Deno.env.get,
   harnesses: readonly AgentHarness[] = AGENT_HARNESSES,
+  write: ConfigWriter = writeConfig,
 ): Promise<AgentConfigRemoval[]> {
   const removals: AgentConfigRemoval[] = [];
   for (
@@ -212,12 +290,13 @@ export async function unexportFromAgentConfigs(
       harnesses,
     )
   ) {
-    const config = await readConfig(path);
-    if (config === undefined) continue;
-    if (config === "unreadable") {
+    const read = await readConfig(path);
+    if (read.kind === "missing") continue;
+    if (read.kind === "unreadable") {
       removals.push({ harness: harness.name, path, outcome: "unreadable" });
       continue;
     }
+    const config = read.config;
     const block = envBlock(config);
     if (block === undefined || !(name in block)) continue;
     const existing = block[name];
@@ -226,7 +305,7 @@ export async function unexportFromAgentConfigs(
         harness: harness.name,
         path,
         outcome: "kept",
-        ...(typeof existing === "string" ? { existing } : {}),
+        existing: describe(existing),
       });
       continue;
     }
@@ -237,8 +316,12 @@ export async function unexportFromAgentConfigs(
     } else {
       written.env = rest;
     }
-    await writeConfig(path, written);
-    removals.push({ harness: harness.name, path, outcome: "removed" });
+    const wrote = await write(path, written, read.text);
+    removals.push({
+      harness: harness.name,
+      path,
+      outcome: wrote ? "removed" : "changed",
+    });
   }
   return removals;
 }

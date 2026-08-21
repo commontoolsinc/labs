@@ -114,14 +114,17 @@ function zshDir(env: Environment, home: string): string {
 /**
  * Profiles that are not written but are read for a setting already
  * there, because a shell reads them after the one written and what they
- * say would win. A zsh reads .zshrc after .zshenv.
+ * say would win. A zsh reads .zshenv first and then, depending on how
+ * the shell was started, .zprofile, .zshrc, and .zlogin.
  */
 export function profilesToInspect(
   env: Environment = Deno.env.get,
 ): string[] {
   const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
   if (home === undefined || home.length === 0) return [];
-  return shellKind(env) === "zsh" ? [join(zshDir(env, home), ".zshrc")] : [];
+  if (shellKind(env) !== "zsh") return [];
+  const dir = zshDir(env, home);
+  return [".zprofile", ".zshrc", ".zlogin"].map((name) => join(dir, name));
 }
 
 /** A path split at the home directory, when it sits under one. */
@@ -412,13 +415,16 @@ export interface ProfileRemoval {
 }
 
 /**
- * Takes the marked block out of a profile's text. The blank line this
- * tool put in front of the marker goes with it, so removing what was
- * added leaves the file as it stood.
+ * Takes the marked block out of a profile's text. Only a block whose
+ * line is word for word the one this tool writes comes out: a marker
+ * over something a person has since edited names their line now,
+ * whatever the comment above it says. The blank line this tool put in
+ * front of the marker goes with it, so removing what was added leaves
+ * the file as it stood.
  */
 export function stripMarkedBlock(
   text: string,
-  name: string,
+  written: string,
 ): { text: string; removed: boolean } {
   const lines = text.split("\n");
   const kept: string[] = [];
@@ -427,8 +433,7 @@ export function stripMarkedBlock(
     const line = lines[index]!;
     const next = lines[index + 1];
     if (
-      line.trim() === MARKER && next !== undefined &&
-      parseSetting(next, name) !== undefined
+      line.trim() === MARKER && next !== undefined && next.trim() === written
     ) {
       if (kept.length > 0 && kept[kept.length - 1]!.trim() === "") kept.pop();
       index += 1;
@@ -441,6 +446,33 @@ export function stripMarkedBlock(
 }
 
 /**
+ * Replaces a profile's whole text through a temporary file in the same
+ * directory, keeping the file's own permissions. A shell startup file
+ * left half written is a shell that fails to start, so the replacement
+ * is never partial.
+ */
+export async function replaceFile(
+  path: string,
+  text: string,
+): Promise<void> {
+  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+  try {
+    await Deno.writeTextFile(temporary, text);
+    try {
+      const mode = (await Deno.stat(path)).mode;
+      if (mode !== null && mode !== undefined) {
+        await Deno.chmod(temporary, mode & 0o7777).catch(() => {});
+      }
+    } catch {
+      // No file to take permissions from; the new one keeps its own.
+    }
+    await Deno.rename(temporary, path);
+  } finally {
+    await Deno.remove(temporary).catch(() => {});
+  }
+}
+
+/**
  * Takes this tool's export back out of every profile it writes or
  * reads, returning what each file's removal did. A line setting the
  * variable that this tool did not write is reported and left alone: it
@@ -448,17 +480,20 @@ export function stripMarkedBlock(
  */
 export async function unexportFromProfiles(
   name: string,
+  value: string,
   env: Environment = Deno.env.get,
   os: string = Deno.build.os,
 ): Promise<ProfileRemoval[]> {
   const removals: ProfileRemoval[] = [];
+  const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
+  const written = exportLine(shellKind(env), name, value, home);
   const paths = [...profileCandidates(env, os), ...profilesToInspect(env)];
   for (const path of paths) {
     const text = await readIfPresent(path);
     if (text === undefined) continue;
-    const stripped = stripMarkedBlock(text, name);
+    const stripped = stripMarkedBlock(text, written);
     if (stripped.removed) {
-      await Deno.writeTextFile(path, stripped.text);
+      await replaceFile(path, stripped.text);
       removals.push({ path, outcome: "removed" });
       continue;
     }

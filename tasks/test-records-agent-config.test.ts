@@ -8,7 +8,11 @@ import {
   exportFromAgentConfigs,
   installedHarnesses,
   unexportFromAgentConfigs,
+  writeConfig,
 } from "./test-records-agent-config.ts";
+
+/** A writer that declines, as it does when the file moved under it. */
+const declines = () => Promise.resolve(false);
 
 const VARIABLE = "CF_TEST_RECORDS_KEY_FILE";
 const KEY = "/h/.config/common-fabric/test-records-key.json";
@@ -190,6 +194,71 @@ describe("test-records-agent-config", () => {
       expect(await Deno.readTextFile(config)).toBe("{ not json");
     });
 
+    it("reports a value of any other type as a conflict", async () => {
+      await install();
+      await Deno.writeTextFile(
+        config,
+        JSON.stringify({ env: { [VARIABLE]: null } }),
+      );
+
+      const updates = await exportFromAgentConfigs(
+        VARIABLE,
+        KEY,
+        env,
+        harnesses,
+      );
+
+      expect(updates).toEqual([{
+        harness: "Test Harness",
+        path: config,
+        outcome: "conflict",
+        existing: "null",
+      }]);
+      expect(JSON.parse(await Deno.readTextFile(config))).toEqual({
+        env: { [VARIABLE]: null },
+      });
+    });
+
+    it("keeps the permissions the configuration already had", async () => {
+      await install();
+      await Deno.writeTextFile(config, JSON.stringify({ theme: "auto" }));
+      await Deno.chmod(config, 0o600);
+
+      await exportFromAgentConfigs(VARIABLE, KEY, env, harnesses);
+
+      expect((await Deno.stat(config)).mode! & 0o777).toBe(0o600);
+    });
+
+    it("stands down when the configuration changed under it", async () => {
+      await install();
+      await Deno.writeTextFile(config, JSON.stringify({ theme: "dark" }));
+
+      // The text the configuration was read from no longer describes the
+      // file, which is what a harness writing its own settings looks
+      // like from here.
+      const wrote = await writeConfig(config, { theme: "auto" }, "{}");
+
+      expect(wrote).toBe(false);
+      expect(JSON.parse(await Deno.readTextFile(config))).toEqual({
+        theme: "dark",
+      });
+    });
+
+    it("reports a write that stood down as changed", async () => {
+      await install();
+      await Deno.writeTextFile(config, JSON.stringify({ theme: "auto" }));
+
+      const updates = await exportFromAgentConfigs(
+        VARIABLE,
+        KEY,
+        env,
+        harnesses,
+        declines,
+      );
+
+      expect(updates[0]?.outcome).toBe("changed");
+    });
+
     it("refuses a configuration that cannot be read at all", async () => {
       await install();
       await Deno.mkdir(config);
@@ -283,6 +352,24 @@ describe("test-records-agent-config", () => {
       expect(JSON.parse(await Deno.readTextFile(config))).toEqual({
         env: { [VARIABLE]: "/elsewhere.json" },
       });
+    });
+
+    it("reports a removal that stood down as changed", async () => {
+      await install();
+      await Deno.writeTextFile(
+        config,
+        JSON.stringify({ env: { [VARIABLE]: KEY } }),
+      );
+
+      const removals = await unexportFromAgentConfigs(
+        VARIABLE,
+        KEY,
+        env,
+        harnesses,
+        declines,
+      );
+
+      expect(removals[0]?.outcome).toBe("changed");
     });
 
     it("returns nothing for a configuration that never carried it", async () => {
