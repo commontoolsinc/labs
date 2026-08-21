@@ -90,6 +90,12 @@ installFakeClock({
     // waits on push/watermark edges with bounded timeouts, and its
     // "would-be loop" window is a real-time observation.
     "speculation-arrival-gate",
+    // The OW50 wish commit-failure surfacing suite (seat S-J): its
+    // two-writer journey drives a live shared memory server with two
+    // runtimes (the served-wish topology) and waits on a bounded
+    // settle window for the failure-surfacing bookkeeping transaction —
+    // the same live-transport class as the executor suites above.
+    "cfc-prepare-crash-surfacing",
     // The stage-C intent-listener suite (design (e)): its e2e pins drive
     // a live memory server and, for the served-mark pin, a live
     // ExecutorHost under the same wall-clock policies (renew cadence,
