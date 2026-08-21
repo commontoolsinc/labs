@@ -1,21 +1,26 @@
 # Reading review comments on a pull request
 
-An automated reviewer posts its findings as inline review comments: each one is
-attached to a file and a line of the diff. This document names the commands
-that list those findings, and at the end the command that looks as though it
-would and does not.
+An automated reviewer posts its findings as inline review comments. Each one is
+attached to a file, and a line comment is also attached to a line of the diff.
+This document names the commands that list those findings, and at the end the
+command that looks as though it would and does not.
 
 ## Listing the findings
 
 This returns every inline review comment on a pull request, with the file and
-line each is attached to:
+any line it is attached to:
 
 ```bash
 gh api --paginate repos/commontoolsinc/labs/pulls/<n>/comments
 ```
 
-A finding whose line has since changed comes back with `line` set to null. The
-`path` still identifies the file.
+Line comments have `subject_type` set to `line`. When the line has since
+changed, `line` comes back as null. File-level comments have `subject_type` set
+to `file` and no line. In both cases, `path` identifies the file.
+
+A comment with no `in_reply_to_id` starts a thread and carries that thread's
+finding. A comment with `in_reply_to_id` is a reply in an existing thread. The
+endpoint returns both kinds.
 
 ## Checking whether a thread is still open
 
@@ -36,9 +41,10 @@ query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
 }' -f owner=commontoolsinc -f repo=labs -F number=<n>
 ```
 
-An unresolved thread is one still waiting on you. An outdated thread may still
-be waiting on you: the code moved, which is not the same as the finding being
-answered.
+An unresolved thread still needs inspection. It may be waiting on you, or on
+the reviewer after a reply; `isResolved` alone does not assign the next action.
+An outdated thread also needs inspection: the code moved, which is not the same
+as the finding being answered.
 
 ## Waiting for the review
 
