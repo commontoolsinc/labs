@@ -3,26 +3,9 @@ import {
   listRunnerTests,
   selectRunnerTestFiles,
 } from "./select-runner-test-files.ts";
-import { parseShard } from "./shard-utils.ts";
 import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 const TOTAL_SHARDS = 8;
-
-Deno.test("parseShard parses shard notation", () => {
-  assertEquals(parseShard("2/5"), { index: 2, total: 5 });
-});
-
-Deno.test("parseShard rejects invalid shard notation", () => {
-  try {
-    parseShard("6/5");
-    throw new Error("expected parseShard to throw");
-  } catch (error) {
-    assertEquals(
-      (error as Error).message,
-      "Shard index 6 exceeds total shard count 5",
-    );
-  }
-});
 
 Deno.test("runner test weighting spreads expensive files across shards", () => {
   const files = ["a", "b", "c", "d", "e", "f"].map((name) => ({

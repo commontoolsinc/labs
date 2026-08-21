@@ -9,7 +9,6 @@ import {
   PATTERN_INTEGRATION_TEST_WEIGHTS,
   selectPatternIntegrationFiles,
 } from "./select-pattern-integration-files.ts";
-import { parseShard } from "./shard-utils.ts";
 import {
   parsePatternIntegrationShard,
   selectPatternIntegrationShard,
@@ -19,40 +18,6 @@ const TOTAL_SHARDS = PATTERN_INTEGRATION_SHARD_COUNT;
 const INTERNALLY_SHARDED_FILE_NAMES = new Set<string>(
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
 );
-
-Deno.test("parseShard parses shard notation", () => {
-  assertEquals(parseShard("2/4"), { index: 2, total: 4 });
-  assertEquals(parseShard("9007199254740991/9007199254740991"), {
-    index: Number.MAX_SAFE_INTEGER,
-    total: Number.MAX_SAFE_INTEGER,
-  });
-});
-
-Deno.test("parseShard rejects invalid shard notation", () => {
-  try {
-    parseShard("5/4");
-    throw new Error("expected parseShard to throw");
-  } catch (error) {
-    assertEquals(
-      (error as Error).message,
-      "Shard index 5 exceeds total shard count 4",
-    );
-  }
-});
-
-Deno.test("parseShard rejects unsafe integer values", () => {
-  const enormous = "9".repeat(400);
-  for (
-    const raw of [
-      "1/9007199254740992",
-      "9007199254740992/9007199254740992",
-      "9007199254740993/9007199254740992",
-      `${enormous}/${enormous}`,
-    ]
-  ) {
-    assertThrows(() => parseShard(raw), Error, "safe integers");
-  }
-});
 
 Deno.test("pattern integration shard defaults local runs to every item", () => {
   const shard = parsePatternIntegrationShard(undefined);

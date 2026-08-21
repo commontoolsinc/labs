@@ -15,7 +15,7 @@ A test's identity is the triple of **kind** (`unit`, `browser`, `pattern`,
 `integration`, `typecheck`, `lint`, `format`, `gate`), **scope** (the owning
 workspace member, or `repo`), and **name** (whatever the test's own runner
 reports — a bdd describe chain, a pattern file path, a task name, a script
-section). One record is one JSON line; one uploaded object is a run's
+step). One record is one JSON line; one uploaded object is a run's
 context line followed by its record lines. The schema, the line codecs, and
 their validators live in `packages/test-support/src/records/`.
 
@@ -263,6 +263,22 @@ Anything else wraps its command:
 ```
 deno task run-recorded <kind> <scope> <name> -- <command...>
 ```
+
+A harness that is also a library — one this repository's own tests drive
+over fixture files — takes the decision to record from its caller, not
+from the environment alone. Its entry point asks for records; a test
+driving the same function does not, since the files it hands over are that
+test's fixtures. `recordsSpooledBy` from
+`@commonfabric/test-support/records` pins both halves of that: it points
+recording at a fresh spool, runs the function, and hands back every record
+the function left there.
+
+A harness a test drives as a child process takes it the other way round,
+since the child reads its own environment: the test hands the child an
+empty `CF_TEST_RECORDS_DIR`, which is recording off. `tasks/integration.ts`
+does that for the `cf` children whose files it times itself, and
+`packages/deno-web-test/test/utils.ts` for the fixture projects it runs the
+browser harness over.
 
 Every test must finish within sixty seconds in CI, not counting setup; a
 check that cannot is a container to split, and the report's over-60s list

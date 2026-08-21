@@ -170,6 +170,9 @@ export const test = new Command()
         : undefined,
       patternCoverageDir,
       continuousUI: Deno.env.get("CF_TEST_CONTINUOUS_UI") === "1",
+      // The files this command was pointed at are a run of tests, so they
+      // are the run's records. Recording still needs CF_TEST_RECORDS_DIR.
+      recordResults: true,
     });
 
     // Exit with error code if any tests failed

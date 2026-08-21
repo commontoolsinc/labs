@@ -2,6 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 
+import { recordsSpooledBy } from "@commonfabric/test-support/records";
+
 import {
   checkGroup,
   collectPathsByScope,
@@ -134,6 +136,31 @@ describe("typecheck", () => {
 
     it("fails an empty path collection outright", async () => {
       expect(await runTypecheck(new Map())).toBe(false);
+    });
+
+    it("spools no records for a caller that did not ask for them", async () => {
+      const spooled = await recordsSpooledBy(() =>
+        runTypecheck(new Map([["alpha", ["a.ts"]]]), { check: stub({}, []) })
+      );
+      expect(spooled).toEqual([]);
+    });
+
+    it("spools one record per scope for a caller that asked", async () => {
+      const spooled = await recordsSpooledBy(() =>
+        runTypecheck(
+          new Map([["alpha", ["a.ts"]], ["beta", ["b.ts"]]]),
+          { check: stub({ beta: false }, []), recordResults: true },
+        )
+      );
+      expect(
+        spooled.map((record) => [record.test.s, record.outcome]).sort(),
+      ).toEqual([["alpha", "pass"], ["beta", "fail"]]);
+      expect(spooled.every((record) => record.test.k === "typecheck")).toBe(
+        true,
+      );
+      expect(spooled.every((record) => record.test.n === "deno-check")).toBe(
+        true,
+      );
     });
   });
 });
