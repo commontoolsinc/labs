@@ -130,6 +130,7 @@ export class HarnessRun {
   readonly projectDir: string;
   readonly success: boolean;
   readonly code: number;
+  readonly signal: Deno.Signal | null;
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
   readonly stdoutText: string;
@@ -139,6 +140,7 @@ export class HarnessRun {
     this.projectDir = projectDir;
     this.success = output.success;
     this.code = output.code;
+    this.signal = output.signal;
     this.stdout = output.stdout;
     this.stderr = output.stderr;
     this.stdoutText = decode(output.stdout);
@@ -156,8 +158,13 @@ export class HarnessRun {
   }
 
   transcript(): string {
+    // A run the kernel killed reports the signal alongside the code, which is
+    // 128 plus the signal number and reads as an ordinary exit on its own.
+    const ending = this.signal === null
+      ? `exited with code ${this.code}`
+      : `was killed by ${this.signal}, exiting with code ${this.code}`;
     return [
-      `deno-web-test in ${this.projectDir} exited with code ${this.code}.`,
+      `deno-web-test in ${this.projectDir} ${ending}.`,
       "--- stdout ---",
       this.stdoutText,
       "--- stderr ---",

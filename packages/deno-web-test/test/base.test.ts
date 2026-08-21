@@ -1,5 +1,28 @@
-import { assertEquals } from "@std/assert";
-import { runDenoWebTest, sanitizeDenoWebTestOutput } from "./utils.ts";
+import {
+  assertEquals,
+  AssertionError,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import {
+  HarnessRun,
+  runDenoWebTest,
+  sanitizeDenoWebTestOutput,
+} from "./utils.ts";
+
+// A run built from a stated `Deno.CommandOutput` rather than from a subprocess,
+// so a transcript can be read for an ending no real run in this suite reaches.
+function harnessRun(output: Partial<Deno.CommandOutput>): HarnessRun {
+  const encoder = new TextEncoder();
+  return new HarnessRun("some-project", {
+    code: 1,
+    success: false,
+    signal: null,
+    stdout: encoder.encode("error: Could not load add.test.ts\n"),
+    stderr: encoder.encode("Task test deno run cli.ts *.test.ts\n"),
+    ...output,
+  });
+}
 
 Deno.test("smoke test", async function () {
   const run = await runDenoWebTest("success-project");
@@ -21,6 +44,38 @@ Deno.test("smoke test", async function () {
     run.stderrText.split("\n")[1] === "",
     "stderr has no other messages",
   );
+});
+
+// A harness run can fail for a reason no assertion in this suite anticipates:
+// the browser refuses to boot, a bundle fails, the process is killed. Each of
+// those says what happened on one of the run's two streams, and an assertion
+// that reported only its own words left the reason nowhere.
+Deno.test("a failed assertion carries the whole run", function () {
+  const run = harnessRun({});
+  const error = assertThrows(
+    () => run.assert(run.success, "test successful"),
+    AssertionError,
+  );
+
+  assertStringIncludes(error.message, "test successful");
+  assertStringIncludes(error.message, "some-project");
+  assertStringIncludes(error.message, "code 1");
+  assertStringIncludes(error.message, "Could not load add.test.ts");
+  assertStringIncludes(error.message, "Task test deno run cli.ts *.test.ts");
+});
+
+Deno.test("an assertion that holds says nothing", function () {
+  harnessRun({}).assert(true, "test successful");
+});
+
+// The exit code of a killed process is 128 plus the signal number, which reads
+// as an ordinary exit to anyone not counting. The signal is what says the run
+// was killed rather than that it decided to stop.
+Deno.test("a run the kernel killed names the signal", function () {
+  const transcript = harnessRun({ code: 137, signal: "SIGKILL" }).transcript();
+
+  assertStringIncludes(transcript, "SIGKILL");
+  assertStringIncludes(transcript, "137");
 });
 
 Deno.test("dependency downloads before the harness boundary are removed", function () {
