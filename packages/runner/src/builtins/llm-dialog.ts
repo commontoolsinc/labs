@@ -1257,46 +1257,46 @@ function flattenTools(
     return flattened;
   }
 
-  flattened[READ_TOOL_NAME] = {
+  defineBuiltinTool(flattened, READ_TOOL_NAME, {
     description:
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
-  };
-  flattened[INVOKE_TOOL_NAME] = {
+  });
+  defineBuiltinTool(flattened, INVOKE_TOOL_NAME, {
     description:
       'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  flattened[PIN_TOOL_NAME] = {
+  });
+  defineBuiltinTool(flattened, PIN_TOOL_NAME, {
     description:
       'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
     inputSchema: PIN_INPUT_SCHEMA,
-  };
-  flattened[UNPIN_TOOL_NAME] = {
+  });
+  defineBuiltinTool(flattened, UNPIN_TOOL_NAME, {
     description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: UNPIN_INPUT_SCHEMA,
-  };
-  flattened[UPDATE_ARGUMENT_TOOL_NAME] = {
+  });
+  defineBuiltinTool(flattened, UPDATE_ARGUMENT_TOOL_NAME, {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
       'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
     inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  };
-  flattened[SCHEMA_TOOL_NAME] = {
+  });
+  defineBuiltinTool(flattened, SCHEMA_TOOL_NAME, {
     description:
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
       "Returns schema showing what data can be read and what handlers can be invoked. ",
     inputSchema: SCHEMA_INPUT_SCHEMA,
-  };
+  });
 
   return flattened;
 }
@@ -1359,6 +1359,38 @@ function _toolsHaveChanged(
   return false;
 }
 
+/**
+ * Advertises a built-in tool, unless a pattern-supplied tool already holds the
+ * name.
+ *
+ * `resolveToolCall` consults the pattern's tools before the built-in names, so
+ * on a collision the pattern's tool is what runs and the built-in is
+ * unreachable. Every description of the tools has to say the same thing. The
+ * advertised schema is what the model writes its input against, and it is also
+ * where the CFC gates read policy from — `toolAllowsObservedConfidentiality`
+ * takes `ifc.maxConfidentiality` from it and `integrityGateTarget` takes the
+ * `requiredIntegrity` floors — so letting a built-in overwrite the entry
+ * describes one tool while another executes, enforcing the built-in's absent
+ * policy against the pattern's tool.
+ *
+ * Callers pass a record holding only the pattern-supplied tools, so a name
+ * already present is a shadowed built-in.
+ */
+function defineBuiltinTool<T>(
+  tools: Record<string, T>,
+  name: string,
+  definition: T,
+): void {
+  if (Object.hasOwn(tools, name)) {
+    logger.warn(
+      "llm",
+      `Tool "${name}" shadows the built-in of the same name; the pattern's tool is what runs. Rename it to reach the built-in.`,
+    );
+    return;
+  }
+  tools[name] = definition;
+}
+
 function buildToolCatalog(
   toolsCell:
     | Cell<Record<string, Schema<typeof LLMToolSchema>>>
@@ -1414,46 +1446,46 @@ function buildToolCatalog(
     return { llmTools, dynamicToolCells };
   }
 
-  llmTools[READ_TOOL_NAME] = {
+  defineBuiltinTool(llmTools, READ_TOOL_NAME, {
     description:
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
-  };
-  llmTools[INVOKE_TOOL_NAME] = {
+  });
+  defineBuiltinTool(llmTools, INVOKE_TOOL_NAME, {
     description:
       'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  llmTools[PIN_TOOL_NAME] = {
+  });
+  defineBuiltinTool(llmTools, PIN_TOOL_NAME, {
     description:
       'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
     inputSchema: PIN_INPUT_SCHEMA,
-  };
-  llmTools[UNPIN_TOOL_NAME] = {
+  });
+  defineBuiltinTool(llmTools, UNPIN_TOOL_NAME, {
     description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: UNPIN_INPUT_SCHEMA,
-  };
-  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
+  });
+  defineBuiltinTool(llmTools, UPDATE_ARGUMENT_TOOL_NAME, {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
       'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
     inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  };
-  llmTools[SCHEMA_TOOL_NAME] = {
+  });
+  defineBuiltinTool(llmTools, SCHEMA_TOOL_NAME, {
     description:
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
       "Returns schema showing what data can be read and what handlers can be invoked. ",
     inputSchema: SCHEMA_INPUT_SCHEMA,
-  };
+  });
 
   return { llmTools, dynamicToolCells };
 }
@@ -1489,13 +1521,13 @@ function materializeDialogRequestSnapshot(
     | JSONSchema
     | undefined;
   if (userResultSchema) {
-    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
+    defineBuiltinTool(toolCatalog.llmTools, PRESENT_RESULT_TOOL_NAME, {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       inputSchema: prepareSchemaForLLM(
         toDeepFrozenSchema(userResultSchema),
       ),
-    };
+    });
   }
 
   // A DECLARED bound — even the empty one — engages observation-aware
@@ -2438,6 +2470,7 @@ export const llmDialogTestHelpers = {
 export const llmToolExecutionHelpers = {
   PRESENT_RESULT_TOOL_NAME,
   buildToolCatalog,
+  flattenTools,
   executeToolCalls,
   extractToolCallParts,
   buildAssistantMessage,
@@ -3788,13 +3821,13 @@ async function startRequest(
   const userResultSchema = capturedRequest?.userResultSchema ??
     (inputs.key("resultSchema").get() as JSONSchema | undefined);
   if (userResultSchema && capturedRequest === undefined) {
-    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
+    defineBuiltinTool(toolCatalog.llmTools, PRESENT_RESULT_TOOL_NAME, {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       inputSchema: prepareSchemaForLLM(
         toDeepFrozenSchema(userResultSchema),
       ),
-    };
+    });
   }
 
   // Build available cells documentation (both context and pinned cells).
