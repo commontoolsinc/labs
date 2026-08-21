@@ -23,10 +23,43 @@ import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
 } from "./multi-runtime-harness.ts";
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
+
+// The server-execution v2 posture this test process runs (testing.md §2):
+// declared from the environment — the CI ON lane sets
+// EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF (the first-party default
+// while Phase 7 is landed dark).
+const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
+  .serverExecution;
+
+/**
+ * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
+ * a step listed there for this file is skipped ONLY when this process runs
+ * the ON posture, loudly (the entry's reason is printed), and only while
+ * the entry exists — the OFF arm and an unlisted step always run. Never a
+ * silent filter: the CI step prints every entry, and the validator
+ * requires this file to name each listed step and call this guard.
+ */
+function onArmStepSkip(step: string): { ignore: boolean } {
+  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  const entry = serverExecutionOnStepSkip(
+    "patterns",
+    "integration/cellset-lww.test.ts",
+    step,
+  );
+  if (entry === undefined) return { ignore: false };
+  console.warn(
+    `[server-execution ON arm] patterns: SKIPPING STEP ${
+      JSON.stringify(step)
+    } (until ${entry.phase}) — ${entry.reason}`,
+  );
+  return { ignore: true };
+}
 
 const PROGRAM_PATH = join(
   import.meta.dirname!,
@@ -139,32 +172,38 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
     );
   });
 
-  it("end-to-end: a typed name survives the own-write race through save", async () => {
-    // The original cfc-group-chat-demo "Name not set" flake, end to end: a user
-    // types a profile name (a scalar `$value` write to the PerUser draft), then
-    // saves. The save handler (commitTrustedProfileSave) reads draftText(nameDraft).
-    // Pre-fix, the draft `$value` write loses the own-write race, is rejected and
-    // rolled back to its prior (empty) value, so the save reads the wrong/empty
-    // draft and the profile name is not the one the user typed. With the fix the
-    // scalar write is precondition-free, lands, and the save reads it.
-    for (let i = 0; i < 5; i++) {
-      await harness.settle();
-      // Another concurrent write bumps the shared PerUser draft's seq…
-      await aliceTab2.set([...DRAFT], `tab2-${i}`, { idle: false });
-      // …so alice's later typed name commits against a stale baseline.
-      const typed = `alice-typed-${i}`;
-      await alice.set([...DRAFT], typed, { idle: false });
-      // Save the profile via the trusted action (reads draftText(nameDraft)).
-      await alice.send("saveProfile", {}, {
-        surface: PROFILE_SURFACE,
-        action: SAVE_PROFILE_ACTION,
-      });
-      await harness.settle();
-      assertEquals(
-        await alice.read(["currentProfileName"]),
-        typed,
-        `the name alice typed must be the saved profile name (iter ${i})`,
-      );
-    }
-  });
+  it(
+    "end-to-end: a typed name survives the own-write race through save",
+    onArmStepSkip(
+      "end-to-end: a typed name survives the own-write race through save",
+    ),
+    async () => {
+      // The original cfc-group-chat-demo "Name not set" flake, end to end: a user
+      // types a profile name (a scalar `$value` write to the PerUser draft), then
+      // saves. The save handler (commitTrustedProfileSave) reads draftText(nameDraft).
+      // Pre-fix, the draft `$value` write loses the own-write race, is rejected and
+      // rolled back to its prior (empty) value, so the save reads the wrong/empty
+      // draft and the profile name is not the one the user typed. With the fix the
+      // scalar write is precondition-free, lands, and the save reads it.
+      for (let i = 0; i < 5; i++) {
+        await harness.settle();
+        // Another concurrent write bumps the shared PerUser draft's seq…
+        await aliceTab2.set([...DRAFT], `tab2-${i}`, { idle: false });
+        // …so alice's later typed name commits against a stale baseline.
+        const typed = `alice-typed-${i}`;
+        await alice.set([...DRAFT], typed, { idle: false });
+        // Save the profile via the trusted action (reads draftText(nameDraft)).
+        await alice.send("saveProfile", {}, {
+          surface: PROFILE_SURFACE,
+          action: SAVE_PROFILE_ACTION,
+        });
+        await harness.settle();
+        assertEquals(
+          await alice.read(["currentProfileName"]),
+          typed,
+          `the name alice typed must be the saved profile name (iter ${i})`,
+        );
+      }
+    },
+  );
 });

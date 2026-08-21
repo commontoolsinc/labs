@@ -38,22 +38,28 @@ caller keeps them, walks them under a schema, and records what it reached.
   method, `load(address)`, returning a document or `null`. `memory`'s
   `EngineObjectManager` implements it over the SQLite engine, reading at a
   branch, a sequence number, and a principal.
-- `GraphQueryWalk` is the walk. Construct one over a manager, a space, and a
-  schema tracker; call `visit(document, selector)` for each root. It builds the
-  read-only transaction the traverser reads through, carries the pointer-cycle
-  tracker that stops a link loop, and follows the metadata documents a reader
-  needs in order to interpret what it found.
-- `schemaTrackerKey(space, id, scope)` is the key a walk records under. Both
-  packages need to build one — `memory` to look up what a write invalidated,
-  `runner` to record what a traversal reached — so there is one function and
-  both call it. One reader does not: `isLinkedDocumentCovered` in `traverse.ts`
-  builds its lookup key from a link's own scope with no `space` default, so
-  when that scope is absent it looks up a key nothing ever wrote and reports
-  the document as uncovered. The traversal then re-walks a document it had
-  already proven covered, which costs work and records no wrong answer.
-  Routing that site through `schemaTrackerKey` makes the two agree and makes
-  the traversal skip those re-walks, so it changes what a traversal does and
-  belongs in a change of its own.
+- `GraphQueryWalk` is the walk. Construct one over a manager, a space, a
+  schema tracker, and the acting identity the walk's tracker keys resolve
+  scoped addresses against; call `visit(document, selector)` for each root.
+  A root that names an explicit scope instance passes its key as `visit`'s
+  third argument, and records under THAT instance rather than one resolved
+  from the acting identity. The walk builds the read-only transaction the
+  traverser reads through, carries the pointer-cycle tracker that stops a
+  link loop, and follows the metadata documents a reader needs in order to
+  interpret what it found.
+- `schemaTrackerKey(space, id, scope, identity)` is the key a walk records
+  under: one entry per scope INSTANCE, the middle segment the shared
+  `scope_key` vocabulary resolved from the scope and the acting identity
+  (key-vocabulary.md §1 sites 5-6). Both packages need to build one —
+  `memory` to look up what a write invalidated, `runner` to record what a
+  traversal reached — so there is one function and both call it, including
+  the coverage check in `isLinkedDocumentCovered` for links that declare a
+  scope. An unscoped link refuses coverage explicitly instead of looking up
+  a key no writer produces — deliberately preserving the pre-existing
+  never-covered outcome for those links, because letting the coverage memo
+  fire for them changes which documents a traversal re-walks and what
+  consumers of traversed values observe; see the OFF-ARM NEUTRALITY note at
+  that site for what gates enabling it.
 - The rest is vocabulary the two sides name in common:
   `MapSetStringToPathSelectors` (the tracker), `schemaTrackerCoversSelector`
   (whether a tracker already covers a selector), `createSchemaMemo` and

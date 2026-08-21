@@ -238,9 +238,11 @@ This would eliminate the special-casing for streams.
 
 ## Remaining Open Questions
 
-- Persisted scheduler state records the last reads and fixed write surface when
-  its experimental option is enabled; see
-  [Persistent Scheduler State](../persistent-scheduler-state.md).
+- Scheduler state is not persisted (the experimental persisted form was
+  deleted by server-execution v2 Phase 1 stage C; the archived account is
+  [Persistent Scheduler State](../../history/specs/persistent-scheduler-state.md)).
+  The durable successor is the serving loop's basis index
+  ([serving-loop.md §3b](../server-side-execution/serving-loop.md)).
 - How should deliberate debouncing and threshold-based execution be specified?
 
 ---

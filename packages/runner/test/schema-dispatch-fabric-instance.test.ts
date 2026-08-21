@@ -71,7 +71,7 @@ const traverserOver = (
   const traverser = new SchemaObjectTraverser(
     storeTx,
     selector,
-    createDefaultTraversalContext(includeMeta),
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY, includeMeta),
   );
   const doc: IMemorySpaceValueAttestation = {
     address: {
@@ -83,6 +83,13 @@ const traverserOver = (
     value,
   };
   return { traverser, doc };
+};
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
 };
 
 describe("value-type dispatch: FabricSpecialObject subclasses", () => {

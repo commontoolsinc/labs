@@ -23,6 +23,42 @@ const COMPILED_PATH = new URL("../COMPILED", import.meta.url);
 export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
 
 /**
+ * The raw `EXPERIMENTAL_SERVER_EXECUTION` value present in the build
+ * environment when this binary was built — the value the browser shell
+ * BAKED as its esbuild define (packages/shell/felt.config.ts; the shell
+ * has no serve-time override) — or null when it was unset (the shell then
+ * follows `SERVER_EXECUTION_DEFAULT_ENABLED`) and in a source run. Same
+ * failure posture as `readBuildInfoFrom`: an unreadable or malformed
+ * marker reads as null. Surfaced on `/api/meta` as
+ * `shellServerExecutionDefine` so CI's server-execution lanes can verify
+ * the posture the binary they run actually carries
+ * (docs/specs/server-side-execution/testing.md §2).
+ */
+export function readShellServerExecutionDefineFrom(
+  path: URL | string,
+): string | null {
+  let raw: string;
+  try {
+    raw = Deno.readTextFileSync(path);
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const value = (parsed as { shellServerExecutionDefine?: unknown })
+    .shellServerExecutionDefine;
+  return typeof value === "string" ? normalize(value) : null;
+}
+
+export const shellServerExecutionDefine: string | null =
+  readShellServerExecutionDefineFrom(COMPILED_PATH);
+
+/**
  * Pure precedence function used by `resolveGitSha()`. Exposed so it can be
  * tested without manipulating env or filesystem state.
  */

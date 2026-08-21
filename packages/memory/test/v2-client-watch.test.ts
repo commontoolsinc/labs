@@ -57,6 +57,108 @@ Deno.test("memory v2 watch view keeps same id snapshots in different scopes", ()
   );
 });
 
+Deno.test("memory v2 watch view keys KEYED entries by instance: two instances of one (branch, id, scope) stay apart, a keyed remove drops exactly the named one, and an unkeyed frame keys by scope name as before (fan-out stage A's wire leg; mutation: key ignores scopeKey → red)", () => {
+  const aliceKey = "user:did%3Akey%3Aalice";
+  const bobKey = "user:did%3Akey%3Abob";
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 2,
+    upserts: [
+      {
+        branch: "",
+        id: "of:keyed-watch-view",
+        scope: "user",
+        scopeKey: aliceKey as never,
+        seq: 1,
+        doc: { value: { who: "alice" } },
+      },
+      {
+        branch: "",
+        id: "of:keyed-watch-view",
+        scope: "user",
+        scopeKey: bobKey as never,
+        seq: 2,
+        doc: { value: { who: "bob" } },
+      },
+    ],
+    removes: [],
+  });
+  const snapshotOf = () =>
+    view.entities.map(({ id, scope, scopeKey, document }) => ({
+      id,
+      scope,
+      scopeKey,
+      document,
+    }));
+  assertEquals(snapshotOf(), [
+    {
+      id: "of:keyed-watch-view",
+      scope: "user",
+      scopeKey: aliceKey,
+      document: { value: { who: "alice" } },
+    },
+    {
+      id: "of:keyed-watch-view",
+      scope: "user",
+      scopeKey: bobKey,
+      document: { value: { who: "bob" } },
+    },
+  ]);
+  // A keyed remove of Alice's instance leaves Bob's.
+  view.applySync({
+    type: "sync",
+    fromSeq: 2,
+    toSeq: 3,
+    upserts: [],
+    removes: [{
+      branch: "",
+      id: "of:keyed-watch-view",
+      scope: "user",
+      scopeKey: aliceKey as never,
+    }],
+  }, false);
+  assertEquals(snapshotOf(), [
+    {
+      id: "of:keyed-watch-view",
+      scope: "user",
+      scopeKey: bobKey,
+      document: { value: { who: "bob" } },
+    },
+  ]);
+  // An unkeyed upsert of the same (branch, id, scope) is a DIFFERENT
+  // entry (keyed by the scope name), and an unkeyed remove drops only it.
+  view.applySync({
+    type: "sync",
+    fromSeq: 3,
+    toSeq: 4,
+    upserts: [{
+      branch: "",
+      id: "of:keyed-watch-view",
+      scope: "user",
+      seq: 4,
+      doc: { value: { who: "own" } },
+    }],
+    removes: [],
+  }, false);
+  assertEquals(snapshotOf().length, 2);
+  view.applySync({
+    type: "sync",
+    fromSeq: 4,
+    toSeq: 5,
+    upserts: [],
+    removes: [{ branch: "", id: "of:keyed-watch-view", scope: "user" }],
+  }, false);
+  assertEquals(snapshotOf(), [
+    {
+      id: "of:keyed-watch-view",
+      scope: "user",
+      scopeKey: bobKey,
+      document: { value: { who: "bob" } },
+    },
+  ]);
+});
+
 Deno.test("memory v2 client installs a watch set and receives live updates", async () => {
   const server = new Server({
     ...testSessionOpenServerOptions,

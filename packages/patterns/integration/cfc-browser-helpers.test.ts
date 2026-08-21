@@ -12,12 +12,15 @@ import {
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import {
+  armSenderEcho,
   CLICK_TARGET_ATTR,
   clickCfButton,
   clickCfButtonsConcurrently,
   clickNthCfButton,
   clickTrustedAction,
   fillCfInput,
+  installSenderEchoProbe,
+  readSenderEchoReport,
   submitViaEnter,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
@@ -2486,6 +2489,78 @@ describe("CFC browser helpers", () => {
       assertEquals(clicks, 0, "a click reached a control the page cannot show");
     } finally {
       await narrow.close();
+    }
+  });
+
+  it("samples the sender's click-to-own-render echo, shadow roots included", async () => {
+    const echoPage = await browser.newPage();
+    try {
+      await echoPage.evaluate(() => {
+        // The render target lives inside a shadow root created AFTER the
+        // probe installs (the attachShadow chain-wrap's case), and the
+        // rendered text lands one macrotask after the click — a stand-in
+        // for handler -> speculative write -> re-render.
+        const button = document.createElement("button");
+        button.id = "echo-send-button";
+        button.textContent = "Send";
+        document.body.append(button);
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __echoMount: () => void;
+        }).__echoMount = () => {
+          const host = document.createElement("div");
+          const root = host.attachShadow({ mode: "open" });
+          const preview = document.createElement("div");
+          preview.id = "echo-preview";
+          preview.textContent = "no messages yet";
+          root.append(preview);
+          document.body.append(host);
+          button.addEventListener("click", () => {
+            setTimeout(() => {
+              preview.textContent = "echo landed";
+            }, 40);
+          });
+        };
+      });
+
+      await installSenderEchoProbe(echoPage);
+      // Mount AFTER install so the shadow root is one the attachShadow wrap
+      // caught, not the initial scan.
+      await echoPage.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __echoMount: () => void;
+        }).__echoMount()
+      );
+
+      // A pre-rendered expectation is refused and recorded, not sampled.
+      await armSenderEcho(echoPage, "pre", "#echo-preview", "no messages yet");
+      // The real expectation: armed before the click, rendered ~40 ms after.
+      await armSenderEcho(echoPage, "post-0", "#echo-preview", "echo landed");
+      await clickCfButton(echoPage, "#echo-send-button");
+      await waitForSettledText(echoPage, "#echo-preview", "echo landed");
+
+      // An expectation that never renders is flushed as abandoned by the
+      // read, with the click recorded.
+      await armSenderEcho(echoPage, "post-1", "#echo-preview", "never shown");
+      await clickCfButton(echoPage, "#echo-send-button");
+
+      const report = await readSenderEchoReport(echoPage);
+      assertEquals(report.samples.length, 1);
+      const sample = report.samples[0];
+      assertEquals(sample.label, "post-0");
+      assertEquals(sample.clicks, 1);
+      assert(
+        sample.echoMs >= 30 && sample.echoMs < 2_000,
+        `echoMs ${sample.echoMs} is outside the 40 ms render's sane band`,
+      );
+      assertEquals(
+        report.abandoned.map((row) => [row.label, row.reason]),
+        [["pre", "pre-armed"], ["post-1", "unrendered"]],
+      );
+    } finally {
+      await echoPage.close();
     }
   });
 });

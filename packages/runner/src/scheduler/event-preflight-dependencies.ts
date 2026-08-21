@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
@@ -20,6 +21,8 @@ import type {
 } from "./types.ts";
 
 export interface EventPreflightDependencyState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly getTrace: () => EventPreflightTraceContext | undefined;
   readonly nodes: NodeRegistry;
   readonly pending: ReadonlySet<Action>;
@@ -46,6 +49,7 @@ export function collectInvalidUpstreamForLog(
 ): boolean {
   const trace = state.getTrace();
   const directWriters = collectDirectWritersForLog({
+    scopeKeyIdentity: state.scopeKeyIdentity,
     writersByEntity: state.writersByEntity,
     effects: state.effects,
     getSchedulingWrites: state.getSchedulingWrites,
@@ -116,14 +120,17 @@ export function collectPendingLoadParkKeys(
   log: ReactivityLog,
 ): string[] {
   if (pendingLoadAddresses.length === 0) return [];
+  const identity = state.scopeKeyIdentity();
   const pendingByKey = new Map(
-    pendingLoadAddresses.map((address) => [entityKey(address), address]),
+    pendingLoadAddresses.map((
+      address,
+    ) => [entityKey(address, identity), address]),
   );
 
   const keys = new Set<string>();
   // Direct: the closure itself reads a loading document.
   for (const read of [...log.reads, ...log.shallowReads]) {
-    const key = entityKey(read);
+    const key = entityKey(read, identity);
     if (pendingByKey.has(key)) keys.add(key);
   }
 
@@ -131,6 +138,7 @@ export function collectPendingLoadParkKeys(
   // closure set mirrors collectInvalidUpstreamForLog's (direct writers of the
   // log plus materializer writers).
   const closure = collectDirectWritersForLog({
+    scopeKeyIdentity: state.scopeKeyIdentity,
     writersByEntity: state.writersByEntity,
     effects: state.effects,
     getSchedulingWrites: state.getSchedulingWrites,

@@ -48,6 +48,16 @@ export function streamData(
   let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
+    // Deferred under server-execution v2: disabled while the flag is on, with
+    // nothing half-working — no cells are minted and no request starts
+    // (docs/specs/server-side-execution/builtins.md §5).
+    if (runtime.experimental.serverExecution) {
+      throw new Error(
+        "The streamData built-in is disabled under " +
+          "EXPERIMENTAL_SERVER_EXECUTION: it is deferred in server-execution " +
+          "v2 (docs/specs/server-side-execution/builtins.md §5).",
+      );
+    }
     tx.resetNarrowestReadScope();
     const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
     const outputScope = tx.getNarrowestReadScope();

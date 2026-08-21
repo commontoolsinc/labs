@@ -1,5 +1,8 @@
-import { AnyCellWrapping } from "@commonfabric/api";
-import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
+import {
+  AnyCellWrapping,
+  type JSONSchemaObj,
+  type JSONValue,
+} from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
@@ -13,6 +16,25 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import type { Runtime } from "./runtime.ts";
+import type {
+  IMemorySpaceValueAddress,
+  NormalizedFullLink,
+} from "./link-utils.ts";
+import {
+  createQueryResultProxy,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
+import { materializeSchemaView } from "./schema-view.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
@@ -36,7 +58,6 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -54,27 +75,10 @@ import {
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import {
-  readMaybeLink,
-  resolveLink,
-  undefinedDataLink,
-} from "./link-resolution.ts";
-import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
-} from "./link-utils.ts";
-import {
-  createQueryResultProxy,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { type Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { materializeSchemaView } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
@@ -1350,18 +1354,32 @@ export function validateAndTransform(
 
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
+  // The traversal's acting identity (key-vocabulary.md §1 sites 5-6): a
+  // served run's DEMAND-SUPPLIED identity when the wave run context
+  // carries one (M1's per-run threading, server-execution v2 Phase 2) —
+  // or when the STORAGE transaction carries one (stage A: the event
+  // preflight's dependency probe runs under the event's actor without a
+  // wave stamp) — else the runtime's own session. `runIdentity` stays
+  // undefined for an own-identity traversal, so its absent-target loads
+  // take the ordinary path.
+  const runIdentity =
+    waveRunContextOf(tx as IExtendedStorageTransaction)?.scopeKeyIdentity ??
+      (tx as IExtendedStorageTransaction).tx?.scopeKeyIdentity;
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
     createDefaultTraversalContext(
+      runIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
       undefined,
       // Absent link targets get an async load kicked (cross-space always;
       // same-space only when the replica has never seen the doc); the
-      // tracked read re-runs the reader on arrival.
+      // tracked read re-runs the reader on arrival. A served per-instance
+      // run's absent target loads AS that run's instance (stage A — the
+      // runner's explicit-instance read).
       (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace),
+        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
     ),
     objectCreator,
   );

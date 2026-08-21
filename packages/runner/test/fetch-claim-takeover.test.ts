@@ -447,4 +447,106 @@ describe("fetch builtins: taking over a claim", () => {
       expect(outcome.pending).toBe(true);
     });
   });
+
+  // The claim-time memo guard (server-execution v2 stage G,
+  // serving-loop.md §4): a COMPLETED request — stored hash matching the
+  // expected inputs AND a result (or error-shaped result) present — is
+  // never re-claimed; the stored value IS the value. The serving
+  // posture's deferred flush can re-admit a key whose first effect
+  // already completed, and without this guard the late claim would
+  // clear the result and issue a second egress for inputs that already
+  // have their answer.
+  describe("the completed-request guard of the mutex", () => {
+    const inputs = { url: "http://mock-test-server.local/api/completed" };
+
+    async function claimWithStored(
+      stored: "result" | "error" | "none",
+    ): Promise<{ claimed: boolean; result: unknown; pending: boolean }> {
+      const inputsCell = runtime.getCell<typeof inputs>(
+        space,
+        `mutex-completed-inputs-${stored}`,
+        undefined,
+        tx,
+      );
+      const pending = runtime.getCell<boolean>(
+        space,
+        `mutex-completed-pending-${stored}`,
+        undefined,
+        tx,
+      );
+      const result = runtime.getCell<unknown>(
+        space,
+        `mutex-completed-result-${stored}`,
+        undefined,
+        tx,
+      );
+      const error = runtime.getCell<unknown>(
+        space,
+        `mutex-completed-error-${stored}`,
+        undefined,
+        tx,
+      );
+      const internal = runtime.getCell<Schema<typeof internalSchema>>(
+        space,
+        `mutex-completed-internal-${stored}`,
+        undefined,
+        tx,
+      );
+
+      // The completed request's durable shape: hash recorded for these
+      // very inputs, pending long false, and — in the guarded arms —
+      // the settled value standing.
+      inputsCell.set(inputs);
+      pending.set(false);
+      if (stored === "result") {
+        result.set({ from: "the completed request" });
+      } else if (stored === "error") {
+        error.set({ message: "the stored error-shaped result" });
+      }
+      internal.set({
+        requestId: "",
+        lastActivity: 0,
+        inputHash: computeInputHashFromValue(inputs),
+      });
+      await tx.commit();
+      tx = runtime.edit();
+
+      const claim = await tryClaimMutex(
+        runtime,
+        inputsCell,
+        pending,
+        result,
+        error,
+        internal,
+        "this-replica:whatever",
+        (cell) => cell.get() ?? ({} as typeof inputs),
+        computeInputHashFromValue(inputs),
+      );
+      return {
+        claimed: claim.claimed,
+        result: result.get(),
+        pending: pending.get(),
+      };
+    }
+
+    it("never claims over a stored result whose hash matches", async () => {
+      const outcome = await claimWithStored("result");
+      expect(outcome.claimed).toBe(false);
+      // The stored value stands untouched — no clear on the way out.
+      expect(outcome.result).toEqual({ from: "the completed request" });
+      expect(outcome.pending).toBe(false);
+    });
+
+    it("never claims over a stored error-shaped result whose hash matches", async () => {
+      const outcome = await claimWithStored("error");
+      expect(outcome.claimed).toBe(false);
+      expect(outcome.pending).toBe(false);
+    });
+
+    it("still claims when the hash matches but nothing has landed", async () => {
+      const outcome = await claimWithStored("none");
+      expect(outcome.claimed).toBe(true);
+      expect(outcome.pending).toBe(true);
+    });
+  });
 });

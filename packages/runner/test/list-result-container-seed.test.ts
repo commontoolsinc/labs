@@ -7,7 +7,7 @@ import { Logger, type LogMessage } from "@commonfabric/utils/logger";
 
 import { seedResultContainerWhenPullSettles } from "../src/builtins/list-result-container-seed.ts";
 import type { Cell } from "../src/cell.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 // The seed is the list coordinators' recovery for a result container that was
@@ -128,6 +128,7 @@ describe("list-result-container-seed", () => {
         () => true,
         Promise.resolve(),
         logger,
+        "filter/resume-seed/of:absent-after-pull",
       );
       expect(valueOf(container)).toEqual([]);
       expect(logger.warnings).toEqual([]);
@@ -142,6 +143,7 @@ describe("list-result-container-seed", () => {
         () => true,
         pull.promise,
         logger,
+        "filter/resume-seed/of:barrier-held-until-seeded",
       );
       // The cross-space promise set is what `Cell.pull()`,
       // `storageManager.synced()` and the `settled(Infinity)` drain in
@@ -169,6 +171,7 @@ describe("list-result-container-seed", () => {
         () => true,
         pull.promise,
         logger,
+        "filter/resume-seed/of:arrived-during-pull",
       );
       const { error } = await runtime.editWithRetry((tx) => {
         container.withTx(tx).set([1, 2, 3]);
@@ -188,6 +191,7 @@ describe("list-result-container-seed", () => {
         () => false,
         Promise.resolve(),
         logger,
+        "filter/resume-seed/of:coordinator-torn-down",
       );
       expect(valueOf(container)).toBeUndefined();
       expect(logger.warnings).toEqual([]);
@@ -205,6 +209,7 @@ describe("list-result-container-seed", () => {
         () => true,
         Promise.reject(pullFailure),
         logger,
+        "filter/resume-seed/of:rejected-pull",
       );
       expect(valueOf(container)).toEqual([]);
       expect(logger.warnings.length).toBe(1);
@@ -231,6 +236,7 @@ describe("list-result-container-seed", () => {
         () => held,
         Promise.resolve(),
         logger,
+        "filter/resume-seed/of:released-between-attempts",
       );
       // The retry ran, and wrote nothing: a seed that only asked once would
       // have re-written the container on this attempt.
@@ -252,6 +258,7 @@ describe("list-result-container-seed", () => {
         () => true,
         Promise.resolve(),
         logger,
+        "filter/resume-seed/of:refused-seed",
       );
       expect(valueOf(container)).toBeUndefined();
       expect(logger.warnings.length).toBe(1);
@@ -260,6 +267,45 @@ describe("list-result-container-seed", () => {
         "seeding the empty result container failed",
       );
       expect(logger.reportedError(0)).toBe(rejection);
+    });
+
+    it("stamps every seed attempt's transaction as sanctioned bookkeeping", async () => {
+      const container = newContainer("stamped-seed");
+      // The seed transaction is minted outside any scheduler run, so nothing
+      // else stamps it, and a SERVING runtime's wave refuses an unstamped
+      // seal (serving-loop.md §3d). A refused first commit forces a retry,
+      // and each attempt opens a fresh transaction — the stamp has to land
+      // on every one of them, or the retry's seal is the unstamped commit
+      // the wave refuses.
+      const commits = refuseFirstCommit({
+        name: "ConflictError",
+        message: "stale confirmed read: of:test at seq 0 conflicted with seq 9",
+        readyToRetry: () => Promise.resolve(),
+      });
+      const stamped: ServerRunInfo[] = [];
+      const stamp = runtime.stampServerRun.bind(runtime);
+      (runtime as any).stampServerRun = (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => {
+        stamped.push(info);
+        stamp(tx, info);
+      };
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        Promise.resolve(),
+        logger,
+        "filter/resume-seed/of:stamped-seed",
+      );
+      expect(commits()).toBe(2);
+      expect(stamped).toEqual([
+        { actionId: "filter/resume-seed/of:stamped-seed", kind: "bookkeeping" },
+        { actionId: "filter/resume-seed/of:stamped-seed", kind: "bookkeeping" },
+      ]);
+      expect(valueOf(container)).toEqual([]);
+      expect(logger.warnings).toEqual([]);
     });
   });
 });

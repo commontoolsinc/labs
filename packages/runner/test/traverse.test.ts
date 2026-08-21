@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { type CellScope, resolveScopeKey } from "@commonfabric/memory/v2";
 import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
@@ -40,11 +41,21 @@ import {
   type TraversalContext,
 } from "../src/traverse.ts";
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E). These tests traverse space-scoped docs, so any one
+// identity partitions alike.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 // Helper function to get the SchemaObjectTraverser backed by a store map
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-  context: TraversalContext = createDefaultTraversalContext(),
+  context: TraversalContext = createDefaultTraversalContext(
+    TEST_SCOPE_IDENTITY,
+  ),
   sharedSchemaMemo?: SchemaMemo,
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
@@ -682,7 +693,11 @@ describe("SchemaObjectTraverser array traversal", () => {
         JSONSchema | undefined
       >();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -744,7 +759,11 @@ describe("SchemaObjectTraverser array traversal", () => {
         JSONSchema | undefined
       >();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -807,7 +826,11 @@ describe("SchemaObjectTraverser array traversal", () => {
         JSONSchema | undefined
       >();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, schemaTracker);
+      const context = createTraversalContext(
+        tracker,
+        schemaTracker,
+        TEST_SCOPE_IDENTITY,
+      );
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -880,7 +903,11 @@ describe("getAtPath array index validation", () => {
       JSONSchema | undefined
     >();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, schemaTracker);
+    const context = createTraversalContext(
+      tracker,
+      schemaTracker,
+      TEST_SCOPE_IDENTITY,
+    );
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -2861,7 +2888,7 @@ describe("link schema path narrowing", () => {
       },
       required: ["id", "friends"],
     } as const satisfies JSONSchema;
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const traverser = getTraverser(
       store,
       { path: ["value"], schema: querySchema },
@@ -2911,7 +2938,7 @@ describe("link schema path narrowing", () => {
         },
       },
     } as const satisfies JSONSchema;
-    const nonOpaqueContext = createDefaultTraversalContext();
+    const nonOpaqueContext = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const nonOpaqueTraverser = getTraverser(
       store,
       { path: ["value"], schema: nonOpaqueQuerySchema },
@@ -2980,7 +3007,7 @@ describe("link schema path narrowing", () => {
       },
       required: ["id", "friends"],
     } as const satisfies JSONSchema;
-    const context = createDefaultTraversalContext();
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
     const traverser = getTraverser(
       store,
       { path: ["value"], schema: querySchema },
@@ -3035,8 +3062,10 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   const TYPE = "application/json" as const;
 
   /** Build a tracker key matching the internal getTrackerKey() format. */
-  function trackerKey(id: string, scope = "space"): string {
-    return `${SPACE}/${scope}/${id}`;
+  function trackerKey(id: string, scope: CellScope = "space"): string {
+    // Instance keys (stage E): the scope segment is the shared scope_key
+    // resolved against the traversal's identity, not the scope name.
+    return `${SPACE}/${resolveScopeKey(scope, TEST_SCOPE_IDENTITY)}/${id}`;
   }
 
   /** Shortcut: store a document in the map-based store. */
@@ -3073,6 +3102,46 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   ): MapSet<string, SchemaPathSelector> {
     return (traverser as any).schemaTracker;
   }
+
+  it("repeat unscoped links keep their values (stage-E neutrality guard)", () => {
+    // Two links to one unscoped target inside one traversal. The coverage
+    // memo must NOT fire for unscoped links (isLinkedDocumentCovered's
+    // neutrality guard): pre-stage-E the coverage key never matched for
+    // them, and the covered-skip path replaces a repeat link's value with
+    // `null` in traverseCells mode — which value consumers (the html
+    // reconciler's cell reads) would render. Both occurrences must carry
+    // the value.
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:repeat-link-root" as URI;
+    const targetUri = "of:repeat-link-target" as URI;
+
+    const rootValue = {
+      a: makeLink(targetUri),
+      b: makeLink(targetUri),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { label: "hello" });
+
+    const linkedSchema = {
+      type: "object",
+      properties: { label: { type: "string" } },
+    } as const;
+    const schema = {
+      type: "object",
+      properties: { a: linkedSchema, b: linkedSchema },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const { ok: result } = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect(result).toEqual({
+      a: { label: "hello" },
+      b: { label: "hello" },
+    });
+  });
 
   it("tracks same-id linked docs in different scopes separately", () => {
     const store = new Map<string, Revision<State>>();
@@ -3851,7 +3920,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schema,
-    });
+    }, createDefaultTraversalContext(TEST_SCOPE_IDENTITY));
 
     const { ok: result, error } = traverser.traverse({
       address: {
@@ -3982,7 +4051,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schema,
-    });
+    }, createDefaultTraversalContext(TEST_SCOPE_IDENTITY));
 
     const { ok: result, error } = traverser.traverse({
       address: {
@@ -4046,7 +4115,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(
       tx,
       { path: ["value"], schema },
-      createDefaultTraversalContext(false),
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY, false),
     );
 
     const { ok: result, error } = traverser.traverse({
@@ -4407,7 +4476,11 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
       expect(entry).toMatch(/^.{20}\.\.=\d+$/);
     }
     // Most-visited first. Target `i` was linked `i + 1` times, so the two
-    // least-visited targets are the ones the cap dropped.
+    // least-visited targets are the ones the cap dropped. (These links
+    // are unscoped, so the coverage memo deliberately does not skip
+    // their re-walks — the stage-E neutrality guard in
+    // isLinkedDocumentCovered preserves the pre-re-keying behavior, and
+    // this assertion doubles as its regression test.)
     const counts = listed.map((entry) => Number(entry.split("=")[1]));
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
     expect(counts).not.toContain(1);
@@ -4474,7 +4547,7 @@ describe("SchemaObjectTraverser schema memo keys", () => {
     const traverser = getTraverser(
       new Map<string, Revision<State>>(),
       { path: ["value"], schema },
-      createDefaultTraversalContext(),
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
       memo,
     );
     traverser.traverse({

@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { parse as parseYaml } from "@std/yaml";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
@@ -157,6 +158,36 @@ function workflowTriggers(contents: string): string {
   assert(concurrencyStart >= 0, "workflow trigger section not found");
   return contents.slice(0, concurrencyStart);
 }
+
+// Every other check in this file reads the workflow files as TEXT (regex over
+// job and step blocks), so none of them can notice that a file has stopped
+// being valid YAML — and a workflow that does not parse produces ZERO jobs on
+// every push while every text-level check here stays green. That happened: an
+// unquoted `default: ` inside two step names turned deno.yml into a nested
+// mapping the runner refused, and CI silently ran nothing for a whole stack of
+// pushes. This is the one check that would have caught it.
+Deno.test("every workflow and composite action is valid YAML", async () => {
+  const broken: string[] = [];
+  for await (const path of githubYamlPaths()) {
+    const contents = await Deno.readTextFile(path);
+    try {
+      parseYaml(contents);
+    } catch (error) {
+      broken.push(
+        `${path.pathname.split("/.github/")[1]}: ${
+          String(error).split("\n")[0]
+        }`,
+      );
+    }
+  }
+  assertEquals(
+    broken,
+    [],
+    "these files under .github do not parse as YAML — the runner will " +
+      "schedule NO jobs from them, and every text-level check in this file " +
+      "stays green while it does",
+  );
+});
 
 Deno.test("Status waits for every pull request validation job", async () => {
   const contents = await workflow("deno.yml");

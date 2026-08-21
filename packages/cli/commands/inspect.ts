@@ -645,12 +645,12 @@ export const inspect = new Command()
           }`,
         );
         console.log(
-          `scheduler: ${
-            !sum.hasSchedulerTables
-              ? "absent"
-              : sum.schedulerObservations > 0
-              ? `${sum.schedulerObservations} observations`
-              : "tables present, empty (persistentSchedulerState off)"
+          `scheduler basis: ${
+            !sum.hasSchedulerBasisTable
+              ? "absent (pre-migration store)"
+              : sum.schedulerBasisRows > 0
+              ? `${sum.schedulerBasisRows} rows`
+              : "table present, empty"
           }`,
         );
       });

@@ -767,8 +767,12 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
     value: { value: 7 },
   });
   const runtime = {
+    // The stub tx carries an inner `tx` like the real
+    // IExtendedStorageTransaction: effect-completion marking keys its
+    // WeakMap on `tx.tx` (round-2 thread 18 — wrappers share the inner
+    // tx), so a bare `{}` would throw on the WeakMap set.
     editWithRetry: (fn: (tx: unknown) => void) => {
-      fn({});
+      fn({ tx: {} });
       return true;
     },
     getCellFromLink: () => targetCell,

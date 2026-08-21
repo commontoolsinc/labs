@@ -1,11 +1,13 @@
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
 declare global {
   var $ENVIRONMENT: string | undefined;
   var $API_URL: string | undefined;
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
-  var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
+  var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
 }
 
@@ -20,10 +22,6 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
   typeof $EXPERIMENTAL_MODERN_CELL_REP === "string"
     ? $EXPERIMENTAL_MODERN_CELL_REP
     : undefined;
-const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
-  typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
-    ? $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE
-    : undefined;
 const EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE =
   typeof $EXPERIMENTAL_COMPUTED_CELL_IDS === "string"
     ? $EXPERIMENTAL_COMPUTED_CELL_IDS
@@ -32,6 +30,11 @@ const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
     ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
     : undefined;
+const EXPERIMENTAL_SERVER_EXECUTION_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_EXECUTION === "string"
+    ? $EXPERIMENTAL_SERVER_EXECUTION
+    : undefined;
+
 const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
   typeof $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS === "string"
     ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
@@ -57,9 +60,6 @@ function flagValue(flag: string | undefined): boolean | undefined {
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
-  persistentSchedulerState: flagValue(
-    EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
-  ),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
   // Auto-update space-root system patterns (default-app AND home) in place.
   // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
@@ -67,6 +67,15 @@ export const EXPERIMENTAL = {
   // home-golden-replay.test.ts, so the home root no longer needs a second flag.
   systemPatternAutoUpdate:
     flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
+  // Server-execution v2 (docs/specs/server-side-execution/): the
+  // first-party default (the landed-dark constant, `false` until the flip
+  // PR), overridable by the build define either way
+  // (`EXPERIMENTAL_SERVER_EXECUTION=false` builds the OFF-arm shell — the
+  // rollback lever and CI's regression guard). The worker refuses to
+  // initialize if its resolved posture disagrees with this declaration
+  // (runtime-client's posture agreement).
+  serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??
+    SERVER_EXECUTION_DEFAULT_ENABLED,
   // Content-addressed schemas Phase 1: link writers emit cid: references.
   // Off by default, and deliberately so for now — clients read references
   // before any client writes them, so the writer turns on only once every

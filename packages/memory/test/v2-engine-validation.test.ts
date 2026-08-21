@@ -8,15 +8,8 @@
 
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import {
-  applyCommit,
-  close,
-  type Engine,
-  open,
-  ProtocolError,
-  read,
-} from "../v2/engine.ts";
-import { encodeMemoryBoundary } from "../v2.ts";
+import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
+import { encodeMemoryBoundary, ProtocolError } from "../v2.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 
@@ -50,42 +43,6 @@ Deno.test("rejects a commit with no operations, observation, or preconditions", 
       () => applyCommit(engine, { sessionId: "s:a", commit: commit(1, {}) }),
       Error,
       "requires at least one operation",
-    );
-  });
-});
-
-Deno.test("rejects mixing schedulerObservation with schedulerObservationBatch", async () => {
-  await withEngine((engine) => {
-    assertThrows(
-      () =>
-        applyCommit(engine, {
-          sessionId: "s:a",
-          principal: "did:key:alice",
-          commit: commit(1, {
-            schedulerObservation: { x: 1 },
-            schedulerObservationBatch: [{ y: 1 }],
-          }),
-        }),
-      ProtocolError,
-      "cannot mix schedulerObservation and schedulerObservationBatch",
-    );
-  });
-});
-
-Deno.test("rejects semantic operations on an observation-batch commit", async () => {
-  await withEngine((engine) => {
-    assertThrows(
-      () =>
-        applyCommit(engine, {
-          sessionId: "s:a",
-          principal: "did:key:alice",
-          commit: commit(1, {
-            operations: [setOp("of:fid1:a", 1)],
-            schedulerObservationBatch: [{ y: 1 }],
-          }),
-        }),
-      ProtocolError,
-      "must not include semantic operations",
     );
   });
 });

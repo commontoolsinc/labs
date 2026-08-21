@@ -32,6 +32,8 @@ describe("CFC runtime stats", () => {
 
     expect(runtime.getCfcStats()).toEqual({
       cfcRelevantTx: 0,
+      flowLabelProbesComputed: 0,
+      flowLabelProbeMemoHits: 0,
       cfcPreparedTx: 0,
       cfcPrepareRejects: 0,
       cfcDigestInvalidations: 0,
@@ -166,6 +168,12 @@ describe("CFC runtime stats", () => {
 
     expect(runtime.getCfcStats()).toEqual({
       cfcRelevantTx: 4,
+      // Stage C tuning T1: this runtime leaves the flow-labels dial at its
+      // "off" default, so the flow-label probe never runs here and its
+      // memo is never consulted. The probe's own pins live in
+      // cfc-flow-probe-memo.test.ts.
+      flowLabelProbesComputed: 0,
+      flowLabelProbeMemoHits: 0,
       cfcPreparedTx: 3,
       cfcPrepareRejects: 1,
       cfcDigestInvalidations: 1,

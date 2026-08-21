@@ -328,7 +328,6 @@ describe("RuntimeInternals", () => {
 
     const experimental = {
       modernCellRep: true,
-      persistentSchedulerState: false,
     };
     const options = createRuntimeClientOptions({
       session,

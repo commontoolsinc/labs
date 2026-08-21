@@ -1,13 +1,16 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { entityKey } from "./keys.ts";
+import { entityNameKey } from "./keys.ts";
 import type { Action, SpaceScopeAndURI } from "./types.ts";
 
 export interface WriterIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
   setSurface(action: Action, surface: IMemorySpaceAddress[]): void;
@@ -30,10 +33,28 @@ export interface SchedulingWriteState {
 
 export class SchedulerWriteIndex
   implements WriterIndexState, SchedulingWriteState {
+  constructor(
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
+  ) {}
+
   // Current-known writes are the action's static declared write surface.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
-  // Updated from the active scheduling write set.
+  // Updated from the active scheduling write set. Keyed by scope NAME
+  // (entityNameKey — server-execution v2 stage A, the instance-AGNOSTIC
+  // writer index): the reader→writer relation is a NODE-level topology
+  // relation — under C11b one node writes ALL instances of its declared
+  // surface — so a reader whose logged read names one principal's
+  // instance must still find the writer whose surface declares the scope
+  // by name. An instance-keyed index would drop that edge the moment
+  // reads carry non-own instances (today both sides collapse to the
+  // runtime's own instance and match by accident). Cost of the fan-in:
+  // any instance's change re-dirties the (singular) node, so all N
+  // instances re-run — O(N) per input change, equality cutoffs absorb the
+  // unchanged siblings; instance-precise dirtiness is stage B's B7 and
+  // is never a correctness need here (dirtiness/dependency keys stay per
+  // instance via entityKey).
   readonly writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
   // Reverse index: action -> entities it writes to (for cleanup).
   readonly actionWriteEntities = new WeakMap<
@@ -69,7 +90,7 @@ export class SchedulerWriteIndex
     const removedEntities = new Set<SpaceScopeAndURI>();
 
     for (const write of nextSchedulingWrites) {
-      const entity = entityKey(write);
+      const entity = entityNameKey(write);
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
@@ -100,8 +121,26 @@ export class SchedulerWriteIndex
     }
 
     this.actionWriteEntities.set(action, nextEntities);
+    if (addedEntities.size > 0 || removedEntities.size > 0) {
+      this.onWriterEntitiesChanged?.(action, addedEntities, removedEntities);
+    }
     return { nextEntities, addedEntities, removedEntities };
   }
+
+  /** (d′) — the REGISTRATION hook for the standing
+   * `demandedWriters` root kind (design §2.4: "a writer that registers
+   * AFTER its output is demanded must consult the demanded set on
+   * registration … unregistration releases"). Fired with the entities a
+   * writer's surface gained and lost; the facade consults its demanded
+   * entity set and brackets the root transition. Undefined off the
+   * serving posture (never installed). */
+  onWriterEntitiesChanged:
+    | ((
+      action: Action,
+      added: ReadonlySet<SpaceScopeAndURI>,
+      removed: ReadonlySet<SpaceScopeAndURI>,
+    ) => void)
+    | undefined;
 
   clearAction(action: Action): void {
     const writeEntities = this.actionWriteEntities.get(action);
@@ -116,6 +155,7 @@ export class SchedulerWriteIndex
     }
     // Clear actionWriteEntities so resubscribe will re-register the action.
     this.actionWriteEntities.delete(action);
+    this.onWriterEntitiesChanged?.(action, new Set(), writeEntities);
   }
 }
 
@@ -196,6 +236,7 @@ export function readsOverlapWrites(
  */
 export function forEachOverlappingWriter(
   state: {
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity;
     readonly writersByEntity: ReadonlyMap<SpaceScopeAndURI, Set<Action>>;
     readonly getSchedulingWrites: (
       action: Action,
@@ -213,7 +254,9 @@ export function forEachOverlappingWriter(
     read: IMemorySpaceAddress,
     shallow: boolean,
   ): boolean => {
-    const writers = state.writersByEntity.get(entityKey(read));
+    // Looked up by NAME (see writersByEntity): the read's instance is
+    // irrelevant to WHICH node writes the doc.
+    const writers = state.writersByEntity.get(entityNameKey(read));
     if (!writers) return false;
     for (const writer of writers) {
       if (hooks.filter && !hooks.filter(writer)) continue;

@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-281 binding rules. Instruments: the scenario traces (T1–T12), the
+300 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -20,17 +20,20 @@ families), the Phase 1 dry-run, and the doc-review panels
 | doc | rules | instrument-covered | impl-gate | deferral | derivable | owed |
 | --- | --- | --- | --- | --- | --- | --- |
 | README | 31 | 17 | 9 | 1 | 2 | 2* |
-| protocol | 53 | 43 | 3 | 2 | 4 | 1* |
+| protocol | 63 | 47 | 8 | 3 | 4 | 1* |
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
-| serving-loop | 71 | 43 | 17 | 1 | 4 | 6 |
-| key-vocabulary | 6 | 5 | 1 | 0 | 0 | 0 |
-| speculation | 15 | 10 | 2 | 0 | 1 | 2 |
+| serving-loop | 79 | 46 | 21 | 1 | 5 | 6 |
+| key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
+| speculation | 16 | 11 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
 | runtime-mapping | 17 | 5 | 3 | 1 | 5 | 3 |
 
-(*push-priority appears in two docs — counted once in §3.)
+(*push-priority appears in two docs — counted once in §3. The
+scheduler-tell classification rule likewise appears in two docs —
+protocol §1 primary, speculation §2 cross-reference — and is counted
+once, under protocol.)
 
 **Adjudication notes on the three big buckets:**
 
@@ -70,6 +73,685 @@ same property family (C1/C10's event-first processing). The
 other budgets. The recorded write-class fallback is not built —
 no instrument owed unless it is ever adopted.
 
+Delta 2026-08-04/05 — stage D's carriage sentences and the
+2026-08-05 ruling pair (protocol 53 → 58):
+
+- §7's stored-representation sentences (the annotation pair's
+  carriage is server-internal admission input; its stored form is a
+  per-op-indexed sidecar on the commit row — recorded, never wire,
+  never pushed; admission consumes only the addressing half): +2
+  rules, impl-gate, verification home = the stage-D PR's engine
+  tests (`packages/memory/test/v2-wave-commit.test.ts` pins the
+  stored pair, the addressing-keyed rows, the
+  space-scoped-annotation refusal, and the non-derived refusal).
+- §1's `system`-row widening (RULED 2026-08-05): the
+  new-direct-write-caller-is-a-spec-decision sentence is
+  panel-covered (+1 instrument-covered — a prose-discipline rule,
+  the same instrument family as §7's "spec edit here first"); the
+  accepted no-user-attribution posture with its named blob-write
+  hardening is a deferral (+1) — deferrals are answers.
+- §2's derived-envelope defense-in-depth sentence (RULED
+  2026-08-05): +1 rule, impl-gate, assigned to Phase 1 stage F —
+  the plan's stage F bullet carries the task. The MODEL side needs
+  no extension: `admitDerived` already compares the envelope
+  principal to `holderId`; the impl-side operand mapping is the
+  stage F design question.
+
+The same review recorded a model/impl asymmetry in §3d's conflict
+handling — the impl's three-way drop/rebase/requeue disposition is
+pinned by impl tests only — now owed as OW9 below.
+
+Delta 2026-08-05 — the stage-D review's Q1/Q2/Q4 ruling batch
+(serving-loop 71 → 76):
+
+- Q1 (§3d recompute-by-dependency, RULED 2026-08-05): the weakened
+  recompute sentence is a CHANGED rule, model-covered as before —
+  C8a's recompute flows through the model derivation's own read of
+  the raced doc (its fire predicate consults the output's current
+  value), and the model has no drop-triggered re-arm mechanism, so
+  it verifies exactly the ruled semantics. Two NEW rules: the drop
+  re-arms nothing / no recompute-owed mark exists (+1,
+  instrument-covered, the same C8a family); a survivor whose writes
+  were dropped per-doc still lands its basis rows (+1, impl-gate —
+  the mixed-disposition test in
+  `packages/runner/test/executor-wave.test.ts` asserts the
+  dropped-write survivor's rows land).
+- Q2 (per-run write classification, RULED 2026-08-05): +1 rule,
+  instrument-covered — the model's C8 contributions carry writes per
+  producing run, and the impl's per-(contribution,doc) disposition
+  test pins one handler write rebasing while a derivation's write to
+  the same doc drops.
+- Q4 (unstamped seals refused, RULED 2026-08-05): +1 rule,
+  impl-gate — the refusal throw at the seal destination is pinned
+  red-first in `packages/runner/test/executor-wave.test.ts`; the
+  stage-F half (naming the sanctioned internal stamp kinds when the
+  seal destination is installed) is +1 impl-gate assigned to Phase 1
+  stage F, alongside §2's derived-envelope check.
+
+Delta 2026-08-05 (follow-up) — Q1-ruling propagation (serving-loop
+76 → 77; no other rows move):
+
+- The retracted unconditional "next wave recomputes" sentence
+  survived outside §3d — protocol §1 (threat model) and §2
+  (admission note), README §1, runtime-mapping N15/N17 — and two
+  trace cells (T9.Q1, T12.Q4) had drifted. All now state the
+  dependency-only rule and cite serving-loop §3d (RULED
+  2026-08-05). CHANGED sentences only: every location keeps its
+  existing row; no counts move for these.
+- Completion-path clarification (adjudicated 2026-08-05, vetoable):
+  the completion commit (serving-loop §4) never passes §3d's
+  sealing, but its identity annotations are sourced from outbox
+  carriage captured at the ORIGINAL run's seal — necessarily
+  stamped under Q4's refusal — so completion commits inherit
+  stamped provenance transitively and no unstamped derived path
+  exists. +1 rule, DERIVABLE — covering cells: the Q4 refusal row
+  (impl-gate, above) and §4's identity-carriage miss rule (FP6,
+  RULED 2026-08-03).
+
+Delta 2026-08-05 — the name-keyed boundary surface
+(key-vocabulary §5, stage E's review batch): three new rules
+(key-vocabulary 6 → 9). The §4 tripwire extension (a new
+name-keyed identity key, or a change to a listed boundary site,
+must update §5) is an implementation gate of the same grep-tripwire
+class as the rest of §4. The coverage-memo enablement gate
+(unscoped-link coverage stays off until the html reconciler's
+`get({ traverseCells: true })` value consumption is resolved —
+key-vocabulary §5) is an implementation gate on the PR that flips
+it. The schema-memo single-identity invariant (cross-identity memo
+sharing FORBIDDEN) is OWED an explicit guard — OW10.
+
+Delta 2026-08-05 — stage F lands (the serving loop; this PR):
+
+- §2's derived-envelope defense-in-depth row: impl-gate → COVERED.
+  The operand mapping landed (`resolveCommitSessionKey(sessionId,
+  principal) == holder` — the sink commits under the holder's own
+  service session) with negative tests
+  (`packages/memory/test/v2-wave-commit.test.ts`: a user session and
+  a non-holder internal session naming the right holder are both
+  refused; the holder's own session admits). protocol.md §2 records
+  the landed mapping — a CHANGED sentence, same row.
+- §3d's stage-F stamp-kind naming duty: impl-gate → COVERED. The
+  sanctioned internal kind is named (`bookkeeping`, serving-loop.md
+  §3d — a NEW binding sentence, this row is its coverage), stamped
+  at the three scheduler/runner choke points, with BOTH conflict
+  dispositions pinned in
+  `packages/runner/test/executor-wave.test.ts`: a bookkeeping PATCH
+  racing a disjoint authored patch REBASES and commits (the live
+  rebase arm — the loop's steady-state watermark advance is a
+  key-path patch), and a semantic conflict (whole-doc authored
+  intrusion) DROPS the contribution whole with nothing requeued.
+  The drop arm's recorded acceptance, stated truthfully
+  (2026-08-05): the wave's commit metadata (`derivedThrough`) and
+  the loop's in-memory W still advance when the DOC write drops —
+  the doc lags until the next INPUT-driven advance (a quiet space
+  stays lagged), which is conservative for clients because
+  `waitForSettled` reads the doc. Accepted under protocol §1's
+  authored-intrusion threat model; the code comments at the
+  bookkeeping write and the WaveRunKind doc state the same.
+- §2's read row (LD5): the admission half is now impl-covered —
+  `packages/memory/test/v2-explicit-read.test.ts` pins
+  holder-admitted / non-holder-refused / off-flag-refused on both
+  the query and watch paths. The trace/model coverage stands
+  unchanged. One recorded Phase-1 acceptance rides this row
+  (2026-08-05): the landed operand check compares the
+  SERVICE-IDENTITY component of the live holder, not the full
+  per-process DR1 holder, so a second process sharing the service
+  DID would pass on the first process's lease row — no instances
+  exist co-hosted in Phase 1 (one serving process per memory
+  server); the per-process sharpening lands with Phase 5's
+  cross-engine lease lookup design, alongside FP2's widening.
+- serving-loop §2's renew cadence + stop-committing MUST: the
+  serving loop drives them for real; lease-loss and idle-park pinned
+  end to end in `packages/runner/test/executor-serving-loop.test.ts`
+  (C6/C7's impl witnesses at the loop level) — including the
+  renew-blip arm (2026-08-05): when the reacquire SUCCEEDS but a
+  wave sealed under the lapsed tenure aborts at its commit step, the
+  space PARKS rather than continuing (a continued loop would mint a
+  watermark-only advance over the withdrawn derivations;
+  re-activation's fresh-runtime recompute-on-demand is the only
+  post-abort arm), pinned with a deterministic mid-wave interleave.
+- serving-loop §6 step 2's re-mark: PARTIAL by design in Phase 1 —
+  activation runs `selectStaleBasisInstances` and surfaces the stale
+  set (counted, logged), and recovery CORRECTNESS rides
+  recompute-on-demand over a fresh runtime (sound: an absent warm
+  graph means demanded pulls recompute regardless). The
+  skip-still-current warm-start VALUE of the index materializes when
+  a later stage carries a materialized graph across activation;
+  until then the scan is the recovery input, not yet an optimizer.
+- protocol §4's watermark: impl-gate rows land — the doc + metadata
+  carriage (`derived_through`), same-transaction watermark write,
+  W-advance-at-quiescence-only, and `waitForSettled` — pinned in the
+  serving-loop tests.
+- scopes §2's eager via-user hop: impl-gate → PARTIALLY COVERED
+  (`packages/runner/test/eager-via-user-hop.test.ts`: both
+  `data-updating.ts` shapes — the declared-scope narrowing and the
+  eager omitted-property redirect — under the flag, one hop pinned
+  in the OFF arm). The DISCOVERED-narrowing site
+  (`pattern-binding.ts`'s `narrowestReadScope` branch) carries the
+  same gated chain but has no direct test yet — owed as OW12 below.
+- key-vocabulary §5's boundary re-keys (M4-coupled + serving-identity
+  lists): dispositions moved to RE-KEYED in the same change, per §4's
+  tripwire; the server-side partition equivalence is witnessed by the
+  full memory suite (wire frames byte-identical via `toWireUpsert`)
+  and the client-side by the full runner suite. TWO RECORDED
+  OFF-arm acceptances ride this row, both RATIFIED (owner,
+  2026-08-05; testing §2's byte-identity gate now carries the
+  matching "up to the recorded key-vocabulary §5 acceptances"
+  clause):
+  - the `fromSeq` resume-marker delta — the M4 re-key removes the
+    cross-session SPURIOUS WAKE the name-keyed form produced
+    (principal A's scoped commit no longer re-evaluates principal
+    B's session), so under multi-principal scoped workloads a later
+    frame's `fromSeq` can differ from the old arm's. No client
+    consumes server-frame `fromSeq` (an unconsumed integer); the
+    observable residue is a marker-latency shift of roughly the
+    refresh cadence (~5 ms) in the staged-ack race window, and the
+    removed wake is the M4 defect itself.
+  - the shaper-bucket merge — the `${scope}:${id}` normalization
+    merges the two buckets that previously DISAGREED about one
+    piece's identity (`packages/runner/src/runner.ts:3399–3417,
+    5450–5456`; key-vocabulary §5's parenthetical carries the same
+    ratification stamp).
+- stage D's documented bounds: the delegated-admission bound is
+  DISCHARGED for its LANDED half only — carriage presence +
+  completeness (authored class, non-empty actor + grant, the
+  sessionless session-scope refusal) and carried-identity keying,
+  pinned in `executor-wave.test.ts` and
+  `packages/memory/test/v2-wave-commit.test.ts` — while grant
+  RESOLUTION against the target doc/stream remains OWED hardening
+  (OW13 below; protocol §2's delegated row carries the same
+  Phase-1-bound parenthetical). The read-only-read-set bound is
+  DISCHARGED with tests (read-only reads folding into withdrawals).
+  The sqlite bound stays stage G.
+
+Delta 2026-08-05 — the stage-F independent review's ruling batch
+(three flags RULED by the owner; changed sentences and recorded
+acceptances only — no rule counts move):
+
+- Flag 1 (the `inputSynced` input-barrier residual — a frame parked
+  on the loop's own sealed commit vs foreign novelty): ACCEPTED for
+  Phase 1, revisit trigger Phase 2. The two named revisit items —
+  the parked-on-own-seal distinction (or excluding unapplied frames'
+  seqs from `batchHead`) and the pattern-updater CHECK-half
+  verification in the `sx2-serving-loop` integration surface — are
+  carried in the plan's Phase 2 section so its gates cannot rely on
+  W before they resolve.
+- Flag 2 (watermark-only derived commits): CONFIRMED — protocol §4's
+  "never its own commit" now carries the ruled parenthetical: an
+  advance-only wave commits the advance as the batch's ONE derived
+  commit; the phrase bans bookkeeping-as-its-own-commit (the
+  push-priority rule), not advance-only waves. CHANGED sentence,
+  same row.
+- Flag 3 (OFF-arm byte-identity deltas): RATIFIED — testing §2's
+  gate sentence now reads byte-identical "up to the recorded
+  key-vocabulary §5 acceptances", and the recorded-acceptance row
+  above names both deltas.
+
+Delta 2026-08-06 — stage G lands (effect serving + the outbox; this
+PR):
+
+- serving-loop §4's memoization contract: impl-gate → COVERED. The
+  hit rule, in-flight dedupe, error-shaped results, and the
+  no-re-fire-on-recovery property are pinned end to end in
+  `packages/runner/test/executor-serving-loop.test.ts` (the effectful
+  node journey: one external call per key across park/re-activate;
+  the failure leg retries only on input change) and
+  `packages/runner/test/executor-outbox.test.ts` (dedupe + counters).
+  The builtins' own memo checks now REPORT hits (`effectMemoObserver`
+  — fetch*, generate*, sqliteQuery; fetchProgram and llmDialog count
+  misses via the outbox and report no hit events yet, recorded in
+  stats.ts).
+- serving-loop §4's completion-commit clarification (2026-08-05,
+  was DERIVABLE): now impl-covered — the completion commits as its
+  OWN derived-class commit (never through §3d's sealing), its
+  annotations sourced from the outbox carriage captured at the
+  original run's seal, pinned with a scoped write + acting identity
+  in `executor-serving-loop.test.ts` (T7.Q4's impl witness). Stated
+  for Phase 1: T7.Q4's carriage-sourced `scope_key` is STRUCTURAL —
+  the E2E pins the cardinality-1 fallback (carriage identity ==
+  wave identity), and the per-run demanded identity that makes the
+  carriage carry a DIFFERENT key arrives with Phase 2's stamper.
+- serving-loop §5's FP1 rows: impl-gate → COVERED. Durable rows
+  land INSIDE the wave's engine transaction (surviving contributions
+  only — a dependency-dropped contribution's appends are excluded, a
+  per-doc-superseded survivor's still ride, matching §3d's
+  drop-re-arms-nothing ruling), delivery admits at the target under
+  the delegated row with `firedAt` from the CARRIED actor (LT5's
+  service envelope), the row deletes on delivery-ack
+  (admit-before-delete), a re-sent duplicate dedupes at the eventId
+  horizon, and an LT4 deterministic rejection deletes without
+  retrying (`executor-outbox.test.ts`; the model's C2/FP1 closure
+  stays the oracle).
+- serving-loop §1 plane (c): CHANGED sentence — the direct-engine
+  plane now also carries the outbox's delivery-acked row retirement
+  (the rows are WRITTEN on plane (a) inside the wave transaction;
+  only the delete rides plane (c)). This row is its coverage; the
+  retirement behavior is pinned by the delivery tests above.
+- serving-loop §7's memo/outbox counters: structurally-zero note
+  retired — the counters are live and asserted by the stage-G tests
+  (stats.ts documents the exact semantics, including that
+  `outbox.failed` counts INFRASTRUCTURE failures while effect-level
+  failures commit error-shaped results per §4).
+- stage D's last documented bound (sqlite ops in wave batches):
+  DISCHARGED for HOME batches — the accumulator resolves each folded
+  op's db scope against its RUN's identity (M1), the sink attaches
+  through the memory server's `attachWaveCommitSqliteDbs` (same
+  validations as the transact path) and applies atomically inside
+  the wave transaction; hook-less sinks, key-less ops, and FOREIGN
+  batches with sqlite ops are refused loudly (`executor-outbox.
+  test.ts`). Foreign-batch sqlite lands with Phase 5's cross-space
+  design.
+- OW7 → LANDED as trace T14 (scenario-traces §3/§4) plus the
+  serving-loop failure-leg test above; the owed entry below is
+  flipped.
+- The stage-G adversarial review's fix batch (2026-08-06), coverage
+  where it added binding behavior: (i) the deferred-flush window the
+  serving posture opens — a stale action re-run re-admitting a key
+  whose first effect already completed — is closed by TWO mechanisms
+  in series, stated truthfully after the independent review's
+  captured double-fire showed the claim guard alone does NOT close
+  it: `tryClaimMutex`'s completed-request guard (skip the claim when
+  the stored hash matches and a result/error is READABLE —
+  unit-pinned in `fetch-claim-takeover.test.ts`) plus the
+  READABILITY-GATED in-flight retirement (serving-loop §5's ruled
+  idempotence sentence): the outbox holds the key until every
+  completion commit's writes are applied to the serving replica
+  (`ISpaceReplica.whenApplied` over CT-1927's parked accepts), so
+  the stale re-admit that used to arrive inside the ~15 ms
+  absorption window — reading a view without the completion, where
+  the guard structurally passes — now DEDUPES. Pinned by the
+  `whenApplied` unit (`memory-v2-stacked-commit.test.ts`), the
+  deterministic hold-absorption/re-admit/dedupe interleave
+  (`executor-outbox.test.ts`), and the E2E's exactly-once
+  external-call pins under repeated load runs; (ii) the sqliteQuery
+  memo decision distinguishes a SETTLED result (a hit) from a bare
+  claim marker — an orphaned claim re-issues under the serving
+  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
+  §6 step 3's re-miss premise for the one builtin whose key commits
+  ahead of its result; (iii) userless/grantless outbound appends
+  are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
+  ahead of the delegated floor that would deterministically destroy
+  them at delivery — the Phase-3 floor carve-out for sessionless
+  space-scope emissions is now SHAPE-RULED (2026-08-05, protocol §2;
+  implementation is Phase 3's, owed below); (iv) admit-before-delete
+  is now pinned by a transport-failure test (the row survives a
+  non-deterministic delivery failure; the next drain delivers
+  exactly one entry).
+
+Delta 2026-08-06 — the stage-G INDEPENDENT review's fix batch, plus
+the owner's 2026-08-05 ruling batch (five rulings recorded; changed
+sentences, one recorded acceptance, three owed entries):
+
+- serving-loop §5's effect-idempotence sentence: AMENDED (RULED
+  2026-08-05). The old "a duplicate completion writes an identical
+  key and is a CAS no-op" described a mechanism the completion path
+  does not have; the section now states the true one — the
+  builtins' request-hash guards plus the all-no-op short-circuit,
+  completion commits deliberately at `basisSeq = NOW` (no per-doc
+  CAS), and the readability-gated in-flight retirement closing the
+  absorption-window race. CHANGED sentence; its coverage is the
+  fix-batch row above.
+- serving-loop §3d's sanctioned-stamp-kinds sentence: the
+  "acked-effect retirement when stage G lands it" clause was a
+  MIS-ATTRIBUTION (reviewer-verified): the write it describes is
+  Phase 4's client-effect retirement (protocol §5 — a
+  bookkeeping-stamped wave write among protocol §1's
+  service-identity writes). §3d now attributes it to Phase 4 and
+  notes stage G's own retirement is plane (c)'s unstamped
+  engine-table ROW delete (§1 already said so). CHANGED sentence,
+  same rows.
+- ONE RECORDED OFF-arm acceptance rides stage G (RATIFIED
+  2026-08-05; testing §2's gate clause widened the same day to name
+  this register's recorded-acceptance rows alongside
+  key-vocabulary §5's): `tryClaimMutex`'s completed-request guard
+  changes the OFF arm's cross-writer race corner. Old behavior:
+  a claimant racing another writer's completed result for the SAME
+  inputs claimed anyway, transiently cleared result/error, and
+  re-fetched (a redundant refetch plus a visible clearing blip).
+  New behavior: the claim is skipped — the stored value stands.
+  Post-B-1 shape, stated precisely: the guard reads the claimant's
+  view, so it engages exactly when the completed writeback is
+  READABLE there; the serving posture's unreadable-window case is
+  closed by the retirement gate (above), not by this guard, and
+  client-side the guard only removes the redundant-refetch corner
+  (inline flushing already made in-process ordering safe). (A SECOND
+  recorded acceptance — Phase 2's R4 written-subtree narrowing — is
+  recorded in the Phase-2 independent-review delta below.)
+- FIVE MORE recorded rows ride stage G's 2026-08-12 review round
+  (ALL RATIFIED by the owner 2026-08-13, alongside the §4
+  per-(key, result target) amendment):
+  (1) per-target idempotency keys make the OFF arm's tx-level
+  outbox dedupe (`outboxIdempotencyKeys`) finer — two distinct
+  nodes enqueueing byte-identical inputs in ONE transaction now
+  BOTH flush where the second was silently dropped (reachable
+  only when one tx runs multiple actions; a bug-fix delta);
+  (2) OFF-arm fetch writebacks whose commit fails terminally now
+  REJECT the tracked-work promise (previously silent), and the
+  error-shaped-result conversion applies OFF-arm too;
+  (3) tryClaimMutex marker placement is OFF-inert (a WeakMap
+  write plus a destination-gated authoritative call) — listed
+  for completeness;
+  (4) the authoritative-write completion path (container
+  assertions + whole-doc set/delete) is gated on the serving
+  posture — OFF byte-identical — with ONE ratified ON-arm
+  widening: a serving completion's whole-doc write of a builtin
+  `internal` doc can stomp a concurrent CLIENT replica's mutex
+  claim fields (requestId/lastActivity); it self-heals via the
+  5s staleness bound and is strictly better than the wedged
+  completion it replaces;
+  (5) llm hit-observer gating shifts OFF-arm counters only
+  (settled re-evaluations now count as hits; no behavioral
+  consumer today).
+- FP6's register row (field-provenance.md): the label basis is
+  STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
+  yields the stricter label, loosening matches the OFF arm's
+  write-time derivation, a frozen snapshot would write stale labels
+  over a re-labeled basis. Recorded on the row; no mechanism moved.
+- protocol §2: the Phase-3 floor carve-out for sessionless
+  space-scope emissions is SHAPE-RULED (2026-08-05) and recorded in
+  the delegated-row region — absent acting principal admitted iff
+  declared sessionless-space-scope (`firedAt = { session: "server"
+  }`, no user key), grant presence still mandatory. events §2 and
+  the model already carry the semantics; implementation is owed
+  (Phase 3, below).
+- builtins §2's fetch row: the "migrate requestHash onto the result
+  doc" prescription now carries its deferral note (the
+  internal-cell hash is functionally equivalent committed state per
+  T10.Q1; the migration is an OFF-arm cell-shape change waiting for
+  an OFF-arm ruling batch that wants it — plausibly never).
+  CHANGED sentence, same row.
+- stats.ts's memo.hits note now states the hit unit (a
+  re-evaluation touching a settled effect node, NOT a suppressed
+  fire) so Phase 2's gate arithmetic cannot read hits as "avoided
+  calls". Code-comment clarification; no counter moved.
+- FP1 fold completeness (the review's M-A): appends and consequence
+  coverage now fold for EVERY surviving contribution — the
+  foreign-only-seal survivor and the zero-seal emitter (minted as a
+  zero-write contribution, the model's committed-`writes: []`
+  shape) both land their appends and `consequenceOf`; both shapes
+  red-first pinned in `executor-outbox.test.ts`.
+- The SpaceServer's recovery seams (the review's M-B): the §6-step-5
+  activation re-send and the owed post-wave drain are now pinned at
+  the SpaceServer level (`executor-space-server.test.ts` — deleting
+  the activation re-send call turns the test red), and a
+  transport-failed ACTIVATION re-send now arms the owed re-drain so
+  surviving rows ride the next wave instead of waiting for the next
+  appends-carrying wave or re-activation.
+
+Delta 2026-08-07 — the completion-visibility wedge fix batch (F1a +
+F2, mechanism-triaged from the serving-loop soak's ~11%-red wedge
+population):
+
+- Retirement LIVENESS (F1a): sealed commits — waves and effect
+  completions alike — now CONFIRM on the serving replica at verdict
+  time (`settleSealedCommit` → `confirmPending`) instead of taking
+  the parkable path. Parking guards a REMOTE mirror against
+  promoting over missing foreign novelty, but engine-plane commits
+  bypass the transact path — the only place catch-up marker
+  obligations are staged — so a parked sealed accept could NEVER
+  promote: `whenApplied` waiters never resolved, every served
+  effect leaked one permanently-in-flight outbox entry, and any
+  A→B→A input cycle starved deduping against the dead entry.
+  CT-1927 parking for pushed (socket) commits is untouched. The
+  earlier fix-batch row's "whenApplied over CT-1927's parked
+  accepts" mechanism reads accordingly: readability is now
+  immediate for completions and the retirement barrier is the BELT
+  over the structural guarantee (its hold/re-admit/dedupe pins are
+  unchanged and still green). Red-first pinned by the deterministic
+  A→B→A starvation test and the N-effects in-flight-baseline test
+  (`executor-serving-loop.test.ts`).
+- Completion writebacks are AUTHORITATIVE (F2): a completion-marked
+  transaction's writes commit even where the replica's optimistic
+  view calls them no-ops — that view can layer a DOOMED sealed
+  overlay (a derivation write a later wave-commit supersede-drops,
+  §3d), and eliding the completion's `inputHash`/`pending` writes
+  against it durably landed `result present + inputHash stale`,
+  which the next run's memo guard read as "inputs changed" and
+  destroyed the just-served value (the observed ~30 ms
+  arrive-then-wipe). Mechanism: `markEffectCompletion` flips the
+  transaction into authoritative-writes mode
+  (`markAuthoritativeWrites`, gated on the serving posture's seal
+  destination so the OFF arm stays byte-identical), which is
+  honored at every elision layer — the value-diff leaf
+  (`normalizeAndDiff`), the transaction write paths, the doc-level
+  no-op skip and the initial-vs-current patch diff
+  (`getNativeCommit`/`buildPatchOperation`, which emits forced
+  full-cover `replace` asserts). All effectful builtins already
+  route their writebacks through `markEffectCompletion`
+  (fetch/fetch-program/llm/llm-dialog/sqlite), so the audit
+  reduces to that single seam. Ordinary transactions keep the
+  elision everywhere. Red-first pinned by the torn-hash
+  supersede-drop interleave (`executor-wave.test.ts`).
+- The parked-overlay stale-read machine (the triage's independent
+  observation — a never-promoted sealed overlay replaying over
+  advancing confirmed state until a later drop flips visible
+  state): structurally unreachable post-F1a — sealed verdicts
+  either confirm immediately or withdraw-and-roll-back, and
+  `settleAccept`'s parking branch is reachable only from the
+  socket-transact paths, where CT-1927's marker machinery
+  guarantees eventual promotion. No test forced; recorded here.
+
+Delta 2026-08-07 — Phase 2 lands (flag ON: the server derives, the
+client does not; this PR):
+
+- speculation §1/§2/§4/§6's impl-gated rules: the implementation they
+  gated on LANDED, with the pins cited below. Stated precisely
+  (r3739139527 — the earlier "impl-gate rows → COVERED" overstated
+  against the §1 map, whose speculation row still counts them
+  impl-gate): this delta records the landing evidence; the map's
+  COLUMN moves (impl-gate → instrument-covered where the cited pins
+  bind the rule text) belong to the next full mapping pass, which §4's
+  standing rule already schedules. The overlay is
+  the runtime's DEFAULT seal destination under the flag for every
+  non-serving runtime (`packages/runner/src/speculation/
+  overlay-destination.ts`): stamped derivation-kind runs redirect into
+  the replica's pending layer (`sealNative` speculative — outside the
+  `synced()` barrier), handler runs kept committing authored (F10 —
+  Phase 2's interim posture; ENDED with Phase 3's events-down, which
+  INVERTED these pins: a handler fire commits only the event and the
+  handler run diverts — the same suite now asserts that posture),
+  unstamped/binding writes untouched, egress effect kinds dropped
+  with `navigateTo` enacting (the egress rule), `compile-and-run`
+  gated at the builtin — the gate's true interim scope is wider than
+  "not speculable": it suppresses fresh compiles for EVERY flag-ON
+  non-wave run and the serving side refuses the writebacks, so fresh
+  compile-and-run is INERT ON-arm until the serving port (stage G's
+  out-of-scope note) lands; both-arms pins in
+  `packages/runner/test/compile-and-run.test.ts` (the review's m5) —
+  retirement on watermark coverage of the entry's read basis + acked
+  origins via success-shaped `superseded` withdrawals that cascade
+  nothing. Pinned in
+  `packages/runner/test/speculation-overlay.test.ts` (echo with zero
+  client commits; the store-attribution query — zero derived-class
+  commits from any client session; watermark-coverage retirement;
+  F10; egress suppression) and live in
+  `packages/patterns/integration/sx2-speculation.test.ts` — scoped
+  honestly (the review's m6): the acked-origins component (§4 step
+  3's KEEP half — an unacked origin holds the echo) is NOT directly
+  pinned by these suites; it rides OW4's scoping below, with direct
+  pins owed alongside the Phase-3 offline machinery that builds the
+  origin-queue fixtures they need.
+- The Phase-2 revisit (a) — the settle input barrier: RESOLVED by the
+  plan's sanctioned exclusion alternative.
+  `ISpaceReplica.unappliedForeignSeqFloor` reports inbound foreign
+  seqs still shadowed by parked own writes; the SpaceServer clamps
+  its W advance below them (`watermarkClamped` counter, serving-loop
+  §7 — edited with this delta) and the shadow-flip notification in
+  `confirmPending` (flag ON) registers the dirtiness the moment the
+  overlay leaves, so the next wave derives over the foreign value
+  before W claims it. Two exemptions the serving loop's own frames
+  forced, both pinned: an own-echo upsert (its seq IS a pending
+  accept's ack seq, with the verdict-race repair) and the seq-0
+  absent-doc marker never shadow. Pinned in
+  `packages/runner/test/memory-v2-stacked-commit.test.ts` (flag-ON
+  shadow + flip notification; flag-OFF silent-flip byte-identity;
+  own-echo exemption). The stage-F residual comment at `inputSynced`
+  is rewritten to the resolved posture.
+- The Phase-2 revisit (b) — the pattern-updater CHECK half: the
+  `sx2-serving-loop` integration surface is AUTHORED
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`) and the
+  machinery observation was made in the live bring-up runs (the
+  serving loop settles to watermark-covered quiescence with
+  `systemPatternAutoUpdate` flipped ON server-side against toolshed's
+  real routes — the environment the stage-F unit fixture could not
+  provide). Stated honestly: that surface is currently SKIP-LISTED in
+  the ON arm (it deterministically reproduces the demand-cycle
+  starvation fork — the owed row below), so its gates are witnessed
+  by the live bring-up evidence and the serving-loop unit suite, not
+  yet by CI; the row un-skips with the terminal-state follow-up. A
+  full stale-pointer roll-forward journey remains the named
+  follow-up.
+- M1's Phase-2 seam — per-run demanded identities: the demand
+  carriage (watchedRootsForSpace per-instance entries + the
+  SpaceServer's demanded-identity registry), the widened
+  `ServerRunInfo` (`scopeKeyIdentity`/`actionScopeKey`) passed
+  through `#stampRun`, and the tx-carried identity consulted at the
+  traversal-context and result-cell sites. Cardinality 2 pinned at
+  three levels (`executor-wave.test.ts`: the sink/engine same-doc
+  two-instance fold and two stamped runs folding into one wave with
+  per-run keys; `executor-serving-loop.test.ts`: the production-seam
+  journey whose per-run outbox carriages carry two DIFFERENT keys
+  into the completions — the m-4 note's "arrives with Phase 2's
+  stamper" DISCHARGED). The per-run SUPPLY — the scheduler running a
+  scoped action once per demanded instance — LANDED with stage P2-F
+  (the N-run settle loop through the `runInstanceResolver` seam;
+  OW17 below carries the narrowed residue: the replica-level
+  per-instance read keying and the local dirtiness precision that
+  depends on it).
+- The ON-arm skip list: Phase 2 RETIRED the two-browsers entry (its
+  named unskipping condition — the client derivation-commit path
+  removed — is this PR; that gate now runs and passes ON) and ADDED
+  one entry, `sx2-serving-loop`, under `phase-2-followup` — the
+  demand-cycle starvation fork's reproducer. Stage P2-F
+  (2026-08-13) RETIRED that entry too: the terminal state closed
+  the fork (the OW19 row below records the closure), and the ON-arm
+  skip list was EMPTY again — the full patterns suite runs both
+  arms. (Dated history: Phase 4 re-added `topics-navigation`, Phase 7's
+  fixer added five more `phase-7` entries — and found the mechanism
+  had been INERT since Phase 4, so "runs and passes ON" for the
+  two-browsers gate was true only of the MIXED-posture lane; see OW25
+  and the 2026-08-16 delta.)
+- testing §4's single-deriver envelope gate: impl-covered — the
+  store-attribution query pinned in `speculation-overlay.test.ts`
+  (every derived commit's holder is the service identity; none from a
+  client session).
+- The standing rule's trigger has FIRED: Phase 2 flips ON, so the
+  next full mapping pass is DUE — owed as a follow-up alongside the
+  Phase-3 pre-flight, not carried in this PR.
+
+**Phase 2 pre-gate — LANDED with Phase 2 (2026-08-07):**
+
+- OW3 — LANDED as the model's narrowing/fan-out sub-model
+  (`packages/spec-model/server-execution/model.ts`, C11a–C11c in
+  `properties.test.ts`): instance sets stay clean products (never
+  ragged, exhaustively), the fan-out unit is the RUN
+  (`action × instance`, never merged), and W never forks — one
+  integer whose ADVANCE waits on demanded siblings only (protocol
+  §4's fresh-demand-after-W allowance modeled explicitly), undemanded
+  instances never holding it back.
+- OW4 — LANDED as trace T15 (scenario-traces §3/§4, count 14 → 15)
+  plus impl witnesses, scoped precisely: input-origin RETIREMENT
+  (acked AND W ≥ seq — the retire-after-coverage half) and
+  never-serialized are pinned in `speculation-overlay.test.ts` /
+  `sx2-speculation.test.ts`; unreplicated-doc-reads-pending and the
+  KEEP half of §4 step 3 (an unacked origin holds the echo) are
+  covered by T15's cited answers and speculation §2's normative text,
+  with direct pins owed alongside the Phase-3 offline machinery
+  (which builds the origin-queue fixtures they need).
+- OW12 — LANDED: the discovered-narrowing eager via-user hop now has
+  its direct test (`packages/runner/test/eager-via-user-hop.test.ts`,
+  the OW12 case — a compiled pattern whose run READS a `PerSession`
+  cell and discovers session narrowing at its result binding;
+  space→user→session chain pinned, value at session).
+
+Delta 2026-08-07 — the scheduler-tell classification batch (owner
+ruling 2026-08-07; this PR):
+
+- protocol §1's scheduler-tell rule (+1 rule, map edited with this
+  delta; speculation §2 carries the cross-reference, counted once):
+  → COVERED by the existing stamping-boundary pins — the ruling NAMES
+  the landed boundary rather than changing it, and the boundary is
+  already witnessed end to end in
+  `packages/runner/test/speculation-overlay.test.ts` (stamped
+  derivation-kind runs divert; handler runs committed authored — F10,
+  the interim Phase 3 INVERTED: those pins now assert a handler fire
+  commits only the event and the handler run diverts; UNSTAMPED
+  setup/binding transactions commit as today; the
+  store-attribution query — zero derived-class commits from any
+  client session) and live in
+  `packages/patterns/integration/sx2-speculation.test.ts`. The
+  no-creation-carve-out corollary rides the same pins (a lift
+  instantiation's run is stamped derivation-kind by construction);
+  the imperative-creation `.pull`-for-round-one flow is exercised by
+  the serving-loop demand path
+  (`packages/runner/test/executor-serving-loop.test.ts`).
+- speculation §4's retirement honesty sentence (+1 rule, map edited
+  with this delta): → COVERED — the retirement trigger (watermark
+  coverage of basis + acked origins, value arrival NOT awaited) is
+  pinned in `speculation-overlay.test.ts`, and the safety machinery
+  the sentence names — the demand-cycle ensure-retry on deferred
+  structure loads — is pinned red-first in
+  `packages/runner/test/executor-serving-loop.test.ts` (the
+  demand-cycle ensure-retries test, c766ef453).
+
+Delta 2026-08-07 — the Phase-2 INDEPENDENT review's fix batch (this
+PR):
+
+- A SECOND RECORDED OFF-arm acceptance rides Phase 2's R4 fix (RULED
+  2026-08-07, owner — complexity-adjudicated: the whole-result
+  validation's over-reach was latent on BOTH arms, and narrowing was
+  chosen over carrying it; testing §2's gate clause already names
+  this register's recorded-acceptance rows, so this row is the
+  stage-G `tryClaimMutex` row's sibling). The delta:
+  `PiecePropIo.set`'s non-stream branch moved from WHOLE-RESULT
+  validation to WRITTEN-SUBTREE validation (`linkPathContracts`, the
+  sibling stream branch's long-standing approach) — property writes
+  that formerly threw on UNRELATED-property staleness (an absent or
+  invalid sibling the write never touched — the ON arm's
+  server-derived-late `$NAME` flake, and the same latent over-reach
+  OFF) now succeed, while an invalid WRITTEN value still throws and
+  correlated-anyOf paths keep the whole-result fallback (the one
+  shape path contracts cannot decompose). Pinned in
+  `packages/piece/test/pull-materialization.test.ts`: the ruled
+  absent-unrelated-required and invalid-unrelated-sibling shapes
+  (both RULED-2026-08-07-named tests), the explicit-undefined alias
+  still surfaced by the write-destination validator, the
+  derived-Cell-root pin reconciled to the narrowed contract, and the
+  correlated-union path still validated.
+- The settle input barrier's review pins (M2/M3/m4), landed with
+  probe evidence: the own-echo VERDICT-RACE repair (a frame
+  outrunning its verdict mis-records the echo as foreign; the
+  settleAccept repair lifts it — deleting the repair turns the new
+  `memory-v2-stacked-commit.test.ts` test red); the SpaceServer
+  W-clamp's counter now matches serving-loop §7's binding sentence —
+  it counts every wave whose advance the floor held below an
+  otherwise-advancing batch head, FULL suppression and the
+  remove-sentinel floor included (the pre-fix `advanceTo > W` guard
+  missed exactly those; no spec change — the code moved to the
+  sentence); and the clamp's min/max advance composition, the
+  counter, and the PROMPT lift are pinned at the SpaceServer level
+  (`executor-space-server.test.ts`, stubbed floor — either inverted
+  Math.min/Math.max turns it red). The prompt lift is new mechanism
+  (the review's m4): `ISpaceReplica.shadowFlipObserver`, installed at
+  activation and fired by `confirmPending`'s flip, resolves the
+  loop's input wait directly — without it a clamped-then-quiet space
+  waited out IDLE_PARK_MS before the catch-up wave (probe: wake
+  disabled, the prompt-lift pin times out red). The shadowed-REMOVE
+  sentinel (floor 1) gained its replica-level pin, and the R2
+  never-a-piece exclusion test now exercises the `cid:` class
+  (dropping it from the exclusion turns the test red).
+- `sx2-speculation`'s bounded destination-validator retry is now
+  VISIBLE when it engages (a loud engagement log) and scoped to the
+  cold-view creation window it exists for: the gate's new
+  steady-state edit runs with ZERO retries, so the open
+  set-validation fork engaging outside its window fails the gate
+  instead of riding the mask (the review's m9).
+- Provenance note for protocol §1's owner blockquote (the scheduler
+  tell): its primary source is the owner's coordination-channel
+  message of 2026-08-07 (off-GitHub), attested by the coordinator —
+  the quote's fidelity is not independently verifiable from repo
+  artifacts.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -82,41 +764,4423 @@ extension owed and WHEN it earns its cost:
   scopes §5). One C6-style negative.
 - OW2 — a lease renewal is NEVER a commit (serving-loop §2): renew
   transition asserts zero commit records.
+- OW9 — the §3d rebase arm: the model's conflict machinery requeues
+  EVERY raced consequence — it has no field-level-merge disposition —
+  so the impl's three-way drop/rebase/requeue split (serving-loop
+  §3d) is pinned by impl tests alone
+  (`packages/runner/test/executor-wave.test.ts`). Owed: a model
+  rebase-arm extension (commuting-patch merge plus the
+  re-CAS-at-the-observed-head rule).
 
-**Phase 2 pre-gate (when fan-out/speculation semantics go live —
-extend the model with narrowing, and the traces with a client-side
-journey):**
+**Phase 2 pre-gate — LANDED with Phase 2 (2026-08-07; the delta
+above carries the coverage):**
 
-- OW3 — instance sets never RAGGED across principals (scopes §2);
-  CFC unit `action × instance` under fan-out (serving-loop §3c);
-  no per-instance watermark forks (scopes §9). One narrowing/fan-out
-  model extension covers all three.
-- OW4 — speculation client-side trio: unreplicated-doc reads go
-  pending; input-origin overlay retirement (ack + W ≥ seq); overlay
-  never serialized to any server (speculation §2/§4/§6).
+- OW3 — LANDED (the C11 narrowing/fan-out model family).
+- OW4 — LANDED (trace T15 + the speculation impl witnesses).
 
-**Stage F pre-gate (SpaceServer behaviors — one activation-journey
-trace, T13 candidate):**
+**Stage F pre-gate — LANDED with stage F (2026-08-05):**
 
-- OW5 — activation loads demand + queued events, never a
-  piece-start step (serving-loop §1; runtime-mapping N22/N31);
-  event-to-parked-space auto-activation; parking vs pending
-  gate-wakes (N9); wish `#now` timers vs quiescence (N50 — carries
-  its own owner ruling first).
-- OW6 — pattern-pointer hot-swap runs server-side (serving-loop
-  §3e; N40/41).
+- OW5 — LANDED as trace T13 (scenario-traces §3/§4) plus the
+  serving-loop tests: activation loads demand + queued events, never
+  a piece-start step; auto-activation on authored admission /
+  session open; parking honors pending gate wakes (N9's default,
+  adopted). One residue stays owed, carried DELIBERATELY as T13.Q8's
+  GAP: wish `#now` timers vs quiescence needs its own owner ruling
+  first (N50) — see OW11 below.
+- OW6 — LANDED: trace T13.Q5 + the end-to-end server-side hot-swap
+  test (`executor-serving-loop.test.ts`): the pointer write is
+  authored input, the SpaceServer swaps, the swapped derivation
+  serves as a derived commit.
+- OW10 — LANDED: `assertSchemaMemoIdentity`
+  (`packages/runner/src/traverse.ts`) binds a shared memo to its
+  first traversal's identity at the SchemaObjectTraverser choke
+  point and throws on any other — the future-sharing change now
+  trips loudly instead of silently value-bleeding.
 
-**Stage G pre-gate:**
+**Still owed from the stage-F bucket:**
 
-- OW7 — effect failure retries are input-driven, never
-  timer-driven (serving-loop §4); one failure-path trace question.
+- OW11 — the N50 owner ruling (wish `#now` timers vs quiescence and
+  the amplification budget), carried out of OW5: a space with an
+  interval `#now` never quiesces and every tick is a derived
+  commit; parking policy and the testing §4 gate need the ruling
+  before builtins §1 ships `wish` as "port cost: none". T13.Q8
+  holds the trace cell open.
+- OW12 — LANDED with Phase 2 (2026-08-07): the discovered-narrowing
+  fixture exists (`eager-via-user-hop.test.ts`'s OW12 case) and pins
+  the `pattern-binding.ts` chain directly.
+- OW13 — delegated-grant RESOLUTION (protocol §2's delegated row,
+  carved out 2026-08-05): admission today validates carriage
+  PRESENCE + COMPLETENESS (class, non-empty actor + grant, the
+  sessionless session-scope refusal) and keys scoped writes from the
+  carried identity; it does NOT resolve `capabilityRef` against the
+  target doc/stream — today's ACL model holds no per-doc grants to
+  resolve against. Owed: the grant-resolution check and its negative
+  tests when a per-doc grant store lands. Trigger: the first
+  producer of grant-scoped capabilities (protocol §2's anticipated
+  grant-scoped checks) — no later than the outbox/provisioning
+  producers going live (Phase 3 events; Phase 5 cross-space).
+  RULED 2026-08-13 (owner; the delegated-scoped-reads deferral): NO
+  refusal machinery lands in Phases 1–4 — no delegated-scoped-read
+  producer exists through Phase 4 (verified), so there is nothing
+  to refuse. Phase 5 MUST land the grant-scoped read design
+  (protocol §2's anticipated grant-scoped checks), or an explicit
+  fail-closed admission refusal, BEFORE any delegated-scoped-read
+  producer ships — a Phase-5 work-order PRECONDITION, and the
+  producer and its refusal/design land together as one stack, so no
+  interim exposure window exists. DISCHARGED with Phase 5
+  (2026-08-14): the design landed in protocol §2 and its fail-closed
+  interim landed at both ends of the stack (the 2026-08-14 delta
+  below carries the coverage); the grant-RESOLUTION obligation stays
+  owed on its original trigger.
+
+**Stage G pre-gate — LANDED with stage G (2026-08-06):**
+
+- OW7 — LANDED as trace T14 (effect failure and retry: input-driven,
+  never timers — scenario-traces §3/§4) plus the impl witness in
+  `executor-serving-loop.test.ts` (the failure leg: an error-shaped
+  result commits with the key, no timer retry fires, and only an
+  input change re-fires).
+
+**Phase 3 pre-gate (when events land; pulled by Phase 3's
+pre-flight):**
+
+- OW14 — LANDED with Phase 3 (2026-08-10): the LT4 arm writes the
+  events §5 failure notice onto the SOURCE event's entry (protocol
+  §2b's ruling) BEFORE deleting the refused row — a small derived
+  commit of the loop's own, deduped by the refused append's eventId;
+  the crash-window pin (re-send → re-notice deduped → retire) and the
+  unsourced fallback live in `executor-outbox.test.ts`. The notice's
+  FIELD SHAPE (`StreamEventEntry.deliveryFailures`) is an
+  implementation choice FLAGGED for ratification in the Phase-3 PR.
+  Original obligation: the LT4 arm's source-side notice ORDER: when Phase 3 lands
+  events.md §5's failure-notice machinery, the deterministic-
+  rejection arm must write the events §5 notice BEFORE deleting the
+  refused outbox row — today the delete discards
+  `eventId`/`target`/`reason` except a warn log, and the obligation
+  lives only in outbox.ts's LT4 comment. Owed: the write-then-delete
+  ordering plus its test (a crash between the two must re-send and
+  re-notice, deduped, never lose the notice). Trigger: Phase 3's
+  events §5 machinery landing.
+- OW15 — LANDED with Phase 3 (2026-08-10): the engine floor admits a
+  userless batch iff declared sessionless-space-scope (negatives both
+  ways + both contradiction refusals + the user-scope chimera twin in
+  `memory/test/v2-event-append.test.ts`); the source refusal in
+  `enqueueOutboundAppend` lifted symmetrically; the delivery path
+  forwards the declaration and stores NULL — never "" — for the
+  absent principal; the delivered entry stamps
+  `firedAt = { session: "server" }` with no user key (pinned end to
+  end in `executor-outbox.test.ts`); the model pin rides C0-guards.
+  Original obligation: the sessionless space-scope floor carve-out's
+  IMPLEMENTATION (SHAPE-RULED 2026-08-05, protocol §2): lift the
+  source refusal in `enqueueOutboundAppend` for declared
+  sessionless-space-scope entries, fix the delivery path's `?? ""`
+  acting-principal mapping, land the floor negatives BOTH ways
+  (userless space-scope-declared admitted with
+  `firedAt = { session: "server" }`; userless without the
+  declaration still refused) and the model pin. Trigger: Phase 3's
+  event producers going live.
+- OW16 — LANDED with Phase 3 (2026-08-10): pin/unpin route through
+  `markEffectCompletion` as COMPLETION-class turn-lifecycle state
+  (their own derived commits, lifecycle subkeys so the turn's
+  in-flight entry never tears) and updateArgument stamps as a
+  HANDLER-class event-handler contribution (§3d's rebase-don't-drop
+  class; no eventId — the no-event requeue corner is the class's
+  inherent shape, noted at the call site).
+  Original obligation: the llm-dialog tool mutations' RULED classifications
+  (2026-08-05), implemented: pin and unpin commit as
+  COMPLETION-CLASS turn-lifecycle state; updateArgument commits as
+  a HANDLER-CLASS consequence. The three call sites carry the
+  ruling in comments (llm-dialog.ts — awaited and surfaced since
+  the stage-G review batch); the stamping/classing itself is
+  Phase-3 events territory. Trigger: Phase 3's pre-flight.
+
+**Phase 2 follow-up (APPROVED as its own follow-on stage — owner
+nod, 2026-08-07; recorded in the plan's stage list):**
+
+- OW17 — the scheduler instance dimension, NARROWED by stage P2-F
+  (2026-08-13; the supply LANDED): the N-run settle loop over
+  demanded identities is BUILT — the scheduler's reactive-action
+  choke point resolves an action's piece root against the
+  SpaceServer's demanded-identity registry (the
+  `runInstanceResolver` seam installed beside the §3d stamper) and
+  runs once per demanded instance, each run stamped with that
+  instance's identity AND acting pair; the LT6 inheritance hands an
+  emitting run's identity to its dispatched handler run. Pinned:
+  `executor-run-supply.test.ts` (the N-run loop at cardinality 2
+  through the production choke point; LT6 inheritance; both
+  red-first at the P2 base), `executor-serving-loop.test.ts`
+  ("supplies the demanded (user, session) identity … END TO END" —
+  registry → auto-stamped run → acting annotations + per-instance
+  basis rows in the engine, red-first;
+  `executor-space-server.test.ts` adds the argument-doc demand — the
+  ensure-resolved owning root differs from the demanded id — reaching
+  the same observable through the resolved-root mapping). What
+  REMAINS owed — one leg,
+  together: the replica-level per-instance READ keying (one doc, N
+  instances read locally — the replica still keys scoped docs by
+  scope name, the cardinality-1 collapse the sink-level fold test
+  documents) and the per-(action × instance) LOCAL read-set/
+  dirtiness precision that depends on it (until the replica holds
+  distinct instances, per-instance local dirtiness is
+  behaviorally unobservable; the node re-runs its current instance
+  set and equality cutoffs/memo hits absorb the siblings — those two
+  are the ONLY absorbers: event ids mint per origin transaction, so
+  sibling instance runs mint DISTINCT ids and a derivation body
+  calling `.send()` would dispatch once per demanded instance, with
+  no eventId-level dedupe absorbing it. Handler dispatch is a
+  separate non-fanned path (C11b), and derivation-emitted events are
+  an anti-pattern today; that surface is unpinned either way — a pin
+  is owed when they become legal). The read collapse has a VALUE
+  half, stated explicitly so Phase 5's trigger is legible: sibling
+  runs read the SAME collapsed local scoped doc, so at
+  cardinality ≥ 2 with genuinely divergent scoped inputs one user's
+  per-instance engine rows hold values derived from the OTHER user's
+  data, stamped acting = the wrong user — a consequence stage P2-F
+  SHARPENS (pre-P2-F, scoped writes never landed in user instances
+  at all). Trigger:
+  no later than Phase 5's cross-space serving (foreign scoped
+  instances make the local collapse load-bearing); flag-don't-fill
+  until then.
+  **Phase 7 evidence (2026-08-15) — the collapse is LOAD-BEARING NOW,
+  and it is the flip's honest blocker for multi-user browser
+  scenarios.** Three mechanisms peeled on the lunch gate under the full
+  ON posture, in order: (1) the served `#profile` wish could not READ
+  the demanding user's home space (memory ACL — the process identity
+  was not a service principal; fixed: `memoryServiceDidsFor`);
+  (2) a flag-ON client's wish also fetched + instantiated the create
+  sidecar through bookkeeping-stamped AUTHORED commits, racing the
+  server's derived ones on the same docs (fixed: the client references
+  the served sidecar cell only — builtins.md §5); (3) the lunch
+  pattern's `#profile` wish lives in a NESTED sub-pattern whose actions
+  carried the CHILD root as `pieceRootId`, so the run supply found no
+  demanded instances and the runs fell to the wave-level identity —
+  the served scoped writes landed under `user:<serviceDID>` /
+  `session:<serviceDID>:…` (store dump: 34 user rows + 7 session rows
+  keyed by the SERVICE identity in the lunch space) — the
+  silent-empty-instance trap for WRITES, protocol §2's S1 ("there is
+  no third source of run identity") violated in practice (fixed: the
+  demand-root CHAIN, `SchedulerObservationIdentity.demandRootIds` —
+  nested pieces resolve through the outer root; `executor-run-supply.
+  test.ts`, red-first). The build report's "with (1)–(3) the gate
+  reaches the join UI ('host name filled') and stalls at the join
+  click" DID NOT REPRODUCE at head (P7 independent review, 0/2 runs;
+  `review-p7-logs/lunch-head-default-run{1,2}`): at head the served
+  `#profile` wish ran once identity-less and threw at STEP 1
+  (`home-space resolution on a serving runtime requires the run's
+  demanding identity`) — the client's demand supplies NO identity for
+  the wish's piece root (the OW29 space-root-demander gap is live at
+  FIRST demand, not at the join click) — and because fix (2) makes the
+  flag-ON client REFERENCE-ONLY, the client wish churns (~13.6/s,
+  `wish/phase/send-error` n=4078 / 300 s) waiting for a sidecar the
+  server cannot produce: fix (2) without OW29 converts a racy-but-
+  rendering client into a wait-forever client. The builder's join-UI
+  observation was on his tree WITH the reverted extensions applied.
+  Two further extensions were BUILT AND REVERTED because they make
+  cardinality ≥ 2 real on the collapsed replica: (4) SPACE-ROOT
+  DEMANDERS — a client watching only the space-scoped piece root
+  registers NO identity (`watchedRootsForSpace` records identity for
+  scoped roots only), so the second browser was never demanded; a
+  registry of (principal, session) demanders per space root + a
+  demand-ARRIVAL re-run (`Scheduler.invalidateActionsForDemandRoots`,
+  needed because a clean action never re-runs for an instance that did
+  not exist when it last ran); (5) the OW17 WRITE-half mitigation — a
+  per-instance run's scoped patch ops sealed as whole-doc SETS (the
+  patch was diffed against a SIBLING instance's collapsed local value,
+  so the engine rejected the whole wave: "wave commit rejected …
+  missing path /value/$UI/props/$cell"). With (4)+(5) both users'
+  instances materialize (store: `user:alice` 37, `session:alice:*` 2,
+  `user:bob` …) and the serving replica OSCILLATES: two instances of
+  one node write the same collapsed local doc alternately, each
+  re-dirtying the other — a wave STORM (4,427 waves / 4,426 derived
+  commits in 5 min, watermarkLag 1,685) — the OW17 VALUE half in its
+  purest form. (4)+(5) are recorded here as the designed shape and are
+  GATED on this row's owed leg (replica-level per-instance keying);
+  they must land WITH it, not before. CORRECTION (P7 independent
+  review, 2026-08-15; fixer 2026-08-16): the two-browsers gate's stall
+  under the full ON posture — at the unmodified Phase-6 base AND at the
+  Phase-7 head — is NOT evidenced as this collapse. Its server stats are
+  QUIET (waves 20–26, derivedCommits 19–25, events 2/2 appended/
+  processed, watermarkLag 1–2; `wavesBudgetExhausted` 12–16 of those
+  waves — but the single-browser `counter` gate exhausts 2/5 with no
+  client loop, so exhaustion alone is not the discriminator) while BOTH
+  browsers run a CLIENT-side `scheduler-non-settling` loop (every
+  ~6.6 s; 40–56 k client action runs / 5 min at head and base;
+  `runner/start/resumeCellSync` n=458–644 piece re-starts). The
+  4,427-wave storm signature above exists ONLY with (4)+(5) applied.
+  The client loop is its own UNATTRIBUTED row (OW32) whose triage comes
+  FIRST in the flip's ordered gates; "the browser-ON red family IS this
+  collapse" is withdrawn.
+  **CLASS VERDICT (P7 independent review, 2026-08-15): a bounded
+  architectural LEG — not a bug, not a redesign.** ONE layer was never
+  re-keyed: the runner-side local view. `SpaceReplica` keys every local
+  doc by scope NAME (`docKey(id, scope)` = `${normalizeCellScope(scope)}
+  \0${id}`, `packages/runner/src/storage/v2.ts` — used by `#docs`,
+  `#sinks`, `#staleFloor`, `#watchedIds`, `#shadowedForeignSeqs`,
+  `#syncTasks`: ~20 sites in one class); the wire upsert cannot name an
+  instance (`SessionSyncUpsert.scope?: CellScope`, `packages/memory/
+  v2.ts` — no scope key); `IMemoryAddress` carries no instance; and the
+  scheduler dependency graph resolves reads/writes against the
+  runtime's OWN identity (`scheduling-writes.ts`; C11b's singular node).
+  Everything else already speaks per instance (engine rows and dirty
+  keys `toDirtyKey(id, scopeKey)`, the lease-holder explicit-instance
+  reads, `DerivedWriteAnnotation.scopeKey`, the P2-F run supply's N
+  stamped runs). Fix SHAPE, with precedent (stage F/M2 re-keyed the
+  scheduler's `entityKey` from name to scope key with the cardinality-1
+  partition unchanged): (1) `SessionSyncUpsert`/`Remove` gain
+  `scopeKey`, populated by the memory server for lease-holder-exempt
+  sessions (the value is already `entry.scopeKey` at the push site);
+  (2) `docKey` takes the scope KEY, resolved from the replica's own
+  identity when no explicit key rides (OFF-arm neutral by
+  construction); (3) the tx→replica read/write seam passes the run's
+  stamped identity (`waveRunContextOf(tx).scopeKeyIdentity`) so an
+  instance run reads/writes ITS doc; (4) scoped-doc change notification
+  fans in to the singular node (any instance's change dirties the node;
+  the N-run loop re-runs; equality cutoffs absorb siblings — the "local
+  dirtiness precision" half stays an optimization). Nothing in C11b
+  forbids this ("instances live in keys" — the local doc map is a key
+  space); no serving-loop, demand, or wave redesign is implied. Size:
+  P2-F-shaped (a stage), cross-cutting but mechanical; not a one-site
+  fix. OW29's two extensions are prerequisites for user #2 to be served
+  at all, and the whole-doc-set write-half hack becomes unnecessary once
+  the diff base is the right instance's doc. Landing OW17+OW29 alone is
+  NOT shown to green the two-user journeys (OW32 first).
+  Trigger, re-stated: the flip's ordered gates (plan Phase 7 task 1):
+  OW32 triage → THIS leg (with OW29) → OW28 → the honest benchmark →
+  the flip PR.
+  **IN PROGRESS — leg 1 of 2 LANDED (fan-out stage A, 2026-08-16;
+  owner-ruled 2026-08-16 on the fan-out design + panel).** The
+  serving replica and the wire are INSTANCE-keyed: `SpaceReplica`
+  keys every local doc by `scope_key` (`docKey(id, instance)`;
+  key-vocabulary.md §3b) — one replica holds the service instance
+  AND per-principal instances of one doc; the wire carries
+  `scope_key` on lease-holder frames/snapshots only, the collapse
+  guard is scoped to non-holders, `WatchView` keys by instance; the
+  tx→replica identity seam threads the run's demand-supplied identity
+  (`IStorageTransaction.scopeKeyIdentity`, set by the wave stamp)
+  through reads, the commit-time claim, seals and verdicts, the
+  reactivity log (`IMemoryAddress.scopeKey` — the scheduler's
+  dependency/trigger keys per instance), and the runner's
+  explicit-instance loads (`Cell.sync` / `syncCell` / `syncInstance`
+  / the transaction-layer kick / `ensureLinkedDocLoaded` / the served
+  event's presync+preflight as its actor); the writer and
+  materializer indexes are NAME-keyed by design (the one fan-in);
+  the N-run loop resubscribes once to the union of its instance logs
+  (the last-instance-wins replacement gone); S4 keys basis rows by
+  the run's FULL instance address and clears the stranded stamp and
+  broader-chain keys in both directions (the RAGGED amendment,
+  scopes.md §2 — narrowing below the space→user hop is per
+  principal). Pinned red-first at the P7 head:
+  `executor-instance-keyed-replica.test.ts` (two demanded runs read
+  their OWN per-user inputs → divergent per-instance derived rows
+  with the right values and the serving replica holds both instances
+  — the VALUE half CLOSED; **R7** — Alice's authored draft + save
+  event → the served handler runs as Alice, reads HER draft, writes
+  her per-user consequence with the typed value; the resubscribe path
+  instance-aware — Bob's input change wakes the node; S4 — a
+  session-scoped demand on a user-discovering node records `user:<p>`
+  rows and no session-keyed zombie, a space-discovering node records
+  `space`), `storage-instance-keying.test.ts` (OFF-arm neutrality per
+  site: keys/compaction/logged addresses/notification addresses
+  byte-identical without an explicit instance; the two-instance
+  replica; the union resubscribe; per-instance watches and kicks),
+  memory `v2-explicit-read.test.ts` (a lease holder names two
+  instances of one (branch, id, scope) and receives both KEYED on
+  watch.set/watch.add/graph.query/push; a non-holder's read set is
+  still refused; a non-holder's frames carry no key). What REMAINS
+  (leg 2, stage B): the fan-out run SUPPLY — identity on space-scoped
+  demand rows, the demanders resolver, the known-scope ratchet with
+  discovery/arrival re-arms, the per-demander demand walk (+ the
+  wish-sidecar `parentPieceRootId` chain), output-scope-derived
+  attribution, and B7 precise dirtiness (the name-keyed fan-in's O(N)
+  cost is recorded, not a correctness need). Stage-A residuals,
+  FLAGGED (not filled): (i) an effect COMPLETION for a per-instance
+  run seals its local layer under the outbox carriage's identity
+  (matching its engine row) but the writeback transaction is unstamped,
+  so its hash-guard READS resolve the service's instances — a
+  per-instance node's effect completion is unpinned; (ii) a
+  handler-only write to a never-written PerUser slot lands at the
+  slot's base scope (the handler's handle carries no scope cap until
+  the slot redirects — pre-existing OFF behavior, verified at OFF;
+  the group-chat drafts avoid it because the client types first);
+  (iii) two P2-F basis-key pins moved to the S4 truth (a demanded run
+  reading only space input keys `space`, its `user:<p>` stamp cleared
+  — the acting annotations still witness the supply); (iv) the
+  wave-level fallback still runs a demanded piece before any
+  identity-bearing demand exists and leaves the `user:<serviceDID>`
+  garbage instance (stage B's B5 residual).
+  **Independent review + fix round (2026-08-17; review verdict
+  LANDABLE-WITH-FIXES, 24 mutations / 17 caught / 7 untested; fixer:
+  every finding dispositioned, 24/24 archived mutations + M1 caught).**
+  CLOSED by the fix round: (1) the review's MAJOR correctness finding —
+  the keyed wire hung from a bit any lapsed push pass cleared and only
+  a fresh admission re-armed, so a former/blipped holder's
+  full-evaluation catch-up sent UNKEYED removes for keyed-delivered
+  foreign instances (the runner replica wiped its OWN instance and kept
+  the stale foreign one — reproduced end to end) and a survived
+  renew-blip left the loopback session's foreign instances withheld for
+  the session's life (silent-stale). Invariant as landed: the session's
+  keying is STICKY wire vocabulary (a keyed delivery is always keyed-
+  retracted); foreign-instance DELIVERY stays the per-pass live-lease
+  question; a lapse is recorded and the first live pass RE-ARMS with a
+  full evaluation; the SpaceServer's renew arm reports a survived blip
+  (`noteLeaseReacquired`) so that pass runs promptly (protocol.md §3 as
+  amended). Pinned red-first: memory `v2-explicit-read.test.ts` (keyed
+  retraction with the own instance untouched; the re-arm via the notice
+  and via the first evaluating pass; the notice inert when nothing
+  lapsed), `storage-instance-keying.test.ts` (the replica half),
+  `executor-space-server.test.ts` (the renew arm's notice — once per
+  blip, never on a plain tick, never on a park),
+  `executor-instance-keyed-replica.test.ts` (the lapse withholds Alice's
+  write, the notice re-delivers it keyed to the serving replica, her
+  instance re-derives, Bob's untouched); each half mutation-verified.
+  (2) The TRUE R7 shape (type, then save; no derivation ever loaded the
+  actor's draft instance) is now pinned — the shipped R7 pin was
+  green with the presync AND preflight actor identity removed (a
+  derivation had pre-loaded the instance); the new pin asserts the
+  no-load precondition and goes red with both removed. (3) S4's
+  clearance half is pinned in BOTH directions with pre-existing
+  stranded rows plus the same-wave real-row guard
+  (`executor-wave.test.ts`); the earlier "pinned in both directions"
+  claim was an over-claim (only not-written was asserted). (4) The A3
+  seed-memo re-key is pinned (Bob's default seeded after Alice's run
+  memoized presence). (5) The individually-redundant seams have their
+  own pins (served preflight/presync identity, `Cell.sync` identity,
+  the traversal kick identity, `buildReads` identity, `WatchView` key).
+  Residuals SHARPENED, still flagged: (i) effect completion — the
+  writeback tx is unstamped, so its hash-guard reads resolve the
+  service's instances while the seal is under the carriage identity;
+  `buildReads` then attests the CARRIAGE identity's records (a never-
+  loaded record yields seq-0 confirmed reads); the engine does not
+  reject a mis-attested basis on derived commits today, so the
+  consequence is confined to local cascade/hash-guard tracking — but
+  any per-user node with an effect is served with an unattested basis;
+  fix shape: stamp the completion tx with the carriage identity at
+  `markEffectCompletion` (needs the runtime's outbox carriage — a
+  stamper hook, threaded through the builtins), NOT filled here;
+  trigger: before stage B adds per-user effect nodes. (v) The served
+  event stamp sets a NON-RESOLVING identity for a userless `firedAt`
+  (`{session:"server"}`) while preflight/presync read the own instance
+  — deliberately NOT aligned: the non-resolving identity is what makes
+  a userless run's scoped WRITE fail closed (`resolveScopeKey` throws;
+  the events.md §2 sessionless-actor class), dropping it would key the
+  write under the service silently, and aligning the guards the other
+  way buys nothing (loads land only in resolvable instances); the shape
+  itself — a declared sessionless space-scope chain touching user
+  scope — is illegal and its reads are empty either way. (vi) The
+  arrival gate's sweep has no arrival trigger of its own (speculation.md
+  §4 now states the frame-coupling assumption); an arrival re-sweep is
+  owed if that coupling loosens — LANDED, stage C tuning T2 (2026-08-18;
+  the coupling loosened by construction under the honest flush deadline
+  — see the stage-C tuning delta below). (vii) Two PRE-EXISTING SpaceServer
+  blip-window shapes surfaced by the fix round's E2E, not stage A's and
+  not filled: (a) with the lease row expired but the in-process tenure
+  live, the loop re-attempts its watermark advance every cycle and each
+  is refused by the engine's derived-class rule (a hot spin — 471
+  `wave-commit-rejected` in 2.7 s observed) until the row is live again
+  or the tick parks; (b) an EMPTY seal (a read probe, a no-op
+  derivation) opens a `#currentWave` that outlives zero-delta cycles
+  with the pre-blip tenure, so the first real seal after a same-process
+  reacquire aborts `lease-lost` and PARKS the space — the "survived
+  blip keeps serving" path is reachable only on a space quiet across the
+  tick; owner: the P7 renew-blip / wedge arms.
+  **CLOSED — leg 2 of 2 LANDED (fan-out stage B, 2026-08-17; owner
+  ruling 2026-08-16 "if a space scoped calculation gets narrowed to
+  user, it'll have to run for all users that demand it").** The
+  per-demander run SUPPLY: the demand registry keeps every demanding
+  (user, session) pair on every root a client watches — space-scoped
+  roots included (`watchedRootsForSpace` returns one row per demanding
+  session; the SpaceServer's `#demandersByKey`); the resolver seam
+  returns DEMANDERS (`runDemanderResolver` / `serverRunDemandersFor`,
+  replacing the instance-returning P2-F seam that decided instances
+  from the demand's own scope — F10's over-keying); the scheduler owns
+  the KNOWN-SCOPE RATCHET (`scheduler/fan-out.ts`: the top hop a
+  node-level bit, session depth per principal — ragged, scopes.md §2
+  as amended; only narrows; forgotten with the node) and derives
+  `instances(ratchet, demanders)` — one probe (min pair, key `space`)
+  while unnarrowed, one per demanding principal at user depth, one per
+  demanding session for a session-deep principal; the discovery
+  RE-ARM runs the siblings a moved ratchet exposes in the SAME pass;
+  the ARRIVAL RE-ARM (`invalidateActionsForDemandRoots`, keeping the
+  per-instance record) runs a late demander's instances only, woken
+  by the memory server's new `demandChanged` observer with a 300 ms
+  coalescing grace; the demand WALK runs per demander (an effect node
+  registered per demand key with the root as its demand root, so the
+  ordinary supply fans it out); B7 precise per-instance dirtiness (per
+  instance: the last committed log + a clean bit; a keyed notification
+  address dirties exactly the instances whose identity covers it; the
+  node's one subscription is the union; retries dirty only their own
+  instance); scope-derived ATTRIBUTION with the early-emit guard
+  (protocol.md §1 as amended); the wish sidecars chained to their
+  wish's piece (`parentPieceRootId`); the ragged redirect fix
+  (pattern-binding.ts: a session hop below an existing user redirect
+  lands in the run's own user slot, never on the shared space slot);
+  the service identity runs NO demanded work (fallback only when no
+  principal demands the roots; a narrowing fallback counted as
+  `undemandedNarrowingRuns`). Pinned red-first at the stage-A tip:
+  `executor-fan-out.test.ts` — (a) two users watching ONLY the space
+  root → two instances with their own values, user-only attribution,
+  no service row; (b) the arrival re-arm (Bob's instance on demand,
+  Alice's untouched); (c) RAGGED (Bob per session, Alice per user, no
+  session-keyed run for Alice); (d)+(e) a space node runs ONCE for
+  three demanders, stamped as a demander; (f-walk) a subtree
+  reachable only through a demander's value materializes under her
+  instance; (h) the B7 probe — N=4 × M=3: ONE user's change re-ran
+  exactly that user's 3 instances (naive 12), derivation node count
+  35 → 35; (i) the OW29 storm pin — 20 divergent edits per user,
+  waves bounded, quiescent, values never crossed; `scheduler-fan-out.
+  test.ts` (the pure core: instance function, ratchet, run outcomes,
+  mid-run causes, B7 dirtiness, union/prune); `executor-run-supply.
+  test.ts` (probe once, then per principal in the same pass; the
+  nested/list/grandchild chains per principal); `executor-space-server.
+  test.ts` (LT6 as a user-instance run: `firedAt.session = "server"`;
+  the EARLY-EMIT GUARD — send-then-read refused fail-closed, retry
+  attributed at the learned scope, one durable entry); the P2-F pins
+  moved to the ruled attribution (a user-scoped instance carries the
+  user only). PINNING (review F3, fix round 2026-08-17): the RAGGED
+  redirect fix now carries a DETERMINISTIC unit pin at
+  `sendValueToBinding` (`pattern-binding.test.ts` "RAGGED redirect": an
+  existing space→user redirect + a session discovery → the run's own
+  USER slot is re-pointed at session, the SHARED space slot untouched;
+  M9 — revert to writing the shared slot — kills it 4/4, replacing the
+  timing-sensitive (c)/(f-walk) coverage the review found M9 surviving
+  3/4). The WISH-SIDECAR demand-root chain (`sidecarRunOptions`) stays
+  covered only by the bimodal lunch gate: a runner-suite pin needs the
+  profile-create sidecar to actually RUN, and its fetch→compile→run
+  `.then` does not complete under the suite's mandatory fake clock (the
+  fetch fires, but `runSidecarInOwnTx`'s run never does), so a reliable
+  MWISH pin is OWED as a served-host wish E2E (the fan-out E2E's
+  ExecutorHost shape) — a named follow-up, not landed here.
+  Stage-B residuals, FLAGGED: (viii) the wish sidecar's
+  instance SET is the chain's demanders, not only the demander the
+  sidecar was minted for (a sibling's runs of a per-user sidecar's
+  narrowed nodes are inert but not free) — a per-demander pin
+  (`demandedBy` on the run options → a resolver filter) is the
+  refinement, an unstated semantic left for the owner; (ix) ~~the walk
+  re-fires per changed doc it read (an effect; N × walk per changed
+  root — the design's stated cost), not covered by B7's derivation
+  claim~~ **RESTATED 2026-08-19 (stage-C build W1): there is no walk.**
+  The demand walk is deleted; the demand pass reconciles the tracked-ids
+  closure in O(rows) on registry deltas (no per-row engine read), and the
+  structural-growth path lands one derived commit later than the link that
+  reaches it (W0's measured cost: chat 220–253 ms p50 to the landing,
+  ≤ 1.24 s p95, mostly the 300 ms demand-wake grace of (x)). B7's
+  per-instance clean bit is now the currency check's substrate; (x) the demand wake's 300 ms grace is a coalescing choice,
+  not a ruling — without it the lunch gate's browsers hung at login
+  (the loop's eager first structure load + derivations of a piece its
+  creator was still setting up made the creator's deferred-start
+  reads stale; the client's `piece-instantiate` then failed
+  `piece-start-commit-failed` and the shells never idled) — the
+  client-instantiate-vs-server-derive race at piece creation is
+  pre-existing and only softened, not closed (owner: the runner's
+  piece-start path).
+- OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
+  (2026-08-13; the RULED 2026-08-07 direction, built whole). A
+  demanded root CONFIRMED synced with no pattern meta parks TERMINAL
+  (`structureLoadTerminal`) — no per-cycle ensure churn — and a
+  commit touching one of the load's observed docs RE-ARMS it
+  (`structureLoadRearmed`); the re-armed retry is SETTLE-GATED
+  (retrying inside the re-arming cycle reads the replica's stale
+  pre-commit state and would re-terminalize the not-yet case the
+  re-arm exists to keep sound — caught red during the build). The
+  demanded-structure load pass moved UNDER the wave's flush deadline
+  (single-flighted across cycles; completion wakes the loop), so a
+  slow ensure no longer throttles input consumption. The conflation
+  hazard is discharged exactly as ruled: not-yet (creation race —
+  the instantiation commit re-arms, the settled retry loads and the
+  piece serves) vs never (a plain value doc stays parked) are
+  distinguished by the re-arm, never by id. Pinned red-first:
+  `executor-space-server.test.ts` ("terminalizes … STOPS the
+  per-cycle churn" — deferred/terminal counters flat across driven
+  cycles; "re-arms … and LOADS a piece created after the terminal
+  decision" — the full terminal → re-arm → settle-gated retry →
+  serve journey), and the serving-loop E2E's creation-race test
+  reconciled to the new classification (terminal + re-arm counters,
+  failures still zero). The `sx2-serving-loop` skip-list entry is
+  RETIRED with this row — the surface runs in CI's ON arm, carrying
+  the amplification-ratio gate and the pattern-updater CHECK-half
+  witness (the plan's Phase-2 revisit (b), now ticked).
+
+- OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
+  the scheduler-tell batch, NOT implemented by it):
+  `ensure-default-app-is-running` and pattern updating are
+  outside-scheduler CLIENT acts today — authored under the scheduler
+  tell, protocol §1 — and under the flag they can move server-side,
+  triggered by a pull on a qualifying pattern (in the current setup:
+  a system pattern from `/api/patterns`), after which flag-ON clients
+  simply STOP calling those ensurers/updaters. Owed when it lands:
+  the trigger's coverage (pull on a qualifying pattern ensures/
+  updates server-side; flag-ON clients make no ensurer calls) beside
+  the §3e watcher surface in `sx2-serving-loop`. Trigger: a Phase-2
+  follow-on PR, no later than Phase 3.
+
+**Phase 3 follow-ups (the independent review's owed rows,
+2026-08-11):**
+
+- OW20 — CLOSED with Phase 7 (2026-08-15) as OUT-OF-SCOPE-THIS-ROUND
+  (not deferred-owed): the owner RE-RULED LT9 — queued events surviving
+  a client reload is a NON-GOAL this round ("the status quo doesn't
+  survive client + server reload either"), the queue is
+  PROCESS-LIFETIME (events.md §5), and the durable adapter that carried
+  this row (Phase 3's Web-Storage store, Phase 5's
+  `InitializationData.eventAppendQueuePersistence` coupling seam) is
+  RETIRED. Kept: the manager-shared in-memory store and its in-process
+  replacement-survival pins (`event-append-client.test.ts`,
+  `space-host-late-hint.test.ts`) — machinery loss, not reload loss.
+  The recorded FUTURE shape, if reload survival is ever wanted:
+  per-tab persistence + orphan adoption (per-tab sessions, one writer
+  per session by construction, no leader election, no shared persisted
+  session). Original obligation, for the record: the LT9 BROWSER
+  ADAPTER (the durable `EventAppendQueueStore`, landing with protocol
+  §5's sessionId persistence it depends on) carried two queue debts —
+  (i) queue SELF-START on reconnect; (ii) the save-ordering contract
+  (`#persist` serializes saves behind the previous save — review m6,
+  still pinned; an async adapter MUST keep resolving `save()` per
+  call).
+- OW21 — updateArgument's FULL EVENT-ROUTING (per OW16's
+  classification): the tool mutation stamps HANDLER-class with NO
+  eventId, so on a flag-ON client the overlay REFUSES the seal
+  loudly (review m5 — surfacing what was silent loss: the divert
+  reported ok, nothing landed, no server run reproduced it, the
+  entry could never intent-retire). The refusal is the honest
+  interim, not the design: routing the mutation as a real event
+  (minted id, appended intent, server-authoritative run) is owed.
+  Interim mitigation, now ASSERTED (`speculation-overlay.test.ts`):
+  the llm-dialog tool loop's egress is dropped under speculation, so
+  a speculative turn cannot reach the tool call client-side.
+  Trigger: the first flag-ON client surface that drives llm-dialog
+  turns (the dialog moves server-side with the loop, which may
+  retire this row instead).
+- OW22 — `leaseHolderReads` is STICKY and the wire upsert path
+  strips scope keys (pre-existing adjacencies, surfaced by the
+  Phase-4 independent review's isolation trace): (i) the flag
+  (`session-registry.ts` — set once when a session is admitted an
+  explicit `entity_scope_key` read, lease holders only) is never
+  retired, so a session that ONCE held the lease keeps its push
+  applicable-set exemption — every instance's rows keep flowing to
+  it — after the lease expires or hands over; (ii) the recovery
+  path's wire upserts carry scope NAMES, so a lease-holder
+  session's explicit foreign instances mis-resolve to its OWN
+  identity (`server.ts`'s instanceKeyFor recovery — mitigated today
+  by forcing a full resync, itself keyed on the sticky flag). Owed:
+  retire the flag with the lease (or re-verify at push time), and a
+  test that a post-handover session stops receiving other
+  instances' rows. Trigger: Phase 5's grant-scoped read hardening
+  (FP2's named follow-up), or the first multi-server lease
+  handover work, whichever lands first. DISCHARGED with Phase 5
+  (2026-08-14; the delta below carries the evidence — the re-verify
+  and the post-handover tests exist, the half-(ii) mitigation
+  stands).
+- OW23 — unvalidated scope strings reach `resolveScopeKey` with no
+  default arm (pre-existing adjacency): the switch covers the three
+  `CellScope` members and TypeScript exhaustiveness assumes the
+  closed union, but wire-supplied scope strings are not narrowed
+  before the call at every site — an out-of-vocabulary string falls
+  through to `undefined` typed as `ScopeKey`, silently keying rows
+  under an impossible instance instead of refusing. Owed: a default
+  arm that THROWS (the fail-closed twin of the session/user arms)
+  plus a wire-boundary negative. Trigger: the next
+  `key-vocabulary.md` touch, or the first wire surface that accepts
+  scope strings from untrusted clients into scoped-row keying.
+- OW24 — stream-entry compaction's latent skip-vs-re-execute flip
+  (pre-existing adjacency): events §4 allows entries at or below
+  `eventWatermark` to COMPACT, and admission's dedupe horizon
+  already excludes them — but the serving drain's duplicate arm
+  (`space-server.ts`'s already-consequenced-eventId skip) consults
+  the STORED log, so the day compaction lands, a reused eventId
+  re-admitted above the horizon flips from "skip (its consumed twin
+  is visible)" to "re-execute (the twin compacted away)". Which
+  behavior is contractual is UNPINNED — events §4's dedupe-horizon
+  paragraph sanctions the re-admission without saying whether the
+  drain may re-run it. Owed: the ruling (one sentence in events §4)
+  and its pin, in the same PR that implements compaction. Trigger:
+  the compaction implementation.
+- OW25 — the ON-ARM CI SHELL BUILD (the workflow contract's other
+  clause, discharged-by-listing in Phase 4): the ON-arm CI lanes
+  run the toolshed binary's OFF-built browser shell — the flag is
+  an esbuild define burned in at `build-binaries` and embedded via
+  `--include`, with no serve-time override — so browser-ON
+  behavior (Phase 4's effect channel in a real shell, and every
+  later phase's browser-side surface) is CI-UNCOVERED: locally
+  full-ON, in CI mixed-posture. The affected test is listed
+  (`tasks/server-execution-on-skips.ts`: topics-navigation, red on
+  the unmodified Phase-3 base under the full posture). Owed: a
+  flag-ON toolshed binary build feeding the two ON jobs (a second
+  `build-binaries` invocation with the define env set — contained
+  in the workflow, but it flips ~50 browser suites into a posture
+  with a known inherited red family, so it lands WITH the triage
+  of that family, not before). Trigger: the leg-C ruling landing
+  (the inherited red's fix), and no later than the Phase-7 flip
+  (a flip criterion measured on a mixed-posture lane would be
+  vacuous).
+  Phase 7 (2026-08-15, re-tensed 2026-08-16 by the P7 fixer on the
+  independent review — the flip landed DARK, constant `false`): the ON
+  shell build LANDS as its own CI job, `build-toolshed-on` (the shell
+  define baked `true`), feeding the explicit-`EXPERIMENTAL_SERVER_
+  EXECUTION=true` ON lanes — the FULL ON posture (server ON, test
+  processes declaring ON, shell ON-built), VERIFIED by a posture probe
+  before every ON suite (`/api/meta`'s `shellServerExecutionDefine ===
+  "true"` from the COMPILED marker + `/api/health/stats`.servingLoop
+  present). The default lanes stay the OFF posture (their probe pins
+  server OFF + define unset). This row's owed leg is DISCHARGED: no
+  ON-lane green rides a mixed posture anymore. The inherited red did NOT
+  lift and its attribution is CORRECTED: `cfc-group-chat-demo-two-
+  browsers` and `lunch-poll-vote` stall on the UNATTRIBUTED client-side
+  scheduler-non-settling loop (OW32; NOT evidenced as OW17 — see the
+  correction in OW17), `topics-navigation` fails fast at the
+  controller's write-destination validation (`missing required property
+  myName`, OW30's class). All three are ON-skip-listed with loud reasons
+  (`tasks/server-execution-on-skips.ts`), and the fixer found the skip
+  mechanism itself had been INERT since Phase 4 (`deno test --ignore`
+  does not apply to explicitly listed files; fixed and pinned — the
+  quoted-glob tasks + the pattern shard's `--filter`); no browser-
+  posture criterion ticks until OW32/OW30 are triaged.
+- OW26 — the DEMANDED-EFFECT retry wedge (scheduler adjacency,
+  surfaced by the owner-review P1 batch, 2026-08-12): when an
+  `isEffect` builtin's action THROWS (the arms are builtins.md §4's
+  navigateTo runtime errors — no-context, sessionless, LT3) and an
+  authored input lands in the tight window after the failure, the
+  failed action's retry parks idle-blocking and STARVES — no
+  further charge ever appears, every subsequent flush exhausts its
+  deadline, and the space's W freezes below the new input (observed
+  ≥30s with no recovery). DETERMINISTIC for a statically-demanded
+  navigateTo (the invalid-pattern shape: the demand persistently
+  re-arms the node) and INTERMITTENT for the event-instantiated
+  throws (the sessionless test's kick-and-await-W barrier froze ~1
+  run in 4 before being reverted to a bounded drain). A throwing
+  `computed` under the IDENTICAL schedule does not wedge (charged,
+  bounded-retried, W advances in <1s), so the class is the
+  demanded-EFFECT retry park, not action errors per se; with
+  ≥500ms between the failure and the next input the wedge does not
+  arm. Reachable only downstream of a §4 runtime error today, but
+  one erroring pattern then degrades the whole space's serving
+  (waitForSettled stalls for every session). Original owed: a
+  scheduler fix aligning the erroring-demanded-effect posture with
+  the erroring-derivation posture (charge, bounded retry, settle),
+  plus a regression test racing an input into the failure window;
+  the three refusal tests' absence asserts then move from fixed
+  drains to the kick-and-await-W barrier that batch had to revert.
+  DISCHARGED with Phase 6 (2026-08-14) — the repro was re-run to
+  root cause, and every symptom that REPRODUCED traced to the
+  OBSERVER, not a scheduler posture gap (one recorded symptom did
+  not reproduce at all — the residual below):
+  (i) the reverted kick-and-await-W barriers derived their targets
+  from `Engine.serverSeq`, which counts the serving loop's own
+  derived wave echoes — and coverage NEVER claims a trailing echo on
+  a quiet space (the advance is input-driven; `#drainFeed` skips
+  self-echoes for `#coverageHead`), so the BARRIER hung, not W's
+  contract (deterministic for the fast-settling statically-demanded
+  thrower, ~1-in-4 when the echo raced the target read, disarmed by
+  a ≥500 ms gap — every recorded arm);
+  (ii) "no further charge ever appears" came from the recorded racing
+  input writing an UNRELATED doc — the thrower's registered reads
+  are path-granular, so it legitimately never re-ran (an input that
+  re-points the target re-runs and re-charges it);
+  (iii) offset sweeps 0–250 ms (overlapping commits included, 30+
+  runs) found NO genuine settled-contract stall: the
+  erroring-demanded-effect posture already matches the
+  erroring-derivation posture — charged, settled, W covers every
+  authored seq. No scheduler change was needed or made.
+  (iv — recorded 2026-08-15, from the Phase-6 independent review)
+  The original record's computed-control contrast ("a throwing
+  computed under the IDENTICAL schedule does not wedge", above) was
+  ALSO observer read-timing, not a product asymmetry: the review's
+  directed computed-control probe — a throwing `computed` under the
+  identical schedule and the same flawed `serverSeq` arithmetic, run
+  at both the Phase-6 base and head — froze IDENTICALLY (same
+  watermark-only echoes, same frozen wrong-class target, same
+  instant coverage of the input's own authored seq). The original
+  control's barrier simply read its target BEFORE the trailing echo
+  landed. So the two postures are symmetric from BOTH directions —
+  erroring demanded-effect and erroring derivation are each charged,
+  settled, and W covers every authored seq — which is the
+  discharge's central claim; the review's main probe added the
+  product-liveness discriminator the original observation lacked
+  (during the recorded "wedge" state the product accepts and settles
+  a fresh authored input in ~50 ms, at base and head alike).
+  RESIDUAL (keep watching): the original record's "every subsequent
+  flush exhausts its deadline" was NOT reproduced — it is
+  unexplained, not explained: `wavesBudgetExhausted` stayed 0 in
+  every armed wedge-schedule state across the root-cause re-runs and
+  the independent review's probes (base and head). By mechanism the
+  recorded ingredients cannot produce it (an erroring action writes
+  nothing, so it cannot re-dirty itself, and budget backoff defers
+  invalid actions out of the dirty pull set), and real-load
+  exhaustion — normal and benign, observed under the sx2-scale
+  flood — is a plausible mundane source of the original observation.
+  This row REOPENS if a schedule surfaces where W genuinely stalls
+  below an authored seq; the OW26 pin suite in
+  `executor-effect-channel.test.ts` is the resurface point.
+  (Correction 2026-08-15: this residual previously lived only in the
+  Phase-6 PR body — the self-review's claim that the discharge text
+  carried it was wrong; the register is the canon and now carries
+  it.)
+  The obligation's substance landed as: the OW26 pin test racing
+  authored inputs into the failure window and asserting
+  charged/settled/W-advances directly; the three refusal tests'
+  bounded 300 ms drains RETIRED for deterministic kick-and-await-W
+  barriers with authored-seq targets (`settleAnotherWaveFamily` +
+  `authoredSeqOf` in `executor-effect-channel.test.ts` — the
+  reverted barriers' safety, restored by correct arithmetic, is the
+  discharge's acceptance evidence). Standing lesson, binding on test
+  authors: a settled-contract barrier targets the AUTHORED seq of
+  its own kick — never a server seq, which derived echoes inflate
+  (protocol §4's client-use sentence was always the contract; the
+  helper enforces it). The lesson is also PINNED in-suite
+  (2026-08-15, from the Phase-6 independent review): every barrier
+  waits for the trailing derived echo to land BEFORE reading its
+  target, because pre-echo a `serverSeq`-degraded target is correct
+  by accident and the whole suite stayed green under that
+  degradation; post-echo the degraded arithmetic times out at every
+  barrier (mutation-verified red at all four sites, green restored).
+
+- OW27 — LANDED with Phase 7 (2026-08-15; RULED (a) by the owner
+  2026-08-15 — "client-side send pacing in the flag-gated append path,
+  per-stream token bucket, pace-never-drop"): the client event-append
+  queue paces per stream (`EventAppendQueue` — `pacing`, keyed by the
+  stream's sidecar doc; burst passes, sustained sends drain at the
+  rate, a flood is HELD in that stream's fired order, never coalesced,
+  never dropped). Streams are INDEPENDENT — RULED 2026-08-16 (P7 fixer,
+  on the P7 independent review's finding 5): the queue sends the
+  earliest-fired entry whose stream has a token, so a paced stream
+  holds only its own later sends and never an unrelated stream's (NO
+  cross-stream head-of-line hold; the P7 build's "accepted cost" wording
+  described a defect — the shipped drain sent strictly the fired-order
+  head, so b1 waited behind a2's hold, reproduced by the review's probe
+  and unpinned by the shipped suite). Fixed red-first: the adopted
+  cross-stream test in `event-append-client.test.ts` (b1 sends
+  immediately, a2/b2 wait only on their own buckets, a3 on A's second
+  refill; every stream's own fired order exact; every intent delivered)
+  went red at head and green with the per-stream selection; events.md
+  §5 and README §3.8 now state per-stream fired order + independence.
+  Default posture
+  `DEFAULT_EVENT_APPEND_PACING` = 20/s sustained, 20 burst — a DIAL,
+  FLAGGED for the owner (the bound on the flooding user's own rapid
+  interactions ≈ (queued − burst)/rate seconds; a held key at ~30 Hz
+  is paced to 20 commits/s and clears within half a second of
+  release). Pinned red-first in `event-append-client.test.ts`: a 40-send
+  key-repeat flood — bounded rate (no 100 ms window above burst +
+  rate·window), ZERO loss, fired order — plus the DISABLED-PACING
+  mutation witness (`pacing: false` → the flood sends in one tick) and
+  close-during-hold (held outcomes settle; the intent stays queued for
+  a successor). OFF-arm untouched by construction: the OFF arm never
+  enqueues (the fire fork is flag-gated), so pacing has nothing to act
+  on there. README §3.8 carries the implementation sentence. Original
+  obligation, for the record — the Phase-6 plan bullet's third item,
+  FLAGGED as a design fork rather than filled (2026-08-14): README
+  §3.8 promises "event floods
+  (key-repeat driving `stream.send()`) are rate-shaped at the binding
+  layer before they become commits", and under the flag the W4
+  last-wins collapse is DISABLED (events.ts gates it off — collapse
+  would destroy durable intent ids), so the ON arm currently has NO
+  event-flood bound at all; the two shapers that exist do not satisfy
+  §3.8 (the scheduler's WakeShaper shapes when patterns OBSERVE a
+  commit — after it exists; the UI InputTimingController reduces
+  commit volume but is per-component, defaults `immediate` for
+  boolean bindings, and is OFF-arm-visible to change). The unstated
+  semantics are exactly the escalate-don't-fill fork class: pace vs
+  batch vs drop (events are intent — dropping loses it), the hold-
+  latency bound a paced send imposes on the flooding user's own
+  legitimate rapid interactions, per-stream vs per-space keying, and
+  whether UI timing defaults may change (user-visible in BOTH arms).
+  Candidate resolutions, costs recorded: (a) client-side send pacing
+  in the flag-gated append path (token bucket per stream, pace-never-
+  drop — OFF-arm untouched by construction; chooses a latency bound);
+  (b) batch coalescing — N held sends commit as ONE authored commit
+  carrying N event appends (intent preserved, commit RATE bounded;
+  touches fresh Phase-3 admission machinery and the offline-queue
+  discharge path); (c) UI-layer defaults (flag-reach into packages/ui
+  — rejected shape unless gated). Owed: the owner's semantics ruling,
+  then the implementation with its tests. Trigger: before the
+  Phase-7 flip (the ON arm ships with no event-flood bound until
+  then; W4's cheap guard still bounds the OFF arm).
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**
 
-- OW8 — push priority: subscribed derived rows flush before
-  bookkeeping/bulk (README §3.3, protocol §3). Counter/ordering
-  assertion in `sx2-scale`.
+- OW8 — LANDED with Phase 6 (2026-08-14): `noteExecutorCommit`
+  classifies derived commits' dirty keys, and the fan-out runs two
+  phases per flush batch — every connection's derived-subscribed
+  sessions evaluate and send before any bulk-only session (protocol
+  §3's implementation-shape note carries the frame/marker rationale).
+  The ORDERING half pins deterministically at the unit level
+  (`packages/memory/test/v2-push-priority.test.ts` —
+  registration-order-adversarial, mutation-probed against the
+  reverted split, with vacuous-arm negatives); the COUNTER half rides
+  `sx2-scale` (`servingLoop.push.*` present and sane in the ON arm) —
+  split deliberately: a live mixed batch needs derived and bulk
+  novelty in one flush window, which wall-clock integration timing
+  cannot force reliably. Original obligation: push priority —
+  subscribed derived rows flush before bookkeeping/bulk (README §3.3,
+  protocol §3), counter/ordering assertion in `sx2-scale`.
+
+Delta 2026-08-10 — Phase 3 (events-down, D-v2-1; the phase PR):
+
+- events.md §1/§4/§5, protocol §2's event-append rows: IMPL-GATE rows
+  now COVERED by the Phase-3 suites — admission end to end
+  (`memory/test/v2-event-append.test.ts`: stamping, disagreement
+  refusal, the dedupe-horizon CAS + replay short-circuit +
+  at-or-below re-admission, the sidecar write guard, LT1 derived
+  carriage incl. the REWRITE arm, delegated stamping, OW15's floor),
+  the serving loop (`executor-events-down.test.ts`: the full loop,
+  restart exactly-once both directions, error/skip arms, LT1
+  same-space cascade, LD1 attribution at cardinality 2), the client
+  half (`event-append-client.test.ts` + the inverted F10 pins in
+  `speculation-overlay.test.ts`), and the outbox arms
+  (`executor-outbox.test.ts`: OW15 delivery, OW14 order).
+- NEW implementation surfaces below spec granularity, FLAGGED in the
+  Phase-3 PR rather than silently normative: (i)
+  `StreamEventEntry.deliveryFailures` — OW14's notice shape on the
+  source entry; (ii) the stream-sidecar doc vocabulary
+  (`of:stream-events:` + `streamEntriesDocId` — the spec's "stream
+  document", concretely: a derivation-owned result doc cannot hold
+  durable entries); (iii) LT9's persistence SEAM (the queue rides an
+  injectable store whose default is in-memory — the same persistence
+  class as `sessionId` today, protocol §5's sessionId persistence
+  being pre-existing spec debt; the browser adapter lands with it);
+  (iv) same-space emitted entries PROCESS IN THEIR OWN WAVE: the
+  batch marks an emitted entry consequenced iff its handler's
+  contribution survived the wave (requeued runs leave it unmarked
+  for the next drain — C8b/C8d); (v) `runtimeInjectedEventKeys` on
+  the entry converts a process-local trust mark into client-asserted
+  wire provenance the drain re-mints — threat-model-consistent (the
+  client could equally assert locally today) but a WIDENING, flagged;
+  (vi) the OW14 notice's CARRIAGE is a direct engine derived commit
+  from the outbox (the completion-commit precedent), not a
+  later-wave write — flagged with its field shape; (vii) `events.*`
+  counter semantics: `processed` counts DRAINED (thrown handlers and
+  re-drained requeues re-count), `appended` re-counts scan-covered
+  entries across re-activations — gates assert `>=`, never equality;
+  (viii) sidecar-log COMPACTION (events §4's allowance) is not
+  implemented — the per-wave pending scan and the index-addressed
+  consequence marks are both sized by the uncompacted log, and the
+  compaction follow-up must revisit the wave's sidecar rebase
+  refinement and the drain's index addressing together; (ix) the
+  backlog-collapse disablement gates on the FLAG (all events), not
+  per-durable-id — conservative (losing collapse loses no intent);
+  ledger L8's alternative stays open.
+- The engine's per-stream `eventWatermark` is DERIVED state: the
+  contiguous consequenced frontier recomputed inside every derived
+  commit that touches a sidecar (the model's commit-step rule
+  verbatim, INCLUDING its stored-value floor — the recompute never
+  lowers the stored watermark, so a lease holder that wrote a
+  too-high value is trusted: the single-deriver threat posture,
+  protocol §1's accepted-intrusion twin).
+- runtime-mapping N26 discharged: the receipt create-only +
+  origin-committed precondition mechanisms are disabled under the
+  flag (`eventWatermark` subsumes); the receipt VALUE surface and
+  `handlingReceiptLink` stay.
+- events §2's backlog-collapse disablement discharged (the last-wins
+  collapse is gated OFF under the flag; ledger L8's
+  collapse-but-list alternative stays open).
+
+Delta 2026-08-10 — the #5569 incremental-liveness catch-up (main
+9d6c9fe00 cascaded through the train; one NEW binding sentence, two
+re-homed pins from train-deleted test surfaces):
+
+- serving-loop §8's liveness-bracket tripwire: NEW binding sentence
+  (any future demand-root kind or root-flipping site MUST bracket its
+  transitions with the liveness notifications; no global rebuild
+  repairs silent flips — labs #5569). Coverage: the env-gated
+  every-mutation equivalence hook in
+  `packages/runner/src/scheduler/dependency-graph.ts`
+  (`SCHEDULER_LIVENESS_EQUIVALENCE=1`, asserts incremental state
+  equals `recomputeLiveRefs` at each mutator exit; run across the
+  whole runner suite at catch-up: zero drift, and
+  discrimination-verified by reinjecting the historical
+  `unregisterDependentEdge` root-writer decrement skip), plus
+  `test/scheduler/dependency-graph.test.ts`'s randomized
+  every-mutation reference check. Silent-root-flip audit of the
+  merged tree found every flip site bracketed
+  (`updateSchedulerActionType`, `updateMaterializerRegistration`,
+  `setNodeProvisionalDemand` callers; unsubscribe's envelope clear is
+  post-unregistration and inert).
+- per-doc-rehydration's resume-fresh reliance on scheduler-v2 §5.2's
+  registration-recount order-independence: CROSS-REFERENCE recorded
+  (a §5.2 recount change is a resume-correctness change). Coverage:
+  same instruments as above; resume paths exercised under the
+  equivalence hook by the runner suite's reload/resume tests.
+- #5388's release-vs-stop pin ("releasing a target before link
+  resolution preserves the held start") — its main-side home
+  (`reload-rehydration-safety.test.ts`) was deleted with the
+  observation machinery; RE-HOMED train-side as
+  `packages/runner/test/release-vs-stop-link-resolution.test.ts`
+  (green; discriminates — substituting stop for the release fails).
+- #5529's verdict-precedes-fan-out — its main-side instrument gated
+  `runPostCommitSchedulerSideEffects`, machinery the train deleted;
+  RE-PINNED train-side in
+  `packages/memory/test/v2-verdict-catchup.test.ts` ("the verdict
+  leaves within the transact's publication turn; fan-out cannot
+  enter it"), instrumenting the publication turn directly (green;
+  discriminates — deferring the in-lock verdict publication fails
+  it).
+
+Delta 2026-08-11 — lunch-gate triage leg A: §3d's unstamped-seal
+refusal caught real undeclared commit paths (this PR; serving-loop
+§7's counter shape gains `unstampedSealRefusals` — a CHANGED
+sentence, coverage below):
+
+- §3d's "every server-side commit path declares its run context"
+  (RULED 2026-08-05): the RULE was already covered (the Q4 refusal
+  row); this delta records impl CONFORMANCE. A three-run
+  instrumented triage proved the resumed list builtins'
+  container-recovery seeds (`map`/`filter`/`flatMap` resume-seed +
+  resume-settle — an out-of-band `editWithRetry` from a `.finally()`
+  continuation, no scheduler run around it) sealed unstamped on the
+  serving runtime: the wave refused, the seed retried into the
+  refusal (97,341 throws in one 5-minute run), and the demanded map
+  derivation never landed — breaking speculation.md §4's
+  overlay-retirement premise (the serving loop's first-round
+  reliability machinery makes the demanded derivation exist and
+  land). Fixed by declaring the sanctioned internal `bookkeeping`
+  kind at the runtime's posture-gated stamping seam
+  (`stampServerRun` — a no-op on the OFF arm; under client
+  speculation bookkeeping commits exactly as unstamped txs do), for
+  the full audited class: the six list-builtin recovery writes
+  (2026-08-13 amendment, review thread r3756175819: the three
+  resume-SETTLE writes are bookkeeping ONLY on the serving posture —
+  on a flag-ON client they write DERIVED content and now stamp
+  `derivation`, diverting to the overlay; the shared decision is
+  `resumeSettleRunKind` in resume-republish.ts, unit-pinned; the
+  three resume-SEEDs stay bookkeeping on both postures as
+  container-materialization, setup-class under the scheduler tell), the
+  shared list republisher, the compile-cache writebacks + pattern
+  annotation (pattern-manager), the piece
+  instantiate/start/repair/run-synced/pointer-roll-forward family
+  (runner), the pattern updater's transition writes, wish's
+  interval tick / error-UI / sidecar-run / ready writes, and the
+  fetch / fetchProgram / llmDialog teardown claims-release txs.
+  NOT stamped, per existing rulings: llm partial-stream writes
+  (partials never become commits — the serving posture UNDER THE
+  FLAG now SKIPS the write before minting a tx, the same ruled
+  outcome the refusal produced, keeping the new counter clean; the
+  2026-08-13 round scoped the skip to `serverExecution === true` —
+  posture alone had dropped OFF-arm partials, an unrecorded OFF-arm
+  delta, review thread r3756175835),
+  compile-and-run's async writebacks (stage-G deferral, documented
+  in-file), and llm-dialog's pin/unpin/updateArgument/invoke
+  tool-call writes (ruled completion-/handler-class — Phase-3
+  territory). Coverage: impl-gate, red-first —
+  `packages/runner/test/executor-serving-loop.test.ts` ("lands a
+  resumed map derivation whose result container was never
+  persisted") authors a map piece under client speculation (the
+  production shape that leaves the result container unpersisted),
+  resumes it through the demand loader, and pins BOTH the landed
+  derivation and `unstampedSealRefusals === 0`; at the pre-fix
+  tree the same test red-fails (counter at 3, the §3d refusal
+  storm in the log).
+- serving-loop §7's counter shape: `unstampedSealRefusals` added
+  (CHANGED sentence — the refusal becomes a health-stats fact,
+  structurally zero under conformance; any non-zero count names an
+  undeclared commit path). Coverage rides the same impl-gate
+  test's `=== 0` assertion.
+
+This closes leg A of the lunch-gate triage arc (the unstamped
+recovery-seed storm). Leg B — the OW19 demand spin
+(`structureLoadDeferred` climbing) — is closed by stage P2-F's
+demand-cycle terminal state (the closed OW19 row above); leg C
+(the speculative-pending-basis design fix) is closed by the
+2026-08-13 delta below.
+
+Delta 2026-08-13 — lunch-gate triage leg C: the speculative-basis
+export refusal (RULED 2026-08-13; speculation.md §6's "process-local
+principle and the export refusal" carries the rule and the owner
+blockquote; this PR):
+
+- speculation.md §6's "a commit basis MUST NOT name a speculative
+  layer" (the export refusal): → COVERED, impl-gate, red-first.
+  `packages/runner/test/speculation-overlay.test.ts` ("an authored tx
+  that read a speculative echo is refused LOUDLY at the client")
+  drives a real client-flag-ON runtime to a live echo, commits an
+  unstamped tx that read it, and pins the terminal client-side
+  `SpeculativeBasisError` (isTerminalRejection true), the unchanged
+  engine commit count (nothing exported), the intact overlay entry,
+  and the never-rendered refused write. At the pre-fix tree the same
+  scenario exported the seq and red-failed with the server's
+  `ConflictError: pending dependency not resolved: 4` after a wire
+  round trip.
+- The bounded-and-loud convergence half (the ruling's "fix infinitely
+  stuck things"): → COVERED, red-first. The same file's "a handler
+  that read a speculative echo fails terminal on the FIRST attempt"
+  pins exactly ONE handler run per event (console-channel counting —
+  the sandbox globalThis is isolated); pre-fix the backoff loop
+  re-ran the handler throughout the observation window (17 runs / 5s
+  observed; production shape ~43 attempts / 30.5s to
+  CommitConvergenceError). The push-boundary belt (a ConflictError
+  naming a known-speculative layer upgrades to the terminal refusal)
+  is unreachable-by-construction behind the build-time refusal and
+  carries no separate pin — `speculative-basis-exported` in the log
+  names any future reach.
+- The origin-ack retirement wake (speculation.md §6's closing
+  paragraph; the verdict-lifetime sub-defect): → COVERED, impl-gate,
+  red-first. The same file's "an entry whose origin's accept verdict
+  lands AFTER the covering watermark still retires" scripts the race
+  destination-level (watermark event first, ack after; no further
+  watermark event) and pins retirement on the ack wake alone;
+  pre-fix the entry stayed pending forever (red: the observer was
+  never installed and the sweep never re-ran).
+
+One ATTEMPTED-AND-REVERTED fix rides this round, recorded per
+flag-don't-fill (review thread r3739139506 — stage D's documented
+third bound, the read-only-space seal dependencies): an overlay
+implementation of the sealSpaceReads handoff (per-entry read-only-space
+floors; retirement additionally gated on EACH read-only space's
+watermark; cross-space re-sweeps on watermark/ack/settled events) was
+built red-first and REVERTED the same day. CORRECTED RATIONALE (the
+revert commit's original "bisect-verified gate regression" claim was
+INVALIDATED hours later: the two-browsers Phase-2 gate proved
+BIMODALLY FLAKY on the from-source local harness independent of
+commit — the UNMODIFIED merge base failed the same "Bob sees Alice"
+300s stall twice in a row under clean single-engine fresh-store
+conditions, and a runtime-identical tree to an earlier passing
+configuration also failed — so the gate discriminates nothing
+locally; CI's compiled-binary harness is its arbiter). The revert is
+RETAINED on design-risk grounds identified during the investigation:
+the machinery makes flag-ON client runtimes open watermark
+subscriptions into foreign — possibly unauthorized — spaces reached
+through links (AuthorizationError sync-load noise observed), and its
+conservative blocking can pin entries on never-covered floors
+forever. That risk profile wants an owner-reviewed design, not a
+fix-batch patch. The BOUND THEREFORE STANDS as documented: a
+cross-space speculation can retire on its written space's coverage
+while a read-only input is still uncovered. Owed: the redesign,
+flagged for the owner alongside P2-F's follow-ups.
+
+Two adjacency closures ride the same 2026-08-13 round (stage-G
+round-2 follow-ups):
+
+- `tryClaimMutex` swallows a TERMINAL claim-commit failure (row only;
+  no code change): the claim callback sets `claimed = true`, but the
+  surrounding `editWithRetry`'s outcome is not consulted — a commit
+  that terminally fails after retries still returns
+  `{ claimed: true }`, the builtin proceeds as claim-holder, and the
+  effect can complete locally WITHOUT its claim/completion egress
+  ever becoming durable. Bounded by design: recovery is §6 step 3's
+  re-miss — the next demanded run finds no durable result, re-misses
+  the memo, and re-claims (the completed-request guard reads the
+  durable view, so nothing wedges on the phantom claim). Recorded as
+  a known-swallow with a ruled recovery path; a loud disposition
+  (consulting the editWithRetry outcome) is follow-up material, not
+  Phase-2 gate material.
+- The wave-replay reachability closure (stage-G round-2's flag,
+  checked against the spec-model): `applyWaveCommit` runs the
+  per-doc CAS re-verification BEFORE `applyCommitTransaction`'s
+  replay return, so an exact replay at its ORIGINAL basisSeq can
+  never reach replay service — the first application advanced the
+  heads past that basis and the re-verification throws
+  `WaveCommitConflictError`. Only a re-drive with a RE-DERIVED
+  (current) basis reaches the stored-result return (the FP1
+  insert-skip's test shape). VERIFIED AGREEING with the spec-model's
+  crash-recovery arms: the model's `crash` step nulls the in-memory
+  `pendingWave` (nothing retains an old basis), `recover` recomputes
+  at current state per the ruled §6 no-replay recovery, and no arm
+  re-submits an already-admitted wave — the model never expects
+  original-basis replay service, so the engine's reachability
+  restriction and the model agree by construction. (The
+  admitted-but-unacked re-drive window G's engine test pins sits
+  below the model's step granularity — the wave step is atomic
+  there; noted, accepted.)
+
+Delta 2026-08-11 — the Phase-3 INDEPENDENT review's fix batch (this
+PR; every finding probe- or repro-verified by the reviewer, all
+red-first-evidenced where the batch required it):
+
+- M1+m4 — the fail-open sidecar admission CLOSED, both arms, both
+  flag postures. Pre-fix, `appendedEntriesOfPatch` and the `set` arm
+  coerced a non-array `/value/entries` write to `[]` for validation
+  while the write applied VERBATIM: authored garbage ADMITTED with
+  zero located entries, then `selectPendingStreamEventDocs`
+  TypeErrored in activate/park/drain/wave-close (wedging the space)
+  while every honest append hit the garbage in its dedupe read.
+  Fixed: `refuseMalformedAuthoredStreamWrites` (engine.ts) refuses
+  authored non-array `/value/entries` writes flag-ON, and refuses
+  authored sidecar-prefixed writes OUTRIGHT flag-OFF; the pending
+  scan, the watermark recompute, and the admission's dedupe read all
+  carry defensive `Array.isArray` (derived stays trusted — malformed
+  derived state skips instead of wedging). Red-first pinned in
+  `memory/test/v2-event-append.test.ts` (the reviewer's repro shapes:
+  admit-then-TypeError, the set-arm coercion, the OFF-arm refusal,
+  the derived-garbage recompute wedge).
+- A THIRD RECORDED OFF-arm acceptance rides the m4 half (RATIFIED
+  2026-08-13 — owner ruling: BOTH deltas stand, the both-arms
+  non-array refusal AND the OFF-arm `of:stream-events:` id-prefix
+  refusal; coordinator-adjudicated 2026-08-11: the defect-flavored
+  freedom removed; the OFF-written garbage poisons the ON flip):
+  authored writes into `of:stream-events:`-prefixed docs under the
+  OFF flag, which formerly SUCCEEDED unvalidated (no admission
+  exists OFF — including forged `firedAt` actors that the first ON
+  activation would deliver as-stamped), now REFUSE prefix-keyed. No
+  legitimate OFF-arm producer writes the reserved prefix; testing
+  §2's gate clause already names this register's recorded-acceptance
+  rows. The ruling's simplicity lean was applied as a review of
+  `refuseMalformedAuthoredStreamWrites` (engine.ts): no
+  behavior-preserving simplification was worth taking — folding the
+  patch-op arms or replacing the `"entries" in` narrowing changes
+  edge behavior (explicit-`undefined` payloads flip from refused to
+  admitted), so the guard stands as written.
+- M2 — the C8d parent fold WIRED FOR REAL. The fold keyed on
+  `context.parentEventId`, which nothing in production set: cell.ts's
+  same-wave cascade queued `{eventId, served:{firedAt}}` only, so a
+  raced parent's requeue left its cascade child COMMITTED (the
+  orphan) and the retry re-applied the consequence under a fresh-id
+  re-emission (the double). The emitter's eventId now threads
+  end-to-end: `ServedEventDispatch.parentEventId` → the dispatch
+  stamp (scheduler/events.ts) → `ServerRunInfo.parentEventId` →
+  `#stampRun` → the wave run context. Red-first e2e through the
+  WHOLE production chain in `executor-events-down.test.ts` (the
+  raced-cascade test: a predicate-scoped settle gate holds the
+  sealed wave open, a rival races the parent's consequence — child
+  lands exactly once, never doubled).
+- M3 (RULED let-stand 2026-08-13; coordinator-adjudicated
+  2026-08-11) — the emit-path
+  tail-read excluded from the dependency log and basis rows: a
+  sender does not re-send because someone else sent. cell.ts's LT1
+  emission read `/entries` unmarked, putting the target sidecar in
+  the EMITTING run's logged reads and basis rows — a demanded
+  derivation emitter re-ran (and re-emitted, fresh eventId) on any
+  neighbor's append to the same stream. Classified with the existing
+  machinery-read boundary: `ignoreReadForScheduling` +
+  `mergeableOpRead` (the Cell.push precedent, paired with the
+  already-recorded mergeable append). Red-first pinned in
+  `executor-wave.test.ts` (the derivation-emitter test: dependency
+  log and §3b basis rows both exclude the sidecar; the write and the
+  stamped entry still land).
+- C1 — the watermark requeue-hold PINNED at the engine
+  (`v2-event-append.test.ts`): mixed consequenced/unconsequenced
+  entries at distinct seqs hold the frontier below the pending entry
+  and advance through consequenced ones; a same-commit seq group
+  advances only together (the `every(consequenced)` clause verbatim
+  — the reviewer's delete-the-hold probe now goes red; it previously
+  left all 481 memory tests green).
+- C2 — the mark-failure ABORT pinned at the SpaceServer
+  (`executor-space-server.test.ts`): fault-injected consequence-mark
+  failure aborts the handler tx — no unmarked consequence ever
+  commits (events.md §4's double-consequence hatch; the reviewer's
+  replace-abort-with-continue probe now goes red).
+- m5 — the overlay REFUSES an event-handler seal lacking an eventId
+  (loud error instead of the silent no-retire divert), the llm-dialog
+  tool loop's egress-drop posture is now asserted (both in
+  `speculation-overlay.test.ts`), updateArgument's full event-routing
+  is owed as OW21, and the pin/unpin completion key carries the
+  scopeKeyIdentity caveat comment (llm-dialog.ts) for the day
+  `pinnedCells` is scoped.
+- m6/n2 — the event-append queue's `#persist` serializes behind the
+  PREVIOUS save (an async adapter could complete saves out of order,
+  leaving an OLDER snapshot durable) and an enqueue AFTER close
+  settles its outcome instead of hanging its barrier (both pinned in
+  `event-append-client.test.ts`); the browser-adapter follow-up
+  carries the remaining debts as OW20.
+- m7 — worker/host flag-posture AGREEMENT
+  (`runtime-client/backends/runtime-processor.ts`):
+  `InitializationData.experimental` now types `serverExecution` (it
+  rode as an untyped excess property), and the worker asserts the
+  constructed runtime's resolved posture matches the host's
+  declaration — refusing initialization loudly on divergence in
+  either direction (pre-fix `data.experimental ?? {}` silently
+  reverted an undeclared worker to OFF while the host diverted: F10
+  alive and dead across realms). OFF-arm-neutral (nothing-declared +
+  resolved-OFF agree); pinned in `runtime-processor.test.ts`.
+- n3 (recorded note, no mechanism moved): a send from a
+  BOOKKEEPING-stamped run on a flag-ON client is silent loss — the
+  stamp suppresses the client append (the fire fork keys on "outside
+  the scheduler") and no wave carries it. The bookkeeping class is
+  the pattern-swap setupTx plus, since the lunch-gate leg-A delta
+  above, the audited recovery/writeback family (list-builtin seeds,
+  compile-cache writebacks, the piece start/repair family, pattern
+  updater transitions, wish tick/UI writes, teardown claims) — all
+  CELL WRITES; none calls `.send()` today. The row becomes
+  load-bearing the day a bookkeeping path sends on a client; route
+  it as an event then.
+- n4 — the Phase-3 flagged-surfaces list above omitted one NEW
+  below-spec-granularity surface, recorded here: the
+  `execution_outbox` EVENT-CARRIAGE MIGRATION
+  (`migrateExecutionOutboxEventCarriage`, engine.ts) — three
+  additive nullable columns (`target_stream_link`,
+  `sessionless_space_scope`, `source_event`) added in place;
+  stage-G-era rows predate them, and their NULLs read fail-closed
+  (path-less stream fallback at the sidecar id; "not declared" for
+  the OW15 carve-out) — the engine.ts migration comment carries the
+  same reading.
+- n1 — `selectPendingStreamEventDocs`' cost comment corrected: the
+  head query is a branch-wide scan filtered by the sidecar prefix
+  (LIKE under default collation does not use the PK), run at
+  activation, per drain, at park evaluation, and at wave-close — not
+  "activation-time, never per-wave".
+- n5 — the two Phase-2 ledger lines above that still described the
+  inverted F10 pins now carry their Phase-3 supersession inline (the
+  named suite asserts the diverted posture since events-down).
+
+Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
+
+- protocol §5's channel rows now COVERED by the Phase-4 suites: the
+  effects-doc engine surface (`memory/test/v2-effects-doc.test.ts`:
+  `issuedIn` stamping derived-only, append nonce-dedupe against the
+  stored instance with the whole-value-set exemption, per-instance
+  addressing at cardinality 2, the retirement scan's
+  acked/unacked/stale-mark/malformed arms), and the end-to-end
+  channel (`runner/test/executor-effect-channel.test.ts`: the T2
+  hops-1–4 served intent with addressing+acting annotations, the
+  cardinality-2 multi-hop inheritance pin (a cascade-hop navigateTo
+  addresses the CLICKING session; the second session's instance stays
+  empty), the T2 hops-5–6 optimistic-enact convergence at ONE
+  navigation with the authored ack counted in `effectAcks` and the
+  retirement write's addressing-only annotations (T2.Q4), the LT8
+  reload journey (re-enact across the reload-wiped record, ack once,
+  retire once, nothing resurrects), the sessionless refusal, and the
+  LT3 not-connected refusal). T2's Q2/Q3 reference cells carry the
+  Phase-4 refreshes (scenario-traces §4).
+- NEW implementation surfaces below spec granularity, FLAGGED in the
+  Phase-4 PR rather than silently normative:
+  (i) the ACK MARK SHAPE — protocol §5's "`{ ackedNonce }`" is
+  implemented as per-nonce marks (`acks[nonce] = true`) because a
+  scalar last-ack field LOSES an earlier unretired ack whenever two
+  intents ack within one retirement interval; was PENDING OWNER
+  RATIFICATION, RULED 2026-08-13 — ratified, protocol §5 now
+  specifies the map (the T2.Q3 refresh carried the same flag, also
+  resolved; the 2026-08-13 delta below);
+  (ii) the DETERMINISTIC NONCE constructor
+  (`effectIntentNonce(eventId, instanceId)`, wire-shape module) —
+  "minted server-side" implemented as a deterministic function both
+  sides compute, which is what makes T2.Q7's optimistic enactment
+  converge by nonce (the cause-derived-identity convergence
+  speculation §2 sanctions); a re-run of either side is idempotent by
+  the engine's stored-nonce dedupe;
+  (iii) the served half's NO-CONTEXT arm refuses with a WARN instead
+  of builtins §4's runtime ERROR: a re-instantiated builtin from a
+  past fire (a restart/re-demand replay, whose navigation already
+  happened) is indistinguishable from a fresh
+  outside-any-event-context computation at the action — the
+  ctx-PRESENT error arms (sessionless chain, LT3) still throw;
+  flagged, not silently normative;
+  (iv) LT3's "connected session of the computing space" is probed as
+  a LIVE-SESSION-NOW check (`Server.hasLiveSessionFor` via
+  `Runtime.connectedSessionProbe`, installed at activation) — a
+  session inside the registry's TTL window counts as connected, which
+  is what lets the reload race (fire, reload, intent computes)
+  deliver rather than refuse;
+  (v) the LT8 reload journey's COLD-PROCESS half (the same sessionId
+  re-OPENED from a fresh process) additionally rides protocol §5's
+  owed client-side session persistence: the registry refuses a
+  token-less re-open by design (anti-hijack), so the persistence
+  adapter must carry the resume token with the sessionId — recorded
+  on OW20's trigger; the landed test pins the runtime-reload half
+  (overlay + enacted record wiped, session persisted);
+  (vi) the effects doc joins the never-a-piece id classes
+  (space-server.ts): every flag-ON client subscribes to it, and
+  piece demand for a value doc that can never carry `patternIdentity`
+  meta is the OW19 churn class;
+  (vii) the serving replica's scope-NAME-keyed local view (the OW17
+  residual) is TOLERATED, never trusted for instance state: the
+  served half still READS it, but ONLY as the tail-append base —
+  nothing store-visible derives from it, and no suppression
+  consults it (the independent review's MINOR-4 deleted the local
+  presence gate that suppressed the append on a locally-seen nonce:
+  consulting the collapsed view to withhold a store write WAS a
+  store-visible derivation, redundant with the engine dedupe today
+  and cross-session suppression the day foreign rows land in the
+  serving replica) — the intent write is a tail-relative MERGEABLE
+  append (only the appended tail crosses; the store applies it per
+  instance via the annotation key; the builtin FAILS CLOSED if the
+  transaction cannot record the mergeable append) with the ENGINE's
+  stored-nonce dedupe as the SOLE idempotency authority, and the
+  retirement write's pruned value is computed from
+  `selectRetirableEffectsInstances`' engine reads.
+- serving-loop §7's `effectAcks` counter is LIVE (the feed drain
+  counts authored commits touching the effects doc), so testing §4's
+  amplification metric is computable from counters alone — the
+  Phase-2 gate's formula gains its subtrahend. (Counting note: the
+  recognizer is any AUTHORED commit touching the effects doc — a
+  client authoring garbage into its own instance inflates it; the
+  notice carries no paths to discriminate by, and the inflation is
+  the same self-poisoning class as the instance itself.)
+- The Phase-4 SELF-review's fix batch (2026-08-11; every finding
+  addressed in the same PR): (1) requeue is now ATOMIC PER
+  EVENT at the wave — an event can contribute SEVERAL transactions
+  (the handler run + the served intent tx), and the conflict
+  closure folds every same-eventId sibling into a requeue, with
+  `requeuedEventIds`/`committedEventIds`/`consequenceOf` deduped to
+  one entry per event (red-first pinned in `executor-wave.test.ts`'s
+  per-event fold test: without the fold, a requeued handler beside a
+  surviving intent marks the event consequenced while its
+  consequences were withdrawn — lost behind the idempotency skip).
+  CORRECTED by the independent review (M2, below): the fold makes
+  the ROLLBACK atomic, but it did NOT restore the re-issue — the
+  wave-2 re-run re-landed the handler consequences while the served
+  navigateTo's closure guard (`navigated`, surviving in the reused
+  builtin instance) suppressed the intent forever; exactly-once
+  additionally required the store-owned idempotency fix below;
+  (2) the overlay records the optimistic nonce BEFORE the flush (a
+  slow async navigateCallback left a window where the authoritative
+  intent double-navigated within one life); (3) the intent seal's
+  resolved-`{error}` outcome is logged loudly (commit promises
+  resolve, never reject, on ordinary failure) — the isolated
+  failure's input-driven re-land posture recorded there was
+  OVERRULED by the owner review (P1-2, below: every seal failure
+  now requeues the owning event), and the failures are COUNTED
+  (§7's `servedIntentSealFailures`); (4) the
+  served-side `navigated` re-run arm returns early instead of
+  re-writing the result cell under the wave-level service identity
+  (superseded by the independent review's M2: served runs no longer
+  consult `navigated` at all — the result-cell read early-returns a
+  landed navigation, and the served path still never writes the
+  result cell on the wave tx); (5) the no-context refusal arm gained
+  direct coverage (the static-wiring test in
+  `executor-effect-channel.test.ts`).
+- The Phase-4 INDEPENDENT adversarial review's fix batch
+  (2026-08-11, the fixer PR-push; reviewed at d28276798):
+  (M1) CASCADE-HOP DOUBLE NAVIGATION fixed by suppressing
+  cascade-hop optimism — on a cascade hop the client's speculative
+  run and the server's authoritative run mint DIFFERENT attempt ids
+  (events §4's fresh-per-attempt cascades), and the handler-result
+  frame's cause embeds that id (`$event: tx.dispatchedEventId`), so
+  BOTH `effectIntentNonce` components (event id AND cause-derived
+  instance id) diverge across the twins: no keying scheme can
+  converge them, which is also why the review's probe saw two
+  DISTINCT targets. The capture is tagged attempt-minted
+  (`NavigateEventContext.attemptMinted`, threaded from the
+  emitter's eventId through the cascade dispatch on both sides),
+  and the optimistic arm refuses to enact an attempt-minted
+  capture — first-hop optimism (durable fire id, converging cause)
+  is unchanged; the authoritative intent is the cascade hop's ONE
+  navigation (red-first: the cascade × capable-client test in
+  `executor-effect-channel.test.ts` — two navigations, two targets
+  at d28276798);
+  (M2) REQUEUED NAVIGATE EVENTS RE-ISSUE: the served arm's
+  `navigated` closure guard is DELETED — the builtin instance and
+  its closure survive a requeue (runner.ts's cancels-guard reuse),
+  so closure state suppressed the wave-2 re-issue; store-derived
+  state governs instead (the result-cell read returns a landed
+  navigation early, a withdrawn intent reads false and re-issues,
+  and the ENGINE's stored-nonce dedupe makes re-issue idempotent)
+  (red-first: the requeue-through-the-builtin test — intent count
+  0 forever at d28276798, exactly 1 post-fix);
+  (MINOR-3) the receipt-race divert is PINNED structurally: zero
+  authored-class commits touch the served navigation's target doc
+  (the divert-neutralization probe that left the full runner suite
+  green now goes red) — NOTE (2026-08-18, the stage-C tuning
+  independent review): this pin FLAKES under load, PRE-EXISTING and
+  not the tuning trio's — its 20-s `waitUntil` for the served intent
+  to land times out at 1-min load ≈ 5 (the fan-out-B base tip 2/20,
+  the trio's tip 2/16, ≈10 %); a sweep should read a red here as the
+  wait budget, not the divert, until the budget or the wake is
+  addressed;
+  (MINOR-4) the `locallyPresent` suppression gate deleted — see
+  (vii) above;
+  (MINOR-5) same-principal two-session isolation pinned BOTH
+  halves: the push half (memory-side, `v2-scoped-push.test.ts`) —
+  a derived write into `session:p:s1`'s effects instance delivers
+  the frame to s1 and ZERO rows of that doc to `session:p:s2` —
+  and the client half (`executor-effect-channel.test.ts`) — s2's
+  channel neither enacts nor acks s1's intent, and stays live for
+  its own;
+  plus: the dispose-order hazard fixed (a runtime's dispose clears
+  `spaceOpenObserver` only when the installed hook is its OWN — a
+  later runtime over the same manager keeps its channel);
+  `servedIntentSealFailures` added to §7's stats; the two engine
+  gap arms pinned (`v2-effects-doc.test.ts`: the retirement scan's
+  non-session-instance skip; append dedupe consults the OP's OWN
+  instance — a space-addressed duplicate is not deduped against a
+  session instance, and stamping still applies); the client-half
+  convergence assert made unconditional (the channel's
+  enacted-nonce count); owed rows OW22–OW25 below.
+- The OWNER review's fix batch (seefeldb review 2026-08-12, the six
+  P1s; fixer push):
+  (P1-1) THE ACK FOLLOWS ENACTMENT SUCCESS (protocol.md §5's
+  "enacts, then commits an authored ack write"): the channel
+  previously acked unconditionally — before the async
+  navigateCallback settled and regardless of its outcome — so a
+  failed enactment was acked, retired by the next wave, and the
+  navigation lost permanently. Now every ack chains on the
+  enactment's outcome (`beginEnactment`: record-before-invoke with
+  the outcome attached), a FAILED enactment retracts the
+  enacted-nonce record and withholds the ack (the entry stays
+  durable and unacked; a later delivery or the LT8 reload re-read
+  retries), and the OPTIMISTIC flush propagates its failure into
+  the same discipline (the flag-ON flush no longer swallows the
+  callback error; the OFF arm's legacy swallow is untouched).
+  Red-first: the two enactment-failure tests in
+  `executor-effect-channel.test.ts` (throwing-then-recovering
+  callbacks; both red at the pre-fix batch — the failed-enactment
+  entry was retired with zero navigations). Known residual: a
+  failed enactment retries only on the NEXT delivery of the
+  instance (no in-life retry timer — protocol.md §5 forbids
+  server-side retries and names no client timer; recorded, not
+  filled), and a permanently-malformed entry (no stageable target)
+  now stays unacked-loud instead of being silently consumed (the
+  session-lifetime GC is the backstop) — both residual postures
+  RULED 2026-08-13 as the intended contract, now normative in
+  protocol §5's failure postures (the 2026-08-13 delta below);
+  (P1-2) INTENT-SEAL FAILURE REQUEUES THE OWNING EVENT: an isolated
+  seal failure of the served navigateTo's intent tx previously only
+  logged — the handler contribution (carrying the entry's
+  `consequenced` mark) committed and the event went
+  consequenced-clean with the intent lost forever. Now the
+  SpaceServer's seal wrapper notes every failed wave-bound seal on
+  the wave (`noteSealFailure`, INSIDE the seal chain, so the
+  flush's pre-commit `await #sealChain` barrier orders the note
+  before commitWave), and commitWave seeds the noted events into
+  the requeue set — the per-event fold withdraws the handler's mark
+  with the failed consequence, the entry stays pending, the
+  re-drain re-runs the event, and the engine's nonce dedupe absorbs
+  the re-issue (red-first: the one-shot seal-injection test — at
+  the pre-fix batch the event consequenced clean with zero intents
+  forever);
+  (P1-3) THE NO-CONTEXT ARM RAISES THE §4 RUNTIME ERROR: the served
+  navigateTo's no-firing-event-context arm warned-and-returned
+  where builtins.md §4 mandates the SAME runtime error as the
+  sessionless chain ("Enforce with a runtime check"); it now throws
+  like the sessionless and LT3 arms, charged to the run
+  (red-first: the no-context test asserts the charge via
+  scheduler.onError — no charge at the pre-fix batch). The
+  acknowledged costs: a re-instantiated past instance re-running
+  after a restart surfaces the same loud error (nothing further is
+  lost — its navigation already happened), and the throw is the
+  first deterministic thrower on a DEMANDED effect node, exposing
+  the pre-existing OW26 scheduler wedge above (as recorded at the
+  time; DISCHARGED with Phase 6 as an observer artifact, not a
+  scheduler wedge — see the OW26 row);
+  (P1-4) the ack WIRE SHAPE (`acks[nonce]` map vs protocol.md §5's
+  scalar `{ ackedNonce }`) was PENDING OWNER RATIFICATION — neither
+  the spec nor the implementation was touched; the plan doc's
+  passage carried the pending marker. RULED 2026-08-13: the map is
+  ratified — protocol §5 amended, the plan marker resolved (the
+  2026-08-13 delta below);
+  (P1-5) the deferred-start stamping (serving-loop.md §3d's sole
+  sanctioned internal `bookkeeping` stamp vs the flag-ON client's
+  event-handler-stamped navigate-deferred start) was FLAGGED as a
+  genuine spec-vs-design contradiction, evidence in the fixer
+  report: conforming to §3d's letter (the bookkeeping mutation) is
+  exactly the MINOR-3 neutralization and fails the receipt-race pin
+  deterministically — the spec edit was the owner's call, not the
+  fixer's. RULED 2026-08-13, resolution (a): §3d now carries the
+  sanction sentence (boundary named, not exception carved) and the
+  runner comments cite it (the 2026-08-13 delta below);
+  (P1-6) the shared-manager observer clear was already
+  identity-guarded in this batch (NOTE-a above; red-first:
+  `effects-channel-dispose.test.ts` fails at d28276798).
+
+Delta 2026-08-13 — the owner ruling batch (P1-4, P1-5, the P1-1
+residual postures, and the delegated-scoped-reads deferral; protocol
+59 → 61, serving-loop 77 → 78 — the map edited with this delta):
+
+- protocol §5's ack wire shape RATIFIED as the per-nonce
+  `acks[nonce] = true` map (P1-4 resolved; the scalar
+  `{ ackedNonce }` draft is retired — rationale on the amended
+  sentence: a scalar loses an earlier un-retired ack whenever two
+  intents ack between retirement observations). CHANGED sentences,
+  same rows — the ack-write and next-wave-retirement rules already
+  existed; the stale-mark defined no-op and re-ack idempotence are
+  stated on the amended retirement sentence. Coverage already
+  landed with Phase 4: the engine retirement-scan arms
+  (`memory/test/v2-effects-doc.test.ts`: acked/unacked prune,
+  stale-mark hygiene, malformed-value skip) and the end-to-end ack
+  journeys (`executor-effect-channel.test.ts`). The Phase-4 delta's
+  (i) flag, the owner-review delta's P1-4 entry, the plan's ack
+  passage, T2.Q3's refresh flag, and FP11's ack-shape half all
+  carry the resolution.
+- serving-loop §3d's speculative-consequence deferred-start
+  sentence (+1 rule): the flag-ON client's `event-handler`-stamped
+  deferred piece-start is SANCTIONED (P1-5 resolution (a) —
+  boundary named, not exception carved: §3d's refusal machinery
+  governs the wave seal destination, which the client's start tx
+  never reaches). → COVERED by the landed MINOR-3 receipt-race pin
+  (`executor-effect-channel.test.ts`: the bookkeeping-stamp
+  mutation fails deterministically — eventEchoSealCount 1 ≠ 2 —
+  and zero authored-class commits touch the served navigation's
+  target doc). The runner.ts comments now cite the sentence
+  instead of claiming an informal "Phase-4 exception".
+- protocol §5's failure postures (+2 rules, both RULED): (a)
+  failed-enactment retry is DELIVERY-driven and RELOAD-driven only
+  — no client-side backoff timers; → COVERED by the P1-1 red-first
+  pair (the retry is witnessed arriving with the next delivery;
+  the no-timer half is the sanctioned absence, structural in
+  `effects-channel.ts`). (b) permanently malformed entries stay
+  unacked and LOUD until session GC — no synthesized acks, no
+  tombstones; → COVERED by the leave-unacked discipline pins (the
+  P1-1 arms; the engine's stale-mark/malformed scan arms) — the
+  unknown-kind arm shares the same reconcile skip-without-ack
+  path (code-comment-cited); its dedicated client pin rides the
+  session-data GC design (scopes §8 item 2), which owns the
+  abandoned-instance end state.
+- OW13 updated in place with the delegated-scoped-reads deferral
+  ruling (no count move — the register row carries the Phase-5
+  work-order precondition; see the row).
+
+Delta 2026-08-14 — Phase 5 (cross-space serving; the phase PR;
+protocol 61 → 63, serving-loop 78 → 79 — the map edited with this
+delta):
+
+- protocol §2's grant-scoped read DESIGN (+1 rule) with its
+  FAIL-CLOSED interim (+1 rule) — the RULED 2026-08-13 Phase-5
+  precondition, discharged as one stack with the producers: →
+  COVERED, impl-gate, red-first. `memory/test/v2-explicit-read.test.ts`
+  ("Phase 5" arms, all three red at the pre-change tree): FP2's
+  cross-engine widening (a home holder names a FOREIGN space's
+  instance under its own space's lease; a lease-less client stays
+  refused), the per-process sharpening (a second process's lease row
+  admits nobody — full-DR1-holder equality), and the fail-closed
+  unnamed-scoped-foreign refusal (a co-hosted serving session's
+  unnamed scoped read of a space it does not hold refuses; ordinary
+  clients, space-scope foreign reads, and home scoped reads are
+  untouched). The producer half is
+  `runner/test/executor-cross-space.test.ts`'s provider refusal (a
+  serving manager's FOREIGN provider refuses scoped reads; space-scope
+  and home and non-serving managers unaffected), refused ENTRY-scoped
+  at `pull()` — per caller, before the coalesced watch-refresh batch —
+  so one scoped offender cannot poison innocent space-scope foreign
+  reads sharing the batch's single pending promise (the review's F3;
+  the concurrent scoped+plain coalescing arm is pinned red-first, and
+  the batch-level check survives as a loud bypass backstop). The
+  unnamed-path check is fully synchronous (the resolved-engine index),
+  preserving the ACL revocation-race invariant; its per-query cost is
+  one prepared-statement lease probe per open co-hosted engine, only
+  for flag-ON scoped reads by principal-bearing sessions.
+- protocol §2's read-row Phase-1 recorded acceptance (the
+  service-identity-only equality): RETIRED — the sharpened check
+  compares the full DR1 holder minted by the co-hosted process
+  (CHANGED sentences on the existing row; coverage above).
+- serving-loop §3b's server-internal foreign wake (+1 rule,
+  impl-gate): → COVERED, with a survival-test finding recorded
+  honestly. `executor-cross-space.test.ts`'s wake test pins the
+  END-TO-END behavior — a home derivation over a foreign doc
+  re-derives on the foreign commit alone (idle window 600 s). A
+  host-side fan-out built for the wake was MUTATION-PROBED REDUNDANT
+  (the test stayed green with it disabled) and REMOVED: the wake is
+  the already-landed chain — foreign session frames → the scheduler's
+  autonomous storage-notification runs → the seal's loop wake — so
+  the spec sentence is satisfied by construction, not by new
+  machinery. Chained-not-yet-applied wave seals now COUNT as work in
+  the loop's idle check (the review's F4: a seal chained in a cycle's
+  last microtasks was invisible to the contribution count and fell
+  back to the idle timeout — latency-only; the level shape was chosen
+  over an edge latch after the latch double-counted the loop's own
+  mid-cycle watermark seal, caught by the shadow-clamp pin; not a
+  guard, so no mutation probe attaches).
+  Activation's foreign basis re-mark (§6 step 2's Phase-5 sentence)
+  rides `selectForeignBasisRows` + per-space head resolution,
+  fail-degrading to surfacing (accounting parity with the home scan;
+  recovery correctness rides recompute-on-demand) — and because that
+  catch makes breakage invisible by design, the DECISION is
+  unit-pinned (the review's F5): `selectForeignStaleInstances` in
+  `executor-cross-space.test.ts` — foreign rows only, at-head rows
+  never re-mark (the `>=` mutation is red), behind-head rows do, a
+  foreign-head move flips an at-head row stale, home-scan findings
+  are not double-added.
+- serving-loop §3d's accumulation gate (CHANGED — the Phase-5 accept
+  posture as an AUTHORIZATION boundary, per the review's F1: carriage
+  is minted for every acting run, so an admitted-iff-carriage gate
+  authorized nothing): → COVERED. The gate admits iff carriage AND
+  the acting identity holds a structural write grant for the TARGET
+  space (`Server.foreignWriteAuthorityFor`: owner-by-identity /
+  fresh-store creation, DID-shape-checked and probed WITHOUT
+  materializing a store (F1c) / the target's own ACL grant,
+  mode-independent — no service-DID blanket, no populated-legacy
+  compat; fail-closed otherwise), and `foreignWrites: "accept"`
+  REFUSES construction without the probe — the vacuous configuration
+  is unrepresentable. `executor-wave.test.ts`: full carriage admitted
+  with the foreign scoped row keyed from the CARRIED identity (the
+  stage-F delegated test, now under the live gate, allow-all probe);
+  the UNGRANTED crossing (full carriage, existing no-ACL target)
+  refused action-scoped and counted with the actor's OWN home space
+  admitted beside it (red under the grant-check-neutralized
+  mutation — the pre-fix shape); partial carriage refused at
+  ACCUMULATION with the wave surviving vacuous (red under the
+  carriage-arm mutation); the probe's own arms (owner / creation /
+  non-creating second probe / garbage name / no-ACL fail-closed /
+  ACL WRITE grant / no-row refusal) pinned in
+  `executor-cross-space.test.ts`; the sink's
+  scoped-op-without-carriage refusal re-pinned DIRECTLY as the
+  backstop ("Phase 5 backstop" test). The serving loop passes
+  "accept" + the memory server's probe (space-server.ts) and resolves
+  foreign co-hosted engines ahead of the commit step with PER-SPACE
+  failure isolation (the review's F1b: pre-fix an unresolvable
+  foreign engine threw out of the cycle — loop-failed → park for the
+  HOME space; now the failing space's contributions withdraw
+  action-scoped — events requeue, derivations drop — the wave commits
+  the rest, counted in §7's `foreignEngineFailures`; the E2E is red
+  under the catch-reverted mutation, reproducing park(loop-failed)
+  verbatim). Carriage-less and ungranted foreign writes stay counted
+  in §7's `foreignWriteRefusals`. Residual recorded (F1c): a
+  well-formed FRESH space DID still provisions a store at commit —
+  §2b's sanctioned minting (deterministic per-user-per-event ids;
+  quota attribution the standing residual, README §3.8).
+- builtins §5's wish row (CHANGED — the RULED 2026-08-14
+  per-demanding-identity lift): → COVERED, impl-gate.
+  `executor-cross-space.test.ts`'s home-space resolution test: a
+  stamped derivation resolves the DEMANDING principal's home space, a
+  stamped handler resolves the ACTOR's, MIXED carriage (instance
+  owner's scopeKeyIdentity + a different acting pair) resolves the
+  INSTANCE OWNER (the review's F6 — red under the precedence-swap
+  mutation), an identity-less serving run refuses (never the service
+  DID), and a client runtime is byte-identical to before. The wish
+  builtin's guards ride `homeSpacePrincipalFor`; the sidecar
+  compile-cache context is the SERVED space on serving runtimes;
+  sidecar result cells AND the builtin's per-node closure caches key
+  by the home-space user — PINNED by the two-demander test (the
+  review's F2: the closure caches were per-node singles, so demander
+  #2 reused demander #1's create surface and clobbered the shared
+  pending input; the reviewer's M6 mutation — both keyings reverted
+  to the service DID — now fails the test, where pre-fix it survived
+  every suite; the suggestion sidecar gains the same per-user keying
+  on SERVING runtimes only, client cause byte-identical). The
+  lunch-ON gate's profile leg is the E2E witness (the phase PR's
+  gates table carries its status).
+- OW13 — the delegated-grant RESOLUTION row's Phase-5 PRECONDITION is
+  DISCHARGED (the design + fail-closed refusals above, one stack with
+  the producers). The row's original obligation — grant RESOLUTION
+  against a per-doc grant store, with negative tests — STAYS OWED on
+  its original trigger (the store landing); Phase 5's write-side
+  carriage is presence+completeness (`capabilityRef` minted
+  structurally at #stampRun: `event-consequence:<eventId>` /
+  `demanded-run:<principal>`, the FP1 `stream-append:<sidecarId>`
+  precedent — a below-spec-granularity surface FLAGGED in the
+  Phase-5 PR) PLUS the accept gate's per-TARGET-SPACE structural
+  grant check above — space-granular authorization now, doc-granular
+  resolution still owed.
+- OW22 — DISCHARGED (evidence recorded on this delta; the row's
+  trigger was Phase 5's grant-scoped read hardening): the exemption
+  re-verifies on CURRENT holdership at every push-path use
+  (`#currentLeaseHolderExemption` — Phase 5 widens it to exactly the
+  admission's co-hosted condition, full-holder equality), lease loss
+  clears the persisted bit, and the post-handover test exists
+  red-first ("lease-holder push exemption dies with the lease" +
+  the resume revalidation test, `v2-explicit-read.test.ts`). The
+  half (ii) wire-upsert scope-name mitigation (forced full resync)
+  stands unchanged and keeps its comment. *(Superseded in part by
+  fan-out stage A's fix round, 2026-08-17: "lease loss clears the
+  persisted bit" is no longer the mechanism — the bit is the session's
+  sticky WIRE VOCABULARY (keyed frames for its life; a keyed delivery is
+  keyed-retracted), the exemption still re-verifies on CURRENT
+  holdership at every push-path use, a lapse is recorded and re-armed on
+  the first live pass; the post-handover tests still hold — a former
+  holder receives no foreign instance — see OW17.)*
+- OW17 — RE-TAGGED with the Phase-5 posture (flag-don't-fill upheld):
+  the trigger anticipated foreign scoped instances making the
+  replica's scope-name collapse load-bearing; Phase 5 instead
+  REFUSES foreign scoped reads fail-closed (the grant-design
+  interim), so no foreign instance can enter a serving replica and
+  the collapse's exposure is unchanged from P2-F. The owed leg
+  (replica-level per-instance read keying + per-(action × instance)
+  local precision) now triggers with the grant-scoped read
+  RESOLUTION landing — the same work that first admits a foreign
+  scoped instance producer.
+- LT9 rec (c) — was ADOPTED-PENDING-VETO (the COUPLING SEAM half only:
+  `InitializationData.eventAppendQueuePersistence` →
+  `resolveEventAppendQueuePersistence` → the manager's
+  `eventAppendQueueStore` option); VETOED BY SIMPLIFICATION with the
+  LT9 re-ruling (owner, 2026-08-15) and RETIRED in Phase 7 — the seam
+  and its tests are deleted (dead weight for a non-goal); OW20 CLOSED
+  (see its row).
+
+Delta 2026-08-14 — Phase 6 (push priority, budgets, scale; the phase
+PR):
+
+- protocol §3's push-priority row: IMPL-GATE → COVERED. The
+  implementation-shape note added to §3 (session-chain ordering,
+  two-phase fan-out, whole-frame-at-derived-priority for mixed
+  frames, the INV-5 rationale against frame splitting) is +1 binding
+  sentence; its pins are the memory unit suite's
+  registration-order-adversarial ordering test (mutation-probed
+  against the reverted split) and `sx2-scale`'s counter half
+  (OW8's row above carries the split rationale).
+- serving-loop §5's budget-hooks row: IMPL-GATE → COVERED. The §5
+  rewrite (+1 binding sentence set) names the mechanism: outstanding
+  cap + egress token bucket as `SpaceServerPolicy` knobs, env-wired
+  in the toolshed bootstrap (`SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`
+  default 16, `SERVER_EXECUTION_EGRESS_RATE_PER_S` default unpaced,
+  `SERVER_EXECUTION_FLUSH_DEADLINE_MS` for T_flush — the §3 "tuned in
+  Phase 6" knob's landing), eager in-flight registration with
+  dispatch-only deferral, the sqlite-query LOCAL exemption, and
+  drop-on-park. Pins: `executor-outbox-budget.test.ts` (cap + FIFO
+  drain, local exemption, token pacing, close-drops — real-clock,
+  listed in the preload). NEW implementation surfaces below spec
+  granularity, FLAGGED in the Phase-6 PR rather than silently
+  normative: (i) the LOCAL_EFFECT_KINDS exemption set (sqlite-query
+  is the one shipped non-egress effect kind); (ii) the 16-outstanding
+  toolshed default (an operator-tunable production posture, not a
+  spec constant); (iii) `outbox.budgetDeferrals` + the
+  `servingLoop.push` counter block (§7's list updated).
+- The Phase-6 gate calibration (impl-gate, lands with `sx2-scale`):
+  the budget-isolation and flat-accumulation gates bind
+  noise-tolerant envelopes (absolute ceiling + same-box baseline
+  multiple, constants at the head of `sx2-scale.test.ts`) rather
+  than the §3.3 300 ms LAN p50, which is a quiet-box number the
+  plan's Phase-7 criterion re-measures under the §1 method; the
+  cf-checkbox in-suite≈isolated criterion is held as its SUBSTANCE
+  (server latency flat as spaces accumulate) measured headlessly —
+  the v1 mechanism was never pinned and the browser-context timing
+  rides the ordinary suite.
+- OW26's discharge and the OW27 flag are recorded in their register
+  rows above (§3).
+
+Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
+
+- OW26's row: the computed-control arm reconciled (observer
+  read-timing, probed at base and head) and the flush-deadline
+  residual moved INTO the register (it had lived only in the PR
+  body); the standing lesson is now pinned in-suite — every
+  kick-and-await-W barrier in `executor-effect-channel.test.ts` reads
+  its target after the trailing echo, so the `serverSeq` regression
+  class is deterministically red (mutation-verified at all four
+  barrier sites).
+- serving-loop §5's env-knob sentence gained +1 binding clause: the
+  outstanding-effect cap's env parse is FAIL-CLOSED (literal `0` is
+  the only opt-out; garbage/negative → default 16, warned). Pin:
+  `packages/toolshed/lib/server-execution.test.ts`
+  (`serverExecutionPolicyFromEnv`; the pre-fix parser mapped garbage
+  to unbounded — mutation-verified red).
+- §7's `push.*` counters are DEFINED as sessions EVALUATED per group
+  (an ordering witness, not delivered frames) — the exported type's
+  doc said "sends"; corrected, no counter change.
+
+**Phase 7 (the flip): rows opened by the flip's own gates, 2026-08-15:**
+
+- OW28 — the `compile-and-run` SERVING PORT (stage G's out-of-scope
+  note; builtins.md §3): under the flag fresh `compile-and-run` is
+  INERT everywhere — the client gate suppresses fresh compiles for
+  every non-wave run and the serving side's async writebacks are
+  unstamped, so they refuse at the wave seal — and the flip ships that
+  inertness by default (`common-fabric.tsx`'s piece-creation flow among
+  the consumers). CHARACTERIZED by the P7 independent review
+  (2026-08-15) as a product regression relative to OFF: on a flag-ON
+  runtime whose tx carries no wave run context (every CLIENT run —
+  derivation, handler, imperative) `builtins/compile-and-run.ts` sets
+  `pending = true` and RETURNS before launching the compile — no
+  compile, no result, no error, `pending` never clears; on the SERVER
+  (wave-stamped run) the compile launches but its writebacks
+  (`runtime.editWithRetry`, `runSynced`) are UNSTAMPED floating
+  transactions on a serving runtime → refused at the wave seal
+  (`unstampedSealRefusals`), so `pending=false`/`result`/`error` never
+  land either. User-visible under ON: every `compileAndRun` consumer
+  shows "compiling…" forever — `fetchAndRunPattern` in
+  `packages/patterns/system/common-fabric.tsx` (the LLM/tool piece-
+  instantiation flow: `ifElse(pending || …)` never resolves),
+  `packages/patterns/compiler.tsx`, `write-and-run.tsx`,
+  `email-pattern-launcher.tsx`. The pins in `compile-and-run.test.ts`
+  assert exactly the gate (0 launches non-wave, 1 launch wave-stamped),
+  not a working port. FIX SHAPE (owning layer: runner
+  `builtins/compile-and-run.ts` + `executor/outbox.ts` /
+  `effect-completion.ts`, following the request-hash builtins):
+  compilation as an OUTBOX EFFECT KIND memoized on the program hash,
+  the instantiation landing as a COMPLETION-CLASS stamped writeback;
+  the client keeps reading through (speculation.md §2). Trigger: a
+  named flip blocker — third in the flip's ordered gates (plan Phase 7
+  task 1); nothing in CI exercises fresh compile-and-run in the ON arm.
+- OW29 — space-root demanders + demand-arrival re-runs (the reverted
+  Phase-7 extension recorded under OW17): a client whose only watch is
+  the space-scoped piece root supplies NO identity to the run supply,
+  and a clean action never re-runs for a newly arrived instance. Both
+  are needed for a second user of a shared space to be served at all;
+  both are GATED on OW17's replica per-instance keying (without it they
+  turn silent under-serving into a wave storm). Land the three
+  together. Trigger: OW17. The demand-root CHAIN'S coverage folds in
+  here (P7 independent review finding 4, 2026-08-15): the chain
+  (`demandRootIds`) covered nested pattern nodes and result-as-pattern
+  children but MISSED the list builtins' child instantiation
+  (`builtins/map.ts`, `filter.ts`, `flatmap.ts` call `runtime.runner.
+  run` directly) — a mapped child's derivations ran with the service
+  fallback while the parent's `raw:map` ran per instance (probe:
+  alice=0 bob=0 fallback=2), so any per-user state inside a list item's
+  sub-piece was mis-keyed under `user:<serviceDID>` at cardinality 1
+  too. FIXED by the P7 fixer (2026-08-16): the six list-builtin sites
+  pass `parentPieceRootId`; red-first via the adopted probe,
+  parametrized over map/filter/flatMap in `executor-run-supply.test.ts`
+  (mutation-verified per site); the grandchild-composes probe pinned.
+  STILL OPEN, FLAGGED (not filled): wish.ts's four `runtime.run`
+  sidecar launches (profile create / picker / suggestion) also carry no
+  parent — the served sidecar's own actions run under the wave-level
+  identity — but chaining them to the wish's parent root would run each
+  per-demander sidecar for EVERY demanded instance of the outer root
+  (bob's run over alice's sidecar; spurious per-user writes under bob's
+  key), and whether a per-demander sidecar wants the chain's instances
+  or exactly its own demander is an UNSTATED semantic — owner ruling
+  needed before it is wired.
+  **DIRECTION VINDICATED, storm cut PINNED IN THE HARNESS; a lunch
+  residual stays OPEN (fan-out stage B, 2026-08-17; wording corrected on
+  the independent review's F4).** Both extensions landed on stage A's
+  instance-keyed replica: space-root demanders (every demanding pair
+  recorded on every root; the walk and the supply per demander) and the
+  demand-arrival re-run (the arrival re-arm). The 4,427-wave storm's
+  cycle — N instance runs writing one collapsed local doc + patches
+  diffed against a sibling's value — is pinned UNBUILT in the HARNESS:
+  `executor-fan-out.test.ts` (i) — two users, 20 divergent authored
+  edits each, waves ≤ 2·edits + 8, quiescent after the last edit (no
+  wave in a 3 s window), zero `wave-commit-rejected … missing path`,
+  neither instance ever holding the sibling's value. But "UNCONSTRUCTIBLE
+  now" OVERCLAIMED against the LIVE gate: the independent review's
+  lunch run 4 still showed a churning serving loop (331
+  `wavesBudgetExhausted`, `wave-commit-rejected … path is not
+  traversable at /value/children/2/children/0` ×5) under ON — a
+  transient patch-vs-wrong-base race on a `computed:` VDOM. The fixer
+  pass did NOT reproduce that on its own ON binary (fadc2efb1b): lunch
+  runs 1–2 show `wavesBudgetExhausted` 66–90 (well below run 4's 331)
+  and ZERO `wave-commit-rejected`, so the storm cut holds far better
+  here than the review's snapshot — plausibly helped by F1's
+  RetryImmediately bound removing one hot-loop source — but the residual
+  is not PROVEN gone at the live gate, so the honest disposition is
+  "storm pinned unbuilt in the harness; a live churn residual of open
+  attribution, unreproduced at the fixer's binary". The wish-sidecar
+  chain is WIRED per the panel's Lens 5 (the sidecar's actions carry the
+  outer root and run as demanders) but its runner-suite pin is OWED
+  (review F3 — it needs the sidecar to RUN, which does not complete
+  under the suite's fake clock; the per-demander pin stays FLAGGED, OW17
+  residual viii). The lunch gate STAYS SKIP-LISTED with the residual
+  named below.
+- OW30 — the controller-side write-destination validation RACE under
+  the flag (`piece-controller.ts` `validateWriteDestination`, the
+  #4717 guard as narrowed 2026-08-07): under the full ON posture
+  `counter` failed once in three runs on the Phase-7 tree ("current
+  producer value is not accepted as an array container" — the
+  controller read a served-late/speculative producer value of the wrong
+  shape) and `topics-navigation` fails fast on the same class ("missing
+  required property myName"); green on re-run and at the base. Owed:
+  the convergence step the 2026-08-07 narrowing anticipated (validate
+  against a settled view — `waitForSettled` on the piece's space —
+  before judging the written subtree), and its pin. Trigger: the flip
+  soak (an intermittent red in the ON lanes; `topics-navigation` is
+  ON-skip-listed on it).
+
+**Rows opened by the Phase 7 independent review and the fixer pass
+(2026-08-15/16; the flip landed DARK — constant `false`):**
+
+- OW31 — the service-principal READ-AUTHORITY grant is a WRITE-AUTHORITY
+  WIDENING for the process identity's ordinary session traffic (P7
+  independent review finding 6; the P7 build's "NOT a write widening"
+  was overstated). Under the flag `memoryServiceDidsFor` makes the
+  toolshed process identity a memory service principal, and a service
+  principal is implicit OWNER for its sessions on EVERY space
+  (`packages/memory/v2/server.ts` — transact, queries, watches, ACL-doc
+  writes, fresh-space genesis; the ACL policy has no read-only service
+  class). So the process identity's ORDINARY session traffic — its own
+  `productionServer` runtime (ingest / webhooks) and the loopback
+  plane's authored/bookkeeping commits — gains OWNER everywhere,
+  wherever `MEMORY_SERVICE_DIDS` did not already list it. Bounded by
+  process trust (the same process already derives every space through
+  the engine-direct sink) and NOT widened at the wave's foreign-write
+  accept gate (`foreignWriteAuthorityFor` ignores the blanket). What the
+  wish's bootstrap NEEDS is READ on the demanding user's home space; the
+  narrower shape — a read-only service-principal class in the memory
+  ACL — is a memory-ACL POLICY addition, and whether it suffices depends
+  on what the served create handler's `.inSpace()` provisioning needs at
+  fresh-space GENESIS (a service DID may initialize a genesis ACL; a
+  read-only principal could not). RULED-POSTURE ITEM FOR THE OWNER:
+  accept the OWNER-everywhere posture under the flag (the deployment
+  checklist's operator-DID posture made automatic where the loop runs),
+  or add the read-only class and route the wish's read through it. Not
+  narrowed by the fixer (flag-don't-fill). Inert while the constant is
+  `false` (the grant is flag-gated; OFF the configured list is used
+  verbatim). Trigger: before the flip PR.
+  **RULED 2026-08-18 — the write-authority posture; implementation
+  OWED post-merge, BEFORE the flip PR; OFF-invisible.** Owner,
+  verbatim intent: toolshed's serving identity (a generic one, not
+  user-specific) must NOT be used to write into users' home spaces;
+  the USER's identity does — for wish provisioning and `.inSpace()`
+  genesis; the service principal is not an implicit OWNER of users'
+  spaces. Genesis shape, ruled: "the new space's own keys can be used
+  for the genesis transaction, immediately delegating owner to the
+  acting user (so that first commit happens under the space's own
+  identity, the rest is then the user's)." Scoping report (the
+  evidence, work order and proposed spec text):
+  [`stage-c-ow31-scope-report.md`](../../history/plans/server-execution-v2/stage-c/stage-c-ow31-scope-report.md).
+  Findings, as they bear on the build: (i) served home-space WRITES
+  ALREADY ride the delegated path under the acting user — the wave's
+  accept gate ignores the service-DID blanket and the engine sink
+  carries `delegated{actingPrincipal, capabilityRef}` — so the ruling
+  was the architecture's intent, honored for every write but one;
+  (ii) the ONE defect is the `.inSpace()` genesis ACL's CONTENT, which
+  names the SERVICE as OWNER (`packages/runner/src/storage/v2.ts:1047-1221`
+  — the bootstrap session signs as the space, but `signer` = the
+  manager's `as` = the service on the loopback plane), so a served
+  create mints a service-owned space — or an ACL-less one when the
+  sink's data commit wins the race with the mount's genesis; UNPINNED
+  today; the fix is `registerSpaceIdentity(identity, { owner:
+  actingUser })` threaded from the serving-side `resolveSpaceName`
+  (a serving runtime with no actor REFUSES to register), the genesis
+  forced BEFORE the sink's data batch for every `creation`-granted
+  foreign target, and the sink refusing a foreign batch into a
+  seq-0 / no-ACL engine (INV-13 mirrored on the engine-direct plane);
+  replay-idempotent, because actor and keys are both functions of the
+  creation event (CT-1650 + the event's stamped `firedAt.user`);
+  (iii) the READ side: removing the OWNER blanket with no replacement
+  makes `session.open` deny the serving runtime on EVERY owner-only
+  home space — under ON, where clients do not commit derivations,
+  every private-space piece stops deriving — so a READ-ONLY SERVICE
+  CLASS in the memory ACL policy (`acl.readOnlyServiceDids`: a READ
+  floor, never WRITE or OWNER by that class, never a genesis
+  initializer; ON: the process identity; OFF: empty) is the
+  scoping report's RECOMMENDATION on file — SUPERSEDED by the READ
+  ruling below (RULED 2026-08-19: ACL-only service reads); (iv)
+  flagged residual for the
+  owner's eye: the genesis ACL's `"*": WRITE` wildcard (the client's
+  own rollout default) leaves the service — and every authenticated
+  principal — with WRITE on the new space via the wildcard; "the user
+  is OWNER, the service is not" holds, "the service cannot write P"
+  does not follow, and narrowing the wildcard is a separate policy
+  question. Pins for the build: "a served `.inSpace()` genesis: actor
+  = the space DID, ACL owner = the acting user, the service principal
+  appears nowhere in the ACL, and the space's commit #1 IS the ACL
+  commit"; "the service principal cannot write into a user home space"
+  (session plane refused under `enforce`; a carriage-less wave write
+  refused at accumulation; a carriage-bearing write acting as another
+  user refused on the `acl` arm); a creation-granted foreign batch
+  never lands before the genesis; kill/replay between genesis, data
+  and home commits converges on ONE user-owned ACL; and the served-wish
+  + lunch gates as acceptance (no `lacks READ` in the toolshed log,
+  `foreignWriteRefusals` 0, a store dump with no `of:<P>` owned by the
+  service DID; an `observe`-mode canary counting the process
+  identity's write would-denies — expected 0, any non-zero names a
+  residual to re-route). Guard against creep: the OWNER-class list
+  stays operator-configured; if a future stage needs the process
+  identity to WRITE over the session plane, the answer is a
+  wave-stamped path or an explicit grant, never re-adding it to that
+  list. Does not gate landing the stack OFF (the grant is flag-gated;
+  OFF the configured list is used verbatim); the flip PR's gate reads
+  against the built posture.
+
+  **READ side RULED 2026-08-19 — service identity reads the ACL ONLY;
+  every other served read runs under the USER's identity.** Owner, in
+  chat:
+
+  > ACL can be read with service identity, but all other reads must
+  > be user identity (but if this is wrong, flag for follow-up work
+  > after merging to main if criteria succeeds)
+
+  — owner (Berni), 2026-08-19. This rules the read side and
+  SUPERSEDES the scoping report's read-only-service-class
+  recommendation (finding (iii) above; `acl.readOnlyServiceDids` is
+  not taken — the report stays as the evidence and the history): the
+  service identity may read a space's ACL, and EVERY OTHER served
+  read — `session.open` on a user's home space included — runs under
+  the acting USER's identity, mirroring the ruled write posture's
+  delegated carriage. Escape hatch, per the ruling's own words: if
+  this proves wrong during the OW31 build, FLAG for follow-up work
+  after merging to main (the merge happening if the confidence
+  criteria succeed) rather than blocking on it. The build — the write
+  and read postures together — stays OWED POST-MERGE, BEFORE the flip
+  PR; OFF-invisible; does not gate landing the stack OFF.
+- OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
+  ON posture in the two-browser journeys — the EVIDENCED mechanism of
+  the two two-browser gates' red, UNATTRIBUTED (P7 independent review
+  findings 1/2; the P7 build had attributed the red to OW17 by
+  inference). Evidence (`review-p7-logs/`, two-browsers 2/2 at head +
+  1 at base, lunch 2/2 at head, 300 s stalls each): the SERVING LOOP is
+  QUIET (waves 20–26, derivedCommits 19–25, events 2/2 appended/
+  processed, watermarkLag 1–2 — no storm) while BOTH browsers run
+  `scheduler-non-settling` every ~6.6 s (40–56 k client action runs /
+  5 min at head AND base; `runner/start/resumeCellSync` n=458–644 piece
+  re-starts); 50–70 % of the server's waves exhaust the flush deadline
+  (`wavesBudgetExhausted` 12–16 of 20–26 — reported here because it was
+  reported nowhere; the single-browser `counter` gate also exhausts 2/5
+  with NO client loop, so exhaustion alone is not the discriminator).
+  Base stall ≈ head stall (head run 1 got one step further; run 2
+  stalled identically at the first per-user write) — P7 is not a
+  regression, but neither is it evidenced progress. The 4,427-wave storm
+  signature exists ONLY on the builder's tree with OW29's reverted
+  extensions applied. NOT evidenced as OW17. The lunch gate ADDITIONALLY
+  hits the served `#profile` wish throwing identity-less at step 1 (see
+  OW17's correction; the OW29 gap at first demand). Owed FIRST in the
+  flip's ordered gates: the discriminating experiment — a
+  `commonfabric.detectNonIdempotent()` capture in one browser of the
+  two-browsers gate plus a debug-level `wave-budget-exhausted` trace
+  naming the non-quiescing server actions — then the fix. Until then
+  both gates are ON-skip-listed with this reason (`tasks/server-
+  execution-on-skips.ts`), red under the full ON posture, NOT green-by-
+  vacuity. Trigger: first of the flip's ordered gates (plan Phase 7 task
+  1); the flip PR needs the skip list EMPTY.
+  **TRIAGED (2026-08-16) and the SYMPTOM treated — row stays OPEN
+  until stage B.** The triage attributed the loop: a purely
+  CLIENT-side speculation retire-to-nothing loop on scope-narrowed
+  (per-user) derivations — the overlay retires the echo on watermark
+  coverage of its basis (~1 ms after the seal), the store holds
+  NOTHING for the instance (the server derived it under the SERVICE
+  identity's instance — F1's identity-less space-root demand), the
+  flip is an `integrate` and the writer reads its own output, so it
+  re-derives; seal → retire → flip → re-run at ~80 ms cycles. Cause =
+  the demand registry drops identity for space roots (stage B's run
+  supply fixes it). The CLIENT ARRIVAL GATE (speculation.md §4, RULED
+  2026-08-16 on the panel's recommendation — a backstop for demand-walk
+  coverage gaps and the first-demand transient, independent of the
+  server half) LANDED with fan-out stage A as its own commit: an
+  input-origin entry retires only once every doc instance it wrote
+  holds a confirmed value at seq ≥ its floor; riders
+  supersede-by-newer and own-retirement-is-not-a-trigger. Pinned:
+  `speculation-arrival-gate.test.ts` (the OW32 shape — covering
+  watermark, no store value → the echo stays, bounded runs, no
+  non-settling; gate removed → the entry retires to nothing; arrival
+  retires it and the store value renders; the own-retirement mechanism
+  with its mutation; supersede-by-newer scripted). The triage's
+  measured effect: 45–56 k → 55–137 client runs / 5 min, both
+  two-browser gates booting < 3 s. The gates stay ON-skip-listed:
+  the gate treats the symptom; the R7 wall behind it is closed by
+  stage A's read seam, and the per-user derived state of real users
+  needs stage B's supply — record the two-browser gates' status
+  honestly at each stage (stage A's build report carries the runs).
+  **CAUSE FIXED FOR WATCHING PRINCIPALS (fan-out stage B, 2026-08-17;
+  wording corrected on the independent review's F4 — not blanket
+  "CLOSED as a cause").** The loop's premise — the store holds per-user
+  instances under the SERVICE identity and no user principal — is gone;
+  every demanded per-user node runs per demanding principal (OW17 leg
+  2). The NON-watching actor gap the review's F2 named (a served handler
+  reading a per-user derivation it does not watch lost its event
+  silently) is CLOSED by the fixer pass's transient-demander PREFLIGHT
+  (`rearmNotCurrentFanOutForActor` — instance-level currency, not
+  node-level; flag (2) row above). The arrival gate STAYS as the
+  backstop for the first-demand transient and any walk-coverage gap
+  (design §E residuals 1 and 4). Gate observations on the fixer's
+  ON-built binary (fadc2efb1b), fresh store per run: the two-browsers
+  gate GREEN 2/2 (1m53s, 56s; zero `scheduler-non-settling`;
+  `structureLoadTerminal` 105 — NOT the build report's "0"), holding
+  the stage-A/B builders' 3/3 + the review's 2/2 — UN-SKIPPED. The lunch
+  gate is BIMODAL (fixer runs 1/2: run 1 merge-hang, run 2 green
+  1m18s), on a residual the F4 TRIAGE attributes to SERVED-WISH TIMING,
+  NOT a stage-B B7 precise-dirtiness miss:
+  - the swatch flip and the merge's lost vote are the SAME chain,
+    `ranked ← todaysVotes ← nowTick`. `todaysVotes` and `ranked`
+    (`lunch-poll/main.tsx`) read only SHARED inputs (options, votes,
+    users, `nowTick`), so they are SPACE-scoped — NOT fanned out per
+    user — and B7 per-instance dirtiness does not even apply to them; a
+    change to `nowTick` (a shared doc) is a space cause that dirties the
+    single instance (and, for any per-user swatch VDOM downstream,
+    `dirtyFanOutForCause`'s space arm dirties ALL instances —
+    `dirtyFanOutAll`, not a miss). The flip is `ranked` recomputing a
+    different VALUE as `nowTick` resolves, not a missed re-dirty.
+  - the ROOT is the served `#now/300` interval wish (`nowTick`)
+    resolving null/stale on the serving loop: `castVote` NO-OPS when
+    `nowTick` is null (`main.tsx` `if (!now) return`) → the merge's lost
+    vote (fixer run 1: "1 love it" at the 300 s timeout, the client
+    re-fetching the piece every ~6 s — `compile-cache-hit` — with
+    commitConflicts but `eventLostRaces=0` and NO `wave-commit-rejected`);
+    `todaysVotes`' `dayKeyOf(nowTick)` filter flips which votes are
+    "today" as `nowTick` changes → the review's swatch flip
+    [Bob,Alice]→[Alice]→[Bob,Alice].
+  - the two-browsers gate — which has NO `#now/300`/`nowTick`
+    dependency — is GREEN 2/2 under the SAME binary and load, isolating
+    the failure to the `nowTick` chain, not stage B's per-user run
+    supply. The review's run-4 churn (331 `wavesBudgetExhausted`,
+    `wave-commit-rejected … path is not traversable
+    /value/children/2/children/0` ×5) did NOT reproduce on the fixer's
+    binary (0 in 2 runs; `wavesBudgetExhausted` 66–90), so that storm
+    is characterized as a transient patch-vs-wrong-base race on a
+    `computed:` VDOM under the review's timing (the OW29-cousin
+    class) — NOT a persistent stage-B issue; a register note, not a
+    stage-B fix, plausibly further damped by F1's RetryImmediately
+    bound.
+  Owed (Stage C, a NAMED FOLLOW-UP, NOT stage-B-owned): the served
+  interval `#now/300` wish's value for a serving runtime at dispatch
+  (or the pattern's `if (!now) return` guard reading a wall clock the
+  serving runtime supplies) — plus the pre-existing
+  client-instantiate-vs-server-derive race at piece creation (the
+  300 ms demand-wake grace mitigates, does not close it; residual x).**
+- OW34 — a CFC-serving POLICY item: served handler runs carry NO
+  renderer-trusted event mark, so a per-user served handler's write to a
+  UI-contract-gated (owner-protected) cell is refused by CFC at prepare
+  ("missing trusted-event policy input") — the two-browsers gate's NEXT
+  wall, UNMASKED by fan-out stage A and NOT caused by it (the stage-A
+  independent review's characterization, 2026-08-17: stage A changed
+  nothing the CFC ladder sees; it made the handler read Alice's draft
+  and reach the write; pre-stage-A the same handler wrote nothing).
+  Owning layer: stage B's attribution work or a CFC policy-input rule
+  for actor-stamped served entries — with its own spec sentence (cfc +
+  events.md) before it is wired; the two-browsers gate's ON-skip reason
+  names it alongside OW32. Evidence (2026-08-16/17): with the R7 read
+  seam closed, Alice's served save
+  handler reads her draft and WRITES the shared `profiles` cell, and the
+  wave refuses the commit three times and drops it — `CFC enforcement
+  rejected commit: relevant transaction was not prepared: missing
+  trusted-event policy input for <profiles doc> at /` (both stage-A ON
+  runs, `store-on{2,3}/toolshed.log`). Mechanism: the client's fire marks
+  the UI event renderer-trusted in an in-process WeakSet
+  (`cfc/ui-contract.ts` `markRendererTrustedEvent`), and
+  `recordTrustedEventPolicyInputs` at dispatch matches only such events;
+  a drained stream entry's payload is a fresh object, so the served
+  dispatch records no trusted-event policy input and
+  `verifyTrustedEventRequirements` refuses at prepare. Pre-stage-A the
+  same handler read the service instance's EMPTY draft and wrote nothing,
+  so the refusal never fired. Not stage A's scope (flag-don't-fill): the
+  fix shape is a CFC-serving design question — carry the fired event's
+  trust provenance on the durable stream entry (the append is admitted
+  under the actor's authority; events.md §1) and re-mark it at the served
+  dispatch, or a serving-side trust rule for actor-stamped entries — with
+  its own spec sentence (cfc + events.md) before it is wired. Trigger:
+  before the two-browsers gate can green under ON (with stage B for the
+  per-user derived state of the second user); the gates stay skip-listed.
+  **CLOSED (fan-out stage B, 2026-08-17) — the sister-mark carriage,
+  wired red-first (item 10's condition: the actor carriage did NOT
+  supply the policy input — the ladder wants the process-local
+  renderer-trust MARK, which no `firedAt` carries — so the fix is the
+  register's own stated shape, the twin of the already-landed
+  `runtimeInjectedEventKeys` re-mint, not a new CFC rule): the firing
+  RUNTIME writes `rendererTrusted: true` on the durable entry IFF the
+  sent event carried the renderer-trust mark (never the pattern; the
+  append queue carries only the runtime's `true`; admission refuses any
+  other value); the served dispatch RE-MARKS the payload, so the
+  handler's UI-contract-gated write records the trusted-event policy
+  input `verifyTrustedEventRequirements` requires, under the same
+  in-process trust the client-side gate ran under (the entry was
+  admitted under the firing client's authority). events.md §2 carries
+  the sentence. Pinned: `executor-events-down.test.ts` (a marked fire
+  appends the flag, an unmarked one — even one CLAIMING renderer
+  provenance in its payload — does not; a served probe handler sees
+  the re-mark for the attested entry only; a caller-supplied non-true
+  value never reaches the entry) and memory `v2-event-append.test.ts`
+  (malformed values refused, `true` admits). Evidence: the
+  two-browsers gate's "Bob sees Alice before save" — 300 s / 14
+  `missing trusted-event policy input` refusals on stage B's first
+  build (`store-on1`) — passes in 3–3.4 s with the carriage
+  (`store-on2..4`), zero refusals. FLAGGED for the owner: the
+  server re-mints a client runtime's process-local trust attestation
+  — sound at the injected-keys precedent's trust level (a compromised
+  client can already write what its session authority admits), stated
+  here so the ruling can veto.**
+- OW33 — the ON-posture DENO-CLIENT family, surfaced by making the ON
+  lanes UNIFORM (P7 independent review finding 7; fixer 2026-08-16):
+  once the runner integration tests that talk to the lane's toolshed
+  and the runtime-client worker DECLARE the posture from the env
+  (before: bare `new Runtime` / undeclared worker → OFF client against
+  an ON server, so "runner 14/14" and "runtime-client 45 steps" under
+  the ON lane were mixed-posture evidence), the uniform ON posture is
+  RED on: (a) `packages/runner/integration/pattern-and-data-
+  persistence.test.ts` — Phase 3 starts a NEW piece, `pull()`s its
+  result and reads `getAsQueryResult().sum` (15 under OFF, `undefined`
+  under ON; no sink → no demand — the sink is the demand — and the ON
+  client's own speculative run did not surface the value through this
+  read path either; 13/14 green otherwise); (b) `runtime-client/
+  integration/client.test.ts` step "renders PerUser-derived computed
+  JSX inside cf-screen header slot (CT-1606)" — never reaches its FIRST
+  render in 15 s (3/3 red; a `computed` over `PerUser<myName>` — the
+  same PerUser shape `topics-navigation` fails on under full ON); (c)
+  the same file's "dispatches one navigateTo when a rendered handler
+  changes local state" — FLAKY (1/3 red: two dispatches observed for
+  one handler fire — the double-dispatch class the F10 handler-fork
+  contract exists to prevent); (d) `derive_array_leak.test.ts` counts 0
+  of 50 increments under ON (its own warning fires; green only because
+  it asserts memory). UNTRIAGED — whether the Deno-client speculation
+  overlay should have shown (a)/(b) or the demand should have been
+  registered, and what double-fires (c). Recorded as ON-skip entries
+  (a file entry for (a); STEP-level entries for (b)/(c) so the one-file
+  runtime-client suite keeps its other 43 steps ON — the step guard is
+  in-file, bound to the register and validated). The 8 runner
+  integration files that serve toolshed's `app.ts` in-process (no
+  ExecutorHost) are single-process harnesses, OFF by construction in
+  either lane. Trigger: with OW32's triage (the same "client under ON
+  never settles/renders" family); the flip PR needs the skip list EMPTY.
+
+Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
+
+- README §3.8's backpressure sentence: IMPL-GATE → COVERED (OW27 LANDED
+  above; +1 binding implementation sentence — pace-never-drop, per
+  stream, fired order held; the default posture is a flagged dial).
+- events.md §5's offline-queue persistence sentence RE-TENSED (LT9
+  re-ruled — process-lifetime; the reload half is a non-goal this
+  round, the in-process replacement survival stays pinned); OW20
+  CLOSED, the LT9 rec (c) seam RETIRED (rows above).
+- protocol §2b's free-read row and serving-loop §3b's cross-space read
+  gained the read-authority mechanism sentence (the process identity is
+  a memory service principal under the flag —
+  `packages/toolshed/lib/server-execution-flag.ts`, pinned in
+  `server-execution-flag.test.ts`: OFF the configured list verbatim,
+  ON the identity joins it exactly once). CORRECTED 2026-08-16: this IS
+  a write widening for the process identity's ordinary session traffic
+  (implicit OWNER everywhere) — not widened at the wave's §2b accept
+  gate, which ignores the service-DID blanket by design; OW31 carries
+  the ruled-posture question.
+- builtins.md §5's wish row: +1 binding sentence (a flag-ON non-serving
+  runtime references the served sidecar cell, never instantiates it)
+  — impl-gate; witnessed live on the lunch gate (the ~13/s stale-basis
+  loop stopped), unit pin owed with OW17's landing (the two-demander
+  sidecar test in `executor-cross-space.test.ts` covers the serving
+  side).
+- scheduler/types.ts `SchedulerObservationIdentity.demandRootIds` (the
+  nested-piece demand-root chain) — an implementation surface below
+  spec granularity, FLAGGED: scopes.md §5's "the demand supplies the
+  identity" now resolves a nested piece through its ancestors; pinned
+  red-first (`executor-run-supply.test.ts`).
+- testing.md §2: the CI arms (SUPERSEDED the next day — see the fixer
+  delta below): the phase PR swapped the lanes by env (default = ON;
+  explicit false = OFF on an OFF-built binary).
+- The flip's own default (SUPERSEDED — see the fixer delta below): the
+  phase PR set `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+  (`packages/memory/v2/server-execution-default.ts`), resolved by the
+  `productionServer` / `remoteClient` presets, the shell define
+  fallback, and toolshed's flag helper; the single-process presets keep
+  the OFF baseline by construction (EXPERIMENTAL_OPTIONS.md). Pins:
+  `runtime-presets.test.ts` (deployed-topology presets carry the
+  default), `shell/test/env.test.ts` (define unset → default; `false`
+  → OFF), `toolshed/lib/server-execution-flag.test.ts`.
+- The plan's Phase-7 section carries the honest gates table (re-tensed
+  by the fixer delta below).
+
+Delta 2026-08-16 — Phase 7 fixer pass (the independent review's 12
+findings; the OWNER RULING — the flip lands DARK):
+
+- The landing posture: `SERVER_EXECUTION_DEFAULT_ENABLED = false`
+  (owner ruling 2026-08-16 on the review's verdict LANDABLE-WITH-FIXES
+  as flip-READY / NOT-LANDABLE as the flip). The OFF posture is the
+  default again everywhere the constant reaches; the ON posture stays
+  fully selectable; the ONE absolute pin (`server-execution-flag.test.
+  ts`) now states the default IS OFF. THE FLIP IS ITS OWN SEPARATE
+  ONE-LINE PR (repo convention: a flip is reverted by reverting the PR
+  that only flips) — owed after the ON posture works and is performant,
+  in the plan's ordered gates: OW32 triage → OW17 re-keying (+OW29) →
+  OW28 → the honest benchmark → the flip PR (which also flips the
+  absolute pin, the CI lane roles and their posture probes, and
+  EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
+- CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
+  (probe: server not serving, shell define unset); explicit-`true` ON
+  lanes on `build-toolshed-on` (shell define baked `true`), FULL ON
+  posture VERIFIED before each suite (`/api/meta.shellServerExecution
+  Define === "true"` — a new field read from the COMPILED marker
+  `tasks/build-binaries.ts` writes from the same env the shell bakes;
+  `/api/health/stats.servingLoop` present); the ON lanes' Deno-side
+  clients DECLARE the posture from the env (runner integration tests
+  that talk to the lane's toolshed; the runtime-client worker) — the
+  ON lane is UNIFORM, no longer the mixed posture the review found. The
+  future flip PR's gate obligation for the deployed-topology binaries
+  the review named (finding 8: `background-piece-service`, the CLI,
+  cf-harness, every `PiecesController` resolve ON by the presets — no
+  gate exercises them ON) is RECORDED in the plan's Phase-7 task 1;
+  with the constant `false` none of them flips today.
+- The ON skip mechanism was INERT since Phase 4 (found while adding
+  entries; pinned by spawning deno on both shapes in
+  `tasks/server-execution-on-skips.test.ts`): `deno test --ignore`
+  filters only discovered modules and ignores nothing for explicitly
+  listed files — a shell-expanded glob or the pattern shards' list. The
+  runner/runtime-client/shell `integration` tasks now hand deno a
+  QUOTED glob; the pattern ON shard filters its list through the
+  script's `--filter` mode; STEP-level entries exist (in-file guard
+  bound to the register, validated). Entries today (ALL `phase-7`, none
+  of the lists EMPTY — the P7 phase PR's "one entry" and every earlier
+  "EMPTY" wording were about a mechanism that never bit): patterns ×3
+  (`topics-navigation`, `cfc-group-chat-demo-two-browsers`,
+  `lunch-poll-vote` — the last two on OW32's characterized, unattributed
+  loop), runner ×1 (`pattern-and-data-persistence` — OW33),
+  runtime-client ×2 STEP entries in `client.test.ts` (OW33). Verified
+  locally: runner integration 14/14 default posture, 13/14 + 1 skipped
+  under ON; runtime-client 45 steps default, 43 + 2 ignored under ON.
+- Rows: OW17 gains the review's CLASS VERDICT and the correction (the
+  two-browser red is NOT evidenced as OW17; the lunch "(1)+(2)+(3) →
+  join UI" narrative did not reproduce); OW25 DISCHARGED (the ON shell
+  build runs and is verified); OW27 corrected (cross-stream head-of-line
+  hold was a defect, fixed and pinned — streams independent); OW28
+  carries the characterization and fix shape (compile as an outbox
+  effect kind + completion-class writeback); OW29 folds in the
+  demand-root chain's list-builtin gap (fixed) and the wish-sidecar
+  question (flagged); NEW OW31 (write-authority posture — ruled item),
+  OW32 (the client non-settling loop — first gate), OW33 (the ON-posture
+  Deno-client family).
+- protocol.md §2 gains the `capabilityRef` vocabulary sentence (review
+  finding 11 — adjudicated spec-sentence, no rename): the values are
+  provenance TAGS naming the authorizing context, admitted by PRESENCE,
+  never resolved (OW13/FP7); the name does not denote a capability
+  object.
+- Benchmark (review finding 12): the two-browsers harness red is the
+  OW32 client loop, not a harness bug and not evidenced as OW17. An
+  HONEST partial number has a shape (not built): `sx2-scale.test.ts`
+  already builds N `PiecesController` clients with a timed
+  `settleWrite`; two controllers (distinct identities) on ONE space — A
+  appends an event, B's replica sinks the served consequence — timed
+  under explicit ON vs explicit OFF, fresh store per arm, n ≥ 20, gives
+  a byte-identical cross-user propagation number for the Deno client
+  posture today. Recorded in the plan; the browser number waits for the
+  two-user family.
+
+Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
+serving replica + wire; the client arrival gate):
+
+- protocol.md §2's read row: +1 binding clause (the runner ISSUES
+  explicit-instance reads for a served per-instance run's non-own
+  scoped reads; a live lease holder may name two instances of one
+  (branch, id, scope)) — pinned in memory `v2-explicit-read.test.ts`
+  ("stage A: a lease holder names two instances…", red-first at the P7
+  head) and `executor-instance-keyed-replica.test.ts` (the serving
+  replica holds both instances).
+- protocol.md §3: +1 binding clause (lease-holder frames/snapshots carry
+  `scope_key`; every other session's wire byte-identical) — pinned in
+  the same memory test (keyed frames on watch.set/add/query/push; no
+  key on a non-holder's frames). AMENDED 2026-08-17 (the fix round on
+  the review's finding 1): the keying is the admitted session's STICKY
+  wire vocabulary — a keyed delivery is always keyed-retracted — and the
+  foreign-instance delivery re-arms after a lapse — pinned in
+  `v2-explicit-read.test.ts` ("finding 1" ×3), `storage-instance-keying.
+  test.ts` (the replica half), `executor-space-server.test.ts` (the
+  renew arm's notice), `executor-instance-keyed-replica.test.ts` (the
+  lapse E2E); mutation-verified per half.
+- scopes.md §2 Monotonicity AMENDED (RULED 2026-08-16): structural at
+  the space→user hop only; ragged per principal below it; instance
+  addresses carry the full (scope-kind, principal) address; "k only
+  narrows" is stage B's policy — a ruling, no impl-gate of its own; its
+  consequence for the basis index is the S4 amendment below.
+- serving-loop.md §3b's S4 AMENDED (+1 binding sentence set): rows keyed
+  by the run's FULL instance address — pinned in
+  `executor-instance-keyed-replica.test.ts` (S4 step) with the two P2-F
+  pins moved to the same truth (`executor-serving-loop.test.ts`,
+  `executor-space-server.test.ts`); the stranded stamp and broader-chain
+  keys cleared in BOTH directions — pinned 2026-08-17 in
+  `executor-wave.test.ts` ("S4 clearance in BOTH directions", with
+  pre-existing stranded rows and the same-wave real-row guard; the
+  earlier "pinned" claim covered not-written only — corrected).
+- key-vocabulary.md §3b (new inventory section) + §5's list: the
+  instance-keyed replica/wire vocabulary and `IMemoryAddress.scopeKey`;
+  §4's first tripwire covers the list — pinned in
+  `storage-instance-keying.test.ts` (OFF-arm neutrality per site).
+- speculation.md §4 step 3 + the arrival-gate paragraph (RULED
+  2026-08-16): +1 binding sentence set (the gate, its two riders) —
+  pinned in `speculation-arrival-gate.test.ts` (each with its
+  mutation); OW32's row carries the disposition.
+- Danger-zone note (storage/v2.ts near the wedge machinery): the
+  re-key touched `sealNative`/`sealOperations`, `settleSealedCommit`,
+  `confirmPending`, `finalizeRejection`, `finalizeSupersededSpeculation`,
+  `applySessionSync`, `buildReads`, `record`/`visibleVersion` and the
+  sink/notify paths — ONLY to thread the instance key/identity into
+  the doc-key resolution and the touched-doc entries; no ordering,
+  parking, marker, or shadow-floor logic moved. The wedge pins
+  (`settleSealedCommit → confirmPending` at verdict, `whenApplied`,
+  `markAuthoritativeWrites`), park/backoff, the B-1 barrier, the
+  renew-blip, and C10/T_flush suites ran green under the re-key (the
+  stage-A build report carries the counts).
+- Fix round (2026-08-17, on the independent review): the seams the
+  review found untested each carry a discriminating pin — the true-R7
+  no-load shape (`executor-instance-keyed-replica.test.ts`), the A3
+  seed memo, the served preflight/presync identity, `Cell.sync`, the
+  traversal kick, `buildReads`, and the OFF-arm serialized-form witness
+  (`storage-instance-keying.test.ts`), `WatchView` keying
+  (`v2-client-watch.test.ts`); speculation.md §4 states the arrival
+  gate's frame-coupling assumption; the two-browsers gate's ON-skip
+  reason names OW34 alongside OW32; residuals sharpened in OW17.
+
+Delta 2026-08-17 — fan-out stage B (OW17 leg 2: the per-demander run
+supply; OW29/OW32/OW34 closed):
+
+- scopes.md §2: +1 binding bullet — the mechanism sentence ("a
+  principal's demand at a broad address is demand for that
+  principal's instance of every node that narrows beneath it"; RULED
+  2026-08-16) with the probe / discovery re-arm / arrival re-arm /
+  accept-and-count / transient-demander sentences — pinned in
+  `executor-fan-out.test.ts` (a)–(i) and `executor-run-supply.test.ts`.
+- serving-loop.md §1 ("for the subscriber's instances"; the walk per
+  demanding pair) and §3b (the known-scope ratchet's three sources and
+  no fourth; `instances(ratchet, demanders)`; discovery/arrival
+  re-arms; B7) — pinned in `scheduler-fan-out.test.ts` (the pure core,
+  each mutation red on its own), `executor-fan-out.test.ts` (b)/(h),
+  `executor-run-supply.test.ts` (probe once, then per principal).
+- protocol.md §1: the SpaceServer's-own-writes sentence AMENDED for the
+  discovering run's redirect (RULED 2026-08-16, §I.3) with the
+  durability-coupling note; +1 binding sentence set for scope-derived
+  attribution and the early-emit guard (RULED 2026-08-16, §I.2) —
+  pinned in `executor-space-server.test.ts` (LT6 as a user-instance
+  run; the guard arm) and `executor-fan-out.test.ts` (a) (user-only
+  annotations, never the service). §4: W waits on demanded INSTANCES;
+  arrival is later demand — pinned by (i)'s bounded waves and (b).
+- events.md §2: the renderer-trust attestation carriage (OW34) —
+  pinned in `executor-events-down.test.ts` and memory
+  `v2-event-append.test.ts`.
+- Counters (stats.ts): `undemandedNarrowingRuns`, `earlyEmitRefusals`,
+  `demandArrivals` — the first two 0 at both browser gates, the third
+  17–36 per gate run.
+- Danger-zone note: `space-server.ts` gained (i) the demand latch +
+  300 ms coalescing grace on `noteDemandChanged`, (ii) the empty-wave
+  discard at zero-delta cycles (a wave with no contribution, no
+  pending effect batch and no chained-not-yet-applied seal is dropped
+  so the next seal opens a fresh basis/tenure — closes the stage-A fix
+  round's residual vii(b): a stale-basis wave superseded the boot
+  wave's first derivations; verified against the wave/outbox/watermark/
+  cross-space/effect-channel/events-down/serving-loop suites), (iii)
+  the drain's view-lag guard moved AHEAD of the SKIP arm (the skip
+  notice was index-addressed on the stored index alone; with a fresh
+  basis its stale-view write materialized a ghost entry — pinned by
+  the events-down SKIP-arm test staying green under the discard).
+  `pattern-binding.ts` gained the ragged redirect fix (flag-gated; a
+  session hop below an existing user redirect writes the run's own
+  user slot). Not touched: the wedge machinery in `storage/v2.ts`,
+  park/backoff, B-1, the renew-blip arm, C10/T_flush.
+- OFF byte-identity: every new seam is reached only past a serving-
+  posture or flag gate — `serverRunDemandersFor` undefined off the
+  serving runtime (the scheduler's single-run path is byte-identical;
+  a node acquires a fan-out record only from demanders); the wave's
+  attribution settle/guard run only for stamped derivations with a
+  demanded identity; `homeSpacePrincipalFor`'s ratchet is inside the
+  serving branch; the pattern-binding hop is behind
+  `getServerExecutionConfig()`; the wish sidecar chain is inert
+  (`demandRootIds` is consulted only by the resolver); `rendererTrusted`
+  rides only events-down appends (the OFF client fires no appends);
+  the memory server's `demandChanged` observer and per-session demand
+  rows are read only by the ExecutorHost. Whole-suite witness in the
+  build report.
+- Self-review delta (the mutation ledger, 2026-08-17): two mechanisms
+  survived their first mutation and got discriminating pins —
+  `executor-fan-out.test.ts` (f-walk) now requires the result root's
+  walk to have RUN stamped with each demander's key (a walk registered
+  without its demand root runs once as the service; the guarded value
+  still materialized because a demander's own instance of the ifElse
+  pulled it — the walk's per-demander identity is a supply fact, not
+  what that value witnesses), and (j) pins the TRANSIENT event
+  demander at the resolver seam (a queued served event fired by a
+  non-watching principal makes their pair a demander of the target
+  piece's roots — deterministically, while queued, never after, never
+  for another piece). Two FLAGS surfaced while building (j)'s E2E
+  shape (owner rulings owed; NOT filled):
+  (1) **A handler's write to a per-user slot can land on the SPACE row
+  — real behavior, WRONG cause, nil reachability, fixed UPSTREAM by a
+  schema-generator guard; NO v2 code change (the fix round's
+  pre-narrowing was RETRACTED 2026-08-17).** As found: a `type` handler
+  running as Alice wrote her draft onto the shared argument row, no
+  `user:alice` row; the independent review characterized it
+  posture-independent (reproduced OFF, client-only). The owner's
+  main-side investigation (`scope-handler-write-findings.md`, main
+  `751cbf75c`) confirmed the STORAGE behavior but REFUTED the cause and
+  the seat, and the fixer pass RE-VERIFIED the refutation on the
+  fan-out-B tree with a 4-cell raw-row check:
+  - **The eager-redirect pass WORKS on our tree.** The ordinary
+    `PerUser<T>` shape (generated `{type:"string",
+    asCell:[{kind:"cell",scope:"user"}]}` — scope at the TOP level, NOT
+    a compound) narrows correctly: the report's §8 recipe (parent
+    written THROUGH the schema, then a schema-less handler write) yields
+    SPACE = redirect → user, USER = the value — identical to main. A
+    piece instantiated with a VALUE argument narrows the same way. So
+    stage A/B did NOT break the eager pass (verified: the eager
+    scoped-keys pass in `data-updating.ts` and `updateArgument` /
+    `setupInternal`'s cell-link handling are BYTE-IDENTICAL across the
+    stage-A base `6d18d6998` → stage-B head — the only stage-A
+    `data-updating.ts` change is `seedMemoKey`, unrelated).
+  - **The review's leak came from a NON-STANDARD construction, not a
+    handler-write gap.** The review's repro seeded a SCHEMA-LESS
+    document with `{n:1}` and instantiated the piece over that doc
+    cell; `run` converts a cell argument to a link and never re-writes
+    the parent through the schema, so the eager pass never fired and the
+    slot stayed at `space` — the same on main (unchanged code). This is
+    "the construction is valid but skips a mitigation that fires first"
+    (the report's words). Normal instantiation (value argument, or a
+    schema-bearing doc) narrows; the two-browsers gate's real served
+    pieces keep per-user state isolated (GREEN 2/2).
+  - **The genuine defect is compound-schema blindness.**
+    `getSchemaScopeCap` (`cfc.ts:787`) reads only the top level, so a
+    scope inside an `anyOf`/`oneOf` branch is invisible to the write
+    path (`declaredCellScope`, `foldDeclaredScopeIntoLinkSchema`) while
+    the READ side folds it in — writes and reads disagree and the slot
+    lands on `space`. Corpus reachability is NIL (all 165 declarations
+    put the union inside the wrapper). ENFORCEMENT: a schema-generator
+    guard that throws when a scope wrapper ends up a union member —
+    OWNED BY THE MAIN-SIDE thread, at that layer, in that thread; NOT a
+    v2 write-path change.
+  - **Spec.** scopes.md §5 already says handler consequences land in the
+    acting principal's scoped instances; §2 governs DISCOVERED scope
+    (derivations). The genuine gap is that the DECLARED-scope path had
+    no stated invariant — added to §5 (2026-08-17 owner thread): *a
+    declared scope must be visible to the write path at the top level of
+    the slot's own schema; declared-scope narrowing is the eager-redirect
+    pass, and served execution EXPOSES a violation as cross-user sharing
+    rather than causing it.*
+  DISPOSITION: the fix round's `preNarrowDeclaredScopeSlots` (an
+  instantiation-time pre-narrow) was **REVERTED** — it was a behavior
+  change for a leak the ordinary path does not reach, and the real bug
+  is fixed one layer up. No recorded OFF-arm acceptance. The F2 pins
+  that need a narrowed slot narrow it the ORDINARY way (a schema write —
+  the R7 idiom), never via pre-narrowing.
+  (2) **The transient demander's REACH — CLOSED (review F2, fix round
+  2026-08-17).** As found: the ruled sentence was read as "a DIRTY
+  scoped input at the dispatch's preflight", and the preflight
+  (`collectInvalidUpstreamForLog`) asked only the NODE-level question.
+  A non-watching actor whose handler reads a per-user DERIVATION met a
+  node that was node-level CLEAN (it ran for the watchers) but had NO
+  instance for her — so nothing ran, her handler read the MISSING
+  instance, its argument failed the schema, the run was silently
+  skipped, and the entry was marked consequenced with NO error: silent
+  event loss, in ALL THREE schedules the independent review tried
+  (two-drains, same-drain, and the dirty-input race where the
+  recompute landed before her event queued). The register formerly
+  understated this as "reads empty / unstated"; §B5's own text says
+  "stale/**missing**", so this was a gap in the implementation of the
+  ruled mechanism, not an unstated semantic. Fix: B7 made cleanliness
+  PER INSTANCE, so the preflight now asks the per-instance question for
+  the actor — `Scheduler.rearmNotCurrentFanOutForActor` re-arms the
+  fanned-out nodes in a served handler's closure whose instance for the
+  ACTOR is not current (never run at the node's ratchet for her),
+  keeping the sibling instances clean (B7); the event waits on them,
+  and the handler then reads a CURRENT instance (or, if her instance
+  cannot be keyed — a sessionless actor at session depth — nothing is
+  materialized and the read fails as before, never a silent
+  consequence for the motivating shape). This is the arrival re-arm
+  applied to the transient demand `transientEventDemandersFor` already
+  folds in (pinned by (j)). Pinned red-first: `executor-fan-out.test.ts`
+  (k) [two-drains / same-drain / dirty-input] — the actor's `save`
+  lands `saved:echo:A` under HER instance, consequenced CLEAN, the
+  watcher's instance untouched; mutation (the re-arm dropped) → the
+  silent loss returns → red 3/3. scopes.md §2's transient-demander
+  sentence now reads "not current for the actor" (B7's sense), not
+  "dirty". Residual (documented gap, narrow): the re-arm walks the
+  handler's DIRECT read-writers only — a per-user node reached
+  TRANSITIVELY through an intervening derivation is not materialized
+  for the actor (the node-level path's inverted cone is not
+  duplicated); the watchers' rendering walk covers the rendering shape,
+  so this is narrow in practice.
+  Also on the record: (f-walk)'s walk-key wait failed 5/9 in one
+  window (Alice's walk instance CLEAN with no keyed run 20 s after
+  her flag write; the diagnostic label now prints the walk node's
+  fan-out record and every run since the flag write) and then held
+  40+/40 across two soaks including one under CPU load; unexplained,
+  so the pin waits on TWO keyed changes under her chain (flag, then
+  draft) — a recurrence in CI is evidence about B7 (a keyed cascade
+  not dirtying a walk instance) and should be read as such, not
+  retried.
+
+- **Stage C tuning delta (2026-08-18) — the tuning trio, owner-approved
+  as the tuning half of the tuning-vs-design split (the design half —
+  the per-demander demand walk × roots, and the client's whole-sidecar
+  intent tracking with a CFC probe per fire — is a SEPARATE stage;
+  untouched here). Every item re-measured on the harness protocol
+  (fresh store per run, ON binary posture-verified via `/api/meta` +
+  `servingLoop` present, load recorded, NO configured LLM model — the
+  attribution found the 08-17 daytime greens masked by exactly that
+  churn). Provenance: the figures below are the FINAL binaries' — ON
+  `a2d9a2b7…` / OFF `e8d8ae60…`, both built from the PR tip
+  `2e9d86478` — with the interim reps (`a9534d18…` ON, `6ac8a606…` OFF,
+  and earlier scratch builds) kept where they add evidence and labeled
+  as such; this register's first cut (`5c296cefe`) carried the interim
+  figures alone and was reconciled 2026-08-18 by the independent
+  review's fix batch:**
+  - **T1 — one CFC flow-label probe per commit** (`cfc/prepare.ts`
+    `flowLabelWorkExists`, evaluated by both `Runtime.prepareTxForCommit`
+    and the commit chokepoint on the same unprepared, not-yet-relevant
+    tx — 65 % of a saturated client worker on the ON note series). The
+    NEGATIVE verdict is memoized on the transaction
+    (`IExtendedStorageTransaction.probeFlowLabelWork`), invalidated by
+    any journaled read/write/dereference trace/trigger read (an activity
+    epoch); a positive verdict marks the tx relevant, after which nobody
+    probes. Shared client code, both arms: verdicts unchanged (a memo of
+    a deterministic function; the flow-label suites pin them), probe
+    count 2 → 1 per commit in both. Pinned:
+    `cfc-flow-probe-memo.test.ts` (one evaluation + one memo hit; a
+    read or a write between the asks re-evaluates; a positive verdict is
+    never memoized; both arms) with mutations (memo disabled → red;
+    read-bump removed → the invalidation pin red). Re-measured, note
+    create n=20 (`default-app.test.ts`, `CF_NOTE_CREATE_TIMING_SERIES=20`):
+    ON createToView p50 **5 758 / 3 838 ms** on the FINAL binary
+    (`a2d9a2b7…`, FN1/FN2, loads 6.0 / 5.1) and **4 224 / 4 361 ms** on
+    the interim `a9534d18…` (N1/N2, loads 3.3 / 3.0) vs the
+    attribution's baseline **8 927 / 5 841 ms**; p95 **10 003 / 9 908 ms**
+    (final) and **8 165 / 7 358 ms** (interim) vs **23 335 / 26 451**;
+    the series completed n=20 in 292 / 229 s (final) and 253 / 227 s
+    (interim) — every rep — vs 502 s and a 780-s cap hit at note 18; the
+    adjacent OFF controls (OFF binaries from the same tips: final
+    `e8d8ae60…` at load 5.8, interim `6ac8a606…` at load 3.6)
+    createToView p50 **1 205 / 1 129 ms**, p95 1 447 / 1 236 — inside the
+    baseline OFF band (1 085–1 171 / 1 328–1 496): the OFF arm's timing
+    is unchanged. ON/OFF ratio 3.2–4.8× (was 5.4–8.2×). The per-note
+    growth is still monotone (1.2 → 14.9 s at note 20 on the interim
+    reps): the O(events²) intent-tracking term is the design half's, as
+    predicted; the console-gate red on some ON reps is the pre-existing
+    `splitDefinitions` error the attribution's §6 records, unrelated to
+    timing.
+  - **T2 — retirement on ARRIVAL, and the late-echo rule** (the
+    attribution's §4: a correctly served + pushed derived value held 48 s
+    by the client's overlay). (a) The owed arrival re-sweep LANDED: the
+    replica fires `speculationArrivalObserver` at the end of integrating
+    a frame that moves a doc's confirmed seq forward; the overlay
+    re-sweeps when an arrived doc is one some live entry wrote. The
+    gate's predicates are UNCHANGED — arrival is a second, EARLIER
+    trigger (speculation.md §4's amended paragraph states the soundness
+    argument: the sweep re-evaluates coverage and arrival on replica
+    state at every trigger). Reconciled with #5969's arrival-gate KEEP
+    verdict: the gate STAYS as the fallback; the wake fires ahead of the
+    watermark. (b) The late-echo edge #5969 flagged is the SAME gate and
+    IS covered here, by a different sentence than the arrival wake: an
+    event-handler echo sealed after its intent's terminal consequence
+    already arrived is not registered (speculation.md §4 step 2 read as
+    the state it names — the consequences exist, the echo is jobless).
+    Evidence that E2 WAS that edge: the chip never flipped even
+    speculatively (`flippedAt=-1`) — no prompt echo — while Alice's
+    worker was busy for 8.7–12 s (`ipc/runtime:idle` max in every red
+    run: A1 8 658, D4 12 015, E2 8 699 ms; the green runs 3.2–7.3 s);
+    the toggle handler is bound to `onClick` with no `detail.checked`,
+    so a dispatch that runs after the served consequences reads
+    `everyoneIsAdmin=false` and toggles it BACK — the DOM's "Everyone is
+    admin"; that echo's floor is the served commit's seq (above every W
+    until the next authored input) and its mark was consumed before it
+    existed, so nothing retires it — until Bob's draft lifts W (the
+    48-s release the report timed). Stated as INFERRED from that
+    evidence, not witnessed by a client trace (the report's "last
+    inch"): the re-measured runs never reproduced the late dispatch
+    (`overlayLateEchoDrops` 0), so the rule's live firing is unobserved;
+    its unit pin covers the mechanism. The rule's sentence in
+    speculation.md §4 step 2 landed DATED (2026-08-18), not RULED, and
+    was **ratified 2026-08-18** — RULED as written, with its rationale
+    (a speculative preview of an event the server has already completed
+    has nothing to add and can only mislead); #5969 had called it a
+    candidate rule, owner call; it landed here as the retirement
+    condition the step already states (register OW36, closed). The
+    rule reaches the late echo's
+    client CASCADE too (a child echo whose `parentEventId` is the jobless
+    intent, and its children), and a dropped late echo's enactable
+    effects are owned and not enacted (the closed-overlay arm's shape).
+    Pinned: `speculation-arrival-gate.test.ts`
+    (the E2 shape end to end — a served value arriving decoupled from a
+    watermark advance retires and renders at once, mutation: wake
+    removed → the entry stands; the trigger-not-relaxation scripted pin;
+    the late-echo rule scripted with its mutation). Re-measured, the
+    two-browsers lockdown gate at night-like conditions (no LLM model,
+    loads 2.2–6.5): **GREEN 16/16** — 6/6 on the FINAL binary
+    (`a2d9a2b7…`, F10–F15: 36–43 s walls), 7/7 on the interim
+    `a9534d18…` (G3–G9: 31–58 s walls), I1 (instrumented, byte-equal
+    code) and G1/G2 on earlier interim builds — vs the attribution's 5
+    stalls in 12 night attempts; per browser, `overlayArrivalSweeps`
+    14–25 per run
+    (the wake fires routinely — served values now arrive decoupled from W
+    as the ordinary shape), `overlayLateEchoDrops` 0 (the late dispatch
+    did not recur: Alice's `ipc/runtime:idle` max fell to 0.66–2.3 s per
+    run, total 3.4–6.7 s vs 11.8–31.4 s — T1's client relief; the
+    late-echo rule stands as the backstop). Also found and FIXED while
+    landing (a): the browser worker bundle drops UNINITIALIZED class
+    fields, so `"speculationAckObserver" in replica` read false in
+    browsers — leg-C's origin-ack wake had never installed in a browser
+    client (Deno-only green); the replica's observer fields are now
+    initialized explicitly and the overlay probes capability by method
+    (`speculationRetirementView`). The overlay counters ride the browser
+    load summary (`cfc-browser-helpers.ts` churn:
+    `overlayLateEchoDrops`, `overlayArrivalSweeps`).
+  - **T3 — the honest deadline and the mid-wave renew** (attribution
+    §2b/§3: deadline late by 2.5–8.3 s; renew gaps to 10 s vs a 15-s TTL;
+    t2's `lease-lost` on all spaces at once). A SERVING runtime's
+    scheduler yields one macrotask between settle-loop ACTIONS once its
+    16-ms slice of continuous work is spent — not inside the per-demander
+    fan-out loop, where a yield let a run's own async seal refusal land
+    mid-pass and double a served emission (the LT6 early-emit arm caught
+    it; the retry lands on the queued pass by contract)
+    (`scheduler/cooperative-yield.ts` — `setTimeout(0)`,
+    the one primitive that lets due timers fire in deadline order;
+    MessageChannel and setImmediate measured to starve them); the OFF arm
+    and clients construct no yielder (posture-gated at construction).
+    The SpaceServer installs `Runtime.servingYieldObserver` at
+    activation and renews the lease from it once the tenure has gone
+    TTL/3 without a renewal (`leaseTtlMs` policy knob for tests). Pinned:
+    `executor-cooperative-yield.test.ts` — (i) a 1.2-s synthetic walk
+    under a 100-ms deadline commits its first exhausted wave in < 600 ms
+    (mutation: yield removed → 1 239 ms, red); (ii) a 45-step, 1.8-s
+    walk outliving a 900-ms TTL twice over commits under a live lease
+    with the timer inert (mutation: renew-on-yield removed → the commit
+    is refused, red); (iii) posture gate; unit. Live (I1, instrumented
+    scratch build): deadline lateness on exhausted cycles p50 **25 ms**,
+    p90 152, max 399 ms (was p50 125 / p90 443 / max 1 155 on the note
+    run, and seconds on chat event waves); renew gaps p50 **5 020 ms**,
+    max 5 120 (was p50 5.0–7.9 s, max 10.0 s); `lease.lost` **0** in
+    all 22 re-measured runs (the 16 gate runs and the 4 ON note runs hold
+    leases; the 2 OFF note controls hold none); `wavesBudgetExhausted`
+    now an honest count (117–210 per chat run vs 29 — it counts every
+    cut cycle). Its
+    COMPANION, forced by honesty: with cycles cut before a drained event
+    ran, the post-commit re-arm re-drained the still-pending entry every
+    cycle and queued a second copy each time — G1 (pre-guard) showed
+    `events: appended 8 / processed 34` (4.25× dispatch of the lockdown
+    toggle; #5969's (β) re-scan variant); the drain now skips an entry
+    whose earlier drain copy is still in flight — queued/held/running,
+    or with its mark sealed into a wave the store has not yet committed
+    — and releases it only on a store-visible outcome (the wave's
+    committed/requeued ids) or a provably markless end (deferral, an
+    aborted run's final callback, a notice that failed to stage); the
+    self-review's finding 1 moved the release off the SEAL, where a
+    re-drain hitting a real await between wave-detach and the guard
+    check could still queue a second copy (`events.drainInFlightSkips`;
+    events.md §4's new sentence, stated narrowly as the drain deduping
+    against ITSELF — the LT1 (α) in-process copy and the cross-producer
+    invariant stayed owed to the owner's ruling at this landing; RULED
+    2026-08-18, OW35 below). Pinned:
+    `executor-events-down.test.ts` (exactly-once under an honest
+    deadline: one fire mid-settle → processed 1, ONE consequence commit,
+    the counter reads 1; mutation: guard removed → processed 11, red).
+    The RELEASE POINT itself is pinned too (the independent review's
+    MINOR-2, 2026-08-18 — the exactly-once pin above passes with either
+    release point): the same file's SEAL→OUTCOME-window pin parks a
+    re-drain at the sidecar sync (the serving manager's `syncCell` seam,
+    engaged on re-drains only) until the copy's consequence has SEALED
+    into a wave the store has not committed — the store still holds the
+    pre-fire value, the entry is unconsequenced — then lets the drain
+    reach the entry's guard check: it skips (`marked`), the wave commits,
+    processed 1, value 1; mutation: release at the seal → that re-drain
+    queues a second copy (processed 2, value 2), red.
+    Every guarded run: `processed == appended`.
+  - OFF witness: T1 is arm-independent by design (verdicts pinned);
+    T2 lives in the flag-ON client overlay (constructed only under the
+    flag on non-serving runtimes) and the replica seam fires only with an
+    observer installed; T3 is gated on `runtime.servingPosture` at
+    construction (the yielder does not exist elsewhere) and the drain
+    guard sits inside the serving loop. Whole-suite witness in the PR.
+
+- **Stage C coordination delta (2026-08-18) — the coordination state is
+  carried ON-BRANCH (owner directive 2026-08-18: files, not agent
+  memory).** The arc's live state — the train, the owner's landing
+  posture (confidence verdict → land the stack with the flag OFF →
+  optimize on main; the flip later), stage-C outcomes, ordered next
+  actions, open rulings — is the plan's "Coordination state" section
+  (`docs/plans/server-execution-v2.md`); the frozen record with the
+  evidence beside it is
+  [`docs/history/plans/server-execution-v2/stage-c-closeout.md`](../../history/plans/server-execution-v2/stage-c-closeout.md)
+  (the two benchmarks, the attribution, the three stage-C review
+  reports, the fan-out design + panel). Bookkeeping about the SIBLING
+  stage-C branches, so a reader of THIS branch is not misled: OW28's
+  LANDED delta and its three owed rows (`OW28-supersession-family`,
+  `OW28-instance-family`, `OW28-createRef`) live on #5968's branch
+  (`463ea3887`); OW32's stage-C block was REWRITTEN into the
+  double-dispatch dossier on #5969's branch (`eb64d8694`) — the row
+  above still carries the pre-dossier "served-wish timing" wording,
+  which #5969 REFUTED (`nowTick` is valid at every served dispatch; the
+  residual is double dispatch, OW35 below); both arrive when the
+  siblings are stacked. Rows minted here (the siblings mint no new
+  numbers; the coordination delta owns OW35–OW38):
+  - **OW35 — the served-handler DOUBLE-DISPATCH parity gap: (α) + the
+    cross-producer invariant sentence — RULED 2026-08-18 (owner:
+    "agreed with your recommendations" — (ii) as stated, NOT (iii));
+    the (α) build is OWED to the design build stage.** One
+    durable entry, one eventId, dispatched N× (2–5 on the lunch gate;
+    the two-browsers lockdown toggle is the same class, re-drain
+    variant only) via the LT1 in-process leftover (α), the drain
+    re-queue (β), and the re-armed re-scan; under OFF exactly-once by
+    construction (one in-process queue, one handler registration per
+    stream link) — a served-execution parity gap, not a pattern bug
+    (#5969's Flag 1 is the dossier, `file:line` at `fb2292a24`; the
+    attribution quantified it ≤1.2× on chat/note, 1.15–1.67× on the
+    lunch `nowTick` shape; the re-benchmark shows it intact — `appended
+    11 / processed 17` in both green lunch runs). CLOSED NARROWLY by the
+    tuning trio: the drain dedupes against ITSELF (events.md §4's
+    at-most-one-copy sentence; `events.drainInFlightSkips`; released
+    on the wave outcome, not the seal). STILL OWED: (α) — a
+    deadline-time purge of unrun LT1 in-process leftovers
+    (discriminator `served !== undefined && served.streamEntry ===
+    undefined`, synchronous at the deadline decision) — and the
+    events.md §4 sentence across BOTH producers. Recommendation on file
+    (#5969's (ii); the coordinator concurs): *"one durable entry = one
+    COMPLETED delivery to its handler, regardless of dispatch path or
+    reference count; an entry not completed in the wave that appended
+    it is dispatched by the drain alone"*, with the sub-clause decided
+    for DERIVATION-kind LT1 emitters (a superseded per-doc drop re-emits
+    nothing; today an orphan consequence — refuse or tolerate); NOT
+    "make handlers idempotent". `events.processed > events.appended` is
+    NOT the signature; per-event run counts are. **RULED 2026-08-18:**
+    events.md §4 now carries the binding sentence — *"One durable
+    stream entry is delivered to its handler exactly once as a
+    COMPLETED run, regardless of dispatch path or reference count. An
+    entry whose in-process (LT1 same-wave) run does not complete within
+    its appending wave is dispatched by the drain alone; the serving
+    loop purges unrun in-process leftovers at the flush deadline and
+    skips at the drain any id already queued or run with a durable
+    entry. A derivation-kind emitter's superseded LT1 leftover re-arms
+    nothing and its orphan delivery is REFUSED (never delivered without
+    a durable entry)."* — the orphan-delivery sub-clause decided
+    REFUSE, (iii) refused (a FORBIDDEN entry names it), and
+    serving-loop.md §3d (REQUEUE = one completed delivery; the
+    supersede-drop re-arms nothing) / §5 (the outbox's durable-row +
+    `eventId`-horizon twin) cross-referenced. State against the
+    sentence: the tuning trio's drain in-flight guard ALREADY covers
+    the (β) drain re-queue for the drain's own copies (it dedupes the
+    drain against ITSELF — `events.drainInFlightSkips`, released on the
+    wave outcome; pinned in `executor-events-down.test.ts`); OWED to the
+    design build stage: (α) the deadline-time purge of unrun LT1
+    in-process leftovers (discriminator `served !== undefined &&
+    served.streamEntry === undefined`, synchronous at the deadline
+    decision), the drain's skip against an in-wave `streamEntry`-bearing
+    run (the (β) half beyond the drain's own copies, shaper-held events
+    included), the derivation-emitter orphan REFUSAL, and a per-event
+    run-count pin (one fire under an LT1 cascade that misses the
+    deadline → exactly one COMPLETED run; `processed == appended` is
+    not that pin). Scope, recorded at the owner's request so the
+    invariant is not misread: the client's speculative echo COMMITS
+    NOWHERE — it renders only (speculation.md §1) — and the AUTHORED
+    event commit (the client's append, one per fire) and the DERIVED
+    result commit (the served handler's consequences) are TWO commits;
+    the invariant binds the RESULT side — how many times one durable
+    entry's consequences are committed — not the authored append (whose
+    exactly-once is the `eventId` dedupe horizon) and not the echo.
+    Trigger unchanged for the build: before the lunch skip lifts and
+    before the ON arm is called correct on non-idempotent handlers —
+    i.e. before the confidence verdict is stated as "no fundamental
+    issue" without this qualification.
+    **CLOSED 2026-08-19 by the design build's W3 (α)** (stacked PR
+    `claude/server-exec-v2-w3-alpha`, built off W1 and re-stacked onto
+    W2's tip at the 2026-08-19 re-stack; no CI — every green a local
+    run). LANDED: (α1) the deadline-time purge of QUEUED LT1 leftovers
+    (`Scheduler.purgeQueuedEvents`, the ruled discriminator, synchronous
+    at both `exhausted` arms of `#waveCycle`; `events.lt1LeftoversPurged`);
+    (α1b) the late-seal REFUSAL of an LT1 copy that was still RUNNING at
+    the deadline and seals after its appending wave closed — the wave its
+    emitter sealed into, carried as `ServedEventDispatch.lt1.emitterTx`
+    and resolved at the dispatch stamp (`#lt1AppendingWave`), refused in
+    `SpaceServer.seal()` before it enters any wave
+    (`events.lt1LateSealsRefused`; the scheduler settles the copy quietly
+    on the `LT1_LATE_SEAL_REFUSED` sentinel) — the seat the ruled
+    sentence's "does not complete within its appending wave" requires and
+    the design's α1–α4 list did not name: W0's l1 store shows it (commit
+    64 = the in-process copy's unmarked vote add + the drain copy's marked
+    `remove-by-value`, `consequenceOf` deduping to ONE id — so per-event
+    `consequenceOf` counts cannot see a same-wave double; the handler's
+    effect can); (α2) VERIFIED, not rebuilt: the trio's in-flight guard is
+    set BEFORE `queueEvent`, which holds shaped events synchronously, so a
+    shaper-held drain copy is `queued` to the guard, and the drain is the
+    ONLY producer of `streamEntry`-bearing copies (cell.ts's LT1 copy
+    carries none; the scheduler's requeue paths never carry `served` —
+    served copies are queued `retries: false`); (α3) the orphan REFUSAL
+    in the wave's requeue closure — an LT1 copy (`WaveRunContext.lt1`)
+    whose entry no SURVIVING contribution of the wave appends (the
+    emitter's sidecar write superseded per-doc, the emitter dropped whole
+    or requeued, or the emitter's seal never entered the wave) is
+    withdrawn with disposition `dropped`, never reported as requeued,
+    nothing re-armed (`events.orphanDeliveriesRefused`; the seat is the
+    closure loop beside the C8d `parentRequeued` arm, keyed on a
+    per-wave eventId → emitter map built from the sealed ops' seq-less
+    sidecar entries); (α4) the per-event run-count pins, red-first:
+    `executor-events-down.test.ts` "(α1)+(α1b)+(α4)" (two LT1 children —
+    the first async and parked across the deadline, the second queued
+    behind it: purge 1, refusal 1, the child's non-idempotent effect
+    applied exactly twice for two entries, one consequence commit each;
+    mutations: purge skipped → purge 0 / refusal 2; seal refusal AND the
+    orphan arm's absent-emitter clause skipped → the effect applied
+    THREE times, the lunch double), "(α1b)+(α4)" (the in-flight copy
+    alone: refusal 1, effect once; the combined mutation → effect twice),
+    "(α3)" (a derivation emitter + a rival client append on the same
+    stream, the settle gate holding the wave: the orphan refused, the
+    sidecar holds only the rival's entry, every consequenced id has a
+    durable entry; mutation: the orphan arm removed → "ping" delivered
+    with no entry behind it). Defense in depth, recorded: with the seal
+    refusal alone removed, the late copy enters the next wave and the
+    orphan arm's absent-emitter clause withdraws it there (the drain's
+    copy, having read its write, requeues once) — the effect stays once;
+    the TRUE double needs both seats off. Live witness: the lunch gate ON
+    at the W3 tip, fresh store, 3/3 GREEN (walls 36 / 20 / 17 s; totals
+    7.3 / 5.5 / 4.5 s; `events appended 11 / processed 12` in every run —
+    the 12th is the purged LT1 leftover the drain delivered —
+    `lt1LeftoversPurged 1`, `lt1LateSealsRefused 0`,
+    `orphanDeliveriesRefused 0`; each run's store: 16 events (11 client
+    + 5 LT1), every eventId in exactly one derived commit, the votes doc
+    3 adds / 0 `remove-by-value` — W0's l1 showed the remove). The
+    before/after shape: `appended 11 / processed 17` (re-benchmark) and
+    `appended 9 / processed 10` + a vote toggled off (W0 l1) → `appended
+    11 / processed 12`, no toggle. The lunch ON skip STAYS (decision
+    below, W3 block): the gate's remaining bimodality is NOT (α)'s —
+    see the l3 row.
+    **RE-READ by W3's independent review (2026-08-19) — CLOSED stands
+    for the PINNED shapes, and the sibling shape is now one of them.**
+    The closing build's code was WEAKER than the ruled sentence's
+    letter in one corner the (α4) pins did not construct: an event
+    contributing a same-eventId SIBLING tx (the served navigateTo's
+    intent, committed inline mid-run) beside its LT1 handler run. With
+    the sibling surviving the appending wave and the handler's tx
+    refused at its late seal (α1b), the batch marked the entry on the
+    sibling's survival and the drain never re-delivered — zero
+    completed runs (review B1, a BLOCKER: a lost delivery and a
+    regression against the W1 base, where the late copy committed
+    unmarked one wave later); the (α3) arm had the mirror gap — the
+    intent half of an orphan landed (review M1). Both FIXED in the
+    review batch and pinned red-first ("(α1b)+(α4) + a same-eventId
+    SIBLING tx"; "(α3) + a same-eventId SIBLING tx"): only the LT1
+    copy's OWN surviving run marks its seq-less entry; an
+    orphan-refused copy folds its siblings, counted once per event.
+    Residual recorded (events.md §4's AMENDED note): the late-seal
+    split — the intent lands in the appending wave, the consequences
+    with the drain's run one wave later, idempotent by the nonce
+    dedupe; a tightening that withdraws the timing-orphaned sibling is
+    named, not built. Not a hole in the sentence; a shape the register
+    now names.
+  - **OW36 — the late-echo arrival-gate rule — RULED 2026-08-18
+    (ratified as written); CLOSED.**
+    Implemented in #5991 (T2 (b)) as speculation.md §4 step 2 read as a
+    state predicate — an event-handler echo sealed after its intent's
+    terminal consequence already arrived is jobless and NOT registered;
+    its client cascade is jobless via `parentEventId`; its enactable
+    effects are owned and not enacted — DATED 2026-08-18, no RULED
+    marker; #5969 had called it a candidate rule / owner call. Never
+    fired live (`overlayLateEchoDrops` 0 in every re-measured run — 16
+    gate runs, the re-benchmark's 2 chat runs); its unit pin covers the
+    mechanism (`speculation-arrival-gate.test.ts`, with mutation). E2's
+    mechanism is INFERRED (no prompt echo, a busy worker, the
+    click-bound toggle re-toggling), not witnessed by a client trace.
+    **RULED 2026-08-18:** the owner ratified the sentence AS WRITTEN;
+    speculation.md §4 step 2 now carries the RULED marker with the
+    one-clause rationale — a speculative preview of an event the server
+    has already completed has nothing to add and can only mislead. The
+    tuning review's Q1/Q2 sub-questions (cascade semantics; effects)
+    are answered by option (a) as built (the T2 row above records the
+    two arms). Nothing owed; the live-firing evidence gap stays as
+    recorded (`overlayLateEchoDrops` 0 across the re-measured runs; the
+    unit pin covers the mechanism).
+  - **OW37 — the §4 amplification ratio, a hair over budget under the
+    honest deadline — a testing.md §4 TRIGGER breach that needs its
+    human inspection.** Re-benchmark: chat 2.05 / 2.14 (≤2 pure), lunch
+    2.11 / 2.15 (≤2), note 3.07 / 3.20 (≤3 effectful) — where the first
+    benchmark sat just under (1.7–2.8). Mechanism named: with T3's
+    honest deadline `derivedCommits == waves` still holds but the settle
+    commits MORE, SMALLER waves per authored input, so the ratio tracks
+    the cycle count, not per-write amplification; total store commits
+    remain 2.1–3.1× BELOW OFF (chat 195–201 vs 608–612; note 460–475 vs
+    989). Owed (the metric's owner): either a "per logical write"
+    reading of the denominator/numerator or a re-baselined budget line
+    with this reason recorded in testing.md §4 — never silenced in the
+    test. Trigger: before the §4 counter assertion is asserted in CI's
+    ON arm on these workloads; naturally with the design pass's
+    re-benchmark (whose fewer, larger walks may move it back under).
+  - **OW38 — the flip's performance metric and BAR: measure SERVER
+    SETTLE TIME explicitly; the bar is an owner ruling.** The owner's
+    2026-08-18 measurement caveat: the OFF "4–42 ms" client-local
+    numbers (and the 0.22-s chat series) are the client rendering its
+    own run; speculative client-side execution stays under ON and stays
+    fast, so that number is not necessarily the comparator. The honest
+    server metric is TIME-TO-SETTLE ON THE SERVER — authored input
+    admitted → derived consequences committed and W covering them
+    (`waitForSettled` / `derivedThrough`), measured explicitly and
+    reported beside the send→other-browser series (which stays: the
+    several-second sends are far too high under any comparator). Owed:
+    (i) the next benchmark's protocol adds the settle-time series (the
+    `sx2-scale` `settleWrite` shape and the two-controllers-one-space
+    partial number the plan already names are the building blocks); (ii)
+    the flip's performance BAR restated against it — the design pass's
+    pre-recommendation is "sub-second, within a small constant of OFF"
+    on the cross-user step; the owner rules. Trigger: the design pass's
+    re-benchmark; the flip gate (plan Phase 7 task 1 item 4) reads
+    against the RULED bar, not against the client-local OFF number.
+    (W3.1, 2026-08-19: S1's quiescence advances are split OUT of the
+    per-input settle series — the `settleAdvances` block (count,
+    lastDelta, series) — so W4's settle metric reads per-input
+    timings with the designed advance-only waves excluded, and the
+    amplification arithmetic subtracts them; the sx2-serving-loop
+    budgets already do.)
+    **(i) LANDED 2026-08-20 with W4's acceptance benchmark**
+    (`stage-c/w4-acceptance-report.md`, raw series under
+    `stage-c/w4-raw/`): the settle-time series measured explicitly on
+    the OFF₁→ON→OFF₂ protocol at the train tip — server settle
+    all-inputs coverage p50 **18/15 ms chat, 17/20/17 ms lunch,
+    28/22 ms note** (value-only 15–21 ms; structural-growth to landing
+    p50 258–520 ms; every p50 sub-second — the design pass's
+    pre-recommendation bar holds on the measured numbers), reported
+    beside the send→other-browser series (chat median 520/421 ms ON vs
+    217–253 OFF; the several-second sends gone) and the new
+    sender-echo series (the one bar that FAILS as worded: not ms-class
+    in either arm, ON 1.5–2.4× OFF on chat, attributed to the client
+    (e) term). **(ii) stays OWED to the owner**: the flip's numeric
+    BAR is the owner's ruling — W4 reports the numbers and does not
+    rule; the flip gate (plan Phase 7 task 1 item 4) still reads
+    against the RULED bar once the owner sets it.
+  - OW31 (row above, RULED 2026-08-18): the write-authority posture is
+    ruled — the serving identity never writes users' home spaces, the
+    user's identity does; a provisioned space's genesis is signed by
+    the space's own keys and names the acting user OWNER in that same
+    first commit — with the work order recorded (the scoping report
+    beside the closeout); implementation OWED post-merge, BEFORE the
+    flip PR; OFF-invisible; does not gate landing the stack OFF (the
+    grant is flag-gated; OFF uses the configured list verbatim). The
+    READ side is RULED 2026-08-19 (the row above carries the verbatim
+    quote): the service identity reads the ACL ONLY, every other
+    served read runs under the acting user's identity — SUPERSEDING
+    the scoping report's read-only-service-class recommendation; if
+    the posture proves wrong during the build, flag for follow-up
+    after merging to main rather than blocking.
+  - Not rows, recorded: #5991's ledger comment POSTED 2026-08-18
+    (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+    the second review round's report recovered on-branch beside the
+    closeout, `stage-c/stage-c-tuning-independent-review.md`); the design
+    pass's reconciled report (`stage-c-design.md`) LANDED 2026-08-18 as
+    a LIVE design + build work order at
+    `docs/plans/server-execution-v2/stage-c-design.md` (the design-pass
+    delta below; it archives beside the closeout with the history
+    header when the build stage lands — the closeout's stated
+    destination); #5968's Flags 1–4 (instantiation seat,
+    `resolvedHash`, fetch-parity on live completion failure,
+    `plainProgramOf`) await the owner's ratify-or-direct.
+- **Stage C design-pass delta (2026-08-18) — the reconciled design
+  LANDED; NOTHING BINDING LANDED.** The three design lenses (spec-only;
+  server demand walk; client intent watch) are reconciled in
+  [`docs/plans/server-execution-v2/stage-c-design.md`](../../plans/server-execution-v2/stage-c-design.md)
+  (live; the lens reports verbatim beside the closeout as
+  `stage-c/stage-c-lens-*.md`). It is a DESIGN: this PR changes no
+  binding sentence — serving-loop.md §1:57–62 still reads "runs once
+  per demanding pair" (superseded later the same day: the
+  ruling-acceptance delta below lands the (d′) text there); the
+  amended "structural subscription" text is
+  the design's §2F.4 (the FALLBACK's wording since the same-day (d′)
+  amendment below; the (d′) text is §2.10) and the front-loaded item of
+  its ruling set (§5); the residual (ix) item above ("N × walk per
+  changed root — the design's stated cost") still stands as accepted
+  cost and is restated only when (d′) — or its fallback — lands. The
+  three rulings the owner made on
+  2026-08-18 are folded in as RULED (no lazy demand — RULED in
+  substance; the double-dispatch invariant, OW35, whose (α) build the
+  design carries as a work item; the measurement caveat, OW38 — the
+  build's acceptance is server settle time sub-second on the
+  cross-user journeys plus client-local speculation latency preserved).
+  Rows the BUILD will mint or move when it lands (none minted here):
+  a "Stage C design build delta" LANDED block with the counters
+  (`servingLoop.demand.*`, the client `commonfabric.*` surface); the
+  restated residual (ix); (b′) the incremental structural walk if the
+  settle floor needs it; the effects-channel listener if not in scope;
+  Q3.3 (skip resubscribe on identical logs) for fanned-out computeds;
+  the CFC zero-write probe rider (CFC owner; OFF-visible); speculation
+  §4 step 4's rebase if ruled owed; OW24 compaction re-pointed as the
+  bound on the ON-only linear residuals (whole-doc frames, the
+  differential, patch apply); the (a) upgrade if the interim
+  schema-narrowed sink lands first; OW37 re-read on the new numbers;
+  OW38 (i) the settle-time series lands with the build's benchmark and
+  (ii) the flip's numeric bar stays the owner's. Spec drift the design
+  records for the build to fix: serving-loop.md §7's counter list omits
+  `undemandedNarrowingRuns` (scopes.md §2) and `earlyEmitRefusals`
+  (protocol.md §2) though the code emits both; scopes.md §9's "ragged
+  instance sets" tripwire is inconsistent with §2's amended ragged
+  ruling (design §5 item 10).
+  - **Amendment (2026-08-18, same day) — design (d) SUPERSEDED by (d′)
+    per owner direction; still NOTHING BINDING LANDED.** The owner
+    directed that demand be "the set of documents the client cares
+    about … accumulated across all (highly overlapping) demands …
+    [with] the schema" — which memory v2 already tracks per session
+    (`session.trackedIds`, coarse on unsubscribe) — and that the loop
+    "keep that list, for each document there see whether it is current
+    via scheduler metadata and if not update it. that then creates new
+    reads that trigger later updating." The design's §2 is now (d′):
+    the demand WALK is DELETED; demand = the union over a space's
+    client sessions of their tracked-ids closures with each row's
+    demanding pair (`demandedInstancesForSpace`, the successor of
+    `watchedRootsForSpace`); the writers of demanded instances are
+    demand roots (a new `isDemandRoot` disjunct, §8-bracketed) and the
+    loop runs the ones not current for a demanding pair (B7's clean
+    bit; the basis index at activation); no structural-versus-value
+    distinction; the structural walk is the FALLBACK (design §2F). What
+    this changes in the ruling set: item 1 is RESTATED — the sentence
+    to adopt for serving-loop.md §1:57–62 is the (d′) text ("demand is
+    the union of the demanding sessions' tracked instances (memory v2's
+    schema-narrowed closure); the serving loop runs the stale writers
+    of demanded instances; there is no demand walk"; design §2.10 —
+    still a PROPOSAL, not landed here; LANDED 2026-08-18 by the
+    ruling-acceptance delta below); items 2 (reach gap), 3 (Q3.3),
+    11 (no basis rows for the walk), 12 (walk-node key) are MOOT under
+    (d′); ONE new item is RULED — **R-D, the coarse unsubscribe** ("it
+    doesn't unsubscribe in a fine-grained way … i think this remains
+    acceptable (and we can make it fine-grained in the future)") —
+    recorded in the design's §5, no binding sentence yet (its sentence
+    is part of the (d′) §1 text the build lands; the build mints the
+    "fine-grained demand release" future row then). W0 becomes (d′)'s
+    refutation experiment (does anything the walk kept live go dark;
+    the settle including the one-push-late structural-growth cycle and
+    the 300 ms demand-wake grace); W1 becomes (d′) proper with the
+    structural walk as the fallback branch. Rows the build will now
+    mint or move (superseding the list above where they conflict): the
+    (d′) `demand` counter block (`demandedInstances`, `demandedWriters`,
+    `demandRootEnters/Leaves`, `notCurrentRearms`, `pushGrowthWakes`, …
+    — no `walkRuns`); residual (ix) restated as "there is no walk; the
+    demand pass reconciles the tracked-ids closure in O(rows) on
+    deltas; the structural-growth path lands one derived commit later
+    than the link that reaches it"; the fine-grained-release future
+    row (R-D); the no-grace push-growth wake / pre-seal closure refresh
+    if W0 needs them; the structure load for demanded non-root docs
+    with pattern meta if W0's count says so; the output-doc demanders
+    union if `undemandedNarrowingRuns` shows the linked-piece shape;
+    (b′) and Q3.3-for-computeds ONLY on the fallback branch. The
+    design's §2.8 lists what in the code makes (d′) harder than the
+    naive statement — flagged, not filled.
+- **Stage C ruling-acceptance delta (2026-08-18) — the design's §5
+  ruling set ACCEPTED by the owner (verbatim: "ruling set is
+  accepted"); ONE binding sentence lands — serving-loop.md §1's (d′)
+  demand paragraph (RULED 2026-08-18), whose IMPLEMENTATION is W1;
+  every other spec sentence the rulings unlock is RULED TEXT OWED WITH
+  THE BUILD; W0 is next.** Every open item of the design's §5 is RULED
+  per its stated recommendation (each carries its RULED line there);
+  the four already-RULED (R-A–R-D) and four MOOT items are unchanged.
+  Rows minted here: OW39, OW40 (the siblings mint no numbers; this
+  delta owns them).
+  - **serving-loop.md §1:57–62 — CHANGED sentence, same row; the
+    row's instrument moves to W1 (impl-gate → OW39).** The stage-B
+    description — "the demand WALK (the live reader per demanded root
+    that pulls the value's subtree) runs once per demanding pair, each
+    run following THAT demander's redirects" (pinned 2026-08-17 in
+    `executor-fan-out.test.ts` (f-walk) and `scheduler-fan-out.test.ts`
+    — the fan-out stage-B delta above) — is REPLACED by the (d′) text
+    (design §2.10, verbatim: demand = the demanding (user, session)
+    pair on every INSTANCE a client session TRACKS — memory v2's
+    schema-narrowed closure, instance-keyed, accumulated across
+    overlapping watches; the union over the space's client sessions;
+    there is no demand walk; the loop runs the STALE writers of
+    demanded instances; a demanded instance's writers hold demand while
+    any session tracks it and release when none does — coarse, R-D;
+    push-time re-traversal / a later derived commit for
+    structural growth; value-only changes through the trigger index
+    alone; nothing about structure versus value decided anywhere), with
+    a RULED marker that quotes the replaced sentence and states the
+    implementation gap. RULED (a) — the replaced sentence was
+    DESCRIPTIVE (item 1 as recommended), so this is a changed rule, not
+    a spec change; no count moves here (the map's re-tally is the
+    build's LANDED block, as the design-pass delta says). The
+    instrument: the stage-B pins pin the WALK the sentence no longer
+    describes — they stay green at this tip because the CODE still
+    runs the walk (the spec is ahead of the code at §1, and says so in
+    its own marker), and W1 retires them with the walk (T9′ is the
+    structural pin: no `demand-walk:*` node anywhere in the graph
+    snapshot; the (d′) `demand` counter block has no `walkRuns`); the
+    sentence's own pins are W1's — T1′–T5′, T7′, T9′, T10′,
+    P-demand-set, P-coarse, P-arrival (design §2.8 / §6) — red-first
+    when the build lands. NOT restated here, deliberately: residual (ix)
+    above ("the walk re-fires per changed doc it read … N × walk per
+    changed root") describes the code at this tip and stays its accepted
+    cost until W1 restates it with the code (design §2.10's landing
+    note; item 1's ruling line); speculation.md §4's rationale phrase
+    "any per-user subtree the demand walk does not reach" likewise
+    describes the stage-B mechanism and is swept by the build's
+    speculation.md edits (W2), not by the acceptance.
+  - **OW39 — the (d′) §1 sentence's IMPLEMENTATION (W1). CLOSED
+    2026-08-19 by the design build's W1.** Binding since 2026-08-18
+    (serving-loop.md §1): demand is the union of the demanding sessions'
+    tracked instances (memory v2's schema-narrowed closure); the serving
+    loop runs the stale writers of demanded instances; there is no demand
+    walk; a demanded instance's writers hold demand while any session
+    tracks it and release when none does (coarse — R-D; fine-grained is
+    the future row below). W1 LANDED it: the memory-server exposure
+    (`demandedInstancesForSpace` + the push-growth `demandChanged`
+    notify), the SpaceServer's registry over the closure + the currency
+    check on registry deltas (writers of an entered key → demand roots;
+    not-current-for-pair re-arm; releases on leave), the scheduler's
+    standing `demandedWriters` root kind with its §8 bracket on every
+    enter/leave/registration/unregistration transition, and the walk
+    DELETED (`#installDemandWalk`, `#demandSinks`, the `demand-walk:*`
+    effects/traces, the walk's union logs and resubscribes — gone; `grep
+    -r demand-walk packages/src` finds no code). Instruments: the (d′)
+    `demand` counter block (no `walkRuns`); the W1 pins T1′/T2′(probe +
+    cross-piece)/T3′/T4′/T5′/T7′/T9′/T10′/P-demand-set/P-coarse/P-arrival
+    (`executor-dprime-w0.test.ts`), red-first with recorded killing
+    mutations; the fan-out (f) walk half retired into T9′;
+    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green across the executor suites
+    and the pins; the OFF scheduler suites' pass/fail set identical to
+    the base tree (T9′). §1's spec-ahead-of-code marker is REMOVED. See
+    the "Stage C design build delta — W1 (d′)" LANDED block below for the
+    per-sentence coverage rows. (W0 returned PROCEED (d′): no dark value;
+    the fallback §2F was not taken.)
+  - **OW40 — speculation.md §4 step 4's re-run of un-consequenced
+    intents against fresh state — RULED "owed" 2026-08-18 (design §5
+    item 4's sub-question, as recommended; §4 NOT amended).** Step 4
+    names a rebase that is neither the sink's nor the sweep's job today
+    (`#sweep` retires / un-renders an intent echo, never rebases it);
+    NOT built in the design build stage — the intent listener (e) is
+    orthogonal to it; the alternative ruling ("amend §4 to say an
+    outstanding echo stands until retired") was not taken, so the
+    sentence stands as written with this row as its owed mechanism.
+    Owed: the rebase in the client overlay (`overlay-destination.ts`
+    is the seat), or a later ruling that retires the sentence. Trigger
+    (the recorder's, not ruled): before the flip PR — the sentence
+    binds the flag-ON client — and earlier if a rendered un-consequenced
+    echo is witnessed standing stale on a live run. The build
+    re-points this row if W2 learns more.
+  - **RULED text OWED WITH THE BUILD (not landed with the acceptance;
+    each sentence brings its coverage row when it lands — §4's standing
+    rule):** item 5 + item 6 — speculation.md §4 step 2's clarifying
+    sentence (the match is on the pushed commit's `consequenceOf`,
+    carried to the client as the tracked entry's own `consequenced` /
+    `status` / `error` fields — T7 semantics — SANCTIONED as the
+    consequence carrier with the guards binding: never a dependency on
+    HISTORY, always backstopped by `W ≥ seq(e)` / `eventWatermark ≥
+    seq(e)`; the entry read only for the tracked event and a dropped
+    event's reason; `consequenceOf` does NOT go on the wire) — rides
+    W2; item 7 — events.md §5's one-line pin (drops and errors ride
+    `consequenceOf`) — rides the build; item 8 — the client keeps a
+    stream subscribed while it has intents outstanding on it (the
+    minimal watch; the `eventWatermark` write on the appended stream
+    doc is the vehicle) — rides the build, its spec home (speculation.md
+    §4 beside step 2, or events.md §5) the build's to name; item 9 —
+    the W / `eventWatermark` backstop retires an intent-origin entry
+    when the `consequenceOf` frame was missed (already the sweep's
+    rule; one sweep serves both origins) — a clarifying clause if the
+    build needs one; item 10 —
+    scopes.md §9's tripwire amended to "ragged at the space→user hop"
+    — rides the build train (design §6's "spec and register edits the
+    build carries").
+  - **RULED, no spec sentence and no row (build items, recorded in the
+    design's §5):** item 4 — the intent watch may be a non-reactive
+    storage-notification listener outside the scheduler (pin 10 guards
+    the timing); item 13 — the effects-channel sink follows the same
+    redesign as (e)'s second step; item 14 — the zero-write CFC-probe
+    skip is a separate CFC-owner rider, OFF suite as its gate,
+    OFF-visible, not this stage; item 15 — `storageManager.subscribe`;
+    item 16 — the schema-narrowed sink only as an interim if (e) lands
+    in two steps.
+  - Not rows, recorded: the coordination state moves to "ruling set
+    ACCEPTED 2026-08-18; W0 is next" (plan); W0 is (d′)'s refutation
+    experiment (and (e)'s) on a scratch branch, nothing pushed (design
+    §6); the design document itself stays LIVE until the build lands.
+- **Stage C design build delta — W1 (d′) LANDED (2026-08-19).** The
+  serving loop's demand model is now the tracked-ids closure and the
+  demand walk is deleted; the build is the stacked PR
+  `claude/server-exec-v2-w1-dprime` off the design branch (no CI — every
+  green a local run). It closes OW39 (above) and lands serving-loop.md
+  §1's (d′) text as CODE. Coverage row per (d′) §1 sentence:
+  - "demand … is memory v2's schema-narrowed closure … instance-keyed,
+    accumulated across its overlapping watches" — COVERED by
+    `demandedInstancesForSpace` (⋃ `session.trackedIds` over the space's
+    client sessions, service excluded, one row per (instance key,
+    session)); pins P-demand-set / T5′ (`server.demandSetSizesForSpace`
+    unionKeys = the registry keys). Killing mutation: return only watch
+    roots → the closure's non-root docs vanish from the registry and
+    P-demand-set's union-equality fails.
+  - "there is no demand walk … the serving loop runs the STALE writers
+    of demanded instances … those runs' own logged reads make their
+    inputs live and current in turn" — COVERED by the standing
+    `demandedWriters` root kind (the `isDemandRoot` disjunct) + the
+    currency check on registry deltas; pins T1′/T4′/T7′ (the standing
+    root), P-arrival (a second principal arriving on a ROOT key —
+    `notCurrentRearms` +1 AND `demandArrivals` +1, both now ASSERTED), and
+    **P-arrival-closure** (W1 review MAJOR-1 — the non-root-growth case of
+    design §2.2: a second principal whose closure reaches a narrowed
+    writer's OUTPUT doc ONLY through non-root closure rows, her watch root a
+    plain holder doc that is no piece's root, gets her instance through the
+    per-key currency check ALONE — the root-level arrival re-arm has no
+    piece beneath her root). Killing mutation **M1** (drop the
+    `demandedWriters` disjunct in `isDemandRoot`/`recomputeLiveRefs`) → 5/6
+    T1′-family steps time out. Killing mutation **M-C**
+    (`rearmNotCurrentForDemander` returns 0) → BOTH P-arrival (the counter
+    assertion) and P-arrival-closure (the landing times out) RED — the
+    build report's original P-arrival "killing mutation" claim was REFUTED
+    (M-C was green against it) and is corrected there. T9′: no
+    `demand-walk:*` action in the graph or trace; the OFF suites byte-identical.
+  - "a demanded instance's writers hold demand … while any session
+    tracks the instance and release it when none does — a session's
+    tracked set shrinks only on a full re-evaluation or close (coarse)"
+    — COVERED by the §8 liveness bracket on enter/leave/registration and
+    the coarse leave (release only when no registry key names the writer);
+    pins P-coarse (a departed session's keys leave; a shared key stays)
+    AND **P-release** (W1 review MAJOR-2): a writer demanded ONLY through a
+    departing session releases 1→0 (`demandRootLeaves` +N, `demandedWriters`
+    drops) and goes DORMANT (a later write to its input does not re-derive),
+    while a writer a remaining session still demands stays a root and keeps
+    re-deriving. Killing mutation **M-B** (`leaveDemandedEntity` a no-op) →
+    the solo writer never releases (`demandRootLeaves` 0; the dormant value
+    re-derives), RED. **M-I** (`before <= 2` early release) is GREEN by
+    construction: writer entities are SPACE-keyed so their refcount is
+    always 1 — the refcount>1 branch is reached only by writerless entities
+    (the session-scoped effects doc, the per-user narrowed rows, DIAG-2), so
+    `before <= 2` alters no writer's liveness; no multi-key writer entity is
+    reachable in the demand-set's shape (recorded, not forced).
+    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green (T10′ — but see the T10′ note
+    below: the equivalence hook's real guard is fan-out's M-A2, not this
+    suite).
+  - "a derivation that becomes reachable through a wave's own write
+    becomes demand when the tracker's push-time re-traversal reaches it
+    and lands in a later derived commit" — COVERED by the push-growth
+    `demandChanged` notify (a push pass that GREW a session's tracked set)
+    → `pushGrowthWakes`; pins T2′-cross / T3′ **GROWTH** (W1 review
+    MAJOR-3). The old pins asserted only the notify COUNTER while the
+    value they checked (`leaf:5`) had been pre-landed by the creator's
+    demand — "asserts the landing" was vacuous. Reworked: the creator
+    DEPARTS; a non-runner makes `leaf` STALE; a separate firing actor
+    (who does not demand leaf) fires the link; the FRESH `leaf:6` LANDS
+    server-side and `demandedWriters` goes 0→1 — the landing is now the
+    assertion. Killing mutation **M-D** (remove the two push-growth notify
+    sites) → the growth pins fail on `pushGrowthWakes`. NOTE (the reviewer's
+    sanctioned split): `leaf` is SPACE-scoped, so the firing actor's served
+    handler run makes it live through its own read edge (design §2.3(ii))
+    and it lands regardless of the demand pass — so **M-E** (the demand pass
+    ignoring every non-root row) does NOT bite the cross-piece growth pins.
+    The M-E kill — closure-row consumption LOAD-BEARING for a landing — is a
+    PER-USER property, pinned by **P-arrival-closure**: a demander's own
+    instance, reached only through her non-root closure row, is STARVED
+    under M-E (RED). Forcing a per-user narrowing in a departed-creator
+    growth is unreachable in the fan-out machinery, so this split is
+    RECORDED here rather than COVERED (design §2.8 note; the reviewer
+    sanctioned it). The cycle count is the `settle` series'
+    structural-growth waves (W0 workload numbers: chat landing 3.3–3.4
+    waves, 220–253 ms p50 — adjacency-attributed, and the W0/W1 counts
+    included service-session growth now dropped, MINOR-4).
+  - The `demand` counter block (serving-loop.md §7, no `walkRuns`) and
+    the `settle` series are asserted present in the pins; `demandRootEnters`/
+    `Leaves` accumulate across park (obligation (iii)).
+  - **R-D — the coarse unsubscribe — RULED 2026-08-18, recorded here.**
+    A doc leaves demand only when NO live session tracks it; the
+    incremental push path only grows a session's set, so demand roots
+    release LATE, never early (bounded work no client reads, never a
+    starved value). FUTURE row **"fine-grained demand release"**: the
+    seat is the memory server's tracker (per-doc refcounts across a
+    session's selectors), not the loop; trigger — a workload where the
+    coarse over-demand's compute cost is shown to matter (W0's drift was
+    not tens of thousands: note union 0 → 1 721 over 20 notes, one
+    session, dropping to 3 when the sessions leave).
+  - **FUTURE / owed rows the build surfaced (none binding):**
+    - **flag 4 — the structure load for demanded NON-root docs with
+      pattern meta.** The closure surfaces a piece reachable only through
+      a DATA link whose writer is not registered on the server (parity
+      with the walk, which never started pieces either); W0 counted the
+      rows: chat 2 / note 19 / lunch 0. The id-class-filtered
+      `#attemptStructureLoad` per such row is the OPTION; not built (the
+      count is small and the pattern-meta test needs a per-row engine read
+      the pass must not do). Trigger: a workload where a data-linked
+      piece's value must land server-side.
+    - **flag 5 — the output-doc-demanders union.** `#demandersFor`
+      matches keys by ROOT id; a session whose closure reaches piece P2's
+      computed doc but not P2's root supplies no demander to P2's writer →
+      the wave-level `undemandedNarrowingRuns` fallback (pre-existing;
+      W0: chat 0, lunch 0, note 47–55, the trio tip 47–48). Unioning the
+      pairs demanding a writer's OUTPUT docs into its demanders is an
+      option within the ruled semantics; not built. Trigger: the note
+      journey's `undemandedNarrowingRuns` shown on the critical path.
+    - **flag 9 — id-class filtering of the `source`-wired closure.** The
+      tracker follows a piece root's `source`/process wiring regardless of
+      schema, so a schema-narrowed root watch demands the piece's whole
+      internal graph (over-approximation, never under — W0 §2(b)).
+      RECOMMENDATION ON FILE: accept the tracker's set as the demand set
+      (it is what the client is delivered anyway); do NOT filter the demand
+      pass by id class / value reach. Owner-visible; not a binding change.
+      RULED 2026-08-19: accepted as recommended — the tracker's closure IS
+      the demand set; the filtering is logged as a future improvement,
+      PAIRED with lazy client instantiation, as row OW44 (the owner-rulings
+      delta below carries the owner's verbatim quote).
+    - **the no-grace push-growth wake / pre-seal closure refresh** — the
+      two named fix shapes for the one-push-late structural-growth cycle;
+      NOT built (W0's numbers did not force it: sub-second at p50 on every
+      workload, mostly the 300 ms grace, and the `source` pre-emption
+      makes most structure demanded before it exists). Trigger: a real
+      journey that puts the growth path on its critical path.
+    - **the l3 duplicate-join / vote-toggle family → W3.** The lunch gate
+      was bimodal on the W0 tip (1/3 green) for a DUPLICATE-CONSEQUENCE
+      family — (α)'s double dispatch toggling a vote off; a duplicate join
+      rendered — made more visible by faster waves, NOT a (d′) demand hole
+      (the votes were demanded and derived, twice). The root cause is
+      (α)/(e) territory (W3/W2); l3's duplicate not root-caused (client
+      speculative echo vs a same-drain LT1 copy). Trigger: W3 (α).
+      **RESOLVED by W3 (2026-08-19):** the vote toggle was (α)'s in-flight
+      late seal (OW35 CLOSED above); the duplicate join is a CLIENT
+      cascade-echo stranding — W2's, handed off with the evidence (the W3
+      block below).
+    - **OW37 re-read on W1's numbers** — with the walk gone, the wave
+      count per authored input falls (fewer exhausted waves; W0: chat
+      wavesBudgetExhausted 30–35 vs the trio tip's 739–777), and the
+      structural-growth path adds one cycle; re-read the §4 amplification
+      ratio on W4's quiet run, never silence the assertion.
+  - **W1 (d′) independent-review fixes (2026-08-19; LANDABLE-WITH-FIXES,
+    0 BLOCKER / 3 MAJOR / 9 MINOR / 6 NIT — all dispositioned; review
+    report on-branch at `docs/history/plans/server-execution-v2/stage-c/
+    w1-dprime-review-report.md`, fix report beside it).** The three MAJORs
+    were pin/register honesty, not mechanism (the (d′) code held): the
+    three coverage rows above are RE-WORDED to what is now genuinely
+    red-first — the per-key currency check (P-arrival-closure, RED under
+    M-C), the 1→0 release (P-release, RED under M-B), and the growth
+    LANDING (T2′-cross/T3′ GROWTH, RED under M-D; the M-E closure-row kill
+    pinned by P-arrival-closure). OW39's "pins … red-first with recorded
+    killing mutations" was true for the MECHANISM but overstated for
+    three named pins; it is now accurate. Minor dispositions worth a row:
+    - **MINOR-4 — the push-growth notify is now PRINCIPAL-FILTERED.** The
+      serving runtime's own loopback (service-principal) session is
+      dropped by the ExecutorHost (the memory server threads the changed
+      session's principal; pinned red-first in
+      `test/v2-demand-changed-principal.test.ts`). CAVEAT on the numbers:
+      the W0/W1 `structural-growth` p50 (220–263 ms) is BOTH
+      adjacency-attributed (the reports say so) AND included ~2/20
+      service-driven growth notifies per (d′) run (the reports did not say
+      so); W4's quiet run reads the counters net of the now-dropped service
+      growth. The settle `class` prose (§7, stats.ts) now labels the
+      adjacency honestly, and `demandPassMs` is labeled WALL time (it
+      includes structure-load awaits), `pushGrowthWakes`/`watchWakes` as
+      pre-coalescing NOTIFY counts.
+    - **T10′ / MINOR-5 — the equivalence hook's real guard is fan-out's
+      M-A2, not this suite.** In `executor-dprime-w0` every demanded
+      writer reads only authored docs (no upstream scheduler writer), so
+      `recomputeLiveRefs`'s disjunct is liveRefs-blind here and the (d′)
+      T10′ is a SMOKE check; the load-bearing kill (drop the disjunct from
+      `recomputeLiveRefs` only) is RED in `executor-fan-out` (f) —
+      `liveness drift … incremental=1 rebuilt=0` — as the build report
+      already records. A starvation-witness pin with an undemanded upstream
+      scheduler writer is the strengthening the reviewer named; NOT built
+      (the fan-out guard covers the disjunct); recorded.
+    - **OW41 (NEW, owed) — the demand pass is O(closure) per WAVE inside
+      the settle race (MINOR-6).** Measured 4.9 ms/pass at 1 922 rows /
+      823 keys (incl. early structure-load awaits), ≈ ≤2.5 µs/row; linear
+      — ~25 ms at 10 K rows, ~100 ms (the whole default flush deadline) at
+      ~40 K. Sub-second at today's sizes; NOT a hole. The named follow-on
+      is the INCREMENTAL-delta exposure (a per-space demand generation on
+      the memory server, bumped on watch.set/add / push-growth / session
+      prune, so a pass with an unchanged generation does only its pending
+      structure-load retries) — flag 6, not built here (rebase-risk for the
+      W3 builder; the cost curve is the trigger). Witness: `demandPassMs`.
+    - **Ruling item 10 (LANDED here) — scopes.md §9's ragged tripwire.**
+      The §9 "ragged instance sets as a steady state" tripwire forbade what
+      §2's amended ruling (2026-08-16, design §5 item 10) permits; §9 now
+      distinguishes the TOP (space→user) hop (uniform — forbidden ragged)
+      from BELOW it (ragged per principal — the RULED stage-B mechanism,
+      not forbidden). The §7 counter-list omission the same drift note
+      named (`undemandedNarrowingRuns` / `earlyEmitRefusals`) was already
+      folded in by W1.
+- **Stage C design build delta — W2 (e) (2026-08-19) — the client
+  intent watch is a NON-REACTIVE storage-notification listener keyed on
+  the outstanding intent set; the schema-less whole-sidecar `cell.sink`
+  is GONE; the effects channel follows (item 13); THREE RULED sentences
+  LANDED (items 5/6, 8, 7). LANDED on
+  `claude/server-exec-v2-w2-intent-listener` (PR #6039, built on the
+  design branch; RE-STACKED onto W1's tip — PR #6029 — 2026-08-19).
+  Independent adversarial review 2026-08-19: LANDABLE-WITH-FIXES (0
+  BLOCKER / 1 MAJOR / 7 MINOR / 6 NIT), every finding addressed in the
+  fix pass — MAJ-1 (the check applied a retired id TWICE when an
+  outcome subscriber re-fired on the same sidecar) FIXED with its pin.**
+  Reports:
+  [`stage-c/w2-intent-build-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-build-report.md),
+  [`stage-c/w2-intent-review-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-review-report.md),
+  [`stage-c/w2-intent-fix-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-fix-report.md).
+  Rows minted here: OW42 (the fix pass; minted as OW41 — W1's branch
+  had minted none at the time of minting, OW40 was the last — and
+  RENUMBERED OW42 at the 2026-08-19 re-stack onto W1, whose own fix
+  pass had concurrently minted OW41, the O(closure) demand-pass row;
+  W1 keeps the number).
+  W0's (e) gate (the design §6 refutation experiment, run FIRST on this
+  branch): the interim (b) schema-narrowed sink on the note n=20 series
+  collapsed the per-note client `scheduler/run` from 0.84 → 14–20 s
+  (monotone, `run/commit` = the CFC probes 60–70 % of it) to a FLAT
+  0.07–0.33 s, and createToView p50 from 4.03 s to 0.81 s (same
+  instruments, adjacent runs, ON binaries, no LLM model; 1-min load
+  in-run 2.2 → 6.3 — the BASELINE arm peaked highest (b1 6.29
+  mid-series, e1 ≤ 5.01), which inflates the ratio a little; the
+  flat-vs-monotone SLOPE is the robust signal) — the O(history) client
+  term IS the intent sink; (a) was built (design §3.3's seven-point
+  contract), the interim (b) did NOT ship (item 16: (a) replaced the
+  sink outright; the (b) scratch is W0's measurement arm only, kept in
+  the branch history).
+  - **speculation.md §4 step 2 — the match-and-carrier sentence (items
+    5 + 6) — LANDED (RULED 2026-08-18; text with W2).** Binding: the
+    match is on the pushed commit's `consequenceOf`, carried to the
+    client as the TRACKED entry's own `consequenced` / `status` /
+    `error` fields (T7 semantics), SANCTIONED as the carrier;
+    `consequenceOf` does not go on the wire; guards: tracked-entry-only
+    read (its terminal fields; on a drop, its reason), never
+    whole-history, never a dependency on HISTORY; always backstopped
+    by `W ≥ seq(e)` / `eventWatermark ≥ seq(e)` (item 9's clause is
+    folded into the same sentence). Instrument:
+    `packages/runner/test/speculation-intent-listener.test.ts` — pin 1
+    (consequenced retires silently; errored + dropped retire AND signal;
+    `waitForIntentConsequence` per terminal kind, memo consumed), pin 2
+    (an UNTRACKED id's mark is ignored), pin 5 (a sidecar with 1 000
+    consequenced entries + 1 outstanding: the mark's check visits ≤ 2
+    entries, ZERO transactions — the per-check-cost witness: a
+    notified check located by verified hint is O(1); a moved index is
+    verified by eventId and re-located from the tail), pin 7 (T25: a
+    re-fired id whose consequence already landed resolves AT
+    `trackIntent`, no listener leaks), pin 10 (the REAL path: the
+    served mark resolves the intent by the time `synced()` / `idle()`
+    armed at the mark's frame resolve and by the time the mark is
+    visible on a macrotask poll, O(1) visits, the echo retires, the
+    durable ack settles from the consequence — plus
+    `executor-events-down.test.ts`'s full loop, whose ack assertion
+    only settles through this carrier); the review pins — MAJ-1 (a
+    RE-ENTRANT `trackIntent` inside an outcome callback: each retired
+    id is applied exactly once — the check gates on the LIVE tracked
+    set per entry, never its pre-loop snapshot; mutation: the snapshot
+    gate → `dropped:X` twice and a stale memo), MIN-1 (ONE notification
+    whose merged changes span TWO tracked sidecars checks both;
+    mutation: record only the first wanted change → the second intent
+    stays outstanding); the re-seamed pin in
+    `event-append-client.test.ts` ("intent outcome consumption") now
+    drives the storage-notification seam, not a hand-stubbed
+    `cell.sink`. Mutations recorded in the build report's table (each
+    pin red under its own mutation, or — pin 11 — the OFF witness).
+  - **speculation.md §4 step 2 — "the client keeps a stream subscribed
+    while it has intents outstanding on it" (item 8) — LANDED, spec home
+    NAMED: speculation.md §4 beside step 2** (the client-side
+    reconciliation rule belongs with the retirement it serves; events.md
+    §5 is the server's failure semantics). Instrument: pin 1 (the
+    sidecar is put on watch through the schema-less selector
+    `sync(id, { path: [], schema: false }, "space")` at EVERY
+    `trackIntent` on it — a covered watch is a replica no-op, and the
+    re-kick is what heals a transiently failed first pull: review pin
+    MIN-4, a `sync` that fails once (loud: `intent-watch-failed`) is
+    re-issued by the next fire on that stream; mutation: kick only when
+    the sidecar state is created → the second fire issues no sync), pin
+    6 e2e (the appended sidecar ARRIVES in the firing client's replica
+    while its intent is outstanding — the entry's arrival is checked in
+    O(1) from the tail; the reviewer's MX5 probe — the watch never
+    established — times out pins 6 and 10: the watch is LOAD-BEARING,
+    the event-append path alone does not put the sidecar in the
+    client's replica).
+  - **speculation.md §4 step 2 — the non-reactive listener (item 4,
+    build item; item 15 `storageManager.subscribe`) — LANDED with the
+    same sentence.** Instrument: pin 6 (no `sink:…/of:stream-events:`
+    scheduler node after a fire, before or after the append lands —
+    mutation: keep the `cell.sink` → a node appears), pin 9 (the check
+    runs in a MICROTASK, never inside the notification dispatch; a burst
+    coalesces to ONE check per sidecar; a storage RESET re-checks every
+    tracked sidecar), pin 8 (`close()` releases; a delivery already
+    dispatched when close runs does not check; nothing after close
+    subscribes), pin 10 (the design's timing guard proper: the check
+    has run by the time `storageManager.synced()` / `runtime.idle()`
+    armed AT the mark's frame resolve — observed from a subscriber
+    registered after the listener; mutation: defer the check to a
+    macrotask → both barriers read the intent still outstanding, a
+    deferral the earlier macrotask-poll form of the pin could not see),
+    pin 11 (OFF: no overlay, no `subscribe`, no node).
+  - **The effects channel follows the same redesign — item 13, (e)'s
+    SECOND step — LANDED in this PR** (`speculation/effects-channel.ts`
+    over the shared `speculation/doc-notification-listener.ts`; the
+    reconcile is unchanged, it now reads the RAW session instance and
+    runs from a microtask; the LT8 resubscribe re-read rides the same
+    schema-less `sync`). Instrument: pin 6's second half (no
+    `sink:…/of:server-execution-effects/` node; `listenerInstalled`) and
+    the whole `executor-effect-channel.test.ts` suite green through the
+    listener (15 steps incl. the LT8 reload journey, cardinality 2, the
+    receipt-race divert pin, same-principal two-session isolation).
+    No follow-on row: the effects doc is small on the acceptance
+    workloads (one entry + one ack per navigation), but its sink shared
+    the intent sink's shape (schema-less whole-doc effect following
+    `args.target` links), so it was retired here rather than measured.
+  - **events.md §5 — "drops and errors ride `consequenceOf`" (item 7)
+    — LANDED.** Binding: a drop notice / an error surface is the
+    event's consequence, named in the writing derived commit's
+    `consequenceOf`, advancing `eventWatermark` (verified in
+    `space-server.ts` `#sealEventConsequenceNotice`: the notice seals as
+    an event-handler-kind tx stamped with the eventId, so the wave's
+    `consequenceOf` fold carries it). Instrument: the existing
+    `executor-events-down.test.ts` ERROR arm and DROP arm; the client
+    half by pins 1 and 2 (the `status: "dropped"` and `error` arms on
+    the tracked entry).
+  - **The `commonfabric.*` counter surface (design §3.3 point 7 / SB S5),
+    LANDED:** the overlay's logger keys under `speculation-overlay/` —
+    `intent-check` (per check: one at the fire, one per coalesced sidecar
+    change while outstanding), `intent-retired-by-consequence-of`
+    (an intent resolved by its tracked entry's mark), `intent-drop-notice`,
+    `intent-error-notice`, `intent-refused`, `intent-echo-retired-by-
+    backstop` (an intent-origin ENTRY retired by the W sweep instead —
+    it counts ECHO entries swept by W, NOT missed marks: the arrival
+    sweep runs synchronously inside `applySessionSync` and can retire
+    the echo before the mark's microtask check runs, so a non-zero
+    count coexists with every fire resolved by its mark — the chat
+    witness below reads 2 beside 25/25), `intent-listener-installed` /
+    `-released`, `intent-watch-failed` / `intent-listener-failed` /
+    `intent-check-read-failed` / `intent-apply-failed` (the loud
+    fail-soft arms; the last is the fix pass's per-entry guard, N-2 —
+    nothing in the arms throws today); the effects channel's
+    `effects-reconcile`; the overlay's diagnostic getters
+    `pendingIntentCount`, `intentListenerInstalled`, `intentCheckCount`,
+    `intentCheckVisits` (the `sidecarEntriesRead` witness),
+    `intentCheckMaxVisits`; the browser churn line
+    (`cfc-browser-helpers.ts`) gained `overlayIntentChecks` /
+    `overlayIntentsByConsequenceOf` / `overlayIntentEchoBackstops`.
+    `pendingIntents` = `pendingIntentCount` (a gauge; not a logger key).
+  - **W4 witnesses (client side), PROVISIONAL numbers on the W2 tip
+    `7a5481d14` (ON built binary sha `7964711e835ea16f`, gitSha read per
+    run, `No default model available`, fresh store; the design tip's
+    server — the walk still present — so the cross-user numbers are
+    W1's territory):** note createToView **FLAT in history** —
+    per-note `scheduler/run` 71–170 ms across n=20 (baseline on the
+    design tip the same hour: 0.84 → 14–20 s), createToView series
+    `1145 692 637 878 765 741 932 444 879 415 596 474 1275 1166 876 887
+    574 793 1879 778` ms (p50 ~0.79 s vs the design tip's 4.03 s and
+    W0's 4.09 s; first-10 median 764 / last-10 876 — no slope), 1-min
+    load 3.46 → 6.07 during the run (the note arms' loads were NOT
+    equal: b1 peaked 6.29, e1 5.01, a1 6.07 — the slope is the signal,
+    the ratio indicative); the sink effect no longer exists (0 runs, 0
+    ms; the design tip: 9–19 runs and 142 → 4 096 ms per note); chat
+    n=20 (1-min load 3.9 → 7.6 in-run): `overlayIntentChecks` 75 for
+    25 fires (3 per intent: fire, append landing, mark),
+    `overlayIntentsByConsequenceOf` 25/25 (every fire resolved by its
+    mark), `overlayIntentEchoBackstops` 2 (echo entries the arrival
+    sweep reached first — see the counter bullet; not lost marks),
+    cross-user median 11.3 s (the trio tip 7.4–9.7 s: the walk term,
+    unchanged by (e), plus load) — the client-local speculation latency
+    is preserved by construction (the fire's own echo runs are inside
+    the flat 71–170 ms per-note client budget); a DEDICATED sender-echo
+    instrument (click → own render) does not exist in the harness and
+    is W4's to add (recorded). The fix pass changed one client-side
+    cost (the per-fire watch re-kick, MIN-4 — a covered watch is an
+    O(1) tracker lookup, no wire); its PROVISIONAL note n=20 series is
+    in the fix report.
+  - **OW40 (step 4's rebase) — re-read, unchanged:** the listener
+    RETIRES and never rebases; an outstanding echo stands until its
+    mark or the backstop, as the sentence says; nothing learned moves
+    the row.
+  - **OW42 — the tracked-set DRAIN when a mark never arrives: an
+    outstanding intent whose sidecar entry is GONE before this client
+    saw its mark never resolves — `waitForIntentConsequence` hangs,
+    and with it the caller's durable-ack `onCommit` (`cell.ts`'s
+    flag-ON send path routes the ack through it: the CLI verb dispatch
+    / the webhook forwarder would wait forever) — the ECHO still
+    retires by W.** Numbered in the W2 fix pass (independent review
+    MIN-3; the build had it "recorded, not a row"; minted as OW41 and
+    renumbered OW42 at the 2026-08-19 re-stack onto W1 — W1's fix pass
+    had concurrently minted OW41, the O(closure) demand-pass row, and
+    keeps the number). Verified
+    UNREACHABLE today: the watermark is recomputed from the contiguous
+    consequenced frontier, so `eventWatermark ≥ seq(e)` implies the
+    mark is present, and nothing else removes an entry — only
+    stream-entry compaction (OW24, unbuilt) could. Pre-existing with
+    the sink (the same tracked set, the same hang). Owed: in
+    `#checkIntents`, record the entry's `seq` at first sight and treat
+    `eventWatermark ≥ seq` with the entry GONE as consequenced — item
+    9's fact applied to the tracked SET (~10 lines) — with a pin whose
+    scripted sidecar compacts the entry away under an advanced
+    watermark. Trigger: OW24 — the compaction PR cannot land without
+    this row (the two rows close together); earlier if any path other
+    than compaction is found to remove a sidecar entry.
+  - Not rows, recorded: (i) the cost of the check AS BUILT (the spec
+    sentence was corrected to it in the fix pass — review MIN-2; the
+    ruling says nothing about cost): the immediate check at
+    `trackIntent` walks the raw array once, O(E), for an id whose entry
+    is not yet present (a plain JS array walk, no transaction; T25
+    needs it; pin 5 asserts the 1 000 visits) — `intentCheckMaxVisits`
+    reports it; a NOTIFIED check is O(outstanding + hinted indices),
+    and a change with no usable index (an append, a moved hint)
+    degrades to a backward tail scan over the entries appended AFTER
+    the tracked one — O(k) per notification while an intent stays
+    outstanding on a busy shared stream (µs at k ≈ 100; memoizing each
+    located index into the hint set would make later checks O(1), not
+    done — flagged, not ruled). (ii) The backward (tail-first) scan
+    reads the TAIL-MOST entry for a tracked id: when a T25 duplicate
+    coexists with its consequenced original, the listener waits for the
+    duplicate's OWN mark (the skip path seals it consequenced without
+    error → signals `consequenced`); the old forward scan read the
+    original's mark (and its `error`, if any). This fire's own
+    consequence — a behavior delta in that corner, stated (review N-3).
+    (iii) The re-seamed `event-append-client` pin's first delivery uses
+    the whole-doc path and so exercises the tail-scan arm only; the
+    hinted arm is pinned in the new suite (review N-6). (iv) The
+    scripted harness's change addresses carry the production scope
+    (`scope: "space"`, as `differential.ts`'s `toAddress` sets) since
+    the fix pass, so the `wants` scope filter is exercised by the
+    scripted pins too (review MIN-6; before, only e2e pins 6/10 saw the
+    production shape).
+  - **W2.1 (2026-08-19) — the CLIENT CASCADE-ECHO STRANDING (W0 l3's
+    "duplicate join", root-caused by W3 and handed to W2) — FIXED, shape
+    (a): `retireIntent(P)` also retires P's client cascade
+    descendants.** Report:
+    [`stage-c/w2-1-cascade-echo-report.md`](../../history/plans/server-execution-v2/stage-c/w2-1-cascade-echo-report.md).
+    Binding text: speculation.md §4 step 2's DATED clarification beside
+    the late-echo rule (descriptive — the jobless-cascade consequence
+    read on arrival; not a new rule). What it binds: when the terminal
+    consequence of intent `e` arrives (consequenced / errored / dropped
+    / refused — every arm reaches the one seam), every live overlay
+    entry whose cascade thread (`OverlayEntry.parentEventId`, recorded
+    at the cascade echo's seal; `#cascadeParents` links a child that
+    wrote nothing to its grandchildren) reaches `e` retires with `e`'s
+    own echo; the retired descendant's id joins the jobless set (a LATE
+    grandchild drops at seal). Scope: client-minted descendants of
+    `e`'s speculative run only — never a durable entry of its own, never
+    an unrelated intent's cascade, never a derivation echo. Guards kept:
+    no dependency on history (the thread is process-local and bounded
+    like the jobless set); the parent's own retirement is still the
+    sanctioned mark / the `W ≥ seq(e)` backstop — the descendant rides
+    the parent's signal (in the fail-soft posture where neither the
+    listener nor the watch installed, the descendant has no backstop of
+    its own — as before W2.1; stated). Instrument:
+    `speculation-intent-listener.test.ts` — **W2.1-1** (a cascade
+    child's echo is retired when P's MARK arrives; RED on the pre-W2.1
+    tip: `entryCount` 1 ≠ 0 — the entry stood forever; mutation: the
+    cascade arm removed), **W2.1-2** (P's mark retires ONLY P's cascade:
+    an entry with an unrelated parent, another intent's root echo, and
+    an untracked emitter's cascade stand; mutation: the walk accepts any
+    parented entry), **W2.1-3** (the late-echo rule holds around the
+    arrival arm — a LATE child and a LATE grandchild of the retired
+    child drop at seal; a grandchild behind a SILENT no-write child is
+    reached through the thread; mutations: the thread not recorded at a
+    no-write seal / the retired child not joining the jobless set),
+    **W2.1-4** (the flicker witness counts a cascade echo retired on
+    its parent's consequenced mark while NO doc it wrote landed at or
+    after the mark's frame — including when a CONCURRENT writer moved
+    the doc past the echo's basis first (the two voters' shape) — not
+    one whose written doc rode the mark's frame, and not a dropped
+    parent's cascade; mutations: key on the basis → the concurrent-
+    writer case reads arrived; arm on the drop arm → it counts), and
+    the **W2.1 e2e** pin — the lunch
+    join shape through the real path (a click handler that only forwards
+    to a handler that cellifies a NEW object into a list, one flag-ON
+    client + a live ExecutorHost): on the pre-W2.1 tip it times out at
+    "the cascade child's echo to retire" (the stranding, reproduced
+    end to end); with the fix the echo retires on the click's mark, the
+    rendered list holds exactly the server's one entry, the counter
+    reads 1, unarrived 0. OFF arm: pin 11's shape unchanged — every
+    W2.1 line lives inside the overlay, which does not exist OFF. The
+    lunch gate's "both join lands" step now asserts the CONFIRMED
+    roster (exactly {Alice, Bob} chips on BOTH browsers + "2 joined"),
+    RED on a standing echo (7–16 ms on the pre-W2.1 tip), green only on
+    the real landing (3.3–5.1 s across 6/6 green runs at the W2.1 tip
+    without (α); 253–255 ms across the 6 green runs at loads ≤ 12 on
+    the W2.1 + (α) scratch — each ≥ a server round trip); the ON skip
+    entry is W3's to lift — and **must NOT lift on these runs:
+    BLOCKER-class flag (2026-08-19, W2.1 report §6b) — on the W2.1 +
+    (α) scratch the gate is RED at "both voters' swatches visible" in
+    5 of 13 runs (60-s timeout; the store clean in every one, both
+    votes durable, "2 love it" rendered on both browsers 300–700 ms
+    after the clicks), while W3's own tip is 3/3 green under HIGHER
+    load and W2-on-W3 WITHOUT W2.1 2/2 green under far higher load:
+    the stall is attributable to W2.1 in the (α) configuration — the
+    voter's own vote ECHO retired at the click's mark (the designed
+    flicker; the purged castVote child lands a wave later), and the
+    CONFIRMED own vote then not rendering its swatch on that browser
+    within 60 s. Not root-caused; candidates named in the report (the
+    confirmed own-vote entity doc — a new id the client never read —
+    not reaching the voter's replica after the echo's entity layer
+    dropped; or the swatch re-derivation after the superseded flip
+    racing the next frame). Before W2.1 the stranded echo carried the
+    own swatch forever, so every baseline is green by masking. (b)
+    would remove the exposure (the echo stands until the child's own
+    landing). Owner / W3 / W2 call; the evidence, the three baseline
+    worktrees and binaries are in the report. UPDATE 2026-08-19
+    (W3.1): the stall is root-caused (the coordination delta below;
+    OW43) and its CLASS FIX landed — S1's drain-settle quiescence
+    advance (RULED 2026-08-19) makes the diverged layer's retirement
+    reachable on a quiet space, so the blocker mechanism is closed;
+    the designed FLICKER itself (the cascade echo retiring at the
+    parent's mark, one wave before the drained child lands) remains
+    W2.1's designed cost, and shape (b) — deterministic cascade ids,
+    the FUTURE row below — stays the flagged follow-on that would
+    remove the flicker too. The lunch skip's lift rides the W3.1
+    lunch gate's evidence, not this flag.** Counters:
+    `speculation-overlay/cascade-echo-retired` and
+    `…/cascade-echo-retired-unarrived` (the flicker witness, armed only
+    on a consequenced non-error parent: no doc the echo wrote held a
+    confirmed value at or after the MARK frame's seq — the sidecar's
+    confirmed seq at the check — when it went; keyed on the mark's
+    frame, not the echo's basis, because a concurrent writer moves the
+    doc past the basis without the child having landed — a HEURISTIC,
+    two misreadings stated on the getter: an unchanged authoritative
+    value reads as unarrived; a foreign write landing in the mark's own
+    frame at or after the mark reads as arrived), getters
+    `cascadeEchoRetirementCount` /
+    `cascadeEchoRetirementUnarrivedCount`, the browser churn line's
+    `overlayCascadeEchoRetired` / `overlayCascadeEchoFlickers`. Lunch
+    witness: at the W2.1 tip (no (α)) `overlayCascadeEchoRetired` 2 /
+    `…Flickers` 1 on the host every run — the join child landed one
+    wave AFTER the click's mark (commit 45 the click, 46 the child's
+    `users` splice), so spec-Alice went at 45 and the confirmed Alice
+    arrived at 46: the flicker, live; on the (α) scratch the JOIN child
+    rode the click's wave (0 for it), and the purged castVote leftover
+    (`lt1LeftoversPurged 1` in ~1 run in 2: the click alone in one
+    commit, the drained child in the next) is the flicker the mark-
+    frame-keyed witness catches (0–1 per browser per run).
+    **UPDATE 2026-08-20 (combined W2.1+S1 review, F1 MAJOR — FIXED on
+    the train tip):** the seal-time jobless checks were ONE LEVEL deep
+    (eventId or direct parent) while the thread can be deeper — a LATE
+    grandchild of a SILENT (write-less) cascade child sealed after the
+    root's mark passed both checks, registered, and stranded forever
+    (the silent child has no entry, is never retired, never joins the
+    jobless set; probe-verified by the reviewer: `entryCount=1,
+    dropped=false, retired=false`). Both checks (pre-seal and the
+    post-`sealInto` re-check) now walk the `parentEventId` chain
+    through `#cascadeParents` (`#joblessByAncestry` — the
+    `#cascadeReaches` walk on ids). Pins, red-first on the pre-fix
+    code: W2.1-3 extended with the late-silent-grandchild seal (RED:
+    the entry registered, drops +2 not +3), **W2.1-6** (the mid-seal
+    mark arrival caught at the post-`sealInto` re-check through the
+    chain; RED: `entryCount` 1, no drop). The review also named the
+    SILENT truncation modes (F6 MINOR): a `#cascadeParents` eviction at
+    the 4096 bound and a walk stopped at the 64-hop depth cap are
+    indistinguishable from "no ancestor" at walk time — both now
+    COUNTED (`cascadeThreadEvictionCount` / `cascadeWalkDepthCapCount`,
+    logger keys `cascade-thread-evicted` / `cascade-walk-depth-capped`;
+    pin **W2.1-7**), so if either bound is ever hit in the wild the
+    stranding presents WITH telemetry (the strand itself remains the
+    stated bounded-design posture — eviction needs ~4096 cascade seals
+    within one intent round trip). The flicker-witness docstring on the
+    churn surface (F5 MINOR) was still basis-keyed text from before the
+    witness refinement — rewritten to the mark-frame semantics with
+    both heuristic biases and their directions stated.
+  - **FUTURE / owner-level — (b) deterministic cascade ids (NOT built;
+    the reason the flicker exists).** Derive a cascade child's event id
+    on BOTH sides from the parent event id + the send ordinal within the
+    parent's run (instead of `mintEventId`'s per-tx random key): then
+    the client's cascade echo carries the SAME id as the server's LT1
+    entry — `retireIntent` matches it by its own mark (no thread walk),
+    AND the handler-frame-caused entity ids agree (`$event:
+    tx.dispatchedEventId`, runner.ts), so step 3's arrival gate passes
+    and the echo stands until the child's OWN consequence lands — no
+    flicker in the purged-leftover case, and a tracked intent per
+    cascade hop if wanted. What it touches: `event-identity.ts`
+    `mintEventId` and events.md §4's "cascade sends minted inside a
+    handler attempt get fresh ids per attempt" (the per-attempt
+    freshness that keeps a retried attempt's cascades apart; a
+    deterministic id must then carry the attempt or rely on the
+    committing-attempt-only escape), the C8d fold key and the served
+    dispatch's `parentEventId` carriage, the LT1 emission in `cell.ts`
+    (both arms mint), and the client cascade's `queueEvent` id. Better:
+    no flicker, the child's own mark retires its own echo, one identity
+    for one cascade hop. Worse: a spec-level identity change (events.md
+    §4), two code paths that must agree byte-for-byte, and a retry
+    story to re-rule. Owner-level; put to the owner 2026-08-19 —
+    ACKNOWLEDGED / DEFERRED (below). Trigger: the OPEN swatch stall
+    (5/13 at the W2.1 + (α)
+    configuration, 2026-08-19 — (b) structurally removes the exposure:
+    the echo stands until the child's own landing) if the root cause
+    lands in this seat; the flicker witness reading non-zero on the W4
+    acceptance workloads at a rate the owner will not accept; or when
+    per-hop intents are wanted.
+
+    **ACKNOWLEDGED / DEFERRED by the owner — 2026-08-19.** Owner, in
+    chat:
+
+    > ack, revisit later if flicker is too high or as optimization.
+    > honestly, flicker might be acceptable for a first launch since
+    > status quo flickers as well.
+
+    — owner (Berni), 2026-08-19. The trigger above is CONFIRMED as
+    written, with the owner's judgment recorded beside it: the flicker
+    is likely ACCEPTABLE for a first launch (the status quo flickers
+    as well), which SOFTENS W4's flicker bar — W4 still reports the
+    flicker counters, so "too high" stays a number the owner can read,
+    not a feeling. Not scheduled; revisit if that number is too high,
+    or as optimization.
+
+    **Instrument bias note (2026-08-20, combined review F4 — the
+    trigger's counter is a floor, not an exact count).** The flicker
+    witness (`overlayCascadeEchoFlickers`) systematically UNDER-counts
+    the COALESCED-PURGED shape: when both voters' clicks mark in ONE
+    commit that carries the OTHER voter's confirmed add while THIS
+    voter's child was purged (the root-cause report's green-run shape,
+    s6/s13 — a COMMON shape, not a corner), the shared list doc moves
+    to the mark's own seq via the foreign write, reads "arrived", and
+    the purged voter's real one-wave flicker is NOT counted. It also
+    over-counts on the equality cutoff (an unchanged authoritative
+    value moves no seq and reads "unarrived") and on a late same-frame
+    sidecar append over-stating the mark seq. Directionally: whoever
+    reads this row's trigger at W4 should treat a NONZERO reading as
+    real flicker evidence and a LOW/ZERO reading as NOT proof of
+    little flicker — the bias in the common shape is downward. A
+    seq-level witness cannot attribute a same-frame move to a specific
+    writer; counting the shape exactly needs value-level (or
+    writer-attributed) evidence — deliberately NOT built in the fix
+    round (it would change the decision instrument right before the
+    owner reads it); the biases are now also stated on the churn
+    surface's docstring (F5). Disposition: NOT CHANGED (code), this
+    note is the register record.
+- **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
+  durable stream entry is delivered to its handler exactly once as a
+  COMPLETED run (events.md §4, RULED 2026-08-18); the build is the
+  stacked PR `claude/server-exec-v2-w3-alpha`, built off W1 and
+  re-stacked onto W2's tip 2026-08-19 (no CI — every green a local
+  run; report
+  [`stage-c/w3-alpha-build-report.md`](../../history/plans/server-execution-v2/stage-c/w3-alpha-build-report.md)).
+  It closes OW35 (above) and lands events.md §4's LANDED note naming the
+  three seats. Coverage row per sentence of the RULED paragraph:
+  - "One durable stream entry is delivered to its handler exactly once
+    as a COMPLETED run, regardless of dispatch path or reference count"
+    — COVERED by the run-count pins (`executor-events-down.test.ts`
+    "(α1)+(α1b)+(α4)", "(α1b)+(α4)"): the child handler's non-idempotent
+    effect applied exactly once per durable entry and exactly one
+    derived commit naming each event, under a flush deadline that cuts
+    the appending wave with one LT1 copy running and one queued. Killing
+    mutations recorded in the report (the true double needs BOTH the
+    seal refusal and the orphan arm's absent-emitter clause off: the
+    effect applied three times / twice). **Review fix (2026-08-19):**
+    the same-eventId SIBLING shape — an LT1 copy whose run commits a
+    separate event-handler-stamped tx (the served navigateTo intent)
+    before an await spanning the deadline — is pinned by "(α1b)+(α4) +
+    a same-eventId SIBLING tx": RED on the build tip (the sibling's
+    survival marked the entry; the refused handler copy was never
+    re-delivered — `processed` 1, the effect 0×, a LOST delivery),
+    green with the marking keyed on the copy's OWN run (`lt1 === true`);
+    the effect once, the sibling's write once, `processed` 2; the
+    store-side per-event commit count reads 2 for this split and is
+    recorded as not the witness. Pin 1 additionally holds its gate
+    across ≥2 further deadlines with the drain's `streamEntry` copies
+    queued (review m1): an over-reaching purge predicate (`served !==
+    undefined` alone) is RED there (`lt1LeftoversPurged` 3 ≠ 1) — the
+    discriminator is now guarded by the α pins, not only by the trio's.
+  - "An entry whose in-process (LT1 same-wave) run does not complete
+    within its appending wave is dispatched by the drain alone; the
+    serving loop purges unrun in-process leftovers at the flush deadline
+    and skips at the drain any id already queued or run with a durable
+    entry" — COVERED by (α1) `#purgeLt1Leftovers` at both `exhausted`
+    arms (pin: `lt1LeftoversPurged` 1 for the queued child; mutation:
+    purge skipped → 0 and the copy is refused at the seal instead,
+    `lt1LateSealsRefused` 2), by (α1b) the late-seal refusal (pin:
+    `lt1LateSealsRefused` 1 for the parked child; `childRuns` 2 — the
+    refused copy and the drain's), and by (α2) the trio's guard, verified
+    by reading (held copies are `queued` to the guard; one producer of
+    `streamEntry`-bearing copies) — its pin is the trio's
+    ("exactly-once under an HONEST flush deadline"); a shaper-HELD-copy
+    pin is NOT added (FOLLOW-ON, see the report's not-done list) — and
+    the follow-on should cover the shaper-held LT1 copy too, not only
+    the drain-held one (review m3): an LT1 copy forwarding a
+    renderer-trusted event is HELD by the wake shaper, out of the
+    purge's `eventQueue` reach, released into a later wave and caught by
+    (α1b) there — exactly-once holds, `lt1LateSealsRefused` grows
+    routinely for it (the counter doc says so now).
+  - "A derivation-kind emitter's superseded LT1 leftover re-arms nothing
+    and its orphan delivery is REFUSED (never delivered without a durable
+    entry)" — COVERED by (α3): the orphan arm in the wave's requeue
+    closure (pin "(α3)": `orphanDeliveriesRefused` 1, the witness doc
+    saw only the rival's tag, every consequenced id has an entry;
+    mutation: the arm removed → "ping" delivered with no entry) and by
+    (α1)'s purge for a not-yet-run copy (no notice, no re-arm: the copy
+    carries no failure hook and no commit callback). **Review fix
+    (2026-08-19, M1):** the arm folds the copy's same-eventId SIBLINGS
+    (the inline intent tx) into the refusal and counts once per EVENT —
+    pin "(α3) + a same-eventId SIBLING tx": RED on the build tip (the
+    handler half refused, the intent half LANDED — `side` 1), green with
+    the fold (`side` 0, `orphanDeliveriesRefused` 1 for two folded
+    contributions).
+  - Counters (serving-loop.md §7 `events`): `lt1LeftoversPurged`,
+    `lt1LateSealsRefused`, `orphanDeliveriesRefused` — asserted in the
+    pins; read on the live runs (lunch 1/0/0 per run; chat 0/0/0).
+  - **DECISION (flag-don't-fill) — the lunch ON skip STAYS, its reason
+    rewritten.** The lift rule's two conditions are met literally (the
+    (α4) pins green; the gate 3/3 green fresh-store on the W3 tip), but
+    the l3 root cause below shows the gate's "both join lands (count
+    reaches 2)" step has been passing on a stranded CLIENT echo (7–16 ms
+    after the guest's click in every green run — W0 l1/l2, W3 l1–l3 —
+    faster than any server round trip) and fails when the first probe
+    lands after the guest's confirmed join (W0 l3: "3 joined"). Lifting
+    would knowingly re-expose the ON lane to a ~1-in-8 flake whose
+    mechanism is W2's (the alternative, named: lift now on the literal
+    rule and accept the flake until W2 lands). Lift condition restated
+    in the entry: W2's cascade-echo fix (or the step re-pointed at the
+    CONFIRMED count) + 3/3 green. Owner-visible.
+  - **l3 root cause (W0's "3 joined") — NOT (α); W2 / T2 territory,
+    handed off with the evidence.** The join is a CASCADE child: the
+    `#lp-join-button` click lowers to a handler (stream `FkFw…`) whose
+    served run emits `joinAs`'s event (stream `lalq…`, payload `{}`)
+    as an LT1 same-space emission, consequenced in the same commit as
+    the click (W0 l3 store: commit 42 = click + child; `users` spliced
+    ONCE per join — commits 42 and 52 — so the server holds 2 joined; 8
+    events, each in exactly one `consequence_of`; `appended 6 /
+    processed 6`). On the client the speculative click echo sends the
+    same `{}` to `boundJoin`, minting a cascade id from its own tx
+    (`mintEventId(link, originTx)` — a random per-tx key) that never
+    equals the server's LT1 id (another random key); `retireIntent`
+    retires by EXACT eventId, so the child's echo is never retired by
+    the parent's consequence; the late-echo rule (T2/OW36) does not
+    apply (the child sealed ~8 ms after the click, before the served
+    consequence); and the sweep's ARRIVAL gate never passes because
+    `joinAs` cellifies the new `user` into a doc whose id derives from
+    the frame's cause — `$event: tx.dispatchedEventId` (runner.ts) — so
+    the client's entity (`$event` = the client cascade id) ≠ the
+    server's `NYEME…`, and the spec entity doc never holds a confirmed
+    value. The host page renders overlay spec-Alice + confirmed Alice +
+    Bob = "3 joined, Alice, Alice, Bob". Candidate shapes for W2, not
+    filled: (a) `retireIntent(P)` also retires the cascade children
+    whose `parentEventId` chain reaches P (the late-echo rule's jobless
+    logic applied on arrival; a visible flicker when the LT1 child lands
+    a wave later); (b) deterministic cascade ids derived from the parent
+    id + send ordinal on both sides (then `retireIntent` matches and the
+    `$event`-caused entity ids match, so the arrival gate passes) —
+    touches events.md §4's per-attempt freshness; owner-level.
+  - **OW37 re-read on W3's numbers** — (α) adds no wave: the purge and
+    the refusal run inside existing cut cycles; the lunch runs show
+    `derivedCommits == waves` (61/61, 52/52, 52/52) with
+    `wavesBudgetExhausted` 38 / 26 / 25 — the deadline-honesty shape the
+    trio named. CORRECTED (review m2, 2026-08-19; the first wording said
+    "fewer … by noise", the wrong direction): W3's exhausted ratios are
+    0.62 / 0.50 / 0.48 (38/61, 26/52, 25/52) against W0's l1–l3 0.46 /
+    0.39 / 0.26 (21/46, 17/44, 10/38) — HIGHER, and confounded by load
+    (W3's 1-min load 4.5 / 6.9 / 5.5 before each run → 8.8 / 8.3 / 5.7
+    after; W0's l1–l3 5.0 / 2.9 / 3.6 before, from the driver logs); not
+    a comparison, not silence. The ratio metric stays owed to W4's
+    quiet run.
+  - Chat n=20 smoke (PROVISIONAL, one run, load 9.4–9.6 — a concurrent
+    benchmark on the box; NOT comparable to W1's 1 239 ms): series
+    complete, median 1 541 ms (q1 1 408 / q3 1 818 / max 3 208);
+    `events appended 28 / processed 28`, purge/refusal/orphan 0/0/0 —
+    (α) is passive on the chat path.
+
+- **Stage C coordination delta (2026-08-19) — the swatch stall
+  ROOT-CAUSED; one row minted (OW43; nothing renumbered).** The
+  blocker-class stall flagged in the W2.1 row above (5/13 at the
+  W2.1 + (α) configuration; "Not root-caused; candidates named") is
+  now root-caused and the candidates there are SUPERSEDED — report
+  [`stage-c/swatch-stall-rootcause.md`](../../history/plans/server-execution-v2/stage-c/swatch-stall-rootcause.md):
+  under (α) the purged castVote child makes the lagging voter's click
+  a mark-only commit; W2.1's cascade-echo retirement at that mark
+  visibly regresses the client; the re-derivation from the regressed
+  base seals a DIVERGED speculation layer — a literal
+  `splice remove@1` tombstone over the swatch VDOM doc — under which
+  the server's healed derivation ARRIVES (delivery fine) and stays
+  masked, because both convergence paths are dead: no re-run (the
+  swatch computed is an undemanded pull computation — a legal
+  scheduler idle; a settle does not run it) and no retirement (the
+  space-server's watermark freezes below the layer's floor on a quiet
+  space until the next authored commit — probe-verified: one
+  keystroke healed the stalled browser in one poll). All 5 builder
+  reds plus 8 instrumented reproductions ONE class (arm A
+  i6/i7/i10/i15 + arm B f1/f7/f9/f10; recorded as 7 when this block
+  was minted — corrected by W3.1 per the report's own tables)
+  (delivered-but-masked); 0 never-delivered; 0 B1; F1 tested and
+  orthogonal (4/10 vs 5/13). Fix seats S1–S4 are with the owner —
+  the plan's coordination block carries them and the S1 ruling
+  request (its item (10)).
+  - **OW43 — the overlay sweep's accepted-lingering premise ("values
+    converge, rendering stays correct") is FALSE under regressed-base
+    re-derivation — a diverged layer can mask a DELIVERED value —
+    CLOSED 2026-08-19 by W3.1 (S1)**, per the row's own trigger ("the
+    chosen fix seat's landing (S1 closes this row)"): the drain-settle
+    quiescence advance landed — protocol.md §4's RULED 2026-08-19
+    amendment, the space-server seat, pins
+    `executor-settle-advance.test.ts` (red-first on the pre-S1 tip:
+    the frozen-W i10 shape and the diverged-layer masking reproduced
+    RED, then healed with NO authored traffic) — so every layer's
+    floor is reachable on a quiet space, and the premise the sweep's
+    comment now states is true. The original row, for the record:
+    The sweep's comment accepts entries lingering on a then-quiet
+    space under the premise that lingering layers hold CONVERGED
+    values; a re-derivation from a flip-regressed effective base
+    (W2.1's cascade-echo retirement at a mark-only commit is the
+    known producer; any regressed-base re-derivation racing an
+    arrival can mint one — e.g. a rejection-revert racing pushes)
+    seals a layer whose value DIVERGES, and the delivered, healed
+    confirmed value beneath it is masked indefinitely (the swatch
+    stall; report §§3–4). Owed: make the premise TRUE (S1 — the
+    watermark covers the tail derivations at drain-settle, so every
+    layer's floor is reachable on a quiet space) or make the sweep
+    handle the diverged case explicitly; S2/S3 remove the only known
+    producer but leave this hole open. The flicker witness
+    (`…/cascade-echo-retired-unarrived`) is the live, cheap predictor
+    of the poisonous window (5/5 on the builder's reds; marks the
+    stalled browser in every instrumented red) — necessary, not
+    sufficient (report §1). Trigger: the chosen fix seat's landing
+    (S1 closes this row; under S2/S3 the row STAYS until the
+    retirement hole is closed or explicitly accepted) — in any case
+    before the lunch ON skip lifts and before W4's `waitForSettled`
+    numbers are read at quiescence.
+
+- **Stage C W3.1 (S1) delta (2026-08-19) — the drain-settle
+  quiescence advance LANDED (the ruling at the plan's owner item
+  (10): owner, in chat, "S1 sounds good"; OW43 CLOSED above).**
+  Coverage row for the amended sentence:
+  - protocol.md §4, the quiescence-advance amendment ("at
+    drain-settle ... W additionally advances over the space's
+    committed TAIL DERIVATIONS", with the stated reading that W's
+    definition quantifies over authored commits only, the
+    once-per-transition latch, the never-chased advance commit, and
+    the fail-closed hole rule) → seat
+    `packages/runner/src/executor/space-server.ts` (the wave cycle's
+    advance computation; `#ownWaveSeqs` + `#settleAdvanceOwed`),
+    `wave.ts` `contentContributionCount`, `stats.ts`/`host.ts`
+    `settleAdvances` → pins `executor-settle-advance.test.ts`:
+    (1) the frozen-W i10 shape (RED on `e386a01be`: "W frozen at
+    input coverage; derived tail 4"; GREEN: the advance lands with NO
+    authored commit and reaches the client via the ordinary
+    watermark-doc push), (2) the diverged layer retires at quiescence
+    and the healed confirmed value renders (the report §5 probe
+    shape as a minimal seam — a stamped derivation-kind re-derivation
+    over the pushed derived value; RED masked 30 s), (3+5)
+    idempotence/no-self-chase + busy-space neutrality (the killing
+    mutation: removing the latch consume storms — one advance per
+    echo cycle — caught in 920 ms; arming the latch on
+    bookkeeping-only waves is INERT because the consume runs after
+    the arm, stated here so nobody "fixes" the ordering), (4) the
+    OFF witness (no SpaceServer, no derived commits, no watermark
+    doc). Serving-loop §3's drain-settle step and §7's counter
+    vocabulary updated in the same commit; the sweep comment's
+    accepted-lingering premise rewritten to the now-true form.
+  - FLAGGED test edits (not silent fixes): the serving-loop
+    stability pin now waits for the designed trailing advance before
+    sampling its 400-ms window (meaning unchanged — stabilize, no
+    self-chase — and it now also witnesses the advance's
+    no-successor guarantee); sx2-serving-loop's waves and
+    amplification budgets subtract `settleAdvances` and add the
+    once-per-transition bound (`advances <= authored + 1`).
+  - Residuals, stated: (i) the advance never fires past a LATE
+    authored record (a notice arriving after a later echo advanced
+    the input head — the in-order coverage math skips it, so W stays
+    below that seq until the next ordinary input; pre-S1 behavior,
+    unchanged, now the one remaining stall residue of that rare
+    interleaving); (ii) the walk's fail-closed hole rule is
+    construction-guaranteed (Set membership over dense engine seqs),
+    not pinned by a dedicated in-flight-notice interleaving test — a
+    deterministic seam would need a notice-holding server shim
+    (flagged, not filled); (iii) the one derived commit W does not
+    cover at quiescence is the final advance-carrying bookkeeping
+    commit itself, definitionally — a client derivation READING the
+    watermark doc could carry that seq in its floor and linger to
+    the next transition (no known reader does; the id class is
+    excluded from piece demand); (iv) **[FOUND by the combined review
+    2026-08-19 (F2 MAJOR) — FIXED 2026-08-20 in its fix round]** the
+    once-per-transition latch was consumed even when the advance-only
+    wave picked up CONTENT mid-seal (a transaction sealing between the
+    quiescence gate's snapshot and the wave detach joins the still-open
+    closing wave — the watermark-tx commit and `#sealChain` awaits are
+    the window): the fold's content armed the latch, the seal-consume
+    immediately erased it, and the folded seq — ABOVE the advance's
+    pre-fold target — stayed uncovered until the next authored input
+    (the swatch-stall shape, reintroduced in a microtask-wide race;
+    same consequence bound as residual (i), but S1's own bookkeeping
+    and previously unflagged). Fix: the consume is gated on
+    `closing.contentContributionCount === 0` — a fold leaves the latch
+    armed and the NEXT quiescence covers the folded tail (the
+    reviewer's probe-validated shape, 28/28 green against the pinned
+    population). Pin 6 makes the interleaving DETERMINISTIC (a
+    serving-runtime `edit()` wrapper injects a derivation-kind commit
+    when the quiescence advance's watermark write commits, then
+    asserts the fold landed in the SAME wave commit — loud abort
+    otherwise) and was RED on the unfixed code: W frozen below the
+    folded seq, timeout. The sweep comment's "every floor is reachable
+    on a quiet space" carries the pointer.
+  - For OW38/W4: quiescence advances are split in the stats
+    (`settleAdvances`), so the settle-time metric excludes the
+    advance-only waves; the growth-landing adjacency attribution is
+    UNCHANGED (a quiescence advance right after a growth wake can
+    still take the landing slot — the pre-existing MINOR-4
+    heuristic, now cross-referenceable against the settleAdvances
+    series timestamps).
+  - The LUNCH GATE at the W3.1 tip (`f250feacd`, ON-built binary
+    sha256 `53a712cede690b6e…`, fresh store + posture + `No default
+    model available` per run, loads 2.3–3.7): **6/6 GREEN**, totals
+    3 467–4 334 ms, joins honest (confirmed roster) 254–256 ms, and
+    the stalled step — "both voters' swatches visible" — walled at
+    **1 ms in every run** (no 28-s recovery, no timeout); events
+    appended/processed 11/12 with the one purged LT1 leftover in 4
+    runs and 11/11 in 2 (the clicks coalesced — no purge; both
+    shapes exactly-once); consequence multiplicity **{1:16} in all
+    six stores**; settleAdvances 10–13 per run (S1 live at
+    quiescence). **The lunch ON skip is LIFTED** (the entry removed;
+    the ledger lives in `tasks/server-execution-on-skips.ts`'s
+    header comment; the skip-list test asserts the one-entry state).
+    Chat n=20 smoke at the tip (PROVISIONAL, one run, load 4.3–4.4):
+    series complete, median 544 ms (q1 459 / q3 563 / max 622),
+    events 28/28, purge/refusal/orphan 0/0/0, settleAdvances 54 over
+    193 waves — quiescence-only, never per-wave (busy-path
+    neutrality at workload level).
+
+- **Stage C owner-rulings delta (2026-08-19) — the four open owner
+  items answered in chat; one row minted (OW44).** No owner question
+  stays open on the arc after this batch (#5968's Flags 1–4 remain on
+  file awaiting ratify-or-direct, flagged, not blocking). The four:
+  α1b — events.md §4's late-seal-refusal clarification RATIFIED as it
+  stands in the W3 fix pass's amended form (owner, verbatim: "ack");
+  the RULED 2026-08-19 marker and the attributed quote live in
+  events.md §4, the DATED/AMENDED trail kept as history, and the
+  split-residual tightening stays a named, not-built follow-on. OW31's
+  READ side — RULED 2026-08-19 (the OW31 row above carries the
+  verbatim quote): the service identity reads the ACL ONLY, every
+  other served read runs under the acting user's identity, SUPERSEDING
+  the scoping report's read-only-service-class recommendation, with
+  the flag-don't-block escape hatch recorded; build unchanged — owed
+  post-merge, before the flip PR. Shape (b) — ACKNOWLEDGED / DEFERRED
+  with the trigger confirmed and the owner's first-launch-flicker
+  judgment recorded on the FUTURE row above (it softens W4's flicker
+  bar; the counters still report, so "too high" stays a number). W0's
+  flag 9 — the tracker's closure ACCEPTED as the demand set, the
+  filtering logged as a future improvement paired with lazy client
+  instantiation: the row below.
+  - **OW44 — FUTURE (optimize-on-main) — filter the demand closure
+    toward the rendered subset, TOGETHER WITH lazy client
+    instantiation (the client not running the pattern immediately).**
+    W0's flag 9
+    ([`stage-c/w0-dprime-report.md`](../../history/plans/server-execution-v2/stage-c/w0-dprime-report.md)
+    §2(b)/§4): the tracker's closure follows a piece root's
+    `source`/process wiring, so a schema-narrowed root watch demands
+    the piece's WHOLE internal graph (ifElse inputs = both branches;
+    handler bindings) — over-demand, never under-demand. RULED
+    2026-08-19: the closure (the piece graph, `source`-wired) IS the
+    demand set, accepted as recommended; the narrowing is a future
+    improvement, coupled by the owner with the client side. Owner, in
+    chat:
+
+    > log as a future improvement, together with not running the
+    > pattern on the client immediately
+
+    — owner (Berni), 2026-08-19. The row pairs, per that coupling:
+    (i) filtering the demand closure toward the rendered subset (by
+    id class / value reach — flag 9's named shapes), and (ii) LAZY
+    CLIENT INSTANTIATION — the client not running the pattern
+    immediately, so what a session demands (today: the tracker's
+    closure, hence the whole piece graph) can narrow toward what is
+    actually rendered rather than being forced wide by the client's
+    own immediate run. Trigger: the optimize-on-main phase (the
+    owner's landing posture — land OFF, then continue optimizing on
+    main); not a gate for landing the stack, and not one of the
+    flip's ordered gates.
+
+- **Stage C combined W2.1+S1 independent review + fix round delta
+  (2026-08-20).** The combined adversarial review of W2.1 (cascade-echo
+  retirement), W3.1/S1 (drain-settle quiescence advance), and the
+  receipt-race flake fix — read-only, at `4bf914a70` (= the train tip
+  minus one docs-only commit) — returned **LANDABLE-WITH-FIXES: 2
+  MAJOR / 5 MINOR / 8 notes**; report on-branch verbatim:
+  [`stage-c/combined-w21-s1-review-report.md`](../../history/plans/server-execution-v2/stage-c/combined-w21-s1-review-report.md),
+  dispositions with red/green evidence:
+  [`stage-c/combined-w21-s1-fix-report.md`](../../history/plans/server-execution-v2/stage-c/combined-w21-s1-fix-report.md).
+  Every fix landed ON THE TRAIN TIP (`claude/server-exec-v2-w3-alpha`)
+  — F1 touches W2.1's client file that lives lower in the stack; the
+  fix rides the tip, no lower branch was rebased. Dispositions: **F1
+  (MAJOR) FIXED** — the seal-time jobless checks walk the cascade
+  thread (the W2.1 row's UPDATE above carries the mechanism and pins
+  W2.1-3-extended/W2.1-6); **F2 (MAJOR) FIXED** — the latch consume
+  gated on the advance wave having stayed bookkeeping-only (the S1
+  row's residual (iv) above carries the mechanism and pin 6); **F3
+  (MINOR) FIXED** — S1 pin 1's client clause is now PUSH-HALF honest
+  (a watermark sink installed before any advance exists must observe a
+  DELIVERED value above the authored coverage; under the reviewer's
+  S1-P1 mutation — the advance wave's `noteExecutorCommit` skipped —
+  the pin goes RED at 10 s, re-verified in the fix round, where the
+  pre-fix pins all stayed green); **F4 (MINOR) NOT CHANGED (code) —
+  register note landed** on the shape-(b) FUTURE row above (the
+  flicker counter under-counts the coalesced-purged shape; read it as
+  a floor); **F5 (MINOR) FIXED** — the churn-surface docstring
+  re-keyed to the mark-frame semantics with both biases stated; **F6
+  (MINOR) FIXED (counter, the preferred shape)** —
+  `cascadeThreadEvictionCount` / `cascadeWalkDepthCapCount` + logger
+  keys, pin W2.1-7; **F7 (nit) FIXED** — `#ownWaveSeqs` bounded at
+  4096, oldest evicted (fail-closed degradation only; on a healthy
+  space the prune-at-advance keeps the set near-empty). The 8 notes:
+  acknowledged in the fix report §4 (no code action beyond F6's
+  counter, which also covers the depth-64 note); the reviewer verified
+  OW43's closure justified, the skip lift doubly satisfied (adding an
+  independent 7th green lunch run with `{1:16}` store multiplicity),
+  and the flake fix real. One NEW pre-existing flake surfaced during
+  the fix round's suite battery and was attributed by the ritual
+  before any blame: `executor-effect-channel.test.ts`'s "served intent
+  (T2 hops 1–4)" step times out at "waiting for the intent to land in
+  alice's session instance" (~1/8 under load ~2) — reproduced at the
+  UNFIXED tip `7e1d5a8ff` with the byte-identical assert (baseline
+  worktree, 1/7), so NOT a fix-round regression and NOT the
+  receipt-race pin `78959c26c` fixed (different step, different wait);
+  left un-fixed here (out of the round's scope), flagged for its own
+  red-first pass.
+
+- **First ON-lane CI gate delta (2026-08-21) — the stack's first-ever
+  CI execution of the ON pattern lanes (land-off PR #6096, run
+  32447348664) found SEVEN real ON red surfaces; skip-and-land is the
+  landing posture; NINE rows minted (OW45–OW53, nothing renumbered).**
+  Every surface reproduced locally on the ON-built binary; the OFF
+  lanes untouched; the lunch and chat ON gates PASSED in CI. The
+  headline: **NO DEMAND HOLE** — the (d′) demand machinery held
+  everywhere it could be observed (group-chat: 33–41 derived commits,
+  healthy demand counters, normal settle series; home-profile: the
+  identical demand derived the surviving space's name with 72 basis
+  rows) — every red is a WRITE-PATH defect under ON: a write that no
+  longer lands, a write that lands with the wrong identity, or an
+  action killed at commit-prep before it can write. TWO of the seven
+  converge on the register's already-owed **OW31/§2b write-authority
+  carriage build** (cfc-group-chat-demo's served rows carrying the
+  SERVICE identity; home-profile's `compile-cache/writeback` fallback
+  refused without carriage): NO new row is minted for what OW31
+  already owes — those skip entries point at OW31, which now carries
+  two CI surfaces as its lift evidence. A ninth CI-red family member,
+  `cfc-group-chat-demo-multi-runtime`, was the test HARNESS's own
+  mixed posture (the self-hosted OFF-arm standalone server refusing
+  the ON workers' event appends deterministically) — fixed IN the
+  harness (`create()` resolves the posture like a deployed entry
+  point; ON targets the lane's toolshed), all 7 steps green on the ON
+  binary: no skip, no row. Reports:
+  [`stage-c/first-on-ci-gate.md`](../../history/plans/server-execution-v2/stage-c/first-on-ci-gate.md)
+  (the gate record: the failure table, the harness fix, the coverage
+  re-baseline) and
+  [`stage-c/on-render-stall-rootcause.md`](../../history/plans/server-execution-v2/stage-c/on-render-stall-rootcause.md)
+  (the three render-stall surfaces: store/log/live-run evidence,
+  classifications, fix seats S-A..S-J). The skip entries live in
+  `tasks/server-execution-on-skips.ts` (SIX file entries + TWO
+  step-level entries; the skip-list test pins the set); they gate the
+  FLIP — whose bar is the list EMPTY — not the land. Rows, one per
+  mechanism cluster; each row's trigger names the skip entry it
+  lifts:
+  - **OW45 — the profile piece's PROGRAM-materialization write path
+    under ON (rootcause §1; seats S-A/S-B/S-C).** Under ON the
+    created piece's program (code + CFC labelMap + schema docs) is
+    only ever written by the client's own post-arrival commit; a
+    reload kills the trailing create's program commit (it is issued
+    AFTER `waitForRuntimeIdle` returns), nothing re-issues it, and
+    the server's fallback — `compile-cache/writeback/<patternIdentity>`
+    running in the HOME space's wave — is refused by the wave
+    accumulator as a foreign-space write with no §2b delegated
+    carriage (`seal-space-commit-failed`, 17 refusals per profile
+    space observed), so the space's serving loop parks the structure
+    load forever and the name renders the `#id` placeholder. Owed:
+    **S-A** a legitimate server-side write path for
+    `compile-cache/writeback` into the piece's own space — either the
+    OW31 §2b delegated carriage covering it, or a RULING that
+    program/compile-cache materialization docs are system-class,
+    content-addressed, idempotent writes exempt from the foreign-write
+    refusal (this arm also heals already-broken spaces on next
+    demand); **S-B** the client pending-commit durability barrier
+    covering program materialization (`Scheduler.idleWithPendingCommits`
+    — `waitForRuntimeIdle` must not return before the program is
+    durable); **S-C** heal-on-read: re-issue program materialization
+    on adopt/open when the space lacks the program docs for a
+    referenced patternIdentity. Trigger: lifts the
+    `integration/home-profile-reload-durability.test.ts` ON skip
+    (jointly with OW31's build if S-A takes the carriage arm).
+  - **OW46 — the silent forever-park is invisible (seat S-D;
+    OW19-adjacent detectability).** The "unloadable pattern awaiting
+    its source docs" deferral (`space-server.ts`'s
+    `structureLoadDeferred` branch) parks with NO counter and NO log
+    line — `structureLoadFailures` stays 0, no error names the space
+    — so a whole class of dead spaces (OW45's shape) is undetectable
+    from stats. Owed: the deferral counts and logs after N cycles.
+    Trigger: rides OW45's fix arc — the home-profile lift run must
+    show the park counted/logged (detectability; not itself the lift
+    condition).
+  - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
+    rootcause §2b + the cellset-lww reproducer).** A USER's binding
+    write into a serve-owned user-scope doc can be silently LOST:
+    group-chat local shape — Bob's `messageDraft` `$value` patch (the
+    exact op that landed for Alice) never reaches the store in 4/4
+    runs including a 300 s probe while his session commits 12 OTHER
+    writes; cellset-lww end-to-end — the typed name's transaction is
+    refused terminally (`speculative-basis-refused`) and the write is
+    DROPPED. Common premise failure: serving-loop.md §3d's "its own
+    reads re-run it when fresh state lands" does not hold for
+    non-re-derivable INPUTS (the scheduler's logged
+    "dropping the write without retry" class — the which-direction
+    hazard). Owed: **S-E** trace and fix the `$value`-binding commit
+    path for served-instance user-scope docs (candidates: a
+    withdrawn-overlay origin commit dropped on a wave race; a flush
+    queued behind the arrival/echo gate that never drains — needs one
+    instrumented client build; whether the `shell.login` identity
+    switch is necessary is undetermined); **S-F** the pending-commit
+    barrier must cover binding writes into served docs (idle returned
+    with the write unflushed); **S-G** (test-side, secondary)
+    group-chat line 197 clicks without `waitForDisabled(false)` — the
+    wait belongs there under ON regardless; it fixes nothing (proven:
+    300 s). Trigger: lifts the `integration/cellset-lww.test.ts`
+    step entry; jointly with OW31's build, lifts the
+    `integration/cfc-group-chat-demo.test.ts` skip.
+  - **OW48 — #6098's reserved-result-keys rule × system patterns
+    under the ON serving compile (seat S-H; rootcause §4b).** Main's
+    #6098 transformer rule ("a result may not declare its own screen
+    opaque") makes the SERVER fail to load `profile-create.tsx` /
+    `profile-picker.tsx` (TransformerError into `profile-home.tsx`)
+    in the ON serving-compile posture ONLY — the OFF arm compiles the
+    same byte-identical files green; compile byte-cache presence
+    decides whether this or OW49's assert is the proximate kill.
+    Owed: decide the composition — compliant `$UI` typing for the
+    wish/system patterns on main, or the serving compile relaxing the
+    #6098 check for the consumer-view position it trips on. Trigger:
+    one half of lifting the `integration/profile-embed.test.ts` ON
+    skip.
+  - **OW49 — the ifc-divergent-anyOf envelope at /result under ON
+    (seat S-I; rootcause §4a; a CFC-OWNER call — FLAGGED, not
+    scheduled).** Main's `assertNoDivergentIfcBranches`
+    (cfc/schema-merge.ts, #3263) fires inside the `raw:wish` action's
+    commit-prep only under ON: the /result envelope becomes
+    divergent-ifc-carrying when served/instance schema envelopes
+    merge with the local one (the profile schema family is documented
+    divergent-union-prone). Owed: a merge rule for ifc-in-anyOf at
+    /result OR normalizing the served envelope before the merge — the
+    CFC owner decides; first step is an envelope dump at
+    `prepareBoundaryCommit` (rootcause §6.2). Trigger: the other half
+    of lifting the `integration/profile-embed.test.ts` ON skip.
+  - **OW50 — wish-action commit-prep failures must surface in the
+    wish UI (seat S-J; detectability).** Today the killed wish action
+    leaves the UI silently never-mounted (`pendingIpc` empty, 1
+    subscribe), and even the red error surface lands at most once
+    (the "Can't report … in the surface it belongs to" /
+    StorageTransactionInconsistent follow-on). Owed: the failure
+    surfaces where the wish UI belongs. Trigger: rides the
+    OW48/OW49 fix arc (detectability; not itself the lift condition).
+  - **OW51 — the default-app `splitDefinitions` undefined-read (the
+    ON read-semantics seam).** A note.tsx lift callback's input
+    arrives `undefined` under ON where the OFF arm always supplies it
+    — `TypeError: Cannot read properties of undefined (reading
+    'split')` at `notes/reference-block.ts:62`, caught by the
+    integration console gate (the same console error W4 §6.2 recorded
+    on the note workload's rc=1, here fatal). Owed: root-cause which
+    ON read shape reaches the lift undefined (served value vintage,
+    schema default not applied, or arrival ordering) and fix at the
+    producer or the lift contract. Trigger: lifts the
+    `integration/default-app.test.ts` ON skip.
+  - **OW52 — the convergence-storm ON loss (landed 23/40).** Under
+    the TRUE ON topology the storm step (2×20 pipelined `post` events,
+    `idle:false`, per writer) leaves the non-writing observer at
+    landed=23/40 — a REAL loss (the pre-fix mixed posture refused all
+    40, masking it); the file's 3 element-schema tests are green.
+    WHERE the 17 die — append admission, queue, dispatch, or
+    consequence commit under pipelined contention — is UNTRIAGED; the
+    (α) exactly-once invariants say nothing about append-side loss
+    under storm depth. Owed: the triage and the fix. Trigger: lifts
+    the `integration/convergence-storm.test.ts` step entry (green
+    5/5).
+  - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
+    semantic asserts under the TRUE ON topology: db-owner — a SECOND
+    user's runtime re-mints itself as the sqlite db handle owner
+    ("bob's runtime must not re-mint itself as the db owner");
+    read-clearance — the cleared-read request hash becomes
+    READER-keyed ("baseline request hash stays reader-blind" fails)
+    and the cleared result doc carries more than the declared
+    surface. The sqlite handle/clearance identity model diverges
+    under served execution — an identity-model decision ADJACENT to
+    OW31's ruled posture but not covered by it (who mints the owner
+    under served runs; what keys the cleared-read request hash).
+    UNTRIAGED whether the fix is model or implementation. Owed: the
+    decision and the fix. Trigger: lifts BOTH
+    `integration/sqlite-db-owner-multi-runtime.test.ts` and
+    `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
+    skips.
 
 ## 4. Standing rule
 

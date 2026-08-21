@@ -18,7 +18,6 @@ import {
   PreconditionFailedError,
   ProtocolError,
   read,
-  type SchedulerActionObservation,
 } from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import {
@@ -617,30 +616,6 @@ Deno.test("entity-absent precondition-only commit rejects for an existing entity
   }
 });
 
-const observationOnlyFixture = (
-  localSeq: number,
-): SchedulerActionObservation => ({
-  version: 1,
-  ownerSpace: undefined,
-  branch: "main",
-  pieceId: "piece:preconditions",
-  processGeneration: 1,
-  actionId: "pattern.tsx:handler:precondition-test",
-  actionKind: "event-handler",
-  implementationFingerprint: "impl:preconditions",
-  runtimeFingerprint: "runtime:test",
-  observedAtSeq: 0,
-  observedAtLocalSeq: localSeq,
-  transactionKind: "action-run",
-  reads: [],
-  shallowReads: [],
-  actualChangedWrites: [],
-  currentKnownWrites: [],
-  declaredWrites: [],
-  materializerWriteEnvelopes: [],
-  status: "success",
-});
-
 Deno.test("precondition-only commit validates and records against a committed origin", async () => {
   const { engine, path } = await createEngine();
 
@@ -704,38 +679,6 @@ Deno.test("precondition-only commit rejects a missing origin with PreconditionFa
       "origin commit not committed",
     );
     assertEquals(rejected.precondition, "origin-committed");
-  } finally {
-    close(engine);
-    await Deno.remove(path);
-  }
-});
-
-Deno.test("observation-only commit still validates preconditions", async () => {
-  const { engine, path } = await createEngine();
-
-  try {
-    // Preconditions must be validated before the observation-only fast path;
-    // otherwise a descendant of an uncommitted origin can persist its
-    // scheduler observation.
-    assertThrows(
-      () =>
-        applyCommit(engine, {
-          sessionId: "session:lineage",
-          principal: "did:key:precondition-test",
-          commit: {
-            localSeq: 1,
-            reads: { confirmed: [], pending: [] },
-            preconditions: [{
-              kind: "origin-committed",
-              originLocalSeq: 99,
-            }],
-            operations: [],
-            schedulerObservation: observationOnlyFixture(1),
-          },
-        }),
-      PreconditionFailedError,
-      "origin commit not committed",
-    );
   } finally {
     close(engine);
     await Deno.remove(path);

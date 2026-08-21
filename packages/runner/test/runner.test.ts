@@ -13,6 +13,8 @@ import {
   NAME,
   type Pattern,
 } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
 import {
   areNormalizedLinksSame,
@@ -30,7 +32,6 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
 } from "../src/runner.ts";
-import { Runtime } from "../src/runtime.ts";
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,
@@ -1257,15 +1258,25 @@ describe("storage subscription", () => {
     await storageManager?.close();
   });
 
-  it("clears cached patterns when storage notifies of changes", () => {
+  it("clears cached patterns when storage notifies of changes — every scope INSTANCE of the changed doc (r3739139481)", () => {
     const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<string, string>;
+      resultPatternCache: Map<string, Map<string, string>>;
       createStorageSubscription(): IStorageSubscription;
     };
 
     const uri = "pattern-cache-test" as URI;
-    const key = `${space}/space/${uri}`;
-    internals.resultPatternCache.set(key, "cached-pattern");
+    // The memo is keyed doc-then-instance: notifications name the DOC
+    // (scope arrives by NAME, which cannot address a per-run instance
+    // on a serving runtime), so one change clears every instance's
+    // memo — the documented safe over-eviction.
+    const key = `${space}/${uri}` as const;
+    internals.resultPatternCache.set(
+      key,
+      new Map([
+        ["space", "cached-pattern"],
+        ["user:did%3Akey%3Aalice", "cached-pattern-alice"],
+      ]),
+    );
 
     const notification = {
       type: "commit",
@@ -1887,8 +1898,10 @@ describe("setup/start", () => {
     await expect(redundantStart).resolves.toBe(false);
 
     await resultCell.pull();
-    const link = resultCell.getAsNormalizedFullLink();
-    const resultKey = `${link.space}/${link.scope}/${link.id}` as const;
+    const resultKey = entityKey(
+      resultCell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
     expect(runtime.runner.cancels.has(resultKey)).toBe(true);
     runtime.runner.releaseChild(resultCell, undefined);
     expect(runtime.runner.cancels.has(resultKey)).toBe(false);
