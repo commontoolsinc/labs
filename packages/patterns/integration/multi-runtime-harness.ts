@@ -42,15 +42,16 @@ import {
 } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { env } from "@commonfabric/integration";
-import { Identity, type KeyPairRaw } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import type {
-  RuntimeDiagnosticsSnapshot,
-  TrustedUiDescriptor,
-  WorkerRequest,
-  WorkerResponse,
+import {
+  fabricFromKeyPairRaw,
+  type RuntimeDiagnosticsSnapshot,
+  type TrustedUiDescriptor,
+  type WorkerRequest,
+  type WorkerResponse,
 } from "./multi-runtime-worker.ts";
 
 export type { TrustedUiDescriptor };
@@ -148,21 +149,17 @@ class WorkerClient {
    * Calls `cmd` in the worker realm, answering with what it returns.
    *
    * `args` and the answer each cross as one `codec-realm` encoding, so both
-   * carry the whole `FabricValue` domain. `rawIdentity` rides beside the
-   * encoded args and reaches the command as an ordinary argument, for the
-   * reason {@link WorkerRequest} gives.
+   * carry the whole `FabricValue` domain.
    */
   call(
     cmd: string,
     args: Record<string, FabricValue> = {},
-    rawIdentity?: KeyPairRaw,
   ): Promise<FabricValue> {
     const id = this.#nextId++;
     const request: WorkerRequest = {
       id,
       cmd,
       args: realmFromFabricValue(args),
-      ...(rawIdentity !== undefined ? { rawIdentity } : {}),
     };
     return new Promise<FabricValue>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -399,13 +396,14 @@ export class MultiRuntimeHarness {
           );
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
+          identity: fabricFromKeyPairRaw(identity.serialize()),
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
-        }, identity.serialize());
+        });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
         );
@@ -418,10 +416,11 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
+        identity: fabricFromKeyPairRaw(sessions[0].identity.serialize()),
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
-      }, sessions[0].identity.serialize());
+      });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
         rootPath: options.rootPath,

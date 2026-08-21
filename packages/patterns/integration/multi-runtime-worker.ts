@@ -11,6 +11,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import {
   type FabricValue,
   isValidFabricValue,
@@ -24,7 +25,11 @@ import {
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import { Identity, type KeyPairRaw } from "@commonfabric/identity";
+import {
+  Identity,
+  isCryptoKeyPair,
+  type KeyPairRaw,
+} from "@commonfabric/identity";
 import {
   initializePiecesController,
   type PieceController,
@@ -47,20 +52,37 @@ export type WorkerRequest = {
   id: number;
   cmd: string;
   args: RealmEncodedValue;
-  /**
-   * `init`'s key material, which rides beside the encoded args rather than
-   * within them, and reaches the handler as an ordinary `rawIdentity`
-   * argument.
-   *
-   * TODO(danfuzz): move this into `args`. A `KeyPairRaw` is not a
-   * `FabricValue` -- one arm is a pair of bare `Uint8Array`s and the other a
-   * pair of `CryptoKey`s -- so the encoder refuses one. The
-   * `InsecureCryptoKeyPair` marker in `@commonfabric/identity`'s
-   * `interface.ts` is the first arm; the second wants a fabric class for a
-   * key pair.
-   */
-  rawIdentity?: KeyPairRaw;
 };
+
+/**
+ * Converts a key pair into the form `init` carries it in, a `FabricKeyPair`
+ * being what lets key material travel inside the encoded args rather than
+ * beside them.
+ *
+ * A byte pair does not say what algorithm it is for, where a `CryptoKeyPair`
+ * reports its own; `identity` only ever produces ed25519, so that is the name
+ * the material arm is given.
+ *
+ * TODO(danfuzz): this pair of conversions belongs in
+ * `@commonfabric/identity`, once `Identity` speaks `FabricKeyPair` rather
+ * than `KeyPairRaw`. `serializeKeyPairRaw()` there is the function they
+ * replace, it having no answer but `null` for the handles arm.
+ */
+export function fabricFromKeyPairRaw(raw: KeyPairRaw): FabricKeyPair {
+  return isCryptoKeyPair(raw)
+    ? new FabricKeyPair(raw)
+    : new FabricKeyPair("Ed25519", raw.publicKey, raw.privateKey);
+}
+
+/** Converts a key pair back into the form `Identity.deserialize()` takes. */
+function keyPairRawFromFabric(pair: FabricKeyPair): KeyPairRaw {
+  return pair.hasMaterial
+    ? {
+      publicKey: pair.publicKeyBytes.slice(),
+      privateKey: pair.privateKeyBytes.slice(),
+    }
+    : pair.cryptoKeyPair;
+}
 
 /**
  * A response from a worker realm. `ok` is the command's answer as one
@@ -238,8 +260,10 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<FabricValue>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
-    const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
+  async init({ identity: keyPair, spaceName, apiUrl, diagnostics, wsDelayMs }) {
+    const identity = await Identity.deserialize(
+      keyPairRawFromFabric(keyPair as FabricKeyPair),
+    );
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
@@ -520,7 +544,7 @@ const handlers: Record<
 };
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
-  const { id, cmd, args, rawIdentity } = event.data;
+  const { id, cmd, args } = event.data;
   const respond = (response: WorkerResponse) =>
     (self as unknown as Worker).postMessage(response);
   const fail = (error: unknown) =>
@@ -544,7 +568,6 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   let decoded: Record<string, unknown>;
   try {
     decoded = fabricFromRealmValue(args) as Record<string, unknown>;
-    if (rawIdentity !== undefined) decoded = { ...decoded, rawIdentity };
   } catch (error) {
     fail(error);
     return;

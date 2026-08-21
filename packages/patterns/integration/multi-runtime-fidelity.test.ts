@@ -14,6 +14,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { Identity, isCryptoKeyPair } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -99,5 +100,46 @@ describe("multi-runtime harness value fidelity", () => {
         `${name}: read back ${Object.is(read, -0) ? "-0" : String(read)}`,
       );
     }
+  });
+});
+
+describe("multi-runtime harness identity fidelity", () => {
+  let harness: MultiRuntimeHarness;
+
+  beforeAll(async () => {
+    // Every other harness test asks for `implementation: "noble"`, whose
+    // serialized form is a byte pair. The default is a real `CryptoKeyPair`,
+    // which is the arm that has key handles rather than material, and the one
+    // a realm boundary cannot carry as anything but a `FabricKeyPair`.
+    const identity = await Identity.fromPassphrase("fidelity-native");
+    assert(
+      isCryptoKeyPair(identity.serialize()),
+      "the default implementation stopped producing key handles, so this " +
+        "test no longer covers the arm it names",
+    );
+
+    harness = await MultiRuntimeHarness.create({
+      programPath: PROGRAM_PATH,
+      rootPath: ROOT_PATH,
+      sessions: [{ label: "native", identity }],
+    });
+    await harness.settle();
+  });
+
+  afterAll(async () => {
+    await harness?.dispose();
+  });
+
+  it("starts a runtime from an identity holding key handles", async () => {
+    // Reaching a read at all is the assertion: the session's runtime only
+    // exists if its worker rebuilt the identity from what crossed, and a
+    // `CryptoKey` reduced to `{}` on the way would have failed `init`.
+    const session = harness.sessions[0];
+    assertEquals(await session.read(["weird"]), 0);
+
+    const written = await session.set(["weird"], 7);
+    assert(written.ok, `set failed: ${written.error?.message}`);
+    await harness.settle();
+    assertEquals(await session.read(["weird"]), 7);
   });
 });
