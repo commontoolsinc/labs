@@ -5089,7 +5089,15 @@ supply; OW29/OW32/OW34 closed):
     probe (which spaces may donate is a policy decision), or S-A's
     server-side heal (which the rootcause already names as healing
     broken spaces on next demand) — routed to the owner with the
-    OW31/S-A decision rather than filled. Trigger: lifts the
+    OW31/S-A decision rather than filled. A binding CONSTRAINT for
+    any future S-C build, from OW31's build flags (their FLAG-4):
+    the detached compile flows — the `loadPatternByIdentity` repair
+    writeback and `compilePattern`'s own persist — carry NO wave-run
+    context and hence no §2b carriage, so a foreign-target re-issue
+    routed through them is refused fail-closed; an S-C design must
+    run where carriage or the client's OWN identity write authority
+    is available (the adopting user writing their own space), or
+    stay server-side with S-A's carriage-borne trigger. Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
     (jointly with OW31's build if S-A takes the carriage arm).
   - **OW46 — the silent forever-park is invisible (seat S-D;
