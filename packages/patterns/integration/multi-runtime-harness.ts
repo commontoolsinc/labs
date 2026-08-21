@@ -102,6 +102,11 @@ export interface MultiRuntimeHarnessOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const RPC_TIMEOUT_MS = 120_000;
+/** Total event-consequence quiescence budget per `settle()` call on a
+ * toolshed-backed harness (see `settle`): generous against the measured
+ * ~2–3 s serving drain of a 40-event pipelined storm, small against the
+ * suite timeouts a wedged consequence would otherwise eat. */
+const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
 
 class WorkerClient {
   #worker: Worker;
@@ -309,6 +314,19 @@ export class MultiRuntimeSession {
   }
 
   /**
+   * Wait, bounded by `timeoutMs`, until every event this session fired has
+   * its terminal consequence ARRIVED back here (speculation.md §4 step 2 —
+   * the overlay's outstanding-intent set is empty). Resolves with the
+   * still-outstanding count when the budget elapses first. Instant on the
+   * OFF arm (no overlay). See `MultiRuntimeHarness.settle`.
+   */
+  async eventQuiescence(timeoutMs?: number): Promise<{ pending: number }> {
+    return await this.#client.call("eventQuiescence", { timeoutMs }) as {
+      pending: number;
+    };
+  }
+
+  /**
    * Force an ordered-after round trip on this runtime's open space connections,
    * so any subscription fan-out the server has already sent has landed here.
    * See `MultiRuntimeHarness.settle`.
@@ -470,14 +488,69 @@ export class MultiRuntimeHarness {
    * 4. Every runtime settles again, so a foreign write that just arrived and
    *    re-derives local cells has its recompute run before this round ends.
    *
-   * With a running toolshed (when `apiUrl` was passed) there is no in-process
-   * server handle for step 2; the barrier in step 3 still pulls in whatever the
-   * toolshed has sent, and successive rounds converge.
+   * With a running toolshed (when `apiUrl` was passed, or the ON posture
+   * resolved one) there is no in-process server handle for step 2, and under
+   * the ON posture the toolshed's serving loop processes this harness's event
+   * appends ASYNCHRONOUSLY — a fixed round count of idle/barrier hops races
+   * the drain (the OW52 shape: a 40-event pipelined storm needs ~2–3 s of
+   * server time while 20 rounds complete in well under a second, so the
+   * assert read a mid-drain head). Step 2's replacement is the
+   * client-observable stand-in for `server.idle()`: wait until every event
+   * each session fired has its terminal consequence ARRIVED back at that
+   * session (speculation.md §4 step 2 — the overlay's outstanding-intent set
+   * empties exactly then). CAVEAT (#6158 review F2): this covers
+   * FIRST-ORDER consequences only — a server-side cascade child (an event a
+   * served handler itself emits) is no session's intent and commits in a
+   * LATER wave, outside the wait; cascades ride the ordinary barrier rounds,
+   * so a test asserting on cascade results still needs enough rounds (or a
+   * `waitFor`). The wait shares ONE budget across the whole `settle()`
+   * call, so a genuinely wedged consequence degrades to the old behavior
+   * (the caller's assert speaks) instead of hanging the harness — LOUDLY:
+   * exhausting the budget with intents still outstanding warns once, so a
+   * red assert after it self-identifies as budget exhaustion (a slow
+   * serving drain) rather than re-opening the OW52 loss triage. The
+   * barrier then pulls each replica to a head ≥ every first-order
+   * consequence commit. Instant on an OFF-posture toolshed run (no
+   * overlay, no outstanding intents).
    */
   async settle(rounds = 2): Promise<void> {
+    const quiescenceDeadline = this.#server === undefined
+      ? Date.now() + SERVED_SETTLE_QUIESCENCE_BUDGET_MS
+      : undefined;
+    let quiescenceWarned = false;
     for (let i = 0; i < rounds; i++) {
       await Promise.all(this.sessions.map((session) => session.idle()));
       await this.#server?.idle();
+      if (quiescenceDeadline !== undefined) {
+        const budget = Math.max(0, quiescenceDeadline - Date.now());
+        const outcomes = await Promise.all(
+          this.sessions.map((session) => session.eventQuiescence(budget)),
+        );
+        // #6158 review F1: the worker returns pending > 0 ONLY at its
+        // deadline, so any nonzero here means the shared budget ran out
+        // with consequences still outstanding — the reads that follow may
+        // see a MID-DRAIN head. Say so once, so the resulting red names
+        // itself instead of presenting as the OW52 "loss" shape.
+        if (!quiescenceWarned && outcomes.some((o) => o.pending > 0)) {
+          quiescenceWarned = true;
+          const detail = outcomes
+            .map((outcome, index) =>
+              outcome.pending > 0
+                ? `${this.sessions[index].label}: ${outcome.pending}`
+                : undefined
+            )
+            .filter((entry) => entry !== undefined)
+            .join(", ");
+          console.warn(
+            `[multi-runtime-harness] settle: event-consequence quiescence ` +
+              `budget (${SERVED_SETTLE_QUIESCENCE_BUDGET_MS} ms) exhausted ` +
+              `with intents still outstanding (${detail}) — subsequent ` +
+              `reads may see a mid-drain head. A red assert after this ` +
+              `line is BUDGET EXHAUSTION (a slow serving drain or a wedged ` +
+              `consequence), not the OW52 loss shape.`,
+          );
+        }
+      }
       await Promise.all(this.sessions.map((session) => session.barrier()));
       await Promise.all(this.sessions.map((session) => session.idle()));
     }

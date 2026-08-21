@@ -172,18 +172,22 @@ stream is passed to other spaces, which then append intents to it.
   instantiates or writes it (pre-Phase-7 a flag-ON client's
   bookkeeping-stamped instantiation raced the server's on the same
   docs). The OFF arm and the serving runtime are unchanged.*
-  *Read authority for the demanding user's home space (Phase 7):
-  the served wish's foreign reads ride the serving runtime's loopback
-  plane, whose sessions are admitted by the memory ACL as the process
-  identity — under the flag the toolshed process's identity is a
-  memory service principal (protocol.md §2b's free-read row;
-  `memoryServiceDidsFor`), the posture every deployment checklist
-  already requires of the operator DID. Honestly (P7 independent review
-  finding 6): a service principal is implicit OWNER for its sessions on
-  every space, so this WIDENS the process identity's ORDINARY session
-  traffic to OWNER everywhere; it is not widened at the wave's §2b
-  accept gate (which checks the ACTING identity's grant). The narrower
-  read-only shape is a ruled item — verification-coverage.md OW31.*
+  *Read authority for the demanding user's home space (OW31, READ
+  side RULED 2026-08-19; BUILT — supersedes the Phase-7 OWNER
+  posture): the served wish's foreign reads ride the serving
+  runtime's loopback plane, whose sessions carry the
+  `actingAs: "space-owner"` delegated READ binding — admitted only
+  for the flag-gated DELEGATING process identity
+  (`memoryAclPrincipalsFor`; never an OWNER-class service DID by
+  default) — so the session's READ-class capability on the demanding
+  user's home space resolves as THAT USER (the space's ACL owner,
+  which the memory server dereferences itself: the ruled
+  service-identity ACL read). WRITE/OWNER-class requirements keep
+  resolving against the service envelope — the binding grants no
+  session-plane write path; the wish's home-space bootstrap writes
+  ride the wave's §2b delegated carriage exactly as above, and a
+  provisioned space's genesis is signed by the space's own keys
+  naming the acting user OWNER (protocol.md §2's genesis clause).*
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

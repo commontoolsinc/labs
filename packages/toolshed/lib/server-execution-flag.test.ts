@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import {
-  memoryServiceDidsFor,
+  memoryAclPrincipalsFor,
   serverExecutionEnabledFromEnv,
 } from "@/lib/server-execution-flag.ts";
 
@@ -65,46 +65,58 @@ describe("serverExecutionEnabledFromEnv", () => {
   });
 });
 
-// Under the flag the process identity is a memory service principal (the
-// serving loop's loopback plane reads foreign co-hosted spaces as it —
-// protocol.md §2b's free-read row); OFF the flag the operator's configured
-// list is used verbatim.
-describe("memoryServiceDidsFor", () => {
+// OW31 (RULED 2026-08-18/19): the process identity is a DELEGATING
+// principal under the flag (session-level acting-as-owner READ binding;
+// ACL-only service reads), NEVER an OWNER-class service DID by default —
+// the operator's configured list is verbatim on BOTH arms, retiring the
+// Phase-7 implicit-OWNER blanket.
+describe("memoryAclPrincipalsFor", () => {
   const me = "did:key:z6MkToolshedProcess";
   const operator = "did:key:z6MkOperator";
 
-  it("OFF the flag: the configured list, byte-identical (never the process identity)", () => {
+  it("OFF the flag: the configured list byte-identical, and an EMPTY delegating list (the binding is unreachable)", () => {
     expect(
-      memoryServiceDidsFor({
+      memoryAclPrincipalsFor({
         configured: [operator],
         processIdentityDid: me,
         serverExecution: false,
       }),
-    ).toEqual([operator]);
+    ).toEqual({ serviceDids: [operator], delegatingDids: [] });
     expect(
-      memoryServiceDidsFor({
+      memoryAclPrincipalsFor({
         configured: [],
         processIdentityDid: me,
         serverExecution: false,
       }),
-    ).toEqual([]);
+    ).toEqual({ serviceDids: [], delegatingDids: [] });
   });
 
-  it("ON: the process identity joins the configured list exactly once", () => {
+  it("ON: the process identity is DELEGATING and — the absolute pin — NOT an OWNER-class service DID unless the operator configured it", () => {
     expect(
-      memoryServiceDidsFor({
+      memoryAclPrincipalsFor({
         configured: [operator],
         processIdentityDid: me,
         serverExecution: true,
       }),
-    ).toEqual([operator, me]);
-    // Already configured by the operator: no duplicate.
+    ).toEqual({ serviceDids: [operator], delegatingDids: [me] });
+    // The absolute pin (OW31's guard against creep): under ON the
+    // process identity is not an OWNER-class service DID by default.
     expect(
-      memoryServiceDidsFor({
+      memoryAclPrincipalsFor({
+        configured: [operator],
+        processIdentityDid: me,
+        serverExecution: true,
+      }).serviceDids,
+    ).not.toContain(me);
+  });
+
+  it("operator-configured OWNER-class listing of the process identity is kept VERBATIM (scope report flag F1: explicit configuration wins; the route logs the combination)", () => {
+    expect(
+      memoryAclPrincipalsFor({
         configured: [me, operator],
         processIdentityDid: me,
         serverExecution: true,
       }),
-    ).toEqual([me, operator]);
+    ).toEqual({ serviceDids: [me, operator], delegatingDids: [me] });
   });
 });

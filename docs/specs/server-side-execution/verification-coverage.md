@@ -2754,9 +2754,106 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   delegated carriage. Escape hatch, per the ruling's own words: if
   this proves wrong during the OW31 build, FLAG for follow-up work
   after merging to main (the merge happening if the confidence
-  criteria succeed) rather than blocking on it. The build — the write
-  and read postures together — stays OWED POST-MERGE, BEFORE the flip
-  PR; OFF-invisible; does not gate landing the stack OFF.
+  criteria succeed) rather than blocking on it.
+
+  **BUILT 2026-08-21 (the optimize-on-main train; build report:
+  `docs/history/plans/server-execution-v2/optimize/ow31-build-report.md`).**
+  What landed, per the recorded work order:
+  (a) **genesis owner = the acting user** —
+  `registerSpaceIdentity(identity, { owner })` threaded from the
+  serving-side `resolveSpaceName` (the acting principal read from the
+  frame tx's wave run context WITHOUT the read-scope-ratchet side
+  effect, F8); a serving runtime with no actor REFUSES to resolve;
+  the bootstrap ACL's non-home arm names the registered owner
+  (`{ [actor]: "OWNER", "*": "WRITE" }`), the home arm and every
+  client byte-identical. Pins: `memory-v2-acl-bootstrap.test.ts`
+  (red-first: the pre-fix run minted `{ [service]: "OWNER" }`),
+  `executor-cross-space.test.ts` (the serving no-actor refusal).
+  (b) **genesis before data** — the wave retains the grant probe's
+  `via` per (space, acting) and the commit step forces
+  `ensureSpaceInitialized` for every `creation`-granted foreign
+  target before the sink applies; the sink refuses a foreign batch
+  into a seq-0/no-ACL engine (INV-13 mirrored on the engine-direct
+  plane; red-first: the pre-fix sink landed the batch in a fresh
+  store). Kill/replay converges on ONE user-owned ACL (the replay
+  grant resolves `acl` through the owner; `executor-wave.test.ts`'s
+  OW31 pins, including the actor-=-space / owner-=-acting-user /
+  service-nowhere / commit-#1-is-the-ACL shape).
+  (c) **the READ posture** — the OWNER blanket is RETIRED:
+  `memoryServiceDidsFor` became `memoryAclPrincipalsFor`
+  (`serviceDids` = the operator list verbatim on BOTH arms — the
+  absolute pin "under ON the process identity is not an OWNER-class
+  service DID by default" is in `server-execution-flag.test.ts`;
+  `delegatingDids` = ON: the process identity, OFF: empty). A serving
+  manager's session mounts carry `actingAs: "space-owner"` (signed
+  into the session.open descriptor); the memory server admits the
+  marker for delegating-class envelopes only, resolves the space's
+  ACL owner ITSELF (the ruled service-identity ACL read), and the
+  session's READ-class decisions run as that user — WRITE/OWNER
+  requirements stay on the envelope (no session-plane write path; the
+  observe canary counts residuals — `v2-server-acl.test.ts`'s OW31
+  pins, mutation-witnessed), a delegating principal cannot initialize
+  a genesis, revocation judges the acting user, and the lease/read-row
+  /scoped-read machinery (which keys on the envelope) is untouched.
+  (d) **seat S-A** — the cross-space `compile-cache/writeback` rides
+  the TRIGGERING run's §2b carriage: `ServerRunInfo.delegated`
+  (an explicit carriage for the bookkeeping-kind materialization
+  family), stamped verbatim by the SpaceServer's stamper and threaded
+  through `replicatePatternToSpace` from the instantiating run's wave
+  context — attached only when the target is FOREIGN to the serving
+  home space; carriage-less foreign writebacks stay refused
+  (fail-closed pin + mutation witness in
+  `executor-cross-space.test.ts`). The carriage arm was NOT wrong at
+  writeback time for the observed defect class — the trigger
+  (`instantiatePatternNode`, CT-1687) has the provisioning run's
+  carriage in scope, and the client precedent is exact (the program
+  commit is the user's own session client-side) — so the system-class
+  alternative was not needed for this class.
+  RESIDUALS, flagged (see the build report's running list): (i) the
+  `"*": WRITE` wildcard residual (finding iv) STANDS — pinned live in
+  the executor mutation test: a mis-threaded genesis owner is visible
+  in the ACL content while the wildcard still grants the write;
+  narrowing it is the separate policy question. (ii) the
+  `loadPatternByIdentity` repair path and `compilePattern`'s own
+  persist do not carry the carriage (no run context is reachable at
+  those triggers today) — their foreign-write case stays fail-closed
+  refused; if live gates surface residual refusals from them, that is
+  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS
+  (`authored-by`/`represents-principal`) on served rows still carry
+  the SERVICE signer: they come from the runtime-level CFC trust
+  snapshot (`storageManager.as`), NOT the memory-plane carriage this
+  build landed — so cfc-group-chat-demo's CI shape does NOT lift on
+  this build alone; per-run CFC attribution is a CFC-owner seam
+  (OW34's family), flagged rather than filled. (iv) the ruled
+  ACL-only-read allowance is exercised as the server-side owner
+  resolution at session.open; no raw ACL-doc query surface was built
+  (nothing needs one — smaller surface, permissive clause). (v) SHARED
+  NAMED spaces (equal `inSpace("name")` across users deliberately map
+  to ONE space) now transfer OWNER power — ACL-rewrite included — to
+  whichever user's flow wins the genesis race; peers hold `"*": WRITE`.
+  Inherent in the ruling composed with the pre-existing shared-name
+  behavior; convergence clean; SURFACED TO OWNER 2026-08-21 (the
+  independent review's F2 — the wildcard residual's sharper sibling;
+  build report FLAG-8). (vi) a via-"owner" crossing into a
+  never-materialized home store is granted without genesis forcing and
+  then refused forever by the sink's INV-13 mirror — a fail-closed
+  livelock unreachable in sanctioned flows; its watcher signature is
+  nonzero `foreignWriteRefusals` naming a HOME space (the review's F3).
+  (vii) a serving session revoked by the owner-resolution-change
+  trigger does not remount: `Provider.#sessionHandle` memoizes the
+  terminated session, so an ownership TRANSFER of an actively-served
+  space stops its serving reads until the provider/route lifecycle
+  recycles — fail-closed and rare; the reopen would succeed under the
+  new owner once a revocation-remount path is wired with the takeover
+  machinery's care (parked accepts, marker epoch, commit replay —
+  `onSessionReplaced`'s duties). Named follow-up from the delta
+  review's D1; not forced into the build PR.
+  Acceptance beyond the executor pins rides the PR's CI ON lanes and
+  the flip train's live gates (the lunch/served-wish log criteria and
+  the store dump), which stay the flip PR's bar; the
+  `home-profile-reload-durability` and `cfc-group-chat-demo` ON skips
+  stay listed — they lift jointly with OW45 and OW47 (+ the CFC
+  attribution residual above).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -3754,13 +3851,15 @@ supply; OW29/OW32/OW34 closed):
     BAR is the owner's ruling — W4 reports the numbers and does not
     rule; the flip gate (plan Phase 7 task 1 item 4) still reads
     against the RULED bar once the owner sets it.
-  - OW31 (row above, RULED 2026-08-18): the write-authority posture is
+  - OW31 (row above, RULED 2026-08-18; BUILT 2026-08-21): the
+    write-authority posture is
     ruled — the serving identity never writes users' home spaces, the
     user's identity does; a provisioned space's genesis is signed by
     the space's own keys and names the acting user OWNER in that same
     first commit — with the work order recorded (the scoping report
-    beside the closeout); implementation OWED post-merge, BEFORE the
-    flip PR; OFF-invisible; does not gate landing the stack OFF (the
+    beside the closeout); the implementation LANDED on the
+    optimize-on-main train (the row above carries the build evidence);
+    OFF-invisible; it did not gate landing the stack OFF (the
     grant is flag-gated; OFF uses the configured list verbatim). The
     READ side is RULED 2026-08-19 (the row above carries the verbatim
     quote): the service identity reads the ACL ONLY, every other
@@ -5062,12 +5161,14 @@ supply; OW29/OW32/OW34 closed):
     space observed), so the space's serving loop parks the structure
     load forever and the name renders the `#id` placeholder. Owed:
     **S-A** a legitimate server-side write path for
-    `compile-cache/writeback` into the piece's own space — either the
-    OW31 §2b delegated carriage covering it, or a RULING that
-    program/compile-cache materialization docs are system-class,
-    content-addressed, idempotent writes exempt from the foreign-write
-    refusal (this arm also heals already-broken spaces on next
-    demand); **S-B CLOSED 2026-08-21** (optimize-on-main
+    `compile-cache/writeback` into the piece's own space — **BUILT
+    2026-08-21 with OW31's build, on the carriage arm**: the
+    replicate trigger threads the instantiating run's §2b delegated
+    carriage into the writeback stamps (the system-class-exemption
+    alternative was not needed; the heal-on-next-demand property
+    holds for the replicate trigger — the repair path's own foreign
+    case stays fail-closed, a flagged residual in OW31's row);
+    **S-B CLOSED 2026-08-21** (optimize-on-main
     client-durability pass; its report,
     `ow47-client-durability-report.md`, lands under
     `docs/history/plans/server-execution-v2/optimize/` with the OW47
@@ -5101,7 +5202,10 @@ supply; OW29/OW32/OW34 closed):
     is available (the adopting user writing their own space), or
     stay server-side with S-A's carriage-borne trigger. Trigger: lifts the
     `integration/home-profile-reload-durability.test.ts` ON skip
-    (jointly with OW31's build if S-A takes the carriage arm).
+    (S-A landed with OW31's build, carriage arm; S-B lands here — the
+    joint lift run is the remaining evidence, and the optimize pass's
+    preview run had step 1 green in ~10 s with step 2 still red on the
+    cross-space module-run residual OW31's row carries).
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability).** The "unloadable pattern awaiting
     its source docs" deferral (`space-server.ts`'s
@@ -5171,27 +5275,73 @@ supply; OW29/OW32/OW34 closed):
     surfaces where the wish UI belongs. Trigger: rides the
     OW48/OW49 fix arc (detectability; not itself the lift condition).
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam).** A note.tsx lift callback's input
-    arrives `undefined` under ON where the OFF arm always supplies it
-    — `TypeError: Cannot read properties of undefined (reading
-    'split')` at `notes/reference-block.ts:62`, caught by the
-    integration console gate (the same console error W4 §6.2 recorded
-    on the note workload's rc=1, here fatal). Owed: root-cause which
-    ON read shape reaches the lift undefined (served value vintage,
-    schema default not applied, or arrival ordering) and fix at the
-    producer or the lift contract. Trigger: lifts the
+    ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
+    optimize-phase loss triage) — ARRIVAL ORDERING (mechanism CLASS,
+    established by elimination; the exact failing hop is inferred,
+    not traced — the report's evidence-status block draws the line);
+    the fix fork is
+    FLAGGED for the owner.** The undefined read is a scheduler lift
+    on a freshly SERVED-instantiated note (default-app's menuNewNote
+    runs authoritatively in the wave; the client's speculative child
+    is refused at piece-start commit and carries different
+    handler-frame ids per speculation.md §4 W2.1) evaluated while its
+    input's link chain — through the piece's result/process doc to
+    the schema-default-only `pendingEdit` cell — is still
+    materializing in the reading runtime's replica view: the
+    mid-chain resolution yields `undefined` and the leaf schema's
+    `default: null` is never consulted (every leaf default site is
+    null-safe; the undefined enters above the leaf). NOT client-only:
+    the toolshed's own serving runtime hits the identical TypeError
+    in its pull-settle loop (no overlay, no runtime-client protocol
+    in that stack), amid `event-view-lag` replica-view warnings.
+    Racy, load-sensitive (1/6 local browser runs; W4's loaded bench
+    2-for-2 at n=20); single-creation headless flows never hit it.
+    Not served-value vintage; "schema default not applied" only as
+    the symptom of the chain dying early. Owed: the OWNER's call on
+    the fix fork — (1) defer-on-unresolved-chain in the runner
+    (speculation.md §2's client-side PENDING sentence arguably
+    already states it; the serving-runtime equivalent is UNSTATED —
+    new spec wording + scheduler-semantics blast radius), vs (2)
+    "lifts tolerate undefined during arrival" (a pattern-contract
+    change: under OFF a schema-defaulted input never reads
+    undefined) — then the fix red-first on the ruled arm. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow51-undefined-read-report.md. Trigger: lifts the
     `integration/default-app.test.ts` ON skip.
-  - **OW52 — the convergence-storm ON loss (landed 23/40).** Under
-    the TRUE ON topology the storm step (2×20 pipelined `post` events,
-    `idle:false`, per writer) leaves the non-writing observer at
-    landed=23/40 — a REAL loss (the pre-fix mixed posture refused all
-    40, masking it); the file's 3 element-schema tests are green.
-    WHERE the 17 die — append admission, queue, dispatch, or
-    consequence commit under pipelined contention — is UNTRIAGED; the
-    (α) exactly-once invariants say nothing about append-side loss
-    under storm depth. Owed: the triage and the fix. Trigger: lifts
-    the `integration/convergence-storm.test.ts` step entry (green
-    5/5).
+  - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
+    (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The
+    full 40-event accounting (serving-loop counters + the space's
+    sqlite commit log) cleared every candidate seam: append admission
+    40/40 (`events.appended`), drain/dispatch 40/40
+    (`events.processed`, `skippedIdempotent` 0, purge/orphan counters
+    0), consequences EXACTLY-ONCE (all 40 eventIds across 10 derived
+    commits, zero duplicates — the (α) invariant held at storm depth),
+    all 40 array appends durable, and the observer CONVERGES to 40/40
+    (~2–3 s of serving drain; 16 waves, 9 deadline-cut — the honest
+    flush deadline's routine shape, serving-loop.md §3). Per-wave
+    coalescing (`coalescedPerWaveMax` 11) collapses wave boundaries
+    only, never handler runs — no coalescing-by-design ambiguity. The
+    red was the HARNESS: the served-topology `settle()` had no
+    server-drain step (the OFF arm's `server.idle()`), so a fixed
+    round count of idle/barrier hops raced the drain and the assert
+    read a mid-drain head. Fixed in the harness (test infrastructure,
+    no product semantics): `MultiRuntimeHarness.settle`'s
+    toolshed-backed arm waits, bounded, for each session's
+    outstanding-intent set to empty — speculation.md §4 step 2's
+    arrived-terminal-consequence retirement,
+    `Runtime.speculationOverlay.pendingIntentCount` — before the
+    barrier, restoring the arms' settle agreement for FIRST-ORDER
+    consequences (server-side cascade children are no session's
+    intent and ride the barrier rounds — the storm has none; budget
+    exhaustion warns loudly so a slow-box mid-drain red
+    self-identifies instead of re-opening this row). Step green ON
+    5/5 + file 4/4 ON and OFF; the step entry LIFTED. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow52-storm-loss-report.md. Recorded, not decided (adjacent):
+    whether the PRODUCT's idle vocabulary should carry an
+    intent-quiescence barrier under ON (OFF's idle implies own-send
+    consequence visibility; ON's does not) — a spec question beside
+    OW47's pending-commit-barrier seat, surfaced in the report.
   - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
     semantic asserts under the TRUE ON topology: db-owner — a SECOND
     user's runtime re-mints itself as the sqlite db handle owner

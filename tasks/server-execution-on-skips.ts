@@ -208,18 +208,31 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
         "skip-and-land — gates the FLIP, not the land): the browser " +
-        "console gate (integration/shell-utils.ts afterEach) trips on a " +
-        "deterministic `TypeError: Cannot read properties of undefined " +
-        "(reading 'split')` at `splitDefinitions` " +
+        "console gate (integration/shell-utils.ts afterEach) trips on " +
+        "`TypeError: Cannot read properties of undefined (reading " +
+        "'split')` at `splitDefinitions` " +
         "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
-        "callbacks — an ON READ-SEMANTICS seam: under the ON posture the " +
-        "lift's input arrives undefined where the OFF arm always supplies " +
-        "it (the same console error W4 §6.2 recorded on the note workload; " +
-        "fatal here because the console gate fails the test). Reproduced " +
-        "locally ON; OFF green. NOT a demand hole. Evidence: " +
-        "docs/history/plans/server-execution-v2/stage-c/first-on-ci-gate.md. " +
-        "Lifts when verification-coverage.md OW51 closes and the file " +
-        "greens ON; the flip PR needs this list EMPTY.",
+        "callbacks. ROOT-CAUSED by the optimize-phase triage " +
+        "(2026-08-21): ARRIVAL ORDERING — a scheduler lift on a freshly " +
+        "SERVED-instantiated note runs while its input's link chain " +
+        "(through the piece's result/process doc to the " +
+        "schema-default-only pendingEdit cell) is still materializing in " +
+        "the reading runtime's replica view; the mid-chain resolution " +
+        "yields undefined and the leaf default:null is never consulted. " +
+        "NOT a demand hole (the gate's classification stands — the value " +
+        "is served and lands; the read races its arrival), and NOT " +
+        "client-only (the toolshed's serving runtime hits the same " +
+        "TypeError in its pull-settle loop); racy and load-sensitive " +
+        "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
+        "mostly green); OFF green by construction (instantiate-and-read " +
+        "in one runtime). The fix fork is FLAGGED for the owner " +
+        "(defer-on-unresolved-chain in the runner vs lifts tolerating " +
+        "undefined during arrival — both change a stated/relied-upon " +
+        "semantic). Evidence: docs/history/plans/server-execution-v2/" +
+        "optimize/ow51-undefined-read-report.md (and " +
+        "stage-c/first-on-ci-gate.md). Lifts when verification-" +
+        "coverage.md OW51 closes and the file greens ON; the flip PR " +
+        "needs this list EMPTY.",
     },
     {
       file: "integration/cfc-group-chat-demo.test.ts",
@@ -233,7 +246,12 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "represents-principal name the service signer, not Alice — so CFC " +
         "authorship verification stays 'unverified' forever; this IS the " +
         "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence. Local " +
+        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
+        "build LANDED 2026-08-21, but the authorship labels come from " +
+        "the runtime-level CFC trust snapshot (storageManager.as), not " +
+        "the memory-plane carriage that build landed, so this shape does " +
+        "NOT lift on it alone (the flagged CFC-attribution residual in " +
+        "OW31's register row; OW34's family). Local " +
         "shape (Bob's send click): Bob's messageDraft $value binding " +
         "write into the serve-owned user-scope instance doc NEVER reaches " +
         "the store (0/4 runs incl. a 300 s probe; his session committed " +
@@ -283,8 +301,10 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
         "hole — the identical demand derived the name wherever the " +
         "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half is the owed OW31/§2b build " +
-        "(S-A); the client barriers and heal-on-read are " +
+        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
+        "OW31's build — the replicate trigger's writebacks now ride the " +
+        "instantiating run's §2b carriage; the client barriers and " +
+        "heal-on-read are " +
         "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
         "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
         "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
@@ -344,24 +364,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "first-on-ci-gate.md (mechanism family: " +
         "on-render-stall-rootcause.md §2b). Lifts when OW47 closes and " +
         "the step greens ON; the flip PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/convergence-storm.test.ts",
-      step: "a non-writing session sees every concurrently-posted message",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under the TRUE ON topology the 3 " +
-        "element-schema tests are green; this storm step is red with a " +
-        "REAL ON loss — 2×20 pipelined posts (idle:false), observer " +
-        "landed=23/40 (was 0/40 under the pre-fix mixed posture, which " +
-        "refused every append): a write-path loss at storm depth; WHERE " +
-        "the 17 die (append admission, queue, dispatch, or consequence " +
-        "commit under pipelined contention) is UNTRIAGED " +
-        "(verification-coverage.md OW52). NOT a demand hole — what lands " +
-        "is served and delivered to the non-writing observer. Evidence: " +
-        "docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md. Lifts when OW52 closes and the " +
-        "step greens ON 5/5; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [
