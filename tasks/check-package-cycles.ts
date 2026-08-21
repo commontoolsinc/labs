@@ -77,9 +77,10 @@ export const ALLOWLIST: readonly AllowedCycle[] = [
   {
     packages: ["memory", "runner"],
     reason:
-      "memory's v2 query planner walks schemas with runner's traverse and " +
-      "builder types, while runner's storage and ACL layers are written " +
-      "against memory's interfaces.",
+      "memory's v2 query planner drives runner's schema traversal through " +
+      "@commonfabric/runner/graph-query, and reaches runner's schema-document " +
+      "registry, while runner's storage and ACL layers are written against " +
+      "memory's interfaces.",
   },
   {
     packages: ["html", "runtime-client"],
