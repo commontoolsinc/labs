@@ -985,22 +985,14 @@ function readCellValueForObservation(
 
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
+  includeBuiltinTools = true,
 ): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
   const pieces: PieceToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
-    // The other built-in names may be shadowed: dispatch prefers the pattern's
-    // tool and every advertisement follows it. This one may not, because the
-    // dialog captures the structured result by matching the call's name, and
-    // that match cannot follow a resolution. A pattern holding the name would
-    // be dispatched the call while its input was still stored as the result.
-    if (name === PRESENT_RESULT_TOOL_NAME) {
-      throw new Error(
-        `A tool may not be named "${PRESENT_RESULT_TOOL_NAME}": the dialog stores the call carrying that name as its structured result, so the name cannot also address a tool.`,
-      );
-    }
+    assertToolNameAvailable(name, includeBuiltinTools);
 
     if (tool?.piece?.get?.()) {
       const piece: Cell<any> = tool.piece;
@@ -1034,6 +1026,49 @@ const PIN_TOOL_NAME = "pin";
 const UNPIN_TOOL_NAME = "unpin";
 const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
+
+/**
+ * The names the dialog itself answers to when built-in tools are enabled.
+ */
+const BUILTIN_TOOL_NAMES: readonly string[] = [
+  READ_TOOL_NAME,
+  INVOKE_TOOL_NAME,
+  SCHEMA_TOOL_NAME,
+  PIN_TOOL_NAME,
+  UNPIN_TOOL_NAME,
+  UPDATE_ARGUMENT_TOOL_NAME,
+];
+
+/**
+ * Refuses a tool whose name the dialog has already given a meaning.
+ *
+ * A name addresses one tool. Letting a pattern supply a second under a name the
+ * dialog answers to would leave the catalog, the flattened list the UI reads,
+ * the CFC gates, and the system prompt each free to describe a different one,
+ * and the prompt describes the built-ins in prose that no lookup can redirect.
+ * So the name is refused where it is registered rather than resolved somewhere
+ * and quietly wrong everywhere else.
+ *
+ * `builtinTools: false` leaves the six unregistered, and free.
+ * `presentResult` is refused either way: the dialog stores the call carrying
+ * that name as its structured result, matching by name, whatever else is
+ * enabled.
+ */
+function assertToolNameAvailable(
+  name: string,
+  includeBuiltinTools: boolean,
+): void {
+  if (name === PRESENT_RESULT_TOOL_NAME) {
+    throw new Error(
+      `A tool may not be named "${PRESENT_RESULT_TOOL_NAME}": the dialog stores the call carrying that name as its structured result.`,
+    );
+  }
+  if (includeBuiltinTools && BUILTIN_TOOL_NAMES.includes(name)) {
+    throw new Error(
+      `A tool may not be named "${name}": it is a built-in tool of the dialog. Rename it, or pass builtinTools: false to run without the built-ins.`,
+    );
+  }
+}
 
 const READ_INPUT_SCHEMA = internSchema(
   {
@@ -1251,7 +1286,7 @@ function flattenTools(
   }
 > {
   const flattened: Record<string, any> = {};
-  const { legacy } = collectToolEntries(toolsCell);
+  const { legacy } = collectToolEntries(toolsCell, includeBuiltinTools);
 
   for (const entry of legacy) {
     const passThrough: Record<string, unknown> = { ...entry.tool };
@@ -1267,46 +1302,46 @@ function flattenTools(
     return flattened;
   }
 
-  defineBuiltinTool(flattened, READ_TOOL_NAME, {
+  flattened[READ_TOOL_NAME] = {
     description:
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(flattened, INVOKE_TOOL_NAME, {
+  };
+  flattened[INVOKE_TOOL_NAME] = {
     description:
       'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(flattened, PIN_TOOL_NAME, {
+  };
+  flattened[PIN_TOOL_NAME] = {
     description:
       'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
     inputSchema: PIN_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(flattened, UNPIN_TOOL_NAME, {
+  };
+  flattened[UNPIN_TOOL_NAME] = {
     description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: UNPIN_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(flattened, UPDATE_ARGUMENT_TOOL_NAME, {
+  };
+  flattened[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
       'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
     inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(flattened, SCHEMA_TOOL_NAME, {
+  };
+  flattened[SCHEMA_TOOL_NAME] = {
     description:
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
       "Returns schema showing what data can be read and what handlers can be invoked. ",
     inputSchema: SCHEMA_INPUT_SCHEMA,
-  });
+  };
 
   return flattened;
 }
@@ -1369,38 +1404,6 @@ function _toolsHaveChanged(
   return false;
 }
 
-/**
- * Advertises a built-in tool, unless a pattern-supplied tool already holds the
- * name.
- *
- * `resolveToolCall` consults the pattern's tools before the built-in names, so
- * on a collision the pattern's tool is what runs and the built-in is
- * unreachable. Every description of the tools has to say the same thing. The
- * advertised schema is what the model writes its input against, and it is also
- * where the CFC gates read policy from — `toolAllowsObservedConfidentiality`
- * takes `ifc.maxConfidentiality` from it and `integrityGateTarget` takes the
- * `requiredIntegrity` floors — so letting a built-in overwrite the entry
- * describes one tool while another executes, enforcing the built-in's absent
- * policy against the pattern's tool.
- *
- * Callers pass a record holding only the pattern-supplied tools, so a name
- * already present is a shadowed built-in.
- */
-function defineBuiltinTool<T>(
-  tools: Record<string, T>,
-  name: string,
-  definition: T,
-): void {
-  if (Object.hasOwn(tools, name)) {
-    logger.warn(
-      "llm",
-      `Tool "${name}" shadows the built-in of the same name; the pattern's tool is what runs. Rename it to reach the built-in.`,
-    );
-    return;
-  }
-  tools[name] = definition;
-}
-
 function buildToolCatalog(
   toolsCell:
     | Cell<Record<string, Schema<typeof LLMToolSchema>>>
@@ -1409,6 +1412,7 @@ function buildToolCatalog(
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell as Cell<Record<string, Schema<typeof LLMToolSchema>>>,
+    includeBuiltinTools,
   );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
@@ -1456,46 +1460,46 @@ function buildToolCatalog(
     return { llmTools, dynamicToolCells };
   }
 
-  defineBuiltinTool(llmTools, READ_TOOL_NAME, {
+  llmTools[READ_TOOL_NAME] = {
     description:
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(llmTools, INVOKE_TOOL_NAME, {
+  };
+  llmTools[INVOKE_TOOL_NAME] = {
     description:
       'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(llmTools, PIN_TOOL_NAME, {
+  };
+  llmTools[PIN_TOOL_NAME] = {
     description:
       'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
     inputSchema: PIN_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(llmTools, UNPIN_TOOL_NAME, {
+  };
+  llmTools[UNPIN_TOOL_NAME] = {
     description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: UNPIN_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(llmTools, UPDATE_ARGUMENT_TOOL_NAME, {
+  };
+  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
       'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
     inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  });
-  defineBuiltinTool(llmTools, SCHEMA_TOOL_NAME, {
+  };
+  llmTools[SCHEMA_TOOL_NAME] = {
     description:
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
       "Returns schema showing what data can be read and what handlers can be invoked. ",
     inputSchema: SCHEMA_INPUT_SCHEMA,
-  });
+  };
 
   return { llmTools, dynamicToolCells };
 }
@@ -1531,8 +1535,7 @@ function materializeDialogRequestSnapshot(
     | JSONSchema
     | undefined;
   if (userResultSchema) {
-    // Not defineBuiltinTool: collectToolEntries reserves this name, so there
-    // is no pattern tool here to shadow it.
+    // collectToolEntries refuses this name, so nothing else holds it.
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
@@ -3694,8 +3697,7 @@ async function startRequest(
   const userResultSchema = capturedRequest?.userResultSchema ??
     (inputs.key("resultSchema").get() as JSONSchema | undefined);
   if (userResultSchema && capturedRequest === undefined) {
-    // Not defineBuiltinTool: collectToolEntries reserves this name, so there
-    // is no pattern tool here to shadow it.
+    // collectToolEntries refuses this name, so nothing else holds it.
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
