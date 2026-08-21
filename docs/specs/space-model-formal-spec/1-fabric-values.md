@@ -1222,8 +1222,18 @@ export class FabricKeyPair extends FabricPrimitive {
   /** Whether this instance holds key material, as opposed to handles. */
   get hasMaterial(): boolean;
 
-  /** A fresh `CryptoKeyPair`. Throws when this instance holds material. */
+  /**
+   * A `CryptoKeyPair` holding this instance's two keys: a new record each
+   * call, holding the same two `CryptoKey`s. Throws when this instance holds
+   * material.
+   */
   get cryptoKeyPair(): CryptoKeyPair;
+
+  /** The public key's handle. Throws when this instance holds material. */
+  get publicCryptoKey(): CryptoKey;
+
+  /** The private key's handle. Throws when this instance holds material. */
+  get privateCryptoKey(): CryptoKey;
 
   /** The public key's bytes. Throws when this instance holds handles. */
   get publicKeyBytes(): FabricBytes;

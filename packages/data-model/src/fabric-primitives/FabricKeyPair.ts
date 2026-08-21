@@ -1,5 +1,4 @@
 import type {
-  FabricBytes as ApiFabricBytes,
   FabricKeyPair as ApiFabricKeyPair,
   FabricKeyPairConstructor as ApiFabricKeyPairConstructor,
 } from "@commonfabric/api";
@@ -65,7 +64,9 @@ type RealmHandleState = {
  * An instance is in one of two states, which its whole surface distinguishes:
  *
  * * It **holds handles**: two `CryptoKey`s, whose material this realm may have
- *   no way to reach. {@link #cryptoKeyPair} returns them.
+ *   no way to reach. {@link #publicCryptoKey} and {@link #privateCryptoKey}
+ *   return them, and {@link #cryptoKeyPair} returns both in the record shape
+ *   Web Crypto uses.
  * * It **holds material**: the two keys as bytes. {@link #publicKeyBytes} and
  *   {@link #privateKeyBytes} return them.
  *
@@ -99,7 +100,8 @@ export class FabricKeyPair extends BaseFabricPrimitive
    * Constructs an instance, either from a `CryptoKeyPair` -- whose two keys
    * must be a public/private pair agreeing on their algorithm -- or from an
    * algorithm name and the two keys' bytes. A `Uint8Array` argument is copied;
-   * a caller wishing to cede its buffer wraps it in a `FabricBytes` first.
+   * a caller wishing to cede its buffer wraps it in a `FabricBytes` first,
+   * which is also how a caller avoids the copy.
    *
    * The algorithm name follows Web Crypto's normalized spelling (e.g.
    * `"Ed25519"`), which is what the `CryptoKeyPair` form reports.
@@ -107,13 +109,13 @@ export class FabricKeyPair extends BaseFabricPrimitive
   constructor(pair: CryptoKeyPair);
   constructor(
     algorithm: string,
-    publicKey: ApiFabricBytes | Uint8Array,
-    privateKey: ApiFabricBytes | Uint8Array,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
   );
   constructor(
     pairOrAlgorithm: CryptoKeyPair | string,
-    publicKey?: ApiFabricBytes | Uint8Array,
-    privateKey?: ApiFabricBytes | Uint8Array,
+    publicKey?: FabricBytes | Uint8Array,
+    privateKey?: FabricBytes | Uint8Array,
   ) {
     super();
 
@@ -154,9 +156,10 @@ export class FabricKeyPair extends BaseFabricPrimitive
   }
 
   /**
-   * A fresh `CryptoKeyPair` holding this instance's two keys, returned anew on
-   * each call so the record is never aliased out. Throws when this instance
-   * holds material.
+   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
+   * object on each call, so a caller may do as it likes with it; the two
+   * `CryptoKey`s within it are this instance's own, and are the same two
+   * objects on every call. Throws when this instance holds material.
    */
   get cryptoKeyPair(): CryptoKeyPair {
     if (this.hasMaterial) {
@@ -171,6 +174,16 @@ export class FabricKeyPair extends BaseFabricPrimitive
     };
   }
 
+  /** The public key's handle. Throws when this instance holds material. */
+  get publicCryptoKey(): CryptoKey {
+    return this.#handleOf(this.#publicKey);
+  }
+
+  /** The private key's handle. Throws when this instance holds material. */
+  get privateCryptoKey(): CryptoKey {
+    return this.#handleOf(this.#privateKey);
+  }
+
   /** The public key's bytes. Throws when this instance holds handles. */
   get publicKeyBytes(): FabricBytes {
     return this.#materialOf(this.#publicKey);
@@ -179,6 +192,21 @@ export class FabricKeyPair extends BaseFabricPrimitive
   /** The private key's bytes. Throws when this instance holds handles. */
   get privateKeyBytes(): FabricBytes {
     return this.#materialOf(this.#privateKey);
+  }
+
+  /**
+   * Returns the given key as a handle.
+   *
+   * @throws If this instance holds material.
+   */
+  #handleOf(key: CryptoKey | FabricBytes): CryptoKey {
+    if (key instanceof FabricBytes) {
+      throw new Error(
+        "Cannot produce a `CryptoKey`: this key pair holds material.",
+      );
+    }
+
+    return key;
   }
 
   /**
@@ -438,12 +466,13 @@ export class FabricKeyPair extends BaseFabricPrimitive
   }
 
   /**
-   * Returns the given key bytes as a `FabricBytes`, copying a `Uint8Array`. The
-   * `instanceof` is the real admission test: the declared parameter is the api
-   * package's structural `FabricBytes`, and only this class's own is accepted.
+   * Returns the given key bytes as a `FabricBytes`, copying a `Uint8Array`.
+   * The `undefined` arm is the overload's doing: the two key parameters are
+   * optional in the implementation signature and absent on the
+   * `CryptoKeyPair` call.
    */
   static #toFabricBytes(
-    bytes: ApiFabricBytes | Uint8Array | undefined,
+    bytes: FabricBytes | Uint8Array | undefined,
     name: string,
   ): FabricBytes {
     if (bytes instanceof FabricBytes) {

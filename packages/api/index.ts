@@ -222,7 +222,7 @@ export declare const FabricRegExp: FabricRegExpConstructor;
  *
  * An instance either holds handles -- two `CryptoKey`s, whose material this
  * realm may have no way to reach -- or holds material, the two keys as bytes.
- * `hasMaterial` says which, and the accessor belonging to the other arm
+ * `hasMaterial` says which, and every accessor belonging to the other arm
  * throws.
  */
 export interface FabricKeyPair extends FabricPrimitive {
@@ -230,11 +230,18 @@ export interface FabricKeyPair extends FabricPrimitive {
   readonly hasMaterial: boolean;
 
   /**
-   * A fresh `CryptoKeyPair` holding this instance's two keys, returned anew on
-   * each call so the record is never aliased out. Throws when this instance
-   * holds material.
+   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
+   * object on each call, so a caller may do as it likes with it; the two
+   * `CryptoKey`s within it are this instance's own, and are the same two
+   * objects on every call. Throws when this instance holds material.
    */
   readonly cryptoKeyPair: CryptoKeyPair;
+
+  /** The public key's handle. Throws when this instance holds material. */
+  readonly publicCryptoKey: CryptoKey;
+
+  /** The private key's handle. Throws when this instance holds material. */
+  readonly privateCryptoKey: CryptoKey;
 
   /** The public key's bytes. Throws when this instance holds handles. */
   readonly publicKeyBytes: FabricBytes;
@@ -247,8 +254,8 @@ export interface FabricKeyPairConstructor {
   new (pair: CryptoKeyPair): FabricKeyPair;
   new (
     algorithm: string,
-    publicKey: FabricBytes | Uint8Array,
-    privateKey: FabricBytes | Uint8Array,
+    publicKey: Uint8Array,
+    privateKey: Uint8Array,
   ): FabricKeyPair;
   prototype: FabricKeyPair;
 }

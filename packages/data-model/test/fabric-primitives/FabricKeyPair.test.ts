@@ -33,6 +33,10 @@ function materialPair(): FabricKeyPair {
   return new FabricKeyPair("Ed25519", PUBLIC_BYTES, PRIVATE_BYTES);
 }
 
+/** A fixed non-extractable pair, so identity checks have a stable subject. */
+const { publicKey: PUBLIC_KEY, privateKey: PRIVATE_KEY } = await crypto.subtle
+  .generateKey({ name: "Ed25519" }, false, ["sign", "verify"]) as CryptoKeyPair;
+
 /** Returns a fresh non-extractable `CryptoKeyPair`. */
 async function generatePair(): Promise<CryptoKeyPair> {
   return await crypto.subtle.generateKey(
@@ -167,14 +171,58 @@ describe("FabricKeyPair", () => {
         expect(pair.cryptoKeyPair.privateKey).toBe(source.privateKey);
       });
 
-      it("returns a fresh record on each call", async () => {
+      it("returns a new record on each call", async () => {
         const pair = new FabricKeyPair(await generatePair());
 
         expect(pair.cryptoKeyPair).not.toBe(pair.cryptoKeyPair);
       });
 
+      it("returns the same two `CryptoKey`s on each call", () => {
+        // The other half of what the record's newness means: the wrapper is
+        // fresh, its contents are not. A `CryptoKey` is an opaque handle, and
+        // two calls handing back different handles would be a different
+        // contract entirely.
+        const source = { publicKey: PUBLIC_KEY, privateKey: PRIVATE_KEY };
+        const pair = new FabricKeyPair(source);
+
+        expect(pair.cryptoKeyPair.publicKey).toBe(pair.cryptoKeyPair.publicKey);
+        expect(pair.cryptoKeyPair.privateKey).toBe(
+          pair.cryptoKeyPair.privateKey,
+        );
+      });
+
       it("throws for an instance holding material", () => {
         expect(() => materialPair().cryptoKeyPair).toThrow(/holds material/);
+      });
+    });
+
+    describe(".publicCryptoKey", () => {
+      it("returns the key it was built from", () => {
+        const pair = new FabricKeyPair({
+          publicKey: PUBLIC_KEY,
+          privateKey: PRIVATE_KEY,
+        });
+
+        expect(pair.publicCryptoKey).toBe(PUBLIC_KEY);
+      });
+
+      it("throws for an instance holding material", () => {
+        expect(() => materialPair().publicCryptoKey).toThrow(/holds material/);
+      });
+    });
+
+    describe(".privateCryptoKey", () => {
+      it("returns the key it was built from", () => {
+        const pair = new FabricKeyPair({
+          publicKey: PUBLIC_KEY,
+          privateKey: PRIVATE_KEY,
+        });
+
+        expect(pair.privateCryptoKey).toBe(PRIVATE_KEY);
+      });
+
+      it("throws for an instance holding material", () => {
+        expect(() => materialPair().privateCryptoKey).toThrow(/holds material/);
       });
     });
 
@@ -453,6 +501,30 @@ describe("FabricKeyPair", () => {
       expect(
         Object.getOwnPropertyNames(new FabricKeyPair(await generatePair())),
       ).toEqual([]);
+    });
+
+    it("refuses every accessor belonging to the other arm", async () => {
+      // Both directions, and every accessor, so that adding one to a class
+      // whose whole contract is "the other arm's accessors throw" cannot
+      // quietly leave the new one answering for both states.
+      const handles = new FabricKeyPair(await generatePair());
+      const material = materialPair();
+
+      for (
+        const name of [
+          "cryptoKeyPair",
+          "publicCryptoKey",
+          "privateCryptoKey",
+        ] as const
+      ) {
+        expect(() => material[name]).toThrow(/holds material/);
+        expect(handles[name]).toBeDefined();
+      }
+
+      for (const name of ["publicKeyBytes", "privateKeyBytes"] as const) {
+        expect(() => handles[name]).toThrow(/holds handles/);
+        expect(material[name]).toBeDefined();
+      }
     });
 
     it("is frozen on construction", () => {
