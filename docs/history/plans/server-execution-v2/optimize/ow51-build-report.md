@@ -61,21 +61,137 @@ CHAIN dies at a missing intermediate doc yields `undefined` into the
 callback WITHOUT the register-and-refuse step (and without the leaf
 default), on both the client and the serving runtime.
 
-(section in progress — the precise hole path, the fix, and the pins
-land below as the build proceeds)
-
 ## 2. The hole (the exact path)
 
-(pending — chain-walk in progress)
+The write-topology explorer's chain-walk (verified against main)
+located the dead-end, and red-first work corrected one framing
+detail:
+
+- **Link resolution's dead-end is silent.** `link-resolution.ts`: the
+  sigil probe reports a `NotFoundError` whose `path` is `[]` when the
+  DOC itself is missing (vs a non-empty path = a present doc lacking
+  that sub-path). That distinction was READ and then DISCARDED — the
+  walk broke and returned a `ResolvedFullLink` pointing at the absent
+  doc. The leaf link and its schema default live INSIDE that absent
+  doc, so the default was structurally unreachable.
+- **The lazy read then handed `undefined` to the body.** `schema.ts`'s
+  lazy branch called `materializeSchemaView` with the absent value;
+  `readValueOrThrow` swallows `NotFoundError` by design
+  (`extended-storage-transaction.ts`), and the view's root arm returns
+  `undefined` for a missing value rather than refusing (a fresh
+  `cell.get()` never sets `mismatchThrows`). So the body received
+  `undefined` where its schema promised a value — `splitDefinitions`
+  crashed on `body.split`.
+- **The corrected framing (red-first).** The map anticipated a
+  MID-WALK dead-end (`followedHop` true). In the real OW51 shape the
+  `asCell` boundary consumed the hop when it MINTED the handle, so the
+  crashing `get()` starts AT the absent doc — `followedHop` is false,
+  `path` is `[]`, mechanically identical to a fresh cell's own absent
+  root (the pervasive `get() ?? fallback` first-write idiom). The
+  honest discriminator is therefore not "did this walk follow a hop"
+  but "is this link DATA-DERIVED" — parsed from a stored sigil, or the
+  product of a resolution that followed a hop. A locally-minted cell's
+  own link is not; a handle minted from somebody else's link is.
+- **`servingPosture` gates nothing on this path** (map, confirmed):
+  the serving runtime reads through the same lazy path, so "server
+  matches client exactly" falls out of shared code — no separate
+  serving-side branch to write.
 
 ## 3. The build
 
-(pending)
+Four seams, all read-side and OFF-safe (the lazy read path is the
+action-body path; eager reads — bindings, diffing, scheduler
+internals — are untouched):
+
+1. **`link-types.ts`** — two read-side `NormalizedLink` fields, never
+   serialized and never part of link identity (the `scopeCaps`
+   discipline): `viaLinkHop` (the link is DATA-DERIVED) and
+   `pendingHopDoc` (a resolution dead-ended at a missing doc behind a
+   hop / from a data-derived handle).
+2. **`link-utils.ts` `parseLink`** — a sigil-parsed link carries
+   `viaLinkHop`. A locally-minted cell's own link does not, so its
+   first-write `undefined` reads unchanged.
+3. **`link-resolution.ts`** — the walk tracks `followedHop`; the
+   dead-end break re-decides `deadEndDocMissing` per iteration from the
+   probe's `NotFoundError` path (`[]` = the doc), and sets
+   `pendingHopDoc` on the result when the walk crossed a hop OR started
+   from a data-derived handle. The result itself is stamped
+   `viaLinkHop` so a handle minted from it carries the provenance its
+   own later reads need.
+4. **`schema-view.ts` + `schema.ts`** — `UnresolvedInputError` (a
+   `SchemaMismatchError` subclass, so every existing disposal seam
+   treats it identically). The lazy branch refuses when
+   `pendingHopDoc === true && value === undefined &&
+   defaultForAbsentValue(viewSchema) === undefined`: it registers the
+   dead-end doc's read (the arrival re-trigger) then throws. A DECLARED
+   default keeps the pinned "the default stands in, read registered"
+   contract — the gate sits BEHIND the default arm, which is where
+   the first placement's schema-view regression surfaced and was
+   fixed.
+
+**The (ii) lift-throw clause.** Because `UnresolvedInputError` extends
+`SchemaMismatchError`, the refusal propagating OUT of a lift body (the
+body did not catch it) takes the same disposal at the runner's action
+boundary (`runner.ts` `isSchemaMismatchError` catches, sync and async)
+— output `undefined`, no failure, re-trigger. The primary pin
+exercises exactly this: the `computed`'s `ref.get()` throws, propagates
+through the body, and is disposed. A pattern body MINTING the error
+deliberately needs a pattern-facing export, which stays the FLAGGED
+API question with the owner (the coordinator's item 6: build
+runner-internal for now); the read-propagation path — the OW51 shape —
+is the built coverage.
+
+**Caution 3 — the `schema-view.ts` opaque no-type route: CLOSED BY
+CONSTRUCTION.** That route (a `type: "unknown"` position answering
+presence with a non-recursive-only dependency) is reached only for
+`value !== undefined`; the refusal gate fires only for
+`value === undefined`. The two are mutually exclusive, and the refusal
+is UPSTREAM (in `schema.ts`, before `materializeSchemaView` is
+called), so an unresolved input never reaches the opaque route. No pin
+needed — it is unreachable for this case, not an accidental survivor.
+
+**Caution 4 — the optional-property refusal swallow: CORRECT, with a
+NAMED owed pin.** `createObjectView`'s non-required-property arm
+catches a `SchemaMismatchError` from a child read, `clearSchemaRefusal`
+s it, and returns the property as `undefined` (ABSENT). For an
+unresolved input reached through an OPTIONAL property this is the
+RIGHT disposition and eager-parity: an eager read leaves an optional
+property whose traversal fails OUT of the object (only a `required`
+one takes the object down). Crucially the swallow clears only the
+refusal NOTE — the `readValueOrThrow` registration the refusal made
+survives, so the reader still re-triggers when the doc arrives. The
+OW51 production shape does not reach this arm (note.tsx reads
+`pendingEdit` at the computed's root, hitting the root refusal), so
+this is not in the critical path; the mechanism is correct by the
+registration-survives argument above. Decision: IN-SCOPE-and-correct,
+with a dedicated pin OWED (a lift reading an optional property that
+dead-ends → `undefined` while unresolved, heals on arrival) — named
+here rather than built as a fiddly drive-by, and tracked as the OW51
+row's residual so it is not forgotten.
 
 ## 4. Spec landing
 
-(pending)
+`speculation.md` §2 ("Unreplicated inputs") gains the RULED
+unresolved-lift-input paragraph: the owner's ruling verbatim, the two
+clauses (the unresolved read refuses; a lift that throws takes the
+same disposition), the default-arm and own-root carve-outs, and the
+implementation + pin pointers. The client half was already stated
+there (the PENDING sentence); the new text makes the
+`undefined`-is-not-the-answer edge explicit and binds the serving
+runtime to the same behavior.
 
 ## 5. Default-app verification + skip lift
 
-(pending)
+The authoritative serving-side E2E is `default-app.test.ts` ON — the
+surface whose SERVING-runtime crash (not just the browser client's)
+first recorded OW51. Built the ON binary from this branch
+(`shellServerExecutionDefine "true"`, serving loop present, gitSha =
+branch tip) and ran it:
+
+- **Run 1: 2/2 green, ZERO `splitDefinitions` crashes** (the pre-fix
+  count was 17 + 6 per run; W4's loaded bench 2-for-2 red). Fast, too
+  — 29 s, versus the pre-fix 5-minute crash-timeouts.
+- 10-run stability sweep: (results appended as they land).
+
+On green ×10 the `integration/default-app.test.ts` ON skip entry
+lifts and the OW51 register row closes with the ruling quoted.

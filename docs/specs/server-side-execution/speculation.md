@@ -66,6 +66,63 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   with the store local — serving-loop.md §3b; the asymmetry is the
   point.)
 
+  **Unresolved lift inputs are PENDING, not `undefined` (RULED
+  2026-08-21 — the OW51 fix; the serving runtime matches the client
+  exactly).** The rule above is stated for a doc the reader has not
+  replicated; its edge is a lift whose input LINK CHAIN dead-ends at a
+  hop-target doc the local replica cannot serve yet (the doc has not
+  arrived, or does not exist). Such a read does NOT hand `undefined`
+  into the lift body — nothing about the value is knowable, so a body
+  whose schema promised a value would crash on the `undefined` (the
+  OW51 `splitDefinitions` TypeError, observed on BOTH the client and
+  the serving runtime because the read path is shared code). Instead
+  the lazy read REFUSES: it registers the dead-end doc's read (the
+  dependency that re-triggers the run when the doc arrives) and the run
+  is disposed as a non-event — **output `undefined`, no action failure,
+  re-triggered when any of its reads so far change, exactly like a
+  regular call whose inputs were not ready.** The owner's ruling,
+  verbatim:
+
+  > (a), server-side should match the current client behavior exactly.
+  > also note that with the lazy proxy based evaluation a lift can
+  > throw a specific error and mark a tx aborted with that reason and
+  > that should also be handled just like an unresolved input, i.e.
+  > being retriggered when any of the reads so far change (just like a
+  > regular call), and the output being `undefined`.
+
+  — owner (Berni), 2026-08-21. Two clauses, both RULED and built:
+
+  1. **The unresolved read refuses.** Link resolution marks a
+     dead-end behind a followed hop (`pendingHopDoc`); the lazy read
+     path throws `UnresolvedInputError` (a `SchemaMismatchError`
+     subclass, so the action-run boundary's existing "argument did
+     not resolve" disposal treats it identically — §4's reconciliation
+     is unchanged). This applies ONLY when the reader's schema
+     declares NO default: a declared default is the stated absent
+     value and still flows (the `get() ?? fallback` idiom, and a
+     computed that has not produced yet, are unchanged). A dead-end at
+     the reader's OWN root doc is likewise not this shape — a
+     locally-minted cell's doc does not exist until its first write.
+  2. **A lift that THROWS the error takes the same disposition.** The
+     refusal propagates out of the lift body (the body did not catch
+     it) and the run's transaction aborts with it as the reason —
+     the same non-event disposal, re-triggering on the reads so far.
+     A pattern body cannot yet MINT the error itself (it is
+     runner-internal; a pattern-facing refusal export is a flagged
+     API question with the owner), so the built coverage is the
+     read-propagation path — the OW51 shape — with the deliberate
+     body-throw awaiting that export.
+
+  Implementation: `link-resolution.ts` (`pendingHopDoc` /
+  `viaLinkHop`), `schema.ts`'s lazy branch, `schema-view.ts`
+  (`UnresolvedInputError`); pinned in
+  `packages/runner/test/unresolved-input-lift.test.ts` (the hop-target
+  dead-end disposes and re-triggers on arrival; the stated-null
+  control still flows), with the serving-runtime match witnessed by
+  `integration/default-app.test.ts` greening ON (the surface whose
+  serving-runtime crash first recorded the bug —
+  verification-coverage.md OW51).
+
 ## 3. Rendering
 
 Rendering reads through the overlay, so the actor sees handler
