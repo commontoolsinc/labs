@@ -63,20 +63,36 @@ A rehearsal that used different tooling from the live run would rehearse
 something else. Both runs use the same commands and the same plan format;
 what changes is the deployment they name.
 
-## The three operations
+## The operations
 
 | | selects | applies | reverses with |
 | --- | --- | --- | --- |
 | **Retarget** | pieces on a given pattern, or an explicit list | one source package to every selected piece | rollback |
 | **Repair** | pieces a supplied fixer would change | that fixer's output, as each piece's whole document | a second fixer, or restore from a content export |
 | **Rollback** | pieces a plan previously moved | each piece's own recorded prior source | a second retarget |
+| **Survey** | any enumerated set | nothing — it reads and reports | n/a; it writes nothing |
 
 They are one subject because the risky parts are identical: deciding what is
 in scope, proving each piece is in the state you think it is, not losing your
 place when the run stops, and telling afterwards whether it worked. They are
-three operations because the write paths, the preconditions, and the
+separate operations because the write paths, the preconditions, and the
 reversibility differ, and a tool that conflates them will get one of those
-three wrong for two of the operations.
+wrong for the others.
+
+**Survey is the one that writes nothing, and it is not a lesser member.** It
+answers "what does each of these pieces currently look like?" and "which of
+them fails this test?" — the second being the same insight as a fixer being
+its own predicate, with a validator in place of a transform. It earns its
+place because those questions are otherwise unanswerable in bulk: when a
+holder demands something one stored member cannot satisfy, the read fails for
+the whole collection at once and names neither the offending member nor its
+position, so finding the one bad piece among a hundred has no better method
+than bisection by hand. A survey answers it in one pass.
+
+Survey is also how the other three are judged. A survey taken before a run is
+the pre-state record the plan needs; the same survey taken afterwards is the
+verification; and the difference between them is the report of what the run
+actually did. One artifact, three uses — which is why it is built first.
 
 ## The spine
 
@@ -85,11 +101,28 @@ select → plan → check preconditions → apply serially → verify → resume
 ```
 
 **Select** names the set. The selector is not assumed to be pattern identity:
-it may be a pattern, a parent's membership array, an explicit list, or — for
-a repair — the supplied fixer itself, since the pieces it would change are
+it may be a pattern, a holder's own collection, an explicit list, or — for a
+repair — the supplied fixer itself, since the pieces it would change are
 exactly the pieces that need it. Identity is one selector among several, and
 treating it as the axis is what makes a tool board-shaped or upgrade-shaped
 instead of general.
+
+**Selection reads the holder's collection, not the space's piece registry.**
+The registry records pieces that were explicitly registered, which is
+something a piece-creation command does and a pattern's own handler has no
+reason to do. So a board's collection and the registry listing describe
+different sets, and the registry is the smaller and less truthful of the two
+— on a board whose members are created through its own handler, most members
+are absent from it. A tool that enumerates by registry silently operates on a
+subset, reports success over that subset, and leaves the rest untouched with
+nothing in the output to say so.
+
+That failure is invisible by construction, so the design does not merely
+prefer the collection — it requires **two enumerations to be compared, and a
+disagreement to stop the run**. A count that matches is worth little on its
+own; a count that differs is the strongest signal available that the
+selection is wrong, and it is worth more than any amount of care taken after
+the set is chosen.
 
 **Plan** freezes the selection into an artifact. See below.
 
@@ -180,19 +213,27 @@ store is a known outcome, and the design assumes it.
 ## Where batching lives
 
 Batching is an execution strategy under the apply step, not an operation and
-not the subject. Two strategies exist:
+not the subject. Three strategies exist, and only the first two words of that
+sentence are about speed:
 
-- **A process per piece.** Simple, isolated, and pays session start-up,
-  replica warm-up, and source resolution once per piece.
-- **One session for many pieces.** Amortizes all of that. The source package
-  is resolved and pinned once, and the linked-document warm-up is paid once
-  because subsequent pieces meet an already-warm replica.
+- **A process per piece.** Simple and isolated, and it does not work. Across
+  a board-sized set a loop that spawns a command per piece fails outright
+  well before the end, so the cost is not the per-piece startup — it is a
+  partial result that looks like a complete one. This strategy is ruled out
+  rather than deprecated.
+- **One process, a session per piece.** The floor, and what every stage here
+  assumes. It removes the spawn entirely while keeping each piece's session
+  independent, so nothing accumulates across the run.
+- **One process, one session across many pieces.** Amortizes the rest: the
+  source package is resolved and pinned once, and the linked-document warm-up
+  is paid once because later pieces meet an already-warm replica.
 
-The second is worth having and is bounded by questions the first does not
-raise: every updated piece stays running in the shared session for the rest
-of the run, so memory and cross-piece interference scale with the batch, and
+The third is worth having and is bounded by a question the second does not
+raise: an updated piece stays running in the shared session for the rest of
+the run, so memory and cross-piece interference scale with the batch, and
 neither has been measured at the sizes that motivate it. A strategy that has
-not been measured at its intended scale is not yet a strategy.
+not been measured at its intended scale is not yet a strategy — which is why
+the floor is the second and not the third.
 
 Whichever strategy applies, order stays serial and the spine above is
 unchanged. That is the point of putting batching underneath it: the plan,
@@ -201,60 +242,70 @@ the execution strategy does.
 
 ## Building it
 
-Stage 1 is the spine, and everything else is a track over it. The two tracks
-are independent after that, because they have different reversals and so
-different floors:
+Stage 1 writes nothing and everything else stands on it. After that the order
+follows what each operation can be undone by, since that is what decides how
+much has to exist before it is safe to run:
 
-- **Stage 1 is shared and comes first.** A plan, preconditions, a serial
-  apply, and resume. Nothing else is buildable without it and both tracks
-  need all of it.
-- **The repair track is stage 2**, and its floor is stage 1 alone. A repair's
-  reversal is a restore from a content export, which already exists and is
-  already drilled, so repair does not wait on rollback the way retarget does.
-- **The retarget track is stages 3 and 4.** Verification is enough to
-  rehearse against a resettable copy; a live run also needs rollback, which
-  is not an improvement on that path but the only reversal available there,
-  and which has to be exercised on a copy before it is relied on.
-- **Stage 5 is under both.** Session reuse only makes an existing operation
-  faster.
+- **Stage 1 is read-only, shared, and immediately useful on its own.** It is
+  the answer to "what do these pieces currently look like, and which of them
+  is wrong?" — a question that is asked during every upgrade and that has no
+  bulk answer today.
+- **Stage 2 is repair**, whose reversal is a restore from a content export
+  that already exists and is already drilled. So it needs stage 1 and nothing
+  else.
+- **Stages 3 and 4 are the retarget track.** The apply is enough to rehearse
+  against a resettable copy; a live run also needs rollback, which is not an
+  improvement on that path but the only reversal available there, and which
+  has to be exercised on a copy before it is relied on.
+- **Stage 5 is under all of them.** Session reuse only makes an existing
+  operation faster.
 
-Repair is ordered ahead of the retarget track because a supplied fixer is
-useful the moment the spine exists, and because the defect it answers is
-usually found — as this one was — while doing something else.
+### 1. Survey: enumeration, and the plan
 
-### 1. The plan, and retarget
+A read-only pass that enumerates a set of pieces, reports what each one
+currently holds, and writes the result as a plan. No writes, and therefore
+nothing to undo — which is why it is first, and why it can be run against a
+live deployment before anything else has been built.
 
-A command that produces a plan from a selector, and a driver that consumes
-one: checks every row's precondition before writing, applies serially in plan
-order, stops at the first failure naming the remainder by piece, and
-recomputes what is outstanding on each invocation.
+Three things it has to get right, and each of them is a way a bulk operation
+has been wrong:
 
-It also needs a read that does not exist yet in the right shape. A piece's
-pattern identity is reachable live and without running the piece, but only
-through paths that carry far more than the identity: per-piece inspection
-also pulls the whole input document, the whole result, and the link graph in
-both directions, and the space-wide listing runs every piece it lists. Both
-are diagnostics. A plan over a large board needs the identity alone, one
-cheap read per piece, and that is a small addition to machinery that already
-exists rather than new capability.
+**It enumerates from the holder's collection and cross-checks.** Per the
+spine above, the piece registry is not a list of what exists, and a tool that
+enumerates from it operates on a subset while reporting success. Two
+enumerations, compared, with a disagreement stopping the run.
 
-The snapshot-download path is not the answer here, and stage 1 should not
-reach for it. It caches the downloaded store indefinitely with no expiry, and
-the flag that re-downloads is on the pull command rather than on the reads —
-so a second read after a run would be served the pre-run snapshot and report
-that nothing had moved. A resume check backed by that is not slow or
-approximate, it is confidently wrong, which is the one failure mode a resume
-check must not have.
+**It reads the identity alone, cheaply, and live.** A piece's pattern
+identity is reachable without running the piece, but the paths that reach it
+today are diagnostics: per-piece inspection also pulls the whole input, the
+whole result, and the link graph both ways, and the space-wide listing runs
+every piece it lists. A survey over a large board needs one small read per
+piece. The snapshot-download path is not an alternative — it caches
+indefinitely with no expiry and its re-download flag is on the pull command
+rather than the reads, so a survey taken after a run would be served the
+pre-run snapshot and report that nothing had changed. It is also unavailable
+where it would matter most: the endpoint behind it refuses to mount in a
+production environment and its routes answer as though they do not exist.
 
-- [ ] A plan is generated from a selector and checked in as an artifact.
-- [ ] Preconditions are proved for every row before the first write.
-- [ ] A retarget of a seeded board runs to completion from a checked-in plan.
-- [ ] A run interrupted partway is completed by re-invoking the same command,
-      and the pieces that landed are not rewritten.
-- [ ] A stopped run names every unattempted piece, not a count of them.
-- [ ] The precondition read reports live state on every invocation, and a
-      test proves it: a read taken after a change reflects the change. A
-      cached answer here would make resume confidently wrong.
+**It runs as one process over N pieces.** This is a correctness constraint
+rather than a performance one. A shell loop spawning a command per piece does
+not merely take a per-piece startup cost across a board-sized set — it fails
+outright well before finishing, which turns a survey into a partial answer
+that looks like a complete one.
+
+- [ ] Enumeration comes from the holder's collection, and a second
+      enumeration is compared against it.
+- [ ] A disagreement between the two stops the run and reports both counts.
+      A silent subset is the failure this exists to prevent.
+- [ ] One process handles a board-sized set, start to finish.
+- [ ] The read reports live state on every invocation, and a test proves it:
+      a read taken after a change reflects the change.
+- [ ] The output is a plan — the same artifact the later stages consume.
+- [ ] A tally accompanies it, so "do these pieces all agree?" is answered
+      without reading every row.
+- [ ] A supplied validator selects the pieces that fail it, naming each one.
+      A collection whose read fails as a whole is diagnosable by this and by
+      nothing else in bulk.
 
 ### 2. Repair, by a supplied fixer
 
@@ -309,16 +360,27 @@ expensive way.
       that would rewrite one as a value is refused.
 - [ ] Re-running a completed repair writes nothing.
 
-### 3. Verification as its own pass
+### 3. Retarget
 
-A pass that reads every row's current state and reports it against what the
-plan expected, exiting nonzero while anything is outstanding. It reports; it
-does not repair.
+The upgrade apply: one source package across the pieces a plan names, serial,
+in plan order, checking each row's precondition before writing it, stopping
+at the first failure with the remainder named, and recomputing what is
+outstanding on every invocation.
 
-- [ ] Verification is a separate invocation from application, and applying
-      never implies it.
-- [ ] The pass distinguishes "moved as planned", "still outstanding", and
-      "moved to something the plan did not ask for".
+Verification is not a stage of its own, because stage 1 already is it: a
+survey taken after a run, compared against the survey the plan was built
+from, is the report of what the run did. What this stage adds is the
+requirement that applying never implies it — an apply that exits zero is not
+a verdict, and the two stay separate invocations.
+
+- [ ] A retarget of a seeded board runs to completion from a checked-in plan.
+- [ ] Preconditions are proved for every row before the first write.
+- [ ] A run interrupted partway is completed by re-invoking the same command,
+      and the pieces that landed are not rewritten.
+- [ ] A stopped run names every unattempted piece, not a count of them.
+- [ ] The after-survey distinguishes "moved as planned", "still outstanding",
+      and "moved to something the plan did not ask for" — the third being
+      what an upgrade that half-converged looks like.
 - [ ] It composes with the existing space-level checks rather than replacing
       them; those remain the acceptance gate.
 
@@ -386,8 +448,10 @@ settled before work starts.
    live deployment without running the piece — the piece inspection path
    loads the cell with execution off and reports the identity ref — so the
    same check serves a rehearsal and a live run, and neither is verified by
-   a mechanism the other does not use. What does not yet exist is a read of
-   the right *shape*: see below.
+   a mechanism the other does not use. The alternative decided itself: the
+   snapshot endpoint the offline path depends on refuses to mount in a
+   production environment, so there is no offline option there to weigh.
+   What does not yet exist is a read of the right *shape*: see stage 1.
 3. **Scope of a compatibility override** — *stage 1*. An override that lets
    one refused piece through is a per-piece decision today. Applied to a
    plan, one flag covering every row turns many decisions into one, which is
