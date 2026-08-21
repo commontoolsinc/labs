@@ -53,10 +53,16 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#impl.sign(payload);
   }
 
-  // Only "noble" implementations can be converted to PKCS8, since we need the
-  // raw material. Narrows to the implementation rather than asking the key
-  // pair which state it is in: the bytes come from that class's own
-  // `privateKey()`, and the narrowing is what makes that call reachable.
+  /**
+   * This signer's key in PKCS8 form.
+   *
+   * Narrows to the implementation rather than asking the key pair which state
+   * it is in: the bytes come from that class's own `privateKey()`, and the
+   * narrowing is what makes that call reachable.
+   *
+   * @throws If this is not a "noble" implementation, the raw material being
+   *   what the conversion needs.
+   */
   toPkcs8() {
     if (this.#impl instanceof NobleEd25519Signer) {
       return toPEM(ed25519RawToPkcs8(this.#impl.privateKey().slice()));
@@ -128,10 +134,16 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return await Ed25519Signer.fromRaw(bytes, config);
   }
 
-  // Which implementation reconstitutes the signer is decided by the pair
-  // itself rather than by `config`: only "noble" can sign with material and
-  // only "webcrypto" can sign with handles, so the state the pair is in names
-  // the one implementation that can carry it.
+  /**
+   * Reconstitutes a signer from the key pair it hands out.
+   *
+   * Which implementation does so is decided by the pair itself rather than by
+   * a `config`: only "noble" can sign with material and only "webcrypto" can
+   * sign with handles, so the state the pair is in names the one
+   * implementation that can carry it.
+   *
+   * @throws If the pair is for another algorithm.
+   */
   static async fromKeyPair<ID extends DIDKey>(
     keyPair: FabricKeyPair,
   ): Promise<Ed25519Signer<ID>> {

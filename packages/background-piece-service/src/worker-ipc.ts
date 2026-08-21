@@ -10,13 +10,15 @@ export enum WorkerIPCMessageType {
 export type InitializationData = {
   did: string;
   toolshedUrl: string;
-  // The service's signer, as a `codec-realm` encoding of the `FabricKeyPair`
-  // it signs with. Encoded rather than plain because that is the one format
-  // which carries either state of a key pair -- key handles included --
-  // across a realm boundary whole.
-  //
-  // The name is load-bearing: `safeFormat()` in `./worker.ts` redacts this key
-  // out of everything it logs, and it redacts by name.
+  /**
+   * The service's signer, as a `codec-realm` encoding of the `FabricKeyPair`
+   * it signs with. Encoded rather than plain because that is the one format
+   * which carries either state of a key pair -- key handles included --
+   * across a realm boundary whole.
+   *
+   * The name is load-bearing: `safeFormat()` in `./worker.ts` redacts this key
+   * out of everything it logs, and it redacts by name.
+   */
   encodedIdentity: RealmEncodedValue;
   experimental?: {
     modernCellRep?: boolean;

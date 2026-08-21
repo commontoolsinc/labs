@@ -170,16 +170,18 @@ export type InitializationData = {
   // Plain record: structured-clone-safe — no functions cross the worker
   // IPC boundary. Fixed for the connection's lifetime.
   spaceHostMap?: Record<string, string>;
-  // Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
-  // Encoded rather than plain because that is the one format which carries
-  // either state of a key pair -- key handles included -- across a realm
-  // boundary whole.
+  /**
+   * Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
+   * Encoded rather than plain because that is the one format which carries
+   * either state of a key pair -- key handles included -- across a realm
+   * boundary whole.
+   */
   identity: RealmEncodedValue;
   // Identity of space.
   spaceDid: DID;
   // Temporary space name
   spaceName?: string;
-  // Temporary identity of space, encoded as `identity` above is.
+  /** Temporary identity of space, encoded as `identity` above is. */
   spaceIdentity?: RealmEncodedValue;
   // Default timeout in milliseconds.
   timeoutMs?: number;

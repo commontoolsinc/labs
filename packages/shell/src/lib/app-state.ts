@@ -69,9 +69,11 @@ export interface ShellApp {
   setConfig(key: AppStateConfigKey, value: boolean): Promise<void>;
 }
 
-// Turns either form an identity arrives in — a live `Identity`, or the encoded
-// key pair that crosses the integration-test page boundary — into the
-// `Identity` application state holds.
+/**
+ * Turns either form an identity arrives in — a live `Identity`, or the encoded
+ * key pair that crosses the integration-test page boundary — into the
+ * `Identity` application state holds.
+ */
 export async function resolveIdentity(
   id: Identity | SerializedIdentity | undefined,
 ): Promise<Identity | undefined> {
@@ -84,9 +86,11 @@ export async function resolveIdentity(
   );
 }
 
-// Renders an identity as the page boundary carries it, or `null` where it
-// cannot be written down: a key pair holding handles has no JSON encoding,
-// `CryptoKey` material being unreachable.
+/**
+ * Renders an identity as the page boundary carries it, or `null` where it
+ * cannot be written down: a key pair holding handles has no JSON encoding,
+ * `CryptoKey` material being unreachable.
+ */
 function serializeIdentity(
   identity: Identity | undefined,
 ): SerializedIdentity | null | undefined {
@@ -95,7 +99,12 @@ function serializeIdentity(
   return keyPair.hasMaterial ? jsonFromFabricValue(keyPair) : null;
 }
 
-// Decodes what `serializeIdentity()` produced.
+/**
+ * Decodes what {@link serializeIdentity} produced.
+ *
+ * @throws If the encoding is well-formed and decodes to something other than a
+ *   key pair.
+ */
 function keyPairFromSerialized(id: SerializedIdentity): FabricKeyPair {
   const keyPair = fabricFromJsonValue(id);
 

@@ -41,7 +41,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return this.#keypair.sign(payload);
   }
 
-  // This identity's key pair.
+  /** This identity's key pair. */
   get keyPair(): FabricKeyPair {
     return this.#keypair.keyPair;
   }
@@ -151,7 +151,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return Identity.fromRaw(base64pad.decode(stringKey), config);
   }
 
-  // Reconstitute an `Identity` from the key pair it hands out.
+  /** Reconstitutes an `Identity` from the key pair it hands out. */
   static async fromKeyPair<ID extends DIDKey>(
     keyPair: FabricKeyPair,
   ): Promise<Identity<ID>> {

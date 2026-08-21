@@ -72,13 +72,14 @@ export async function describeShellReadyFailure(page: Page): Promise<string> {
   )}`;
 }
 
-// Pass the key over the boundary. The astral boundary carries only what JSON
-// can express, so the key pair crosses in the `FabricValue` JSON encoding,
-// which is a string.
-//
-// The passed in identity must use the `noble` implementation: a key pair
-// holding handles has no JSON encoding, `CryptoKey` material being
-// unreachable.
+/**
+ * Logs `page`'s shell in as `identity`, passing the key over the boundary. The
+ * astral boundary carries only what JSON can express, so the key pair crosses
+ * in the `FabricValue` JSON encoding, which is a string.
+ *
+ * @throws If `identity` is not a `noble` implementation: a key pair holding
+ *   handles has no JSON encoding, `CryptoKey` material being unreachable.
+ */
 export async function login(page: Page, identity: Identity): Promise<void> {
   const { keyPair } = identity;
 
