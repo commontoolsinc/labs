@@ -1157,6 +1157,26 @@ export class Server {
       acl?: {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
+        /**
+         * Principals whose `session.open` may carry the delegated READ
+         * binding `actingAs: "space-owner"` (OW31, READ side RULED
+         * 2026-08-19). Such a session's READ-class capability decisions
+         * resolve as the space's ACL OWNER — the user whose space it
+         * is, resolved by the server from the ACL (the ruled
+         * service-identity ACL read) — while WRITE/OWNER-class
+         * requirements keep resolving against the ENVELOPE principal
+         * (the binding grants no write path; served writes ride the
+         * wave's §2b delegated carriage). Distinct from `serviceDids`
+         * (the operator's OWNER-class list, whose semantics are
+         * untouched): a delegating principal is NOT a service
+         * principal, holds no implicit capability of its own, and may
+         * NOT initialize a fresh space's genesis ACL. Under the
+         * server-execution flag the toolshed lists its own process
+         * identity here (the LT5 trust footing already carried by the
+         * write plane's delegated actors); OFF the flag the list is
+         * empty.
+         */
+        delegatingDids?: readonly string[];
       };
     },
   ) {
@@ -1234,6 +1254,38 @@ export class Server {
 
   #isServicePrincipal(principal: string): boolean {
     return this.options.acl?.serviceDids?.includes(principal) ?? false;
+  }
+
+  #isDelegatingPrincipal(principal: string): boolean {
+    return this.options.acl?.delegatingDids?.includes(principal) ?? false;
+  }
+
+  /**
+   * Resolve the acting principal a delegated READ binding stands for
+   * (OW31; `SessionDescriptor.actingAs: "space-owner"`): the space's ACL
+   * OWNER — the space DID itself when self-owned (every home space),
+   * else the lexicographically first concrete OWNER (deterministic when
+   * an ACL names several). A space with no valid concrete-owner ACL
+   * binds nothing: the envelope principal's own capability applies
+   * (fresh → READ, populated-legacy → WRITE, malformed → fail closed —
+   * today's rules). This resolution IS the ruled "ACL can be read with
+   * service identity": the server dereferences the ACL on the
+   * delegating principal's behalf.
+   */
+  #resolveSpaceOwnerBinding(
+    engine: Engine.Engine,
+    space: string,
+  ): string | undefined {
+    const state = this.#aclState(engine, space);
+    if (state.kind !== "valid") return undefined;
+    if (state.acl[space] === "OWNER") return space;
+    const owners = Object.entries(state.acl)
+      .filter(([principal, capability]) =>
+        principal !== ANYONE_USER && capability === "OWNER"
+      )
+      .map(([principal]) => principal)
+      .sort();
+    return owners[0];
   }
 
   #invalidateAclCapabilities(space: string): void {
@@ -1365,10 +1417,20 @@ export class Server {
     if (this.#sessions.get(space, sessionId) !== session) {
       return toError("SessionError", "Unknown session for space");
     }
+    // The delegated READ binding (OW31, READ side RULED 2026-08-19): a
+    // bound session's READ-class decisions resolve as the ACTING user
+    // (the space's owner). WRITE and OWNER requirements resolve against
+    // the ENVELOPE principal only — the binding grants no write path;
+    // served writes ride the wave's §2b delegated carriage, and a
+    // session-plane write by the serving identity stays refused (the
+    // observe-mode canary's subject).
+    const principal = requirement === "READ"
+      ? session.actingPrincipal ?? session.principal
+      : session.principal;
     return this.#authorizeMessageWithEngine(
       engine,
       space,
-      session.principal,
+      principal,
       requirement,
     );
   }
@@ -1480,7 +1542,33 @@ export class Server {
   ): void {
     if (this.#aclMode() !== "enforce") return;
     for (const session of this.#sessions.sessionsForSpace(space)) {
-      const capability = this.#capabilityFor(engine, space, session.principal);
+      // A delegated READ binding (OW31) is judged as its acting user,
+      // AND against the CURRENT owner resolution: an ACL change that
+      // moves ownership revokes the bound session even when the stale
+      // acting principal still holds READ (the self-owned space's
+      // implicit-OWNER short-circuit included — the Codex P1 finding
+      // on #6156), so the serving plane's next mount re-binds the new
+      // owner instead of reading indefinitely under a stale identity.
+      if (
+        session.actingPrincipal !== undefined &&
+        this.#resolveSpaceOwnerBinding(engine, space) !==
+          session.actingPrincipal
+      ) {
+        this.#sessions.remove(space, session.id);
+        if (session.ownerConnectionId !== null) {
+          this.#connections.get(session.ownerConnectionId)?.revokeSession(
+            space,
+            session.id,
+            "unauthorized",
+          );
+        }
+        continue;
+      }
+      const capability = this.#capabilityFor(
+        engine,
+        space,
+        session.actingPrincipal ?? session.principal,
+      );
       if (capability !== null && isCapable(capability, "READ")) continue;
       // Drop the de-authorized session from the registry: the refresh loop
       // iterates registered sessions, so removal stops all further watch
@@ -2422,10 +2510,57 @@ export class Server {
       );
       connection.consumeSessionOpenChallenge(authContext.challenge);
       const engine = await this.openEngine(message.space);
+      // The delegated READ binding (OW31, READ side RULED 2026-08-19):
+      // `actingAs: "space-owner"` is admitted only for a DELEGATING-class
+      // envelope (the co-hosted process identity under the flag — the
+      // LT5 trust footing), and resolves to the space's ACL OWNER, the
+      // user the session's READ-class decisions then run as. Inert in
+      // `off` mode (off preserves historical behavior); refused hard in
+      // observe AND enforce for a non-delegating envelope — the marker
+      // is an admission-validity claim, not a capability shortfall.
+      let actingPrincipal: string | undefined;
+      const actingAs = message.session.actingAs;
+      if (actingAs !== undefined && this.#aclMode() !== "off") {
+        if (actingAs !== "space-owner") {
+          return respondTypedError<SessionOpenResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              `unknown session.open actingAs value "${actingAs}"`,
+            ),
+          );
+        }
+        if (
+          principal === undefined || !this.#isDelegatingPrincipal(principal)
+        ) {
+          this.aclStats.denied += 1;
+          return respondTypedError<SessionOpenResult>(
+            message.requestId,
+            toError(
+              "AuthorizationError",
+              `Principal ${principal ?? "<anonymous>"} may not open a ` +
+                `session acting as the owner of ${message.space}: not a ` +
+                "delegating principal (memory ACL delegatingDids; OW31)",
+            ),
+          );
+        }
+        // An OWNER-class service envelope (the operator listed it in
+        // serviceDids — the F1 combination) stores NO binding: its
+        // authority is the explicit operator grant, a binding would be
+        // wrong-class, and the owner-resolution revocation branch (which
+        // skips the writerSessionId deferred-self-revocation carve-out)
+        // must never apply to it (delta review D2/D3 on #6156).
+        actingPrincipal = this.#isServicePrincipal(principal)
+          ? undefined
+          : this.#resolveSpaceOwnerBinding(
+            engine,
+            message.space,
+          );
+      }
       const deny = this.#authorizeMessageWithEngine(
         engine,
         message.space,
-        principal,
+        actingPrincipal ?? principal,
         "READ",
       );
       if (deny) {
@@ -2437,6 +2572,7 @@ export class Server {
         Engine.serverSeq(engine),
         connection.id,
         principal,
+        actingPrincipal,
       );
       if (opened.revokedConnectionId !== undefined) {
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
@@ -5466,6 +5602,14 @@ export const parseClientMessage = (
           : undefined,
         sessionToken: typeof parsed.session.sessionToken === "string"
           ? parsed.session.sessionToken
+          : undefined,
+        // The delegated READ binding (OW31): parsed as the LITERAL
+        // marker only — any other string reaches openSession's
+        // unknown-value refusal rather than being silently dropped.
+        actingAs: parsed.session.actingAs === "space-owner"
+          ? "space-owner"
+          : typeof parsed.session.actingAs === "string"
+          ? (parsed.session.actingAs as "space-owner")
           : undefined,
       },
       invocation: isObjectNotArray(parsed.invocation)

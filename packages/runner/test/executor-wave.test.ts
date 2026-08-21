@@ -51,6 +51,13 @@ import {
   streamEntriesDocId,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import {
+  type Options as StorageOptions,
+  type SessionFactory,
+  StorageManager,
+} from "../src/storage/v2.ts";
+import type { Signer } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
 import type {
   ITransactionSealSink,
@@ -134,6 +141,32 @@ describe("stage D seal-into-wave", () => {
       // exactly the stage-F SpaceServer posture.
       sessionId: executionLeaseHolder(`service:${space}`),
     });
+
+  /** Seed a foreign engine's GENESIS ACL as its first commit (OW31 B4:
+   * the sink refuses a foreign data batch into a seq-0/no-ACL engine —
+   * INV-13 mirrored on the engine-direct plane — so tests exercising
+   * later foreign commits first land the genesis the wave commit step
+   * forces in production). */
+  const seedGenesisAcl = (
+    foreignEngine: Engine.Engine,
+    foreignSpace: MemorySpace,
+    owner = "did:key:alice",
+  ): void => {
+    Engine.applyCommit(foreignEngine, {
+      sessionId: "test-genesis-session",
+      space: foreignSpace,
+      principal: foreignSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${foreignSpace}`,
+          value: { value: { [owner]: "OWNER", "*": "WRITE" } },
+        }],
+      },
+    });
+  };
 
   const liveLease = (): ExecutionLeaseCycle => {
     const cycle = new ExecutionLeaseCycle({
@@ -816,6 +849,7 @@ describe("stage D seal-into-wave", () => {
     const foreignSigner = await Identity.fromPassphrase("wave foreign space");
     const foreign = foreignSigner.did() as MemorySpace;
     const foreignEngine = await server.engineForSpace(foreign);
+    seedGenesisAcl(foreignEngine, foreign);
     const lease = liveLease();
 
     const engines = new Map<MemorySpace, Engine.Engine>([
@@ -2067,6 +2101,7 @@ describe("stage D seal-into-wave", () => {
     );
     const foreign = foreignSigner.did() as MemorySpace;
     const foreignEngine = await server.engineForSpace(foreign);
+    seedGenesisAcl(foreignEngine, foreign);
     const lease = liveLease();
     const engines = new Map<MemorySpace, Engine.Engine>([
       [space, engine],
@@ -2193,6 +2228,9 @@ describe("stage D seal-into-wave", () => {
     );
     const foreign = foreignSigner.did() as MemorySpace;
     const foreignEngine = await server.engineForSpace(foreign);
+    // Genesis first (OW31 B4): this pin is about the CARRIAGE refusal,
+    // which sits behind the sink's INV-13 mirror.
+    seedGenesisAcl(foreignEngine, foreign);
     const sink = new EngineWaveCommitSink({
       engineFor: () => foreignEngine,
       sessionId: executionLeaseHolder(`service:${space}`),
@@ -2218,6 +2256,265 @@ describe("stage D seal-into-wave", () => {
     expect(refused.error?.message ?? "").toContain(
       "scoped write in a foreign wave batch refused",
     );
+  });
+
+  it("OW31 B4: a foreign data commit never lands before the genesis ACL — the sink mirrors INV-13 on the engine-direct plane", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave sink inv13 foreign space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const sink = new EngineWaveCommitSink({
+      engineFor: () => foreignEngine,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const acting = "did:key:z6Mk-inv13-alice";
+    const batchFor = (id: string) => ({
+      space: foreign,
+      home: false as const,
+      basisSeq: 0,
+      rebasedHeads: [],
+      operations: [{
+        op: "set",
+        id,
+        value: { value: { v: 1 } },
+      } as never],
+      preconditions: [],
+      annotations: [],
+      consequenceOf: [],
+      basisInstances: [],
+      holder: undefined,
+      delegated: {
+        actingPrincipal: acting,
+        capabilityRef: "event-consequence:e-inv13",
+      },
+    });
+
+    // Fresh engine (seq 0, no ACL): the data batch REFUSES — the
+    // genesis ACL must be the space's first commit (INV-13's
+    // precedence, protocol.md §2's genesis clause; session-plane
+    // #validateAclCommit's mirror on the engine-direct plane).
+    const refused = await sink.commitWave(batchFor("of:inv13-data"));
+    expect(refused.error?.message ?? "").toContain("genesis");
+    expect(Engine.serverSeq(foreignEngine)).toBe(0);
+
+    // With the genesis ACL landed (seq 1, the space's first commit —
+    // as the wave commit step forces for creation-granted targets),
+    // the same batch applies at seq 2.
+    Engine.applyCommit(foreignEngine, {
+      sessionId: "inv13-genesis-session",
+      space: foreign,
+      principal: foreign,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${foreign}`,
+          value: { value: { [acting]: "OWNER", "*": "WRITE" } },
+        }],
+      },
+    });
+    expect(Engine.serverSeq(foreignEngine)).toBe(1);
+    const applied = await sink.commitWave(batchFor("of:inv13-data"));
+    expect(applied.error).toBeUndefined();
+    expect(applied.ok?.seq).toBe(2);
+  });
+
+  it("OW31 B3+B4: a creation-granted provisioning wave forces the genesis ACL (owner = the acting user, actor = the space) before its data batch; replay converges on the acl arm; a mis-threaded owner shows in the ACL content (the wildcard write grant is the F2 residual)", async () => {
+    // The serving-side storage manager: bootstrap-capable factory over
+    // the SAME shared server, holding the provisioned space's identity
+    // with the ACTING user as genesis owner (slice-1 threading).
+    class BootstrapLoopbackFactory implements SessionFactory {
+      readonly supportsAclBootstrap = true;
+      readonly principals: string[] = [];
+      constructor(private readonly server: MemoryV2Server.Server) {}
+      async create(
+        targetSpace: MemorySpace,
+        sessionSigner?: Signer,
+        requested: MemoryV2Client.MountOptions = {},
+      ) {
+        this.principals.push(sessionSigner?.did() ?? "<anonymous>");
+        const client = await MemoryV2Client.connect({
+          transport: MemoryV2Client.loopback(this.server),
+        });
+        const session = await client.mount(
+          targetSpace,
+          requested,
+          (_space, _session, context) => ({
+            invocation: {
+              aud: context.audience,
+              challenge: context.challenge.value,
+            },
+            authorization: { principal: sessionSigner?.did() },
+          }),
+        );
+        return { client, session };
+      }
+    }
+    class BootstrapStorageManager extends StorageManager {
+      static overServer(
+        options: Omit<StorageOptions, "memoryHost">,
+        factory: SessionFactory,
+      ): BootstrapStorageManager {
+        return new BootstrapStorageManager(
+          { ...options, memoryHost: new URL("memory://") },
+          factory,
+        );
+      }
+    }
+    const serviceSigner = await Identity.fromPassphrase(
+      "ow31 provisioning service",
+    );
+    const alice = "did:key:z6Mk-ow31-acting-alice";
+    const pIdentity = await Identity.fromPassphrase("ow31 provisioned space");
+    const provisioned = pIdentity.did() as MemorySpace;
+    const factory = new BootstrapLoopbackFactory(server);
+    const servingManager = BootstrapStorageManager.overServer(
+      { as: serviceSigner },
+      factory,
+    );
+    servingManager.registerSpaceIdentity(pIdentity, { owner: alice });
+
+    const lease = liveLease();
+    const provisionWave = (): WaveAccumulator =>
+      new WaveAccumulator({
+        space,
+        basisSeq: Engine.serverSeq(engine),
+        scopeKeyIdentity: {
+          principal: signer.did(),
+          sessionId: "ow31-wave-session",
+        },
+        replicaFor: (s) => storageManager.open(s).replica,
+        lease,
+        foreignWrites: "accept",
+        // The REAL structural grant supply with the FULL verdict — the
+        // shape the serving loop now wires (the via arm is retained).
+        foreignWriteGrant: (s, acting) =>
+          server.foreignWriteAuthorityFor(s, acting.user),
+      });
+    const sealProvision = async (wave: WaveAccumulator, value: number) => {
+      runtime.installSealDestination(wave);
+      const cell = runtime.getCell<{ value: number }>(
+        provisioned,
+        "ow31-provisioned-doc",
+        undefined,
+      );
+      const home = runtime.getCell<{ value: number }>(
+        space,
+        "ow31-home-link",
+        undefined,
+      );
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "ow31-provision",
+        kind: "event-handler",
+        eventId: "e-ow31",
+        acting: { user: alice, session: "sess-ow31" },
+        capabilityRef: "event-consequence:e-ow31",
+      });
+      tx.enableMultiSpaceWrites?.([provisioned, space]);
+      cell.withTx(tx).set({ value });
+      home.withTx(tx).set({ value: value + 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      runtime.clearSealDestination();
+    };
+
+    try {
+      // Wave 1: the crossing is granted via the CREATION arm and the
+      // wave retains it.
+      const wave1 = provisionWave();
+      await sealProvision(wave1, 7);
+      expect(wave1.creationGrantedForeignSpaces()).toEqual([provisioned]);
+
+      // The commit step's forcing (space-server.ts): genesis BEFORE the
+      // sink's data batch.
+      await servingManager.ensureSpaceInitialized(provisioned);
+      const pEngine = await server.engineForSpace(provisioned);
+      const engines = new Map<MemorySpace, Engine.Engine>([
+        [space, engine],
+        [provisioned, pEngine],
+      ]);
+      const sink = new EngineWaveCommitSink({
+        engineFor: (s) => engines.get(s)!,
+        sessionId: executionLeaseHolder(`service:${space}`),
+      });
+      const outcome1 = await wave1.commitWave(sink);
+      await wave1.settled();
+      expect(outcome1.aborted).toBeUndefined();
+
+      // The pins: commit #1 IS the ACL; owner = the acting user; the
+      // genesis actor is the SPACE identity; the service appears
+      // NOWHERE; the data batch landed at seq >= 2.
+      expect(
+        Engine.selectDocHead(pEngine, {
+          id: `of:${provisioned}`,
+          scopeKey: "space",
+        }),
+      ).toBe(1);
+      const acl = await server.readDocument(provisioned, `of:${provisioned}`);
+      expect(acl?.value).toEqual({ [alice]: "OWNER", "*": "WRITE" });
+      expect(
+        Object.keys(acl?.value as Record<string, unknown>),
+      ).not.toContain(serviceSigner.did());
+      expect(factory.principals).toContain(pIdentity.did());
+      const dataHead = Engine.selectDocHead(pEngine, {
+        id: runtime.getCell<{ value: number }>(
+          provisioned,
+          "ow31-provisioned-doc",
+          undefined,
+        ).getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      });
+      expect(dataHead).toBeGreaterThanOrEqual(2);
+
+      // REPLAY (a kill between the foreign and home commits re-runs the
+      // handler): the store now exists, so the grant resolves via the
+      // ACL arm through the acting user's OWNER — no second genesis is
+      // forced, the data re-applies convergently, and the ACL stays the
+      // ONE user-owned document at seq 1.
+      const wave2 = provisionWave();
+      await sealProvision(wave2, 7);
+      expect(wave2.creationGrantedForeignSpaces()).toEqual([]);
+      const outcome2 = await wave2.commitWave(sink);
+      await wave2.settled();
+      expect(outcome2.aborted).toBeUndefined();
+      expect(
+        Engine.selectDocHead(pEngine, {
+          id: `of:${provisioned}`,
+          scopeKey: "space",
+        }),
+      ).toBe(1);
+      expect(
+        (await server.readDocument(provisioned, `of:${provisioned}`))?.value,
+      ).toEqual({ [alice]: "OWNER", "*": "WRITE" });
+
+      // The MUTATION pin (B4 iii): drop/mis-thread the genesis owner —
+      // a space whose genesis named someone else refuses the acting
+      // user's replay on the acl arm, loudly.
+      const wrongIdentity = await Identity.fromPassphrase(
+        "ow31 wrong-owner space",
+      );
+      const wrongSpace = wrongIdentity.did() as MemorySpace;
+      servingManager.registerSpaceIdentity(wrongIdentity, {
+        owner: "did:key:z6Mk-ow31-bob",
+      });
+      await servingManager.ensureSpaceInitialized(wrongSpace);
+      const wrongVerdict = await server.foreignWriteAuthorityFor(
+        wrongSpace,
+        alice,
+      );
+      // "*": "WRITE" still grants alice via the wildcard (flagged
+      // residual F2 — the wildcard is a separate policy question), so
+      // the acl arm GRANTS here; the owner mutation shows up in the
+      // ACL content, not the wildcard-covered write grant.
+      expect(wrongVerdict).toEqual({ granted: true, via: "acl" });
+      expect(
+        (await server.readDocument(wrongSpace, `of:${wrongSpace}`))?.value,
+      ).toEqual({ "did:key:z6Mk-ow31-bob": "OWNER", "*": "WRITE" });
+    } finally {
+      await servingManager.close();
+    }
   });
 
   it("Phase 5 accept gate is an AUTHORIZATION boundary: an UNGRANTED crossing refuses action-scoped even with full carriage; the actor's own home space admits (protocol.md §2b; the F1 fix)", async () => {

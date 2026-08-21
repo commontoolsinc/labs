@@ -1366,7 +1366,11 @@ Preconditions (all RULED 2026-08-15, all landed with this phase):
       authority — under the flag the toolshed process identity is a
       memory service principal, so the loopback plane reads the
       demanding user's home space (`memoryServiceDidsFor`; OFF the
-      configured list verbatim); (2) a flag-ON client's wish REFERENCES
+      configured list verbatim) — *this posture was later RETIRED by
+      OW31's build (2026-08-21): the process identity became a
+      DELEGATING principal whose serving sessions read as the space's
+      owner via the `actingAs` binding, `memoryAclPrincipalsFor`;
+      verification-coverage.md OW31*; (2) a flag-ON client's wish REFERENCES
       the served sidecar cell instead of fetching/instantiating it
       itself (the bookkeeping-authored instantiation raced the server's
       derived one — the ~13/s stale-basis loop); (3) the nested-piece
@@ -1397,7 +1401,8 @@ Tasks:
       ENABLED` (`packages/memory/v2/server-execution-default.ts`) — value
       `false` today — resolved by the `productionServer` / `remoteClient`
       presets, the shell define fallback, and toolshed's serving-host
-      gate + service-principal grant; explicit `true` = the ON arm,
+      gate + memory ACL principal lists (the DELEGATING class since
+      OW31's build); explicit `true` = the ON arm,
       explicit `false` = the OFF arm; the single-process presets keep the
       OFF baseline by construction (EXPERIMENTAL_OPTIONS.md); the ONE
       absolute pin (`packages/toolshed/lib/server-execution-flag.test.

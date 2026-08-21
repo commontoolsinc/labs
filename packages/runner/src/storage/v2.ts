@@ -838,6 +838,10 @@ export class StorageManager implements IStorageManager {
   /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
   #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
+  /** Genesis ACL owners registered beside a space identity (OW31): the
+   * ACTING user a serving-side provisioning run supplied. Keyed apart so
+   * the client path (no owner registered) stays byte-identical. */
+  #spaceGenesisOwners = new Map<MemorySpace, string>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
@@ -988,9 +992,48 @@ export class StorageManager implements IStorageManager {
    * Retain a derived space key solely as the authority for that space's first
    * ACL commit. Providers continue to authenticate all ordinary replica work
    * as `this.as`.
+   *
+   * `options.owner` names the genesis ACL's OWNER (OW31, RULED 2026-08-18):
+   * on a SERVING runtime the acting user of the provisioning run is
+   * threaded here, so the space's first commit — signed by the space's own
+   * keys — immediately delegates OWNER to that user and the serving
+   * identity appears nowhere in the ACL. Absent (every client), the owner
+   * is the manager's signer: the active user, the pre-OW31 shape
+   * byte-for-byte.
    */
-  registerSpaceIdentity(identity: Signer): void {
+  registerSpaceIdentity(identity: Signer, options?: { owner?: string }): void {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
+    const owner = options?.owner;
+    if (owner !== undefined) {
+      this.#spaceGenesisOwners.set(identity.did() as MemorySpace, owner);
+    }
+  }
+
+  /**
+   * The delegated READ binding a SERVING manager's ordinary session
+   * mounts carry (OW31, READ side RULED 2026-08-19): `actingAs:
+   * "space-owner"` asks the memory server to resolve the session's
+   * READ-class capability as the space's ACL OWNER — the user whose
+   * space it is — admitted only for the delegating-class process
+   * identity (the flag-gated list). Only serving managers
+   * (`servingHomeSpace` set) send it; clients and the toolshed's own
+   * non-serving runtimes never do, and the fresh-space BOOTSTRAP
+   * session (which signs as the SPACE identity, an implicit owner)
+   * never does either.
+   */
+  #servingActingAs(): { actingAs?: "space-owner" } {
+    return this.#servingHomeSpace !== undefined
+      ? { actingAs: "space-owner" }
+      : {};
+  }
+
+  /** The serving manager's HOME space (Options.servingHomeSpace) —
+   * undefined on every client manager. Consumers use it to decide
+   * whether a write target is FOREIGN to the serving loop (OW31 seat
+   * S-A: the compile-cache writeback attaches its trigger's delegated
+   * carriage only for foreign targets). */
+  get servingHomeSpace(): MemorySpace | undefined {
+    return this.#servingHomeSpace;
   }
 
   /**
@@ -1001,6 +1044,19 @@ export class StorageManager implements IStorageManager {
    */
   scopeKeyIdentity(): ScopeKeyIdentity {
     return { principal: this.as.did(), sessionId: this.#sessionId };
+  }
+
+  /**
+   * Force `space`'s provider session — and with it, on a bootstrap-capable
+   * session factory, the fresh-space ACL genesis (`#createInitializedSession`)
+   * — to have completed (OW31 B4; protocol.md §2b's genesis clause). The
+   * serving loop's wave commit step calls this for every `creation`-granted
+   * foreign target BEFORE the sink applies its data batch, so the space's
+   * commit #1 is its ACL. Idempotent: an already-mounted session (or an
+   * already-initialized space) resolves immediately.
+   */
+  async ensureSpaceInitialized(space: MemorySpace): Promise<void> {
+    await this.open(space).ensureSession?.();
   }
 
   /** IStorageManager (server-execution v2 Phase 4): first-open observer
@@ -1050,6 +1106,7 @@ export class StorageManager implements IStorageManager {
           : (_routeGeneration, routeSignal) =>
             this.#sessionFactory.create(space, signer, {
               sessionId: this.#sessionId,
+              ...this.#servingActingAs(),
             }, routeSignal),
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
@@ -1125,7 +1182,7 @@ export class StorageManager implements IStorageManager {
         await this.#sessionFactory.create(
           space,
           signer,
-          { sessionId: this.#sessionId },
+          { sessionId: this.#sessionId, ...this.#servingActingAs() },
           routeSignal,
         ),
       );
@@ -1170,6 +1227,7 @@ export class StorageManager implements IStorageManager {
         ...(normal.session.sessionToken !== undefined
           ? { sessionToken: normal.session.sessionToken }
           : {}),
+        ...this.#servingActingAs(),
       };
       activeClients.delete(normal.client);
       await normal.client.close();
@@ -1206,9 +1264,15 @@ export class StorageManager implements IStorageManager {
           (isHomeSpace || current.serverSeq === 0)
         ) {
           try {
+            // Non-home genesis owner (OW31, RULED 2026-08-18): the acting
+            // user registered beside the space identity, else the signer
+            // (the active user on a client). The HOME arm is untouched —
+            // a home space is its own identity and owner.
+            const genesisOwner = this.#spaceGenesisOwners.get(space) ??
+              signer.did();
             const bootstrapAcl = isHomeSpace
               ? { [signer.did()]: "OWNER" }
-              : { [signer.did()]: "OWNER", "*": "WRITE" };
+              : { [genesisOwner]: "OWNER", "*": "WRITE" };
             await bootstrap.session.transact({
               localSeq: 1,
               reads: {
