@@ -2839,6 +2839,15 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   then refused forever by the sink's INV-13 mirror — a fail-closed
   livelock unreachable in sanctioned flows; its watcher signature is
   nonzero `foreignWriteRefusals` naming a HOME space (the review's F3).
+  (vii) a serving session revoked by the owner-resolution-change
+  trigger does not remount: `Provider.#sessionHandle` memoizes the
+  terminated session, so an ownership TRANSFER of an actively-served
+  space stops its serving reads until the provider/route lifecycle
+  recycles — fail-closed and rare; the reopen would succeed under the
+  new owner once a revocation-remount path is wired with the takeover
+  machinery's care (parked accepts, marker epoch, commit replay —
+  `onSessionReplaced`'s duties). Named follow-up from the delta
+  review's D1; not forced into the build PR.
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the

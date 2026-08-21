@@ -428,6 +428,31 @@ Grace store dump, seq 4). Built shape:
   `commitDelegatedAppend` as the third engine-direct committer (stream
   appends only; no ACL-doc/genesis vector). **F8** — the reviewer's
   OFF-invisibility audit confirmed the build's claim independently.
+- **Delta-review disposition (coordinator-relayed, 2026-08-21; delta
+  verdict CLEAN, merge-ready stands):** **D2+D3** — FIXED red-first in
+  one arm: an OWNER-class service envelope (the F1 operator combination
+  — the process identity in BOTH serviceDids and delegatingDids) now
+  stores NO binding; its authority is the explicit operator grant, so
+  the owner-resolution revocation branch (and its skipped
+  writerSessionId deferred-self-revocation carve-out) never applies to
+  it. Pin: the OWNER-class session survives an ownership transfer
+  (watched red — the stored binding revoked it — before the fix).
+  **D1 — NAMED FOLLOW-UP, not forced into this PR** (the coordinator's
+  offered out, taken for cause): re-mounting a serving session after
+  the NEW revocation trigger (owner-resolution change) needs the
+  takeover machinery's care — `Provider.#sessionHandle` memoizes the
+  terminated session, and a revocation-remount path must handle parked
+  accepts, the marker epoch, outstanding-commit replay, and watch
+  re-establishment exactly as `onSessionReplaced` does for takeovers;
+  wiring that is lifecycle-entangled, the wedge is fail-closed and
+  rare (an ownership TRANSFER of an actively-served space; reads stop
+  until the provider/route lifecycle recycles), and the reopen WOULD
+  succeed under the new owner once wired. Recorded in the register
+  residual list as (vii). **D4** — FIXED: the multi-owner pin now
+  discriminates (removing the first-sorted owner revokes the binding —
+  proving ALICE, not CAROL, was bound). **D5** — skipped as advised
+  (per-ACL-commit owner re-resolution is a cold path: one map lookup +
+  one sorted scan per session per ACL commit).
 - **Escape-hatch status (the READ ruling's own provision): NOT
   exercised.** No case surfaced during the build where user-identity
   routing could not cover a legitimately-needed serving read: home

@@ -2033,6 +2033,79 @@ Deno.test("OW31 acl enforce: an unknown actingAs value is a ProtocolError; a mul
     assertExists(opened.ok, opened.error?.message);
     const read = await graphQuery(bound, space, opened.ok.sessionId, "of:x");
     assertExists(read.ok, read.error?.message);
+
+    // The DISCRIMINATING half (delta review D4 on #6156): remove ALICE
+    // — the lexicographically FIRST owner — from the ACL. If the
+    // binding had resolved CAROL, the new resolution (CAROL) would
+    // still match and the session would survive; because it resolved
+    // ALICE, the owner-resolution revocation branch fires.
+    const carol = await connect(server);
+    const carolSession = await openSession(carol, space, CAROL);
+    assertExists(carolSession.ok);
+    const rewritten = await transactSet(
+      carol,
+      space,
+      carolSession.ok.sessionId,
+      `of:${space}`,
+      { [CAROL]: "OWNER" },
+      1,
+    );
+    assertExists(rewritten.ok, rewritten.error?.message);
+    const revoked = bound.messages.find((message) =>
+      message.type === "session/revoked"
+    );
+    assertExists(
+      revoked,
+      "removing the first-sorted owner must revoke the binding — the " +
+        "binding was ALICE, not CAROL",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("OW31 acl enforce: an OWNER-class service envelope stores NO binding — its authority is the operator grant, and an ownership transfer does not revoke it (D2/D3)", async () => {
+  // The F1 operator combination: the process identity in BOTH
+  // MEMORY_SERVICE_DIDS (OWNER-class, verbatim) and the delegating
+  // list. The marker is admitted, but no binding is stored — the
+  // session's authority is the explicit operator grant, so the
+  // owner-resolution revocation branch (and its writerSessionId
+  // carve-out skip) never applies to it.
+  const server = createAclServer("memory://acl-ow31-ownerclass", {
+    mode: "enforce",
+    serviceDids: [SERVICE],
+    delegatingDids: [SERVICE],
+  });
+  const space = "did:key:z6Mk-acl-ow31-space-9";
+  await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+  const service = await connect(server);
+  const alice = await connect(server);
+  try {
+    const opened = await openSession(service, space, SERVICE, {
+      actingAs: "space-owner",
+    });
+    assertExists(opened.ok, opened.error?.message);
+
+    const aliceSession = await openSession(alice, space, ALICE);
+    assertExists(aliceSession.ok);
+    const transferred = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      `of:${space}`,
+      { [BOB]: "OWNER" },
+      1,
+    );
+    assertExists(transferred.ok, transferred.error?.message);
+
+    // No binding was stored, so the ownership transfer revokes nothing:
+    // the OWNER-class grant still reads.
+    const revoked = service.messages.find((message) =>
+      message.type === "session/revoked"
+    );
+    assertEquals(revoked, undefined, "OWNER-class session must survive");
+    const read = await graphQuery(service, space, opened.ok.sessionId, "of:x");
+    assertExists(read.ok, read.error?.message);
   } finally {
     await server.close();
   }

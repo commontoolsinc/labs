@@ -2544,10 +2544,18 @@ export class Server {
             ),
           );
         }
-        actingPrincipal = this.#resolveSpaceOwnerBinding(
-          engine,
-          message.space,
-        );
+        // An OWNER-class service envelope (the operator listed it in
+        // serviceDids — the F1 combination) stores NO binding: its
+        // authority is the explicit operator grant, a binding would be
+        // wrong-class, and the owner-resolution revocation branch (which
+        // skips the writerSessionId deferred-self-revocation carve-out)
+        // must never apply to it (delta review D2/D3 on #6156).
+        actingPrincipal = this.#isServicePrincipal(principal)
+          ? undefined
+          : this.#resolveSpaceOwnerBinding(
+            engine,
+            message.space,
+          );
       }
       const deny = this.#authorizeMessageWithEngine(
         engine,

@@ -449,6 +449,102 @@ describe("Phase 5 cross-space serving", () => {
     }
   });
 
+  it("OW31 B4: a FAILED genesis forcing is isolated per space — the sink's INV-13 mirror refuses the batch, nothing lands, and the home space keeps serving", async () => {
+    // The forcing loop's failure arm (space-server.ts): a throwing
+    // `ensureSpaceInitialized` must not park the home space — the
+    // contributions targeting the fresh space are refused by the sink
+    // (foreign failure => home withheld => replay) and the loop keeps
+    // serving. The fail-closed cousin of the F6 pin above.
+    host = newHost();
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      homeSpace,
+      "b4-fail-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () =>
+          servingRuntime !== undefined &&
+          host!.spaceServer(homeSpace)?.active === true,
+        "home space activation",
+      );
+      const serving = servingRuntime!;
+      const attempts: MemorySpace[] = [];
+      (serving.storageManager as unknown as {
+        ensureSpaceInitialized(space: MemorySpace): Promise<void>;
+      }).ensureSpaceInitialized = (space: MemorySpace) => {
+        attempts.push(space);
+        return Promise.reject(
+          new Error("injected genesis-forcing failure (test)"),
+        );
+      };
+
+      const pSigner = await Identity.fromPassphrase("b4 forcing-fail space");
+      const pSpace = pSigner.did() as MemorySpace;
+      const foreignCell = serving.getCell<{ value: number }>(
+        pSpace,
+        "b4-fail-provisioned",
+        undefined,
+      );
+      const tx = serving.edit();
+      stampWaveRunContext(tx, {
+        actionId: "b4-fail-provision",
+        kind: "event-handler",
+        eventId: "e-b4-fail",
+        acting: { user: aliceSigner.did(), session: "sess-b4f" },
+        capabilityRef: "event-consequence:e-b4-fail",
+      });
+      tx.enableMultiSpaceWrites?.([pSpace, homeSpace]);
+      foreignCell.withTx(tx).set({ value: 41 });
+      expect((await tx.commit()).error).toBeUndefined();
+
+      // The forcing was attempted and failed; the sink then refused the
+      // creation-granted batch (INV-13 mirror) — the fresh space stays
+      // EMPTY (no genesis, no data).
+      await waitUntil(
+        () => attempts.includes(pSpace),
+        "the commit step attempted the genesis forcing",
+      );
+      const pEngine = await server.engineForSpace(pSpace);
+      await waitUntil(
+        () => (host!.spaceServer(homeSpace)?.active ?? false) === true,
+        "home space still active after the failed forcing",
+      );
+      expect(serverSeq(pEngine)).toBe(0);
+
+      // Failure isolation: a plain home-space write STILL commits — the
+      // loop was not parked by the misdirected provisioning.
+      const homeProbe = serving.getCell<{ value: number }>(
+        homeSpace,
+        "b4-fail-home-probe",
+        undefined,
+      );
+      const probeTx = serving.edit();
+      stampWaveRunContext(probeTx, {
+        actionId: "b4-fail-home-probe",
+        kind: "bookkeeping",
+      });
+      homeProbe.withTx(probeTx).set({ value: 7 });
+      expect((await probeTx.commit()).error).toBeUndefined();
+      const homeEngine = await server.engineForSpace(homeSpace);
+      const probeId = homeProbe.getAsNormalizedFullLink().id;
+      await waitUntil(
+        () => selectDocHead(homeEngine, { id: probeId, scopeKey: "space" }) > 0,
+        "the home probe write committed after the failed forcing",
+      );
+    } finally {
+      cancel();
+    }
+  });
+
   it("OW31 B4 end-to-end: the SpaceServer's OWN commit step forces a creation-granted target's genesis before the sink's data batch (review F6 on #6156)", async () => {
     // Drives the REAL SpaceServer loop (not a hand-built wave): a
     // provisioning-shaped tx seals into the LIVE wave, its crossing
