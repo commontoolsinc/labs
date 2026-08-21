@@ -41,6 +41,14 @@ const frameCounts = (): { queue: number; handle: number } => {
   };
 };
 
+const flushCounts = (): { queue: number; refresh: number } => {
+  const timing = getLogger("memory");
+  return {
+    queue: timing.getTimeStats("memory", "flush", "queue")?.count ?? 0,
+    refresh: timing.getTimeStats("memory", "flush", "refresh")?.count ?? 0,
+  };
+};
+
 describe("v2 server frame timing", () => {
   it("records a waiting half and a working half for each frame received", async () => {
     const server = new Server({
@@ -90,6 +98,38 @@ describe("v2 server frame timing", () => {
       const after = frameCounts();
       expect(after.queue - before.queue).toBe(3);
       expect(after.handle - before.handle).toBe(3);
+    } finally {
+      await server.close();
+    }
+  });
+  it("times a flush as one pass over every dirty space, not once per frame", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://frame-timing-flush"),
+      subscriptionRefreshDelayMs: "manual",
+    });
+    try {
+      const before = flushCounts();
+      // Two spaces dirtied before a single flush. The pass fans out to
+      // both, so a pair of counts that tracked SENDS would read two here.
+      // Reading one is the property the walkthrough and the skill both
+      // lean on: `memory/flush/refresh` is a batch cost, and dividing it
+      // to recover what one frame cost is unsound.
+      await server.writeDocument(
+        "did:key:z6Mk-frame-timing-flush-a",
+        "of:doc:a",
+        { flushed: true },
+      );
+      await server.writeDocument(
+        "did:key:z6Mk-frame-timing-flush-b",
+        "of:doc:b",
+        { flushed: true },
+      );
+      await server.flushSessions();
+
+      const after = flushCounts();
+      expect(after.queue - before.queue).toBe(1);
+      expect(after.refresh - before.refresh).toBe(1);
     } finally {
       await server.close();
     }

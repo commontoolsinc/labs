@@ -116,9 +116,11 @@ walkthrough's server section being where the requests and their fields live.
 **The posture is a fact you check, not one you set.** Which arm a server is on,
 and which arm the browser shell was _built_ for, are both one request away — and
 a client declares its own posture from its own environment, so a `cf` or a
-harness left at its default against a serving toolshed is a mixed posture that
-measures neither arm. Probe both ends before the run and record what they said
-beside the number, the way a board size is recorded.
+harness left at its default against a serving toolshed is a mixed posture. That
+one is worth recognizing because nothing about it looks wrong: every instrument
+keeps reporting faithfully, and what it reports is a configuration that ships in
+neither arm, with both ends deriving. Probe both ends before the run and record
+what they said beside the number, the way a board size is recorded.
 
 **Read the server's instruments before adding any.** The health route already
 reports the serving process's own logger statistics, under the same key names
@@ -147,9 +149,11 @@ re-reading against the ON arm before its numbers mean anything.
 
 Frames are also a queue, with the two costs any queue has — waiting behind what
 is already in flight, and the work itself — and the memory server times them
-apart on both directions of the socket. Only the second is a frame's own cost. A
-queue time that dwarfs every handle time is head-of-line blocking, and it is
-fixed at the frame in front rather than at the one that reported it.
+apart. Only the second is a frame's own cost, so a queue time that dwarfs every
+handle time is head-of-line blocking, and it is fixed at the frame in front
+rather than at the one that reported it. The same split exists on the push side
+one level coarser, over a flush pass rather than a frame, which makes it a bound
+on push latency and not a per-frame cost to divide down.
 
 That watermark helper wants a `Runtime`, so it is the Deno-side test process's
 instrument rather than the browser's. On the browser rung the equivalent is

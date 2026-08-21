@@ -325,8 +325,17 @@ browser shell was *built* with — the define is baked at build time, so a
 source-run toolshed serves the OFF-arm shell whatever its own environment says.
 Clients declare their own posture from their own environment too: `cf` and the
 integration harnesses announce `serverExecution=false` unless
-`EXPERIMENTAL_SERVER_EXECUTION=true` is set for them as well, and a client on
-the other arm from its server measures neither.
+`EXPERIMENTAL_SERVER_EXECUTION=true` is set for them as well.
+
+A client on the other arm from its server is worth naming precisely, because it
+is more dangerous than a broken instrument. Every probe keeps reporting
+faithfully — the server's timing statistics and its serving-loop counters are
+true readings of what that server did. What they are readings *of* is a
+configuration that ships in neither arm: an OFF-declared client still commits
+its own derivations while the serving loop derives them too, so wave counts, the
+settle series and the amplification ratio all describe a system nobody runs. The
+numbers look fine. Check both ends before the run rather than trying to discount
+them afterwards.
 
 ### Read `/api/health/stats`
 
@@ -347,22 +356,43 @@ process:
   per-authored-input latency series: admission to watermark coverage, with the
   wave and cycle counts behind each entry.
 
-Two things to know before quoting any of it. Everything accumulates for the
-process's whole life, across every space it has served, so capture before and
-after a phase and diff rather than reading an absolute. And each timing row
-carries a full CDF, which makes the response hundreds of kilobytes after even a
-single deploy — sample it at phase boundaries; polling it is its own load.
+Everything here accumulates for the process's whole life, across every space it
+has served, so a phase is a difference between two captures rather than any
+single one — and **only `count` and `totalTime` subtract**. `min`, `max`, `p50`,
+`p95` and the CDF describe the whole lifetime; differencing them yields a number
+that looks like a phase percentile and is not one. What a diff of the two
+additive fields does give you honestly is the phase's call count and its mean.
+
+For a phase *distribution*, the process has to have seen only the phase, so
+start a fresh toolshed and capture once at the end. The logger does carry a
+delta reservoir (`resetAllTimingBaselines()`, surfaced on `globalThis` and read
+back as the `*SinceBaseline` fields and `cdfSinceBaseline`), but nothing on the
+health route sets it, so it is reachable in a browser console and not in a
+server you are talking to over HTTP.
+
+Whichever way you capture, capture sparingly: each timing row carries its whole
+CDF, which puts the response into the hundreds of kilobytes after even a single
+deploy. Read it at phase boundaries — polling it is its own load.
 
 The serving loop's own phases are wrapped as `executor/wave/cycle`, `/drain` and
 `/settle`. Read them against `wavesBudgetExhausted`, which is a censored
 measurement: a wave that overruns the flush deadline reports that deadline
-however far past it the wave ran, so the counter says how often and the
-span says by how much. `memory/frame/queue` against `memory/frame/handle` splits
-a connection's frame time into waiting behind earlier frames and doing its own
-work, and `memory/flush/queue` against `memory/flush/refresh` does the same for
-the push side. In each pair, only the second is the frame's own cost — a queue
-time far above every handle time is head-of-line blocking, and the fix is at the
-frame in front.
+however far past it the wave ran, so the counter says how often and the span
+says by how much.
+
+`memory/frame/queue` against `memory/frame/handle` splits an inbound frame's
+time into waiting behind the frames already in flight on its connection and
+doing its own work. Only the second is that frame's cost, so a queue time far
+above every handle time is head-of-line blocking, and the fix is at the frame in
+front rather than at the one that reported it.
+
+`memory/flush/queue` against `memory/flush/refresh` is the same split one level
+coarser, on the push side: a flush **pass**, never a frame. `refresh` covers
+every dirty space the pass selected and every frame those sessions were owed, so
+a large batched fan-out and one expensive send are the same number here and
+dividing it to recover a per-frame cost is unsound. Read it as a bound instead —
+a client's push waits at least the refresh delay plus these two — and reach for
+`servingLoop.push` when the question is which sessions a batch served.
 
 ### Profile the process
 

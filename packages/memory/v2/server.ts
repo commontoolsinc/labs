@@ -5060,12 +5060,15 @@ export class Server {
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
     this.cancelScheduledRefresh();
-    // The push side's half of the frame accounting the connection's receive
-    // keeps for the pull side: `memory/flush/queue` is how long this pass
-    // waited for the flush in front of it, `memory/flush/refresh` how long
-    // its own evaluation-and-send took. A client's push latency is the sum
-    // of the two plus the refresh delay, and which of them dominates says
-    // whether the server is flushing too often or evaluating too much.
+    // The same waiting-against-working split the connection's receive keeps,
+    // one level coarser: a flush PASS, not a frame. `memory/flush/queue` is
+    // how long this pass waited for the flush in front of it,
+    // `memory/flush/refresh` how long its own evaluation and sending took —
+    // across every dirty space the pass selected and every frame those
+    // sessions were owed, so it is a batch cost and dividing it by anything
+    // to recover a per-frame one is unsound. What it does bound is how long
+    // a client's push can sit behind the server's own fan-out: push latency
+    // is at least the refresh delay plus these two.
     const requestedAt = performance.now();
     const run = async () => {
       const refreshStart = Date.now();
