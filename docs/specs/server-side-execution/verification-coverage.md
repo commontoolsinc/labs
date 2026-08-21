@@ -5507,10 +5507,13 @@ supply; OW29/OW32/OW34 closed):
     explicitly when the default port is occupied). Follow-up class
     (flip-follow-up family): no lift trigger; close with the ruled
     posture landed.
-  - **OW56 — the (α3)-family held-wave probe's gate race (a
+  - **OW57 — the (α3)-family held-wave probe's gate race (a
     PRE-EXISTING test flake in `executor-events-down.test.ts`, filed
     2026-08-21 by the #6170 review's G1 so the constructed-depth
-    pin's PR is not blamed when the lane first flakes).** The
+    pin's PR is not blamed when the lane first flakes; renumbered
+    OW56 → OW57 pre-merge for the parallel-mint collision with the
+    durability train's #6173, which keeps OW56 for server-owned
+    program compilation).** The
     "(α3) + a same-eventId SIBLING tx" step's held-wave construction
     (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
     probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
