@@ -7,10 +7,14 @@ import { compilerStack } from "./deferred-compiler-stack.ts";
  *
  * A pattern declares the code it depends on by importing it, and the resolver
  * follows that declaration. A pattern declares the data it depends on by
- * reading it, with `dataFile("/data/cities.json")`, and this follows that one.
+ * reading it, with `dataFile("./cities.json")`, and this follows that one.
  * Both are read out of the source, so a program carries the same files however
  * it was built and whoever built it, and no caller has to state a second time
  * what the source already says.
+ *
+ * A read resolves against the module that wrote it, as an import specifier
+ * does, so the name a file is attached under here is the name the runtime will
+ * look it up by.
  *
  * The names come from the resolved closure, and each is read back through the
  * resolver that produced it, so a program assembled from the file system, from

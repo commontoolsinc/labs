@@ -14,6 +14,7 @@ describe("pattern-vintage-accepted-drops", () => {
       paths: ["crossrefs", "topics[].crossrefs"],
       capturedThrough: "2026-08-06T23-04-13.189Z",
       reason: "removed",
+      record: "docs/history/topics-crossref-identity-break.md",
     },
   ];
   /** A capture from inside the window the entry was granted over. */

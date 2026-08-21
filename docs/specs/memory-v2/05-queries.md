@@ -97,11 +97,13 @@ entity values, guided by a schema that constrains which paths to explore and
 which linked entities to include.
 
 The traversal code in `packages/runner/src/traverse.ts` is **shared between
-client and server**. The v1 server (`space-schema.ts`) imports
-`SchemaObjectTraverser` from `@commonfabric/runner/traverse`, and the client
-(`schema.ts`) uses the same code for validation and transformation. This ensures
-identical traversal behavior on both sides. The v2 implementation MUST preserve
-this shared-code property.
+client and server**. The client reaches `SchemaObjectTraverser` through
+`schema.ts` for validation and transformation; the server reaches the same
+traverser through `@commonfabric/runner/graph-query`, which drives it over
+documents the storage engine supplies. That gives identical traversal behavior
+on both sides, and the implementation MUST preserve this shared-code property.
+[Schema graph queries](../../features/schema-graph-queries.md) describes what
+the two packages exchange to do that.
 
 ### 5.3.1 Schema Query Structure
 

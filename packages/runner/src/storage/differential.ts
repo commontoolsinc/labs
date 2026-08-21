@@ -4,7 +4,6 @@ import {
   isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { unclaimed } from "@commonfabric/memory/fact";
 
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -24,8 +23,8 @@ interface Memory {
 const stateScope = (state: State) =>
   normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
 
-const unclaimedWithScope = (state: State): State =>
-  ({ ...unclaimed(state), scope: stateScope(state) }) as State;
+const valuelessWithScope = (state: State): State =>
+  ({ the: state.the, of: state.of, scope: stateScope(state) }) as State;
 
 const toKey = (state: State) =>
   `/${stateScope(state)}/${state.the}/${state.of}`;
@@ -247,24 +246,25 @@ const addStateChange = (
 };
 
 /**
- * Checks out facts from the given memory so that we can compute changes
- * later on.
+ * Checks out state from the given memory so that we can compute changes
+ * later on. An address the memory does not hold is checked out as its
+ * address alone, carrying no value.
  */
-export const checkout = (memory: Memory, facts: Iterable<State>) => {
+export const checkout = (memory: Memory, states: Iterable<State>) => {
   const checkout = new Checkout();
-  for (const member of facts) {
+  for (const member of states) {
     const address = toAddress(member);
     const existing = memory.get(address);
     if (existing) {
       checkout.add(existing);
     } else {
-      checkout.add(unclaimedWithScope(member));
+      checkout.add(valuelessWithScope(member));
     }
   }
   return checkout;
 };
 
-export const load = (facts: Iterable<State>) => create().set(facts);
+export const load = (states: Iterable<State>) => create().set(states);
 
 class Checkout {
   #model: Map<string, State> = new Map();
@@ -274,10 +274,10 @@ class Checkout {
 
   compare(memory: Memory) {
     const changes = new Changes();
-    for (const fact of this.#model.values()) {
-      const before = fact?.is;
-      const after = memory.get(toAddress(fact))?.is;
-      addStateChange(changes, fact, before, after);
+    for (const state of this.#model.values()) {
+      const before = state?.is;
+      const after = memory.get(toAddress(state))?.is;
+      addStateChange(changes, state, before, after);
     }
     return changes;
   }
@@ -290,24 +290,24 @@ class Changes implements IMergedChanges {
   }
 
   /**
-   * Adds a new fact to the changeset.
+   * Adds new state to the changeset.
    */
-  set(facts: Iterable<State>) {
-    for (const fact of facts) {
-      addStateChange(this, fact, undefined, fact.is);
+  set(states: Iterable<State>) {
+    for (const state of states) {
+      addStateChange(this, state, undefined, state.is);
     }
     return this;
   }
 
   /**
    * Captures changes between what is in the given memory and
-   * provided facts.
+   * provided state.
    */
-  update(memory: Memory, facts: Iterable<State>) {
-    for (const fact of facts) {
-      const before = memory.get(toAddress(fact))?.is;
-      const after = fact.is;
-      addStateChange(this, fact, before, after);
+  update(memory: Memory, states: Iterable<State>) {
+    for (const state of states) {
+      const before = memory.get(toAddress(state))?.is;
+      const after = state.is;
+      addStateChange(this, state, before, after);
     }
     return this;
   }

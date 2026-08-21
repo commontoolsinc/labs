@@ -325,6 +325,50 @@ moved — a sibling branch in the same file is the next one to flap.
 follows that line from a group-level `+2` down to the two integration hits that
 covered it in one run and not the next.
 
+### Failure reports reached only when the operation fails
+
+A fourth shape is the branch that reports a failure: the `if (error)` arm of an
+asynchronous recovery, the log line that says a write was refused. The recovery
+around it runs on every resume, and the report inside it runs only when the
+write underneath fails. No test asks for that write to fail, so whether the line
+is covered comes down to whether some suite, somewhere in the run, happened to
+tear a runtime down while one was in flight.
+
+The list coordinators' resume-seed recovery was one of those. A coordinator
+resuming against a result container with no durable value pulls the container
+and seeds an empty array once the pull settles, and it warns when either the
+pull or the seed fails. One workspace shard on one `main` run reached the seed's
+warning three times; no other artifact in that run or the next reached it at
+all.
+
+Reaching such a branch takes a failing operation, not a failing environment, so
+give the recovery its operation as a parameter.
+`seedResultContainerWhenPullSettles()` in
+`packages/runner/src/builtins/list-result-container-seed.ts` takes the runtime,
+the container, a predicate saying whether the coordinator still holds it, the
+pull to wait on, and the logger to report through.
+`packages/runner/test/list-result-container-seed.test.ts` then hands it a pull
+that rejects and a runtime whose commits are refused. Each failure case asserts
+the message key and the error carried with it, so a report that changed which
+failure it named fails rather than staying green on the line count.
+
+A guard reached only on a retry takes the same treatment. `editWithRetry()`
+runs its action synchronously on the first attempt, so a liveness check inside
+the action reads as unable to disagree with the one the caller just made — and
+as a dead line. It is not: a retryable rejection is followed by an `await` of
+the conflict's catch-up gate and then a fresh call that runs the action again.
+A test reaches it by refusing the first commit with a `ConflictError` whose
+`readyToRetry` gate flips the liveness answer, and asserts the commit count so
+that a version which stopped retrying fails rather than passing vacuously.
+
+Extracting it also settled where the branch lives. The same recovery had been
+written out three times, once each in `map.ts`, `filter.ts` and `flatmap.ts`, so
+one failure report was three separate branches waiting to flap, and two of them
+had never been covered on any run.
+[The investigation record](../history/development/coverage-flake-list-resume-seed-2026-08-20.md)
+follows the five lines from the group-level `+3` down to the single artifact
+that covered them.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:
@@ -373,6 +417,34 @@ numeric literal emits a number rather than the string the node carries — so a
 branch that changed what it produced would fail rather than stay green on the
 line count.
 
+### A fact the checkout supplies
+
+A line can also sit behind a fact the code reads from the machine it is
+running on: the branch the checkout is on, the platform, whether some tool is
+installed. `tasks/test-records.ts` stamps a local test run with the branch,
+and records one only when git names one. Continuous integration builds a pull
+request from a detached merge commit, where `git branch --show-current` prints
+nothing, so the arm that records a branch ran on a developer's machine and not
+in that job. Its coverage then came from whatever else in the run happened to
+build a context, which is what made it move.
+
+A test that creates a scratch repository on a named branch does reach the arm,
+and asserting that git's answer reaches the context is worth doing. It does
+not settle the coverage, though, because it buys the line with a subprocess:
+the line is covered where git is installed, behaves as the test expects, and
+is allowed to run, and not elsewhere.
+
+Separate reading the facts from deciding what they mean.
+`buildLocalContext()` asks git for the commit, the branch and the status, and
+hands the three answers to `composeLocalContext()`, which turns them into the
+context. Reaching the arm that records a branch is then a matter of saying
+what git said, so a unit test states the facts and asserts the context they
+compose into. `tasks/test-records-flap-coverage.test.ts` holds one case per
+arm: a branch git named, the empty string a detached checkout produces, and
+the absent answer a directory outside a repository produces. Nothing in that
+file runs a subprocess or reads the surrounding checkout, so every arm runs on
+every machine.
+
 ### What the check says when the regression is not the pull request's
 
 The gate compares whole-group counts, so a flapping line fails whichever pull
@@ -387,6 +459,27 @@ line that lets the pull request through, and carries a prompt for a fresh agent
 session to make the lines cover the same way every time. The author's pull
 request is not the place to fix them, and it is not held up waiting for someone
 to.
+
+The prompt says where the measurement came from, so a session picking it up can
+locate it instead of reconstructing it: the page of the workflow run that
+measured the lines, the base-branch commit that run merged the pull request
+into, and — for each affected group — the baseline run its count was held
+against and the commit that run measured. The commit named for the measuring
+run is the base-branch commit rather than the pull request head, because a
+`pull_request` run measures `refs/pull/<number>/merge`, and because the
+question the reader has is what has landed on `main` since. The prompt hands
+them the command that answers it, `git log <base commit>.. -- <file>`, and
+tells them to say so and stop if a line has since changed or been given a test.
+
+Anything the run context does not name is left out rather than guessed at. A
+run of the checker outside GitHub Actions names no run page and no commit, and
+its prompt falls back to asking the reader to check what has landed since the
+measurement was taken.
+
+The identity travels on the rows the gate builds. Each row already records the
+baseline it was held against; it also records the run that measured it and the
+base-branch commit that run merged, both of which the check has in hand when it
+scores the row. The comment reads them back out of the rows it is given.
 
 Only files the pull request left alone are compared. A file it changed has
 different content in the two checkouts, so the same line number means a

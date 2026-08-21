@@ -42,6 +42,10 @@ module is bundled. Reach for `bundle` when the module has to run in a realm the
 test page creates -- an iframe or a worker -- which loads it by URL and so
 cannot share the test's own bundle.
 
+A project with no config file runs on the defaults. A config file that is there
+but cannot be imported ends the run before the browser starts, with a message
+naming the file and the error importing it produced.
+
 ## Stuck tests
 
 A test that waits on something which never arrives would otherwise hang until

@@ -8,14 +8,14 @@ The code is `packages/memory` (the store and protocol) plus
 
 > **Historical note, because you'll see traces of it in the code.** The
 > original storage engine ("v1") modeled storage as a chain of immutable
-> *facts* `{the, of, is, cause}` with per-fact compare-and-swap. Its engine
-> has been removed; what survives is its type vocabulary (`URI`,
-> `ConflictError`, `MIME`, the fact shape in `interface.ts`/`fact.ts`),
-> reused by the current engine ("v2", `packages/memory/v2/`). V2 keeps the
-> spirit — optimistic concurrency over append-only history — but moves the
-> unit of conflict from single facts to **commits with read-set
-> validation**, which is what's described below. Toolshed and the runtime
-> speak only v2.
+> *facts* `{the, of, is, cause}` with per-fact compare-and-swap. Both its
+> engine and its fact vocabulary have been removed; what survives is a
+> handful of names (`URI`, `ConflictError`, `MIME`, and `State` — now just
+> an address and the value it holds — in `interface.ts`), reused by the
+> current engine ("v2", `packages/memory/v2/`). V2 keeps the spirit —
+> optimistic concurrency over append-only history — but moves the unit of
+> conflict from single facts to **commits with read-set validation**, which
+> is what's described below. Toolshed and the runtime speak only v2.
 
 ## The data model: documents in spaces
 

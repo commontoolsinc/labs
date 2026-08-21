@@ -72,7 +72,7 @@ export async function dismissDialogs(e: DialogEvent) {
 export class Page extends EventTarget {
   private page: AstralPage | null;
   private timeout: number;
-  private afterNavigation?: () => Promise<void> | void;
+  private afterNavigation: Array<() => Promise<void> | void> = [];
   private interactionObserver?: InteractionObserver;
   private defaultTypeDelay = 0;
   private decoratedElements = new WeakSet<AstralElementHandle>();
@@ -277,8 +277,27 @@ export class Page extends EventTarget {
     this.defaultTypeDelay = delay;
   }
 
-  setAfterNavigationHook(hook?: () => Promise<void> | void): void {
-    this.afterNavigation = hook;
+  // Registers `hook` to run after every navigation this page performs, once
+  // the navigation itself has settled. Hooks run in the order they were added,
+  // and the returned function removes this one. A page carries several at a
+  // time: the shell driver waits here for the shell to finish booting, and a
+  // presentation run starts its recorder here.
+  addAfterNavigationHook(hook: () => Promise<void> | void): () => void {
+    this.afterNavigation.push(hook);
+    return () => {
+      const index = this.afterNavigation.indexOf(hook);
+      if (index >= 0) this.afterNavigation.splice(index, 1);
+    };
+  }
+
+  private async runAfterNavigationHooks(): Promise<void> {
+    // Over a snapshot, so a hook registered by a hook waits for the next
+    // navigation. Each is re-checked against the live list, so a hook whose
+    // remover ran while an earlier hook was awaiting does not run afterwards.
+    for (const hook of [...this.afterNavigation]) {
+      if (!this.afterNavigation.includes(hook)) continue;
+      await hook();
+    }
   }
 
   async setViewportSize(
@@ -368,7 +387,7 @@ export class Page extends EventTarget {
     if (waitUntil === "none") {
       const result = await celestial.Page.navigate(navigateOptions);
       if (result.errorText) throw new Error(result.errorText);
-      await this.afterNavigation?.();
+      await this.runAfterNavigationHooks();
       return;
     }
     const lifecycleNames = waitUntil === "load"
@@ -535,7 +554,7 @@ export class Page extends EventTarget {
     }
     if (navigationFailed) throw navigationError;
     if (cleanupFailed) throw cleanupError;
-    await this.afterNavigation?.();
+    await this.runAfterNavigationHooks();
   }
 
   // Passthru of `@astral/astral`'s `Page#reload`
@@ -543,7 +562,7 @@ export class Page extends EventTarget {
     this.checkIsOk();
     await this.runNavigation(async () => {
       await this.page!.reload(options);
-      await this.afterNavigation?.();
+      await this.runAfterNavigationHooks();
     });
   }
 

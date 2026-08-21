@@ -27,6 +27,7 @@
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",
     "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
+    "./framework-result-keys": "./src/framework-result-keys.ts",
     "./logger": "./src/logger.ts",
     "./markdown": "./src/markdown.ts",
     "./objects": "./src/objects.ts",

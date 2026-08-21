@@ -14,7 +14,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
@@ -449,7 +448,6 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
       the: type,
       of: entity,
       is: { value },
-      cause: hashOf({ the: type, of: entity }),
       since: 1,
     });
     const selector: SchemaPathSelector = { path: ["value"], schema: true };
@@ -491,7 +489,6 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
       the: type,
       of: entity,
       is: { value },
-      cause: hashOf({ the: type, of: entity }),
       since: 1,
     });
     const selector: SchemaPathSelector = { path: ["value"], schema: true };

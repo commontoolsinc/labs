@@ -829,18 +829,18 @@ export default pattern((_) => {
       cancel();
     });
 
-    it("renders nested pattern components when page UI is typed unknown", async () => {
-      const unknownUiPattern =
-        `import { NAME, pattern, UI } from "commonfabric";
+    it("renders a nested pattern component placed in a parent's tree", async () => {
+      const nestedPattern =
+        `import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 interface ChildOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 interface ParentOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
 }
 
 const Child = pattern<unknown, ChildOutput>(() => {
@@ -863,18 +863,18 @@ export default pattern<unknown, ParentOutput>(() => {
   };
 });`;
 
-      const unknownUiProgram: Program = {
+      const nestedProgram: Program = {
         main: "/main.tsx",
         files: [{
           name: "/main.tsx",
-          contents: unknownUiPattern,
+          contents: nestedPattern,
         }],
       };
 
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const page = await rt.createPage(unknownUiProgram, session.space, {
+      const page = await rt.createPage(nestedProgram, session.space, {
         run: true,
       });
       const mock = new MockDoc(

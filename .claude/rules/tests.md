@@ -104,18 +104,20 @@ test compiles, or it fails at the read. It compiles and type-checks either way,
 so nothing earlier reports the omission.
 
 A file the pattern names in a `dataFile()` call is attached by whichever
-command builds the program, so a test that stores the file under the program
-root at the path the call names needs to say nothing further. A file the source
-cannot name — one read by a computed path — is added where the test builds its
-program: `--datafile` on `cf test`, the `dataFiles` field of a
+command builds the program, so a test whose fixture sits where the call says it
+does needs to say nothing further. The path resolves against the module that
+reads it — `./data/cities.json` is the file beside the pattern — so it names
+the same file whichever root the runner assembles the program with. A file the
+source cannot name — one read by a computed path — is added where the test
+builds its program: `--datafile` on `cf test`, the `dataFiles` field of a
 `generated-patterns` scenario, or `dataFilePaths` on the `resolveLocalProgram`
 call a browser integration test makes. A browser test needs nothing beyond that
 — the data reaches the browser through the space, inside the compiled pattern,
 not from the filesystem. A name with no file behind it fails the build, saying
 which module read it; an unattached file the source could not name shows up as
-`No attached data file "<path>"` when the pattern runs, and the message lists
-what is attached. That one function is the only sanctioned way to build a
-program from local files, and
+`No attached data file "<path>"` when the pattern runs, naming the path the
+read resolved to and what is attached. That one function is the only sanctioned
+way to build a program from local files, and
 `deno task check-local-program` fails a `FileSystemProgramResolver` constructed
 anywhere else — a program assembled by hand carries no data files and says
 nothing about it.

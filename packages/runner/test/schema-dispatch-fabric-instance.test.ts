@@ -20,7 +20,6 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Entity,
@@ -55,7 +54,6 @@ const traverserOver = (
     the: type,
     of: entity,
     is: { value },
-    cause: hashOf({ the: type, of: entity }),
     since: 1,
   });
   for (const [linkedUri, value] of Object.entries(linkedValues)) {
@@ -64,7 +62,6 @@ const traverserOver = (
       the: type,
       of: linkedEntity,
       is: { value },
-      cause: hashOf({ the: type, of: linkedEntity }),
       since: 1,
     });
   }

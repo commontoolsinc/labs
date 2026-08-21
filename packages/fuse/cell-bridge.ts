@@ -5,9 +5,10 @@
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
 import type { JSONSchema } from "@commonfabric/api";
-import type {
-  PieceController,
-  PiecePatternRef,
+import { Identity } from "@commonfabric/identity";
+import {
+  type PieceController,
+  type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
 import type { Cell } from "@commonfabric/runner";
@@ -120,9 +121,6 @@ function displayCallableInputType(
       : undefined;
   return schemaToTypeString(schema, { defs, maxDepth: 3 });
 }
-// Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
-// time (breaks tests that only use CellBridge for tree/symlink logic).
-// import { loadPieces } from "../cli/lib/piece.ts";
 
 /**
  * Parse YAML frontmatter from a markdown string.
@@ -206,6 +204,19 @@ type PiecesLoader = (config: {
   identity: string;
   deferSpaceCellSync?: boolean;
 }) => Promise<PiecesController>;
+
+/**
+ * Opens one space against the API the mount was started with, authenticating
+ * with the PKCS#8 identity file it was given. Used whenever the caller
+ * injected no loader of its own.
+ */
+const openSpacePieces: PiecesLoader = async (config) =>
+  await PiecesController.initialize({
+    apiUrl: config.apiUrl,
+    space: config.space,
+    identity: await Identity.fromPkcs8(await Deno.readFile(config.identity)),
+    deferSpaceCellSync: config.deferSpaceCellSync,
+  });
 
 export interface CellBridgeOptions {
   cfcAnnotations?: boolean;
@@ -472,11 +483,7 @@ export class CellBridge {
     for (const [spaceName, state] of spaces) {
       try {
         const loadPieces = this.reconnectPiecesLoader ??
-          this.piecesLoader ??
-          // The CLI's loader is the fallback for a caller that injected none,
-          // which keeps the bridge off the CLI's module graph.
-          // deno-lint-ignore cf-imports/no-inline-module-import
-          (await import("../cli/lib/piece.ts")).loadPieces;
+          this.piecesLoader ?? openSpacePieces;
         const probe = await loadPieces({
           apiUrl: this.apiUrl,
           space: spaceName,
@@ -567,11 +574,7 @@ export class CellBridge {
   private async createSpacePieces(
     spaceName: string,
   ): Promise<PiecesController> {
-    const loadPieces = this.piecesLoader ??
-      // The CLI's loader is the fallback for a caller that injected none, which
-      // keeps the bridge off the CLI's module graph.
-      // deno-lint-ignore cf-imports/no-inline-module-import
-      (await import("../cli/lib/piece.ts")).loadPieces;
+    const loadPieces = this.piecesLoader ?? openSpacePieces;
     return await loadPieces({
       apiUrl: this.apiUrl,
       space: spaceName,

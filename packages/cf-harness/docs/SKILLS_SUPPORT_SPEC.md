@@ -277,9 +277,10 @@ from the mutable workspace cwd. Other executable shebang scripts are indexed for
 metadata, but are not executable by `run_skill_script` in v1.
 
 Bundled scripts that wrap host-adjacent tools should still be parameterized and
-policy-shaped. For example, the `agent-browser` scripts require an explicit
-local `--cdp` origin, avoid saved browser state and filesystem capture commands,
-and emit snapshots/text to stdout so the harness can capture the run artifact.
+policy-shaped. For example, the `agent-browser` scripts attach only to the local
+CDP origin their environment supplies, avoid saved browser state and filesystem
+capture commands, and emit snapshots/text to stdout so the harness can capture
+the run artifact.
 
 The default execution target is the sandbox direct argv API, not a
 model-authored shell string. The default cwd is the workspace root, even if the
@@ -298,8 +299,12 @@ Subagent profiles may opt exact allowlisted scripts into host execution when the
 script is specifically a host-adjacent integration helper. The browser profile
 uses this for the bundled `agent-browser` scripts so they can call the host
 `agent-browser` CLI attached to the Browser Access CDP endpoint leased to the
-child task. Host-target `agent-browser` scripts must pass `--cdp` explicitly and
-the harness rejects values that do not match the lease. Host-target scripts
+child task. The endpoint is harness-side state: the harness injects it as
+`AGENT_BROWSER_CDP` in the script environment, rejects a `--cdp` argument, and
+scrubs endpoint echoes — verbatim, URL-encoded, or bare host:port — from the
+script output the model reads. The scripts themselves are trusted with the
+endpoint the way any digest-pinned bundled code is; the scrub is a backstop
+against accidental echoes, not the confinement mechanism. Host-target scripts
 receive host paths in `SKILL_DIR` and `SKILL_SCRIPT` and
 `CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET=host`; they run with a cleared
 subprocess environment plus a controlled `PATH` and explicit `CF_HARNESS_*` /

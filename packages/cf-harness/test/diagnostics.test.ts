@@ -408,45 +408,15 @@ Deno.test("classifyBashToolFailure prefers the missing subcommand from shell out
   });
 });
 
-Deno.test("classifyBuiltinToolFailure records host shell failures without sandbox capability claims", () => {
+Deno.test("classifyBuiltinToolFailure records invalid browser actions as not allowed", () => {
   const failure = classifyBuiltinToolFailure(
-    "bash-no-sandbox",
-    { command: "agent-browser --help" },
+    "browser",
+    { action: "eval" },
     {
-      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-      stdout: "",
-      stderr: "bash: agent-browser: command not found",
-      exitCode: 127,
-      cwd: "/workspace",
-    },
-    "2026-04-23T18:25:00.000Z",
-  );
-
-  assertEquals(failure, {
-    type: "cf-harness.failure-record",
-    kind: "missing_binary",
-    source: "tool_output",
-    detail: "agent-browser was not found while executing a shell command.",
-    at: "2026-04-23T18:25:00.000Z",
-    toolId: "bash-no-sandbox",
-    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-    command: "agent-browser --help",
-    commandName: "agent-browser",
-    exitCode: 127,
-  });
-});
-
-Deno.test("classifyBuiltinToolFailure records denied browser host commands", () => {
-  const failure = classifyBuiltinToolFailure(
-    "bash-no-sandbox",
-    { command: "git status" },
-    {
-      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-      stdout: "",
-      stderr:
-        "bash-no-sandbox command denied: git is not allowed in the browser host profile",
-      exitCode: 126,
-      cwd: "/workspace",
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "invalid_input",
+      message: "action must be one of: open, snapshot",
     },
     "2026-04-23T18:26:00.000Z",
   );
@@ -455,14 +425,52 @@ Deno.test("classifyBuiltinToolFailure records denied browser host commands", () 
     type: "cf-harness.failure-record",
     kind: "tool_not_allowed",
     source: "tool_output",
-    detail:
-      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    detail: "action must be one of: open, snapshot",
     at: "2026-04-23T18:26:00.000Z",
-    toolId: "bash-no-sandbox",
-    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
-    command: "git status",
-    exitCode: 126,
+    toolId: "browser",
+    outputId: createToolOutputId("run-host", "browser", 1),
   });
+});
+
+Deno.test("classifyBuiltinToolFailure records a browser run without its lease as a harness error", () => {
+  const failure = classifyBuiltinToolFailure(
+    "browser",
+    { action: "snapshot" },
+    {
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "lease_unavailable",
+      message: "Browser Access lease has expired",
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "harness_error",
+    source: "tool_output",
+    detail: "Browser Access lease has expired",
+    at: "2026-04-23T18:26:00.000Z",
+    toolId: "browser",
+    outputId: createToolOutputId("run-host", "browser", 1),
+  });
+});
+
+Deno.test("classifyBuiltinToolFailure leaves browser page-level failures to the model", () => {
+  const failure = classifyBuiltinToolFailure(
+    "browser",
+    { action: "click", ref: "@e5" },
+    {
+      outputId: createToolOutputId("run-host", "browser", 1),
+      status: "error",
+      code: "command_failed",
+      message: "error: ref @e5 not found",
+      exitCode: 1,
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, undefined);
 });
 
 Deno.test("classifyBuiltinToolFailure records blocked web_fetch URLs", () => {

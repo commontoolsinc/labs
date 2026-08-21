@@ -2184,7 +2184,27 @@ function reportMissingLinkTarget(
 function getTrackerKey(
   address: IMemorySpaceAddress,
 ): string {
-  return `${address.space}/${address.scope ?? "space"}/${address.id}`;
+  return schemaTrackerKey(address.space, address.id, address.scope);
+}
+
+/**
+ * Key under which a document's reached selectors are recorded in a schema
+ * tracker. An absent scope keys as `space`, matching how storage defaults one.
+ *
+ * Every writer of a tracker key builds it here, as does the query side that
+ * looks one up. `isLinkedDocumentCovered` is the exception: it builds its
+ * lookup key from a link's own `scope` without that default, so a link whose
+ * scope is absent looks up a key no writer produces and the coverage check
+ * answers "not covered". That is why it is spelled out there rather than
+ * calling this — routing it through here changes which documents a traversal
+ * re-walks, which is a behavioral change rather than a tidy-up.
+ */
+export function schemaTrackerKey(
+  space: string,
+  id: string,
+  scope?: CellScope | null,
+): `${string}/${CellScope}/${string}` {
+  return `${space}/${scope ?? "space"}/${id}`;
 }
 
 /**
@@ -2323,10 +2343,10 @@ function followPointer(
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
     if (error.name === "NotFoundError" && error.path.length === 0) {
-      // If the object we're pointing to is a retracted fact, just return undefined.
+      // If the address we're pointing to holds no value, just return undefined.
       logger.info(
         "traverse",
-        () => ["followPointer found missing/retracted fact", valueEntry],
+        () => ["followPointer found missing document", valueEntry],
       );
       // A target absent from the replica may simply never have been pulled —
       // report it for an async load. This read still resolves notFound; the
@@ -2389,7 +2409,7 @@ function followPointer(
       const lastValue = tx.readOrThrow(partialTarget)!;
       // We can continue with the target, but provide the top level target doc
       // to getAtPath.
-      // An assertion fact.is will be an object with a value property, and
+      // A stored document's `is` is an object with a value property, and
       // that's what our schema is relative to.
       const partialTargetDoc = {
         address: partialTarget,
@@ -2410,7 +2430,7 @@ function followPointer(
 
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
-  // An assertion fact.is will be an object with a value property, and
+  // A stored document's `is` is an object with a value property, and
   // that's what our schema is relative to.
   const targetDoc = {
     address: target,
@@ -2435,7 +2455,8 @@ function trackVisitedDoc(
       internPathSelector(selector),
     );
   }
-  // Load the metadata-linked docs recursively unless we're a retracted fact.
+  // Load the metadata-linked docs recursively unless the address holds no
+  // value.
   if (context.includeMeta) {
     // Loading metadata requires the full doc. Ignore this read for scheduling.
     const { ok: fullDoc } = tx.read(

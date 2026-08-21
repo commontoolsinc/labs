@@ -1,35 +1,30 @@
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   internPathSelector,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import {
-  CompoundCycleTracker,
+  createGraphQueryWalkStats,
   createSchemaMemo,
-  createTraversalContext,
-  getAtPath,
+  GraphQueryWalk,
+  type GraphQueryWalkStats,
   type IAttestation,
-  type IMemorySpaceValueAttestation,
-  loadMetaLinkedDocs,
-  ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
-  SchemaObjectTraverser,
+  type SchemaMemo,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
-  type TraversalContext,
-} from "@commonfabric/runner/traverse";
+  schemaTrackerKey,
+} from "@commonfabric/runner/graph-query";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-import type { JSONSchema } from "../../runner/src/builder/types.ts";
-import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../../runner/src/schema-registry.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
@@ -48,46 +43,22 @@ export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
-  memo: ReturnType<typeof createSchemaMemo>;
+  memo: SchemaMemo;
   manager: EngineObjectManager;
 };
 
-export type QueryTraversalStats = {
+/**
+ * What one query cost: the walk's own counters, plus how many documents the
+ * query read out of the engine.
+ */
+export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
-  coveredSelectorSkips: number;
-  schemaTraversals: number;
-  pointerTraversals: number;
-  arrayTraversals: number;
-  objectTraversals: number;
-  dagTraversals: number;
-  getDocAtPathCalls: number;
-  schemaMemoHits: number;
 };
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
-  coveredSelectorSkips: 0,
-  schemaTraversals: 0,
-  pointerTraversals: 0,
-  arrayTraversals: 0,
-  objectTraversals: 0,
-  dagTraversals: 0,
-  getDocAtPathCalls: 0,
-  schemaMemoHits: 0,
+  ...createGraphQueryWalkStats(),
 });
-
-const addTraverserStats = (
-  stats: QueryTraversalStats,
-  traverser: SchemaObjectTraverser<FabricValue>,
-): void => {
-  stats.schemaTraversals += traverser.traverseWithSchemaCalls;
-  stats.pointerTraversals += traverser.traversePointerCalls;
-  stats.arrayTraversals += traverser.traverseArrayCalls;
-  stats.objectTraversals += traverser.traverseObjectCalls;
-  stats.dagTraversals += traverser.traverseDAGCalls;
-  stats.getDocAtPathCalls += traverser.getDocAtPathCalls;
-  stats.schemaMemoHits += traverser.schemaMemoHits;
-};
 
 export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
@@ -599,19 +570,17 @@ export const trackGraph = (
     );
     reuse?.managers?.set(managerKey, manager);
   }
-  const tracker = new CompoundCycleTracker<
-    FabricValue,
-    JSONSchema | undefined
-  >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
-  const traversalContext = createTraversalContext(
-    tracker,
-    schemaTracker,
-    true,
-  );
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
+  const walk = new GraphQueryWalk({
+    manager,
+    space: space as MemorySpace,
+    schemaTracker,
+    memo: sharedMemo,
+    stats,
+  });
 
   validateSelectorSchemaRefs(space, manager, branch, query.roots);
 
@@ -624,15 +593,7 @@ export const trackGraph = (
       type: "application/json",
     });
     if (loaded !== null) {
-      loadFactsForDoc(
-        manager,
-        loaded,
-        selector,
-        traversalContext,
-        space,
-        sharedMemo,
-        stats,
-      );
+      walk.visit(loaded, selector);
     } else {
       schemaTracker.add(
         toDocKey(space, root.id, rootScope),
@@ -927,93 +888,13 @@ export const refreshTrackedGraph = (
   };
 };
 
-const loadFactsForDoc = (
-  manager: EngineObjectManager,
-  fact: IAttestation,
-  selector: SchemaPathSelector,
-  traversalContext: TraversalContext,
-  space: string,
-  sharedMemo: ReturnType<typeof createSchemaMemo>,
-  stats: QueryTraversalStats,
-) => {
-  if (selector.schema === undefined) {
-    selector = { ...selector, schema: false };
-  }
-
-  const docKey = toDocKey(
-    space,
-    fact.address.id,
-    fact.address.scope ?? DEFAULT_SCOPE,
-  );
-  const internedSelector = internPathSelector(selector);
-  if (
-    schemaTrackerCoversSelector(
-      traversalContext.schemaTracker,
-      docKey,
-      internedSelector,
-    )
-  ) {
-    stats.coveredSelectorSkips++;
-    return;
-  }
-  traversalContext.schemaTracker.add(docKey, internedSelector);
-
-  if (!isObjectNotArray(fact.value)) {
-    return;
-  }
-
-  const tx = new ExtendedStorageTransaction(
-    new ManagedStorageTransaction({
-      load(address) {
-        return manager.load(address);
-      },
-    }),
-  );
-  const document = fact.value as { value: FabricValue };
-  const factValue: IMemorySpaceValueAttestation = {
-    address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
-    value: document.value,
-  };
-  const [nextDoc, nextSelector] = getAtPath(
-    tx,
-    factValue,
-    selector.path.slice(1),
-    traversalContext,
-    selector,
-  );
-  if (
-    nextDoc.value !== undefined &&
-    nextSelector !== undefined &&
-    nextSelector.schema !== false
-  ) {
-    const traverser = new SchemaObjectTraverser(
-      tx,
-      nextSelector,
-      traversalContext,
-      undefined,
-      sharedMemo,
-    );
-    traverser.traverse(nextDoc);
-    addTraverserStats(stats, traverser);
-  }
-
-  loadMetaLinkedDocs(
-    tx,
-    {
-      address: { ...fact.address, space: space as MemorySpace },
-      value: fact.value,
-    },
-    traversalContext,
-  );
-};
-
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
   address: { id: string; scope?: CellScope },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
-  sharedMemo: ReturnType<typeof createSchemaMemo>,
+  sharedMemo: SchemaMemo,
   stats: QueryTraversalStats,
 ) => {
   const loaded = manager.load(address);
@@ -1024,31 +905,22 @@ const evaluateTrackedDocument = (
     );
     return;
   }
-  const tracker = new CompoundCycleTracker<
-    FabricValue,
-    JSONSchema | undefined
-  >();
-  const traversalContext = createTraversalContext(
-    tracker,
-    schemaTracker,
-    true,
-  );
-  loadFactsForDoc(
+  // A fresh walk per document, so each starts with an empty pointer-cycle
+  // tracker while sharing the query's reach and its memoized schema results.
+  new GraphQueryWalk({
     manager,
-    loaded,
-    selector,
-    traversalContext,
-    space,
-    sharedMemo,
+    space: space as MemorySpace,
+    schemaTracker,
+    memo: sharedMemo,
     stats,
-  );
+  }).visit(loaded, selector);
 };
 
 export const toDocKey = (
   space: string,
   id: string,
   scope: CellScope = DEFAULT_SCOPE,
-): QueryDocKey => `${space}/${scope}/${id}`;
+): QueryDocKey => schemaTrackerKey(space, id, scope);
 
 export const fromDocKey = (key: QueryDocKey): {
   space: string;

@@ -17,6 +17,10 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`schema-graph-queries.md`](schema-graph-queries.md) — the query that asks
+  which documents a schema reaches, why the client and the memory server run
+  one implementation of it, what the two packages exchange to do that, and
+  what the resulting coupling costs
 - [`patch-operations.md`](patch-operations.md) — the family of single logical
   changes a commit carries, the registries that define each one exactly once,
   and how to add a new one across the memory, runner, api, and transformer
