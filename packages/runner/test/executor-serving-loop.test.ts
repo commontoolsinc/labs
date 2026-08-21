@@ -46,6 +46,7 @@ import {
 } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   // Delegate to the base connectTo (shared-harness extraction, CT-1962):
@@ -380,6 +381,61 @@ describe("stage F serving loop", () => {
     expect(
       watermarkCell(servingRuntime!, space).get()?.seq,
     ).toBeGreaterThanOrEqual(authored2);
+  });
+
+  it("records a wave's duration and its phases as timing spans, which the §7 counters cannot carry", async () => {
+    // `wavesBudgetExhausted` is a censored measurement: a wave that
+    // overruns the flush deadline reports that deadline however far past
+    // it the wave ran, so the counter alone cannot tell a loop barely
+    // over its budget from one an order of magnitude over. These spans
+    // carry the distribution, `/api/health/stats` reports them as its
+    // `timingStats.executor` block, and both
+    // `docs/development/debugging/profiling.md` and
+    // `skills/perf-investigation/SKILL.md` name the keys as the way to
+    // read a wave's cost. Nothing else fails when a rename leaves those
+    // documents pointing at rows that no longer exist, so the assertion
+    // here is on the KEY NAMES — never on a duration, which belongs to
+    // the machine.
+    const timing = getLogger("executor");
+    const cycles = () =>
+      timing.getTimeStats("executor", "wave", "cycle")?.count ?? 0;
+    const drains = () =>
+      timing.getTimeStats("executor", "wave", "drain")?.count ?? 0;
+    const settles = () =>
+      timing.getTimeStats("executor", "wave", "settle")?.count ?? 0;
+    const before = { cycle: cycles(), drain: drains(), settle: settles() };
+
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "wave-timing-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ n: 7 });
+    expect((await tx.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+
+    // Read with the loop stopped. A running loop records a cycle's drain
+    // before the cycle that encloses it, so the counts differ by one at an
+    // arbitrary observation point and only agree at rest.
+    await host.close();
+
+    // Every cycle runs its drain and its settle, so at rest the three
+    // counts agree — a phase recorded on only some paths through the cycle
+    // shows up here as a shortfall rather than as a silently partial
+    // picture of where a wave's time went.
+    const served = cycles() - before.cycle;
+    expect(served).toBeGreaterThanOrEqual(1);
+    expect(drains() - before.drain).toBe(served);
+    expect(settles() - before.settle).toBe(served);
   });
 
   it("retries a demanded root the loader could not start YET: demand precedes the instantiation commit (the creation race), the deferred ensure re-attempts on a later cycle, and the piece serves", async () => {

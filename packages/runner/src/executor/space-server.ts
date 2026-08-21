@@ -121,6 +121,16 @@ import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
 
+/**
+ * Timing-only logger for the wave's phases. The §7 counters say how many
+ * waves ran and how many hit the deadline; these say how long they took and
+ * where inside one the time went. Recorded whether or not a logger is
+ * enabled, and reported by `/api/health/stats` as `timingStats.executor` —
+ * so a serving toolshed answers "how long is a wave" over HTTP, with
+ * nothing switched on.
+ */
+const timing = getLogger("executor", { enabled: false });
+
 /** Consecutive not-yet-loadable deferrals of ONE demanded root after
  * which the root counts as STUCK (`stats.structureLoadStuck`, once per
  * crossing) and the loop WARNS (`structure-load-stuck`, again at each
@@ -1911,7 +1921,19 @@ export class SpaceServer implements TransactionSealDestination {
     this.#loopRunning = true;
     try {
       while (this.#active && !this.#parkRequested) {
-        await this.#waveCycle();
+        // `wavesBudgetExhausted` says a cycle reached the flush deadline
+        // and nothing more: every overrunning wave reports that same
+        // deadline however far past it the wave ran, so the counter alone
+        // cannot separate a loop barely over its budget from one an order
+        // of magnitude over. This span carries the distribution the
+        // counter censors, and pairs with it rather than replacing it —
+        // the count says how often, the p95 says by how much.
+        const cycleStart = performance.now();
+        try {
+          await this.#waveCycle();
+        } finally {
+          timing.time(cycleStart, "executor", "wave", "cycle");
+        }
         if (!this.#active || this.#parkRequested) break;
         if (!this.#hasWork()) {
           const idleParkMs = this.#options.policy?.idleParkMs ??
@@ -3163,8 +3185,12 @@ export class SpaceServer implements TransactionSealDestination {
     // that under the deadline race below): dispatch auto-loads a
     // handler's piece itself (ensurePieceRunning), and a genuinely
     // cold view defers on the input/backstop cadence — the
-    // creation-race arm the deferral budget was sized for.
+    // creation-race arm the deferral budget was sized for. Being ahead of
+    // the race and fully awaited is also why the drain is timed: it is
+    // wave duration that no deadline bounds and no counter reports.
+    const drainStart = performance.now();
     const drainedEvents = await this.#drainStreamEvents(runtime);
+    timing.time(drainStart, "executor", "wave", "drain");
     this.#retireAckedEffects(runtime);
 
     // Settle to quiescence under the flush deadline: idle() is the wave
@@ -3211,6 +3237,11 @@ export class SpaceServer implements TransactionSealDestination {
         this.#feedArrived?.resolve();
       });
     let exhausted = false;
+    // The segment the deadline actually cuts. Read against
+    // `executor/wave/cycle`: a settle at the deadline inside a much longer
+    // cycle means the wave's cost is the seal and the commit, not the
+    // derivations, and the two are fixed in different places.
+    const settleStart = performance.now();
     try {
       while (true) {
         // RACE the deadline (serving-loop.md §3's second exhaustion
@@ -3263,6 +3294,7 @@ export class SpaceServer implements TransactionSealDestination {
         }
       }
     } finally {
+      timing.time(settleStart, "executor", "wave", "settle");
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
     }
 
