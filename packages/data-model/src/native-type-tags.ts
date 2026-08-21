@@ -71,7 +71,7 @@ export function isNativeError(value: unknown): value is Error {
 /**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
- * special primitives), or `null` otherwise.
+ * `FabricPrimitive`s), or `null` otherwise.
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the

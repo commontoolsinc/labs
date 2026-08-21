@@ -1,5 +1,5 @@
 /**
- * Converting between native JS values and fabric values, in both directions
+ * Converting between native JS values and `FabricValue`s, in both directions
  * and at both depths, plus the predicate saying in advance whether a value
  * will make it across.
  *
@@ -710,7 +710,7 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("passes Fabric values through", () => {
+    describe("passes `FabricValue`s through", () => {
       it("passes a `FabricPrimitive` value through unchanged", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
         expect(shallowFabricFromNativeValue(bytes)).toBe(bytes);
@@ -858,7 +858,7 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are fabric primitives and
+    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
     // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
       it("passes an interned symbol through", () => {
@@ -1086,7 +1086,7 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("passes Fabric values through", () => {
+    describe("passes `FabricValue`s through", () => {
       it("returns a `FabricPrimitive` value as-is", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
         expect(fabricFromNativeValue(bytes)).toBe(bytes);
@@ -1237,14 +1237,14 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("throws for non-fabric nested values", () => {
+    describe("throws for nested non-`FabricValue`s", () => {
       it("throws for nested unique symbol", () => {
         expect(() => fabricFromNativeValue({ val: Symbol("test") })).toThrow(
           "Not representable as a `FabricValue`: unique (uninterned) symbol",
         );
       });
 
-      it("throws for deeply nested non-fabric value", () => {
+      it("throws for a deeply nested non-`FabricValue`", () => {
         expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
           .toThrow(
             "Not representable as a `FabricValue`: unique (uninterned) symbol",
@@ -1752,7 +1752,7 @@ describe("native-conversion", () => {
       });
     });
 
-    // Registry-interned symbols (`Symbol.for(key)`) are fabric primitives and
+    // Registry-interned symbols (`Symbol.for(key)`) are `FabricValue`s and
     // pass through; unique symbols (`Symbol(desc)`) are rejected.
     describe("interned symbols", () => {
       it("passes an interned symbol through", () => {
@@ -1996,7 +1996,7 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("fabric values", () => {
+    describe("`FabricValue`s", () => {
       it("returns `true` for `FabricInstance` (e.g. `FabricError`) values", () => {
         expect(
           isValidFabricConvertibleValue(
@@ -2016,12 +2016,12 @@ describe("native-conversion", () => {
     });
 
     describe("containers", () => {
-      it("returns `true` for plain objects with fabric values", () => {
+      it("returns `true` for plain objects with `FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({ a: 1, b: "hello", c: null }))
           .toBe(true);
       });
 
-      it("returns `true` for arrays with fabric values", () => {
+      it("returns `true` for arrays with `FabricValue`s", () => {
         expect(isValidFabricConvertibleValue([1, "hello", null, true])).toBe(
           true,
         );
@@ -2049,17 +2049,17 @@ describe("native-conversion", () => {
           .toBe(true);
       });
 
-      it("returns `false` for objects with non-fabric nested values", () => {
+      it("returns `false` for objects with nested non-`FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({ a: 1, b: Symbol("bad") })).toBe(
           false,
         );
       });
 
-      it("returns `false` for arrays with non-fabric elements", () => {
+      it("returns `false` for arrays with non-`FabricValue` elements", () => {
         expect(isValidFabricConvertibleValue([1, Symbol("bad")])).toBe(false);
       });
 
-      it("returns `false` for deeply nested non-fabric values", () => {
+      it("returns `false` for deeply nested non-`FabricValue`s", () => {
         expect(isValidFabricConvertibleValue({
           a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
         })).toBe(false);

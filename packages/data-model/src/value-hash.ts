@@ -248,7 +248,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (special primitives, `FabricInstance`, `Array`,
+ * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
  * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).

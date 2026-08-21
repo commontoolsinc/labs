@@ -164,7 +164,7 @@ export function shallowMutableClone<T extends FabricValue>(
  *
  * When `force` is false, returns the value as-is if its frozenness already
  * matches the requested state. When `force` is true, always copies (unless
- * the value is a primitive or special primitive).
+ * the value is a primitive or a `FabricPrimitive`).
  *
  * Deep mode uses `isValidDeepFrozenFabricValue()` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
@@ -233,11 +233,11 @@ export function cloneHelper(
       if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);
-      // A clone is built in the shape a fabric record has, the same way the
-      // array case above builds a fresh `Array`. Valid input is already
+      // A clone is built in the shape a `FabricPlainObject` has, the same way
+      // the array case above builds a fresh `Array`. Valid input is already
       // `Object.prototype`-rooted, so this changes nothing for it; input that
-      // reached here carrying some other prototype leaves canonical rather
-      // than propagating a shape no fabric value has.
+      // reached here carrying some other prototype leaves canonical rather than
+      // propagating a shape no `FabricValue` has.
       const copy = {} as Record<string, FabricValue>;
       if (deep) {
         for (const [key, val] of Object.entries(obj)) {

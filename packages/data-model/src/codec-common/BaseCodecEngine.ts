@@ -7,7 +7,7 @@ import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
- * Base class for a whole-value codec: the object that walks a fabric value
+ * Base class for a whole-value codec: the object that walks a `FabricValue`
  * into one wire format's transport tree and back. What lives here is the part
  * that consults the codec registry and acts on what it says; what a subclass
  * supplies is everything specific to how its format writes a container down.
@@ -130,7 +130,7 @@ export abstract class BaseCodecEngine<
   }
 
   /**
-   * Encodes a fabric value into this format's serialized form, ready to cross
+   * Encodes a `FabricValue` into this format's serialized form, ready to cross
    * whatever boundary the format exists for.
    *
    * Whether the result identifies itself is the format's to decide, and there
@@ -175,7 +175,7 @@ export abstract class BaseCodecEngine<
   }
 
   /**
-   * Decodes this format's serialized form back into a fabric value.
+   * Decodes this format's serialized form back into a `FabricValue`.
    *
    * `env` supplies what decoding needs beyond the data itself,
    * chiefly the ability to resolve a cell reference.

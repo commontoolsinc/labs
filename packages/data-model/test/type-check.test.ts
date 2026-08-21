@@ -7,8 +7,8 @@
  * arranged around where that difference tells.
  *
  * Frozen-ness is deliberately not part of membership, and a group here says so
- * outright -- the two are easy to conflate when nearly every fabric value in
- * circulation happens to be frozen. Cycles are handled rather than refused.
+ * outright -- the two are easy to conflate when nearly every `FabricValue`
+ * in circulation happens to be frozen. Cycles are handled rather than refused.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -73,7 +73,7 @@ describe("type-check", () => {
       });
     });
 
-    describe("given a container or fabric object", () => {
+    describe("given a container or `FabricSpecialObject`", () => {
       it("returns `true` for a plain object", () => {
         expect(isValidFabricValueLayer({})).toBe(true);
         expect(isValidFabricValueLayer({ a: 1 })).toBe(true);
@@ -113,16 +113,16 @@ describe("type-check", () => {
 
       it("returns `true` without recursively validating contents", () => {
         // `isValidFabricValueLayer()` is a shallow, per-se check; deep
-        // validation is `isValidFabricConvertibleValue()`'s job. A non-fabric
-        // nested value does not make the container itself fail the per-se
-        // check.
+        // validation is `isValidFabricConvertibleValue()`'s job. A nested
+        // value that is not a `FabricValue` does not make the container itself
+        // fail the per-se check.
         expect(isValidFabricValueLayer({ a: Symbol("x") })).toBe(true);
         expect(isValidFabricValueLayer([Symbol("x")])).toBe(true);
       });
     });
 
     describe("given a plain object with unrepresentable keys", () => {
-      // A symbol is a valid fabric *value* but not a property *name*:
+      // A symbol is a valid `FabricValue` but not a valid property *name*:
       // `FabricPlainObject` is keyed by `string`. A non-enumerable string key
       // has no representation either, being dropped by every encoding.
 
@@ -266,7 +266,7 @@ describe("type-check", () => {
 
   describe("isValidFabricValue()", () => {
     it("returns `true` for a schema using the `if` / `then` / `else` keywords", () => {
-      // This system's schemas are themselves fabric values, and JSON Schema
+      // This system's schemas are themselves `FabricValue`s, and JSON Schema
       // spells conditional subschemas with those three keywords. So `then` is
       // a data key a schema routinely carries, and reserving it -- as a
       // defense against promise resolution adopting a callable `then` -- would
@@ -433,14 +433,14 @@ describe("type-check", () => {
           .toBe(false);
       });
 
-      it("returns `false` for a non-fabric class instance (`Date`, `Map`, `Set`, `RegExp`)", () => {
+      it("returns `false` for a non-`FabricValue` class instance (`Date`, `Map`, `Set`, `RegExp`)", () => {
         expect(isValidFabricValue(new Date())).toBe(false);
         expect(isValidFabricValue(new Map())).toBe(false);
         expect(isValidFabricValue(new Set())).toBe(false);
         expect(isValidFabricValue(/regex/)).toBe(false);
       });
 
-      it("returns `false` for a non-fabric class instance nested in the graph", () => {
+      it("returns `false` for a non-`FabricValue` class instance nested in the graph", () => {
         expect(isValidFabricValue({ a: 1, d: new Date() })).toBe(false);
         expect(isValidFabricValue([1, [2, new Map()]])).toBe(false);
       });

@@ -108,7 +108,7 @@ describe("RealmCodecEngine", () => {
       // both attempts must fail the same way the first did.
       const engine = newDefaultRealmCodecEngine();
       const act = new RealmEncodeAct(engine, NULL_LIVE_ENVIRONMENT);
-      // A function is no kind of fabric value, so encoding the element throws
+      // A function is no kind of `FabricValue`, so encoding the element throws
       // from inside the array's own descent.
       const holder = [() => 1] as unknown as FabricValue;
 
@@ -916,7 +916,7 @@ describe("RealmCodecEngine", () => {
       // reached from inside another cannot disturb the outer one's. The way
       // to reach that with input the model admits is a codec calling back
       // through a public entry point -- a getter would do it in fewer lines
-      // and would not be a fabric value, accessors being rejected by Section
+      // and would not be a `FabricValue`, accessors being rejected by Section
       // 1.5 of `1-fabric-values.md`.
       //
       // Sequential calls would test nothing here: the outer has returned

@@ -4,7 +4,7 @@ import type { NonterminalCodec } from "./interface.ts";
 
 /**
  * Base class for a `NonterminalCodec`: one whose essential state is made of
- * fabric values, which the walker encodes in turn. One instance serves every
+ * `FabricValue`s, which the walker encodes in turn. One instance serves every
  * wire format.
  *
  * It adds nothing to {@link BaseFabricCodec} but the `FabricValue` domain and
