@@ -222,8 +222,9 @@ export function createJsonHighlighter(initial: string): Highlighter {
   };
 }
 
-/** A full JSON {@link Document}: colored lines, an object-key navigation tree,
- * and a name → declaration index over the keys. */
+/** Builds a full JSON {@link Document}. Every document has colored lines. A
+ * single top-level value can also contribute navigation and declaration
+ * entries for object keys and container array elements. */
 export function jsonDocument(text: string): Document {
   const lines = jsonHighlightLines(text);
   const definitions = new Map<string, Definition[]>();
