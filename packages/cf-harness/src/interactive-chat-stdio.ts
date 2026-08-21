@@ -67,6 +67,17 @@ export interface RunHarnessInteractiveChatStdioOptions {
 export interface HarnessInteractiveChatStdioCliOptions {
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
+  /**
+   * Raw `--host-mount` specs, in the batch CLI's grammar, left unresolved.
+   *
+   * Resolution is async (it realpaths and stats each source) and this parser is
+   * sync, so the caller hands these to `parseHostMountSpecs` from
+   * ./host-mounts.ts. The grammar and its validation are shared with the batch
+   * entrypoint deliberately: provisioning a chat session must not require
+   * learning a second mount vocabulary.
+   */
+  hostMountSpecs?: readonly string[];
+  maxModelTurns?: number;
   help: boolean;
 }
 
@@ -87,6 +98,9 @@ const usageText = `Usage: deno run -A src/interactive-chat-stdio.ts [options]
 Options:
   --chat-session-db <path>             Persist chat sessions, turns, and events in SQLite
   --chat-max-in-memory-events <count>  Retain at most count events in memory
+  --host-mount <spec>                  Extra host bind mount, same grammar as the batch CLI
+                                       (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
+  --max-model-turns <count>            Model turns allowed per user message (default 8)
   --help                              Print this help text to stderr
 
 Environment:
@@ -121,6 +135,17 @@ const parseNonNegativeIntegerOption = (
   return parsed;
 };
 
+const parsePositiveIntegerOption = (
+  name: string,
+  value: string | undefined,
+): number => {
+  const parsed = parseNonNegativeIntegerOption(name, value);
+  if (parsed === 0) {
+    throw new Error(`${name} requires a positive integer value`);
+  }
+  return parsed;
+};
+
 export const parseHarnessInteractiveChatStdioCliOptions = (
   args: readonly string[],
   env: Record<string, string | undefined> = Deno.env.toObject(),
@@ -134,10 +159,35 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
       env[CHAT_MAX_IN_MEMORY_EVENTS_ENV],
     );
   let help = false;
+  const hostMountSpecs: string[] = [];
+  let maxModelTurns: number | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--help" || arg === "-h") {
       help = true;
+      continue;
+    }
+    if (arg === "--host-mount") {
+      index += 1;
+      hostMountSpecs.push(nonEmptyOptionValue(arg, args[index]));
+      continue;
+    }
+    if (arg.startsWith("--host-mount=")) {
+      hostMountSpecs.push(
+        nonEmptyOptionValue("--host-mount", arg.slice("--host-mount=".length)),
+      );
+      continue;
+    }
+    if (arg === "--max-model-turns") {
+      index += 1;
+      maxModelTurns = parsePositiveIntegerOption(arg, args[index]);
+      continue;
+    }
+    if (arg.startsWith("--max-model-turns=")) {
+      maxModelTurns = parsePositiveIntegerOption(
+        "--max-model-turns",
+        arg.slice("--max-model-turns=".length),
+      );
       continue;
     }
     if (arg === "--chat-session-db") {
@@ -171,6 +221,8 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
       ? { sessionDbPath }
       : {}),
     ...(maxInMemoryEvents !== undefined ? { maxInMemoryEvents } : {}),
+    ...(hostMountSpecs.length > 0 ? { hostMountSpecs } : {}),
+    ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
     help,
   };
 };

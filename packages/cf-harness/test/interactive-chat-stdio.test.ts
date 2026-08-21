@@ -1199,3 +1199,46 @@ Deno.test("interactive NDJSON transport rejects invalid Browser Access profile m
 Deno.test("interactive stdio CLI help returns without starting the transport", async () => {
   assertEquals(await runHarnessInteractiveChatStdioCli(["--help"]), undefined);
 });
+
+Deno.test("interactive stdio CLI accepts the batch entrypoint's provisioning flags", () => {
+  // The interactive host used to parse three flags and throw on everything
+  // else, so an embedder could provision a batch run and not a chat session.
+  // Loom shipped cf-harness chat on that gap: no loom mount, no Page RPC, so
+  // page authoring silently vanished from chat.
+  assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([
+      "--host-mount",
+      "name=loom,source=/tmp,target=/loom,mode=readonly",
+      "--host-mount=name=gtd,source=/tmp,target=/gtd,mode=writable",
+      "--max-model-turns",
+      "64",
+    ], {}),
+    {
+      hostMountSpecs: [
+        "name=loom,source=/tmp,target=/loom,mode=readonly",
+        "name=gtd,source=/tmp,target=/gtd,mode=writable",
+      ],
+      maxModelTurns: 64,
+      help: false,
+    },
+  );
+});
+
+Deno.test("interactive stdio CLI rejects a zero model-turn budget", () => {
+  // 0 would mean "no model turns", which is not a smaller budget, it is a
+  // session that cannot answer.
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions(["--max-model-turns", "0"], {}),
+    Error,
+    "requires a positive integer",
+  );
+});
+
+Deno.test("interactive stdio CLI still rejects unknown arguments", () => {
+  assertThrows(
+    () => parseHarnessInteractiveChatStdioCliOptions(["--not-a-flag"], {}),
+    Error,
+    "unsupported interactive chat stdio argument",
+  );
+});
