@@ -2,7 +2,6 @@ import {
   deserializeKeyPairRaw,
   DID,
   Identity,
-  serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
 } from "@commonfabric/identity";
 import { AppView } from "@commonfabric/navigation";
@@ -41,8 +40,15 @@ export function isAppStateConfigKey(
   return false;
 }
 
+// The application state as it crosses the integration-test page boundary,
+// which carries only what JSON can express.
+//
+// An identity appears as its DID rather than as itself. That is what a reader
+// on the far side wants -- it is what names an identity in a comparison and in
+// a message -- and it is a public string, where the identity's key material is
+// a secret that a key pair holding `CryptoKey` handles cannot produce at all.
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
-  identity?: TransferrableInsecureCryptoKeyPair | null;
+  identityDid?: DID;
   apiUrl: string;
 };
 
@@ -107,25 +113,7 @@ export function serialize(
 ): AppStateSerialized {
   const { identity, apiUrl, ...other } = state;
   const out = other as unknown as AppStateSerialized;
-  // Identity key serialization uses array buffers and webcrypto references
-  // for JavaScript contexts. When serializing state here, its in service
-  // of transferring to astral, JSONish boundaries. Convert the key to
-  // buffers of `Array<number>`.
-  out.identity = identity
-    ? serializeKeyPairRaw(identity.serialize())
-    : undefined;
+  out.identityDid = identity?.did();
   out.apiUrl = apiUrl.toString();
-  return out;
-}
-
-export async function deserialize(
-  state: AppStateSerialized,
-): Promise<AppState> {
-  const { identity, apiUrl, ...other } = state;
-  const out = other as unknown as AppState;
-  out.identity = identity
-    ? await Identity.fromRaw(deserializeKeyPairRaw(identity).privateKey)
-    : undefined;
-  out.apiUrl = new URL(apiUrl);
   return out;
 }
