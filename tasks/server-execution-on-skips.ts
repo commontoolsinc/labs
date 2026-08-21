@@ -276,32 +276,36 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       file: "integration/profile-embed.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land), re-scoped by the optimize-on-main " +
-        "served-wish seat (ow48-50-wish-path-report.md): ONE killer, not " +
-        "two. The remaining blocker is OW49 — main's " +
-        "`assertNoDivergentIfcBranches` (runner cfc/schema-merge.ts, " +
-        "#3263) refuses the wish builtin's own /result declaration " +
-        '`anyOf[{type:"undefined"}, <requested schema>]` whenever the ' +
-        "requested schema carries ifc (the profile consumer view). Under " +
-        "ON the serving loop persists that envelope first, and the " +
-        "browser's raw:wish, writing a changed /result link against it, " +
-        "is refused in commit-prep — reproduced on a clean local env " +
-        "(fresh store, self-referential API_URL) and at unit level " +
-        "(runner test/cfc-prepare-crash-surfacing.test.ts). A CFC-owner " +
-        "merge-rule call (verification-coverage.md OW49); NOT a demand " +
+        "the FLIP, not the land), re-scoped twice by the optimize-on-main " +
+        "served-wish seat. The ORIGINAL killer — OW49, " +
+        "`assertNoDivergentIfcBranches` refusing the wish builtin's own " +
+        '`anyOf[{type:"undefined"}, <requested schema>]` /result ' +
+        "declaration — is FIXED: RULING 5 (CFC owner, 2026-08-21) narrowed " +
+        "the assert to actual ambiguity (verification-coverage.md OW49; " +
+        "runner cfc/schema-merge.ts), and 10 fresh-store live ON runs at " +
+        "the ruling head show the assert EXTINCT (0 occurrences; the wish " +
+        "UI mounts and the profile resolves every run). The lift attempt " +
+        "then surfaced the NEXT blocker: the resolved-profile AMEND steps " +
+        "are intermittently red (6/10 — setName/badge 4x, setBio 2x, " +
+        "300 s waits; passes take 19–41 s), and the amended values are " +
+        "durably ABSENT from EVERY run's store, pass and fail — the " +
+        "passing renders ride a non-durable echo. Standing signatures in " +
+        "every run: 60–70 foreign-write refusals of the home wave running " +
+        "the profile module's lifts (cf:module/…:applyInitialName, " +
+        "__cfLift_*) into the profile's own space with no §2b carriage, " +
+        "and the profile space never activates a serving wave — the " +
+        "rootcause §1 / OW45+OW31-family surface, newly REACHABLE now " +
+        "that OW49's kill is gone; row-mapping with the coordinator " +
+        "(triage: optimize/ruling5-ow49-report.md §3). NOT a demand " +
         "hole. Gate record: docs/history/plans/server-execution-v2/" +
         "stage-c/first-on-ci-gate.md; seat evidence: " +
         "docs/history/plans/server-execution-v2/optimize/" +
         "ow48-50-wish-path-report.md. " +
-        "OW48 (the #6098 TransformerError shape) was REFUTED as " +
-        "environment contamination — the investigation's serving " +
-        "runtimes fetched system patterns from a stale localhost:8000 " +
-        "toolshed (env.API_URL default) serving pre-#6019 sources; " +
-        "current sources compile green under every posture. OW50's " +
-        "failure surfacing is BUILT: the killed wish now shows `error` " +
-        "+ an error UI in its state instead of silently never mounting. " +
-        "Lifts when OW49 closes and the file greens ON; the flip PR " +
-        "needs this list EMPTY.",
+        "OW48 was REFUTED as environment contamination (stale " +
+        "localhost:8000 toolshed serving pre-#6019 sources); OW50's " +
+        "failure surfacing is BUILT. Lifts when the amend-convergence " +
+        "blocker closes and the file greens ON; the flip PR needs this " +
+        "list EMPTY.",
     },
     {
       file: "integration/home-profile-reload-durability.test.ts",

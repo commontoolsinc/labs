@@ -81,9 +81,60 @@ extended-storage-transaction, additive-default, boundary,
 cid-schema-verify, speculation-overlay) — 200 steps, all green under
 the CI preload.
 
-## 3. The lift attempt (profile-embed ON)
+## 3. The lift attempt (profile-embed ON) — NOT lifted; the next
+## blocker triaged
 
-_(recorded below when the runs complete)_
+Setup: the ON toolshed binary built at the ruling head
+(`deno task build-binaries toolshed` with
+`EXPERIMENTAL_SERVER_EXECUTION=true`), run per-iteration on :8125
+with a FRESH store, self-referential `API_URL`/`MEMORY_URL`, posture
+verified (`servingLoop` live); the pattern integration test run
+against it exactly as CI's ON lane does. Ten runs.
+
+**Result: 4 pass / 6 fail — not green, so per the ruling's own
+branch: triage, don't force. No lift, no OW49 closure.**
+
+What the ten runs establish:
+
+1. **OW49's kill is EXTINCT.** Zero `divergent anyOf` asserts in all
+   ten runs (server and test logs); the wish UI mounts every run, the
+   create surface drives, the profile resolves cross-space, and the
+   first render lands ("Ada Lovelace" badge). The pre-ruling clean-env
+   baseline at the merged head died at this assert before ANY of that.
+   The narrowing did exactly what the ruling predicted.
+2. **The NEXT blocker, newly reachable:** the resolved-profile AMEND
+   steps are intermittently red — 6/10, split across two shapes
+   (`setName` → badge "Grace Hopper" 4×; `setBio` → "Countess of
+   computing." 2×), each a 300 s wait timeout; passing runs complete
+   in 19–41 s (load-sensitive race, not a deterministic kill).
+3. **The amended values are durably ABSENT from EVERY store — pass
+   AND fail.** No commit and no snapshot in any run's store carries
+   the amended name: the passing renders ride a non-durable echo.
+   Even the green runs are convergence-by-echo, not durable amends —
+   the which-direction hazard shape, here for served owner-protected
+   stream writes.
+4. **Standing signatures in every run (pass and fail):** 60–70
+   `foreign-write-refused`/`seal-space-commit-failed` — the HOME
+   space's wave running the profile module's lifts
+   (`cf:module/Jlzs…:applyInitialName`, `__cfLift_*`) and being
+   refused writing the PROFILE's own space with no §2b carriage
+   (serving-loop.md §3d) — and the profile space NEVER activates a
+   serving wave (`wave serving` names only the test space, all runs).
+   This is byte-for-byte the rootcause §1 evidence shape — the
+   OW45 + OW31 §2b derivation family, post-#6156.
+5. **This seat's machinery is out of the causal picture:** zero
+   surfacing markers (`Can't report`, `commit-failure-ui`) and zero
+   prep-crash reports in all twenty logs — no wish commit was refused
+   anywhere; the OW50 paths never ran.
+
+Disposition (flag, not fill): the amend-convergence blocker belongs
+to the OW45/OW31 cross-space-derivation arc (whether the fix is §2b
+carriage for derivation consequences, the profile space's own loop
+activating, or both, is that arc's call). The profile-embed skip
+entry is re-scoped to name it precisely; OW49's row records
+RULED + BUILT + live-extinct with closure deferred to the
+coordinator; no new row minted here — the row-mapping decision is
+the coordinator's.
 
 ## 4. OW54 separability assessment (directed; no fix in this PR)
 

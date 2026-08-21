@@ -5360,9 +5360,21 @@ supply; OW29/OW32/OW34 closed):
     branches are type-disjoint from it; merge treats the ifc branch
     as the policy carrier); alternative — remove the combinator from
     the wish's own result declaration (narrower; other ifc-under-union
-    families re-trip). Trigger: lifts the
-    `integration/profile-embed.test.ts` ON skip (the sole remaining
-    blocker after OW48's refutation and OW50's build).
+    families re-trip). BUILT 2026-08-21 per the ruling
+    (`cfc/schema-merge.ts`; red-first both directions —
+    `cfc-schema-merge.test.ts` + `cfc-prepare-crash-surfacing.test.ts`
+    carry the admitted-shape, constraint, and genuine-ambiguity pins;
+    optimize/ruling5-ow49-report.md). LIVE-VERIFIED extinct: 10
+    fresh-store ON runs at the ruling head show ZERO divergence
+    asserts — the wish UI mounts and the profile resolves every run.
+    The row is NOT closed: the ruled closure condition (profile-embed
+    greens ON) did not land — the lift attempt surfaced the NEXT
+    blocker (the resolved-profile amend steps intermittently red 6/10
+    with the amended values durably absent from every store; the
+    OW45+OW31-family cross-space derivation signatures in every run —
+    triage in optimize/ruling5-ow49-report.md §3). Closure and the
+    successor's row-mapping are the coordinator's; the skip entry now
+    names the amend-convergence blocker.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
