@@ -80,16 +80,35 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function defaultGithubToken(): Promise<string | undefined> {
+/** Runs a command for its output; injectable so tests run no commands. */
+export type CommandRunner = (
+  command: string,
+  args: string[],
+) => Promise<{ code: number; stdout: Uint8Array }>;
+
+const runCommand: CommandRunner = async (command, args) => {
+  const { code, stdout } = await new Deno.Command(command, {
+    args,
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  return { code, stdout };
+};
+
+/**
+ * The GitHub token to work with: the environment's, and otherwise
+ * whatever the `gh` command line is signed in as. A machine with
+ * neither has no token, which each command reports in its own terms.
+ */
+export function defaultGithubToken(
+  env: Environment = Deno.env.get,
+  run: CommandRunner = runCommand,
+): Promise<string | undefined> {
   return (async () => {
-    const fromEnv = readEnv("GH_TOKEN") ?? readEnv("GITHUB_TOKEN");
+    const fromEnv = readEnv("GH_TOKEN", env) ?? readEnv("GITHUB_TOKEN", env);
     if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
     try {
-      const { code, stdout } = await new Deno.Command("gh", {
-        args: ["auth", "token"],
-        stdout: "piped",
-        stderr: "null",
-      }).output();
+      const { code, stdout } = await run("gh", ["auth", "token"]);
       if (code !== 0) return undefined;
       const token = new TextDecoder().decode(stdout).trim();
       return token.length > 0 ? token : undefined;
@@ -99,11 +118,12 @@ function defaultGithubToken(): Promise<string | undefined> {
   })();
 }
 
-function defaultDeps(): KeyToolDeps {
+/** The wiring the command line runs against. */
+export function defaultDeps(): KeyToolDeps {
   return {
     env: Deno.env.get,
     fetchImpl: fetch,
-    githubToken: defaultGithubToken,
+    githubToken: () => defaultGithubToken(),
     pause: () =>
       new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)),
   };
@@ -763,12 +783,19 @@ export async function collectCommand(
   return 0;
 }
 
-function usage(): never {
+function usage(): number {
   console.error(
     "usage: deno task test-records-key <setup [--rotate]|request|collect>",
   );
-  Deno.exit(2);
+  return 2;
 }
+
+/** What a stopped watch says on its way out. */
+export const INTERRUPT_NOTICE = `
+Stopped watching. The minting run carries on; pick the key up with
+
+    deno task test-records-key setup
+`;
 
 /**
  * Reports a stop as a stop rather than as a stack, and returns the call
@@ -778,11 +805,7 @@ function usage(): never {
  */
 function watchForInterrupt(): () => void {
   const stop = () => {
-    console.log(`
-Stopped watching. The minting run carries on; pick the key up with
-
-    deno task test-records-key setup
-`);
+    console.log(INTERRUPT_NOTICE);
     Deno.exit(130);
   };
   try {
@@ -794,32 +817,42 @@ Stopped watching. The minting run carries on; pick the key up with
   return () => Deno.removeSignalListener("SIGINT", stop);
 }
 
-if (import.meta.main) {
-  const [command, ...rest] = Deno.args;
+/**
+ * Runs one command line and returns the status the process exits with.
+ * A failure a person can hit arrives here as a KeyToolError, whose
+ * message is the whole report; anything else keeps its stack, because a
+ * stack is the report for a bug in this tool.
+ */
+export async function runCli(
+  args: readonly string[],
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<number> {
+  const [command, ...rest] = args;
   try {
     if (command === "setup") {
-      const rotate = rest.includes("--rotate");
-      if (rest.some((argument) => argument !== "--rotate")) usage();
+      if (rest.some((argument) => argument !== "--rotate")) return usage();
       const stopWatching = watchForInterrupt();
       try {
-        const code = await setupCommand(defaultDeps(), { rotate });
-        if (code !== 0) Deno.exit(code);
+        return await setupCommand(deps, { rotate: rest.includes("--rotate") });
       } finally {
         stopWatching();
       }
-    } else if (command === "request") {
-      if (rest.length > 0) usage();
-      await requestCommand();
-    } else if (command === "collect") {
-      if (rest.length > 0) usage();
-      const code = await collectCommand();
-      if (code !== 0) Deno.exit(code);
-    } else {
-      usage();
     }
+    if (command === "request") {
+      if (rest.length > 0) return usage();
+      await requestCommand(deps);
+      return 0;
+    }
+    if (command === "collect") {
+      if (rest.length > 0) return usage();
+      return await collectCommand(deps);
+    }
+    return usage();
   } catch (error) {
     if (!(error instanceof KeyToolError)) throw error;
     console.error(`\n${error.message}\n`);
-    Deno.exit(1);
+    return 1;
   }
 }
+
+if (import.meta.main) Deno.exit(await runCli(Deno.args));

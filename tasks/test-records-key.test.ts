@@ -4,8 +4,12 @@ import { join } from "@std/path";
 
 import {
   collectCommand,
+  defaultDeps,
+  defaultGithubToken,
+  INTERRUPT_NOTICE,
   type KeyToolDeps,
   requestCommand,
+  runCli,
   setupCommand,
 } from "./test-records-key.ts";
 import {
@@ -132,8 +136,12 @@ function mintRun(
 
 interface StubOptions {
   login?: string;
+  loginStatus?: number;
   /** One page of runs per listing call; the last repeats. */
   runPages?: Record<string, unknown>[][];
+  runsStatus?: number;
+  /** GitHub's clock, as the runs listing reports it. */
+  listDate?: string;
   artifacts?: { id: number; name: string; expired?: boolean }[];
   artifactStatus?: number;
   zip?: Uint8Array;
@@ -168,7 +176,7 @@ describe("test-records-key", () => {
           return Promise.resolve(
             new Response(
               JSON.stringify({ login: options.login ?? "octocat" }),
-              { status: 200 },
+              { status: options.loginStatus ?? 200 },
             ),
           );
         }
@@ -186,9 +194,13 @@ describe("test-records-key", () => {
         if (url.includes("/runs?")) {
           const pages = options.runPages ?? [[]];
           const runs = pages[Math.min(page++, pages.length - 1)]!;
+          const headers = options.listDate !== undefined
+            ? { date: options.listDate }
+            : undefined;
           return Promise.resolve(
             new Response(JSON.stringify({ workflow_runs: runs }), {
-              status: 200,
+              status: options.runsStatus ?? 200,
+              ...(headers !== undefined ? { headers } : {}),
             }),
           );
         }
@@ -291,6 +303,14 @@ describe("test-records-key", () => {
 
       await requestCommand(deps);
       expect(urls.some((line) => line.includes("/dispatches"))).toBe(true);
+    });
+
+    it("prints instructions when the token cannot name its owner", async () => {
+      await storeIdentity();
+      withStub({ loginStatus: 403 });
+
+      await requestCommand(deps);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(false);
     });
   });
 
@@ -443,6 +463,152 @@ describe("test-records-key", () => {
       deps.githubToken = () => Promise.resolve(undefined);
       await expect(collectCommand(deps)).rejects.toThrow(
         "A GitHub token is needed",
+      );
+    });
+
+    it("reports a profile that points somewhere else", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      await Deno.writeTextFile(
+        join(home, ".zshrc"),
+        'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
+      );
+
+      expect(await collectCommand(deps)).toBe(0);
+
+      // The profile is a person's file: the line that disagrees stays.
+      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(
+        'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
+      );
+    });
+
+    it("leaves a profile that already exports the key file alone", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      const line = `export CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
+        `test-records-key.json"\n`;
+      await Deno.writeTextFile(join(home, ".zshrc"), line);
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+    });
+
+    it("throws with nowhere to keep the identity", async () => {
+      withStub({});
+      deps.env = () => undefined;
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "Neither XDG_CONFIG_HOME nor HOME is set.",
+      );
+    });
+
+    it("throws when the token cannot read the collector's login", async () => {
+      await storeIdentity();
+      withStub({ loginStatus: 403 });
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "Cannot read your GitHub login",
+      );
+    });
+
+    it("names the status when the run listing fails", async () => {
+      await storeIdentity();
+      withStub({ runsStatus: 500 });
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "Listing minting runs failed: HTTP 500",
+      );
+    });
+
+    it("names the endpoint it could not reach", async () => {
+      await storeIdentity();
+      withFetch(
+        (() =>
+          Promise.reject(new TypeError("connection refused"))) as typeof fetch,
+      );
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "Cannot reach https://api.github.com: connection refused",
+      );
+    });
+
+    it("refuses a delivery sealed to another identity", async () => {
+      const identity = await storeIdentity();
+      const stranger = await generateIdentity();
+      const fingerprint = await recipientFingerprint(identity.recipient);
+      const sealed = await seal(
+        stranger.recipient,
+        new TextEncoder().encode(KEY_TEXT),
+      );
+      withStub({
+        runPages: [[mintRun(identity.recipient)]],
+        artifacts: [{ id: 7, name: `test-records-key-${fingerprint}` }],
+        zip: storedZip(
+          `${fingerprint}.sealed`,
+          new TextEncoder().encode(JSON.stringify(sealed)),
+        ),
+      });
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "does not open with the identity",
+      );
+    });
+
+    it("refuses a delivery that is not a key file", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity, JSON.stringify({ hi: 1 }));
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "not a personal test-records key file",
+      );
+    });
+
+    it("passes over an unnamed run of its own that delivered nothing", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({
+        runPages: [[
+          mintRun(identity.recipient, { id: 9, named: false }),
+          mintRun(identity.recipient, { id: 3 }),
+        ]],
+        ...published,
+      });
+
+      // The newest run is this person's, but it published nothing for
+      // this recipient, so the delivery of the older named run is the
+      // one collected.
+      let artifactsFor: string | undefined;
+      const inner = deps.fetchImpl;
+      deps.fetchImpl = ((input: URL | RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/runs/9/artifacts")) {
+          artifactsFor = url;
+          return Promise.resolve(
+            new Response(JSON.stringify({ artifacts: [] }), { status: 200 }),
+          );
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(artifactsFor).toBeDefined();
+      expect(urls.some((line) => line.includes("/runs/3/artifacts"))).toBe(
+        true,
       );
     });
   });
@@ -603,6 +769,212 @@ describe("test-records-key", () => {
       await expect(setupCommand(deps)).rejects.toThrow(
         "A GitHub token is needed",
       );
+    });
+
+    it("throws when the token cannot name its owner", async () => {
+      withStub({ loginStatus: 403 });
+
+      await expect(setupCommand(deps)).rejects.toThrow(
+        "Cannot read your GitHub login",
+      );
+    });
+
+    it("says so when the run it watched delivered nothing", async () => {
+      const identity = await storeIdentity();
+      withStub({
+        runPages: [[mintRun(identity.recipient)]],
+        artifacts: [],
+      });
+
+      await expect(setupCommand(deps)).rejects.toThrow(
+        "published no delivery",
+      );
+    });
+
+    it("mints again when the installed key file is not one", async () => {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        "not a key file",
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.some((line) => line.includes("/dispatches"))).toBe(true);
+    });
+
+    it("says it is waiting once, however long it waits", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({
+        runPages: [[], [], [mintRun(identity.recipient)]],
+        ...published,
+      });
+
+      expect(await setupCommand(deps)).toBe(0);
+      expect(urls.filter((line) => line.includes("/runs?")).length).toBe(3);
+    });
+
+    it("stops examining runs from before the watch began", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      const stale = mintRun(identity.recipient, {
+        id: 1,
+        named: false,
+        created_at: "2026-08-21T02:00:00Z",
+      });
+      withStub({
+        dispatchStatus: 403,
+        listDate: "Fri, 21 Aug 2026 03:00:00 GMT",
+        runPages: [
+          [stale],
+          [
+            mintRun(identity.recipient, {
+              id: 2,
+              created_at: "2026-08-21T03:00:01Z",
+            }),
+            stale,
+          ],
+        ],
+        artifacts: [],
+        zip: published.zip,
+      });
+      const inner = deps.fetchImpl;
+      deps.fetchImpl = ((input: URL | RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/runs/2/artifacts")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ artifacts: published.artifacts }), {
+              status: 200,
+            }),
+          );
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+
+      expect(await setupCommand(deps)).toBe(0);
+      // The stale run is examined on the first round, which is what
+      // fixes the clock, and left alone on every round after it.
+      expect(
+        urls.filter((line) => line.includes("/runs/1/artifacts")).length,
+      ).toBe(1);
+    });
+  });
+
+  describe("defaultGithubToken()", () => {
+    const noCommand = () => {
+      throw new Error("no command expected");
+    };
+
+    it("returns the token the environment carries", async () => {
+      expect(
+        await defaultGithubToken(
+          (name) => name === "GH_TOKEN" ? "from-gh-token" : undefined,
+          noCommand,
+        ),
+      ).toBe("from-gh-token");
+      expect(
+        await defaultGithubToken(
+          (name) => name === "GITHUB_TOKEN" ? "from-github-token" : undefined,
+          noCommand,
+        ),
+      ).toBe("from-github-token");
+    });
+
+    it("returns what the signed-in command line holds", async () => {
+      expect(
+        await defaultGithubToken(
+          () => undefined,
+          (command, args) => {
+            expect(command).toBe("gh");
+            expect(args).toEqual(["auth", "token"]);
+            return Promise.resolve({
+              code: 0,
+              stdout: new TextEncoder().encode("from-gh\n"),
+            });
+          },
+        ),
+      ).toBe("from-gh");
+    });
+
+    it("returns undefined when no source holds one", async () => {
+      const empty = () => undefined;
+      expect(
+        await defaultGithubToken(
+          empty,
+          () => Promise.resolve({ code: 1, stdout: new Uint8Array() }),
+        ),
+      ).toBeUndefined();
+      expect(
+        await defaultGithubToken(
+          empty,
+          () =>
+            Promise.resolve({ code: 0, stdout: new TextEncoder().encode(" ") }),
+        ),
+      ).toBeUndefined();
+      expect(
+        await defaultGithubToken(empty, () => Promise.reject(new Error("no"))),
+      ).toBeUndefined();
+      expect(
+        await defaultGithubToken(
+          (name) => name === "GH_TOKEN" ? "" : undefined,
+          () => Promise.resolve({ code: 1, stdout: new Uint8Array() }),
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("defaultDeps()", () => {
+    it("returns the wiring the command line runs against", () => {
+      const wiring = defaultDeps();
+      expect(wiring.env).toBe(Deno.env.get);
+      expect(wiring.fetchImpl).toBe(fetch);
+      expect(typeof wiring.githubToken).toBe("function");
+      expect(typeof wiring.pause).toBe("function");
+    });
+  });
+
+  describe("INTERRUPT_NOTICE", () => {
+    it("says how to pick the key up again", () => {
+      expect(INTERRUPT_NOTICE).toContain("deno task test-records-key setup");
+    });
+  });
+
+  describe("runCli()", () => {
+    it("returns 2 and prints usage for a command it does not have", async () => {
+      withStub({});
+      expect(await runCli(["wat"], deps)).toBe(2);
+      expect(await runCli([], deps)).toBe(2);
+    });
+
+    it("returns 2 for an argument the command does not take", async () => {
+      withStub({});
+      expect(await runCli(["setup", "--wat"], deps)).toBe(2);
+      expect(await runCli(["request", "--wat"], deps)).toBe(2);
+      expect(await runCli(["collect", "--wat"], deps)).toBe(2);
+    });
+
+    it("returns 1 and reports a failure a person can hit", async () => {
+      withStub({});
+      expect(await runCli(["collect"], deps)).toBe(1);
+    });
+
+    it("returns what the command it ran returned", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+
+      expect(await runCli(["setup"], deps)).toBe(0);
+      expect(await runCli(["request"], deps)).toBe(0);
+    });
+
+    it("lets a fault in the tool keep its stack", async () => {
+      await storeIdentity();
+      withStub({});
+      deps.githubToken = () => Promise.reject(new RangeError("bug"));
+
+      await expect(runCli(["collect"], deps)).rejects.toThrow(RangeError);
     });
   });
 });
