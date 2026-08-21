@@ -781,6 +781,56 @@ describe("browser", () => {
       expect(runner.calls).toEqual([]);
     });
 
+    it("names a bare disallowed origin a urlHandle resolved to", async () => {
+      // The value is its own origin, so a register that recorded it before
+      // the refusal was written would scrub the refusal down to a placeholder
+      // and leave the operator without the one fact the message carries. A
+      // refused destination materializes nothing, so nothing is recorded.
+      const ref = await seedRef("target-url", "https://phish.example");
+      const runner = new FakeProcessRunner();
+      const register = createHarnessResolvedValueRegister();
+      const engine = createEngine(runner, {
+        resolvedValueRegister: register,
+      });
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "open",
+        urlHandle: ref,
+      });
+
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.code).toBe("destination_not_allowed");
+      expect(output.message).toContain("https://phish.example");
+      expect(output.message).not.toContain(RESOLVED_VALUE_PLACEHOLDER);
+      expect(register.size).toBe(0);
+      expect(runner.calls).toEqual([]);
+    });
+
+    it("records the value of an allowed urlHandle before the browser runs", async () => {
+      const ref = await seedRef("target-url", `${ALLOWED_ORIGIN}/inbox`);
+      const runner = new FakeProcessRunner([{
+        stdout: `navigation to ${ALLOWED_ORIGIN}/inbox failed\n`,
+        stderr: "",
+        exitCode: 1,
+      }]);
+      const register = createHarnessResolvedValueRegister();
+      const engine = createEngine(runner, {
+        resolvedValueRegister: register,
+      });
+      await holdHandles(engine, ref);
+
+      const result = await engine.invokeBuiltinTool("browser", {
+        action: "open",
+        urlHandle: ref,
+      });
+
+      expect(register.size).toBe(1);
+      const output = result.output as BrowserToolErrorOutput;
+      expect(output.message).toContain(RESOLVED_VALUE_PLACEHOLDER);
+      expect(output.message).not.toContain("/inbox");
+    });
+
     it("scrubs a value the parent run materialized out of a child engine's output", async () => {
       // Two browser runs share one lease and therefore one page, so the
       // register follows the lease: what the parent typed is withheld from
