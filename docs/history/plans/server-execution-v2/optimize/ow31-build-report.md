@@ -257,6 +257,24 @@ Grace store dump, seq 4). Built shape:
   (toolshed lib's build-info/clone-banner/configure-open-api/clientKey
   failures are pre-existing local-env dependences — ENV=test + .env.test
   — unrelated to this diff; CI's lanes carry them.)
+- 2026-08-21: **PR #6156 opened** (3bd0f41a4 head at open). Adversarial
+  self-review of the merge-base diff done as the reviewer: verified the
+  true change set is the 27 intended files (the two-dot diff against the
+  moved main misleadingly showed main-side test-records churn — three-dot
+  is clean); walked the memory-server hunks (challenge-consumption order
+  matches the existing deny path; the binding is per-open and never
+  inherited on resume; the capability cache keys the acting principal;
+  hard refusal under observe is precedented by the genesis-invariant
+  posture); the wave's `via` retention may force genesis for a withdrawn
+  crossing (idempotent, converges on replay — noted); the sink's INV-13
+  check sits behind the sqlite refusal and ahead of the carriage check
+  (either refusal is fail-closed; the ordering keeps the existing
+  carriage pin meaningful). The full runner suite runs locally under its
+  canonical task (clock preload) in parallel with CI; CI's ON lanes are
+  the live acceptance carrier. MEMORY_ACL_MODE defaults to `enforce`, so
+  the ON lanes exercise the binding for real; the OFF lanes' session
+  plane was always blanket-less, which bounds the W7 regression class to
+  flows that differ under ON (the serving loop's own, wave-carried).
 
 ## FLAGGED questions (running list)
 
