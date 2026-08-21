@@ -96,7 +96,45 @@ describe("FabricKeyPair", () => {
         .toThrow(/keys are of type/);
     });
 
-    it("throws given two keys whose algorithms disagree", async () => {
+    it("throws given two keys whose algorithm parameters disagree", async () => {
+      // The names agree and the key types are right, so this is refused by the
+      // parameter check alone. A P-256 public key and a P-384 private key
+      // cannot operate together.
+      const { publicKey } = await crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["sign", "verify"],
+      ) as CryptoKeyPair;
+      const { privateKey } = await crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-384" },
+        false,
+        ["sign", "verify"],
+      ) as CryptoKeyPair;
+
+      expect(() => new FabricKeyPair({ publicKey, privateKey }))
+        .toThrow(/Mismatched `ECDSA` algorithm parameters/);
+    });
+
+    it("accepts a pair whose algorithm carries nested parameters", async () => {
+      // RSA's `algorithm` record carries a nested `hash` object and a
+      // `publicExponent` byte array, both of which the parameter check
+      // compares. A genuine pair reports them identically on both keys, so
+      // deepening the check must not have made this one refusable.
+      const pair = await crypto.subtle.generateKey(
+        {
+          name: "RSASSA-PKCS1-v1_5",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        },
+        false,
+        ["sign", "verify"],
+      ) as CryptoKeyPair;
+
+      expect(new FabricKeyPair(pair).algorithm).toBe("RSASSA-PKCS1-v1_5");
+    });
+
+    it("throws given two keys whose algorithm names disagree", async () => {
       const { publicKey } = await generatePair();
       const { privateKey } = await crypto.subtle.generateKey(
         { name: "ECDSA", namedCurve: "P-256" },

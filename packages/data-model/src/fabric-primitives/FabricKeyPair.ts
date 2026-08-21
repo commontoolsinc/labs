@@ -7,6 +7,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -380,8 +381,14 @@ export class FabricKeyPair extends BaseFabricPrimitive
 }
 
 /**
- * Returns the given key pair's two keys, checked as a public/private pair that
- * agrees on its algorithm.
+ * Returns the given key pair's two keys, checked as a public/private pair whose
+ * `algorithm` records agree in full, parameters included.
+ *
+ * The check does not establish that the two keys are counterparts, which no
+ * synchronous check can: two independently generated keys of the same
+ * algorithm and parameters are indistinguishable from a genuine pair by
+ * anything but a sign/verify round trip, which is asynchronous. What it
+ * establishes is that they *could* be counterparts.
  */
 function validPair(pair: CryptoKeyPair): CryptoKeyPair {
   if (!isCryptoKeyPair(pair)) {
@@ -401,6 +408,17 @@ function validPair(pair: CryptoKeyPair): CryptoKeyPair {
       `Mismatched algorithms: ${backtickQuote(publicKey.algorithm.name)} and ${
         backtickQuote(privateKey.algorithm.name)
       }.`,
+    );
+  } else if (!deepEqual(publicKey.algorithm, privateKey.algorithm)) {
+    // The whole record rather than a per-algorithm list of the parameters that
+    // matter: a genuine pair reports the same `algorithm` on both keys for
+    // every algorithm Web Crypto defines, so nothing here has to know which
+    // fields a given one carries, and an algorithm added later is covered as
+    // it stands.
+    throw new Error(
+      `Mismatched ${
+        backtickQuote(publicKey.algorithm.name)
+      } algorithm parameters between the two keys.`,
     );
   }
 
