@@ -504,28 +504,20 @@ FabricKeyPair.prototype satisfies ApiFabricKeyPair;
 // the class of that name, and nothing structural is ever assignable to a class
 // holding a private field -- so the only parameter that could satisfy it is
 // one naming the declaration rather than the class, which is backwards for an
-// implementation.
+// implementation. Each form the declaration promises is therefore written out
+// below instead.
 //
-// Each form the declaration promises is therefore written out below instead.
 // **The closure is not actually called**, by this module or by anything else:
 // it is built, discarded, and never invoked, and only the compilation of its
-// body matters. Dropping an overload, or narrowing one, stops it compiling.
-//
-// A type-level spelling would be better and does not exist. An overloaded
-// constructor satisfies `new (...args: A) => unknown` for any `A` at all, so
-// the obvious `Constructible<[number, number]>` form passes for arguments this
-// class refuses, and checks nothing.
-//
-// The algorithm name is arbitrary -- only its type is under test -- so it is
-// deliberately not one this system uses. A real name would answer a
-// migration's `grep` with a site that has nothing to migrate.
-// Never invoked, so never covered, and no test could honestly cover it. The
-// directive keeps these lines out of the coverage denominator rather than out
-// of a report someone has to remember to read.
+// body matters -- dropping an overload, or narrowing one, stops it compiling.
+// It is therefore never covered either, and no test could honestly cover it,
+// so the directive keeps these lines out of the coverage denominator rather
+// than out of a report someone has to remember to read.
 // deno-coverage-ignore-start
 (() => {
   const bytes = new FabricBytes(new Uint8Array());
 
+  // The algorithm name is arbitrary; a real one would mislead a `grep`.
   new FabricKeyPair(undefined as unknown as CryptoKeyPair);
   new FabricKeyPair("ExampleAlgorithm", bytes, bytes);
   new FabricKeyPair("ExampleAlgorithm", new Uint8Array(), new Uint8Array());
