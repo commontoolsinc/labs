@@ -509,7 +509,10 @@ FabricKeyPair.prototype satisfies ApiFabricKeyPair;
 (() => {
   const bytes = new FabricBytes(new Uint8Array());
 
+  // The algorithm name is arbitrary here -- only its type is under test -- so
+  // it is deliberately not one this system uses. A real name would answer a
+  // migration's `grep` with a site that has nothing to migrate.
   new FabricKeyPair(undefined as unknown as CryptoKeyPair);
-  new FabricKeyPair("Ed25519", bytes, bytes);
-  new FabricKeyPair("Ed25519", new Uint8Array(), new Uint8Array());
+  new FabricKeyPair("ExampleAlgorithm", bytes, bytes);
+  new FabricKeyPair("ExampleAlgorithm", new Uint8Array(), new Uint8Array());
 });
