@@ -370,4 +370,64 @@ proven by the 300 s probe — but removes the test-side mis-aim).
 
 ## 9. Joint-lift run results (local merge, true ON topology)
 
-_(in progress — updated when the runs complete)_
+Topology: scratch merge of origin/main (c911a660f) + all three of this
+pass's branches + `claude/server-exec-v2-ow31-identity` (OW31's #6156,
+unmerged); ON felt shell dev server (define baked from env) proxied by
+an ON toolshed from the merged tree, fresh store per browser run.
+Operational gotcha recorded for the next agent: the BROWSER tests'
+teardown shuts the target toolshed down ("Shutdown signal received" at
+run end), so sequential runs need a shed restart — a first batch of
+multi-runtime runs against a dying shed produced junk failures
+(connection errors / all-steps-30s-timeouts) that were DISCARDED, not
+attributed.
+
+- **home-profile-reload-durability ON (the OW45 joint lift): NOT
+  liftable yet — but the S-A+S-B effect is real and visible.** Step 1
+  ("a profile created before a reload survives the reload") — the
+  gate's ~5-minute red — is GREEN in 10–11 s, twice (two independent
+  fresh-store runs). Step 2 ("the most recent of several rapid creates
+  survives a following reload") stays RED (~5m11s timeout; one profile
+  renders the `#id` placeholder), and the server log names the
+  residual: `foreign-write-refused` for
+  `cf:module/Jlzs0wulc…:{__cfLift_1,applyInitialName}` — the HOME
+  wave running the profile MODULE cross-space without carriage (the
+  rootcause §1 evidence line's second refusal family). That is
+  OW31's remaining cross-space module-run surface (their build's
+  flagged residuals), NOT compile-cache/writeback (no such refusals
+  in the log — S-A's carriage-borne trigger works) and not this
+  pass's seats. Notable OW46 cross-check: `structure-load-stuck`
+  fired ZERO times on the joint tree — correct, because S-A
+  materializes the program so the load no longer parks; the stuck
+  warn is for the pre-S-A world and for whatever future shape parks
+  again.
+- **cfc-group-chat-demo-multi-runtime ON: 3/3 green at the PR-1 tip
+  AND 3/3 green on the joint merge** (live-shed-verified per run).
+  Context: PR #6150's first CI run had this file red on ON shard 7
+  ("bob's post-lockdown message arrives at alice", 30 s step timeout)
+  — unreproduced in 6 local true-ON runs across both trees; the
+  file's steps wait on served round trips with 30 s budgets, the
+  lane class is known to flake on main under CI load (main's own
+  e04fb3460 run failed a different ON shard and the next two main
+  runs were green), and the updated-head CI run is the second
+  observation. Not closed as flake until that run reports; recorded
+  here either way.
+- **cfc-group-chat-demo (the browser file): joint lift NOT expected
+  anymore** — coordinator update during this pass: OW31's build
+  FLAG-5 establishes the CI shape's service-identity labels come from
+  the runtime-level CFC trust snapshot (`Runtime.trustSnapshotProvider`
+  defaulting to the storage manager's identity), an OW34-family
+  CFC-owner seam OW31's carriage does not close. The file's lift set
+  is now OW31 + OW47 (closed here) + that seam; the file entry stays.
+
+## 10. CI-surfaced fix (post-PR-1)
+
+PR #6150's first CI run failed `Test (5/8)` on the skip-list PIN test
+(`tasks/server-execution-on-skips.test.ts`) — the pin is the set's
+guard and the lift PR updates it; done (ONE step entry left,
+convergence-storm, plus a negative pin that the cellset file is
+unlisted — the file's own idiom for lifted entries). A local miss in
+PR 1's original battery: the tasks/ suite wasn't run. The same CI run's
+`Package Integration Tests (shell)` hang (`load-errors.test.ts`, 30 m
+lane timeout) is on the OFF default lane where the OW47 filter is a
+no-op (`#speculativeLocalSeqs` empty under OFF) and main passed at the
+same head — watched on the updated-head run alongside shard 7.
