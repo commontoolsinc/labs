@@ -151,6 +151,12 @@ describe("test-records-gather", () => {
       expect(facts.job).toBe("Check");
     });
 
+    it("rejects an empty variant from a direct caller", async () => {
+      await expect(
+        gather({ out: join(dir, "out"), job: "Check", variant: "", junit: [] }),
+      ).rejects.toThrow("--variant must not be empty");
+    });
+
     it("records the commit, branch, and pull request head from the environment", async () => {
       const out = join(dir, "out");
       const eventPath = join(dir, "event.json");
