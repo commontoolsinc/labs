@@ -2,12 +2,19 @@
  * The run's register of values a handle has been materialized into, and the
  * scrub that keeps them out of everything the model reads afterwards.
  *
- * Resolving a handle trusted-side is only worth doing if the value does not
- * come straight back: a page echoes what was typed into it, a later snapshot
- * reads the filled field, a nonzero exit puts the argument list in stderr.
- * A tool that materializes a value records it here, and every model-facing
- * string that tool produces for the rest of the run is scrubbed through the
- * register first.
+ * A backstop against accidental echo, not a containment boundary. Resolving
+ * a handle trusted-side is defeated outright if the value comes straight
+ * back — a page echoes what was typed into it, a later snapshot reads the
+ * filled field, a nonzero exit puts the argument list in stderr — so a tool
+ * that materializes a value records it here and model-facing strings are
+ * scrubbed through the register.
+ *
+ * Read the limit honestly. This matches strings, so it catches a value
+ * returned as it was written and misses one the page transformed: HTML
+ * entities, JSON escaping, a case change, or a value split across two
+ * elements all pass through. It raises the cost of the obvious return path;
+ * it does not close the class. Containment that holds has to come from the
+ * labels on the data governing the read, not from recognizing the bytes.
  *
  * The register is run-scoped and in-memory only. It holds the very values the
  * design exists to keep out of the model's context, so it is never written to
