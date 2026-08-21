@@ -317,13 +317,29 @@ names, and the write reaches no reader the data had not already reached. The
 guarantee is therefore exactly as strong as the deployment's ACL posture, the
 same bound the §4.9.3 membership lookup carries.
 
-The rule is confined to `Space` deliberately. `PersonalSpace`, `User`, and the
-bare DID-string spelling gate by equality against a single acting reader —
-§4.6.4.2 field classification groups `PersonalSpace.owner` with `User.subject`
-for that reason, while only `Space.id` stays public so it can be dereferenced
-— so their audience is a person rather than the container. A space grants
-reader roles its owner does not hold in person, so admitting those forms would
-place data readable by one principal into a store its co-readers sync. Reading
+The rule is confined to `Space` deliberately. §3.6.4 gives a personal space
+fixed membership — its owner alone — and says sharing happens by moving the
+data to a shared space or by converting the personal space into one, so
+`PersonalSpace(<owner>)` names a single principal rather than a container with
+a reader set. The runtime agrees: no exchange rule maps a space reader onto a
+`PersonalSpace` clause, the display ceiling admits it only by exact match
+against the acting user, and the deployment's §4.6.4.2 field classification
+commits `PersonalSpace.owner` alongside `User.subject` while keeping
+`Space.id` public precisely so §4.9.3's point query can dereference it. A
+space grants reader roles its owner does not hold in person, so admitting
+those forms would place data readable by one principal into a store its
+co-readers sync.
+
+One spec question this exposes and should settle: §4.9.4 describes
+`HasRole(user, PersonalSpace(User), reader)` as minted by a §4.9.3 point query
+against that space's own ACL record, and calls it one of "the two `Space(...)`
+atoms", which reads `PersonalSpace` as an ACL-dereferenced container atom. That
+sits in tension with §3.6.4's fixed membership, and with a deployment
+classification that commits the very field such a point query would have to
+read. If `PersonalSpace` is genuinely ACL-dereferenced, its audience is the
+space's reader set and residency admits it on the same footing as `Space`;
+if membership is fixed, it names one principal and residency must not. The
+implementation takes the second reading, which is the fail-closed one. Reading
 back is unaffected in every case: the derived stamp persists the full join, so
 the egress and display ceilings fit the unchanged label, and the space
 principal there resolves to a reader only through the §4.3.3
