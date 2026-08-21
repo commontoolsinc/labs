@@ -18,10 +18,6 @@ import {
   createHarnessHandleTable,
   mintAddressHandle,
 } from "../src/handle-table.ts";
-import {
-  createHarnessResolvedValueRegister,
-  RESOLVED_VALUE_PLACEHOLDER,
-} from "../src/contracts/resolved-value-register.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -341,9 +337,7 @@ describe("browser", () => {
       options: {
         fabricSession?: boolean;
         handleValueOrigins?: readonly string[];
-        resolvedValueRegister?: ReturnType<
-          typeof createHarnessResolvedValueRegister
-        >;
+        onFabricSession?: () => void;
       } = {},
     ) =>
       new CfHarnessEngine({
@@ -354,12 +348,12 @@ describe("browser", () => {
         workspaceHostPath: "/tmp/cf-harness-workspace",
         browserAccess: BROWSER_LEASE,
         handleValueOrigins: options.handleValueOrigins ?? [ALLOWED_ORIGIN],
-        ...(options.resolvedValueRegister !== undefined
-          ? { resolvedValueRegister: options.resolvedValueRegister }
-          : {}),
-        ...(options.fabricSession === false
-          ? {}
-          : { fabricSessionFactory: () => Promise.resolve({ pieces }) }),
+        ...(options.fabricSession === false ? {} : {
+          fabricSessionFactory: () => {
+            options.onFabricSession?.();
+            return Promise.resolve({ pieces });
+          },
+        }),
       });
 
     /**
@@ -389,7 +383,7 @@ describe("browser", () => {
       return createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space);
     };
 
-    it("passes the value behind a valueHandle to agent-browser and withholds it from the output", async () => {
+    it("passes the value behind a valueHandle to agent-browser", async () => {
       const ref = await seedRef("passphrase", "hunter2");
       const runner = new FakeProcessRunner([
         pageAt(`${ALLOWED_ORIGIN}/login`),
@@ -421,98 +415,6 @@ describe("browser", () => {
       ]);
       const output = result.output as BrowserToolSuccessOutput;
       expect(output.status).toBe("ok");
-      // And it did not come back: the CLI echoed what it typed.
-      expect(output.output).toBe(
-        `filled @e1 with "${RESOLVED_VALUE_PLACEHOLDER}"\n`,
-      );
-    });
-
-    it("withholds a materialized value from a later action's output", async () => {
-      const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner([
-        pageAt(`${ALLOWED_ORIGIN}/login`),
-        { stdout: "", stderr: "", exitCode: 0 },
-        {
-          stdout: '- textbox "Password": hunter2\n',
-          stderr: "",
-          exitCode: 0,
-        },
-      ]);
-      const engine = createEngine(runner);
-      await holdHandles(engine, ref);
-      await engine.invokeBuiltinTool("browser", {
-        action: "fill",
-        ref: "@e1",
-        valueHandle: ref,
-      });
-
-      const result = await engine.invokeBuiltinTool("browser", {
-        action: "snapshot",
-        interactive: true,
-      });
-
-      const output = result.output as BrowserToolSuccessOutput;
-      expect(output.output).toBe(
-        `- textbox "Password": ${RESOLVED_VALUE_PLACEHOLDER}\n`,
-      );
-    });
-
-    it("withholds a materialized value from a failing command's message", async () => {
-      const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner([
-        pageAt(`${ALLOWED_ORIGIN}/login`),
-        {
-          stdout: "",
-          stderr: "agent-browser: fill @e1 hunter2: no such element\n",
-          exitCode: 3,
-        },
-      ]);
-      const engine = createEngine(runner);
-      await holdHandles(engine, ref);
-
-      const result = await engine.invokeBuiltinTool("browser", {
-        action: "fill",
-        ref: "@e1",
-        valueHandle: ref,
-      });
-
-      const output = result.output as BrowserToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.code).toBe("command_failed");
-      expect(output.exitCode).toBe(3);
-      expect(output.message).toBe(
-        `agent-browser: fill @e1 ${RESOLVED_VALUE_PLACEHOLDER}: no such element\n`,
-      );
-    });
-
-    it("withholds a materialized value from the detail of a later success", async () => {
-      const ref = await seedRef("passphrase", "hunter2");
-      const runner = new FakeProcessRunner([
-        pageAt(`${ALLOWED_ORIGIN}/login`),
-        { stdout: "", stderr: "", exitCode: 0 },
-        {
-          stdout: "https://example.com/\n",
-          stderr: "warning: submitted hunter2\n",
-          exitCode: 0,
-        },
-      ]);
-      const engine = createEngine(runner);
-      await holdHandles(engine, ref);
-      await engine.invokeBuiltinTool("browser", {
-        action: "type",
-        ref: "@e1",
-        valueHandle: ref,
-      });
-
-      const result = await engine.invokeBuiltinTool("browser", {
-        action: "get",
-        kind: "url",
-      });
-
-      const output = result.output as BrowserToolSuccessOutput;
-      expect(output.detail).toBe(
-        `warning: submitted ${RESOLVED_VALUE_PLACEHOLDER}`,
-      );
     });
 
     it("navigates to the URL behind a urlHandle", async () => {
@@ -782,14 +684,17 @@ describe("browser", () => {
     });
 
     it("refuses a malformed handle action before reading the fabric", async () => {
-      // A fill carrying a valid handle but no ref cannot execute. Resolving
-      // first would read the value and arm the run's scrub on behalf of a call
-      // that never ran, so the whole shape is checked before anything is read.
+      // A fill carrying a valid handle but no ref cannot execute, and a call
+      // that cannot execute has no business reading a value out of the run's
+      // space. The whole shape is checked before anything is read, so the
+      // fabric session is never even opened.
       const ref = await seedRef("secret-name", "Ada Lovelace");
       const runner = new FakeProcessRunner();
-      const register = createHarnessResolvedValueRegister();
+      let fabricSessions = 0;
       const engine = createEngine(runner, {
-        resolvedValueRegister: register,
+        onFabricSession: () => {
+          fabricSessions += 1;
+        },
       });
       await holdHandles(engine, ref);
 
@@ -800,21 +705,17 @@ describe("browser", () => {
 
       const output = result.output as BrowserToolErrorOutput;
       expect(output.code).toBe("invalid_input");
-      expect(register.size).toBe(0);
+      expect(fabricSessions).toBe(0);
       expect(runner.calls).toEqual([]);
     });
 
     it("names a bare disallowed origin a urlHandle resolved to", async () => {
-      // The value is its own origin, so a register that recorded it before
-      // the refusal was written would scrub the refusal down to a placeholder
-      // and leave the operator without the one fact the message carries. A
-      // refused destination materializes nothing, so nothing is recorded.
+      // The refusal names the origin the value would have gone to, which is
+      // the one fact the operator needs to decide whether to allow it, and
+      // the browser is never driven at all.
       const ref = await seedRef("target-url", "https://phish.example");
       const runner = new FakeProcessRunner();
-      const register = createHarnessResolvedValueRegister();
-      const engine = createEngine(runner, {
-        resolvedValueRegister: register,
-      });
+      const engine = createEngine(runner);
       await holdHandles(engine, ref);
 
       const result = await engine.invokeBuiltinTool("browser", {
@@ -825,56 +726,7 @@ describe("browser", () => {
       const output = result.output as BrowserToolErrorOutput;
       expect(output.code).toBe("destination_not_allowed");
       expect(output.message).toContain("https://phish.example");
-      expect(output.message).not.toContain(RESOLVED_VALUE_PLACEHOLDER);
-      expect(register.size).toBe(0);
       expect(runner.calls).toEqual([]);
-    });
-
-    it("records the value of an allowed urlHandle before the browser runs", async () => {
-      const ref = await seedRef("target-url", `${ALLOWED_ORIGIN}/inbox`);
-      const runner = new FakeProcessRunner([{
-        stdout: `navigation to ${ALLOWED_ORIGIN}/inbox failed\n`,
-        stderr: "",
-        exitCode: 1,
-      }]);
-      const register = createHarnessResolvedValueRegister();
-      const engine = createEngine(runner, {
-        resolvedValueRegister: register,
-      });
-      await holdHandles(engine, ref);
-
-      const result = await engine.invokeBuiltinTool("browser", {
-        action: "open",
-        urlHandle: ref,
-      });
-
-      expect(register.size).toBe(1);
-      const output = result.output as BrowserToolErrorOutput;
-      expect(output.message).toContain(RESOLVED_VALUE_PLACEHOLDER);
-      expect(output.message).not.toContain("/inbox");
-    });
-
-    it("scrubs a value the parent run materialized out of a child engine's output", async () => {
-      // Two browser runs share one lease and therefore one page, so the
-      // register follows the lease: what the parent typed is withheld from
-      // what the child reads back off the same page.
-      const shared = createHarnessResolvedValueRegister();
-      shared.record("hunter2");
-      const runner = new FakeProcessRunner([{
-        stdout: '- textbox "Password": hunter2\n',
-        stderr: "",
-        exitCode: 0,
-      }]);
-      const child = createEngine(runner, { resolvedValueRegister: shared });
-
-      const result = await child.invokeBuiltinTool("browser", {
-        action: "snapshot",
-        interactive: true,
-      });
-
-      expect((result.output as BrowserToolSuccessOutput).output).toBe(
-        `- textbox "Password": ${RESOLVED_VALUE_PLACEHOLDER}\n`,
-      );
     });
 
     it("refuses a valueHandle whose referent is not a string, naming the type only", async () => {
