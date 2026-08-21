@@ -56,11 +56,12 @@ const space = signer.did();
 
 // Two envelope fixtures, either side of RULING 5 (CFC owner, 2026-08-21):
 //
-// - `wishShapedSchema` is the live wish shape (mirroring the schema doc the
+// - The live wish shape (mirroring the schema doc the
 //   serving loop persisted, cid:fid1:-3unxof…): ONE ifc-carrying branch
 //   (`result.anyOf[1]`) whose sibling `{type:"undefined"}` is syntactically
-//   type-disjoint — the ruled ADMITTED shape. Under the ruling its two-writer
-//   journey merges cleanly (the profile-embed lift condition).
+//   type-disjoint — is the ruled ADMITTED shape; its merge pin lives in
+//   cfc-schema-merge.test.ts, and its two-writer clean journey below runs
+//   through the REAL wish builtin (the profile-embed lift condition).
 // - `ambiguousWishShapedSchema` keeps the CRASH class alive for the OW50
 //   detectability pins: TWO ifc-carrying branches is genuine ambiguity, which
 //   the narrowed assert still refuses. The `candidates.items` position (plain
@@ -78,19 +79,6 @@ const profileViewSchema: JSONSchema = {
 const altProfileViewSchema: JSONSchema = {
   type: "string",
   ifc: { confidentiality: ["other"] },
-} as JSONSchema;
-
-const wishShapedSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    result: {
-      anyOf: [
-        { type: "undefined" },
-        profileViewSchema,
-      ],
-    },
-    candidates: { type: "array", items: profileViewSchema },
-  },
 } as JSONSchema;
 
 const ambiguousWishShapedSchema: JSONSchema = {
