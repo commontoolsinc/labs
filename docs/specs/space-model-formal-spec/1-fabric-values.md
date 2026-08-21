@@ -3922,10 +3922,11 @@ symbols.
  * - `FabricSet`        -> `FrozenSet` / `Set`
  *
  * `FabricPrimitive` subclasses (`FabricEpochNsec`, `FabricEpochDay`,
- * `FabricHash`, `FabricBytes`, `FabricRegExp`) pass through unchanged — they
- * are always-frozen (Section 1.4.6). (`FabricRegExp` exposes its native form
- * via `value`, which returns a fresh `RegExp` clone; it is not unwrapped to a
- * native `RegExp` by this function.)
+ * `FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) pass through
+ * unchanged — they are always-frozen (Section 1.4.6). (`FabricRegExp` exposes
+ * its native form via `value`, and `FabricKeyPair` via `cryptoKeyPair`, each
+ * returning it on request; neither is unwrapped to that form by this
+ * function.)
  *
  * **The `frozen` argument is always honored.** The freeze state of every
  * value in the output matches the `frozen` argument. When `frozen` is
@@ -4008,11 +4009,13 @@ with no fabric wrappers at any depth. Without this recursion, an Error's
 > API of `FrozenMap` and `FrozenSet` is an implementation decision.
 
 > **Why `FabricPrimitive` subclasses pass through unchanged.**
-> `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, and `FabricBytes` are
-> all `FabricPrimitive` subclasses — always frozen at construction time with
-> no mutable state. They have no native equivalent to unwrap to (unlike
-> `FabricError` → `Error` or `FabricMap` → `Map`), so the unwrap function
-> returns them as-is.
+> `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
+> `FabricKeyPair`, and `FabricRegExp` are all `FabricPrimitive` subclasses —
+> always frozen at construction time with no mutable state. Most have no
+> native equivalent to unwrap to (unlike `FabricError` → `Error` or
+> `FabricMap` → `Map`). Where one does exist it is reached through a member —
+> `FabricRegExp.value`, `FabricKeyPair.cryptoKeyPair` — rather than by
+> unwrapping, so the unwrap function returns every one of them as-is.
 
 > **Why `FabricBytes` copies its input.** `FabricBytes` is a
 > `FabricPrimitive` — always frozen at construction time with its bytes
@@ -4105,9 +4108,12 @@ in order:
    internal deep-frozen cache. Short-circuits unchanged.
 
 2. **`FabricPrimitive` instance** — `FabricPrimitive` subclasses
-   (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`;
-   Section 1.4.6) self-freeze at construction and have no outbound
-   references. Short-circuits unchanged.
+   (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
+   `FabricKeyPair`, `FabricRegExp`; Section 1.4.6) self-freeze at
+   construction and expose no `FabricValue` for a walk to descend into.
+   Short-circuits unchanged. (A `FabricKeyPair` holding material does hold
+   two `FabricBytes`, but privately, and each froze itself in its own
+   constructor.)
 
 3. **`FabricInstance`** — Delegates to the instance's `[DEEP_FREEZE]`
    member with a `subFreeze` callback that recurses back through the same
