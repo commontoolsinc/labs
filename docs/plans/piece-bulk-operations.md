@@ -221,19 +221,32 @@ sentence are about speed:
   well before the end, so the cost is not the per-piece startup — it is a
   partial result that looks like a complete one. This strategy is ruled out
   rather than deprecated.
-- **One process, a session per piece.** The floor, and what every stage here
-  assumes. It removes the spawn entirely while keeping each piece's session
-  independent, so nothing accumulates across the run.
-- **One process, one session across many pieces.** Amortizes the rest: the
-  source package is resolved and pinned once, and the linked-document warm-up
-  is paid once because later pieces meet an already-warm replica.
+- **One process, a session per piece.** The bare floor. It removes the spawn
+  entirely while keeping each piece's session independent, so nothing
+  accumulates across the run — and it recovers almost nothing, because
+  process and session start-up are a small part of what a piece costs.
+- **One process, one session per bounded group.** The working strategy. A
+  session serves a fixed number of pieces and is then replaced, so the
+  expensive warm-up is paid once per group rather than once per piece, while
+  the number of pieces ever live at once stays bounded by the group size
+  rather than by the length of the run.
+- **One process, one session across the whole run.** Maximum amortization,
+  and the only one whose risk grows with the work: every updated piece stays
+  running for the rest of the run, so memory and cross-piece interference
+  scale with the total. Unmeasured at the sizes that motivate it.
 
-The third is worth having and is bounded by a question the second does not
-raise: an updated piece stays running in the shared session for the rest of
-the run, so memory and cross-piece interference scale with the batch, and
-neither has been measured at the sizes that motivate it. A strategy that has
-not been measured at its intended scale is not yet a strategy — which is why
-the floor is the second and not the third.
+The grouped strategy is the floor for anything board-sized, and the reason is
+arithmetic rather than caution. The warm-up dominates the per-piece cost, so
+paying it once per group of twenty recovers most of what the whole-run
+session would, while the thing that has never been measured — many pieces
+live in one process — is held to twenty instead of hundreds. A group boundary
+is also a natural resume point, so the strategy that bounds the risk is the
+same one that bounds what a failure costs.
+
+What no strategy recovers is the swap itself. Replacing a piece's source,
+re-staging its argument, and letting it settle is the actual work, it is paid
+once per piece, and it sets the floor on any run. Amortization changes what
+surrounds that; it does not change that.
 
 Whichever strategy applies, order stays serial and the spine above is
 unchanged. That is the point of putting batching underneath it: the plan,
@@ -259,6 +272,15 @@ much has to exist before it is safe to run:
   has to be exercised on a copy before it is relied on.
 - **Stage 5 is under all of them.** Session reuse only makes an existing
   operation faster.
+
+**The first useful increment is stages 1 and 3.** A rehearsal-only retarget —
+survey the board, apply the source across it, resume when it stops — needs
+neither repair nor rollback, because a rehearsal's reversal is resetting the
+copy. That increment is worth naming because it is what an upgrade waiting on
+this tooling actually needs, and because it is a prefix of the design rather
+than a detour from it: every part of it is a part of the finished thing.
+Rollback is not skipped, it is sequenced — it returns before the first live
+run, which is the point at which resetting the copy stops being an option.
 
 ### 1. Survey: enumeration, and the plan
 
@@ -383,6 +405,14 @@ a verdict, and the two stay separate invocations.
       what an upgrade that half-converged looks like.
 - [ ] It composes with the existing space-level checks rather than replacing
       them; those remain the acceptance gate.
+- [ ] Sessions are grouped rather than per-piece or per-run, and the group
+      size is a knob rather than a constant in the code.
+- [ ] A group boundary is a resume point: a run that dies inside a group
+      resumes from the start of that group, having lost at most a group's
+      worth of warm-up.
+- [ ] Per-piece timing is reported as the run proceeds. A run whose cost per
+      piece is unknown cannot be improved, and the number is the input to
+      every decision below about whether to go faster.
 
 ### 4. Rollback
 
@@ -470,8 +500,19 @@ settled before work starts.
    already work. The choice decides whether writing a fixer is a
    repository-local task or something an operator can do from anywhere, and
    whether the purity a fixer has to have is enforced or merely asked for.
-6. **Whether one session is viable at the sizes that motivate it** —
-   *stage 5*, and open until measured.
+6. **Whether siblings may be applied concurrently** — *stage 3, and open
+   until the first pass is measured.* Serial ordering exists because a parent
+   recomputing over changing children is what storms, but the children of one
+   parent are independent of each other, so bounded concurrency across them
+   with the parent last is the largest speed lever available. It is also the
+   one that contradicts the operating procedure, which says to migrate
+   serially. The honest sequence is to run serially once while watching the
+   churn the procedure already teaches how to read, and let that decide —
+   rather than to reason about the storm from either direction.
+7. **Whether one session across a whole run is viable at the sizes that
+   motivate it** — *stage 5*, and open until measured. The grouped strategy
+   is the floor precisely so that this stays a question rather than a
+   prerequisite.
 
 ## Out of scope, and where it goes
 
