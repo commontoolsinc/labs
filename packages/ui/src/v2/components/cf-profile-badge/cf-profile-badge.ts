@@ -473,6 +473,19 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   @property({ type: Boolean, reflect: true, attribute: "nonavigate" })
   accessor noNavigate = false;
 
+  /**
+   * Name to present when no profile resolves.
+   *
+   * For a row that RECORDS who someone was without holding their profile —
+   * a roster entry written before the space had profiles, say. Such a row
+   * still knows the name it stored, and showing it beats telling the reader
+   * the person is unknown. It is a fallback only: a resolved profile always
+   * wins, so this can never mask or contradict a real identity, and it earns
+   * no part of the verification treatment.
+   */
+  @property({ type: String, attribute: "fallback-name" })
+  accessor fallbackName: string | undefined = undefined;
+
   @state()
   private accessor _name: string | undefined = undefined;
 
@@ -802,7 +815,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const variant = this.variant;
     const showAvatar = variant !== "chip";
     const showName = variant !== "circle";
-    const displayName = this._name ?? "Unknown profile";
+    const displayName = this._name ?? this.fallbackName ?? "Unknown profile";
 
     // CT-1648: hover/focus tooltip surfacing the profile's configured details
     // (bio + pinned-piece count). Always shown for `circle` (whose name is

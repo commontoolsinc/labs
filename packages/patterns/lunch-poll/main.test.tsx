@@ -234,6 +234,18 @@ export default pattern(() => {
     poll.logVisit.send({ title: "Sneaky" });
   });
 
+  // A resolved profile is not membership. `castVote` is a public stream, so a
+  // headless caller reaches it with an identity and no roster entry; the UI
+  // never offers the control, which is why nothing else here would catch a
+  // vote that counted anyway.
+  const action_try_vote_before_join = action(() => {
+    poll.castVote.send({ optionId: "any", voteType: "green" });
+  });
+
+  const assert_no_vote_without_membership = assert(() =>
+    (poll.votes ?? []).length === 0
+  );
+
   const action_join_as_alex = action(() => {
     poll.joinAs.send({});
   });
@@ -657,6 +669,8 @@ export default pattern(() => {
       { action: action_try_remove_before_join },
       { action: action_try_reset_before_join },
       { action: action_try_log_before_join },
+      { action: action_try_vote_before_join },
+      { assertion: assert_no_vote_without_membership },
 
       // First join → claims admin
       { action: action_join_as_alex },

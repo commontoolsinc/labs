@@ -74,6 +74,32 @@ describe("CFProfileBadge", () => {
     expect(el.size).toBe("md");
   });
 
+  describe("fallback name", () => {
+    it("is undefined by default, so an unresolved badge still says so", () => {
+      const el = new CFProfileBadge();
+      expect(el.fallbackName).toBeUndefined();
+    });
+
+    it("presents a stored name where no profile resolves", () => {
+      // A roster row written before the space had profiles knows the name it
+      // stored; showing it beats telling the reader the person is unknown.
+      const el = new CFProfileBadge() as any;
+      el.fallbackName = "Alex";
+      expect(JSON.stringify(el.render())).toContain("Alex");
+    });
+
+    it("never lets the fallback stand in for a resolved profile", () => {
+      // A fallback that could shadow a real identity would be a way to label
+      // someone as somebody else.
+      const el = new CFProfileBadge() as any;
+      el._name = "Ada";
+      el.fallbackName = "Alex";
+      const html = JSON.stringify(el.render());
+      expect(html).toContain("Ada");
+      expect(html).not.toContain("Alex");
+    });
+  });
+
   describe("variants (CT-1761)", () => {
     it("defaults to the full variant", () => {
       const el = new CFProfileBadge();

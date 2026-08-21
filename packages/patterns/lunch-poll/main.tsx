@@ -731,15 +731,22 @@ const removeOption = handler<RemoveOptionEvent, {
 
 const castVote = handler<CastVoteEvent, {
   votes: VotesCell;
+  users: UsersCell;
   myProfile: LunchProfileCell | undefined;
   nowTick: number | null;
-}>(({ optionId, voteType }, { votes, myProfile, nowTick }) => {
+}>(({ optionId, voteType }, { votes, users, myProfile, nowTick }) => {
   if (!myProfile) return;
   // Terminal cell for storage, and it must READ as present: at `asCell` seams
   // an absent profile arrives as a truthy empty handle, which `!myProfile`
   // cannot catch, and a pinned empty handle would store a floating identity.
   const voter = myProfile.resolveAsCell();
   if (voter.get() === undefined) return;
+  // Voting is for participants. The UI only offers the control to a joined
+  // viewer, but this is a public stream: a headless caller reaches it with
+  // nothing but a resolved profile, and a vote from a non-member counts in
+  // every tally while its caster shows as unjoined. Membership is asked of
+  // the roster by profile cell, the same comparison joined-ness itself uses.
+  if (!(users.get() ?? []).some((u) => equals(u.profile, voter))) return;
   // Stamp with the shared `#now/300` tick — fresh to five minutes, all a
   // day-granularity stamp needs, and it keeps the deployed source compatible
   // with Loom runtimes from before handler-scoped Date.now(). Null until the
@@ -939,6 +946,12 @@ interface OptionTally {
     voteType: VoteColor;
     color: string;
     initials: string;
+    /**
+     * Whether this vote is the viewer's own, decided by profile cell.
+     * Resolved here rather than in the view, which has only a display name
+     * to compare — and two participants may share one.
+     */
+    isSelf: boolean;
   }>;
 }
 
@@ -946,6 +959,10 @@ const tallyOptions = (
   options: readonly Option[],
   votes: readonly Vote[],
   users: readonly User[],
+  // The union the call site actually has: inside a `computed` the viewer's
+  // profile arrives unwrapped, and `equals` compares either form. Narrowing
+  // to the cell alone would only push a cast to the caller.
+  viewer: LunchProfile | LunchProfileCell | undefined,
 ): OptionTally[] => {
   // A vote carries its voter's identity, so the display name and swatch colour
   // are looked up from the roster by comparison. A voter who has left the
@@ -972,6 +989,7 @@ const tallyOptions = (
           color: entry?.color ?? "#888",
           initials: initialsByName.get(name) ??
             getInitials(name, participantNames),
+          isSelf: viewer !== undefined && equals(v.voter, viewer),
         };
       }),
     };
@@ -1225,6 +1243,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const boundCastVote = castVote({
       votes,
+      users,
       myProfile: viewerProfileCell,
       nowTick,
     });
@@ -1305,8 +1324,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       [...visits].reduce((n, v) => n + v.votes.length, 0)
     );
     // The viewer's display name, resolved from their STORED roster entry so a
-    // later profile rename shows through everywhere at once.
-    const me = computed(() => myEntry?.name ?? "");
     // The viewer's own roster entry as a 0-or-1 array: the header chip renders
     // it with a plain static map, which keeps the `$profile` binding free of
     // conditionals (a `$`-binding inside an authored computed blanks the
@@ -1328,7 +1345,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     );
     // Rank from today's votes only — the tallies, swatches, and top choice all
     // reflect the current day.
-    const ranked = tallyOptions(options, todaysVotes, users);
+    const ranked = tallyOptions(options, todaysVotes, users, viewerProfileCell);
 
     const topChoice = todayVoteCount > 0 && ranked.length > 0
       ? ranked[0]
@@ -1413,8 +1430,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         {
                           /* Every profile-backed participant renders from
                             their STORED live cell (the canonical-roster
-                            idiom, multi-user-patterns.md#presenting-identity);
-                            guests keep plain name chips. Static maps on
+                            idiom, multi-user-patterns.md#presenting-identity).
+                            A row written before the space had profiles holds
+                            no cell to bind, and renders the name it stored
+                            rather than "Unknown profile". Static maps on
                             purpose — `$profile` bindings cannot live inside
                             the tally computed below. These badges navigate;
                             only the viewer's own chip is noNavigate. */
@@ -1424,6 +1443,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             variant="chip"
                             size="sm"
                             $profile={entry.profile}
+                            fallback-name={entry.name}
                             data-participant-badge={entry.name}
                           />
                         ))}
@@ -1692,7 +1712,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                       color: "white",
                                       fontSize: "11px",
                                       fontWeight: 700,
-                                      boxShadow: voter.name === me
+                                      boxShadow: voter.isSelf
                                         ? "0 0 0 2px white, 0 0 0 3px #111827"
                                         : "none",
                                     }}
