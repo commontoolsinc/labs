@@ -1271,8 +1271,14 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   reads stale; the client's `piece-instantiate` then failed
   `piece-start-commit-failed` and the shells never idled) — the
   client-instantiate-vs-server-derive race at piece creation is
-  pre-existing and only softened, not closed (owner: the runner's
-  piece-start path).
+  closed in the runner's piece-start path: a refused or wave-withdrawn
+  start removes its registration only while its node generation remains
+  current. The serving loop re-arms matching continuous demand. Wave
+  withdrawal retries immediately. Stale-basis rejection waits for its replica
+  catch-up gate, while other failures wait for authored input or a demand
+  change. The stage P2-F tests pin direct
+  refusal, real wave withdrawal, supersession by a newer hot-swap, and a
+  continuously demanded piece starting again under both retry policies.
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL

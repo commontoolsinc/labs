@@ -2564,6 +2564,22 @@ export class Runner {
         }
       } finally {
         if (shouldCommit) {
+          const teardownAfterFailedCommit = () => {
+            if (cancelNodes !== nodeCancel) {
+              return { registrationRemoved: false };
+            }
+            if (this.cancels.get(key) !== cancel) {
+              return { registrationRemoved: false };
+            }
+            this.cancels.delete(key);
+            this.allCancels.delete(cancel);
+            try {
+              cancel();
+              return { registrationRemoved: true };
+            } catch (cleanupError) {
+              return { registrationRemoved: true, cleanupError };
+            }
+          };
           this.runtime.prepareTxForCommit(actualTx);
           // Fire-and-forget by design (start() resolves before the
           // commit settles), but NEVER swallowed (stage P2-F, the F1
@@ -2573,13 +2589,12 @@ export class Runner {
           // and, on a serving runtime, counted.
           const instantiateActionId =
             `piece-instantiate/${resultCell.sourceURI}`;
-          actualTx.commit().then(({ error }) => {
-            if (error !== undefined) {
-              this.reportPieceStartCommitFailure(instantiateActionId, error);
-            }
-          }).catch((error) => {
-            this.reportPieceStartCommitFailure(instantiateActionId, error);
-          });
+          this.commitPieceStart(
+            actualTx,
+            instantiateActionId,
+            resultCell.getAsNormalizedFullLink().id,
+            teardownAfterFailedCommit,
+          );
         }
       }
     };
@@ -2985,25 +3000,30 @@ export class Runner {
         // cleanup() does) would clobber that live registration and orphan its
         // graph. Delete the key only while it still holds our cancel — the same
         // guard createDeferredStartOwnership uses — and always drop/invoke ours.
+        const repairedNodes = cancelNodes;
         const teardownAfterFailedCommit = () => {
-          if (this.cancels.get(key) === cancel) this.cancels.delete(key);
+          if (cancelNodes !== repairedNodes) {
+            return { registrationRemoved: false };
+          }
+          if (this.cancels.get(key) !== cancel) {
+            return { registrationRemoved: false };
+          }
+          this.cancels.delete(key);
           this.allCancels.delete(cancel);
-          cancel();
+          try {
+            cancel();
+            return { registrationRemoved: true };
+          } catch (cleanupError) {
+            return { registrationRemoved: true, cleanupError };
+          }
         };
         const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
-        repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) {
-            // Surfaced BEFORE the teardown (stage P2-F, the F1
-            // fold-in): the pre-P2-F path tore the registration down
-            // silently — correct liveness, invisible failure.
-            this.reportPieceStartCommitFailure(repairActionId, result.error);
-            teardownAfterFailedCommit();
-          }
-        });
-        repairTx.commit().catch((error) => {
-          this.reportPieceStartCommitFailure(repairActionId, error);
-          teardownAfterFailedCommit();
-        });
+        this.commitPieceStart(
+          repairTx,
+          repairActionId,
+          resultCell.getAsNormalizedFullLink().id,
+          teardownAfterFailedCommit,
+        );
       }
     };
 
@@ -3922,13 +3942,73 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
-  /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
-   * setup/instantiation commit failure is fire-and-forget by design but
-   * NEVER silent — loud in every arm, and handed to the serving
-   * runtime's installed observer (the SpaceServer counts it into §7's
-   * structureLoadFailures). */
+  /** Commit a fire-and-forget piece start and observe its durable wave
+   * settlement. A failed start is reported and its current registration is
+   * removed by the caller's generation-aware teardown. */
+  private commitPieceStart(
+    tx: IExtendedStorageTransaction,
+    actionId: string,
+    pieceRootId: string,
+    teardownAfterFailedCommit: () => {
+      registrationRemoved: boolean;
+      cleanupError?: unknown;
+    },
+  ): void {
+    let failureHandled = false;
+    const retryFor = (error: unknown): "immediate" | "on-input" =>
+      isConflictRejection(error as { name?: string }) ||
+        isStorageTransactionInconsistent(error as { name?: string })
+        ? "immediate"
+        : "on-input";
+    const retryReadyFor = (error: unknown): Promise<void> | undefined => {
+      if (!isConflictRejection(error as { name?: string })) return undefined;
+      const readyToRetry = (error as { readyToRetry?: () => Promise<void> })
+        .readyToRetry;
+      if (readyToRetry === undefined) return undefined;
+      return Promise.resolve().then(() => readyToRetry());
+    };
+    const fail = (error: unknown, retry: "immediate" | "on-input") => {
+      if (failureHandled) return;
+      failureHandled = true;
+      const teardown = teardownAfterFailedCommit();
+      if (teardown.cleanupError !== undefined) {
+        logger.warn("piece-start-cleanup-failed", () => [
+          `cleanup after failed piece-start commit ${actionId} failed`,
+          teardown.cleanupError,
+        ]);
+      }
+      this.reportPieceStartCommitFailure(
+        actionId,
+        pieceRootId,
+        teardown.registrationRemoved,
+        retry,
+        retryReadyFor(error),
+        error,
+      );
+    };
+    void (async () => {
+      try {
+        const committed = await tx.commit();
+        if (committed.error !== undefined) {
+          fail(committed.error, retryFor(committed.error));
+          return;
+        }
+        const settlement = waveSettlementOf(tx);
+        if (settlement === undefined) return;
+        const settled = await settlement;
+        if (settled.error !== undefined) fail(settled.error, "immediate");
+      } catch (error) {
+        fail(error, retryFor(error));
+      }
+    })();
+  }
+
   private reportPieceStartCommitFailure(
     actionId: string,
+    pieceRootId: string,
+    registrationRemoved: boolean,
+    retry: "immediate" | "on-input",
+    retryReady: Promise<void> | undefined,
     error: unknown,
   ): void {
     logger.error("piece-start-commit-failed", () => [
@@ -3936,13 +4016,26 @@ export class Runner {
       "writes did not land (stage P2-F, F1)",
       error,
     ]);
-    try {
-      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
-    } catch (observerError) {
-      logger.warn("piece-start-commit-observer-failed", () => [
-        "pieceStartCommitFailureObserver threw",
-        observerError,
-      ]);
+    const notify = () => {
+      try {
+        this.runtime.pieceStartCommitFailureObserver?.({
+          actionId,
+          pieceRootId,
+          registrationRemoved,
+          retry,
+          error,
+        });
+      } catch (observerError) {
+        logger.warn("piece-start-commit-observer-failed", () => [
+          "pieceStartCommitFailureObserver threw",
+          observerError,
+        ]);
+      }
+    };
+    if (registrationRemoved && retryReady !== undefined) {
+      retryReady.then(notify, notify);
+    } else {
+      notify();
     }
   }
 

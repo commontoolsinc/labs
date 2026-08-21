@@ -410,6 +410,21 @@ export class SpaceServer implements TransactionSealDestination {
    * never started server-side (waves committed watermark-only while
    * `waitForSettled` claimed the derivation current). */
   readonly #pendingStructureLoads = new Set<string>();
+  /** Demand keys whose piece start failed after start() returned while a
+   * structure-load pass was still finishing. The pass's success arm can
+   * delete the pending marker after the failure observer adds it, so its
+   * finally block restores these markers before waking the next pass. */
+  readonly #pieceStartFailuresDuringLoad = new Set<string>();
+  /** Piece roots whose failure arrived before the active structure-load pass
+   * recorded which demanded key resolved to them. */
+  readonly #pieceStartFailureRootsDuringLoad = new Map<
+    string,
+    { wake: boolean; generation: number }
+  >();
+  /** Seal and policy failures retry only after authored input or a demand
+   * change advances this generation. */
+  readonly #pieceStartFailuresAwaitingInput = new Map<string, number>();
+  #pieceStartRetryGeneration = 0;
   /** The TERMINAL not-loadable roots (stage P2-F, the OW19 demand-cycle
    * design — RULED direction 2026-08-07): a demanded root whose doc is
    * confirmed SYNCED from the durable store and still carries no
@@ -777,8 +792,13 @@ export class SpaceServer implements TransactionSealDestination {
     // path is fire-and-forget by design). Count it where the demand
     // cycle's synchronous failures already count, so the swallowed-
     // refusal class is a health-stats fact, never a log grep.
-    runtime.pieceStartCommitFailureObserver = ({ actionId, error }) => {
+    runtime.pieceStartCommitFailureObserver = (
+      { actionId, pieceRootId, registrationRemoved, retry, error },
+    ) => {
       this.#options.stats.structureLoadFailures += 1;
+      if (registrationRemoved) {
+        this.#rearmPieceStartFailure(pieceRootId, retry === "immediate");
+      }
       logger.warn("piece-start-commit-failed", () => [
         `piece-start commit ${actionId} failed on the serving runtime; ` +
         "counted structureLoadFailures (stage P2-F, F1)",
@@ -1010,6 +1030,7 @@ export class SpaceServer implements TransactionSealDestination {
    * below — serving-loop.md §3's self-echo rule). */
   enqueueCommit(record: AdmittedCommitNotice): void {
     this.#feed.push(record);
+    if (record.class === "authored") this.#pieceStartRetryGeneration += 1;
     if (
       record.class === "authored" && this.#active &&
       !this.#pendingSettles.has(record.seq)
@@ -1114,6 +1135,7 @@ export class SpaceServer implements TransactionSealDestination {
     // MINOR-1: a fresh demand note — bump the generation so a pass that
     // already snapshotted its rows re-latches on completion.
     this.#demandNoteGeneration += 1;
+    this.#pieceStartRetryGeneration += 1;
     // (d′) — flag 1/2 instrumentation: count the wake sources
     // (the push-growth notify is the NEW site) and remember that a growth
     // wake fired, so the settle series can class the inputs it covers.
@@ -2676,6 +2698,13 @@ export class SpaceServer implements TransactionSealDestination {
     if (runtime === undefined) return;
     const stats = this.#options.stats;
     const passStart = performance.now();
+    for (const [key, generation] of this.#pieceStartFailuresAwaitingInput) {
+      if (generation >= this.#pieceStartRetryGeneration) continue;
+      this.#pieceStartFailuresAwaitingInput.delete(key);
+      if (this.#demandedRoots.has(key)) {
+        this.#pendingStructureLoads.add(key);
+      }
+    }
     // Obligation (iii): the demand-root enter/leave counters live on the
     // CURRENT runtime's scheduler and reset to 0 on a fresh runtime (a
     // reactivation after park). We fold the delta SINCE THE LAST FOLD
@@ -2767,6 +2796,7 @@ export class SpaceServer implements TransactionSealDestination {
       this.#unindexDemandKey(key);
       this.#pieceRootByDemandKey.delete(key);
       this.#pendingStructureLoads.delete(key);
+      this.#pieceStartFailuresAwaitingInput.delete(key);
       this.#terminalStructureLoads.delete(key);
       this.#rearmedAwaitingSettle.delete(key);
       // The stuck-streak entry retires with the rest of the per-key
@@ -2862,6 +2892,24 @@ export class SpaceServer implements TransactionSealDestination {
               this.#pieceRootByDemandKey.set(key, verdict.rootId);
               this.#indexResolvedRoot(key, verdict.rootId);
             }
+            if (
+              verdict.rootId !== undefined &&
+              this.#pieceStartFailureRootsDuringLoad.has(verdict.rootId)
+            ) {
+              const failure = this.#pieceStartFailureRootsDuringLoad.get(
+                verdict.rootId,
+              )!;
+              if (
+                failure.wake
+              ) {
+                this.#pieceStartFailuresDuringLoad.add(key);
+              } else {
+                this.#pieceStartFailuresAwaitingInput.set(
+                  key,
+                  failure.generation,
+                );
+              }
+            }
           } else if (verdict.reason === "no-pattern-meta") {
             // The OW19 terminal class — but only ON CONFIRMED durable
             // state: an un-synced doc reads identically, so sync the
@@ -2882,6 +2930,24 @@ export class SpaceServer implements TransactionSealDestination {
               ) {
                 this.#pieceRootByDemandKey.set(key, confirmed.rootId);
                 this.#indexResolvedRoot(key, confirmed.rootId);
+              }
+              if (
+                confirmed.rootId !== undefined &&
+                this.#pieceStartFailureRootsDuringLoad.has(confirmed.rootId)
+              ) {
+                const failure = this.#pieceStartFailureRootsDuringLoad.get(
+                  confirmed.rootId,
+                )!;
+                if (
+                  failure.wake
+                ) {
+                  this.#pieceStartFailuresDuringLoad.add(key);
+                } else {
+                  this.#pieceStartFailuresAwaitingInput.set(
+                    key,
+                    failure.generation,
+                  );
+                }
               }
             } else if (confirmed.reason === "no-pattern-meta") {
               this.#pendingStructureLoads.delete(key);
@@ -2998,6 +3064,44 @@ export class SpaceServer implements TransactionSealDestination {
    * closure as keys the scan would be O(closure) twice per pass). */
   readonly #keysByRootId = new Map<string, Set<string>>();
   readonly #keysByResolvedRoot = new Map<string, Set<string>>();
+
+  #rearmPieceStartFailure(pieceRootId: string, wake: boolean): void {
+    const keys = new Set([
+      ...(this.#keysByRootId.get(pieceRootId) ?? []),
+      ...(this.#keysByResolvedRoot.get(pieceRootId) ?? []),
+    ]);
+    if (this.#structureLoadPass !== undefined) {
+      const previous = this.#pieceStartFailureRootsDuringLoad.get(pieceRootId);
+      this.#pieceStartFailureRootsDuringLoad.set(
+        pieceRootId,
+        {
+          wake: (previous?.wake ?? false) || wake,
+          generation: previous?.generation ?? this.#pieceStartRetryGeneration,
+        },
+      );
+    }
+    let rearmed = false;
+    for (const key of keys) {
+      if (!this.#demandedRoots.has(key)) continue;
+      if (wake) {
+        this.#pendingStructureLoads.add(key);
+        if (this.#structureLoadPass !== undefined) {
+          this.#pieceStartFailuresDuringLoad.add(key);
+        }
+      } else {
+        this.#pieceStartFailuresAwaitingInput.set(
+          key,
+          this.#pieceStartRetryGeneration,
+        );
+      }
+      rearmed = true;
+    }
+    if (!rearmed) return;
+    if (wake) {
+      this.#pendingStructureRetryWake = true;
+      this.#feedArrived?.resolve();
+    }
+  }
 
   #indexDemandKey(key: string, id: string): void {
     let keys = this.#keysByRootId.get(id);
@@ -3230,6 +3334,16 @@ export class SpaceServer implements TransactionSealDestination {
       })
       .finally(() => {
         this.#structureLoadPass = undefined;
+        for (const key of this.#pieceStartFailuresDuringLoad) {
+          if (this.#demandedRoots.has(key)) {
+            this.#pendingStructureLoads.add(key);
+          }
+        }
+        if (this.#pieceStartFailuresDuringLoad.size > 0) {
+          this.#pieceStartFailuresDuringLoad.clear();
+          this.#pendingStructureRetryWake = true;
+        }
+        this.#pieceStartFailureRootsDuringLoad.clear();
         // MINOR-1: a demand note that landed AFTER this pass snapshotted
         // its rows (a straddling pass) did not reach the rows it read;
         // re-latch so the next wait runs a FRESH pass rather than
@@ -3928,6 +4042,10 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lastCovered = undefined;
     this.#growthAwaitingLanding = false;
     this.#pendingStructureLoads.clear();
+    this.#pieceStartFailuresDuringLoad.clear();
+    this.#pieceStartFailureRootsDuringLoad.clear();
+    this.#pieceStartFailuresAwaitingInput.clear();
+    this.#pieceStartRetryGeneration = 0;
     this.#terminalStructureLoads.clear();
     this.#rearmedAwaitingSettle.clear();
     this.#pendingStructureRetryWake = false;
