@@ -2866,7 +2866,12 @@ export class SpaceServer implements TransactionSealDestination {
             // input-driven cycle retries.
             this.#pendingStructureLoads.add(key);
             stats.structureLoadDeferred += 1;
-            this.#noteStructureLoadDeferral(key, root.id, verdict.reason, stats);
+            this.#noteStructureLoadDeferral(
+              key,
+              root.id,
+              verdict.reason,
+              stats,
+            );
             logger.debug?.("structure-load-deferred", () => [
               `demanded root ${root.id} not loadable yet ` +
               `(${verdict.reason ?? "unclassified"}); ` +
