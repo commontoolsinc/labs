@@ -519,6 +519,10 @@ FabricKeyPair.prototype satisfies ApiFabricKeyPair;
 // The algorithm name is arbitrary -- only its type is under test -- so it is
 // deliberately not one this system uses. A real name would answer a
 // migration's `grep` with a site that has nothing to migrate.
+// Never invoked, so never covered, and no test could honestly cover it. The
+// directive keeps these lines out of the coverage denominator rather than out
+// of a report someone has to remember to read.
+// deno-coverage-ignore-start
 (() => {
   const bytes = new FabricBytes(new Uint8Array());
 
@@ -526,3 +530,4 @@ FabricKeyPair.prototype satisfies ApiFabricKeyPair;
   new FabricKeyPair("ExampleAlgorithm", bytes, bytes);
   new FabricKeyPair("ExampleAlgorithm", new Uint8Array(), new Uint8Array());
 });
+// deno-coverage-ignore-stop
