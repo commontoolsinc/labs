@@ -854,6 +854,8 @@ jobs:
     name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
+    env:
+      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     needs: ["build-toolshed-on"]
     strategy:
       fail-fast: false
@@ -969,6 +971,17 @@ jobs:
           path: test-results/${{ matrix.junit_name }}.xml
           retention-days: 90
           if-no-files-found: ignore
+
+      - name: 📤 Ship test records
+        if: always()
+        uses: ./.github/actions/test-records-ship
+        with:
+          artifact: package-integration-server-execution-on-${{ matrix.suite_name }}
+          job: >-
+            Package Integration Tests / server-execution ON
+            (${{ matrix.suite_name }})
+          junit: >-
+            kind=integration,scope=${{ matrix.suite_name }},prefix=${{ matrix.package_dir }},glob=test-results/${{ matrix.junit_name }}.xml
 
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
@@ -1339,6 +1352,8 @@ jobs:
     name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
+    env:
+      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     needs: ["build-toolshed-on"]
     strategy:
       fail-fast: false
@@ -1454,6 +1469,18 @@ jobs:
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
+
+      - name: 📤 Ship test records
+        if: always()
+        uses: ./.github/actions/test-records-ship
+        with:
+          artifact: pattern-integration-server-execution-on-${{ matrix.shard }}
+          job: >-
+            Pattern Integration Tests / server-execution ON
+            (${{ matrix.shard }}/${{ matrix.total }})
+          shard: ${{ matrix.shard }}/${{ matrix.total }}
+          junit: >-
+            kind=integration,scope=patterns,prefix=packages/patterns,glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
