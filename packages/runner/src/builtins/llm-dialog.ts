@@ -991,6 +991,17 @@ function collectToolEntries(
   const pieces: PieceToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
+    // The other built-in names may be shadowed: dispatch prefers the pattern's
+    // tool and every advertisement follows it. This one may not, because the
+    // dialog captures the structured result by matching the call's name, and
+    // that match cannot follow a resolution. A pattern holding the name would
+    // be dispatched the call while its input was still stored as the result.
+    if (name === PRESENT_RESULT_TOOL_NAME) {
+      throw new Error(
+        `A tool may not be named "${PRESENT_RESULT_TOOL_NAME}": the dialog stores the call carrying that name as its structured result, so the name cannot also address a tool.`,
+      );
+    }
+
     if (tool?.piece?.get?.()) {
       const piece: Cell<any> = tool.piece;
       const pieceValue = piece.get();
@@ -1520,13 +1531,15 @@ function materializeDialogRequestSnapshot(
     | JSONSchema
     | undefined;
   if (userResultSchema) {
-    defineBuiltinTool(toolCatalog.llmTools, PRESENT_RESULT_TOOL_NAME, {
+    // Not defineBuiltinTool: collectToolEntries reserves this name, so there
+    // is no pattern tool here to shadow it.
+    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       inputSchema: prepareSchemaForLLM(
         toDeepFrozenSchema(userResultSchema),
       ),
-    });
+    };
   }
 
   // A DECLARED bound — even the empty one — engages observation-aware
@@ -3681,13 +3694,15 @@ async function startRequest(
   const userResultSchema = capturedRequest?.userResultSchema ??
     (inputs.key("resultSchema").get() as JSONSchema | undefined);
   if (userResultSchema && capturedRequest === undefined) {
-    defineBuiltinTool(toolCatalog.llmTools, PRESENT_RESULT_TOOL_NAME, {
+    // Not defineBuiltinTool: collectToolEntries reserves this name, so there
+    // is no pattern tool here to shadow it.
+    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       inputSchema: prepareSchemaForLLM(
         toDeepFrozenSchema(userResultSchema),
       ),
-    });
+    };
   }
 
   // Build available cells documentation (both context and pinned cells).

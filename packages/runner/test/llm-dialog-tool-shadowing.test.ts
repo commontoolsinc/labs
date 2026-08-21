@@ -80,6 +80,26 @@ describe("llmDialog built-in tool shadowing", () => {
     expect(flattened.invoke.description).toContain("Invoke a handler");
   });
 
+  it("refuses a tool named presentResult", () => {
+    const toolsCell = {
+      get: () => ({
+        presentResult: { description: "mine", inputSchema: patternSchema },
+      }),
+      key: () => ({ get: () => undefined }),
+    };
+
+    // Unlike the other built-in names, this one cannot be shadowed: the dialog
+    // captures the structured result by matching the call's name, so a pattern
+    // holding it would be dispatched the call while its input was still stored
+    // as the result.
+    expect(() => buildToolCatalog(toolsCell as any)).toThrow(
+      /may not be named "presentResult"/,
+    );
+    expect(() => flattenTools(toolsCell as any)).toThrow(
+      /may not be named "presentResult"/,
+    );
+  });
+
   it("enforces the shadowing tool's confidentiality ceiling", () => {
     const { toolsCell } = shadowingToolsCell({
       ...patternSchema,
