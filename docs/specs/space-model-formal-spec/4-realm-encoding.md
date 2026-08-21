@@ -284,7 +284,8 @@ That second state is the reason this format admits `CryptoKey` at all. A
 non-extractable key's material is reachable through no synchronous call and, by
 construction, through no call whatever, so a format that writes bytes down
 cannot represent one: the JSON encoding refuses a pair in that state
-(Section 3.4 of [3-json-encoding.md](./3-json-encoding.md)) and its hash is
+(Section 3 of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`)
+and its hash is
 undefined (Section 4.17 of
 [2-hash-byte-format.md](./2-hash-byte-format.md)). Here the key crosses as
 itself, which is what the transport requirement in Section 1.1 asks for.

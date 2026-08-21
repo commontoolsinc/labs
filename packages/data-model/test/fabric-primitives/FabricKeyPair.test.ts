@@ -373,6 +373,19 @@ describe("FabricKeyPair", () => {
           ).toBe(false);
         });
 
+        it("returns `false` for a material state with an empty algorithm", () => {
+          // The one thing the constructor refuses about an algorithm name.
+          // Left to `decode()`, it would arrive as a constructor throw, which
+          // that method reports as a detached buffer.
+          expect(
+            codec.canDecode({
+              algorithm: "",
+              publicKey: new ArrayBuffer(1),
+              privateKey: new ArrayBuffer(1),
+            }),
+          ).toBe(false);
+        });
+
         it("returns `false` for state that is not a record", () => {
           expect(codec.canDecode(123)).toBe(false);
         });

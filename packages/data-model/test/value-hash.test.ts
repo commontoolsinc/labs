@@ -23,6 +23,7 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 import { hashOf, hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricValue } from "@/interface.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -956,6 +957,62 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
       });
     });
+    describe("FabricKeyPair hashing (TAG_KEY_PAIR = 0x2C)", () => {
+      it("matches a hand-computed byte stream for `FabricKeyPair`", () => {
+        // Algorithm "Ed25519" = 7 bytes UTF-8, under the 64-byte threshold, so
+        // the direct string form. Each key is a complete tagged `FabricBytes`
+        // value: TAG_BYTES, a LEB128 length, then the raw bytes.
+        const pair = new FabricKeyPair(
+          "Ed25519",
+          new Uint8Array([0xDE, 0xAD]),
+          new Uint8Array([0xBE, 0xEF, 0x01]),
+        );
+        const expected = sha256([
+          0x2C, // TAG_KEY_PAIR
+          0x24, // TAG_STRING
+          0x07, // length of "Ed25519"
+          0x45,
+          0x64,
+          0x32,
+          0x35,
+          0x35,
+          0x31,
+          0x39, // "Ed25519"
+          0x25, // TAG_BYTES
+          0x02, // public key length
+          0xDE,
+          0xAD,
+          0x25, // TAG_BYTES
+          0x03, // private key length
+          0xBE,
+          0xEF,
+          0x01,
+        ]);
+
+        expect(hex(hashBytesOf(pair))).toBe(hex(expected));
+      });
+
+      it("hashes the two keys in a fixed order", () => {
+        // The layout above feeds the public key first. Swapping the two is a
+        // different value rather than the same one -- which the byte stream
+        // decides and no distinctness test alone could show, the two keys
+        // here being of different lengths only so that a swap is visible at
+        // all.
+        const pair = new FabricKeyPair(
+          "Ed25519",
+          new Uint8Array([0xDE, 0xAD]),
+          new Uint8Array([0xBE, 0xEF, 0x01]),
+        );
+        const swapped = new FabricKeyPair(
+          "Ed25519",
+          new Uint8Array([0xBE, 0xEF, 0x01]),
+          new Uint8Array([0xDE, 0xAD]),
+        );
+
+        expect(hex(hashBytesOf(pair))).not.toBe(hex(hashBytesOf(swapped)));
+      });
+    });
+
     describe("FabricHash hashing (TAG_HASH = 0x29)", () => {
       it("matches a hand-computed byte stream for `FabricHash`", () => {
         // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)

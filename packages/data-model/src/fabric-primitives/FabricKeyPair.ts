@@ -133,10 +133,15 @@ export class FabricKeyPair extends BaseFabricPrimitive
         throw new Error("Cannot construct a key pair with no algorithm name.");
       }
       this.#algorithm = pairOrAlgorithm;
-      this.#publicKey = toFabricBytes(publicKey, "publicKey");
-      this.#privateKey = toFabricBytes(privateKey, "privateKey");
+      this.#publicKey = FabricKeyPair.#toFabricBytes(publicKey, "publicKey");
+      this.#privateKey = FabricKeyPair.#toFabricBytes(
+        privateKey,
+        "privateKey",
+      );
     } else {
-      const { publicKey: pub, privateKey: priv } = validPair(pairOrAlgorithm);
+      const { publicKey: pub, privateKey: priv } = FabricKeyPair.#validPair(
+        pairOrAlgorithm,
+      );
       this.#algorithm = pub.algorithm.name;
       this.#publicKey = pub;
       this.#privateKey = priv;
@@ -314,7 +319,11 @@ export class FabricKeyPair extends BaseFabricPrimitive
           return algorithm === undefined;
         }
 
-        return (typeof algorithm === "string") &&
+        // Non-empty, which is the one thing the constructor refuses about an
+        // algorithm name. Left to `decode()` it would arrive as a constructor
+        // throw, which that method reports as a detached buffer -- the only
+        // other way its construction can fail.
+        return (typeof algorithm === "string") && (algorithm !== "") &&
           (publicKey instanceof ArrayBuffer) &&
           (privateKey instanceof ArrayBuffer);
       }
@@ -378,72 +387,74 @@ export class FabricKeyPair extends BaseFabricPrimitive
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;
   }
-}
 
-/**
- * Returns the given key pair's two keys, checked as a public/private pair whose
- * `algorithm` records agree in full, parameters included.
- *
- * The check does not establish that the two keys are counterparts, which no
- * synchronous check can: two independently generated keys of the same
- * algorithm and parameters are indistinguishable from a genuine pair by
- * anything but a sign/verify round trip, which is asynchronous. What it
- * establishes is that they *could* be counterparts.
- */
-function validPair(pair: CryptoKeyPair): CryptoKeyPair {
-  if (!isCryptoKeyPair(pair)) {
-    throw new Error("Not a `CryptoKeyPair`: both keys must be `CryptoKey`s.");
+  /**
+   * Returns the given key pair's two keys, checked as a public/private pair
+   * whose `algorithm` records agree in full, parameters included.
+   *
+   * The check does not establish that the two keys are counterparts, which no
+   * synchronous check can: two independently generated keys of the same
+   * algorithm and parameters are indistinguishable from a genuine pair by
+   * anything but a sign/verify round trip, which is asynchronous. What it
+   * establishes is that they *could* be counterparts.
+   */
+  static #validPair(pair: CryptoKeyPair): CryptoKeyPair {
+    if (!isCryptoKeyPair(pair)) {
+      throw new Error("Not a `CryptoKeyPair`: both keys must be `CryptoKey`s.");
+    }
+
+    const { publicKey, privateKey } = pair;
+
+    if ((publicKey.type !== "public") || (privateKey.type !== "private")) {
+      throw new Error(
+        `Not a key pair: keys are of type ${
+          backtickQuote(publicKey.type)
+        } and ${backtickQuote(privateKey.type)}.`,
+      );
+    } else if (publicKey.algorithm.name !== privateKey.algorithm.name) {
+      throw new Error(
+        `Mismatched algorithms: ${
+          backtickQuote(publicKey.algorithm.name)
+        } and ${backtickQuote(privateKey.algorithm.name)}.`,
+      );
+    } else if (!deepEqual(publicKey.algorithm, privateKey.algorithm)) {
+      // The whole record rather than a per-algorithm list of the parameters
+      // that matter: a genuine pair reports the same `algorithm` on both keys
+      // for every algorithm Web Crypto defines, so nothing here has to know
+      // which fields a given one carries, and an algorithm added later is
+      // covered as it stands.
+      throw new Error(
+        `Mismatched ${
+          backtickQuote(publicKey.algorithm.name)
+        } algorithm parameters between the two keys.`,
+      );
+    }
+
+    return { publicKey, privateKey };
   }
 
-  const { publicKey, privateKey } = pair;
+  /**
+   * Returns the given key bytes as a `FabricBytes`, copying a `Uint8Array`. The
+   * `instanceof` is the real admission test: the declared parameter is the api
+   * package's structural `FabricBytes`, and only this class's own is accepted.
+   */
+  static #toFabricBytes(
+    bytes: ApiFabricBytes | Uint8Array | undefined,
+    name: string,
+  ): FabricBytes {
+    if (bytes instanceof FabricBytes) {
+      return bytes;
+    } else if (bytes instanceof Uint8Array) {
+      return new FabricBytes(bytes);
+    }
 
-  if ((publicKey.type !== "public") || (privateKey.type !== "private")) {
     throw new Error(
-      `Not a key pair: keys are of type ${backtickQuote(publicKey.type)} and ${
-        backtickQuote(privateKey.type)
-      }.`,
-    );
-  } else if (publicKey.algorithm.name !== privateKey.algorithm.name) {
-    throw new Error(
-      `Mismatched algorithms: ${backtickQuote(publicKey.algorithm.name)} and ${
-        backtickQuote(privateKey.algorithm.name)
-      }.`,
-    );
-  } else if (!deepEqual(publicKey.algorithm, privateKey.algorithm)) {
-    // The whole record rather than a per-algorithm list of the parameters that
-    // matter: a genuine pair reports the same `algorithm` on both keys for
-    // every algorithm Web Crypto defines, so nothing here has to know which
-    // fields a given one carries, and an algorithm added later is covered as
-    // it stands.
-    throw new Error(
-      `Mismatched ${
-        backtickQuote(publicKey.algorithm.name)
-      } algorithm parameters between the two keys.`,
+      `Not key material: ${
+        backtickQuote(name)
+      } must be a \`FabricBytes\` or a ` +
+        "`Uint8Array`.",
     );
   }
-
-  return { publicKey, privateKey };
-}
-
-/**
- * Returns the given key bytes as a `FabricBytes`, copying a `Uint8Array`. The
- * `instanceof` is the real admission test: the declared parameter is the api
- * package's structural `FabricBytes`, and only this class's own is accepted.
- */
-function toFabricBytes(
-  bytes: ApiFabricBytes | Uint8Array | undefined,
-  name: string,
-): FabricBytes {
-  if (bytes instanceof FabricBytes) {
-    return bytes;
-  } else if (bytes instanceof Uint8Array) {
-    return new FabricBytes(bytes);
-  }
-
-  throw new Error(
-    `Not key material: ${backtickQuote(name)} must be a \`FabricBytes\` or a ` +
-      "`Uint8Array`.",
-  );
 }
 
 // Compile-time check that the exported `FabricKeyPair` constructor matches the

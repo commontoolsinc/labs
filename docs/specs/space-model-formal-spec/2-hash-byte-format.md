@@ -664,7 +664,32 @@ Full byte stream:
 24 06 65 73 32 30 32 35
 ```
 
-### 7.13 `[1, , 3]` (sparse array)
+### 7.13 `FabricKeyPair("Ed25519", [DE AD], [BE EF 01])`
+
+`FabricKeyPair` is a `FabricPrimitive` with the dedicated tag `TAG_KEY_PAIR`
+(`0x2C`); it is hashed by feeding its algorithm name and then its two keys —
+public first, then private — in that order (Section 4.17). The algorithm name
+is under the 64-byte threshold, so it uses the direct string form; each key is
+a complete tagged `FabricBytes` value.
+
+- KeyPair tag: `2C`
+- Algorithm `"Ed25519"` (7 bytes UTF-8): `24 07 45 64 32 35 35 31 39`
+- Public key (2 bytes): `25 02 DE AD`
+- Private key (3 bytes): `25 03 BE EF 01`
+
+There is no enclosing object and no `TAG_END` terminator — the three fields are
+fed positionally. The two keys carry their own length prefixes, so a pair
+holding them the other way round produces a different byte stream.
+
+Full byte stream:
+```
+2C
+24 07 45 64 32 35 35 31 39
+25 02 DE AD
+25 03 BE EF 01
+```
+
+### 7.14 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
@@ -683,7 +708,7 @@ Full byte stream:
 00
 ```
 
-### 7.14 `[]` (empty array)
+### 7.15 `[]` (empty array)
 
 ```
 10 00
@@ -691,7 +716,7 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.15 `{ a: 1, b: 2 }` (object)
+### 7.16 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
@@ -713,7 +738,7 @@ Full byte stream:
 00
 ```
 
-### 7.16 `{}` (empty object)
+### 7.17 `{}` (empty object)
 
 ```
 11 00
@@ -721,7 +746,7 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.17 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.18 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
@@ -729,7 +754,7 @@ These three arrays produce different byte streams at the middle element:
 - `[1, , 3]`: middle element is `01 01` (`TAG_HOLE` + run of 1)
 - `[1, null, 3]`: middle element is `20` (`TAG_NULL`)
 
-### 7.18 Long string (hashed form)
+### 7.19 Long string (hashed form)
 
 A string whose UTF-8 encoding exceeds 64 bytes uses the hashed form (Section
 4.4). Let `S` be any such string and let `H = SHA-256(utf8(S))` be its 32-byte

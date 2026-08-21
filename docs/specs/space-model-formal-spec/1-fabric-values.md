@@ -1246,7 +1246,8 @@ which is asynchronous where a codec's `encode()` is synchronous, and which a
 non-extractable key refuses outright. So:
 
 - The JSON encoding **refuses** a pair holding handles: encoding one throws
-  (Section 3.4 of [3-json-encoding.md](./3-json-encoding.md)).
+  (Section 3 of [3-json-encoding.md](./3-json-encoding.md), under
+  `KeyPair@1`).
 - The **hash** of a pair holding handles is undefined, and computing one throws
   (Section 4.17 of [2-hash-byte-format.md](./2-hash-byte-format.md)). Its
   algorithm name alone is shared by every key that uses that algorithm, so
