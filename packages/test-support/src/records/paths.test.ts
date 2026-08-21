@@ -94,5 +94,38 @@ describe("paths", () => {
       expect(agentLabel(() => "probe")).toBe("probe");
       expect(agentLabel(() => "")).toBeUndefined();
     });
+
+    it("names the harness an agent runs under", () => {
+      expect(agentLabel((name) => name === "CLAUDECODE" ? "1" : undefined))
+        .toBe("claude-code");
+      expect(agentLabel((name) => name === "CURSOR_AGENT" ? "1" : undefined))
+        .toBe("cursor");
+      expect(
+        agentLabel((name) => name === "CODEX_SANDBOX" ? "seatbelt" : undefined),
+      )
+        .toBe("codex");
+      expect(
+        agentLabel((name) =>
+          name === "AI_AGENT" ? "claude-code_2-1-237_agent" : undefined
+        ),
+      ).toBe("agent");
+    });
+
+    it("keeps the deliberate label over the harness it runs under", () => {
+      expect(
+        agentLabel((name) =>
+          name === "CF_TEST_AGENT"
+            ? "labs-B"
+            : name === "CLAUDECODE"
+            ? "1"
+            : undefined
+        ),
+      ).toBe("labs-B");
+    });
+
+    it("returns undefined for a shell with no agent in it", () => {
+      expect(agentLabel((name) => name === "HOME" ? "/h" : undefined))
+        .toBeUndefined();
+    });
   });
 });

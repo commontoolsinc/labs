@@ -40,15 +40,28 @@ append-only, no-double-mapping, acyclic rules.
   everywhere. CI jobs set it to a workspace directory; local entry points
   set it themselves when they own a run. Never point two concurrent runs
   at one directory by hand — each run owns its own spool.
-- `CF_TEST_RECORDS_KEY_FILE` — a personal reporting key
-  (see below), exported from the login shell's profile by
-  `deno task test-records-key setup`. Its presence is the local opt-in:
-  with it, `deno task test`, `deno task integration`, and `deno task
-  run-recorded` stamp a spool, ship it when the run ends, and sweep any
-  orphaned spools a killed run left behind.
+- `CF_TEST_RECORDS_KEY_FILE` — a personal reporting key (see below), put in
+  the shell's profile and in each agent harness's configuration by `deno
+  task test-records-key setup`. Its presence is the local opt-in: with it,
+  `deno task test`, `deno task integration`, and `deno task run-recorded`
+  stamp a spool, ship it when the run ends, and sweep any orphaned spools a
+  killed run left behind. It has to reach shells nobody is typing into,
+  since that is what an agent's run is, so the export goes in `.zshenv`
+  rather than `.zshrc`. A harness that runs its commands through no shell at
+  all is covered by its own configuration instead, which the setup command
+  writes; the harnesses it knows are listed in
+  `tasks/test-records-agent-config.ts`, and one whose directory is not
+  there is left alone. Anything else — a bash workstation whose agents run
+  non-interactive shells, a harness nothing here knows — puts the variable
+  in whatever starts the agent.
 - `CF_TEST_AGENT` — an opaque label for the operating agent, recorded
-  verbatim in the run context. Set it to tell an agent fleet's runs apart
-  from a person's; it is never required.
+  verbatim in the run context. Set it to tell one agent from another, or
+  one checkout of a fleet from the next; it is never required. Left
+  unset, a run started by an agent is still labeled, by the harness that
+  started it — `claude-code`, `cursor`, `codex`, or `agent` for anything
+  that announces itself only as one. A person's own terminal carries
+  none of those, so their runs stay unlabeled, and a consumer that wants
+  human runs alone reads the ones with no `agent` field.
 - `CF_TEST_RECORDS_SPOOL_ROOT` — overrides the per-user spool root, which
   is otherwise under the user cache directory
   (`~/.cache/common-fabric/test-records`). The root is deliberately not in
@@ -76,8 +89,12 @@ deno task test-records-key setup
 
 generates a delivery identity, dispatches the minting workflow, watches
 until the run delivers, installs the key file with owner-only
-permissions, and exports `CF_TEST_RECORDS_KEY_FILE` from the login
-shell's profile — every shell opened after that records. A profile that
+permissions, and puts `CF_TEST_RECORDS_KEY_FILE` where the things that
+run tests will find it: the shell's profile, and the configuration of
+every agent harness installed here, since an agent that runs its
+commands without a shell is reached only by telling its harness to
+carry the variable. Every shell opened after that records, and so does
+every agent. A profile that
 already sets the variable is reported and left alone, whether it points
 somewhere else or sets it without exporting it, and so is a login
 profile that does not exist yet, since creating one is what stops a
@@ -130,6 +147,26 @@ existing key file copied to it rather than a fresh mint that would kill
 the first machine's. A mint that fails after the revocation leaves you
 with no key rather than two; the next run says so, and running setup
 again mints one.
+
+## Taking it off a workstation
+
+```
+deno task test-records-key uninstall
+```
+
+removes what setup put there — the key file, the delivery identity, the
+export it added, and the entry in each harness's configuration —
+leaving any line or value a person set themselves alone.
+Records that were spooled and never shipped stay where they are, since a
+later key ships them; the command says where they sit and what removing
+them would throw away.
+
+Two things it deliberately does not do. The service account and its key
+still exist, so a key that has leaked is made useless by minting a
+replacement, from this machine or any other, and not by uninstalling.
+And records already in the store stay there: they carry no personal
+material, and no key this tool installs can change or remove anything
+that is already stored.
 
 ## How records move
 

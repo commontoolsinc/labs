@@ -11,6 +11,7 @@ import {
   requestCommand,
   runCli,
   setupCommand,
+  uninstallCommand,
 } from "./test-records-key.ts";
 import {
   generateIdentity,
@@ -477,14 +478,14 @@ describe("test-records-key", () => {
         return inner(name);
       };
       await Deno.writeTextFile(
-        join(home, ".zshrc"),
+        join(home, ".zshenv"),
         'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
       );
 
       expect(await collectCommand(deps)).toBe(0);
 
       // The profile is a person's file: the line that disagrees stays.
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(
         'export CF_TEST_RECORDS_KEY_FILE="/somewhere/else.json"\n',
       );
     });
@@ -501,10 +502,10 @@ describe("test-records-key", () => {
       };
       const line = `export CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
         `test-records-key.json"\n`;
-      await Deno.writeTextFile(join(home, ".zshrc"), line);
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
 
       expect(await collectCommand(deps)).toBe(0);
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
     });
 
     it("keeps the key beside the identity under a plain home", async () => {
@@ -540,10 +541,10 @@ describe("test-records-key", () => {
       };
       const line = `CF_TEST_RECORDS_KEY_FILE="$HOME/common-fabric/` +
         `test-records-key.json"\n`;
-      await Deno.writeTextFile(join(home, ".zshrc"), line);
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
 
       expect(await collectCommand(deps)).toBe(0);
-      expect(await Deno.readTextFile(join(home, ".zshrc"))).toBe(line);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
     });
 
     it("reports the login profile a shell reads and does not have", async () => {
@@ -571,6 +572,76 @@ describe("test-records-key", () => {
       await expect(collectCommand(deps)).rejects.toThrow(
         "Neither XDG_CONFIG_HOME nor HOME is set.",
       );
+    });
+
+    /** A workstation with an agent harness, holding this settings text. */
+    async function withHarness(settings?: string): Promise<string> {
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      const path = join(home, ".claude", "settings.json");
+      if (settings !== undefined) await Deno.writeTextFile(path, settings);
+      return path;
+    }
+
+    /** Where the key lands for these tests. */
+    function keyPath(): string {
+      return join(home, "common-fabric", "test-records-key.json");
+    }
+
+    it("passes the key file to an agent harness installed here", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+
+      expect(await collectCommand(deps)).toBe(0);
+
+      const settings = JSON.parse(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      );
+      expect(settings.env.CF_TEST_RECORDS_KEY_FILE).toBe(
+        join(home, "common-fabric", "test-records-key.json"),
+      );
+    });
+
+    it("says a harness already passes the key file on", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const settings = await withHarness(
+        JSON.stringify({ env: { CF_TEST_RECORDS_KEY_FILE: keyPath() } }),
+      );
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(JSON.parse(await Deno.readTextFile(settings))).toEqual({
+        env: { CF_TEST_RECORDS_KEY_FILE: keyPath() },
+      });
+    });
+
+    it("leaves a harness pointed at another key alone", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const text = JSON.stringify({
+        env: { CF_TEST_RECORDS_KEY_FILE: "/elsewhere.json" },
+      });
+      const settings = await withHarness(text);
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(settings)).toBe(text);
+    });
+
+    it("leaves a harness configuration that does not parse alone", async () => {
+      const identity = await storeIdentity();
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const settings = await withHarness("{ not json");
+
+      expect(await collectCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(settings)).toBe("{ not json");
     });
 
     it("throws when the token cannot read the collector's login", async () => {
@@ -679,7 +750,7 @@ describe("test-records-key", () => {
         if (name === "SHELL") return "/bin/zsh";
         return inner(name);
       };
-      return join(home, ".zshrc");
+      return join(home, ".zshenv");
     }
 
     it("dispatches, waits for the run, installs, and exports the key", async () => {
@@ -1115,6 +1186,161 @@ describe("test-records-key", () => {
     });
   });
 
+  describe("uninstallCommand()", () => {
+    /** A workstation that setup has been through. */
+    async function installed(): Promise<string> {
+      const identity = await storeIdentity();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "test-records-key.json"),
+        KEY_TEXT,
+      );
+      const published = await delivery(identity);
+      withStub({ runPages: [[mintRun(identity.recipient)]], ...published });
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      await Deno.writeTextFile(join(home, ".zshenv"), "alias l=ls\n");
+      await collectCommand(deps);
+      return join(home, ".zshenv");
+    }
+
+    it("removes the key, the identity, and the export", async () => {
+      const profile = await installed();
+
+      expect(await uninstallCommand(deps)).toBe(0);
+
+      await expect(
+        Deno.stat(join(home, "common-fabric", "test-records-key.json")),
+      ).rejects.toThrow();
+      await expect(
+        Deno.stat(join(home, "common-fabric", "test-records-identity.json")),
+      ).rejects.toThrow();
+      expect(await Deno.readTextFile(profile)).toBe("alias l=ls\n");
+    });
+
+    it("stops an agent harness passing the key file on", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, ".claude", "settings.json"),
+        JSON.stringify({
+          theme: "auto",
+          env: {
+            CF_TEST_RECORDS_KEY_FILE: join(
+              home,
+              "common-fabric",
+              "test-records-key.json",
+            ),
+          },
+        }),
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+
+      expect(
+        JSON.parse(
+          await Deno.readTextFile(join(home, ".claude", "settings.json")),
+        ),
+      ).toEqual({ theme: "auto" });
+    });
+
+    it("keeps a harness pointed at a key this tool did not install", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      const text = JSON.stringify({
+        env: { CF_TEST_RECORDS_KEY_FILE: "/elsewhere.json" },
+      });
+      await Deno.writeTextFile(join(home, ".claude", "settings.json"), text);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      ).toBe(text);
+    });
+
+    it("reports a harness configuration it cannot read", async () => {
+      await installed();
+      const inner = deps.env;
+      deps.env = (name) => name === "HOME" ? home : inner(name);
+      await Deno.mkdir(join(home, ".claude"), { recursive: true });
+      await Deno.writeTextFile(
+        join(home, ".claude", "settings.json"),
+        "{ not json",
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(join(home, ".claude", "settings.json")),
+      ).toBe("{ not json");
+    });
+
+    it("leaves the directory when something else is in it", async () => {
+      await installed();
+      await Deno.writeTextFile(
+        join(home, "common-fabric", "something-else.json"),
+        "{}",
+      );
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(
+        await Deno.readTextFile(
+          join(home, "common-fabric", "something-else.json"),
+        ),
+      ).toBe("{}");
+    });
+
+    it("says which file it could not remove", async () => {
+      withStub({});
+      // A directory where the key file goes is not something a delete
+      // of the key file can take away.
+      await Deno.mkdir(
+        join(home, "common-fabric", "test-records-key.json", "inside"),
+        { recursive: true },
+      );
+
+      await expect(uninstallCommand(deps)).rejects.toThrow("Cannot remove");
+    });
+
+    it("says so when there was nothing to remove", async () => {
+      withStub({});
+      expect(await uninstallCommand(deps)).toBe(0);
+    });
+
+    it("keeps an export the tool did not write", async () => {
+      withStub({});
+      const inner = deps.env;
+      deps.env = (name) => {
+        if (name === "HOME") return home;
+        if (name === "SHELL") return "/bin/zsh";
+        return inner(name);
+      };
+      const line = `export CF_TEST_RECORDS_KEY_FILE="/elsewhere.json"\n`;
+      await Deno.writeTextFile(join(home, ".zshenv"), line);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect(await Deno.readTextFile(join(home, ".zshenv"))).toBe(line);
+    });
+
+    it("leaves spools of records that were never shipped", async () => {
+      await installed();
+      const spools = join(home, "spools");
+      await Deno.mkdir(join(spools, "run-1"), { recursive: true });
+      const inner = deps.env;
+      deps.env = (name) =>
+        name === "CF_TEST_RECORDS_SPOOL_ROOT" ? spools : inner(name);
+
+      expect(await uninstallCommand(deps)).toBe(0);
+      expect((await Deno.stat(join(spools, "run-1"))).isDirectory).toBe(true);
+    });
+  });
+
   describe("runCli()", () => {
     it("returns 2 and prints usage for a command it does not have", async () => {
       withStub({});
@@ -1127,6 +1353,12 @@ describe("test-records-key", () => {
       expect(await runCli(["setup", "--wat"], deps)).toBe(2);
       expect(await runCli(["request", "--wat"], deps)).toBe(2);
       expect(await runCli(["collect", "--wat"], deps)).toBe(2);
+      expect(await runCli(["uninstall", "--wat"], deps)).toBe(2);
+    });
+
+    it("runs uninstall", async () => {
+      withStub({});
+      expect(await runCli(["uninstall"], deps)).toBe(0);
     });
 
     it("returns 1 and reports a failure a person can hit", async () => {

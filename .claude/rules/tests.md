@@ -139,6 +139,11 @@ record on their own. Two consequences worth knowing while writing one:
 A new test *surface* (a new CI job, script, or harness) does need wiring —
 `docs/development/test-records.md` under "Covering a new test surface".
 
+Your own runs are recorded too, and are marked as an agent's: with
+`CF_TEST_AGENT` unset, the run context carries the name of the harness
+you are running under. Nothing to set, and nothing to work around —
+a run of yours is data about the tests, the same as anyone's.
+
 When running tests for a team member — someone with commit access —
 whose environment has no `CF_TEST_RECORDS_KEY_FILE`, it is worth
 mentioning once, not per run, that `deno task test-records-key setup`

@@ -18,6 +18,10 @@
  *   deno task test-records-key collect
  *     The second half alone: install the delivery of a finished run.
  *
+ *   deno task test-records-key uninstall
+ *     Takes back everything setup put on the workstation: the key, the
+ *     delivery identity, and the export it added to the profiles.
+ *
  * Keys are a team-member workflow, and every part is self-service. A
  * person contributing without commit access needs no key: local tests run
  * identically without one, and CI records their pull requests' runs on
@@ -26,6 +30,7 @@
 
 import { join } from "@std/path";
 import {
+  defaultSpoolRoot,
   type Environment,
   readEnv,
   RECORDS_KEY_FILE_VARIABLE,
@@ -44,11 +49,17 @@ import {
 } from "./test-records-config.ts";
 import { readZip } from "./test-records-zip.ts";
 import {
+  type AgentConfigUpdate,
+  exportFromAgentConfigs,
+  unexportFromAgentConfigs,
+} from "./test-records-agent-config.ts";
+import {
   exportFromProfiles,
   exportLine,
   type ProfileUpdate,
   reloadHint,
   shellKind,
+  unexportFromProfiles,
 } from "./test-records-shell-config.ts";
 
 const API = "https://api.github.com";
@@ -607,6 +618,47 @@ Every new shell records its test runs. For the one you are in:
 
     ${reloadHint(added[0]!.path, kind)}`);
   }
+  await exportAgentConfigs(deps, path);
+  return updates;
+}
+
+/**
+ * Carries the key file into the configuration of every agent harness
+ * installed here. A shell profile covers an agent whose commands go
+ * through that shell; this covers the rest.
+ */
+async function exportAgentConfigs(
+  deps: KeyToolDeps,
+  path: string,
+): Promise<AgentConfigUpdate[]> {
+  const updates = await exportFromAgentConfigs(
+    RECORDS_KEY_FILE_VARIABLE,
+    path,
+    deps.env,
+  );
+  for (const update of updates) {
+    if (update.outcome === "added") {
+      console.log(
+        `${update.harness} passes ${RECORDS_KEY_FILE_VARIABLE} to what it ` +
+          `runs (${update.path})`,
+      );
+    } else if (update.outcome === "present") {
+      console.log(`${update.harness} already passes the key file on.`);
+    } else if (update.outcome === "conflict") {
+      console.log(`
+${update.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${update.harness} as
+
+    ${update.existing}
+
+Left alone. Point it at ${path} to record from this key.`);
+    } else {
+      console.log(`
+${update.path} does not parse as JSON, so ${update.harness} was left
+alone. Add this to its "env" once the file is readable again:
+
+    "${RECORDS_KEY_FILE_VARIABLE}": "${path}"`);
+    }
+  }
   return updates;
 }
 
@@ -893,9 +945,132 @@ export async function collectCommand(
   return 0;
 }
 
+/** Deletes a file, saying whether there was one. */
+async function removeFile(path: string): Promise<boolean> {
+  try {
+    await Deno.remove(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw new KeyToolError(`Cannot remove ${path}: ${reason(error)}`);
+  }
+}
+
+/** The spools waiting under a root, of which there may be none. */
+async function spoolCount(root: string): Promise<number | undefined> {
+  try {
+    let count = 0;
+    for await (const entry of Deno.readDir(root)) {
+      if (entry.isDirectory) count += 1;
+    }
+    return count;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Takes this workstation back to where it was before `setup`: the key,
+ * the delivery identity, and the export are removed, and the recording
+ * every task entry point does turns itself off with them.
+ */
+export async function uninstallCommand(
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<number> {
+  const key = keyFilePath(deps.env);
+  const identity = identityPath(deps.env);
+  const removedKey = await removeFile(key);
+  if (removedKey) console.log(`Removed ${key}`);
+  const removedIdentity = await removeFile(identity);
+  if (removedIdentity) console.log(`Removed ${identity}`);
+  // The directory goes only when this tool leaves it empty; anything
+  // else in there belongs to something other than test records.
+  await Deno.remove(configDir(deps.env)).catch(() => {});
+
+  const removals = await unexportFromProfiles(
+    RECORDS_KEY_FILE_VARIABLE,
+    deps.env,
+  );
+  for (const removal of removals) {
+    if (removal.outcome === "removed") {
+      console.log(
+        `${RECORDS_KEY_FILE_VARIABLE} no longer exported from ${removal.path}`,
+      );
+    } else {
+      console.log(`
+${removal.path} sets ${RECORDS_KEY_FILE_VARIABLE} in a line this tool did
+not write:
+
+    ${removal.existing}
+
+Left alone. Recording continues from whatever key that names.`);
+    }
+  }
+
+  const configs = await unexportFromAgentConfigs(
+    RECORDS_KEY_FILE_VARIABLE,
+    key,
+    deps.env,
+  );
+  for (const config of configs) {
+    if (config.outcome === "removed") {
+      console.log(
+        `${config.harness} no longer passes ${RECORDS_KEY_FILE_VARIABLE} on ` +
+          `(${config.path})`,
+      );
+    } else if (config.outcome === "kept") {
+      console.log(`
+${config.path} gives ${RECORDS_KEY_FILE_VARIABLE} to ${config.harness} as
+
+    ${config.existing}
+
+Left alone. It is not the key this tool installed.`);
+    } else {
+      console.log(`
+${config.path} does not parse as JSON, so ${config.harness} was left
+alone. Take ${RECORDS_KEY_FILE_VARIABLE} out of its "env" by hand.`);
+    }
+  }
+
+  const removed = removedKey || removedIdentity ||
+    removals.some((removal) => removal.outcome === "removed") ||
+    configs.some((config) => config.outcome === "removed");
+  if (!removed) {
+    console.log("Nothing to remove; this workstation was not recording.");
+    return 0;
+  }
+
+  const root = defaultSpoolRoot(deps.env);
+  const spools = root === undefined ? undefined : await spoolCount(root);
+  if (spools !== undefined && spools > 0) {
+    const runs = spools === 1 ? "One run's" : `${spools} runs'`;
+    console.log(`
+${runs} records were never shipped, and are still spooled in
+
+    ${root}
+
+A later key ships them; remove that directory to throw them away.`);
+  }
+
+  console.log(`
+Every new shell records nothing. Two things this does not do.
+
+The key still exists. This stops the machine using it, and the service
+account and the key itself are untouched; a key that has leaked stops
+working only when a new one replaces it, which any machine can do with
+
+    deno task test-records-key setup --rotate
+
+Records already shipped stay in the store. They carry no personal
+material, and nothing there can be changed or removed by any key this
+tool installs.`);
+  return 0;
+}
+
 function usage(): number {
   console.error(
-    "usage: deno task test-records-key <setup [--rotate]|request|collect>",
+    "usage: deno task test-records-key " +
+      "<setup [--rotate]|request|collect|uninstall>",
   );
   return 2;
 }
@@ -956,6 +1131,10 @@ export async function runCli(
     if (command === "collect") {
       if (rest.length > 0) return usage();
       return await collectCommand(deps);
+    }
+    if (command === "uninstall") {
+      if (rest.length > 0) return usage();
+      return await uninstallCommand(deps);
     }
     return usage();
   } catch (error) {

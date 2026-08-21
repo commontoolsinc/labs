@@ -68,7 +68,9 @@ name (a constant owned by the repository's tooling, never derived from git
 remotes), the `commit` the tests ran against, a `dirty` flag, an optional
 `branch`, `env` (`ci` or `local`), the machine facts (`os`, `arch`,
 `denoVersion`), an ISO 8601 `startedAt` from the run's start, an optional
-opaque `agent` label from `CF_TEST_AGENT`, and for CI runs a `ci` block:
+opaque `agent` label — `CF_TEST_AGENT`, or the name of the harness the
+run was started under when that variable is unset — and for CI runs a
+`ci` block:
 `workflowRunId`, `runAttempt` (the attempt that produced the records),
 `workflow`, `job` (display name with matrix leg), optional `shard`,
 optional `headCommit` (the pull request's head; `commit` is the ephemeral
