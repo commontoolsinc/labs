@@ -74,7 +74,13 @@ export function fabricFromKeyPairRaw(raw: KeyPairRaw): FabricKeyPair {
     : new FabricKeyPair("Ed25519", raw.publicKey, raw.privateKey);
 }
 
-/** Converts a key pair back into the form `Identity.deserialize()` takes. */
+/**
+ * Converts a key pair back into the form `Identity.deserialize()` takes.
+ *
+ * The material arm's bytes are copied where the handles arm's keys are not, a
+ * `CryptoKey` being an opaque handle with no copy to make. So the result of
+ * the handles arm holds the very keys the instance holds.
+ */
 function keyPairRawFromFabric(pair: FabricKeyPair): KeyPairRaw {
   return pair.hasMaterial
     ? {
