@@ -20,6 +20,12 @@ between pattern changes and runtime changes — and which one a given symptom
 would turn out to be was not knowable before measuring. Several runtime fixes
 closed a footgun the pattern had merely been first to step in.
 
+The clearest single number for why: in a CPU profile of fifty topic creates, the
+topics pattern's own frames were 0.1% of self time and 11.6% of inclusive time.
+A pattern body is a thin shell over runtime primitives, so "make the pattern do
+less" only ever cashes out as "make it ask the runtime for less" — and that
+ratio is one pass to measure on whatever you are holding.
+
 So expect any of three outcomes, often more than one from a single
 investigation:
 
@@ -50,6 +56,13 @@ to report — `--stats-action-limit` controls how many per-step scheduler action
 deltas print, and `--storage-stats` adds the storage rows. This is the fastest
 way to see a read count explode, and it needs no conversion work.
 
+Its counts are exact; its milliseconds are not the product's.
+`packages/cli/lib/test-runner.ts` calls `runtime.enableIdempotencyCheck()`
+unconditionally, which runs every computation a second time and changes what
+subscription registers. On a fifty-create topics run that was 16% of the wall
+clock and 58% of the action time, and it moved no count. Read this rung for
+shape, and gate that call off before quoting a duration from it.
+
 **Browser integration test.** What the pattern test cannot see: rendering, the
 main-thread/worker split, IPC, cold load, and anything about how cost scales
 with what is on screen. Promote the test using
@@ -71,6 +84,15 @@ shows what the pattern actually compiles to, and the emitted schema's size is a
 usable proxy for read width — a board derivation that reads the whole space and
 one that reads a length differ by orders of magnitude in emitted characters.
 This catches a class the timers only see downstream of.
+
+**The deployed thing.** Every rung above is a rig you built, and a rig can
+measure itself (see "What your harness holds live"). The board the team actually
+uses is one `cf` command away — `skills/topics/SKILL.md` names it — and a single
+call against it is the cheapest disconfirmation available for anything you are
+about to file as an artifact of your setup. Use it that way rather than as a
+measurement: it is shared, its timings carry whatever else is happening to it,
+and its client sits idle for most of a read, so it settles whether a cost is
+real long before it says how large.
 
 ## The logger names it; the profiler weighs it
 
@@ -179,6 +201,15 @@ waiting, in whatever form — and `skills/perf-investigation/scripts/wall-time.t
 is what reports it. Absence looks the same whether it is a round trip or
 unwrapped compute, so that view says where to look rather than what it found.
 
+A row whose per-call duration barely varies across hundreds of calls is the tell
+that its spans were concurrent rather than sequential, and that its total is
+therefore not a wall cost: work varies, waiting on one shared thing does not.
+`runner/start/resumeCellSync` reads as 111 seconds over 326 calls at a uniform
+368ms inside a twenty-minute run; the enclosing
+`runner/start/syncCellsForRunningPattern` is four calls totalling 1.97 seconds,
+and that is the number. Where a total looks impossible, find the span that
+encloses it before believing either.
+
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
 hypothesis. Confirm it correlates — that it moves with the real measurement
@@ -219,7 +250,7 @@ the other end of the stack from where the symptom appeared.
 ## Where cost comes from in this runtime
 
 Seed list, not a boundary — these are the causes this codebase has actually
-produced, and the point is the shape of each, so you recognize a sixth.
+produced, and the point is the shape of each, so you recognize the next one.
 `packages/patterns/topics/main.tsx` carries several of them as comments on the
 code that resolves them.
 
@@ -240,6 +271,24 @@ code that resolves them.
   re-runs for every element on any change to any of them. Splitting it so each
   half depends only on what can actually change it — and sampling, where a read
   should register no dependency at all — turns N re-runs per write into one.
+- **What you hold live decides what a write costs.** A cell's demand is what
+  re-materializes when anything under it changes, and the widest demand is the
+  one you get by default: `getResult(piece).sink(() => {})` sinks on the piece
+  cell, which carries no schema, so it demands the whole result and every piece
+  that result reaches. Nothing in the spelling says so. Applying the durable
+  schema and keying into a bounded surface first — a board's `index` rather than
+  its result — buys the same liveness for a fraction of the walk. This is a
+  cause in product code and a confound in a harness; see "What your harness
+  holds live".
+- **An append re-walks the list against its element schema.** Appending to a
+  growing array is free, and so is appending a piece to one. Appending a piece
+  whose declared shape is wide re-walks every element already there, once per
+  append, with no reactive fan-out at all — the scheduler run count stays flat
+  while the traversal count climbs per element. The cost is a function of the
+  element schema's width and depth, not of the array's length, which is why a
+  narrow element looks flat at the size where a wide one bends. An A/B cannot
+  separate those; a ladder can — hold the append fixed and vary only what the
+  element is, from a plain value up to the real thing, until the curve bends.
 - **The work is fine but keeps being thrown away.** Mapped sub-patterns track
   their elements by normalized link address, which is stable across position
   changes for a cell and includes the positional index for an inline value — so
@@ -270,6 +319,34 @@ Time individual operations against a board that already exists, rather than
 inferring per-operation cost by dividing the time to build one — building is a
 different curve, and the number you want for a regression is what one more costs
 at a given size.
+
+## What your harness holds live
+
+A harness that holds more live than its subject does measures itself. This is
+the same failure the causes above describe, aimed at your rig rather than at the
+product, and it is easy to miss for the reason the widest demand is the default:
+the spelling that produces it looks like the obvious way to keep a piece running
+while you write to it.
+
+`packages/patterns/integration/topic-board-fixture.ts` holds a board live with
+`getResult(board.getCell()).sink(() => {})` so each write lands against a
+current list. That is a schemaless sink on the piece cell, so every write
+re-materializes the whole board. Narrowing it to the board's own `index` — what
+`packages/patterns/integration/topic-create-onscreen.test.ts` does behind a
+knob, keeping the wide spelling available so the difference stays measurable —
+took the off-screen growth of a create across a size sweep from 3.70× to 1.70×,
+and the traversals slow enough to report over a fifty-topic run from 101 to 9.
+
+So before reading any curve: ask what the harness demands, and whether the
+product demands the same thing. A browser rendering a board demands its view; an
+agent filing through the CLI demands nothing of the sort. If those differ, the
+curve is partly yours.
+
+The correction that follows is not "discard the finding". The same over-wide
+read turned out to be what the `cf` CLI does against the real board, at sixteen
+times the scale — which is why the deployed rung exists above. A rig that
+exaggerates a real cost and a rig that invents one look identical from inside
+the rig.
 
 ## Measuring honestly
 
@@ -305,3 +382,6 @@ Where the investigation produced a finding worth keeping but no longer describes
 the current system — a decomposition, a ruled-out hypothesis, a noise analysis —
 it is a point-in-time record: `docs/history/development/performance/` is its
 home, under the rules in `docs/README.md`.
+`docs/history/development/performance/2026-08-topics-create-off-screen.md` is
+the worked case behind the harness section above, the append ladder, and the
+self-against-inclusive number.
