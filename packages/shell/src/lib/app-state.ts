@@ -40,15 +40,23 @@ export function isAppStateConfigKey(
   return false;
 }
 
-// The application state as it crosses the integration-test page boundary,
-// which carries only what JSON can express.
-//
-// An identity appears as its DID rather than as itself. That is what a reader
-// on the far side wants -- it is what names an identity in a comparison and in
-// a message -- and it is a public string, where the identity's key material is
-// a secret that a key pair holding `CryptoKey` handles cannot produce at all.
+/**
+ * The application state as it crosses the integration-test page boundary,
+ * which carries only what JSON can express.
+ */
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
+  /**
+   * The DID of the identity the state holds, where it holds one.
+   *
+   * An identity appears here as its DID rather than as itself. That is what a
+   * reader on the far side wants -- it is what names an identity in a
+   * comparison and in a message -- and it is a public string, where the
+   * identity's key material is a secret that a key pair holding `CryptoKey`
+   * handles cannot produce at all.
+   */
   identityDid?: DID;
+
+  /** The API URL, as a string, `URL` being no more JSON than an identity is. */
   apiUrl: string;
 };
 

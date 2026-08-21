@@ -168,7 +168,7 @@ async function loginToPublishedApp(
   );
 }
 
-// How a serialized `AppState` reads in a failure message.
+/** How a serialized `AppState` reads in a failure message. */
 function describeAppState(state: AppStateSerialized | undefined): string {
   if (!state) return "none (the page never yielded a state)";
   return `view ${JSON.stringify(state.view)}, identity ${
