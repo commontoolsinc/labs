@@ -4476,7 +4476,7 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility preserves fabric values", async () => {
+Deno.test("memory v2 stacked commits: pending visibility preserves `FabricValue`s", async () => {
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
   try {

@@ -259,7 +259,7 @@ tmp/demos/<package>-<test-file>-<timestamp>/
 ```
 
 `manifest.json` is a versioned diagnostic and composition contract, not a
-Fabric value. Version 1 must include:
+`FabricValue`. Version 1 must include:
 
 - run id, package, test file, command, start/end monotonic offsets, and status;
 - viewport, device scale, requested output format, and presentation profile;

@@ -71,7 +71,7 @@ export type SessionOpenMessage = {
  * {@link wireAuthorizationOf} may produce this type.
  *
  * The signature crosses the wire as a `FabricBytes` -- the canonical binary
- * fabric value -- not as the `Uint8Array`-derived `Signature<T>` used
+ * `FabricValue` -- not as the `Uint8Array`-derived `Signature<T>` used
  * in-process.
  */
 export type WireSessionOpenAuthorization = {

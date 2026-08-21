@@ -994,7 +994,7 @@ export class RuntimeProcessor {
     //
     // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
     // identity, so despite the `as JSONValue` cast below the response can
-    // hold live fabric objects, and `postMessage`'s structured clone
+    // hold live `FabricSpecialObject`s, and `postMessage`'s structured clone
     // silently strips their prototype and private state to `{}` on the way
     // to the main thread. The inbound direction throws instead
     // (`CellHandle.serialize`; see the `WireCellValue` marker in

@@ -8,7 +8,7 @@ import { isPlainObject } from "./types.ts";
  *
  * Intended use is to canonicalize an object shape for stable comparison
  * (e.g. content-hashing), where a property that's present-but-`undefined`
- * should be treated the same as an omitted property. The fabric-value layer
+ * should be treated the same as an omitted property. The `FabricValue` layer
  * preserves `undefined`-valued properties, so callers that need this
  * normalization must apply it directly.
  */

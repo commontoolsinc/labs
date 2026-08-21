@@ -133,7 +133,7 @@ defineFixtureSuite<SchemaResult, string>({
       );
     }
 
-    // A generated schema is a fabric value; `normalizeArrayOrdering` is typed
+    // A generated schema is a `FabricValue`; `normalizeArrayOrdering` is typed
     // loosely because it walks arbitrary structure.
     const normalizedActual = normalizeArrayOrdering(
       actual.normalized,
