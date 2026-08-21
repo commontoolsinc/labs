@@ -3434,7 +3434,7 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
 // provenance reads that could have fed the write. Provenance-only reads still
 // count as "the write had labeled input" for the #14 empty-prefix arm — the
 // group-chat admin-grant shape (provenance lookup + protected write, no
-// endorsed read, no mint) must keep committing.
+// endorsed read) must keep committing.
 const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
   if ((label.confidentiality?.length ?? 0) > 0) return false;
   const integrity = label.integrity ?? [];

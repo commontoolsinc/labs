@@ -187,31 +187,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/parking-admin-floor-contract-break.md",
   },
   {
-    // The lobby's admin roster declared a `requiredIntegrity` floor on the
-    // `lobby-admin` atom that nothing minted at that path: the roles inside
-    // the roster carry the atom, and an endorsement on an array's entries
-    // does not reach a floor declared on the array path. Under
-    // `cfcWriteFloor: "enforce"` every write to the roster is refused, so the
-    // floor had to gain the mint that satisfies it. The registry's other four
-    // rules already held — one atom throughout, endorsed entries, no
-    // self-granted credential, and a `writeAuthorizedBy` binding to
-    // `commitTrustedLobbyAction` — so the mint is the whole correction.
-    pattern: "lobby/main.tsx",
-    baselines: ["20260729T022742Z-GhLFnf8OCmke_Jje"],
-    // `ifc` is compared for exact equality, so adding the mint that makes an
-    // unsatisfiable floor satisfiable reads as a break. The registry is not
-    // part of the pattern's result, so only the argument role is blamed.
-    paths: ["argument.adminRegistry.admins"],
-    reason:
-      "The admin roster's integrity floor was unsatisfiable, so no write to " +
-      "it could be accepted once the write floor is enforced. Minting the " +
-      "atom the floor names at the path the floor sits on is the only thing " +
-      "that satisfies it, and that changes the `ifc` at that path. A piece " +
-      "holding a roster keeps its stored roles; what it loses is the ability " +
-      "to be updated in place to the corrected contract.",
-    record: "docs/history/lobby-admin-floor-contract-break.md",
-  },
-  {
     // The lunch poll's identity moved from display names to profile cells
     // (see docs/history/lunch-poll-identity-break.md). The proof reports two
     // paths here: the published name-keyed admin result went away, and the
