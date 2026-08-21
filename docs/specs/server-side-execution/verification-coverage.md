@@ -5144,15 +5144,35 @@ supply; OW29/OW32/OW34 closed):
     surfaces where the wish UI belongs. Trigger: rides the
     OW48/OW49 fix arc (detectability; not itself the lift condition).
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam).** A note.tsx lift callback's input
-    arrives `undefined` under ON where the OFF arm always supplies it
-    — `TypeError: Cannot read properties of undefined (reading
-    'split')` at `notes/reference-block.ts:62`, caught by the
-    integration console gate (the same console error W4 §6.2 recorded
-    on the note workload's rc=1, here fatal). Owed: root-cause which
-    ON read shape reaches the lift undefined (served value vintage,
-    schema default not applied, or arrival ordering) and fix at the
-    producer or the lift contract. Trigger: lifts the
+    ON read-semantics seam): ROOT-CAUSED (2026-08-21, the
+    optimize-phase loss triage) — ARRIVAL ORDERING; the fix fork is
+    FLAGGED for the owner.** The undefined read is a scheduler lift
+    on a freshly SERVED-instantiated note (default-app's menuNewNote
+    runs authoritatively in the wave; the client's speculative child
+    is refused at piece-start commit and carries different
+    handler-frame ids per speculation.md §4 W2.1) evaluated while its
+    input's link chain — through the piece's result/process doc to
+    the schema-default-only `pendingEdit` cell — is still
+    materializing in the reading runtime's replica view: the
+    mid-chain resolution yields `undefined` and the leaf schema's
+    `default: null` is never consulted (every leaf default site is
+    null-safe; the undefined enters above the leaf). NOT client-only:
+    the toolshed's own serving runtime hits the identical TypeError
+    in its pull-settle loop (no overlay, no runtime-client protocol
+    in that stack), amid `event-view-lag` replica-view warnings.
+    Racy, load-sensitive (1/6 local browser runs; W4's loaded bench
+    2-for-2 at n=20); single-creation headless flows never hit it.
+    Not served-value vintage; "schema default not applied" only as
+    the symptom of the chain dying early. Owed: the OWNER's call on
+    the fix fork — (1) defer-on-unresolved-chain in the runner
+    (speculation.md §2's client-side PENDING sentence arguably
+    already states it; the serving-runtime equivalent is UNSTATED —
+    new spec wording + scheduler-semantics blast radius), vs (2)
+    "lifts tolerate undefined during arrival" (a pattern-contract
+    change: under OFF a schema-defaulted input never reads
+    undefined) — then the fix red-first on the ruled arm. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow51-undefined-read-report.md. Trigger: lifts the
     `integration/default-app.test.ts` ON skip.
   - **OW52 — the convergence-storm ON loss (landed 23/40): CLOSED
     (2026-08-21, the optimize-phase loss triage) — NOT a loss.** The

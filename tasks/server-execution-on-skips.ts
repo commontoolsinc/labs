@@ -208,18 +208,29 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
         "skip-and-land — gates the FLIP, not the land): the browser " +
-        "console gate (integration/shell-utils.ts afterEach) trips on a " +
-        "deterministic `TypeError: Cannot read properties of undefined " +
-        "(reading 'split')` at `splitDefinitions` " +
+        "console gate (integration/shell-utils.ts afterEach) trips on " +
+        "`TypeError: Cannot read properties of undefined (reading " +
+        "'split')` at `splitDefinitions` " +
         "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
-        "callbacks — an ON READ-SEMANTICS seam: under the ON posture the " +
-        "lift's input arrives undefined where the OFF arm always supplies " +
-        "it (the same console error W4 §6.2 recorded on the note workload; " +
-        "fatal here because the console gate fails the test). Reproduced " +
-        "locally ON; OFF green. NOT a demand hole. Evidence: " +
-        "docs/history/plans/server-execution-v2/stage-c/first-on-ci-gate.md. " +
-        "Lifts when verification-coverage.md OW51 closes and the file " +
-        "greens ON; the flip PR needs this list EMPTY.",
+        "callbacks. ROOT-CAUSED by the optimize-phase triage " +
+        "(2026-08-21): ARRIVAL ORDERING — a scheduler lift on a freshly " +
+        "SERVED-instantiated note runs while its input's link chain " +
+        "(through the piece's result/process doc to the " +
+        "schema-default-only pendingEdit cell) is still materializing in " +
+        "the reading runtime's replica view; the mid-chain resolution " +
+        "yields undefined and the leaf default:null is never consulted. " +
+        "NOT client-only (the toolshed's serving runtime hits the same " +
+        "TypeError in its pull-settle loop); racy and load-sensitive " +
+        "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
+        "mostly green); OFF green by construction (instantiate-and-read " +
+        "in one runtime). The fix fork is FLAGGED for the owner " +
+        "(defer-on-unresolved-chain in the runner vs lifts tolerating " +
+        "undefined during arrival — both change a stated/relied-upon " +
+        "semantic). Evidence: docs/history/plans/server-execution-v2/" +
+        "optimize/ow51-undefined-read-report.md (and " +
+        "stage-c/first-on-ci-gate.md). Lifts when verification-" +
+        "coverage.md OW51 closes and the file greens ON; the flip PR " +
+        "needs this list EMPTY.",
     },
     {
       file: "integration/cfc-group-chat-demo.test.ts",
