@@ -1135,6 +1135,39 @@ direction, so the child can neither point the browser elsewhere nor learn the
 host's topology, and a bare browser launch that would race the host's live
 browser profile has no verb to arrive through.
 
+A field that takes a value has a sibling that takes a handle: `valueHandle` for
+`fill`, `type`, and `select`, and `urlHandle` for `open`. The handle is resolved
+trusted-side at the moment of use, so the model composes the action while
+holding only a reference and the value never enters the conversation. A
+value-bearing field and its handle sibling are alternatives — set together, the
+call is refused rather than one winning silently.
+
+Two checks stand between a handle and a materialized value, and both refuse by
+default. The reference must be one the run actually holds: the inbound swap
+rewrites a handle token into an address before a tool sees it, so an expanded
+token and an address the model composed are indistinguishable by then, and only
+membership in the run's handle table tells them apart. And the destination must
+be allowlisted: `--handle-value-origin` names the origins where a value may be
+spent, the page's own origin is read immediately before a `fill`, `type`, or
+`select`, and a `urlHandle` is checked against the origin it resolves to. A run
+with no allowlist cannot materialize a handle at all.
+
+That destination check is a policy control, not a race-free guarantee, and the
+distinction matters. The origin is read and then the value is typed; a page that
+navigates in between — a redirect, or another child driving the same leased
+browser — is not caught. The allowlist is also per-run rather than per-handle,
+so any allowlisted origin can receive any handle the run holds: allowing a mail
+origin for a mail credential does not stop a banking credential going there too.
+Binding permitted destinations to the handle itself, at mint time, is the shape
+that closes both, and it is not what this does.
+
+A materialized value can come back. The page holds what was typed into it, so a
+later snapshot, a read of the filled field, or a skill script driving the same
+browser will carry it into model context. Nothing here prevents that: what a
+handle buys is that the model never held the value beforehand and could only
+spend it at an operator-named origin, not that the value stays unseen
+afterwards. Governing the read is the labels' job, and it is not yet wired.
+
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not
 inherit ambient provider tokens, developer secrets, app credentials, or other

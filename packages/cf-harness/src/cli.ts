@@ -38,6 +38,7 @@ import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
+import { httpOriginOf } from "./tools/handle-values.ts";
 import {
   createCliPromptSlotBinding,
   type PromptSlotRole,
@@ -139,6 +140,7 @@ const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
 const CLI_STRING_FLAGS = [
+  "handle-value-origin",
   "workspace",
   "cwd",
   "focus-root",
@@ -202,6 +204,7 @@ const CLI_COLLECT_FLAGS = [
   "skill",
   "image",
   "host-mount",
+  "handle-value-origin",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -242,6 +245,7 @@ export interface CfHarnessCliConfig {
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   browserAccess?: HarnessBrowserAccessLease;
+  handleValueOrigins: readonly string[];
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -511,6 +515,7 @@ Options:
   --browser-access-expires-at <t> Optional lease expiry timestamp
   --browser-access-profile-mode <mode> persistent | transient
   --browser-access-account-access <access> available | none
+  --handle-value-origin <origin> Origin a handle's value may be sent to (repeatable; none by default)
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
@@ -798,6 +803,32 @@ const optionalStringValue = <T extends string>(
     return value as T;
   }
   throw new Error(`${flagName} must be one of: ${allowed.join(", ")}`);
+};
+
+/**
+ * The origins `--handle-value-origin` names, normalized. Every occurrence must
+ * be a well-formed http(s) origin; anything else is refused at parse rather
+ * than turning into a destination check that silently never matches. An empty
+ * list is the default and means no handle may be materialized anywhere.
+ */
+const parseHandleValueOrigins = (
+  raw: string | readonly string[] | undefined,
+): readonly string[] => {
+  const values = raw === undefined
+    ? []
+    : (typeof raw === "string" ? [raw] : raw);
+  const origins: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    const origin = httpOriginOf(trimmed);
+    if (origin === undefined || origin !== trimmed.replace(/\/+$/, "")) {
+      throw new Error(
+        `--handle-value-origin must be an http(s) origin such as https://example.com, got \`${trimmed}\``,
+      );
+    }
+    origins.push(origin);
+  }
+  return uniqueStrings(origins);
 };
 
 const parseBrowserAccessLease = (
@@ -1325,6 +1356,9 @@ export const parseCfHarnessCliArgs = async (
     ),
   );
   const browserAccess = parseBrowserAccessLease(args);
+  const handleValueOrigins = parseHandleValueOrigins(
+    args["handle-value-origin"] as string | readonly string[] | undefined,
+  );
   const outputMode = parseCliOutputMode(
     typeof args["output-mode"] === "string" ? args["output-mode"] : undefined,
   );
@@ -1747,6 +1781,7 @@ export const parseCfHarnessCliArgs = async (
       ? { cfcInvocationContextDir }
       : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
+    handleValueOrigins,
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -3124,6 +3159,9 @@ export const runCfHarnessCli = async (
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
+        ...(parsed.handleValueOrigins.length > 0
+          ? { handleValueOrigins: parsed.handleValueOrigins }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
@@ -3170,6 +3208,9 @@ export const runCfHarnessCli = async (
         skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
+          : {}),
+        ...(parsed.handleValueOrigins.length > 0
+          ? { handleValueOrigins: parsed.handleValueOrigins }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(effectiveRunManifest !== undefined
@@ -3291,6 +3332,9 @@ export const runCfHarnessCli = async (
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
+        ...(parsed.handleValueOrigins.length > 0
+          ? { handleValueOrigins: parsed.handleValueOrigins }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(parsed.fabricSession !== undefined
           ? { fabricSession: parsed.fabricSession }
@@ -3349,6 +3393,9 @@ export const runCfHarnessCli = async (
         allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
+          : {}),
+        ...(parsed.handleValueOrigins.length > 0
+          ? { handleValueOrigins: parsed.handleValueOrigins }
           : {}),
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }

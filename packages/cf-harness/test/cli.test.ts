@@ -1314,6 +1314,62 @@ Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
   });
 });
 
+Deno.test("parseCfHarnessCliArgs collects handle-value destination origins", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--handle-value-origin",
+      "https://example.com",
+      "--handle-value-origin",
+      "http://localhost:8000",
+      "--handle-value-origin",
+      "https://example.com",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleValueOrigins, [
+    "https://example.com",
+    "http://localhost:8000",
+  ]);
+});
+
+Deno.test("parseCfHarnessCliArgs allows no handle-value destination by default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleValueOrigins, []);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a handle-value origin that is not one", async () => {
+  for (
+    const value of [
+      "example.com",
+      "https://example.com/login",
+      "file:///etc/passwd",
+    ]
+  ) {
+    await assertRejects(
+      () =>
+        parseCfHarnessCliArgs(
+          ["--prompt", "hi", "--handle-value-origin", value],
+          { cwd: "/tmp/project", env: {} },
+        ),
+      Error,
+      "--handle-value-origin must be an http(s) origin",
+    );
+  }
+});
+
 Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
   await assertRejects(
     () =>

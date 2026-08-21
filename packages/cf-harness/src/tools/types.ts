@@ -32,6 +32,13 @@ export interface HarnessToolContext {
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
   /**
+   * Origins a value materialized from a handle may be sent to. Absent or
+   * empty means none: materialization is default-deny by destination, and a
+   * tool that would send a handle's value somewhere refuses rather than
+   * asking the model where it meant.
+   */
+  handleValueOrigins?: readonly string[];
+  /**
    * The run's handle table, as it stands at the invocation. Undefined until
    * the run mints its first handle. `describe_handle` is the only tool that
    * reads it: every other tool sees its input with tokens already resolved to
