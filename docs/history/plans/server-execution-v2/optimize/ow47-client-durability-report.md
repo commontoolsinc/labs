@@ -293,24 +293,81 @@ proven by the 300 s probe — but removes the test-side mis-aim).
   entries eventually happened via later sweeps in-run; noted, not
   investigated.
 
-## 6. Skip-entry status / joint-lift readiness
+## 6. The other two seats (separate PRs off main)
 
-- `integration/cellset-lww.test.ts` step entry: **REMOVED** (this PR),
-  with the in-file guard binding (the file had no other entries). Lift
-  evidence: 5/5 ON local + the unit pin; CI's ON lane now runs the
-  step.
-- `integration/cfc-group-chat-demo.test.ts` file entry: **REMAINS**,
-  reason updated — the OW47 half of its reason is closed; it lifts with
-  OW31's §2b carriage build (its CI shape). Joint-lift test against a
-  local merge of OW31's branch: OW31's branch was not yet pushed at
-  this writing — joint lift NOT yet exercised.
-- `integration/home-profile-reload-durability.test.ts` file entry:
-  untouched here (OW45/OW31; S-B/S-C are this agent's remaining seats,
-  next PR).
+- **OW46 / S-D — PR #6152** (`claude/server-exec-v2-ow46-park-visibility`):
+  the forever-park is visible. Corrected understanding vs the register
+  row's phrasing: the deferral WAS counted per attempt
+  (`structureLoadDeferred`) and logged at debug — the invisibility was
+  the aggregate's indistinguishability (dead space ≡ routine one-cycle
+  creation race) plus the debug-only log plus the quiet-space case
+  where no cycle runs at all. Landed: per-root consecutive-deferral
+  streaks; at `STRUCTURE_LOAD_STUCK_AFTER` (8, an observability knob)
+  `structureLoadStuck` counts once per crossing and
+  `structure-load-stuck` WARNS (space + root + reason) there and at
+  each doubling; streaks clear on start/terminalize; the throw arm
+  untouched. Red-first pin in `executor-space-server.test.ts` (a
+  pattern-unloadable root — the Ada shape — driven through per-cycle
+  deferrals; stuck 0 below threshold, exactly 1 at it, never
+  re-counts). serving-loop.md §7 + the OW46 row ride the PR.
+- **OW45 client half / S-B — PR #6155**
+  (`claude/server-exec-v2-ow45-client-barrier`): the client durability
+  barrier covers program materialization.
+  `Scheduler.idleWithPendingCommits` (the runtime-client `handleIdle`
+  target of `waitForRuntimeIdle`; also `settled()`/`settledFor`) now
+  awaits the pattern manager's in-flight by-identity loads and
+  compile-cache write-backs, joint-fixpoint with pending commits;
+  plain `idle()` stays reactive-only (serving-loop settle probes
+  untouched). Red-first pins in `scheduler-idle-pattern-work.test.ts`
+  (both failed pre-fix). Registration timing traced: loads register in
+  their first awaits (before any storage read), write-backs at
+  `persistCompileCacheTracked` entry; initiators (piece starts, event
+  handlers, awaited IPC requests) are covered until registration
+  lands. A pre-existing wish.test.ts red in the battery was
+  attributed to the unmodified base (byte-identical at c911a660f)
+  before proceeding.
+- **S-C — FLAGGED OPEN, deliberately NOT built** (the register row
+  carries the flag): the heal-on-read re-issue's SOURCE is an
+  unstated semantic. Findings that ground the flag: the in-memory
+  artifact index (`addressableByIdentity` / `modulesByIdentity`)
+  retains EVALUATED EXPORTS, not the module bytes
+  (`CacheableModule[]`) a re-materialization needs; so healing
+  requires one of (a) retaining closure bytes per identity (a
+  memory-policy decision), (b) a cross-space donor probe (WHICH
+  spaces may donate is policy; a read-only space must not be
+  heal-written), or (c) S-A's server-side heal — which OW31's build
+  took (the carriage-borne `compile-cache/writeback` replicate
+  trigger heals on next demand). Routed to the owner beside the
+  OW31/S-A ruling rather than filled.
 
 ## 7. Register rows
 
-- **OW47**: updated to CLOSED in this PR (S-E fixed, S-F resolved as
-  no-defect with the evidence chain, S-G landed; lift evidence named).
-- **OW45 client half (S-B/S-C), OW46 (S-D)**: pending — next PRs of
-  this pass; their rows update with those PRs (docs-move-together).
+- **OW47**: CLOSED in PR #6150 (S-E fixed, S-F resolved as no-defect
+  with the evidence chain, S-G landed; lift evidence named).
+- **OW46**: CLOSED in PR #6152 (S-D landed; residual: the
+  home-profile lift run showing the park counted/logged rides the
+  OW45/OW31 joint lift).
+- **OW45**: S-B closed + S-C flagged in PR #6155; S-A closed by
+  OW31's train (their branch marks it BUILT on the carriage arm).
+
+## 8. Skip-entry status / joint-lift readiness
+
+- `integration/cellset-lww.test.ts` step entry: **REMOVED** (PR
+  #6150), with the in-file guard binding (the file had no other
+  entries). Lift evidence: 5/5 ON local + the unit pin; CI's ON lane
+  runs the step on the PR.
+- `integration/cfc-group-chat-demo.test.ts` file entry: **REMAINS**,
+  reason updated in #6150 — the OW47 half of its reason is closed; it
+  lifts with OW31's §2b carriage build (its CI shape).
+- `integration/home-profile-reload-durability.test.ts` file entry:
+  untouched by these PRs — lifts jointly (OW31 S-A + OW45 S-B).
+- **Joint lift vs OW31** (`origin/claude/server-exec-v2-ow31-identity`,
+  pushed, S-A built on the carriage arm): exercised against a LOCAL
+  merge of all four branches (scratch worktree, never pushed; the one
+  merge conflict was the OW45 register row — S-A-built × S-B-closed —
+  resolved by keeping both, previewing the trivial rebase for
+  whichever lands second). Results below (§9).
+
+## 9. Joint-lift run results (local merge, true ON topology)
+
+_(in progress — updated when the runs complete)_
