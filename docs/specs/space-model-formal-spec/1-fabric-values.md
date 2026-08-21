@@ -1343,9 +1343,8 @@ Section 4.5.
   shape a `FabricValue` has
 
 > **Property names this implementation reserves.** A `FabricPlainObject`'s keys
-> are
-> strings, and the model attaches no meaning to any particular one: a property
-> name is data. Two names are nonetheless refused by the JavaScript
+> are strings, and the model attaches no meaning to any particular one: a
+> property name is data. Two names are nonetheless refused by the JavaScript
 > implementation, `__proto__` and `constructor`, for two different reasons —
 > neither of which is a limit of the language, and both of which are removable.
 >
