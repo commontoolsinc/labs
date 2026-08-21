@@ -135,6 +135,29 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * (stage A's arrival gate stays as the backstop). Its text lives in the
  * OW32 row's history; the one remaining two-browser entry below carries
  * that gate's own residual.
+ *
+ * FIRST ON-LANE CI GATE (2026-08-21, run 32447348664 — the stack's
+ * first-ever CI execution, on the land-off PR #6096): the ON pattern
+ * lanes found SEVEN real ON red surfaces (every one reproduced locally
+ * on the ON-built binary; the OFF lanes untouched; the lunch and chat
+ * ON gates PASSED in CI). Root-caused before any entry was added:
+ * NO DEMAND HOLE anywhere — the (d′) demand machinery held on every
+ * surface it could be observed; each red is a WRITE-PATH defect under
+ * ON (a write refused/lost/mislabeled or an action killed at
+ * commit-prep), and two of the seven converge on the already-owed
+ * OW31/§2b write-authority carriage build. Reports:
+ * docs/history/plans/server-execution-v2/stage-c/first-on-ci-gate.md
+ * (the gate record + triage table) and
+ * docs/history/plans/server-execution-v2/stage-c/on-render-stall-rootcause.md
+ * (the three render-stall surfaces, store/log/live-run evidence).
+ * The landing posture is skip-and-land: the surfaces below carry honest
+ * ON-skip entries with owed register rows (verification-coverage.md §3,
+ * OW45–OW53), and they gate the FLIP — whose bar is this list EMPTY —
+ * not the land. A ninth family member, cfc-group-chat-demo-multi-runtime,
+ * is NOT listed: its CI red was the harness's mixed posture (the
+ * self-hosted OFF-arm standalone server refusing ON clients' event
+ * appends), fixed by resolving the posture in the harness itself —
+ * all 7 steps green on the ON binary with the fix.
  */
 
 export const SERVER_EXECUTION_ON_SKIPS: Record<
@@ -178,6 +201,167 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "rather than green-by-vacuity; lifts when the ON shell build " +
         "lands in CI (verification-coverage.md OW25) AND the " +
         "inherited red is fixed.",
+    },
+    // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
+    {
+      file: "integration/default-app.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
+        "skip-and-land — gates the FLIP, not the land): the browser " +
+        "console gate (integration/shell-utils.ts afterEach) trips on a " +
+        "deterministic `TypeError: Cannot read properties of undefined " +
+        "(reading 'split')` at `splitDefinitions` " +
+        "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
+        "callbacks — an ON READ-SEMANTICS seam: under the ON posture the " +
+        "lift's input arrives undefined where the OFF arm always supplies " +
+        "it (the same console error W4 §6.2 recorded on the note workload; " +
+        "fatal here because the console gate fails the test). Reproduced " +
+        "locally ON; OFF green. NOT a demand hole. Evidence: " +
+        "docs/history/plans/server-execution-v2/stage-c/first-on-ci-gate.md. " +
+        "Lifts when verification-coverage.md OW51 closes and the file " +
+        "greens ON; the flip PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/cfc-group-chat-demo.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): TWO write-path defects, one per failure " +
+        "point, NEITHER a demand hole (the served derivation chain was " +
+        "clean end-to-end: 33–41 derived commits, healthy demand " +
+        "counters). CI shape (Alice's authorship check): served " +
+        "events-down rows carry the SERVICE identity — authored-by/" +
+        "represents-principal name the service signer, not Alice — so CFC " +
+        "authorship verification stays 'unverified' forever; this IS the " +
+        "owed OW31/§2b acting-identity carriage build (post-merge, " +
+        "pre-flip), now with a CI surface as its lift evidence. Local " +
+        "shape (Bob's send click): Bob's messageDraft $value binding " +
+        "write into the serve-owned user-scope instance doc NEVER reaches " +
+        "the store (0/4 runs incl. a 300 s probe; his session committed " +
+        "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
+        "never flips — the client own-write durability seam, " +
+        "verification-coverage.md OW47 (seats S-E/S-F/S-G). Mechanism + " +
+        "store/log evidence: docs/history/plans/server-execution-v2/" +
+        "stage-c/on-render-stall-rootcause.md §2 (and " +
+        "first-on-ci-gate.md). Lifts when OW31's build AND OW47 close and " +
+        "the file greens ON; the flip PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/profile-embed.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): two deterministic killers stacked on " +
+        "the served-wish path, which one fires depending on compiled-byte " +
+        "availability; both kill the wish UI before it mounts; OFF green " +
+        "in 12 s. (1) CI shape: the pre-existing " +
+        "`assertNoDivergentIfcBranches` assert (runner cfc/schema-merge.ts, " +
+        "main's #3263 code) fires in the raw:wish action's commit-prep " +
+        "under ON — the /result envelope only becomes " +
+        "divergent-ifc-carrying when served/instance schema envelopes " +
+        "merge with the local one (verification-coverage.md OW49, a " +
+        "CFC-owner merge-rule call). (2) local/fresh-compile shape: " +
+        "main's day-old #6098 reserved-result-keys transformer rule " +
+        "refuses profile-create.tsx/profile-picker.tsx in the ON " +
+        "serving-compile posture only (OW48). NOT a demand hole. " +
+        "Mechanism + evidence: docs/history/plans/server-execution-v2/" +
+        "stage-c/on-render-stall-rootcause.md §4 (and " +
+        "first-on-ci-gate.md; OW50 owes the wish-UI failure surfacing). " +
+        "Lifts when OW48 AND OW49 close and the file greens ON; the flip " +
+        "PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/home-profile-reload-durability.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): under ON the created profile piece's " +
+        "PROGRAM (code + CFC labelMap + schema docs) is only ever written " +
+        "by the client's own post-arrival commit; the reload kills the " +
+        "trailing create's program commit, and the server's fallback — " +
+        "`compile-cache/writeback` into the profile space — is REFUSED as " +
+        "a foreign-space write with no §2b delegated carriage " +
+        "(seal-space-commit-failed, 17 refusals per space observed), so " +
+        "the space's serving loop parks the structure load forever, " +
+        "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
+        "hole — the identical demand derived the name wherever the " +
+        "program write survived (72 basis rows on Grace's space; 0 on the " +
+        "broken two). The carriage half is the owed OW31/§2b build " +
+        "(S-A); the client barriers and heal-on-read are " +
+        "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
+        "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
+        "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
+        "§1 (and first-on-ci-gate.md). Lifts when OW31's build AND OW45 " +
+        "close and the file greens ON; the flip PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/sqlite-db-owner-multi-runtime.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): red under the TRUE ON topology (the " +
+        "harness posture fix routes ON runs at the lane's toolshed) with " +
+        "a semantic assert — `bob's runtime must not re-mint itself as " +
+        "the db owner`: a second user's runtime re-mints the sqlite db " +
+        "handle owner under ON, the served-execution half of the sqlite " +
+        "identity pair (verification-coverage.md OW53; its sibling below " +
+        "carries the read-clearance half). NOT a demand hole. Evidence: " +
+        "docs/history/plans/server-execution-v2/stage-c/" +
+        "first-on-ci-gate.md. Lifts when OW53 closes and the file greens " +
+        "ON; the flip PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/sqlite-read-clearance-multi-runtime.test.ts",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): red under the TRUE ON topology with " +
+        "semantic asserts — `baseline request hash stays reader-blind` " +
+        "fails (the cleared-read request hash becomes keyed by READER " +
+        "under ON) and `the cleared result doc carries ONLY the declared " +
+        "surface` fails: the sqlite read-time clearance identity model " +
+        "diverges under served execution — the read-clearance half of " +
+        "the sqlite identity pair (verification-coverage.md OW53). NOT a " +
+        "demand hole. Evidence: docs/history/plans/server-execution-v2/" +
+        "stage-c/first-on-ci-gate.md. Lifts when OW53 closes and the " +
+        "file greens ON; the flip PR needs this list EMPTY.",
+    },
+    // STEP-LEVEL entries: on the fixed (true-ON) harness topology each of
+    // these files is green but for ONE step, so the file keeps running ON
+    // and only the red step is guarded in-file (bound to these entries,
+    // exactly like the runtime-client pair).
+    {
+      file: "integration/cellset-lww.test.ts",
+      step: "end-to-end: a typed name survives the own-write race through save",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): under the TRUE ON topology the other 3 " +
+        "steps are green; this end-to-end step stays red — the user's own " +
+        "typed-name write is DROPPED when its transaction is refused " +
+        "terminally (`speculative-basis-refused`): a non-re-derivable " +
+        "USER write refused/withdrawn is silently lost, because the " +
+        "'its own reads re-run it when fresh state lands' premise of " +
+        "serving-loop.md §3d does not hold for INPUTS — the clean " +
+        "reproducer of the client own-write durability seam " +
+        "(verification-coverage.md OW47, seats S-E/S-F; same cluster as " +
+        "cfc-group-chat-demo's local shape). NOT a demand hole. " +
+        "Evidence: docs/history/plans/server-execution-v2/stage-c/" +
+        "first-on-ci-gate.md (mechanism family: " +
+        "on-render-stall-rootcause.md §2b). Lifts when OW47 closes and " +
+        "the step greens ON; the flip PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/convergence-storm.test.ts",
+      step: "a non-writing session sees every concurrently-posted message",
+      phase: "phase-7",
+      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
+        "the FLIP, not the land): under the TRUE ON topology the 3 " +
+        "element-schema tests are green; this storm step is red with a " +
+        "REAL ON loss — 2×20 pipelined posts (idle:false), observer " +
+        "landed=23/40 (was 0/40 under the pre-fix mixed posture, which " +
+        "refused every append): a write-path loss at storm depth; WHERE " +
+        "the 17 die (append admission, queue, dispatch, or consequence " +
+        "commit under pipelined contention) is UNTRIAGED " +
+        "(verification-coverage.md OW52). NOT a demand hole — what lands " +
+        "is served and delivered to the non-writing observer. Evidence: " +
+        "docs/history/plans/server-execution-v2/" +
+        "stage-c/first-on-ci-gate.md. Lifts when OW52 closes and the " +
+        "step greens ON 5/5; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

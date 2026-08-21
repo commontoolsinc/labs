@@ -136,18 +136,51 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list holds exactly ONE phase-7 entry — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7); lunch-poll-vote was LIFTED by stage-C W3.1 (2026-08-19: the swatch stall root-caused, its class fix S1 landed, 6/6 green fresh-store on the ON-built tip with every swatch wall at 1 ms — the file's header comment carries the ledger); cfc-group-chat-demo-two-browsers was UN-SKIPPED by fan-out stage B (3/3 green fresh-store under the full ON posture, 2026-08-17) — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and two STEP entries (cellset-lww's own-write race, convergence-storm's storm step) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
+  // File-level entries only in the --ignore flag (step entries never drop
+  // their file), in list order.
   assertEquals(out, [
-    "--ignore=integration/topics-navigation.test.ts",
+    "--ignore=integration/topics-navigation.test.ts," +
+    "integration/default-app.test.ts," +
+    "integration/cfc-group-chat-demo.test.ts," +
+    "integration/profile-embed.test.ts," +
+    "integration/home-profile-reload-durability.test.ts," +
+    "integration/sqlite-db-owner-multi-runtime.test.ts," +
+    "integration/sqlite-read-clearance-multi-runtime.test.ts",
   ]);
   const report = err[0];
   assertMatch(
     report,
     /patterns: SKIP integration\/topics-navigation\.test\.ts \(until phase-7\)/,
   );
-  // The two-browser gates RUN in the ON arm now: cfc-group-chat
+  for (
+    const file of [
+      "default-app",
+      "cfc-group-chat-demo",
+      "profile-embed",
+      "home-profile-reload-durability",
+      "sqlite-db-owner-multi-runtime",
+      "sqlite-read-clearance-multi-runtime",
+    ]
+  ) {
+    assertMatch(
+      report,
+      new RegExp(
+        `patterns: SKIP integration/${file}\\.test\\.ts \\(until phase-7\\)`,
+      ),
+    );
+  }
+  assertMatch(
+    report,
+    /patterns: SKIP-STEP integration\/cellset-lww\.test\.ts :: end-to-end: a typed name survives the own-write race through save \(until phase-7; the rest of the file runs\)/,
+  );
+  assertMatch(
+    report,
+    /patterns: SKIP-STEP integration\/convergence-storm\.test\.ts :: a non-writing session sees every concurrently-posted message \(until phase-7; the rest of the file runs\)/,
+  );
+  // The two-browser gates RUN in the ON arm: cfc-group-chat-two-browsers
   // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
@@ -161,7 +194,15 @@ Deno.test("main: the patterns list holds exactly ONE phase-7 entry — topics-na
     ),
     false,
   );
-  // The remaining entry keeps the loud-skip contract: its reason names
+  // …and so does cfc-group-chat-demo-multi-runtime: its CI red was the
+  // harness's mixed posture, fixed IN the harness, never skip-listed.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
+      skip.file === "integration/cfc-group-chat-demo-multi-runtime.test.ts"
+    ),
+    false,
+  );
+  // topics-navigation keeps the loud-skip contract: its reason names
   // the red's mechanism and the flip's condition.
   const topics = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
     skip.file === "integration/topics-navigation.test.ts"
@@ -169,7 +210,46 @@ Deno.test("main: the patterns list holds exactly ONE phase-7 entry — topics-na
   if (topics === undefined) throw new Error("missing topics-navigation entry");
   assertEquals(topics.phase, "phase-7");
   assertMatch(topics.reason, /OW25/);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
+  // Every first-ON-CI-gate entry: phase-7, the gate report path, an owed
+  // register row (OW31 or a freshly minted OW45–OW53), the honest
+  // no-demand-hole classification, and the flip's EMPTY-list condition.
+  const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
+    skip.file !== "integration/topics-navigation.test.ts"
+  );
+  assertEquals(gateEntries.length, 8);
+  for (const entry of gateEntries) {
+    assertEquals(entry.phase, "phase-7");
+    assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
+    assertMatch(entry.reason, /first-on-ci-gate\.md/);
+    assertMatch(entry.reason, /OW(31|4[5-9]|5[0-3])/);
+    assertMatch(entry.reason, /(NOT|NEITHER) a demand hole/i);
+    assertMatch(entry.reason, /flip PR needs this list EMPTY/);
+  }
+  // The two STEP entries are BOUND: the guard lookup the files call
+  // resolves exactly these entries (the validator additionally checks the
+  // files name the steps and call the guard).
+  const steps = gateEntries.filter((skip) => skip.step !== undefined);
+  assertEquals(steps.map((skip) => skip.file), [
+    "integration/cellset-lww.test.ts",
+    "integration/convergence-storm.test.ts",
+  ]);
+  for (const entry of steps) {
+    assertEquals(
+      serverExecutionOnStepSkip("patterns", entry.file, entry.step!),
+      entry,
+    );
+  }
+  // Step entries never drop their file from the shard's explicit list.
+  const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
+    "./integration/cellset-lww.test.ts",
+    "./integration/convergence-storm.test.ts",
+  ]);
+  assertEquals(files, [
+    "./integration/cellset-lww.test.ts",
+    "./integration/convergence-storm.test.ts",
+  ]);
+  assertEquals(skipped, []);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 9);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

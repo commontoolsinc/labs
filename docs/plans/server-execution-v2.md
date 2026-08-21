@@ -32,17 +32,40 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-20) — read this first
+## Coordination state (2026-08-21) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. State as of 2026-08-20 (late):
+it in the PR that moves the state. State as of 2026-08-21:
 **LAND-OFF IN PROGRESS — the integration PR is OPEN:
 [#6096](https://github.com/commontoolsinc/labs/pull/6096)
 (`claude/server-exec-v2-land-off` = the train tip `45cca4167` + the
-merge of `origin/main` `bbcc7a348` + the reconciliation), CI pending —
-its run is the stack's FIRST-EVER CI execution; the coordinator merges
-on green.** The merge's conflict ledger, the five tx-boundary
+merge of `origin/main` `bbcc7a348` + the reconciliation + the catch-up
+merges), and its FIRST CI RUN — the stack's first-ever CI execution —
+is in: two jobs red, all else green. The ON pattern lanes found SEVEN
+real ON red surfaces (every one reproduced locally on the ON-built
+binary; the OFF lanes untouched; the lunch and chat ON gates PASSED in
+CI): the headline is NO DEMAND HOLE — the (d′) machinery held on every
+surface it could be observed; every red is a WRITE-PATH defect under
+ON, and two of the seven are the already-owed OW31/§2b write-authority
+carriage build surfacing. Disposition: SKIP-AND-LAND — the seven
+surfaces carry honest ON-skip entries (SIX file + TWO step-level,
+`tasks/server-execution-on-skips.ts`; the skip-list test pins the set)
+with owed rows OW45–OW53 (verification-coverage.md §3, the 2026-08-21
+delta; OW31's two converging surfaces point at OW31, nothing
+re-minted); ONE code fix rides the push — the multi-runtime harness's
+posture (it self-hosted an OFF-arm store under ON workers, a mixed
+topology no deployment produces; ON now targets the lane's toolshed),
+which repairs cfc-group-chat-demo-multi-runtime outright and narrows
+cellset-lww/convergence-storm to their one honest red step each; and
+coverage-check's runner amount re-baselined +1267 → +1276 in the PR
+body (the ON lanes' first-ever coverage profiles moved the
+measurement). The skips gate the FLIP — whose bar is the skip list
+back to EMPTY — not the land. Gate record:
+[`stage-c/first-on-ci-gate.md`](../history/plans/server-execution-v2/stage-c/first-on-ci-gate.md);
+the render-stall mechanisms with fix seats S-A..S-J:
+[`stage-c/on-render-stall-rootcause.md`](../history/plans/server-execution-v2/stage-c/on-render-stall-rootcause.md).
+The coordinator merges on green.** The merge's conflict ledger, the five tx-boundary
 interaction findings (lead: the all-no-op wave is safe-by-construction,
 pinned green by `packages/runner/test/executor-no-op-wave.test.ts`),
 the full suite counts, the reproduced ON gates (lunch 3/3 {1:16}, chat
@@ -417,14 +440,26 @@ stays the owner's;
 (6) the CONFIDENCE VERDICT to
 the owner — the W4 readout carried it, and the owner approved the
 landing strategy; (7) land the train on main with
-the flag OFF — **IN PROGRESS 2026-08-20: integration PR
+the flag OFF — **IN PROGRESS 2026-08-21: integration PR
 [#6096](https://github.com/commontoolsinc/labs/pull/6096) OPEN (one
 merge of main into the train tip, both intents preserved; the
 reconciliation report beside the closeout carries the ledger,
-findings, and verification), CI pending, the coordinator merges on
-green** — then continue on main; (8) the flip's ordered gates as listed under Phase 7 (skip list
-EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
-benchmark against the ruled bar), then the flip PR and the soak.
+findings, and verification), and the FIRST-ON-CI GATE is in
+(2026-08-21, run 32447348664): seven real ON red surfaces, no demand
+hole, all write-path defects (two = the owed OW31/§2b build
+surfacing), lunch + chat ON gates GREEN in CI — resolved
+SKIP-AND-LAND: honest ON-skip entries + owed rows OW45–OW53 + the
+harness posture fix + the coverage re-baseline ride the branch (gate
+record:
+[`stage-c/first-on-ci-gate.md`](../history/plans/server-execution-v2/stage-c/first-on-ci-gate.md));
+the coordinator merges on green** — then continue on main; (8) the
+flip's ordered gates as listed under Phase 7, unchanged by the gate
+and now concretely enumerated: the ON skip list back to **EMPTY**
+(today: patterns 7 files + 2 steps, runner 1, runtime-client 2 steps
+— every entry naming its owed row), **OW31's ruled posture BUILT**,
+the gate's **owed rows OW45–OW53 CLOSED**, deployed binaries
+exercised ON, and the **benchmark against the owner's ruled bar**
+(OW38 (ii)) — then the flip PR and the soak.
 
 **Owner rulings (state at 2026-08-19 — NO OPEN OWNER QUESTIONS: the
 2026-08-19 batch ruled OW31's read side (3), flag 9 (6) and α1b (7),

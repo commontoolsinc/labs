@@ -5013,6 +5013,175 @@ supply; OW29/OW32/OW34 closed):
   left un-fixed here (out of the round's scope), flagged for its own
   red-first pass.
 
+- **First ON-lane CI gate delta (2026-08-21) — the stack's first-ever
+  CI execution of the ON pattern lanes (land-off PR #6096, run
+  32447348664) found SEVEN real ON red surfaces; skip-and-land is the
+  landing posture; NINE rows minted (OW45–OW53, nothing renumbered).**
+  Every surface reproduced locally on the ON-built binary; the OFF
+  lanes untouched; the lunch and chat ON gates PASSED in CI. The
+  headline: **NO DEMAND HOLE** — the (d′) demand machinery held
+  everywhere it could be observed (group-chat: 33–41 derived commits,
+  healthy demand counters, normal settle series; home-profile: the
+  identical demand derived the surviving space's name with 72 basis
+  rows) — every red is a WRITE-PATH defect under ON: a write that no
+  longer lands, a write that lands with the wrong identity, or an
+  action killed at commit-prep before it can write. TWO of the seven
+  converge on the register's already-owed **OW31/§2b write-authority
+  carriage build** (cfc-group-chat-demo's served rows carrying the
+  SERVICE identity; home-profile's `compile-cache/writeback` fallback
+  refused without carriage): NO new row is minted for what OW31
+  already owes — those skip entries point at OW31, which now carries
+  two CI surfaces as its lift evidence. A ninth CI-red family member,
+  `cfc-group-chat-demo-multi-runtime`, was the test HARNESS's own
+  mixed posture (the self-hosted OFF-arm standalone server refusing
+  the ON workers' event appends deterministically) — fixed IN the
+  harness (`create()` resolves the posture like a deployed entry
+  point; ON targets the lane's toolshed), all 7 steps green on the ON
+  binary: no skip, no row. Reports:
+  [`stage-c/first-on-ci-gate.md`](../../history/plans/server-execution-v2/stage-c/first-on-ci-gate.md)
+  (the gate record: the failure table, the harness fix, the coverage
+  re-baseline) and
+  [`stage-c/on-render-stall-rootcause.md`](../../history/plans/server-execution-v2/stage-c/on-render-stall-rootcause.md)
+  (the three render-stall surfaces: store/log/live-run evidence,
+  classifications, fix seats S-A..S-J). The skip entries live in
+  `tasks/server-execution-on-skips.ts` (SIX file entries + TWO
+  step-level entries; the skip-list test pins the set); they gate the
+  FLIP — whose bar is the list EMPTY — not the land. Rows, one per
+  mechanism cluster; each row's trigger names the skip entry it
+  lifts:
+  - **OW45 — the profile piece's PROGRAM-materialization write path
+    under ON (rootcause §1; seats S-A/S-B/S-C).** Under ON the
+    created piece's program (code + CFC labelMap + schema docs) is
+    only ever written by the client's own post-arrival commit; a
+    reload kills the trailing create's program commit (it is issued
+    AFTER `waitForRuntimeIdle` returns), nothing re-issues it, and
+    the server's fallback — `compile-cache/writeback/<patternIdentity>`
+    running in the HOME space's wave — is refused by the wave
+    accumulator as a foreign-space write with no §2b delegated
+    carriage (`seal-space-commit-failed`, 17 refusals per profile
+    space observed), so the space's serving loop parks the structure
+    load forever and the name renders the `#id` placeholder. Owed:
+    **S-A** a legitimate server-side write path for
+    `compile-cache/writeback` into the piece's own space — either the
+    OW31 §2b delegated carriage covering it, or a RULING that
+    program/compile-cache materialization docs are system-class,
+    content-addressed, idempotent writes exempt from the foreign-write
+    refusal (this arm also heals already-broken spaces on next
+    demand); **S-B** the client pending-commit durability barrier
+    covering program materialization (`Scheduler.idleWithPendingCommits`
+    — `waitForRuntimeIdle` must not return before the program is
+    durable); **S-C** heal-on-read: re-issue program materialization
+    on adopt/open when the space lacks the program docs for a
+    referenced patternIdentity. Trigger: lifts the
+    `integration/home-profile-reload-durability.test.ts` ON skip
+    (jointly with OW31's build if S-A takes the carriage arm).
+  - **OW46 — the silent forever-park is invisible (seat S-D;
+    OW19-adjacent detectability).** The "unloadable pattern awaiting
+    its source docs" deferral (`space-server.ts`'s
+    `structureLoadDeferred` branch) parks with NO counter and NO log
+    line — `structureLoadFailures` stays 0, no error names the space
+    — so a whole class of dead spaces (OW45's shape) is undetectable
+    from stats. Owed: the deferral counts and logs after N cycles.
+    Trigger: rides OW45's fix arc — the home-profile lift run must
+    show the park counted/logged (detectability; not itself the lift
+    condition).
+  - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
+    rootcause §2b + the cellset-lww reproducer).** A USER's binding
+    write into a serve-owned user-scope doc can be silently LOST:
+    group-chat local shape — Bob's `messageDraft` `$value` patch (the
+    exact op that landed for Alice) never reaches the store in 4/4
+    runs including a 300 s probe while his session commits 12 OTHER
+    writes; cellset-lww end-to-end — the typed name's transaction is
+    refused terminally (`speculative-basis-refused`) and the write is
+    DROPPED. Common premise failure: serving-loop.md §3d's "its own
+    reads re-run it when fresh state lands" does not hold for
+    non-re-derivable INPUTS (the scheduler's logged
+    "dropping the write without retry" class — the which-direction
+    hazard). Owed: **S-E** trace and fix the `$value`-binding commit
+    path for served-instance user-scope docs (candidates: a
+    withdrawn-overlay origin commit dropped on a wave race; a flush
+    queued behind the arrival/echo gate that never drains — needs one
+    instrumented client build; whether the `shell.login` identity
+    switch is necessary is undetermined); **S-F** the pending-commit
+    barrier must cover binding writes into served docs (idle returned
+    with the write unflushed); **S-G** (test-side, secondary)
+    group-chat line 197 clicks without `waitForDisabled(false)` — the
+    wait belongs there under ON regardless; it fixes nothing (proven:
+    300 s). Trigger: lifts the `integration/cellset-lww.test.ts`
+    step entry; jointly with OW31's build, lifts the
+    `integration/cfc-group-chat-demo.test.ts` skip.
+  - **OW48 — #6098's reserved-result-keys rule × system patterns
+    under the ON serving compile (seat S-H; rootcause §4b).** Main's
+    #6098 transformer rule ("a result may not declare its own screen
+    opaque") makes the SERVER fail to load `profile-create.tsx` /
+    `profile-picker.tsx` (TransformerError into `profile-home.tsx`)
+    in the ON serving-compile posture ONLY — the OFF arm compiles the
+    same byte-identical files green; compile byte-cache presence
+    decides whether this or OW49's assert is the proximate kill.
+    Owed: decide the composition — compliant `$UI` typing for the
+    wish/system patterns on main, or the serving compile relaxing the
+    #6098 check for the consumer-view position it trips on. Trigger:
+    one half of lifting the `integration/profile-embed.test.ts` ON
+    skip.
+  - **OW49 — the ifc-divergent-anyOf envelope at /result under ON
+    (seat S-I; rootcause §4a; a CFC-OWNER call — FLAGGED, not
+    scheduled).** Main's `assertNoDivergentIfcBranches`
+    (cfc/schema-merge.ts, #3263) fires inside the `raw:wish` action's
+    commit-prep only under ON: the /result envelope becomes
+    divergent-ifc-carrying when served/instance schema envelopes
+    merge with the local one (the profile schema family is documented
+    divergent-union-prone). Owed: a merge rule for ifc-in-anyOf at
+    /result OR normalizing the served envelope before the merge — the
+    CFC owner decides; first step is an envelope dump at
+    `prepareBoundaryCommit` (rootcause §6.2). Trigger: the other half
+    of lifting the `integration/profile-embed.test.ts` ON skip.
+  - **OW50 — wish-action commit-prep failures must surface in the
+    wish UI (seat S-J; detectability).** Today the killed wish action
+    leaves the UI silently never-mounted (`pendingIpc` empty, 1
+    subscribe), and even the red error surface lands at most once
+    (the "Can't report … in the surface it belongs to" /
+    StorageTransactionInconsistent follow-on). Owed: the failure
+    surfaces where the wish UI belongs. Trigger: rides the
+    OW48/OW49 fix arc (detectability; not itself the lift condition).
+  - **OW51 — the default-app `splitDefinitions` undefined-read (the
+    ON read-semantics seam).** A note.tsx lift callback's input
+    arrives `undefined` under ON where the OFF arm always supplies it
+    — `TypeError: Cannot read properties of undefined (reading
+    'split')` at `notes/reference-block.ts:62`, caught by the
+    integration console gate (the same console error W4 §6.2 recorded
+    on the note workload's rc=1, here fatal). Owed: root-cause which
+    ON read shape reaches the lift undefined (served value vintage,
+    schema default not applied, or arrival ordering) and fix at the
+    producer or the lift contract. Trigger: lifts the
+    `integration/default-app.test.ts` ON skip.
+  - **OW52 — the convergence-storm ON loss (landed 23/40).** Under
+    the TRUE ON topology the storm step (2×20 pipelined `post` events,
+    `idle:false`, per writer) leaves the non-writing observer at
+    landed=23/40 — a REAL loss (the pre-fix mixed posture refused all
+    40, masking it); the file's 3 element-schema tests are green.
+    WHERE the 17 die — append admission, queue, dispatch, or
+    consequence commit under pipelined contention — is UNTRIAGED; the
+    (α) exactly-once invariants say nothing about append-side loss
+    under storm depth. Owed: the triage and the fix. Trigger: lifts
+    the `integration/convergence-storm.test.ts` step entry (green
+    5/5).
+  - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
+    semantic asserts under the TRUE ON topology: db-owner — a SECOND
+    user's runtime re-mints itself as the sqlite db handle owner
+    ("bob's runtime must not re-mint itself as the db owner");
+    read-clearance — the cleared-read request hash becomes
+    READER-keyed ("baseline request hash stays reader-blind" fails)
+    and the cleared result doc carries more than the declared
+    surface. The sqlite handle/clearance identity model diverges
+    under served execution — an identity-model decision ADJACENT to
+    OW31's ruled posture but not covered by it (who mints the owner
+    under served runs; what keys the cleared-read request hash).
+    UNTRIAGED whether the fix is model or implementation. Owed: the
+    decision and the fix. Trigger: lifts BOTH
+    `integration/sqlite-db-owner-multi-runtime.test.ts` and
+    `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
+    skips.
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row
