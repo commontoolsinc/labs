@@ -5,8 +5,9 @@ recognized shebang use plain text, while filename-free transformed compiler
 output keeps its TypeScript default. Piped source can select a language directly
 or through a virtual filename. Declarative metadata can now describe extensions,
 exact names, compound patterns, explicit aliases, and direct interpreter
-shebangs. JSON Lines and NDJSON names use the JSON tokenizer. Python files with
-recognized extensions now have syntax highlighting.
+shebangs. JSON Lines and NDJSON use the JSON tokenizer with independent lexical
+state for each record. Python files with recognized extensions now have syntax
+highlighting.
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Recognized shebangs and transformed
 compiler headers remain explicit source selectors. Binary is a supported,
@@ -261,7 +262,7 @@ contains 40 path-change events on current JSON Lines paths since February 18,
 grammar work.
 
 - [x] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
-- [ ] Isolate malformed lines so one line cannot affect the next.
+- [x] Isolate malformed lines so one line cannot affect the next.
 - [ ] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
   files, VS Code workspace files, and Swift `Package.resolved`.
 - [ ] Add Jupyter notebook container recognition for `.ipynb`.

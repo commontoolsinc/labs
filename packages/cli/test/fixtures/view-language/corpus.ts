@@ -24,6 +24,8 @@ export interface SelectionCases {
  */
 export interface ViewLanguageFixture {
   readonly languageId: string;
+  /** Other adapters that deliberately share this fixture's token evidence. */
+  readonly highlightingPeers?: readonly string[];
   readonly surveyRepository: string;
   readonly surveyCommit: string;
   readonly surveyPath: string;
@@ -99,6 +101,7 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
   },
   {
     languageId: "json",
+    highlightingPeers: ["json-lines"],
     surveyRepository: "labs",
     surveyCommit: "a09656c3342bf3e34b68c5f754c25473acb0afef",
     surveyPath: "deno.jsonc",
@@ -110,14 +113,34 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
         "deno.jsonc",
         "package.json",
         "settings.jsonc.example",
-        "tasks/test-identity-aliases.jsonl",
-        "tests/fixtures/location.point.sample.ndjson",
       ],
-      aliases: ["json", "jsonc", "jsonl", "ndjson"],
+      aliases: ["json", "jsonc"],
     },
     beforeEvidence: { text: '"tasks"', className: "propertyName" },
     afterEvidence: { text: '"tasks"', className: "propertyName" },
     incompleteEvidence: { text: '"workspace"', className: "propertyName" },
+  },
+  {
+    languageId: "json-lines",
+    surveyRepository: "labs",
+    surveyCommit: "69fcd7efa983a143d1fbe0bc8167b0a6a9be6835",
+    surveyPath: "tasks/test-identity-aliases.jsonl",
+    before: new URL("./json-lines/before.jsonl", import.meta.url),
+    after: new URL("./json-lines/after.jsonl", import.meta.url),
+    incomplete: new URL(
+      "./json-lines/incomplete.fixture",
+      import.meta.url,
+    ),
+    selection: {
+      filenames: [
+        "tasks/test-identity-aliases.jsonl",
+        "tests/fixtures/location.point.sample.ndjson",
+      ],
+      aliases: ["json-lines", "jsonl", "ndjson"],
+    },
+    beforeEvidence: { text: '"queued"', className: "propertyName" },
+    afterEvidence: { text: '"processed"', className: "propertyName" },
+    incompleteEvidence: { text: '"editing"', className: "propertyName" },
   },
   {
     languageId: "yaml",

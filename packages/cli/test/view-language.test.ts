@@ -29,7 +29,10 @@ import {
 import { type LanguageDecoder } from "../lib/view/languages/decoder.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
-import { jsonLanguage } from "../lib/view/languages/json/language.ts";
+import {
+  jsonLanguage,
+  jsonLinesLanguage,
+} from "../lib/view/languages/json/language.ts";
 import { yamlLanguage } from "../lib/view/languages/yaml/language.ts";
 import { pythonLanguage } from "../lib/view/languages/python/language.ts";
 import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
@@ -93,8 +96,9 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("md"), markdownLanguage);
   assertEquals(languageForName("json"), jsonLanguage);
   assertEquals(languageForName("jsonc"), jsonLanguage);
-  assertEquals(languageForName("jsonl"), jsonLanguage);
-  assertEquals(languageForName("ndjson"), jsonLanguage);
+  assertEquals(languageForName("json-lines"), jsonLinesLanguage);
+  assertEquals(languageForName("jsonl"), jsonLinesLanguage);
+  assertEquals(languageForName("ndjson"), jsonLinesLanguage);
   assertEquals(languageForName("yaml"), yamlLanguage);
   assertEquals(languageForName("yml"), yamlLanguage);
   assertEquals(languageForName("python"), pythonLanguage);
@@ -109,6 +113,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "typescript",
     "markdown",
     "json",
+    "json-lines",
     "yaml",
     "python",
     "binary",
@@ -123,6 +128,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "md",
     "json",
     "jsonc",
+    "json-lines",
     "jsonl",
     "ndjson",
     "yaml",
@@ -453,6 +459,7 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "b.ts",
     "c.md",
     "d.json",
+    "events.jsonl",
     "e.yaml",
     "f.py",
     "image.png",
@@ -464,6 +471,7 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
       "typescript",
       "markdown",
       "json",
+      "json-lines",
       "yaml",
       "python",
       "binary",
@@ -588,6 +596,7 @@ Deno.test("diffSemanticsFor: TypeScript answers over its own files in the diff",
         [
           markdownLanguage,
           jsonLanguage,
+          jsonLinesLanguage,
           yamlLanguage,
           pythonLanguage,
           plainTextLanguage,
