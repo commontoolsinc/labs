@@ -228,3 +228,32 @@ skip-entry status: the `integration/convergence-storm.test.ts` step
 entry LIFTED. The in-file guard wiring stays (designed binding for any
 future entry; a guard without an entry is a no-op and the validator
 only checks the other direction).
+
+## 7. Post-merge addendum: the census's group-chat waitFor flakes (items 1+3)
+
+The owner's ON-flake census (2026-08-21; 123 runs, 25 ON failures, all
+pattern-ON) counted 10 shard-7 failures of
+`cfc-group-chat-demo-multi-runtime.test.ts` "admin lockdown gates room
+creation but never message sending" (`Timed out waiting for: bob's
+post-lockdown message arrives at alice`, `MultiRuntimeHarness.waitFor`)
+plus one of "admins can grant admin to another user by name" — every
+observed failure PRE-dating #6158's merge.
+
+Coverage verdict: **this fix covers them.** The failing primitive is
+`waitFor`, whose every poll calls `settle(1)` — and since #6158 each
+such poll blocks (bounded) until the polling sessions' fired events
+have their terminal consequences ARRIVED, then barriers to head. Bob's
+message send is exactly such an intent and the awaited message is its
+first-order consequence, so the former poll race (fast no-op polls
+burning the 30 s window while a loaded runner's serving loop drained)
+is now an event-driven wait at the settle layer; the `waitFor` timeout
+remains only the failure bound, per
+docs/development/waiting-in-tests.md. No timeout was changed.
+
+Empirical verification (quiet dev box, dev toolshed ON, fresh stores):
+the full file — both census tests included, 7 steps per run —
+**12/12 green at 1907e050e** (this fix's squash, pre-#6156) and
+**12/12 green at 9d989c0c1** (main tip with OW31's identity build),
+6–17 s per run, zero quiescence-budget warnings. The census's
+load-dependence caveat applies to any local bench; the mechanism
+coverage above is the primary argument, the 24/24 the corroboration.
