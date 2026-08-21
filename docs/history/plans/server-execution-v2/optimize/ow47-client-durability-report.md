@@ -1,7 +1,8 @@
 ---
-status: active
+status: historical
 created: 2026-08-21
-reason: "OW47 client own-write durability under ON (seats S-E/S-F/S-G, plus OW45's client half S-B/S-C and OW46's S-D): the S-E trace of WHY a USER's binding write dies under ON, the fix with its which-direction argument, and the skip-lift evidence. Working report of the optimize-on-main client-durability agent; updated incrementally."
+archived: 2026-08-21
+reason: "Optimize-phase client-durability report: OW47 CLOSED (the S-E trace — a blind UI write's structural read naming the client's own standing speculation layer fired the §6 export refusal terminally; fixed in buildReads with which-direction pins; S-F resolved no-defect; S-G landed; cellset-lww step skip lifted), OW46 CLOSED (structureLoadStuck + the stuck warn), OW45's S-B CLOSED (the durability barrier covers pattern work) with S-C FLAGGED (heal-on-read's source is an unstated semantic under OW31 FLAG-4's carriage constraint), and the joint-lift runs vs OW31's branch. Incremental during the pass; frozen at handoff."
 ---
 
 # OW47 client own-write durability — trace + fix report
@@ -9,7 +10,8 @@ reason: "OW47 client own-write durability under ON (seats S-E/S-F/S-G, plus OW45
 Agent: client-durability (optimize-on-main phase). Worktree
 `/Users/berni/labs-worktrees/ow47-durability`, branch
 `claude/server-exec-v2-ow47-durability` off `origin/main` @ `ce92b445f`.
-Status: **IN PROGRESS** — updated incrementally with each push.
+Status: **COMPLETE** (frozen at the pass's handoff). PRs: #6150 (OW47),
+#6152 (OW46), #6155 (OW45 S-B) — coordinator merges.
 
 ## 0. Assignment
 
