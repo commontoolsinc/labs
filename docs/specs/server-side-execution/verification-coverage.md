@@ -5076,15 +5076,32 @@ supply; OW29/OW32/OW34 closed):
     `integration/home-profile-reload-durability.test.ts` ON skip
     (jointly with OW31's build if S-A takes the carriage arm).
   - **OW46 — the silent forever-park is invisible (seat S-D;
-    OW19-adjacent detectability).** The "unloadable pattern awaiting
-    its source docs" deferral (`space-server.ts`'s
-    `structureLoadDeferred` branch) parks with NO counter and NO log
-    line — `structureLoadFailures` stays 0, no error names the space
-    — so a whole class of dead spaces (OW45's shape) is undetectable
-    from stats. Owed: the deferral counts and logs after N cycles.
-    Trigger: rides OW45's fix arc — the home-profile lift run must
-    show the park counted/logged (detectability; not itself the lift
-    condition).
+    OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
+    client-durability pass; report:
+    `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`).**
+    The "unloadable pattern awaiting its source docs" deferral
+    (`space-server.ts`'s `structureLoadDeferred` branch) parked with
+    no DISTINGUISHING counter and no visible log line — each attempt
+    fed the per-attempt aggregate `structureLoadDeferred`, where a
+    dead space is indistinguishable from routine one-cycle creation
+    races, the only log line is debug-level, and
+    `structureLoadFailures` stays 0 — so a whole class of dead
+    spaces (OW45's shape) was undetectable from stats. Landed: the
+    space server tracks each root's CONSECUTIVE-deferral streak; at
+    `STRUCTURE_LOAD_STUCK_AFTER` (8 — an observability knob, not a
+    contract) it counts `structureLoadStuck` once per crossing and
+    WARNS (`structure-load-stuck`, naming the space, root, and
+    reason) there and at each doubling of the streak; the streak
+    clears when the root starts or terminalizes (a later re-stuck
+    episode counts again, like `structureLoadTerminal`); the THROW
+    arm is untouched (already loud per attempt). serving-loop.md §7
+    carries the counter. Pinned red-first in
+    `executor-space-server.test.ts` (a pattern-unloadable root
+    deferring per cycle: stuck stays 0 below the threshold, crosses
+    to exactly 1, never re-counts while the streak grows; the OW19
+    terminal/re-arm pins unchanged). Residual (the original
+    trigger): the home-profile lift run should show the park
+    counted/logged — that run belongs to OW45/OW31's joint lift.
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer).** A USER's binding
     write into a serve-owned user-scope doc can be silently LOST:

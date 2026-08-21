@@ -45,7 +45,10 @@ import type {
   MemorySpace,
 } from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
-import { SpaceServer } from "../src/executor/space-server.ts";
+import {
+  SpaceServer,
+  STRUCTURE_LOAD_STUCK_AFTER,
+} from "../src/executor/space-server.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import {
   emptyServingLoopStats,
@@ -867,6 +870,87 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(stats.structureLoadTerminal).toBe(terminalAtTerminal);
     expect(stats.structureLoadRearmed).toBe(0);
     expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("a demanded root stuck in per-cycle deferral is counted after the threshold — the forever-park is visible from stats (OW46)", async () => {
+    // The home-profile Ada shape (rootcause §1; verification-coverage.md
+    // OW46): a doc whose pattern pointer names an identity that can
+    // never load — the program docs are missing — defers its structure
+    // load EVERY input-driven cycle, forever. Each attempt lands in the
+    // aggregate structureLoadDeferred, where a dead space is
+    // indistinguishable from routine one-cycle creation races, and the
+    // only log line is debug-level. This pin: after
+    // STRUCTURE_LOAD_STUCK_AFTER consecutive deferrals of ONE root the
+    // loop counts a structureLoadStuck crossing (once per root, not per
+    // cycle) and WARNS with the space and root named.
+    const rootId = "of:ow46-stuck-root";
+    // Direct engine write so the doc carries `patternIdentity` META
+    // beside its value (writeDocument wraps value-only).
+    Engine.applyCommit(engine, {
+      sessionId: "session:ow46-writer",
+      space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: rootId,
+          value: {
+            value: { plain: 1 },
+            patternIdentity: {
+              identity: "ow46-no-such-pattern",
+              symbol: "default",
+            },
+          },
+        }],
+      },
+      commitClass: "system",
+    });
+
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([{ id: rootId }]),
+    });
+    expect(await created.activate()).toBe(true);
+
+    // Drive input cycles; each one re-attempts the pending root and
+    // defers (pattern-unloadable). The crossing must appear at exactly
+    // the threshold — not before (stuck stays 0 while the streak is
+    // short: a routine creation-race deferral never trips it), and only
+    // ONCE for the one stuck root no matter how far past the threshold
+    // the cycles run.
+    for (
+      let i = 0;
+      stats.structureLoadDeferred < STRUCTURE_LOAD_STUCK_AFTER + 4 && i < 40;
+      i++
+    ) {
+      if (stats.structureLoadDeferred < STRUCTURE_LOAD_STUCK_AFTER) {
+        expect(stats.structureLoadStuck).toBe(0);
+      }
+      const applied = await server.writeDocument(
+        space,
+        `of:ow46-noise-${i}`,
+        { n: i },
+      );
+      created.enqueueCommit({
+        space,
+        seq: applied.seq,
+        class: "system",
+        sessionId: "session:ow46-noise",
+        writes: [{ id: `of:ow46-noise-${i}`, scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => created.watermark >= applied.seq,
+        `noise cycle ${i} to settle`,
+      );
+    }
+    expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(
+      STRUCTURE_LOAD_STUCK_AFTER,
+    );
+    expect(stats.structureLoadStuck).toBe(1);
+    expect(stats.structureLoadFailures).toBe(0);
+    expect(stats.structureLoadTerminal).toBe(0);
   });
 
   it("re-arms a terminal root on a commit touching it and LOADS a piece created after the terminal decision (OW19's not-yet half)", async () => {

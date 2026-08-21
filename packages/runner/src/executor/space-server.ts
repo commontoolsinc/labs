@@ -121,6 +121,17 @@ import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
 
+/** Consecutive not-yet-loadable deferrals of ONE demanded root after
+ * which the root counts as STUCK (`stats.structureLoadStuck`, once per
+ * crossing) and the loop WARNS (`structure-load-stuck`, again at each
+ * doubling of the streak). An observability knob, not a contract: the
+ * routine creation race resolves in one or two cycles, so any streak
+ * this long names a root whose piece cannot start — the OW46 class
+ * (a demanded piece whose program docs never materialized parks in the
+ * retry arm forever, invisible in the aggregate `structureLoadDeferred`
+ * and logged only at debug level). */
+export const STRUCTURE_LOAD_STUCK_AFTER = 8;
+
 /** The sanctioned internal stamp kind's durable action id (serving-loop.md
  * §3d, RULED 2026-08-05: stage F names the kinds when it installs the
  * seal destination). */
@@ -402,6 +413,18 @@ export class SpaceServer implements TransactionSealDestination {
    * classes out of piece demand entirely; this covers the remaining
    * `of:` ids, which id classes cannot split. */
   readonly #terminalStructureLoads = new Map<string, ReadonlySet<string>>();
+  /** Consecutive deferral streak per demanded root (keyed by demand
+   * key), feeding `stats.structureLoadStuck` and the
+   * `structure-load-stuck` WARN once a streak crosses
+   * `STRUCTURE_LOAD_STUCK_AFTER` (verification-coverage.md OW46): the
+   * per-attempt aggregate `structureLoadDeferred` cannot distinguish a
+   * forever-parked root — the home-profile shape, a piece whose
+   * program docs never materialized — from routine one-cycle creation
+   * races, and the per-attempt log line is debug-level. Cleared when
+   * the root starts or terminalizes (a later re-stuck stretch counts
+   * again); left untouched by the THROW arm, whose failures are
+   * already loud (`structureLoadFailures` + warn per attempt). */
+  readonly #structureLoadDeferralStreaks = new Map<string, number>();
   /** The single-flighted demand-structure load pass (stage P2-F): the
    * wave cycle races it against the flush deadline; a pass outliving
    * its wave keeps running and later cycles join it. */
@@ -2764,6 +2787,7 @@ export class SpaceServer implements TransactionSealDestination {
       // sound.
       else if (neverAPieceRootId(root.id)) {
         this.#pendingStructureLoads.delete(key);
+        this.#structureLoadDeferralStreaks.delete(key);
         continue;
       } else {
         try {
@@ -2775,6 +2799,7 @@ export class SpaceServer implements TransactionSealDestination {
           const verdict = await this.#attemptStructureLoad(runtime, root);
           if (verdict.started) {
             this.#pendingStructureLoads.delete(key);
+            this.#structureLoadDeferralStreaks.delete(key);
             if (verdict.rootId !== undefined && verdict.rootId !== root.id) {
               // The demand named an argument/derived doc; remember the
               // OWNING piece root so the per-(action × instance) run
@@ -2797,6 +2822,7 @@ export class SpaceServer implements TransactionSealDestination {
             );
             if (confirmed.started) {
               this.#pendingStructureLoads.delete(key);
+              this.#structureLoadDeferralStreaks.delete(key);
               if (
                 confirmed.rootId !== undefined && confirmed.rootId !== root.id
               ) {
@@ -2805,6 +2831,7 @@ export class SpaceServer implements TransactionSealDestination {
               }
             } else if (confirmed.reason === "no-pattern-meta") {
               this.#pendingStructureLoads.delete(key);
+              this.#structureLoadDeferralStreaks.delete(key);
               this.#terminalStructureLoads.set(
                 key,
                 new Set(confirmed.observedDocIds),
@@ -2818,6 +2845,12 @@ export class SpaceServer implements TransactionSealDestination {
             } else {
               this.#pendingStructureLoads.add(key);
               stats.structureLoadDeferred += 1;
+              this.#noteStructureLoadDeferral(
+                key,
+                root.id,
+                confirmed.reason,
+                stats,
+              );
             }
           } else {
             // Not loadable YET for a non-terminal reason (a chain
@@ -2827,6 +2860,7 @@ export class SpaceServer implements TransactionSealDestination {
             // input-driven cycle retries.
             this.#pendingStructureLoads.add(key);
             stats.structureLoadDeferred += 1;
+            this.#noteStructureLoadDeferral(key, root.id, verdict.reason, stats);
             logger.debug?.("structure-load-deferred", () => [
               `demanded root ${root.id} not loadable yet ` +
               `(${verdict.reason ?? "unclassified"}); ` +
@@ -2948,6 +2982,38 @@ export class SpaceServer implements TransactionSealDestination {
    * graph; instances are data slots, scopes.md §2), so a scoped demand
    * on a shared-structure piece must load through the broad slot
    * rather than churn forever on its meta-less instance doc. */
+  /** Track one root's consecutive-deferral streak and surface the
+   * STUCK crossing (OW46): count `stats.structureLoadStuck` once at
+   * `STRUCTURE_LOAD_STUCK_AFTER`, and WARN there and at each doubling
+   * of the streak (8, 16, 32, …) so a forever-parked root keeps
+   * showing up without per-cycle log spam. The streak is cleared by
+   * the resolution arms (started / terminal / never-a-piece), never
+   * here. */
+  #noteStructureLoadDeferral(
+    key: string,
+    rootId: string,
+    reason: string | undefined,
+    stats: { structureLoadStuck: number },
+  ): void {
+    const streak = (this.#structureLoadDeferralStreaks.get(key) ?? 0) + 1;
+    this.#structureLoadDeferralStreaks.set(key, streak);
+    if (streak < STRUCTURE_LOAD_STUCK_AFTER) return;
+    if (streak === STRUCTURE_LOAD_STUCK_AFTER) {
+      stats.structureLoadStuck += 1;
+    }
+    // Log at the crossing and at each doubling (power-of-two streaks).
+    if ((streak & (streak - 1)) === 0) {
+      logger.warn("structure-load-stuck", () => [
+        `demanded root ${rootId} in ${this.#options.space} has deferred ` +
+        `its structure load ${streak} consecutive cycles ` +
+        `(${reason ?? "unclassified"}): the piece cannot start and the ` +
+        "space serves nothing for it — a forever-park unless the " +
+        "missing docs arrive (verification-coverage.md OW46; the " +
+        "home-profile program-write-loss shape)",
+      ]);
+    }
+  }
+
   async #attemptStructureLoad(
     runtime: Runtime,
     root: { id: string; scope?: string },
