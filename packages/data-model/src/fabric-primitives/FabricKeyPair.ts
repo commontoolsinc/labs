@@ -504,15 +504,21 @@ FabricKeyPair.prototype satisfies ApiFabricKeyPair;
 // the class of that name, and nothing structural is ever assignable to a class
 // holding a private field -- so the only parameter that could satisfy it is
 // one naming the declaration rather than the class, which is backwards for an
-// implementation. Each form the declaration promises is therefore exercised
-// instead: dropping an overload, or narrowing one, stops this compiling.
-(() => {
-  const bytes = new FabricBytes(new Uint8Array());
-
-  // The algorithm name is arbitrary here -- only its type is under test -- so
-  // it is deliberately not one this system uses. A real name would answer a
-  // migration's `grep` with a site that has nothing to migrate.
+// implementation. Each form the declaration promises is therefore written out
+// instead, in a function nothing calls: dropping an overload, or narrowing
+// one, stops it compiling.
+// **This function is never called, by anything, ever.** It is a compile-time
+// check wearing a runtime shape, because there is no type-level spelling that
+// works: an overloaded constructor satisfies `new (...args: A) => unknown` for
+// any `A` at all, so the obvious `Constructible<[number, number]>` form passes
+// for arguments this class refuses, and checks nothing. A body that must
+// compile is what actually holds the overloads in place.
+//
+// The algorithm name is arbitrary -- only its type is under test -- so it is
+// deliberately not one this system uses. A real name would answer a
+// migration's `grep` with a site that has nothing to migrate.
+function _apiDeclaredConstructorForms(bytes: FabricBytes): void {
   new FabricKeyPair(undefined as unknown as CryptoKeyPair);
   new FabricKeyPair("ExampleAlgorithm", bytes, bytes);
   new FabricKeyPair("ExampleAlgorithm", new Uint8Array(), new Uint8Array());
-});
+}

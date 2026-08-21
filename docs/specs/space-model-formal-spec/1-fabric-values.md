@@ -3806,7 +3806,8 @@ input being "safe to freeze."
 `boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
 and pass through unchanged regardless of the `freeze` setting.
 `FabricPrimitive` instances (`FabricEpochNsec`, `FabricEpochDay`,
-`FabricHash`, `FabricBytes`) are treated the same way — they are always returned as-is,
+`FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) are treated the
+same way — they are always returned as-is,
 never copied or modified by the freeze/thaw logic. Their state is immutable by
 construction (readonly fields, no mutation methods), so `Object.freeze()` is
 unnecessary and thawing is meaningless. See Section 1.4.6.
@@ -4039,9 +4040,9 @@ directly; when it differs, a new object is constructed. The **freeze state of
 the output always matches the `frozen` argument**: when `frozen` is `true` (the
 default), the output tree is fully frozen — arrays and plain objects are frozen
 via `Object.freeze()`, a mutable `Map` becomes a `FrozenMap`, a mutable `Set`
-becomes a `FrozenSet`, temporal wrappers unwrap to their bigint values,
-`FabricHash` and `FabricBytes` pass through unchanged, and `Error`s are
-frozen. When `frozen` is `false`, the output tree is
+becomes a `FrozenSet`, every `FabricPrimitive` (`FabricEpochNsec`,
+`FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`,
+`FabricRegExp`) passes through unchanged, and `Error`s are frozen. When `frozen` is `false`, the output tree is
 fully mutable. The data content is preserved; the mutability matches the `frozen`
 argument.
 
