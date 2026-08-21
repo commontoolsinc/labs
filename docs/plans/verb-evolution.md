@@ -93,31 +93,38 @@ deploy's output beside the next, so output changes are governed by convention
 alone.
 
 The same gate also governs the *holder* — what a pattern may change about
-what it demands from the pieces it stores — and there is the fourth bad
-outcome:
+what it demands from the pieces it stores — where the first outcome above
+arrives from the other side:
 
 | Change a holder makes to its own demand | Result |
 | --- | --- |
 | Demand a new optional field or verb | allowed |
 | Demand a new required field that carries a default | allowed |
 | Demand a new **required verb** | **refused** |
-| Stop demanding a field or verb it no longer uses | **refused** |
+| Stop demanding a field or verb it no longer uses | allowed |
 
-Both refusals come from `packages/piece/src/schema-compatibility.ts`.
-Dropping a named field is rejected as `existing argument field was removed`
-— the gate has no notion of narrowing, so giving up a demand looks exactly
-like breaking one. Raising one hits `newly required argument field has no
-default`, and a verb is a stream, which cannot carry a default: the refusal
-above, arriving from the other direction.
+The refusal comes from `packages/piece/src/schema-compatibility.ts`: raising
+a demand hits `newly required argument field has no default`, and a verb is
+a stream, which cannot carry a default, so a newly required verb is the same
+refusal arriving from the other direction.
+
+Giving a demand up is narrowing, and the gate reads it as narrowing. A field
+the pattern stopped reading leaves a writer's value unread rather than
+breaking a reader, so the argument side drops named fields freely; what it
+still proves is that the candidate can hold the value the piece already
+carries, which a closed candidate object fails as `source field is rejected
+by the target object`. The result side preserves every named field it
+published.
 
 Stated plainly, because much of the design rests on it: **a deployed
-holder's required demands are write-once.** They cannot be added to and
-cannot be given up; only optional demands can evolve, and only by growing.
-(The provider side is looser on purpose: a pattern may add a newly required
-field to its own *result*, because the new code materializes it when it
-runs. A demand has no such escape — the piece it points at already exists.)
+holder's required demands can be given up but never raised.** Only optional
+demands can be added, and a required one, once made, is kept or dropped
+whole. (The provider side is looser on that axis: a pattern may add a newly
+required field to its own *result*, because the new code materializes it
+when it runs. A demand has no such escape — the piece it points at already
+exists.)
 
-Behind all four outcomes is the fact that makes this hard: **pieces
+Behind all three outcomes is the fact that makes this hard: **pieces
 persist.** Each carries the interface it was created with while the code
 around it moves on. Sooner or later some caller holds a piece older than the
 interface it wants, and no declaration style makes that impossible.
@@ -421,8 +428,8 @@ version boundary with its name erased; versioning names the vintage, and
 moves the maybe from every seam to bind time.
 
 **The columns are not reachable from one another.** A deployed holder cannot
-move rightward — every such move hits the write-once wall in the holder
-table, and escalating a versioned demand from v1 to v2 is the same event. So
+move rightward — every such move raises a demand, which the holder table
+refuses, and escalating a versioned demand from v1 to v2 is the same event. So
 the design is complete for holders that do not exist yet and — until scoped
 acknowledgment and migration exist — inert for every holder already
 deployed: requirement 6 unmet, and both mechanisms on the critical path for
@@ -468,11 +475,9 @@ record which demands exist, which is what everything below needs.
 
 Today a holder's demand is indistinguishable from its own state — the
 refusal path `argument.notes[].append` *is* the demand subtree, unmarked.
-That single gap is why the impact report below cannot count anything, why
-the gate treats giving up a demand as a break rather than the safe narrowing
-it is, and why a deliberate break can only be acknowledged by turning the
-whole gate off. Marking demands is the substrate the rest of the tooling
-stands on.
+That single gap is why the impact report below cannot count anything, and
+why a deliberate break can only be acknowledged by turning the whole gate
+off. Marking demands is the substrate the rest of the tooling stands on.
 
 [#5746] prototypes both halves: a `Demand<T>` marker whose stamp rides the
 referencing node — a shared definition stays neutral; each use site declares
@@ -480,9 +485,11 @@ its own demand-ness — and an advisory warning when a contract embeds a
 foreign Output type, with self-reference still legal and `@sharedContract`
 opting a genuine protocol type out.
 
-Adopting narrow demands across already-deployed patterns is itself a break
-— a deployed holder cannot drop what it stopped needing — so that migration
-rides the scoped acknowledgment below, not a quiet edit.
+Adopting narrow demands across already-deployed patterns is a holder
+dropping what it stopped needing, which the gate accepts on its own. Where
+the holder republishes the demanded type, the same narrowing reaches its
+result, and that side still refuses — so those adoptions ride the scoped
+acknowledgment below rather than a quiet edit.
 
 ### Authoring time shows the blast radius
 
@@ -619,13 +626,11 @@ pattern, a move across spaces — is creation, not evolution.
 ## What is not settled here
 
 One question is open by design, and it is the one the cross product exposes:
-**how a deployed holder moves.** Narrow demands, required-verb demands and
-versioned demands are all reachable when a holder is written and none of
-them afterwards, so every adoption path runs through a scoped acknowledgment
-or a migration that rewrites holders. Which carries it — and whether the
-gate should learn that removal beneath a demand marker is narrowing rather
-than breakage — decides how much of this design applies to what is already
-running.
+**how a deployed holder moves.** Required-verb demands and versioned demands
+are reachable when a holder is written and not afterwards, so every adoption
+path that raises a demand runs through a scoped acknowledgment or a
+migration that rewrites holders. Which carries it decides how much of this
+design applies to what is already running.
 
 One direction belongs in that conversation, recorded as intent rather than
 mechanism: **the provider tells holders how to move.** A pattern that

@@ -188,14 +188,17 @@ result cell and its populated inputs. **Adding a new `PerSpace` field is safe**
 — on an existing piece it hydrates to its `Default<>` while populated fields
 keep their data.
 
-**Removing one is refused.** The compatibility check reads the deployed schema
-and rejects a source that drops a field, without touching the piece:
+**Removing one is refused wherever the pattern publishes it.** A `PerSpace`
+field that also reaches the result is held by the result contract, and the
+compatibility check rejects a source that drops it, without touching the piece:
 
 ```
 Pattern schemas are not backward compatible:
-- argument.motto: existing argument field was removed
 - result.motto: existing result field was removed
 ```
+
+A field the pattern only reads goes freely: giving up an input leaves whatever
+the piece stored unread rather than breaking a reader.
 
 `--dangerously-allow-incompatible-schema` replaces the source anyway. Adding
 fields is safe, but heavily **reordering or renaming** pattern inputs can shift

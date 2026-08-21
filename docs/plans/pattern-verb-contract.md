@@ -656,13 +656,15 @@ applies to — it must be authored open-world so protocol fields such as a
 payload digest or retention metadata can be added later.
 
 "Results may narrow freely" governs *values*, not *named fields*. Removing a
-named property is rejected outright in either direction — `objectSubsetIssue`
+named property from a **result** is rejected outright — `objectSubsetIssue`
 returns "existing result field was removed" whenever the comparison is an
-evolution, on the stated principle that "pattern evolution preserves named
-fields as part of the public contract, even when the candidate object is
-otherwise open" (`objectSubsetIssue`,
-`packages/piece/src/schema-compatibility.ts`). The removed-field check
-recurses, so a nested removal is rejected on a nested path
+evolution, on the stated principle that a result's named fields are the
+contract consumers read (`objectSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). An argument's named fields are
+not held that way: dropping one gives up a demand, which the same function
+accepts wherever the candidate object can still hold the value the piece
+carries. The removed-field check recurses, so a nested removal is rejected on
+a nested path
 (`result.topic.title: existing result field was removed`) exactly as a flat one
 is. Adding a **required** field is rejected at any depth unless it carries a
 default; adding an **optional** one is allowed at any depth; narrowing a
