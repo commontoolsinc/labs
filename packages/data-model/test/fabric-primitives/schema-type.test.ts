@@ -69,7 +69,7 @@ const CASES: readonly {
     ctor: FabricKeyPair,
     make: () =>
       new FabricKeyPair(
-        "Ed25519",
+        "ExampleAlgorithm",
         new Uint8Array([1]),
         new Uint8Array([2]),
       ),

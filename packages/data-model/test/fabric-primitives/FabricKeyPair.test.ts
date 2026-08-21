@@ -30,7 +30,7 @@ const PRIVATE_BYTES = new Uint8Array([250, 251, 252, 253]);
 
 /** Returns a fresh instance holding material. */
 function materialPair(): FabricKeyPair {
-  return new FabricKeyPair("Ed25519", PUBLIC_BYTES, PRIVATE_BYTES);
+  return new FabricKeyPair("ExampleAlgorithm", PUBLIC_BYTES, PRIVATE_BYTES);
 }
 
 /** A fixed non-extractable pair, so identity checks have a stable subject. */
@@ -50,7 +50,7 @@ describe("FabricKeyPair", () => {
   describe("constructor()", () => {
     it("copies a `Uint8Array` argument", () => {
       const source = new Uint8Array([1, 2, 3]);
-      const pair = new FabricKeyPair("Ed25519", source, PRIVATE_BYTES);
+      const pair = new FabricKeyPair("ExampleAlgorithm", source, PRIVATE_BYTES);
 
       source[0] = 99;
 
@@ -59,7 +59,7 @@ describe("FabricKeyPair", () => {
 
     it("retains a `FabricBytes` argument as it stands", () => {
       const bytes = new FabricBytes(PUBLIC_BYTES);
-      const pair = new FabricKeyPair("Ed25519", bytes, PRIVATE_BYTES);
+      const pair = new FabricKeyPair("ExampleAlgorithm", bytes, PRIVATE_BYTES);
 
       expect(pair.publicKeyBytes).toBe(bytes);
     });
@@ -72,7 +72,7 @@ describe("FabricKeyPair", () => {
     it("throws given key material that is neither form of bytes", () => {
       expect(() =>
         new FabricKeyPair(
-          "Ed25519",
+          "ExampleAlgorithm",
           "nope" as unknown as Uint8Array,
           PRIVATE_BYTES,
         )
@@ -273,7 +273,7 @@ describe("FabricKeyPair", () => {
       describe("encode()", () => {
         it("encodes material to an `{ algorithm, publicKey, privateKey }` object", () => {
           expect(codec.encode(materialPair())).toEqual({
-            algorithm: "Ed25519",
+            algorithm: "ExampleAlgorithm",
             publicKey: "AQID",
             privateKey: "-vv8_Q",
           });
@@ -290,7 +290,7 @@ describe("FabricKeyPair", () => {
         it("returns `true` for a record of three strings", () => {
           expect(
             codec.canDecode({
-              algorithm: "Ed25519",
+              algorithm: "ExampleAlgorithm",
               publicKey: "AQID",
               privateKey: "AQID",
             }),
@@ -302,14 +302,19 @@ describe("FabricKeyPair", () => {
         });
 
         it("returns `false` for a record missing a field", () => {
-          expect(codec.canDecode({ algorithm: "Ed25519", publicKey: "AQID" }))
+          expect(
+            codec.canDecode({
+              algorithm: "ExampleAlgorithm",
+              publicKey: "AQID",
+            }),
+          )
             .toBe(false);
         });
 
         it("returns `false` for a record with a non-string field", () => {
           expect(
             codec.canDecode({
-              algorithm: "Ed25519",
+              algorithm: "ExampleAlgorithm",
               publicKey: "AQID",
               privateKey: 7,
             }),
@@ -322,7 +327,7 @@ describe("FabricKeyPair", () => {
           const decoded = codec.decode(
             expectedTag,
             {
-              algorithm: "Ed25519",
+              algorithm: "ExampleAlgorithm",
               publicKey: "not valid base64!!",
               privateKey: "AQID",
             },
@@ -342,7 +347,7 @@ describe("FabricKeyPair", () => {
           ) as FabricKeyPair;
 
           expect(decoded).toBeInstanceOf(FabricKeyPair);
-          expect(decoded.algorithm).toBe("Ed25519");
+          expect(decoded.algorithm).toBe("ExampleAlgorithm");
           expect(decoded.publicKeyBytes.slice()).toEqual(PUBLIC_BYTES);
           expect(decoded.privateKeyBytes.slice()).toEqual(PRIVATE_BYTES);
         });
@@ -362,7 +367,7 @@ describe("FabricKeyPair", () => {
             privateKey: ArrayBuffer;
           };
 
-          expect(state.algorithm).toBe("Ed25519");
+          expect(state.algorithm).toBe("ExampleAlgorithm");
           expect(state.publicKey).toBeInstanceOf(ArrayBuffer);
           expect(state.privateKey).toBeInstanceOf(ArrayBuffer);
           expect([...new Uint8Array(state.publicKey)]).toEqual([1, 2, 3]);
@@ -405,14 +410,18 @@ describe("FabricKeyPair", () => {
           const { publicKey, privateKey } = await generatePair();
 
           expect(
-            codec.canDecode({ algorithm: "Ed25519", publicKey, privateKey }),
+            codec.canDecode({
+              algorithm: "ExampleAlgorithm",
+              publicKey,
+              privateKey,
+            }),
           ).toBe(false);
         });
 
         it("returns `false` for a material state whose keys are not buffers", () => {
           expect(
             codec.canDecode({
-              algorithm: "Ed25519",
+              algorithm: "ExampleAlgorithm",
               // A bare view rather than a buffer, which is not a form this
               // format emits.
               publicKey: new Uint8Array([1]),
@@ -460,7 +469,7 @@ describe("FabricKeyPair", () => {
 
           expect(decoded).toBeInstanceOf(FabricKeyPair);
           expect(decoded.hasMaterial).toBe(true);
-          expect(decoded.algorithm).toBe("Ed25519");
+          expect(decoded.algorithm).toBe("ExampleAlgorithm");
           expect(decoded.publicKeyBytes.slice()).toEqual(PUBLIC_BYTES);
           expect(decoded.privateKeyBytes.slice()).toEqual(PRIVATE_BYTES);
         });
@@ -538,14 +547,18 @@ describe("FabricKeyPair", () => {
     });
 
     it("hashes instances differing only in algorithm differently", () => {
-      const other = new FabricKeyPair("X25519", PUBLIC_BYTES, PRIVATE_BYTES);
+      const other = new FabricKeyPair(
+        "OtherAlgorithm",
+        PUBLIC_BYTES,
+        PRIVATE_BYTES,
+      );
 
       expect(hashStringOf(materialPair())).not.toBe(hashStringOf(other));
     });
 
     it("hashes instances differing only in a key differently", () => {
       const other = new FabricKeyPair(
-        "Ed25519",
+        "ExampleAlgorithm",
         PUBLIC_BYTES,
         new Uint8Array([250, 251, 252, 254]),
       );
@@ -557,7 +570,7 @@ describe("FabricKeyPair", () => {
       // The two keys are fed in a fixed order, so a pair holding them the
       // other way round is a different value rather than the same one.
       const swapped = new FabricKeyPair(
-        "Ed25519",
+        "ExampleAlgorithm",
         PRIVATE_BYTES,
         PUBLIC_BYTES,
       );

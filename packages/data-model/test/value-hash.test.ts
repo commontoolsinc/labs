@@ -962,6 +962,11 @@ describe("value-hash", () => {
         // Algorithm "Ed25519" = 7 bytes UTF-8, under the 64-byte threshold, so
         // the direct string form. Each key is a complete tagged `FabricBytes`
         // value: TAG_BYTES, a LEB128 length, then the raw bytes.
+        //
+        // A real algorithm name, unlike the placeholder the fixtures use: its
+        // own bytes are spelled out below and mirrored in Section 7.13 of
+        // `2-hash-byte-format.md`, so the two have to be changed together.
+        // Nothing here depends on the algorithm being one this system uses.
         const pair = new FabricKeyPair(
           "Ed25519",
           new Uint8Array([0xDE, 0xAD]),

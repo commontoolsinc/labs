@@ -726,7 +726,11 @@ describe("native-conversion", () => {
         new FabricEpochDay(1n),
         new FabricEpochNsec(1n),
         new FabricHash(new Uint8Array(32), "fid1"),
-        new FabricKeyPair("Ed25519", new Uint8Array([1]), new Uint8Array([2])),
+        new FabricKeyPair(
+          "ExampleAlgorithm",
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+        ),
         new FabricRegExp(/x/),
       ];
 

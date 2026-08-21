@@ -1185,7 +1185,7 @@ describe("RealmCodecEngine", () => {
     it("carries a `FabricKeyPair`'s material across as bytes", async () => {
       const report = await crossRealm({
         keyPair: new FabricKeyPair(
-          "Ed25519",
+          "ExampleAlgorithm",
           new Uint8Array([1, 2, 3]),
           new Uint8Array([250, 251]),
         ),
@@ -1194,7 +1194,7 @@ describe("RealmCodecEngine", () => {
       expect(report.ok).toBe(true);
       expect(report.classes).toEqual({ keyPair: "FabricKeyPair" });
       expect(report.facts?.keyPair).toEqual({
-        algorithm: "Ed25519",
+        algorithm: "ExampleAlgorithm",
         hasMaterial: true,
         publicKey: [1, 2, 3],
         privateKey: [250, 251],

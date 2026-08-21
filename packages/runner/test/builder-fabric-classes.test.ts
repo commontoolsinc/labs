@@ -148,13 +148,13 @@ describe("commonfabric Fabric value classes", () => {
       const BoundFabricKeyPair = commonfabric
         .FabricKeyPair as typeof FabricKeyPair;
       const instance = new BoundFabricKeyPair(
-        "Ed25519",
+        "ExampleAlgorithm",
         new Uint8Array([1, 2, 3]),
         new Uint8Array([4, 5, 6]),
       );
 
       expect(instance).toBeInstanceOf(FabricKeyPair);
-      expect(instance.algorithm).toBe("Ed25519");
+      expect(instance.algorithm).toBe("ExampleAlgorithm");
       expect(instance.hasMaterial).toBe(true);
       expect(instance.publicKeyBytes.slice()).toEqual(
         new Uint8Array([1, 2, 3]),
