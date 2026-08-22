@@ -100,23 +100,27 @@ Deno.test("labs ci trust: only first-attempt success counts as green", async () 
 });
 
 Deno.test(
-  "labs ci trust grid: every run in the latest 200-run window has a cell",
+  "labs ci trust grid: every run in the latest 150-run window has a cell",
   async () => {
     const runs = [
       run({ status: "in_progress", conclusion: null }),
-      ...Array.from({ length: 199 }, () => run({ conclusion: "success" })),
+      ...Array.from({ length: 149 }, () => run({ conclusion: "success" })),
       run({ conclusion: "failure" }),
     ];
     const view = await labsCiTrust.collect(ctx(runs));
     const cells = (view.extra ?? "").match(/class="cell"/g)?.length ?? 0;
-    assertEquals(cells, 200);
+    assertEquals(cells, 150);
+    assertStringIncludes(
+      view.extra ?? "",
+      "grid-template-columns:repeat(30,1fr)",
+    );
     assertEquals(
       view.sub,
-      "first-try green · 199 of last 200 runs",
+      "first-try green · 149 of last 150 runs",
     );
     assert(
       !(view.extra ?? "").includes("var(--status-bad)"),
-      "the 201st run must be outside the grid and percentage window",
+      "the 151st run must be outside the grid and percentage window",
     );
   },
 );
