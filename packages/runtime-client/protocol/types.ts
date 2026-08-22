@@ -984,8 +984,8 @@ export type VDomMountResponse = {
  * transport implemented using `codec-realm`. Note that an `interface` never
  * satisfies `FabricPlainObject` -- TypeScript grants an implicit index
  * signature to an anonymous object type and not to an interface -- so every
- * arm here has to become a type alias. The two ends of the crossing carry the matching
- * markers: `WebWorkerRuntimeTransport.send()` in
+ * arm here has to become a type alias. The two ends of the crossing carry the
+ * matching markers: `WebWorkerRuntimeTransport.send()` in
  * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
  * listener in `../backends/web-worker/index.ts`.
  */

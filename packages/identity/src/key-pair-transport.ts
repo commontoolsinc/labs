@@ -17,10 +17,13 @@ export function realmValueFromKeyPair(
 }
 
 /**
- * Decodes what {@link realmValueFromKeyPair} produced, naming what carried it
- * in whatever it throws. `encoded` is ceded to the decode rather than copied
- * for it, per the format's own contract, so a caller must not use it
- * afterwards.
+ * Decodes what {@link realmValueFromKeyPair} produced. `encoded` is ceded to
+ * the decode rather than copied for it, per the format's own contract, so a
+ * caller must not use it afterwards.
+ *
+ * `what` names the carrier, and reaches only the not-a-key-pair error: a
+ * malformed encoding is the codec's own to report, and it throws before this
+ * has anything to add.
  *
  * @throws If `encoded` is not a well-formed encoding, or if it decodes to
  *   anything but a key pair.
