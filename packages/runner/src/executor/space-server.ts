@@ -98,6 +98,7 @@ import {
 import {
   stampWaveRunContext,
   WaveAccumulator,
+  waveContinuationOf,
   waveRunContextOf,
   type WaveWriteAnnotation,
 } from "./wave.ts";
@@ -347,6 +348,12 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #drainInFlight = new Map<string, "queued" | "marked">();
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
+  #closingWave: WaveAccumulator | undefined;
+  #closingSealChain: Promise<unknown> | undefined;
+  readonly #pendingSealsByWave = new WeakMap<
+    WaveAccumulator,
+    Set<Promise<unknown>>
+  >();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
   // A shadow flip that fired while no input waiter was installed
@@ -1165,9 +1172,11 @@ export class SpaceServer implements TransactionSealDestination {
     // seals: both mutate the replica overlay through sealNative.
     const completionKey = effectCompletionKeyOf(tx);
     if (completionKey !== undefined) {
-      const committed = this.#sealChain.then(() =>
-        this.#commitEffectCompletion(tx, completionKey)
-      );
+      const closing = this.#closingWave;
+      const committed = this.#sealChain.then(async () => {
+        if (closing !== undefined) await closing.settled();
+        return await this.#commitEffectCompletion(tx, completionKey);
+      });
       this.#sealChain = committed.then(() => undefined, () => undefined);
       return committed;
     }
@@ -1211,9 +1220,39 @@ export class SpaceServer implements TransactionSealDestination {
         },
       });
     }
-    const wave = this.#openWave();
+    const continuation = waveContinuationOf(tx);
+    if (!this.#active && continuation === undefined) {
+      return Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: "Space server is parking",
+          reason: new Error("space-server-parking"),
+        },
+      });
+    }
+    const wave = continuation === undefined
+      ? this.#openWave()
+      : this.#waveByTx.get(continuation);
+    if (wave === undefined) {
+      return Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: "Wave continuation has no producing wave",
+          reason: new Error("wave-continuation-without-producing-wave"),
+        },
+      });
+    }
     this.#waveByTx.set(tx, wave);
-    const sealed = this.#sealChain.then(() => wave.seal(tx)).then(
+    const closing = this.#closingWave;
+    const predecessor = closing !== undefined && wave === closing
+      ? this.#closingSealChain ?? this.#sealChain
+      : this.#sealChain;
+    const sealed = predecessor.then(async () => {
+      if (closing !== undefined && wave !== closing) {
+        await closing.settled();
+      }
+      return await wave.seal(tx);
+    }).then(
       (result) => {
         if (result.error !== undefined) {
           // An EVENT-STAMPED tx that failed its seal requeues its
@@ -1243,7 +1282,20 @@ export class SpaceServer implements TransactionSealDestination {
         return result;
       },
     );
-    this.#sealChain = sealed.then(() => undefined, () => undefined);
+    let pending = this.#pendingSealsByWave.get(wave);
+    if (pending === undefined) {
+      pending = new Set();
+      this.#pendingSealsByWave.set(wave, pending);
+    }
+    pending.add(sealed);
+    const sealFinished = () => pending!.delete(sealed);
+    sealed.then(sealFinished, sealFinished);
+    const continuedChain = sealed.then(() => undefined, () => undefined);
+    if (closing !== undefined && wave === closing) {
+      this.#closingSealChain = continuedChain;
+    } else {
+      this.#sealChain = continuedChain;
+    }
     // The F4 window: a seal chained during the cycle's last microtasks
     // (after wave-detach) is not yet APPLIED when #hasWork() evaluates
     // — count it as pending work until the chain settles, so the loop
@@ -1263,6 +1315,27 @@ export class SpaceServer implements TransactionSealDestination {
     // must be committed — wake the loop.
     this.#feedArrived?.resolve();
     return sealed;
+  }
+
+  noteEventConsequenceFailure(
+    producerTx: IExtendedStorageTransaction,
+  ): void {
+    const wave = this.#waveByTx.get(producerTx);
+    if (wave === undefined) {
+      logger.error("event-consequence-failure", () => [
+        "event consequence failed before sealing, but its producer has no " +
+        "owning wave",
+      ]);
+      return;
+    }
+    wave.noteSealFailure(waveRunContextOf(producerTx));
+  }
+
+  async #drainWaveSeals(wave: WaveAccumulator): Promise<void> {
+    const pending = this.#pendingSealsByWave.get(wave);
+    if (pending === undefined || pending.size === 0) return;
+    await Promise.allSettled([...pending]);
+    if (pending.size > 0) await this.#drainWaveSeals(wave);
   }
 
   /**
@@ -3662,8 +3735,10 @@ export class SpaceServer implements TransactionSealDestination {
 
     const closing = this.#currentWave;
     if (closing === undefined) return;
+    this.#closingWave = closing;
+    this.#closingSealChain = this.#sealChain;
     this.#currentWave = undefined;
-    await this.#sealChain;
+    await this.#drainWaveSeals(closing);
 
     // Phase 5 (protocol.md §2b): resolve the co-hosted engines for the
     // wave's foreign provisioning targets BEFORE the commit step — the
@@ -3706,6 +3781,10 @@ export class SpaceServer implements TransactionSealDestination {
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
     await closing.settled();
+    if (this.#closingWave === closing) {
+      this.#closingWave = undefined;
+      this.#closingSealChain = undefined;
+    }
     // The drain's in-flight guard: the store has now spoken for every
     // event this wave carried — committed (its mark landed) or requeued
     // (its contributions withdrawn: lease-lost, rejected, foreign-failed,
@@ -4054,9 +4133,17 @@ export class SpaceServer implements TransactionSealDestination {
     // server may close meanwhile).
     this.#foreignEngines.clear();
     const wave = this.#currentWave;
+    if (wave !== undefined) {
+      this.#closingWave = wave;
+      this.#closingSealChain = this.#sealChain;
+    }
     this.#currentWave = undefined;
-    await this.#sealChain;
+    if (wave !== undefined) await this.#drainWaveSeals(wave);
     wave?.abandon(`parked: ${reason}`);
+    if (this.#closingWave === wave) {
+      this.#closingWave = undefined;
+      this.#closingSealChain = undefined;
+    }
     // Stage G: an abandoned wave's deferred effects are DISCARDED with
     // it — the runtime below is disposed, so this is the
     // crash-equivalent path §4/§6 already cover (the effect re-misses

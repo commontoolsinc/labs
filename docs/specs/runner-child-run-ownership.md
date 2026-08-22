@@ -126,6 +126,17 @@ wave, that wave must also settle before the start succeeds. A withdrawal
 releases the registration and follows the same bounded conflict recovery as a
 setup transaction rejected at its seal.
 
+An event-handler child is part of the producing event's consequences. It
+installs from the successful commit callback so its setup joins the producing
+wave. Waiting for that wave to settle would let the event become consequenced
+before the child joined it. The setup transaction carries the producing event's
+identity, so a setup conflict requeues the event and its other contributions.
+It also names the producer transaction as its wave owner. This keeps the setup
+in the producing wave when the serving loop has detached that wave for its
+final seal drain. The producing wave's settlement still owns the registration:
+a withdrawal releases it. If setup fails before it can seal, the runner marks
+the producing event failed on that wave.
+
 The callback installs the registration while staging the start's own setup
 transaction. If that transaction conflicts, the callback removes only the
 registration it installed, waits for the conflict's `readyToRetry` catch-up

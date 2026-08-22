@@ -83,7 +83,11 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
-import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
+import {
+  stampWaveContinuation,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "./executor/wave.ts";
 import {
   causalFormOfBinding,
   findAllWriteRedirectCells,
@@ -3548,11 +3552,22 @@ export class Runner {
     ownership: DeferredStartOwnership,
     start: () => void,
   ): void {
+    const cancelSafely = () => {
+      try {
+        ownership.cancel();
+      } catch (error) {
+        logger.warn(
+          "deferred-start-cleanup-failed",
+          "Cleanup after a withdrawn producer wave failed",
+          error,
+        );
+      }
+    };
     const startSafely = () => {
       try {
         start();
       } catch (error) {
-        ownership.cancel();
+        cancelSafely();
         logger.error(
           "runner-start",
           "Deferred start failed after producer settlement",
@@ -3561,6 +3576,25 @@ export class Runner {
       }
     };
     const settlement = waveSettlementOf(tx);
+    if (waveRunContextOf(tx)?.kind === "event-handler") {
+      startSafely();
+      if (settlement !== undefined) {
+        void settlement.then(
+          (settled) => {
+            if (settled.error !== undefined) cancelSafely();
+          },
+          (error) => {
+            cancelSafely();
+            logger.error(
+              "runner-start",
+              "Deferred start wave settlement failed",
+              error,
+            );
+          },
+        );
+      }
+      return;
+    }
     if (settlement === undefined) {
       startSafely();
       return;
@@ -3568,13 +3602,13 @@ export class Runner {
     void settlement.then(
       (settled) => {
         if (settled.error !== undefined) {
-          ownership.cancel();
+          cancelSafely();
           return;
         }
         if (!ownership.isCancelled()) startSafely();
       },
       (error) => {
-        ownership.cancel();
+        cancelSafely();
         logger.error(
           "runner-start",
           "Deferred start wave settlement failed",
@@ -3582,6 +3616,36 @@ export class Runner {
         );
       },
     );
+  }
+
+  private stampDeferredStart(
+    tx: IExtendedStorageTransaction,
+    actionId: string,
+    producerTx: IExtendedStorageTransaction,
+    speculativeConsequence?: { eventId: string },
+  ): void {
+    const producerContext = waveRunContextOf(producerTx);
+    if (producerContext?.kind === "event-handler") {
+      this.runtime.stampServerRun(tx, {
+        actionId,
+        kind: "event-handler",
+        eventId: producerContext.eventId,
+        acting: producerContext.acting,
+        scopeKeyIdentity: producerContext.scopeKeyIdentity,
+        actionScopeKey: producerContext.actionScopeKey,
+      });
+      stampWaveContinuation(tx, producerTx);
+      return;
+    }
+    this.runtime.stampServerRun(tx, {
+      actionId,
+      ...(speculativeConsequence === undefined
+        ? { kind: "bookkeeping" as const }
+        : {
+          kind: "event-handler" as const,
+          eventId: speculativeConsequence.eventId,
+        }),
+    });
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -3607,45 +3671,28 @@ export class Runner {
 
       const attempt = (allowConflictRetry: boolean) => {
         const startTx = this.runtime.edit();
-        // Minted inside a commit callback — by definition outside any
-        // scheduler run; the deferred start's node wiring is piece
-        // machinery, stamped bookkeeping per serving-loop.md §3d. A
-        // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
-        // speculative-consequence stamp (2026-08-13): it is a handler
-        // CONSEQUENCE (the receipt + result wrapper of a speculative
-        // echo), so it stamps event-handler-kind and the overlay
-        // diverts it — committing it authored would race the SERVING
-        // side's own deferred start for the create-only receipt, and a
-        // client win would suppress the served navigateTo (no intent
-        // would ever be computed). §3d's bookkeeping-only rule governs
-        // internal writes at the wave seal destination, which this
-        // client-side start tx never reaches. The serving side and the
-        // OFF arm keep bookkeeping.
-        this.runtime.stampServerRun(startTx, {
-          actionId: `piece-start/${resultLink.id}`,
-          ...(speculativeConsequence !== undefined
-            ? {
-              kind: "event-handler" as const,
-              eventId: speculativeConsequence.eventId,
-            }
-            : { kind: "bookkeeping" as const }),
-        });
-        // Phase 4 (builtins.md §4): a deferred start minted from an
-        // EVENT-HANDLER run carries that run's event context across to
-        // the start tx, so a navigateTo instantiated under it can address
-        // the firing session (navigate-context.ts's capture point 1).
-        const navigateContext = navigateEventContextFromRunInfo(
-          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-        );
-        if (navigateContext !== undefined) {
-          setNavigateEventContext(startTx, navigateContext);
-        }
-        const committedResultCell = this.runtime.getCellFromLink<T>(
-          resultLink,
-          undefined,
-          startTx,
-        );
         try {
+          this.stampDeferredStart(
+            startTx,
+            `piece-start/${resultLink.id}`,
+            committedTx,
+            speculativeConsequence,
+          );
+          // Phase 4 (builtins.md §4): a deferred start minted from an
+          // EVENT-HANDLER run carries that run's event context across to
+          // the start tx, so a navigateTo instantiated under it can address
+          // the firing session (navigate-context.ts's capture point 1).
+          const navigateContext = navigateEventContextFromRunInfo(
+            waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+          );
+          if (navigateContext !== undefined) {
+            setNavigateEventContext(startTx, navigateContext);
+          }
+          const committedResultCell = this.runtime.getCellFromLink<T>(
+            resultLink,
+            undefined,
+            startTx,
+          );
           const installedCancel = this.startWithTx(
             startTx,
             committedResultCell,
@@ -3671,6 +3718,10 @@ export class Runner {
             "Error committing deferred start transaction",
           );
         } catch (error) {
+          if (waveRunContextOf(committedTx)?.kind === "event-handler") {
+            this.runtime.installedSealDestination
+              ?.noteEventConsequenceFailure?.(committedTx);
+          }
           startTx.abort(error);
           ownership.cancel();
           logger.error("runner-start", "Deferred start failed", error);
@@ -3708,36 +3759,27 @@ export class Runner {
 
       const attempt = (allowConflictRetry: boolean) => {
         const startTx = this.runtime.edit();
-        // Minted inside a commit callback — outside any scheduler run;
-        // bookkeeping per serving-loop.md §3d, like the deferred start
-        // above (and with the same §3d-RULED speculative-consequence
-        // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
-        // is a speculative handler CONSEQUENCE and diverts to the
-        // overlay instead of racing the serving side's receipt create).
-        this.runtime.stampServerRun(startTx, {
-          actionId: `piece-start/${resultLink.id}`,
-          ...(speculativeConsequence !== undefined
-            ? {
-              kind: "event-handler" as const,
-              eventId: speculativeConsequence.eventId,
-            }
-            : { kind: "bookkeeping" as const }),
-        });
-        // Phase 4 (builtins.md §4): carry the instantiating event-handler
-        // run's event context to the start tx — capture point 1, as in
-        // startAfterSuccessfulCommit above.
-        const navigateContext = navigateEventContextFromRunInfo(
-          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-        );
-        if (navigateContext !== undefined) {
-          setNavigateEventContext(startTx, navigateContext);
-        }
-        const committedResultCell = this.runtime.getCellFromLink<T>(
-          resultLink,
-          pattern.resultSchema,
-          startTx,
-        );
         try {
+          this.stampDeferredStart(
+            startTx,
+            `piece-start/${resultLink.id}`,
+            committedTx,
+            speculativeConsequence,
+          );
+          // Phase 4 (builtins.md §4): carry the instantiating event-handler
+          // run's event context to the start tx — capture point 1, as in
+          // startAfterSuccessfulCommit above.
+          const navigateContext = navigateEventContextFromRunInfo(
+            waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+          );
+          if (navigateContext !== undefined) {
+            setNavigateEventContext(startTx, navigateContext);
+          }
+          const committedResultCell = this.runtime.getCellFromLink<T>(
+            resultLink,
+            pattern.resultSchema,
+            startTx,
+          );
           const installedCancel = this.runWithStartOwnership(
             startTx,
             pattern,
@@ -3768,6 +3810,10 @@ export class Runner {
             "Error committing deferred cross-space pattern transaction",
           );
         } catch (error) {
+          if (waveRunContextOf(committedTx)?.kind === "event-handler") {
+            this.runtime.installedSealDestination
+              ?.noteEventConsequenceFailure?.(committedTx);
+          }
           startTx.abort(error);
           ownership.cancel();
           logger.error(

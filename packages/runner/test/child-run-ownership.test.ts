@@ -526,6 +526,244 @@ describe("child run ownership", () => {
     runtime.runner.stop(result);
   });
 
+  it("starts an event-handler child before its producing wave settles", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const runner = runtime.runner as unknown as {
+      startWithTx(...args: unknown[]): (() => void) | undefined;
+      cancels: Map<string, () => void>;
+      allCancels: Set<() => void>;
+    };
+    const originalStartWithTx = runner.startWithTx;
+    const cleanupCalled = Promise.withResolvers<void>();
+    runner.startWithTx = function (...args: unknown[]) {
+      const installedCancel = Reflect.apply(
+        originalStartWithTx,
+        runtime.runner,
+        args,
+      ) as (() => void) | undefined;
+      if (installedCancel === undefined) return undefined;
+      const throwingCancel = () => {
+        installedCancel();
+        cleanupCalled.resolve();
+        throw new Error("test producer-wave cleanup failure");
+      };
+      runner.cancels.set(key(args[1] as Cell<unknown>), throwingCancel);
+      runner.allCancels.delete(installedCancel);
+      runner.allCancels.add(throwingCancel);
+      return throwingCancel;
+    };
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    let sealChain = Promise.resolve();
+    let startTx: IExtendedStorageTransaction | undefined;
+    runtime.installSealDestination({
+      seal: (sealTx) => {
+        const sealed = sealChain.then(() => wave.seal(sealTx));
+        sealChain = sealed.then(() => undefined, () => undefined);
+        if (waveRunContextOf(sealTx)?.actionId.startsWith("piece-start/")) {
+          startTx = sealTx;
+        }
+        return sealed;
+      },
+    }, {
+      runStamper: (sealTx, info) => {
+        stampWaveRunContext(sealTx, {
+          actionId: info.actionId,
+          kind: info.kind,
+          eventId: info.eventId,
+        });
+      },
+    });
+
+    const producerTx = runtime.edit();
+    const tx = new TransactionWrapper(producerTx);
+    producerTx.tx.immediate = true;
+    (producerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    stampWaveRunContext(producerTx, {
+      actionId: "event-producer-for-deferred-start",
+      kind: "event-handler",
+      eventId: "event-with-child",
+    });
+    const marker = runtime.getCell<{ ready: boolean }>(
+      space,
+      "event producer marker for deferred pattern run",
+      undefined,
+      producerTx,
+    );
+    marker.withTx(tx).set({ ready: true });
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "event child in its producing wave",
+      undefined,
+      producerTx,
+    );
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: IExtendedStorageTransaction,
+        resultCell: Cell<unknown>,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+    };
+    harness.runPatternAfterSuccessfulCommit(
+      tx,
+      result,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+
+    expect((await producerTx.commit()).error).toBeUndefined();
+    await sealChain;
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    expect(waveSettlementOf(producerTx)).toBeDefined();
+    expect(waveSettlementOf(tx)).toBeUndefined();
+    expect(waveRunContextOf(startTx!)?.kind).toBe("event-handler");
+    expect(waveRunContextOf(startTx!)?.eventId).toBe("event-with-child");
+
+    runtime.clearSealDestination();
+    const markerId = marker.getAsNormalizedFullLink().id;
+    const outcome = await wave.commitWave({
+      currentHeads: (_target, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [
+            `${doc.id} ${doc.scopeKey}`,
+            doc.id === markerId ? 0 : 1,
+          ])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([[]]),
+      commitWave: () => Promise.resolve({ ok: { seq: 1 } }),
+    });
+    await wave.settled();
+    await cleanupCalled.promise;
+    await Promise.resolve();
+
+    expect(outcome.requeuedEventIds).toEqual(["event-with-child"]);
+    expect(outcome.dispositions.length).toBeGreaterThanOrEqual(2);
+    expect(outcome.dispositions.every(({ kind }) => kind === "requeued"))
+      .toBe(true);
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(0);
+    runner.startWithTx = originalStartWithTx;
+  });
+
+  it("requeues an event when deferred child setup fails before sealing", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    let sealChain = Promise.resolve();
+    runtime.installSealDestination(
+      {
+        seal: (sealTx) => {
+          const sealed = sealChain.then(() => wave.seal(sealTx));
+          sealChain = sealed.then(() => undefined, () => undefined);
+          return sealed;
+        },
+        noteEventConsequenceFailure: (producerTx) => {
+          wave.noteSealFailure(waveRunContextOf(producerTx));
+        },
+      },
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+            eventId: info.eventId,
+          });
+        },
+      },
+    );
+
+    const producerTx = runtime.edit();
+    producerTx.tx.immediate = true;
+    stampWaveRunContext(producerTx, {
+      actionId: "event-producer-with-failed-child-setup",
+      kind: "event-handler",
+      eventId: "event-with-failed-child-setup",
+    });
+    const marker = runtime.getCell<{ ready: boolean }>(
+      space,
+      "producer whose child setup fails",
+      undefined,
+      producerTx,
+    );
+    marker.withTx(producerTx).set({ ready: true });
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "child that fails before sealing",
+      undefined,
+      producerTx,
+    );
+    const runner = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: IExtendedStorageTransaction,
+        resultCell: Cell<unknown>,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+      runWithStartOwnership(...args: unknown[]): unknown;
+    };
+    const originalRunWithStartOwnership = runner.runWithStartOwnership;
+    runner.runWithStartOwnership = () => {
+      throw new Error("test child setup failure");
+    };
+    runner.runPatternAfterSuccessfulCommit(
+      producerTx,
+      result,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+
+    expect((await producerTx.commit()).error).toBeUndefined();
+    await sealChain;
+    runner.runWithStartOwnership = originalRunWithStartOwnership;
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave({
+      currentHeads: (_target, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [`${doc.id} ${doc.scopeKey}`, 0])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([]),
+      commitWave: () => Promise.resolve({ ok: { seq: 1 } }),
+    });
+    await wave.settled();
+
+    expect(outcome.requeuedEventIds).toEqual([
+      "event-with-failed-child-setup",
+    ]);
+    expect(outcome.dispositions).toEqual([{ kind: "requeued" }]);
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+  });
+
   it("cancels a commit-gated start when its producing wave withdraws", async () => {
     await useServerExecutionRuntime();
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
