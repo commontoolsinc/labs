@@ -60,6 +60,7 @@ import type { Cell } from "../cell.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
+  lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { isSubschema } from "../schema-walk.ts";
@@ -2494,6 +2495,10 @@ class SpaceReplica implements ISpaceReplica {
   // teardown rejects every in-flight request.
   readonly #suppressedVerdicts = new Set<Promise<void>>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
+  // Schema-hash hydration dedupe (hydrateArrivedCfcSchemaRefs): hashes
+  // whose cid: pull is in flight or has succeeded; a failed pull removes
+  // its entry so a later frame can retry.
+  readonly #kickedCfcSchemaPulls = new Set<string>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     string,
@@ -5580,6 +5585,52 @@ class SpaceReplica implements ISpaceReplica {
           error,
         ]);
       }
+    }
+    this.hydrateArrivedCfcSchemaRefs(sync);
+  }
+
+  /** Schema-hash hydration for arrived metadata (verification-coverage.md
+   * OW47's re-close): a frame delivers a doc's `/cfc` metadata WITHOUT its
+   * `schemaHash` refs — the delivery validation covers link-position
+   * schemas only — so stored metadata can reference a `cid:` document no
+   * local source resolves, and the next commit whose CFC prepare consults
+   * it (a blind fill's durable verifier read above all) dies on
+   * `stored schemaHash … missing or unreadable`. Pull the referenced
+   * document as the metadata arrives: deferred a microtask (never
+   * re-entrant inside frame application), deduped per replica while a
+   * kick is in flight or has succeeded, retried on a later frame after a
+   * failed pull (the failure logs through the ordinary sync-load path). */
+  private hydrateArrivedCfcSchemaRefs(sync: SessionSync): void {
+    for (const upsert of sync.upserts) {
+      if (upsert.deleted === true) continue;
+      const id = upsert.id;
+      if (typeof id !== "string" || id.startsWith("cid:")) continue;
+      const doc = upsert.doc;
+      if (!isObjectNotArray(doc)) continue;
+      const cfc = (doc as { cfc?: unknown }).cfc;
+      if (!isObjectNotArray(cfc)) continue;
+      const schemaHash = (cfc as { schemaHash?: unknown }).schemaHash;
+      if (typeof schemaHash !== "string" || schemaHash.length === 0) {
+        continue;
+      }
+      if (this.#kickedCfcSchemaPulls.has(schemaHash)) continue;
+      if (
+        lookupSchemaDocument(schemaHash) !== undefined ||
+        this.getDocument(`cid:${schemaHash}` as URI) !== undefined
+      ) {
+        continue;
+      }
+      this.#kickedCfcSchemaPulls.add(schemaHash);
+      queueMicrotask(() => {
+        this.sync(`cid:${schemaHash}` as URI)
+          .then((result) => {
+            if (result.error !== undefined) {
+              this.#kickedCfcSchemaPulls.delete(schemaHash);
+            }
+          }, () => {
+            this.#kickedCfcSchemaPulls.delete(schemaHash);
+          });
+      });
     }
   }
 
