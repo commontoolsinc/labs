@@ -47,7 +47,6 @@ import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import {
-  fabricFromKeyPairRaw,
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
   type WorkerRequest,
@@ -437,7 +436,7 @@ export class MultiRuntimeHarness {
           );
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
-          identity: fabricFromKeyPairRaw(identity.serialize()),
+          identity: identity.keyPair,
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
@@ -457,7 +456,7 @@ export class MultiRuntimeHarness {
       // compile state.
       bootstrap = new WorkerClient("bootstrap");
       await bootstrap.call("init", {
-        identity: fabricFromKeyPairRaw(sessions[0].identity.serialize()),
+        identity: sessions[0].identity.keyPair,
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,

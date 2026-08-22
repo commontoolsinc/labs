@@ -6,7 +6,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -848,10 +848,30 @@ describe("background worker", () => {
       worker.postMessage({
         msgId: 1,
         type: "initialize",
-        data: { rawIdentity: { privateKey: "secret" } },
+        data: { encodedIdentity: { privateKey: "secret" } },
       });
       const invalid = await nextMessage((message) => message.msgId === 1);
       assertStringIncludes(String(invalid.error), "<REDACTED>");
+
+      // Well-formed as an encoding and wrong as a payload, which the shape
+      // guard cannot tell apart from the real thing: only the decode says so.
+      const notAKeyPair = await workerRequest(
+        worker,
+        nextMessage,
+        9,
+        WorkerIPCMessageType.Initialize,
+        {
+          did: TEST_DID,
+          toolshedUrl: TEST_API_URL,
+          encodedIdentity: realmValueFromKeyPair(
+            "not a key pair" as unknown as never,
+          ),
+        },
+      );
+      assertStringIncludes(
+        String(notAKeyPair.error),
+        "is not a key pair",
+      );
 
       const cleanupBeforeInitialize = await workerRequest(
         worker,
@@ -881,7 +901,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
           experimental: { modernCellRep: true },
         },
       );
@@ -895,7 +915,7 @@ describe("background worker", () => {
         {
           did: identity.did(),
           toolshedUrl: TEST_API_URL,
-          rawIdentity: identity.serialize(),
+          encodedIdentity: realmValueFromKeyPair(identity.keyPair),
         },
       );
       assertEquals("error" in initializedAgain, false);

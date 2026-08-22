@@ -72,13 +72,19 @@ export class EngineWaveCommitSink implements WaveCommitSink {
    * Replay keying — the stage-F choice, made and enforced here: the
    * engine dedupes commits by UNIQUE (session_id, local_seq), returning
    * the STORED result for a byte-identical replay and throwing "commit
-   * replay mismatch" for a different one. The SpaceServer holds ONE
-   * long-lived counter per (space, process) — `localSeqRef`, owned by
-   * the ExecutorHost, starting at 0 — and uses the DR1 HOLDER identity
+   * replay mismatch" for a different one. Every sink in the process
+   * shares ONE long-lived counter — `localSeqRef`, owned by the
+   * ExecutorHost, starting at 0 — and uses the DR1 HOLDER identity
    * as the `sessionId`, which is simultaneously what the
    * derived-envelope admission requires (protocol.md §2, RULED
    * 2026-08-05: the producing session must BE the holder's own service
-   * session). Freshness is structural, not queried: the holder's
+   * session). The counter is process-global rather than per-space
+   * because the session is: a home sink's FOREIGN provisioning batches
+   * (protocol.md §2b) land in other spaces' engines under this same
+   * session, so per-space counters re-mint pairs another writer already
+   * consumed there and the engine kills the later wave as a replay
+   * mismatch (the ExecutorHost's `#sinkLocalSeq` doc carries the
+   * incident shape). Freshness is structural, not queried: the holder's
    * process-instance component makes a new process a NEW engine
    * session, so 0 never collides; a park/re-activate within one
    * process reuses the counter. (A holder scheme WITHOUT a process

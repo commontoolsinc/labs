@@ -5,7 +5,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import {
   executeWorkerRequest,
   formatConsoleMessage,
@@ -52,11 +52,11 @@ try {
     formatConsoleMessage(
       {
         metadata: { space: TEST_DID, pieceId: PIECE_ID },
-        args: [{ rawIdentity: "secret" }],
+        args: [{ encodedIdentity: "secret" }],
       } as never,
       TEST_DID as never,
     ),
-    [`Piece(${PIECE_ID})`, `{"rawIdentity":"<REDACTED>"}`],
+    [`Piece(${PIECE_ID})`, `{"encodedIdentity":"<REDACTED>"}`],
   );
   assertEquals(
     formatConsoleMessage(
@@ -112,7 +112,7 @@ try {
       data: {
         did: identity.did(),
         toolshedUrl: "https://background-piece-service.invalid",
-        rawIdentity: identity.serialize(),
+        encodedIdentity: realmValueFromKeyPair(identity.keyPair),
       },
     },
     handlers,

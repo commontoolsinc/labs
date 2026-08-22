@@ -2854,8 +2854,9 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the
-  `home-profile-reload-durability` ON skip stays listed (it lifts
-  jointly with OW45), and the `cfc-group-chat-demo` skip was LIFTED
+  `home-profile-reload-durability` ON skip was LIFTED 2026-08-21 (the
+  explicit warm request — OW45's row carries the ruling and the 6/6
+  gate), and the `cfc-group-chat-demo` skip was LIFTED the same day
   by OW59 (the OW34-family train closed the CFC-attribution residual
   above and removed the entry on its green ON gate + store audit).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
@@ -5156,10 +5157,12 @@ supply; OW29/OW32/OW34 closed):
   both step entries were lifted the same day, cellset-lww with OW47's
   close and convergence-storm with OW52's, the group-chat file entry
   was lifted with OW59's close, default-app's file entry converted
-  to its OW45 reload-step entry with OW51's close, and profile-embed's
-  file entry fell with OW47's re-close, leaving three file
-  entries beside default-app's step entry);
-  they gate the
+  to its OW45 reload-step entry with OW51's close,
+  home-profile-reload-durability's file entry lifted the same day too
+  with the explicit warm request (OW45's row), and profile-embed's
+  file entry fell with OW47's re-close, leaving TWO file
+  entries — the sqlite identity pair — beside default-app's step
+  entry); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
@@ -5221,19 +5224,53 @@ supply; OW29/OW32/OW34 closed):
     shelf-ready start (client-side heal riding `replicateClosures`
     under the client's own identity, green red-first runner pins,
     serving posture pinned fail-closed; marked do-not-merge).
-    Trigger: lifts the
-    `integration/home-profile-reload-durability.test.ts` ON skip
-    JOINTLY with OW31's cf:module cross-space run residual — S-A and
-    S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
-    pass's joint preview run had step 1 green in ~10 s with step 2
-    red ONLY on that residual. Also now gates
+    Trigger DISCHARGED for the home-profile half — the
+    `integration/home-profile-reload-durability.test.ts` ON skip is
+    LIFTED (2026-08-21). The last blocker was not a carriage residual:
+    the §2b derivation-carriage scoping pass
+    (`optimize/2b-derivation-carriage-scope.md` §4) decomposed step
+    2's red to a SETUP-AFTER-PARK ORDERING RACE — authored setup
+    landing in a parked, sessionless space activates nothing (T11.Q7's
+    designed parking) and nothing ever re-demands it (the post-reload
+    summary reads the missing computed through the HOME space's free
+    cross-space read, which registers no target-side demand) — and
+    flagged three candidate mechanisms for the owner. **RULED
+    2026-08-21 (owner: "three decisions: i agree with all
+    recommendations")**: implement serving-loop.md §1's third,
+    then-unimplemented activation trigger — the EXPLICIT WARM REQUEST,
+    issued by the SERVING-SIDE PROVISIONING PATH when it stages setup
+    into a parked space (not a synthetic client session, and not
+    S-C-shape healing). BUILT the same day: the wave commit step
+    reports every durably committed foreign provisioning batch as a
+    warm-marked notice; the host activates a sessionless target on it
+    (the carries-events arm's sibling; T11.Q7's write-alone parking
+    untouched); the target tenure takes the staged instances as
+    identity-less warm demand, so the setup derives. The build also
+    closed the latent sink localSeq collision the warm activation
+    exposed (per-space counters under the process-stable holder
+    session — a home sink's foreign batches consumed pairs the
+    target's own sink later re-minted, killing its waves as replay
+    mismatches; now one process-global counter). Red-first:
+    `executor-warm-request.test.ts` (watched failing at the
+    activation wait, then at the derivation on the collision, then
+    green end to end). Lift evidence: 6/6 fresh-store ON gate runs at
+    the fix head, BOTH steps green in 12–24 s (the prior shape: step 1
+    ~10 s green, step 2 red at 5m+ on "Alan Turing"), posture verified
+    and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
+    in the live stats. The row's REMAINING charge: it gates
     `integration/default-app.test.ts`'s "persist and reload every
-    rapidly created notebook note" STEP: the OW51 fix (2026-08-21)
+    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
-    `noteCount` reads `undefined` past the step's wait (1/10 local ON);
-    an event-driven wait on `noteCount` is the test-side close, this
-    row's territory.
+    `noteCount` reads `undefined` past the step's wait (1/10 local ON
+    at the OW51 build; re-measured 2026-08-22 by the warm-request P-1
+    probe as heavily LOAD-SENSITIVE: 5/10 red on pure main and 7/10
+    red on the warm-request head — statistically indistinguishable at
+    n=10 — on a shared box at loads 3-16, every red the same
+    `undefined`-vs-7 shape, and the warm request structurally INERT in
+    this flow: `warmRequests` 0 in 10/10, the notebook stages no
+    foreign provisioning); an event-driven wait on `noteCount` is the
+    test-side close, this row's territory.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -5258,9 +5295,42 @@ supply; OW29/OW32/OW34 closed):
     `executor-space-server.test.ts` (a pattern-unloadable root
     deferring per cycle: stuck stays 0 below the threshold, crosses
     to exactly 1, never re-counts while the streak grows; the OW19
-    terminal/re-arm pins unchanged). Residual (the original
-    trigger): the home-profile lift run should show the park
-    counted/logged — that run belongs to OW45/OW31's joint lift.
+    terminal/re-arm pins unchanged). Residual DISCHARGED with the
+    lift (2026-08-21): the home-profile lift landed via the explicit
+    warm request (OW45's row), which PREVENTS the parked state in
+    that flow — the staged setup activates and derives, so the 6/6
+    gate runs had no stuck park to count and the counter correctly
+    stayed quiet. The counter's live purpose stands unchanged for
+    genuinely dead spaces (OW45's named die-before-flush residual;
+    its revisit trigger reads this counter in real ON usage).
+    **Family variant, closed same-day (the warm request's adversarial
+    review; no crash required)**: an activation FAILURE after the
+    host drained buffered warm notices into it — `activate()`
+    refusing on a rival process's unexpired lease, or throwing —
+    stranded the staged setup underived with no crash anywhere: the
+    warm one-shot died with the failed server and nothing re-issued
+    it. Fixed red-first (the host re-buffers the consumed warm
+    notices on either failure arm; `executor-warm-request.test.ts`'s
+    post-drain-failure pin, watched red at the drained root never
+    reaching the eventual successor). The re-buffer collects what the
+    activation CONSUMED — its argument and the drained buffer — so
+    the family's remaining losses are TWO: the PROCESS-crash window
+    recorded above, and a mid-activate-arrival SLIVER (no crash
+    required): a warm notice arriving AFTER the successor registered
+    and BEFORE its `activate()` failed routes through the
+    existing-server arm straight into the doomed server's feed — in
+    neither re-buffer collection. Recovery caveat, stated: re-buffered
+    notices activate nothing by themselves — they recover on the next
+    QUALIFYING trigger (a session open, an event, or another warm
+    request), which in the strict no-backstop shape may be indefinite;
+    the diagnostic read is §7's `warmRequests` against the target
+    space's subsequent serving activity (requests issued with no
+    derived commits following). Review observation, recorded: a
+    tenure's warm-demand key set grows monotonically until park —
+    bounded by the provisioning volume aimed at the space per tenure,
+    and worth a stats eye (`warmRequests` — a loop-global counter; no
+    per-space breakdown exists today) if a provisioning-heavy space
+    ever holds a very long tenure.
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
     (optimize-on-main client-durability pass; report:

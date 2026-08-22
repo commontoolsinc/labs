@@ -235,37 +235,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "step greens ON; the flip PR needs this list EMPTY.",
     },
     {
-      file: "integration/home-profile-reload-durability.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under ON the created profile piece's " +
-        "PROGRAM (code + CFC labelMap + schema docs) is only ever written " +
-        "by the client's own post-arrival commit; the reload kills the " +
-        "trailing create's program commit, and the server's fallback — " +
-        "`compile-cache/writeback` into the profile space — is REFUSED as " +
-        "a foreign-space write with no §2b delegated carriage " +
-        "(seal-space-commit-failed, 17 refusals per space observed), so " +
-        "the space's serving loop parks the structure load forever, " +
-        "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
-        "hole — the identical demand derived the name wherever the " +
-        "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
-        "OW31's build — the replicate trigger's writebacks now ride the " +
-        "instantiating run's §2b carriage; the client barriers and " +
-        "heal-on-read are " +
-        "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
-        "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
-        "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
-        "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
-        "(2026-08-21), OW45's client half too (S-B merged; S-C SKIPPED " +
-        "by owner ruling 2026-08-21 — off the lift critical path, the " +
-        "test's own idle-barrier contract covers every create before " +
-        "any reload); lifts when OW31's cf:module cross-space run " +
-        "residual closes and the file greens ON (the optimize pass's " +
-        "joint run had step 1 green in ~10 s and step 2 red ONLY on " +
-        "that residual); the flip PR needs this list EMPTY.",
-    },
-    {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +

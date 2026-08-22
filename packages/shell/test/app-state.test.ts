@@ -1,7 +1,8 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
-import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
+import { Identity } from "@commonfabric/identity";
 import {
   AppState,
   assertIdentityChangeAllowed,
@@ -77,14 +78,23 @@ describe("AppState", () => {
     assertEquals(clone(original).view, { builtin: "home" });
   });
 
-  it("resolves an identity from either an Identity or a raw key pair", async () => {
+  it("resolves an identity from either an Identity or an encoded key pair", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const raw = serializeKeyPairRaw(identity.serialize());
-    assert(raw, "Insecure keys are serializable.");
+    const encoded = jsonFromFabricValue(identity.keyPair);
 
     assertEquals(await resolveIdentity(undefined), undefined);
     assert(await resolveIdentity(identity) === identity);
-    assertEquals((await resolveIdentity(raw))?.did(), identity.did());
+    assertEquals((await resolveIdentity(encoded))?.did(), identity.did());
+  });
+
+  it("refuses an encoding that is not a key pair", async () => {
+    // Well-formed in the format and wrong as a payload, which is the case a
+    // string arriving over the page boundary can actually be in.
+    await assertRejects(
+      () => resolveIdentity(jsonFromFabricValue("not a key pair")),
+      Error,
+      "not a key pair",
+    );
   });
 
   it("serialize", async () => {

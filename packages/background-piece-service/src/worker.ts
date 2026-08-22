@@ -2,6 +2,7 @@ import {
   createSession,
   type DID,
   Identity,
+  keyPairFromRealmValue,
   Session,
 } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -153,8 +154,13 @@ export async function initialize(
     return;
   }
 
-  const { did, toolshedUrl, rawIdentity, experimental } = data;
-  const identity = await Identity.deserialize(rawIdentity);
+  const { did, toolshedUrl, experimental } = data;
+  const identity = await Identity.fromKeyPair(
+    keyPairFromRealmValue(
+      data.encodedIdentity,
+      "Initialization `encodedIdentity`",
+    ),
+  );
   const apiUrl = new URL(toolshedUrl);
 
   // Initialize session
@@ -367,7 +373,7 @@ export function safeFormat(value: unknown): unknown {
       // we properly handle sensitive logging.
       return JSON.stringify(
         value,
-        (key, value) => key === "rawIdentity" ? "<REDACTED>" : value,
+        (key, value) => key === "encodedIdentity" ? "<REDACTED>" : value,
       );
     } catch (_e) {
       // satisfy typescript's empty block
