@@ -197,33 +197,39 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // single-shot read kept racing (that race was the load-sensitive
       // flake population: 1/10 quiet, 5/10 under load on main). On the
       // FIXED step the residue is not a test artifact: at the true ON
-      // topology the value-wait itself starves — the client's readCell of
-      // the notebook argument's notes (a redirect-linked doc) stays
-      // `undefined` for the full 5-minute net at a 500ms re-read cadence
-      // (run h01, ambient load), or the whole piece never rehydrates
-      // after reload (run h04, load ~20; the rf2 shape) — while the
-      // server-side store holds every one of the 7 note appends and the
-      // page's own reactive render path serves the same notes. Zero data
-      // loss, sticky client-side unresolved reads: the
-      // verification-coverage.md OW45 row's arm-B starvation, now
-      // isolated and store-verified. Lifts when that client
-      // rehydration/readCell starvation closes and the FIXED step greens
-      // ON 10/10 quiet-and-loaded; the flip PR needs this list EMPTY.
+      // topology the value-wait itself starves on FIRST-HYDRATION reads
+      // of freshly created served state — no reload sits between the
+      // creates and the reads (the step's only navigation precedes the
+      // notebook's existence) — the client's readCell of the notebook
+      // argument's notes (a redirect-linked doc) stays `undefined` for
+      // the full 5-minute net at a 500ms re-read cadence (run h01,
+      // ambient load), or every client read of the piece returns nothing
+      // mid-session while the view id still points at it (run h04, load
+      // ~20; the rf2 shape) — while the server-side store holds every
+      // one of the 7 note appends and the page's own reactive render
+      // path serves the same notes. Zero data loss, sticky client-side
+      // unresolved reads: the verification-coverage.md OW45 row's arm-B
+      // starvation, now isolated and store-verified (repro is
+      // create-then-read under serving, NOT reload-then-read). Lifts
+      // when that client first-hydration/readCell starvation closes and
+      // the FIXED step greens ON 10/10 quiet-and-loaded; the flip PR
+      // needs this list EMPTY.
       file: "integration/default-app.test.ts",
       step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
       reason: "Real ON-regime client defect, isolated by the 2026-08-22 " +
         "test-side fix (assertions bind to the wait's approved summary; " +
-        "the old single-shot interim race is closed). Post-reload the " +
-        "client's readCell of the notebook argument's notes stays " +
-        "undefined for the full stuck-condition net at 500ms re-read " +
-        "cadence — or the piece never rehydrates at all — while the store " +
-        "holds all 7 appends and the reactive render path serves the same " +
-        "notes. Sticky unresolved client reads, no data loss " +
-        "(verification-coverage.md OW45, arm B). Lifts when the " +
-        "starvation closes and the fixed step greens ON 10/10.",
+        "the old single-shot interim race is closed). On first hydration " +
+        "of freshly created served state — no reload between the creates " +
+        "and the reads — the client's readCell of the notebook argument's " +
+        "notes stays undefined for the full stuck-condition net at 500ms " +
+        "re-read cadence, or every client read of the piece returns " +
+        "nothing mid-session, while the store holds all 7 appends and " +
+        "the reactive render path serves the same notes. Sticky " +
+        "unresolved client reads, no data loss (verification-coverage.md " +
+        "OW45, arm B; repro: create-then-read under serving). Lifts when " +
+        "the starvation closes and the fixed step greens ON 10/10.",
     },
-    //
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

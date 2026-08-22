@@ -49,14 +49,18 @@ after the sync barrier), closing the OW51-interim race half
 regimes; mutation-checked that a missing note reds the wait's net;
 OFF control 2/2). On the FIXED step the residue proved REAL and is
 now store-verified in the OW45 row: sticky client-side unresolved
-reads after reload — `readCell` of the argument's redirect-linked
-`notes` undefined across the full 5-minute net at 500 ms cadence, or
-the whole piece never rehydrating (rf2's shape) — while the store
+reads on FIRST HYDRATION of freshly created served state (no reload
+sits between the creates and the reads) — `readCell` of the
+argument's redirect-linked `notes` undefined across the full
+5-minute net at 500 ms cadence, or every client read of the piece
+returning nothing mid-session (rf2's shape) — while the store
 holds all 7 appends and the reactive render path serves the same
 notes; 3/5 at ambient-to-spike loads on a churning shared box, zero
-data loss. The patterns ON-skip list therefore still holds exactly
-ONE entry (the reload step, now naming the starvation, with its
-in-file guard restored and the pin test pinning the single entry);
+data loss; repro is create-then-read under serving. The patterns
+ON-skip list therefore still holds exactly ONE entry (the reload
+step, now naming the starvation; its in-file guard is unchanged
+from main except the comment, and the pin test pins the single
+entry);
 the runner and runtime-client lists are as the OW33 triage left
 them. Full evidence chain: verification-coverage.md OW45.
 

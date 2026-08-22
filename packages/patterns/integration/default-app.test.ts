@@ -39,7 +39,9 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
 // arm and an unlisted step always run. The "persist and reload" step stays
 // guarded under OW45: with the step's own interim-race trap fixed (its
 // assertions bind to the wait's approved summary), the remaining ON red is
-// a real client-side rehydration/readCell starvation after reload — sticky
+// a real client-side readCell starvation on FIRST HYDRATION of freshly
+// created served state (no reload sits between the creates and the reads —
+// the step's only navigation precedes the notebook's existence) — sticky
 // undefined at the readCell surface while the store holds every append and
 // the reactive render path serves the same notes — measured 2026-08-22 at
 // the true ON topology on the FIXED step. The skip guards CI against that

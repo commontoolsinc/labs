@@ -5360,9 +5360,21 @@ supply; OW29/OW32/OW34 closed):
     while `noteCount` (internal manifest) resolved 7 and the page's
     reactive render path held ALL SEVEN notes (chips one short at
     6/7 — the starved doc is the missing chip's own dependency); h04
-    (load spike ~20) the rf2 whole-piece shape — `isNotebook` false,
-    the piece never rehydrating post-reload, PERSISTING after load
-    fell back to 6. Store-verified in every red: all 7 `/value/notes`
+    (load spike ~20) the rf2 whole-piece shape — `isNotebook` false
+    with the view id still pointing at the piece: every client read
+    of it (argument, internal manifest, the render's own) returning
+    nothing MID-SESSION, persisting after load fell back to 6.
+    PRECISION (independent review P2, confirmed in code and
+    artifacts): these are FIRST-HYDRATION reads of freshly created
+    served state — the step's only navigation (dispose +
+    `shell.goto` into the fresh space) precedes the notebook's
+    existence, and NO reload sits between the creates and the reads
+    (h01's single post-goto "Await runtime idle" marker precedes
+    every create, nothing between the creates and the red) — so the
+    arm-B repro is CREATE-THEN-READ under serving, not
+    reload-then-read (the true reload surface is the reload shard's,
+    `integration/reload/default-app-notebook.test.ts`).
+    Store-verified in every red: all 7 `/value/notes`
     appends present, event pipeline healthy (each `event-view-lag`
     deferral drained in seconds during the create phase, none in the
     wait window) — ZERO data loss, sticky client-side unresolved
@@ -5380,9 +5392,10 @@ supply; OW29/OW32/OW34 closed):
     greens before h-phase red 3/5 at the same nominal loadavg — the
     starvation is environment-coupled beyond what loadavg captures.
     The step's ON skip therefore STAYS, reworded to the isolated
-    charge (the in-file guard restored; the skips pin test pins the
-    single entry; h06-h10 of the gate incidentally proved the
-    restored guard skips loudly). OFF control on a default-built
+    charge (the in-file guard KEPT — unchanged from main except its
+    comment, which now names the product charge; the skips pin test
+    pins the single entry; h06-h10 of the gate incidentally proved
+    the guard skips loudly). OFF control on a default-built
     binary at the same head, guard in place: 2/2 green (6 s steps).
     Lift bar: the starvation closes and the FIXED step greens ON
     10/10 quiet-and-loaded. Measurement-integrity note, recorded
@@ -5392,8 +5405,8 @@ supply; OW29/OW32/OW34 closed):
     full` wave-commit rejections — an environment fault, discarded);
     attempt 2 re-ran uniformly on a rebuilt binary from a purge-safe
     workdir, and its h06-h10 burner phase self-invalidated (the step
-    skipped) when the guard restoration landed in the worktree
-    mid-gate — the 3/5 rate is the five valid runs h01-h05.
+    skipped) when the skip ENTRY's restoration landed in the working
+    tree mid-gate — the 3/5 rate is the five valid runs h01-h05.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
