@@ -400,7 +400,7 @@ export interface CloneForMutationOptions {
    * false` or when the final path step already exists. Default: `""` (selects a
    * plain object).
    *
-   * Same shape-selection rule as for intermediate steps: array-index- shaped
+   * Same shape-selection rule as for intermediate steps: array-index-shaped
    * values (per `isArrayIndexPropertyName`) and the JSON-Pointer append marker
    * `"-"` select an array; everything else selects a plain object.
    *
