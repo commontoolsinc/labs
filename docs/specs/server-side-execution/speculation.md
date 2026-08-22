@@ -378,7 +378,14 @@ reference, the covering SERVED commit already persisted the same
 documents server-side, and the client's own durable copy can lag —
 serving the verifier "durably absent" there turned the fill into CFC
 prepare's silent stored-schemaHash-missing abort, the same loss one
-layer deeper.
+layer deeper. Resolution is location-indifferent one step further:
+stored `/cfc` metadata can reference a schema document NO replica
+view holds (a frame delivers metadata without its schemaHash refs),
+so `loadSchemaDocument` falls back to the realm schema registry —
+which holds only content verified against its hash, and which the
+metadata-stamping site itself populates (`ensureSchemaDocument`
+registers what it writes: whoever stamped the reference held the
+content, the standing echo's own derivation included).
 
 Both exclusions are about the NAMED BASIS of one commit, never a
 withdrawal: the echo itself stands until its ordinary retirement

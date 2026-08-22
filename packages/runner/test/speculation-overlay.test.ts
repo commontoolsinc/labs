@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -1192,6 +1193,153 @@ describe("Phase 2 speculation overlay", () => {
       const readerDraft = readerRuntime.getCell<{ name: string }>(
         space,
         "cid-staged-draft",
+        DRAFT_SCHEMA,
+      );
+      await readerDraft.sync();
+      await waitUntil(
+        () => readerDraft.key("name").get() === "typed-name",
+        "the typed value to be durable",
+      );
+    } finally {
+      await readerRuntime.dispose();
+      await readerManager.close();
+    }
+  });
+
+  it("a blind write whose DURABLE stored schemaHash resolves in NO replica view still EXPORTS via the realm schema registry — whoever stamped the metadata held the content (the profile-embed run-2 live signature)", async () => {
+    // The second resolution gap the live gate surfaced: a frame
+    // delivers a doc's `/cfc` metadata WITHOUT its schemaHash refs, so
+    // the client's durable view can reference a schema document no
+    // replica view holds — durable OR overlay (store-proven: the
+    // server held `cid:<hash>` as a head while the client's prepare
+    // died on it). Content addressing makes resolution
+    // location-indifferent: the realm registry holds only content
+    // verified against its hash, and `ensureSchemaDocument` registers
+    // at the STAMPING site (production's echo stamps the same hash it
+    // references, in this same session), so `loadSchemaDocument` falls
+    // back to the registry instead of killing the user's fill on a
+    // resolution gap — the triage's flagged "missing or unreadable"
+    // silent-worker class. This pin registers directly, standing in
+    // for the stamper's session.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "registry-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+
+    // The stored metadata references a schema document held by NO view:
+    // registered in the realm registry only (the stamper's session).
+    const registryOnlySchema = {
+      type: "object",
+      properties: { name: { type: "string" }, registryPin: { type: "number" } },
+    } as const;
+    const registryOnlyHash = internSchemaAsTaggedHashString(
+      registryOnlySchema,
+    );
+    registerSchemaDocument(registryOnlyHash, registryOnlySchema);
+    {
+      const seedTx = clientRuntime.edit();
+      const docAddress = {
+        space,
+        id: draftLink.id,
+        scope: draftLink.scope,
+        type: "application/json" as const,
+        path: [],
+      };
+      const current = seedTx.readOrThrow(docAddress);
+      const base = current && typeof current === "object" ? current : {};
+      seedTx.writeOrThrow(docAddress, {
+        ...base,
+        cfc: {
+          version: 1,
+          labelMap: {
+            entries: [{ path: [], label: {}, origin: "declared" }],
+          },
+          schemaHash: registryOnlyHash,
+        },
+      });
+      expect((await seedTx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+
+    // The standing echo: value-only, exactly the traced seed shape.
+    const replica = clientManager.open(space).replica;
+    const durableDoc = replica.getDocument(draftLink.id, draftLink.scope);
+    expect(durableDoc).toBeDefined();
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: draftLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { name: "seed-echo" },
+          },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(draft.key("name").get()).toBe("seed-echo");
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    const nameCell = draft.key("name");
+    const blindTx = clientRuntime.edit();
+    markUiInputBlindWriteTx(blindTx);
+    const link = nameCell.withTx(blindTx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    setBlindStructuralTarget(blindTx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    nameCell.withTx(blindTx).set("typed-name");
+    unmarkUiInputBlindWriteTx(blindTx);
+    expect(blindTx.getCfcState().relevant).toBe(true);
+    clientRuntime.prepareTxForCommit(blindTx);
+    const outcome = await blindTx.commit();
+
+    // The fill survives: the registry supplied the verified content, no
+    // silent abort, no §6 refusal — one exported commit, durable value.
+    expect(outcome.error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+    const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
+    expect(after.length).toBe(commitsBefore + 1);
+
+    const readerManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerManager,
+    });
+    try {
+      const readerDraft = readerRuntime.getCell<{ name: string }>(
+        space,
+        "registry-draft",
         DRAFT_SCHEMA,
       );
       await readerDraft.sync();

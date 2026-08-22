@@ -35,6 +35,10 @@ import {
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
@@ -4452,6 +4456,13 @@ const ensureSchemaDocument = (
       `cid schema document hash mismatch: claimed ${schemaHash}, actual ${actualHash}`,
     );
   }
+  // Whoever STAMPS metadata referencing this hash held the content — index
+  // it in the realm registry so a later resolver in this session can load
+  // it even where no replica holds the cid: document (a frame delivers
+  // `/cfc` metadata without its schemaHash refs, and a speculative run's
+  // staged copy retires with its layer). `loadSchemaDocument` falls back
+  // to exactly this registration.
+  registerSchemaDocument(schemaHash, schema);
   const id = `cid:${schemaHash}`;
   // Do not pre-read the content-addressed schema document here. A read-before-
   // write can make otherwise idempotent schema persistence fail with stale-read
@@ -4484,6 +4495,20 @@ export const loadSchemaDocument = (
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isObjectOrArray(existing) || existing.value === undefined) {
+    // The replica does not hold the document — but content addressing
+    // makes resolution location-indifferent: the realm's schema-document
+    // registry holds only content VERIFIED against its hash at
+    // registration (delivery, link/traverse resolution, local staging),
+    // so a registered copy IS the stored document. Stored metadata can
+    // legitimately reference a document this client never fetched as a
+    // doc — a frame delivers `/cfc` metadata without carrying its
+    // schemaHash refs — and refusing there killed the commit on a
+    // resolution gap, not a policy (silently, in the worker: the
+    // name-draft triage's flagged "missing or unreadable" class).
+    const registered = lookupSchemaDocument(schemaHash);
+    if (registered !== undefined) {
+      return registered;
+    }
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
   const schema = existing.value as JSONSchema;
