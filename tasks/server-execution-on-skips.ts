@@ -277,37 +277,22 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "the draft-write loss closes and the file greens ON; the flip " +
         "PR needs this list EMPTY.",
     },
-    {
-      file: "integration/home-profile-reload-durability.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): under ON the created profile piece's " +
-        "PROGRAM (code + CFC labelMap + schema docs) is only ever written " +
-        "by the client's own post-arrival commit; the reload kills the " +
-        "trailing create's program commit, and the server's fallback — " +
-        "`compile-cache/writeback` into the profile space — is REFUSED as " +
-        "a foreign-space write with no §2b delegated carriage " +
-        "(seal-space-commit-failed, 17 refusals per space observed), so " +
-        "the space's serving loop parks the structure load forever, " +
-        "SILENTLY, and the name renders the #id placeholder. NOT a demand " +
-        "hole — the identical demand derived the name wherever the " +
-        "program write survived (72 basis rows on Grace's space; 0 on the " +
-        "broken two). The carriage half (S-A) LANDED 2026-08-21 with " +
-        "OW31's build — the replicate trigger's writebacks now ride the " +
-        "instantiating run's §2b carriage; the client barriers and " +
-        "heal-on-read are " +
-        "verification-coverage.md OW45 (S-B/S-C); the silent forever-park " +
-        "is OW46 (S-D). Mechanism + store/log evidence: docs/history/" +
-        "plans/server-execution-v2/stage-c/on-render-stall-rootcause.md " +
-        "§1 (and first-on-ci-gate.md). OW31's build is DONE " +
-        "(2026-08-21), OW45's client half too (S-B merged; S-C SKIPPED " +
-        "by owner ruling 2026-08-21 — off the lift critical path, the " +
-        "test's own idle-barrier contract covers every create before " +
-        "any reload); lifts when OW31's cf:module cross-space run " +
-        "residual closes and the file greens ON (the optimize pass's " +
-        "joint run had step 1 green in ~10 s and step 2 red ONLY on " +
-        "that residual); the flip PR needs this list EMPTY.",
-    },
+    // home-profile-reload-durability LIFTED (2026-08-21, the explicit
+    // warm request — serving-loop.md §1's third activation trigger,
+    // RULED 2026-08-21): the §2b derivation-carriage report's §4 had
+    // decomposed the residual to a setup-after-park ORDERING RACE —
+    // authored setup landing in a parked, sessionless space activates
+    // nothing (T11.Q7's designed parking) and nothing ever re-demands
+    // it. The serving-side provisioning path now issues a warm request
+    // when its wave stages setup into another space; the target
+    // activates and derives it (plus the sink localSeq collision fix
+    // the warm activation exposed — executor-warm-request.test.ts pins
+    // both). Lift evidence: 6/6 fresh-store ON gate runs at the fix
+    // head, both steps green in 12–24 s (the prior red: step 2's
+    // "Alan Turing" wait timing out at 5m+), posture verified and
+    // loads recorded per run; warmRequests 4–6 per run in the live
+    // stats. The entry's full history: git log on this file and
+    // verification-coverage.md's OW45 row.
     {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",
       phase: "phase-7",

@@ -116,6 +116,34 @@ per-space check: stream head past `eventWatermark` means undelivered
 events, so activate. A park racing an incoming commit self-heals: the
 hook re-fires on the next admission.
 
+The EXPLICIT WARM REQUEST *(RULED 2026-08-21 — the owner adopted the
+recommendation set for the home-profile setup-after-park residual;
+implemented the same day)*: the SERVING-SIDE PROVISIONING PATH issues
+it — the wave commit step reports every durably committed foreign
+provisioning batch (§2b's sanctioned authored crossing: a served
+`.inSpace()` create's scaffolding, the delegated program-
+materialization writeback) to the co-hosted memory server as a
+warm-marked admission notice carrying the staged doc instances. The
+host activates a parked target on it even with NO live session and NO
+events (the carries-events arm's sibling), and the target's tenure
+takes the staged instances as identity-less WARM DEMAND — the
+anonymous-session shape, a demand key with no demanding pair, unioned
+into the demand pass for that tenure — so the staged piece
+structure-loads and derives. This is the one deliberate extension of
+the demand union beyond client sessions: the issuer is the
+provisioning run that KNOWS it staged setup needing derivation — a
+scoped signal, never a blanket write-trigger — so T11.Q7 stays as
+designed (the admission hook alone still notifies without activating;
+a provisioning write ALONE still parks). Lifecycle: idempotent
+against an active target (the union is a no-op under standing client
+demand); a request racing a park re-carries itself into the successor
+activation; the captured warm demand is TENURE-scoped (it dies with
+the tenure — recompute-on-demand, §6 step 2, is the recovery posture
+for anything a dying tenure drops), and the request itself is a
+one-shot in-process signal, not a durable row — loss across a process
+crash in the staged-but-underived window is the OW46 silent-park
+observability family.
+
 Wiring, by plane. Every byte between these components travels on
 exactly ONE of two planes; the split is what keeps bookkeeping off
 the commit stream (README §3.3):
@@ -1225,6 +1253,7 @@ structureLoadFailures, structureLoadDeferred, structureLoadStuck,
 structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
+warmRequests,
 watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
 demand: {demandedRows, demandedInstances, demandedInstancesMax,
 demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
@@ -1272,7 +1301,11 @@ accept-gate refusals — carriage-less AND ungranted foreign writes,
 both action-scoped; `foreignEngineFailures` counts commit-step
 foreign-engine resolutions that failed and were isolated per space —
 a growing count names a foreign store that persistently cannot open,
-never a home-space outage) (`effectAcks` counts
+never a home-space outage; `warmRequests` counts explicit warm
+requests issued — one per foreign provisioning batch a wave durably
+committed (§1's third activation trigger, RULED 2026-08-21) — so a
+provisioning flow whose target never derives its staged setup is
+diagnosable from the issue count against the target's activity) (`effectAcks` counts
 effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone —
 `settleAdvances` counts S1's drain-settle quiescence advances (RULED

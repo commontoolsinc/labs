@@ -94,7 +94,7 @@ describe("executor-warm-request", () => {
     new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
-      createRuntime: async (space) => {
+      createRuntime: (space) => {
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
           servingHomeSpace: space,
@@ -106,13 +106,13 @@ describe("executor-warm-request", () => {
           experimental: { serverExecution: true },
         });
         servingRuntime ??= runtime;
-        return {
+        return Promise.resolve({
           runtime,
           dispose: async () => {
             await runtime.dispose();
             await manager.close();
           },
-        };
+        });
       },
       policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
     });

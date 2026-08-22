@@ -2854,8 +2854,9 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the
-  `home-profile-reload-durability` ON skip stays listed (it lifts
-  jointly with OW45), and the `cfc-group-chat-demo` skip was LIFTED
+  `home-profile-reload-durability` ON skip was LIFTED 2026-08-21 (the
+  explicit warm request — OW45's row carries the ruling and the 6/6
+  gate), and the `cfc-group-chat-demo` skip was LIFTED the same day
   by OW59 (the OW34-family train closed the CFC-attribution residual
   above and removed the entry on its green ON gate + store audit).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
@@ -5155,10 +5156,11 @@ supply; OW29/OW32/OW34 closed):
   + TWO step-level entries; the skip-list test pins the CURRENT set —
   both step entries were lifted the same day, cellset-lww with OW47's
   close and convergence-storm with OW52's, the group-chat file entry
-  was lifted with OW59's close, and default-app's file entry converted
-  to its OW45 reload-step entry with OW51's close, leaving four file
-  entries beside default-app's step entry);
-  they gate the
+  was lifted with OW59's close, default-app's file entry converted
+  to its OW45 reload-step entry with OW51's close, and
+  home-profile-reload-durability's file entry lifted the same day too
+  with the explicit warm request (OW45's row), leaving THREE file
+  entries beside default-app's step entry); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
@@ -5220,14 +5222,42 @@ supply; OW29/OW32/OW34 closed):
     shelf-ready start (client-side heal riding `replicateClosures`
     under the client's own identity, green red-first runner pins,
     serving posture pinned fail-closed; marked do-not-merge).
-    Trigger: lifts the
-    `integration/home-profile-reload-durability.test.ts` ON skip
-    JOINTLY with OW31's cf:module cross-space run residual — S-A and
-    S-B are both MERGED (9d989c0c1, b27a2fb43), and the optimize
-    pass's joint preview run had step 1 green in ~10 s with step 2
-    red ONLY on that residual. Also now gates
+    Trigger DISCHARGED for the home-profile half — the
+    `integration/home-profile-reload-durability.test.ts` ON skip is
+    LIFTED (2026-08-21). The last blocker was not a carriage residual:
+    the §2b derivation-carriage scoping pass
+    (`optimize/2b-derivation-carriage-scope.md` §4) decomposed step
+    2's red to a SETUP-AFTER-PARK ORDERING RACE — authored setup
+    landing in a parked, sessionless space activates nothing (T11.Q7's
+    designed parking) and nothing ever re-demands it (the post-reload
+    summary reads the missing computed through the HOME space's free
+    cross-space read, which registers no target-side demand) — and
+    flagged three candidate mechanisms for the owner. **RULED
+    2026-08-21 (owner: "three decisions: i agree with all
+    recommendations")**: implement serving-loop.md §1's third,
+    then-unimplemented activation trigger — the EXPLICIT WARM REQUEST,
+    issued by the SERVING-SIDE PROVISIONING PATH when it stages setup
+    into a parked space (not a synthetic client session, and not
+    S-C-shape healing). BUILT the same day: the wave commit step
+    reports every durably committed foreign provisioning batch as a
+    warm-marked notice; the host activates a sessionless target on it
+    (the carries-events arm's sibling; T11.Q7's write-alone parking
+    untouched); the target tenure takes the staged instances as
+    identity-less warm demand, so the setup derives. The build also
+    closed the latent sink localSeq collision the warm activation
+    exposed (per-space counters under the process-stable holder
+    session — a home sink's foreign batches consumed pairs the
+    target's own sink later re-minted, killing its waves as replay
+    mismatches; now one process-global counter). Red-first:
+    `executor-warm-request.test.ts` (watched failing at the
+    activation wait, then at the derivation on the collision, then
+    green end to end). Lift evidence: 6/6 fresh-store ON gate runs at
+    the fix head, BOTH steps green in 12–24 s (the prior shape: step 1
+    ~10 s green, step 2 red at 5m+ on "Alan Turing"), posture verified
+    and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
+    in the live stats. The row's REMAINING charge: it gates
     `integration/default-app.test.ts`'s "persist and reload every
-    rapidly created notebook note" STEP: the OW51 fix (2026-08-21)
+    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
     `noteCount` reads `undefined` past the step's wait (1/10 local ON);
@@ -5257,9 +5287,14 @@ supply; OW29/OW32/OW34 closed):
     `executor-space-server.test.ts` (a pattern-unloadable root
     deferring per cycle: stuck stays 0 below the threshold, crosses
     to exactly 1, never re-counts while the streak grows; the OW19
-    terminal/re-arm pins unchanged). Residual (the original
-    trigger): the home-profile lift run should show the park
-    counted/logged — that run belongs to OW45/OW31's joint lift.
+    terminal/re-arm pins unchanged). Residual DISCHARGED with the
+    lift (2026-08-21): the home-profile lift landed via the explicit
+    warm request (OW45's row), which PREVENTS the parked state in
+    that flow — the staged setup activates and derives, so the 6/6
+    gate runs had no stuck park to count and the counter correctly
+    stayed quiet. The counter's live purpose stands unchanged for
+    genuinely dead spaces (OW45's named die-before-flush residual;
+    its revisit trigger reads this counter in real ON usage).
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
     (optimize-on-main client-durability pass; report:
