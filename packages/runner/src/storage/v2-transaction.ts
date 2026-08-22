@@ -1561,7 +1561,13 @@ export class V2StorageTransaction implements IStorageTransaction {
           scope: address.scope,
           path: [],
         },
-        value: toTransactionDocumentValue(durable),
+        // Served DIRECTLY, never through the empty-collapse
+        // (`toTransactionDocumentValue` maps a PRESENT-but-empty
+        // document to `undefined`): the verifier must see the doc's
+        // durable state as it is — a present-empty envelope reads as
+        // `{}` at the root and as no-metadata under `["cfc"]`, not as
+        // a deleted document.
+        value: durable as unknown as FabricValue | undefined,
       };
       const result = readAttestation(durableRoot, memoryAddress);
       if (result.error) {

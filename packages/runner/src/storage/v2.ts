@@ -5141,7 +5141,19 @@ class SpaceReplica implements ISpaceReplica {
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id)
+        hasDataUriScheme(read.id) ||
+        // Content-addressed documents carry no commit-time concurrency
+        // precondition at all: their content can never change (the engine
+        // and every replica refuse content that does not hash to the id),
+        // so there is no staleness for a conflict check to find — while
+        // the client's confirmed basis for a cid: doc it resolved from
+        // its overlay or the realm registry is 0, and the doc's first
+        // INSTALL is a real revision row, so exporting that read killed
+        // the commit as `stale confirmed read: cid:… at seq 0` exactly
+        // in the delivery-gap window the resolution fallbacks serve
+        // (layer-indifference extended from layers to seqs; the
+        // server-side closure validation owns presence).
+        read.id.startsWith("cid:")
       ) {
         continue;
       }
@@ -5598,8 +5610,14 @@ class SpaceReplica implements ISpaceReplica {
    * `stored schemaHash … missing or unreadable`. Pull the referenced
    * document as the metadata arrives: deferred a microtask (never
    * re-entrant inside frame application), deduped per replica while a
-   * kick is in flight or has succeeded, retried on a later frame after a
-   * failed pull (the failure logs through the ordinary sync-load path). */
+   * kick is in flight or has DELIVERED. A pull that fails, or that
+   * completes WITHOUT the document (not yet installed server-side — a
+   * legal state while the stamper's own commit is in flight), re-arms
+   * the dedupe so the next frame carrying the reference kicks again —
+   * without the re-arm the delivery-gap window was permanent for the
+   * session. Failures log HERE: the replica-level pull never crosses
+   * the manager's sync-load logging wrappers, so this is the only
+   * client-side trace before the prepare abort. */
   private hydrateArrivedCfcSchemaRefs(sync: SessionSync): void {
     for (const upsert of sync.upserts) {
       if (upsert.deleted === true) continue;
@@ -5625,9 +5643,29 @@ class SpaceReplica implements ISpaceReplica {
         this.sync(`cid:${schemaHash}` as URI)
           .then((result) => {
             if (result.error !== undefined) {
+              logger.warn("cfc-schema-hydration-failed", () => [
+                "arrived-metadata schema pull failed; a later frame " +
+                "carrying the reference re-kicks",
+                { schemaHash, error: String(result.error) },
+              ]);
+              this.#kickedCfcSchemaPulls.delete(schemaHash);
+              return;
+            }
+            if (
+              lookupSchemaDocument(schemaHash) === undefined &&
+              this.getDocument(`cid:${schemaHash}` as URI) === undefined
+            ) {
+              // Completed empty: the document is not installed
+              // server-side yet. Re-arm, so the next reference-carrying
+              // frame retries instead of the window going permanent.
               this.#kickedCfcSchemaPulls.delete(schemaHash);
             }
-          }, () => {
+          }, (error) => {
+            logger.warn("cfc-schema-hydration-failed", () => [
+              "arrived-metadata schema pull threw; a later frame " +
+              "carrying the reference re-kicks",
+              { schemaHash, error: String(error) },
+            ]);
             this.#kickedCfcSchemaPulls.delete(schemaHash);
           });
       });

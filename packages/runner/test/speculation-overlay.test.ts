@@ -1376,6 +1376,447 @@ describe("Phase 2 speculation overlay", () => {
     }
   });
 
+  it("a blind fill resolving its stored schema from the registry while the ENGINE already holds the cid: doc still EXPORTS — content-addressed reads carry no confirmed-seq precondition (the review's probe-1)", async () => {
+    // The seq half of content-addressed layer-indifference: the
+    // registry- (or overlay-) resolved schema read left the replica's
+    // confirmed basis for the cid: doc at 0, and the commit exported
+    // `confirmed {seq: 0}` for it — while the doc's FIRST INSTALL is a
+    // real revision row, and the engine's staleness scan has no
+    // content-addressed carve-out. In the delivery-gap window with the
+    // doc already server-installed by ANOTHER session, the fill died
+    // `ConflictError: stale confirmed read: cid:… at seq 0 conflicted
+    // with seq N`, silently (the discarded commit promise). The
+    // resolution-gap pins never saw it because they left the engine
+    // EMPTY at the hash: a seq-0 confirmed read of an absent doc is
+    // satisfiable. The fix drops cid: reads from the commit conflict
+    // set entirely (`buildReads`): content under a content-addressed
+    // id can never change — the engine's own rule — so there is no
+    // staleness for the scan to find; server-side closure validation
+    // owns presence.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "engine-installed-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+
+    const installedSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, probeOne: { type: "number" } },
+    } as const;
+    const installedHash = internSchemaAsTaggedHashString(installedSchema);
+    registerSchemaDocument(installedHash, installedSchema);
+    {
+      const seedTx = clientRuntime.edit();
+      const docAddress = {
+        space,
+        id: draftLink.id,
+        scope: draftLink.scope,
+        type: "application/json" as const,
+        path: [],
+      };
+      const current = seedTx.readOrThrow(docAddress);
+      const base = current && typeof current === "object" ? current : {};
+      seedTx.writeOrThrow(docAddress, {
+        ...base,
+        cfc: {
+          version: 1,
+          labelMap: {
+            entries: [{ path: [], label: {}, origin: "declared" }],
+          },
+          schemaHash: installedHash,
+        },
+      });
+      expect((await seedTx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+
+    // A SECOND session installs the schema document in the ENGINE —
+    // the doc's first revision row. This replica never pulls it (no
+    // watch names it), so its confirmed basis for the cid: doc stays 0.
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const tx = writerRuntime.edit();
+        tx.writeOrThrow({
+          space,
+          id: `cid:${installedHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: installedSchema });
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
+    expect(
+      clientManager.open(space).replica.getDocument(
+        `cid:${installedHash}` as never,
+      ),
+    ).toBeUndefined();
+
+    // The standing echo, then the fill.
+    const replica = clientManager.open(space).replica;
+    const durableDoc = replica.getDocument(draftLink.id, draftLink.scope);
+    expect(durableDoc).toBeDefined();
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: draftLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { name: "seed-echo" },
+          },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(draft.key("name").get()).toBe("seed-echo");
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    const nameCell = draft.key("name");
+    const blindTx = clientRuntime.edit();
+    markUiInputBlindWriteTx(blindTx);
+    const link = nameCell.withTx(blindTx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    setBlindStructuralTarget(blindTx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    nameCell.withTx(blindTx).set("typed-name");
+    unmarkUiInputBlindWriteTx(blindTx);
+    expect(blindTx.getCfcState().relevant).toBe(true);
+    clientRuntime.prepareTxForCommit(blindTx);
+    const outcome = await blindTx.commit();
+
+    // No stale-confirmed-read conflict on the cid: doc: the write
+    // exports and lands.
+    expect(outcome.error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+    const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
+    expect(after.length).toBe(commitsBefore + 1);
+
+    const readerManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerManager,
+    });
+    try {
+      const readerDraft = readerRuntime.getCell<{ name: string }>(
+        space,
+        "engine-installed-draft",
+        DRAFT_SCHEMA,
+      );
+      await readerDraft.sync();
+      await waitUntil(
+        () => readerDraft.key("name").get() === "typed-name",
+        "the typed value to be durable",
+      );
+    } finally {
+      await readerRuntime.dispose();
+      await readerManager.close();
+    }
+  });
+
+  it("a hydration kick that completes EMPTY re-arms — the next frame carrying the reference re-kicks and heals (the review's kick-before-install ordering)", async () => {
+    // The dedupe's contract half: `#kickedCfcSchemaPulls` was cleared on
+    // a pull ERROR only, so a pull that SUCCEEDS without delivering — the
+    // document not yet installed server-side, a legal state — retained
+    // its entry forever, later frames skipped the re-kick, and the
+    // delivery-gap window became PERMANENT for the session. The re-arm
+    // makes the hook's "retried on a later frame" contract true: an
+    // empty completion clears the entry, and the next arriving frame
+    // whose metadata references the hash kicks again — by then the
+    // stamper's install has landed and the pull delivers.
+    //
+    // HONESTY NOTE on what this pin can discriminate: in the emulated
+    // loopback, a frame that arrives AFTER the install can carry the
+    // referenced document itself, so the heal below succeeds with or
+    // without the re-arm — this pin is an end-to-end NET over the
+    // reference-arrives → document-resolves flow (frames, hook,
+    // ordering barrier), not a dedupe discriminator. The dedupe's
+    // discriminating bench is the live ON gate's kick-before-install
+    // ordering (the #6192 review's probe), where watch frames do NOT
+    // attach the refs.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "rearm-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+    const cancelWatch = draft.sink(() => {});
+
+    const lateSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, rearm: { type: "boolean" } },
+    } as const;
+    const lateHash = internSchemaAsTaggedHashString(lateSchema);
+    const replica = clientManager.open(space).replica;
+
+    // FRAME 1 (a second session): /cfc references the hash while the
+    // engine holds NO cid: doc — the reader's integrate kicks a pull
+    // that completes EMPTY.
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const writerDraft = writerRuntime.getCell<{ name: string }>(
+          space,
+          "rearm-draft",
+          DRAFT_SCHEMA,
+        );
+        await writerDraft.sync();
+        const seedTx = writerRuntime.edit();
+        const docAddress = {
+          space,
+          id: draftLink.id,
+          scope: draftLink.scope,
+          type: "application/json" as const,
+          path: [],
+        };
+        const current = seedTx.readOrThrow(docAddress);
+        const base = current && typeof current === "object" ? current : {};
+        seedTx.writeOrThrow(docAddress, {
+          ...base,
+          cfc: {
+            version: 1,
+            labelMap: {
+              entries: [{ path: [], label: {}, origin: "declared" }],
+            },
+            schemaHash: lateHash,
+          },
+        });
+        expect((await seedTx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
+    // The metadata integrated over the watch; the kick's empty pull has
+    // settled (the pull joins the synced() barrier).
+    await waitUntil(
+      () =>
+        (replica.getDocument(draftLink.id, draftLink.scope) as {
+          cfc?: { schemaHash?: string };
+        } | undefined)?.cfc?.schemaHash === lateHash,
+      "frame 1's metadata to integrate",
+    );
+    // The kick's pull joins the replica's inbound settle: after this,
+    // frame 1's EMPTY pull has fully completed — the ordering is
+    // deterministic, never a race with frame 2's install.
+    await (replica as unknown as { inputSynced(): Promise<void> })
+      .inputSynced();
+    expect(replica.getDocument(`cid:${lateHash}` as never)).toBeUndefined();
+
+    // FRAME 2 (the stamper catches up): the cid: doc installs AND the
+    // draft doc updates again, so a fresh frame carries the same
+    // reference. The re-armed hook must re-kick and this time deliver.
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const writerDraft = writerRuntime.getCell<{ name: string }>(
+          space,
+          "rearm-draft",
+          DRAFT_SCHEMA,
+        );
+        await writerDraft.sync();
+        const tx = writerRuntime.edit();
+        tx.writeOrThrow({
+          space,
+          id: `cid:${lateHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: lateSchema });
+        const docAddress = {
+          space,
+          id: draftLink.id,
+          scope: draftLink.scope,
+          type: "application/json" as const,
+          path: [],
+        };
+        const current = tx.readOrThrow(docAddress);
+        const base = current && typeof current === "object" ? current : {};
+        tx.writeOrThrow(docAddress, {
+          ...base,
+          value: { name: "second-frame" },
+        });
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
+
+    // The heal: the reference resolves on this replica via the re-kick.
+    await waitUntil(
+      () => replica.getDocument(`cid:${lateHash}` as never) !== undefined,
+      "the re-armed kick to deliver the stored schema document",
+    );
+    cancelWatch();
+  });
+
+  it("a PRESENT-but-EMPTY durable document reads as present through the blind-tx verifier view — the root serves {} and /cfc serves no-metadata, never a deleted doc", async () => {
+    // The empty-collapse deviation: `toTransactionDocumentValue` maps a
+    // present-but-empty document to `undefined`, so the durable
+    // verifier view served an existing (empty-envelope) doc as DELETED
+    // — its root read `undefined` where the transaction's ordinary
+    // semantics give `{}`. The durable root now serves the replica
+    // state directly: root `{}`, `["cfc"]` descent a swallowed
+    // NotFound — "no metadata", the correct verdict for an envelope
+    // that exists and carries none.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const emptyId = "of:empty-envelope-doc" as never;
+    {
+      const tx = clientRuntime.edit();
+      tx.writeOrThrow({
+        space,
+        id: emptyId,
+        type: "application/json",
+        path: [],
+      }, { value: { seeded: true } });
+      expect((await tx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+    const replica = clientManager.open(space).replica;
+    // Present-but-empty is not constructible through the write path —
+    // the wire normalizes an empty document away — but the FOLD paths
+    // produce it: a durable in-flight PATCH removing the last key
+    // renders the non-speculative view as {}. Seal exactly that (a
+    // NON-speculative seal, verdict pending — a durable pending layer).
+    let resolveVerdict!: (
+      verdict: { withdrawn: { message: string } },
+    ) => void;
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "patch",
+          id: emptyId,
+          type: "application/json",
+          patches: [{ op: "remove", path: "/value" }] as never,
+          value: {},
+        }],
+      },
+      undefined,
+      new Promise((resolve) => {
+        resolveVerdict = resolve;
+      }),
+      {},
+    );
+    // Construction guard: the doc's view is PRESENT and EMPTY.
+    expect(replica.getDocument(emptyId)).toEqual({});
+
+    const verifierMeta = {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    };
+    try {
+      const blindTx = clientRuntime.edit();
+      markUiInputBlindWriteTx(blindTx);
+      setBlindStructuralTarget(blindTx, {
+        id: emptyId as unknown as string,
+        space,
+        scope: undefined,
+        path: [],
+      });
+      unmarkUiInputBlindWriteTx(blindTx);
+      expect(
+        blindTx.readOrThrow({
+          space,
+          id: emptyId,
+          type: "application/json",
+          path: [],
+        }, verifierMeta),
+      ).toEqual({});
+      expect(
+        blindTx.readOrThrow({
+          space,
+          id: emptyId,
+          type: "application/json",
+          path: ["cfc"],
+        }, verifierMeta),
+      ).toBeUndefined();
+      await blindTx.commit();
+    } finally {
+      // Withdraw the sealed layer so its settlement completes before
+      // teardown even when an assert throws (a pending durable seal
+      // strands the event loop).
+      resolveVerdict({ withdrawn: { message: "pin teardown" } });
+      await sealed.settled.catch(() => {});
+    }
+  });
+
   it("the SAME CFC-relevant write WITHOUT the blind mark is still refused over a standing echo — the verifier-read basis change is confined to the blind-write tx shape (speculation.md §6 stands)", async () => {
     // The scoping reverse pin: identical doc, identical relevance,
     // identical standing echo — only the blind UI-input marking

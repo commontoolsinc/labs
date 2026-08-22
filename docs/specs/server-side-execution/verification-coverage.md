@@ -5406,7 +5406,39 @@ supply; OW29/OW32/OW34 closed):
     self-referential API_URL/MEMORY_URL, loads 4.6–10.9 recorded —
     and the `integration/profile-embed.test.ts` skip entry is
     REMOVED (its two prior blockers fell to RULING 5/OW49 and the §2b
-    derivation-carriage close; this was the last).
+    derivation-carriage close; this was the last). **The #6192
+    adversarial review round (LANDABLE-WITH-FIXES) hardened four
+    edges:** (i) cid: reads are dropped from the commit CONFLICT SET
+    entirely (`buildReads`) — the resolution fallbacks leave the
+    replica's confirmed basis for a registry-/overlay-resolved schema
+    doc at 0 while the doc's first install is a real revision row, so
+    the exported `confirmed {seq: 0}` died server-side as
+    `stale confirmed read: cid:… at seq 0 conflicted with seq N` in
+    the delivery-gap window (the review's probe, now a permanent pin —
+    the gap pins had left the engine EMPTY at the hash, a satisfiable
+    read; layer-indifference extended from layers to seqs, presence
+    owned by server-side closure validation); (ii) the hydration
+    dedupe RE-ARMS on a pull that completes without delivering (doc
+    not yet installed — legal), so a later reference-carrying frame
+    re-kicks instead of the window going permanent (the emulated
+    loopback attaches installed refs to frames, so the pin for it is
+    an end-to-end net and the discriminating bench is the live
+    kick-before-install ordering); (iii) a PRESENT-but-empty durable
+    envelope serves `{}` at the root and no-metadata under ["cfc"],
+    never a deleted doc (the empty-collapse deviation, pinned); (iv)
+    hydration pull failures log at the REPLICA layer, the only layer
+    the path crosses. Recorded, not fixed: `setupResultSchemaFor`
+    (cfc/prepare.ts) still reads its SOURCE doc at path [] for
+    `.schema` alone — the surviving over-breadth instance, a named
+    follow-up under the same scoped-to-what-it-consumes rule; the
+    relevance-probe divergence now has a CONCRETE loss shape
+    (overlay-says-irrelevant + durable-says-relevant → the fill
+    exports UNPREPARED → silent server-side CFC refusal; confirming
+    step: seal an echo omitting /cfc over a durably-relevant doc,
+    blind-fill, watch the commit outcome) — still the separate ruling
+    flagged at the close; and the echo-CREATED-target sub-case (the
+    blind fill's leaf path missing at apply because only the echo
+    created the doc) is pre-existing and outside the ruled scope.
   - **OW48 — CLOSED 2026-08-21 (refuted premise; optimize-on-main
     served-wish seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
