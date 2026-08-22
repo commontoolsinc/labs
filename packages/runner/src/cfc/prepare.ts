@@ -804,18 +804,28 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["cfc"], never the whole document: this read is a commit-time
+  // concurrency precondition scoped to what the verifier CONSUMES. A
+  // path-[] recursive read made the whole document a value dependency, so
+  // a concurrent, metadata-irrelevant value write between the reader's
+  // confirmed basis and the server head conflicted the commit — for a
+  // blind UI-input fill during its own echo's arrival window (the
+  // client's confirmed basis lags exactly then), that killed the user's
+  // typed input as a stale-confirmed-read conflict the moment the §6
+  // layer-naming half was fixed (verification-coverage.md OW47's
+  // re-close; the name-draft triage's arm (c), the path half of the
+  // ruled arm (b)). A concurrent /cfc change still conflicts — the
+  // precondition the ruling kept.
+  const metadata = tx.readOrThrow({
     space,
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isObjectOrArray(document) && isObjectOrArray(document.cfc)
-    ? document.cfc as CfcMetadata
-    : undefined;
+  return isObjectOrArray(metadata) ? metadata as CfcMetadata : undefined;
 };
 
 /**

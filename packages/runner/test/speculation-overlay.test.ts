@@ -45,10 +45,13 @@ import {
 import {
   ignoreReadForScheduling,
   internalVerifierRead,
+  isInternalVerifierRead,
+  isReadIgnoredForCommit,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
+import { getDirectTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
@@ -1006,6 +1009,26 @@ describe("Phase 2 speculation overlay", () => {
     // actually runs on this tx.
     expect(blindTx.getCfcState().relevant).toBe(true);
     clientRuntime.prepareTxForCommit(blindTx);
+    // The verifier read's commit-time SHAPE (the triage's arm (c), the
+    // path half of the ruled arm (b)): the stored-metadata read of the
+    // write-target doc is scoped to the /cfc it consumes — a path-[]
+    // recursive read made the whole document a value dependency, so a
+    // concurrent value write between the reader's lagging confirmed
+    // basis and the server head (the echo's arrival window IS that lag)
+    // conflicted the fill server-side as a stale confirmed read. The
+    // commit-set verifier reads of the target doc must sit at ["cfc"],
+    // never at the doc root.
+    const verifierReads = [
+      ...(getDirectTransactionReadActivities(blindTx) ?? []),
+    ].filter((read) =>
+      read.id === link.id &&
+      isInternalVerifierRead(read.meta) &&
+      !isReadIgnoredForCommit(read.meta)
+    );
+    expect(verifierReads.length).toBeGreaterThanOrEqual(1);
+    for (const read of verifierReads) {
+      expect(read.path).toEqual(["cfc"]);
+    }
     const outcome = await blindTx.commit();
 
     // The write exports — no SpeculativeBasisError, no silent drop.

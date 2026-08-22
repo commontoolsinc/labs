@@ -62,7 +62,18 @@ const fakeTxOverDocuments = (
   documents: Record<string, unknown>,
 ): IExtendedStorageTransaction =>
   ({
-    readOrThrow: (target: { id: string }) => documents[target.id],
+    // Honors the read PATH like the real transaction (the stored-metadata
+    // read is scoped to ["cfc"] — a path-blind stub would hand a whole
+    // document to a subtree read and misreport "no metadata" as a
+    // malformed envelope).
+    readOrThrow: (target: { id: string; path?: readonly string[] }) => {
+      let value: unknown = documents[target.id];
+      for (const segment of target.path ?? []) {
+        if (value === null || typeof value !== "object") return undefined;
+        value = (value as Record<string, unknown>)[segment];
+      }
+      return value;
+    },
   }) as unknown as IExtendedStorageTransaction;
 
 const envelopeTarget = { space, id: "of:doc", scope: "space" } as const;

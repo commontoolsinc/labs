@@ -367,6 +367,17 @@ served round trip, and unbounded for a never-served instance):
   set, so verify-durable and name-durable always travel together
   (never verify-overlay + name-durable).
 
+The verifier read's commit-set entry is scoped to what it CONSUMES —
+the stored-metadata read sits AT `["cfc"]`, never at the document
+root. A root-recursive read made the whole document a value
+dependency at the reader's confirmed basis, and the blind fill's
+basis lags exactly while its own echo stands (the arrival window), so
+the covering served commit's value patch conflicted the fill
+server-side as a stale confirmed read — the same silent loss through
+the staleness pin instead of the layer-naming pin. A concurrent
+`/cfc` change still conflicts: that is the precondition the ruling
+kept when it chose basing over dropping the read class entirely.
+
 One read class inside the verifier set is exempt from the VALUE half:
 a CONTENT-ADDRESSED (`cid:`) document's content is identical on every
 layer — the replica refuses content that does not hash to its id — so
