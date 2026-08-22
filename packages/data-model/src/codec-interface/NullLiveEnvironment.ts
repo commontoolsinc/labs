@@ -41,10 +41,10 @@ export class NullLiveEnvironment extends BaseLiveEnvironment {
 }
 
 /**
- * Shared `NullLiveEnvironment` instance with `.shouldDeepFreeze ===
- * true` and whose `getCell()` always throws. Pass this when a codec wants a
- * live environment but isn't expected to need a cell; if a cell ref does turn
- * up, the throw makes the unexpected lookup obvious instead of silent.
+ * Shared `NullLiveEnvironment` instance with `.shouldDeepFreeze === true` and
+ * whose `getCell()` always throws. Pass this when a codec wants a live
+ * environment but isn't expected to need a cell; if a cell ref does turn up,
+ * the throw makes the unexpected lookup obvious instead of silent.
  */
 export const NULL_LIVE_ENVIRONMENT: LiveEnvironment = Object
   .freeze(new NullLiveEnvironment(true));

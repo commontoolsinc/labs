@@ -17,10 +17,10 @@ import { markerOf } from "./marker.ts";
  * One act of decoding for the realm boundary, and the marker read off the
  * envelope that arrived.
  *
- * The marker is the sender's, taken off the envelope by
- * {@link #encodedFromSerializedForm}, and what every tagged form beneath that
- * envelope is checked against: a form carrying anything else is data rather
- * than structure.
+ * The marker is the sender's, taken off the envelope by {@link
+ * #encodedFromSerializedForm}, and what every tagged form beneath that envelope
+ * is checked against: a form carrying anything else is data rather than
+ * structure.
  */
 export class RealmDecodeAct
   extends BaseDecodeAct<RealmCodecValue, RealmEncodedValue> {
@@ -218,25 +218,24 @@ export class RealmDecodeAct
    * Unwraps a tagged wire representation. Returns `{ tag, state }`, or `null`
    * if `data` is not one. The `state` is extracted directly from `data`.
    *
-   * Slot zero decides, and only by identity: an array of the right length
-   * whose first element is some *other* object -- or an equal-looking marker
-   * some payload built for itself -- is a payload's own array and is walked as
-   * one. Nothing about the shape is evidence, which is why the comparison is
-   * `===` and not a structural test.
+   * Slot zero decides, and only by identity: an array of the right length whose
+   * first element is some *other* object -- or an equal-looking marker some
+   * payload built for itself -- is a payload's own array and is walked as one.
+   * Nothing about the shape is evidence, which is why the comparison is `===`
+   * and not a structural test.
    *
-   * With no marker in hand there is nothing to compare against, so nothing is
-   * a tagged form. Stated rather than left to `===`: `undefined` is a value
-   * this format carries directly, so a payload can put one in slot zero for
-   * free, and identity against an absent marker would match it. The walk
-   * reaches here only from `decode()`, which always has one, and this is the
-   * counterpart to `wrapTag()` refusing to build a tagged form without one.
+   * With no marker in hand there is nothing to compare against, so nothing is a
+   * tagged form. Stated rather than left to `===`: `undefined` is a value this
+   * format carries directly, so a payload can put one in slot zero for free,
+   * and identity against an absent marker would match it. The walk reaches here
+   * only from `decode()`, which always has one, and this is the counterpart to
+   * `wrapTag()` refusing to build a tagged form without one.
    *
-   * The tag is handed over as it was found, of whatever type.
-   * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
-   * this format _emits_, and decoding is where data from somewhere else
-   * arrives. Whether what sits there is a tag belongs to `decodeTagged()`,
-   * which asks it the same way for every format and settles the answer against
-   * `lenient`.
+   * The tag is handed over as it was found, of whatever type. {@link
+   * RealmTaggedValue} says a tag is a `string`, but that describes what this
+   * format _emits_, and decoding is where data from somewhere else arrives.
+   * Whether what sits there is a tag belongs to `decodeTagged()`, which asks it
+   * the same way for every format and settles the answer against `lenient`.
    */
   #unwrapTag(
     data: RealmCodecValue,

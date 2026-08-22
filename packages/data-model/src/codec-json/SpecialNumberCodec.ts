@@ -21,16 +21,16 @@ type SpecialNumberState = keyof typeof SPECIAL_NUMBERS;
 
 /**
  * Codec for the four "special" numeric values that JSON cannot represent
- * faithfully: `-0`, `NaN`, `+Infinity`, and `-Infinity`. Wire format:
- * `{ "/SpecialNumber@1": "<literal>" }`, where `<literal>` is one of `-0`,
- * `NaN`, `+Infinity`, or `-Infinity`.
+ * faithfully: `-0`, `NaN`, `+Infinity`, and `-Infinity`. Wire format: `{
+ * "/SpecialNumber@1": "<literal>" }`, where `<literal>` is one of `-0`, `NaN`,
+ * `+Infinity`, or `-Infinity`.
  *
  * String state (rather than a JSON number) is used because `JSON.stringify`
  * emits `null` for `NaN`/`±Infinity` and drops the sign on `-0`, which would
  * make a numeric-state form lossy through the JSON layer.
  *
- * Any NaN bit pattern encodes as the literal `"NaN"` and round-trips
- * back to `Number.NaN`.
+ * Any NaN bit pattern encodes as the literal `"NaN"` and round-trips back to
+ * `Number.NaN`.
  */
 export class SpecialNumberCodec
   extends BaseTerminalCodec<JsonCodecValue, SpecialNumberState> {

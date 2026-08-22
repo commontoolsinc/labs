@@ -170,10 +170,10 @@ existence before the walk starts, and none of them can be the marker. **The
 confinement requirement is what makes the argument hold without resting on
 that.** An encoder is handed values by callers, not by the type system; a value
 carrying live code — an accessor that runs mid-walk, after the marker exists —
-is outside the model, and confinement means such a value still has
-nowhere to read the marker from. It is stated as a requirement rather than
-left to inertness because a rule that fails open on out-of-model input is not
-worth much.
+is outside the model, and confinement means such a value still has nowhere to
+read the marker from. It is stated as a requirement rather than left to
+inertness because a rule that fails open on out-of-model input is not worth
+much.
 
 A marker held across calls fails the first of these. A value may legitimately
 contain a subtree of some *earlier* encoding — the code that assembled it is
@@ -343,12 +343,11 @@ own. A decoder tells the two apart by the type in the key slots.
 That second state is the reason this format admits `CryptoKey` at all. A
 non-extractable key's material is reachable through no synchronous call and, by
 construction, through no call whatever, so a format that writes bytes down
-cannot represent one: the JSON encoding refuses a pair in that state
-(Section 3 of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`)
-and its hash is
-undefined (Section 4.17 of
-[2-hash-byte-format.md](./2-hash-byte-format.md)). Here the key crosses as
-itself, which is what the transport requirement in Section 1.1 asks for.
+cannot represent one: the JSON encoding refuses a pair in that state (Section 3
+of [3-json-encoding.md](./3-json-encoding.md), under `KeyPair@1`) and its hash
+is undefined (Section 4.17 of [2-hash-byte-format.md](./2-hash-byte-format.md)).
+Here the key crosses as itself, which is what the transport requirement in
+Section 1.1 asks for.
 
 Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
 `ProblematicValue`, and every `FabricInstance` — encode the same way under both
@@ -523,12 +522,13 @@ This is a requirement rather than an observation. An implementation that
 coerced instead would satisfy every other claim in this document while
 producing values a sender never sent.
 
-**Do not guard against shapes the transport cannot deliver.** `structuredClone()`
-normalizes what it carries: a plain object arrives with `Object.prototype`
-however its original was made, an `Array` subclass arrives as a plain `Array`,
-and an accessor arrives as a data property. A check for a null-prototype record, an
-exotic array, or a getter-backed index is therefore unreachable, and reads to a
-later maintainer as though the boundary defended against something it does not.
+**Do not guard against shapes the transport cannot deliver.**
+`structuredClone()` normalizes what it carries: a plain object arrives with
+`Object.prototype` however its original was made, an `Array` subclass arrives as
+a plain `Array`, and an accessor arrives as a data property. A check for a
+null-prototype record, an exotic array, or a getter-backed index is therefore
+unreachable, and reads to a later maintainer as though the boundary defended
+against something it does not.
 
 What the transport *does* carry faithfully is an array's extra own properties,
 which arrive intact. Nothing here emits one, which is what rules them out --

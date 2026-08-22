@@ -1,8 +1,8 @@
 /**
- * The `data:` URI codec, complete and self-contained: the media-type
- * facts, the mint half ({@link dataUriFromValue}), and the read half
- * ({@link valueFromDataUri}, {@link extractDataUriPayloadText},
- * {@link valueFromDataUriPayloadText}).
+ * The `data:` URI codec, complete and self-contained: the media-type facts, the
+ * mint half ({@link dataUriFromValue}), and the read half ({@link
+ * valueFromDataUri}, {@link extractDataUriPayloadText}, {@link
+ * valueFromDataUriPayloadText}).
  */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
@@ -39,30 +39,30 @@ export function hasDataUriScheme(id: string): boolean {
 }
 
 /**
- * Is `mediaType` the `data:` URI media type? Exactly one type is
- * accepted; there are no parameters (the payload is always base64url of
- * UTF-8 text, so none are needed).
+ * Is `mediaType` the `data:` URI media type? Exactly one type is accepted;
+ * there are no parameters (the payload is always base64url of UTF-8 text, so
+ * none are needed).
  */
 export function isDataUriMediaType(mediaType: string): boolean {
   return mediaType === DATA_URI_MEDIA_TYPE;
 }
 
 /**
- * Does `id` carry this codec's media type? This is the narrow test of the
- * pair, for readers that go on to decode the payload;
- * {@link hasDataUriScheme} accepts any media type. Only the prefix is
- * examined; the payload is not validated.
+ * Does `id` carry this codec's media type? This is the narrow test of the pair,
+ * for readers that go on to decode the payload; {@link hasDataUriScheme}
+ * accepts any media type. Only the prefix is examined; the payload is not
+ * validated.
  */
 export function isFabricDataUri(id: string): boolean {
   return id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`);
 }
 
 /**
- * Assembles a `data:` URI carrying (the encoding of) `value` -- the
- * single place the URI shape is put together: scheme, media type, and the
+ * Assembles a `data:` URI carrying (the encoding of) `value` -- the single
+ * place the URI shape is put together: scheme, media type, and the
  * base64url-of-UTF-8 `fvj1:` payload. Unlike the runner's
- * `dataUriFromValueWithResolvedLinks()`, this does no link rewriting or
- * other preparation of `value`; callers hand it a ready `FabricValue`.
+ * `dataUriFromValueWithResolvedLinks()`, this does no link rewriting or other
+ * preparation of `value`; callers hand it a ready `FabricValue`.
  */
 export function dataUriFromValue(value: FabricValue): UriString {
   const payload = toUnpaddedBase64urlFromText(jsonFromFabricValue(value));
@@ -118,9 +118,9 @@ export function extractDataUriPayloadText(
   }
 
   try {
-    // Note that `textDecoder` uses the default configuration of
-    // `fatal: false`, so its `decode()` never throws; only the base64url
-    // decode can land in the `catch`.
+    // Note that `textDecoder` uses the default configuration of `fatal: false`,
+    // so its `decode()` never throws; only the base64url decode can land in the
+    // `catch`.
     const bytes = fromBase64url(data);
     return { mediaType, text: textDecoder.decode(bytes) };
   } catch {

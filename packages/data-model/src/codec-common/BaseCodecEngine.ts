@@ -18,40 +18,40 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
  * tree is not necessarily what crosses its public boundary. `Encoded` is the
  * tree the walk and the codecs work in; `SerializedForm` is what `encode()`
  * returns and `decode()` accepts. JSON's differ -- a `JsonCodecValue` tree,
- * reduced to a `string` by a stringify step -- and a format whose tree is
- * what crosses leaves the second to default to the first.
+ * reduced to a `string` by a stringify step -- and a format whose tree is what
+ * crosses leaves the second to default to the first.
  *
- * The other two are the acts of encoding and decoding themselves, and
- * default to the base classes, so a format needing no more than the walk's
- * own bookkeeping names neither. A format that does -- one whose tagged
- * form carries a marker minted per call, say -- subclasses an act and binds
- * it here. Its overrides then receive the narrowed type by
- * construction: the signatures match exactly, so nothing needs a cast.
+ * The other two are the acts of encoding and decoding themselves, and default
+ * to the base classes, so a format needing no more than the walk's own
+ * bookkeeping names neither. A format that does -- one whose tagged form
+ * carries a marker minted per call, say -- subclasses an act and binds it here.
+ * Its overrides then receive the narrowed type by construction: the signatures
+ * match exactly, so nothing needs a cast.
  *
  * The division is between what a format decides and what it must not:
  *
  * * A self-representing value is emitted as it stands, and a value matching no
  *   codec is either a container or an error.
- * * A terminal codec's state is final and a nonterminal codec's is walked
- *   again -- read off the codec's base class, on both sides of the trip.
+ * * A terminal codec's state is final and a nonterminal codec's is walked again
+ *   -- read off the codec's base class, on both sides of the trip.
  * * A tag comes from `tagForValue()` rather than from the value.
- * * An unrecognized tag becomes an `UnknownValue`, and one that is not a tag
- *   at all an error, per Section 9 of the formal spec.
+ * * An unrecognized tag becomes an `UnknownValue`, and one that is not a tag at
+ *   all an error, per Section 9 of the formal spec.
  * * A codec's `decode()` result is deep-frozen, and a throw from one is
  *   re-raised or wrapped according to `lenient`.
  *
  * None of those is a property of a wire format, and every one of them is a
  * decision a walker could quietly get wrong: a state expanded when it should
- * have been passed through, or the reverse, surfaces far from the dispatch
- * that decided it, and where a state is a record of strings the two choices
- * emit byte-identical output. Holding them in one place is worth more than the
- * lines it saves.
+ * have been passed through, or the reverse, surfaces far from the dispatch that
+ * decided it, and where a state is a record of strings the two choices emit
+ * byte-identical output. Holding them in one place is worth more than the lines
+ * it saves.
  *
  * What a subclass owns is everything about containers, and that is where a
  * format is entitled to differ: whether keys are ordered, whether a key can
  * collide with the tag form and so needs escaping, and how an absent array
- * index is written down. A format that answers those differently is not
- * varying an implementation detail; it is being a different format.
+ * index is written down. A format that answers those differently is not varying
+ * an implementation detail; it is being a different format.
  */
 export abstract class BaseCodecEngine<
   Encoded,
@@ -88,24 +88,21 @@ export abstract class BaseCodecEngine<
   //
 
   /**
-   * Constructs one act of encoding, around the live
-   * environment the caller gave. Called once per `encode()`, and the hook by
-   * which a format carries more through its walk than the base class knows
-   * about.
+   * Constructs one act of encoding, around the live environment the caller
+   * gave. Called once per `encode()`, and the hook by which a format carries
+   * more through its walk than the base class knows about.
    */
   protected abstract newEncodeAct(env: LiveEnvironment): EncAct;
 
   /**
-   * Constructs one act of decoding, around the live
-   * environment the caller gave and the form about to be decoded. Called
-   * once per `decode()`.
+   * Constructs one act of decoding, around the live environment the caller gave
+   * and the form about to be decoded. Called once per `decode()`.
    *
-   * `data` is here so that a format whose walk needs something carried in
-   * the form itself -- a marker read off an envelope, say -- can take it
-   * now. It **sniffs rather than validates**: this runs before anything
-   * has checked that `data` is this format's at all, so an implementation
-   * reads defensively and leaves the refusing to
-   * {@link #encodedFromSerializedForm}.
+   * `data` is here so that a format whose walk needs something carried in the
+   * form itself -- a marker read off an envelope, say -- can take it now. It
+   * **sniffs rather than validates**: this runs before anything has checked
+   * that `data` is this format's at all, so an implementation reads defensively
+   * and leaves the refusing to {@link #encodedFromSerializedForm}.
    */
   protected abstract newDecodeAct(
     env: LiveEnvironment,
