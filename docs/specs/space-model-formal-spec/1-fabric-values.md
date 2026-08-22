@@ -2331,6 +2331,38 @@ aligns with the reactive system's assumption that values don't mutate in place.
 > (effectively-immutable wrappers) for collection types, preserving the
 > immutability guarantee even after unwrapping.
 
+### 2.10 Encode Input Contract
+
+Encoding is specified only for a **valid `FabricValue`** — one that has
+passed, or would pass, `isValidFabricValue()` (Section 1). Given such a value,
+an engine's `encode()` produces its format's serialized form or throws for a
+reason the format names: a `FabricSpecialObject` whose class no codec in the
+registry claims, or a cycle.
+
+Given anything else, **all error checking is best-effort.** The binding part
+of that is what it forbids rather than what it permits: no check on this path
+may cost correct input anything. A non-member may therefore encode, may encode
+to something wrong, or may throw, and which of those happens is not specified
+and may differ between formats.
+
+Two consequences follow, and neither is a defect:
+
+- An engine may share a subtree with the value it was given when nothing in
+  that subtree needed encoding. Vetting what is shared would cost the walk the
+  sharing exists to avoid, and would charge it to input that is correct.
+- A codec's `canEncode()` and `encode()` may take a valid `FabricValue` as
+  given, and `encode()` may further take as given that this same codec's
+  `canEncode()` has already returned `true` for it. Re-checking either is work
+  spent on input that is correct by contract.
+
+**Decoding is governed the opposite way.** A serialized form is untrusted
+input in its own right — it arrives from another writer, another version, or
+another realm — so a form that is not this format's, or a payload that will
+not parse, is refused rather than handled best-effort, and `lenient` decides
+only whether the caller sees a throw or a `ProblematicValue` (Section 4.5).
+The asymmetry is deliberate: an encoder is handed a value by its own caller,
+and a decoder is handed one by a stranger.
+
 ---
 
 ## 3. Unknown Types

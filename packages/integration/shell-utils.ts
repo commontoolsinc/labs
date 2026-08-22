@@ -20,7 +20,7 @@ import {
   appViewToUrlPath,
   isAppViewEqual,
 } from "@commonfabric/navigation";
-import { AppState, deserialize } from "@commonfabric/shell/app-state";
+import { AppStateSerialized } from "@commonfabric/shell/app-state";
 
 import { describeThrown } from "./describe-thrown.ts";
 import {
@@ -168,12 +168,12 @@ async function loginToPublishedApp(
   );
 }
 
-// How an `AppState` reads in a failure message. The identity is named by its
-// DID, which the serialized state a page probe reads does not carry.
-function describeAppState(state: AppState | undefined): string {
+/** How a serialized `AppState` reads in a failure message. */
+function describeAppState(state: AppStateSerialized | undefined): string {
   if (!state) return "none (the page never yielded a state)";
-  const identity = state.identity ? state.identity.did() : "none";
-  return `view ${JSON.stringify(state.view)}, identity ${identity}`;
+  return `view ${JSON.stringify(state.view)}, identity ${
+    state.identityDid ?? "none"
+  }`;
 }
 
 /**
@@ -181,15 +181,15 @@ function describeAppState(state: AppState | undefined): string {
  * reports: what the wait was for, the last state it managed to read, and what
  * `page` holds now.
  *
- * The two states answer different questions. `lastState` is what the wait saw,
- * decoded in the test process, so it names the identity by DID. The page probe
- * is read at failure time and covers the case the wait itself cannot describe:
- * a document that is not the shell, where no state was ever there to read.
+ * The two states answer different questions. `lastState` is what the wait saw.
+ * The page probe is read at failure time and covers the case the wait itself
+ * cannot describe: a document that is not the shell, where no state was ever
+ * there to read.
  */
 export async function describeStateWaitFailure(
   page: Page,
   params: { view: AppView; identity?: Identity },
-  lastState: AppState | undefined,
+  lastState: AppStateSerialized | undefined,
 ): Promise<string> {
   const lines = [`  awaited view: ${JSON.stringify(params.view)}`];
   if (params.identity) {
@@ -281,13 +281,12 @@ export class ShellIntegration {
     return page;
   }
 
-  async state(): Promise<AppState | undefined> {
+  async state(): Promise<AppStateSerialized | undefined> {
     this.checkIsOk();
     const page = this.page();
-    const state = await page.evaluate(() => {
+    return await page.evaluate(() => {
       return globalThis.app ? globalThis.app.serialize() : undefined;
     });
-    return state ? deserialize(state) : undefined;
   }
 
   // Login to the initialized app with provided identity.
@@ -310,17 +309,15 @@ export class ShellIntegration {
       view: AppView;
       identity?: Identity;
     },
-  ): Promise<AppState> {
+  ): Promise<AppStateSerialized> {
     function stateMatches(
-      state: AppState | undefined,
+      state: AppStateSerialized | undefined,
       params: Parameters<typeof ShellIntegration.prototype.waitForState>[0],
     ): boolean {
       return !!(
         state &&
         isAppViewEqual(state.view, params.view) &&
-        (params.identity
-          ? state.identity?.did() === params.identity.did()
-          : true)
+        (params.identity ? state.identityDid === params.identity.did() : true)
       );
     }
 
@@ -329,7 +326,7 @@ export class ShellIntegration {
     // The last state the poll below managed to read. A failure reports it, so
     // the message says what the wait actually saw rather than only that it
     // never saw what it wanted.
-    let lastState: AppState | undefined;
+    let lastState: AppStateSerialized | undefined;
     try {
       await waitFor(async () => {
         lastState = await this.state();

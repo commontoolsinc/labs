@@ -4,11 +4,9 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
 import {
   AppState,
-  AppStateSerialized,
   assertIdentityChangeAllowed,
   clone,
   createAppState,
-  deserialize,
   isAppStateConfigKey,
   resolveIdentity,
   serialize,
@@ -101,53 +99,24 @@ describe("AppState", () => {
     let serialized = serialize(state);
     assert(serialized.apiUrl === API_URL);
     assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(
-      serialized.identity === undefined,
+    assertEquals(
+      serialized.identityDid,
+      undefined,
       "Identity not provided (undefined).",
     );
 
-    state.identity = await Identity.generate({ implementation: "webcrypto" }),
+    // Both implementations, because a DID is the one thing either state of a
+    // key pair can produce: the "webcrypto" arm holds `CryptoKey` handles,
+    // whose material is unreachable, and a serialized state carries none.
+    for (const implementation of ["webcrypto", "noble"] as const) {
+      state.identity = await Identity.generate({ implementation });
       serialized = serialize(state);
-    assert(serialized.apiUrl === API_URL);
-    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(
-      serialized.identity === null,
-      "WebCrypto keys cannot be serialized (null).",
-    );
-
-    state.identity = await Identity.generate({ implementation: "noble" });
-    serialized = serialize(state);
-    assert(serialized.apiUrl === API_URL);
-    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(serialized.identity);
-    assert(
-      (await Identity.fromRaw(Uint8Array.from(serialized.identity.privateKey)))
-        .did() ===
+      assert(serialized.apiUrl === API_URL);
+      assertEquals(
+        serialized.identityDid,
         state.identity.did(),
-      "Insecure keys are serializable.",
-    );
-  });
-
-  it("deserialize", async () => {
-    const identity = await Identity.generate({ implementation: "noble" });
-    const identityRaw = serializeKeyPairRaw(identity.serialize());
-    assert(identityRaw, "Deserialized, transferrable identity.");
-
-    const serialized: AppStateSerialized = {
-      apiUrl: API_URL,
-      view: { spaceName: SPACE_NAME },
-      config: {},
-    };
-
-    let state = await deserialize(serialized);
-    assert(state.apiUrl.toString() === API_URL.toString());
-    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(state.identity === undefined);
-
-    serialized.identity = identityRaw;
-    state = await deserialize(serialized);
-    assert(state.apiUrl.toString() === API_URL.toString());
-    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
-    assert(state.identity?.did() === identity.did(), "deserializes identity.");
+        implementation,
+      );
+    }
   });
 });
