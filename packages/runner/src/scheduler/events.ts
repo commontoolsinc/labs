@@ -88,6 +88,20 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
 }
 
 /**
+ * Whether a commit error is CFC enforcement's DETERMINISTIC pre-storage
+ * rejection (`rejectCommitBeforeStorage` in extended-storage-transaction.ts):
+ * the transaction was refused before it reached storage, and re-running
+ * recomputes the identical refused write. The served give-up arm and
+ * {@link reportDroppedCfcRejectedWrite} key on this one predicate, so the
+ * sealed error consequence and the loss report cover exactly the same class.
+ */
+export function isCfcRejectedCommitError(
+  error: { message?: string } | undefined,
+): error is { message: string } {
+  return error?.message?.startsWith("CFC enforcement rejected commit") === true;
+}
+
+/**
  * A CFC-enforcement-rejected commit on a give-up disposition is silent data
  * loss of user intent — the UI's write simply never lands (labs#4772 shipped
  * that way for weeks behind the opt-in scheduler logger, which is disabled in
@@ -98,7 +112,7 @@ export function reportDroppedCfcRejectedWrite(
   error: { message?: string } | undefined,
   handlerId: unknown,
 ): void {
-  if (!error?.message?.startsWith("CFC enforcement rejected commit")) {
+  if (!isCfcRejectedCommitError(error)) {
     return;
   }
   console.error(
@@ -1546,6 +1560,31 @@ export async function dispatchQueuedEvent(state: {
           runFinalCommitCallback();
           break;
         case "give-up":
+          // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+          // error consequence (events.md §5: the error IS the consequence —
+          // the same honesty as the throw arm in `finalize` above). Without
+          // one the durable entry stays unconsequenced and every wave
+          // re-drains it into the identical refusal. Scoped to exactly the
+          // class `reportDroppedCfcRejectedWrite` reports below: every other
+          // give-up (transport, authorization, a handler abort, opt-out)
+          // leaves the entry pending for the wave cadence to re-drain.
+          // Ordered before the commit callback so the drain's in-flight
+          // guard sees the staged notice ("marked") rather than releasing
+          // the still-"queued" copy.
+          if (served !== undefined && isCfcRejectedCommitError(error)) {
+            try {
+              served.onFailure?.({
+                kind: "error",
+                message: error.message,
+              });
+            } catch (callbackError) {
+              logger.error(
+                "schedule-error",
+                "Error in served event failure callback:",
+                callbackError,
+              );
+            }
+          }
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
