@@ -55,15 +55,18 @@ followed as #6156 `9d989c0c1`); the phase is the register's OW rows
   only for the coordinator's delta review. OW34 = all seven §10
   recommendations ACCEPTED; its implementation train launched
   separately.
-- **#6187 MERGED** (`89deb7505`) — the §2b send-axis fix: a served
-  run's send to a foreign stream crosses via the outbox (the LT1 axis
-  is the wave's home space, not the sending cell's); profile-embed's
-  gate moved 4/10 → 7/10 and its skip re-scoped to the name-draft
-  OW47-family residual.
-- **#6186 merge-pending** — OW54 + OW58 minted, OW57's closure
-  withdrawn (re-fetch the register before editing rows near them).
-- **New seats running:** the name-draft triage; arrival-wait
-  hardening.
+- **Four PRs MERGED tonight** (latest `572b07cbc`): **#6187** — the
+  §2b send-axis fix (a served run's send to a foreign stream crosses
+  via the outbox; profile-embed's gate 4/10 → 7/10, skip re-scoped to
+  the name-draft OW47-family residual); **#6186** — a served event
+  refused pre-storage by CFC seals an error consequence (OW54; OW58
+  minted, OW57's closure withdrawn); **#6189** — chained test events
+  gated on arrived consequences (settle stimulus-effect text waits);
+  **#6190** — a served run's CFC trust snapshot carries the acting
+  principal (OW34-family; the group-chat skip lifted under OW59).
+  This PR (#6179) carries the default-app lift.
+- **Trains in flight:** verifier-read-basis; warm-request; the
+  name-draft triage; arrival-wait hardening.
 
 Prior state (kept for the trail — the paragraphs below describe the
 land itself): **LAND-OFF — the integration PR was

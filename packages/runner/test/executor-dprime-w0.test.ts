@@ -1312,11 +1312,16 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     // nothing and merely writes the doc; the target is no piece's
     // demand root, so no arrival re-arm ever names it.
     //
-    // Load-bearing seam (mutation-verified, run log in the OW51 build
-    // report §8): drop the disposed run's log in `fanOutRunFinished`
-    // (`log: undefined` when the tx aborted with the refusal) and this
-    // landing times out — the union subscription never learns the
-    // dead-end read and the foreign arrival re-fires nothing.
+    // Load-bearing seams (mutation-verified, recorded in the OW51
+    // build report §8.4): M-CLEAN — remove `dirtyFanOutKey`'s
+    // `clean.delete`, so a cause-bearing dirty can no longer un-clean
+    // a disposed instance — and this landing times out. M-UNION (the
+    // #6179 review's sharper kill) — drop zero-write logs from
+    // `fanOutUnionLog`, and only THIS pin goes red: the union
+    // subscription never learns the disposed run's dead-end read and
+    // the foreign arrival re-fires nothing. (The refusal-disposed
+    // run's tx COMMITS through the ordinary path — §8.1 — which is
+    // exactly why its log reaches the union subscription at all.)
     const setup = await standUp({
       names: { arg: "dp-f-arg", result: "dp-f-result" },
       pattern: FOREIGN_ARRIVAL_PATTERN,

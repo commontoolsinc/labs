@@ -168,10 +168,16 @@ export const undefinedDataLink = (
 ): NormalizedFullLink => {
   // `path` is rebased to [], so any recorded cap depths now address segments
   // of a different document. Drop them rather than leave them misaligned.
-  // Drop the read-side stamps too (OW51): a scope-blocked, deliberately
-  // undefined-data result is an HONEST undefined, not a pending hop-target —
-  // it must not carry `pendingHopDoc` (would refuse an honest-undefined read)
-  // nor `viaLinkHop` from the input.
+  // Drop the read-side stamps too (OW51): a deliberately undefined-data
+  // result is an HONEST undefined, not a pending hop-target, so it must
+  // not carry `pendingHopDoc` (would refuse an honest-undefined read).
+  // What this strip GUARANTEES is scoped to the exported
+  // asCell-boundary callers, which return the result as built here. On
+  // the walk's own scope-blocked break the exit stamps `viaLinkHop`
+  // back onto the result (behaviorally inert today: nothing consumes
+  // the flag on an undefined-data link) — the re-stamp skip is a named
+  // cleanup in the OW51 build report §8.5, not a contract this comment
+  // can promise.
   const {
     scopeCaps: _dropped,
     pendingHopDoc: _p,

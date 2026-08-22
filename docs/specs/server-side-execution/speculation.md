@@ -118,6 +118,12 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      unresolved input; composition does not change the verdict (a
      per-user cell relayed through a nested pattern's arg doc reads
      its absent row as `undefined` exactly as the flat form does).
+     One window sits outside this protection, matching main: a scoped
+     row already written elsewhere (another device; a cold or lagging
+     serving replica) is transit, not knowledge — such a mid-arrival
+     read takes main's interim-undefined-then-heal. No shipped
+     pattern routes link chains through user-scoped docs (the #6179
+     review's population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
      it) and the run's transaction aborts with it as the reason —

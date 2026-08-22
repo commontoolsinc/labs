@@ -5451,12 +5451,13 @@ supply; OW29/OW32/OW34 closed):
     exists; the §3 observability audit stands; §7's flake exclusion
     stays corrected as a mis-verification. Fixed by the same churn
     convention (`8777de478`), red watched via the named assertion
-    diff.** The refusal-scope fork the first build surfaced
+    diff. The refusal-scope fork the first build surfaced
     (build report §6–§7) was RULED by the owner (option 3: the
     refusal's re-trigger is independent of the root-level arrival
-    re-arm — "client-side doesn't react to its own writes, server
-    should do … either way, option 3 sounds good") and closed in two
-    parts. (i) The memo-variant fix (§7) closed the alias class,
+    re-arm — verbatim: "client-side doesn't react to its own writes,
+    server should do, but i'm not sure this is about that. what does
+    self-demanded mean? either way, option 3 sounds good") and closed
+    in two parts. (i) The memo-variant fix (§7) closed the alias class,
     pinned both directions (`link-resolution-memo.test.ts`). (ii) The
     §8 build closed the demand-closure class: verification showed the
     re-fire contract ALREADY held (a disposed run's committed log
@@ -5468,7 +5469,14 @@ supply; OW29/OW32/OW34 closed):
     instances over), not transit. `pendingHopDoc` now marks only a
     missing SPACE-scoped doc (`link-resolution.ts`); the relayed read
     of an absent user/session row reads `undefined` exactly as the
-    flat form does. Red-first: `executor-dprime-w0`
+    flat form does. NAMED RESIDUAL WINDOW (the #6179 review,
+    MINOR-3): a scoped row ALREADY WRITTEN elsewhere — another
+    device, or a cold/lagging serving replica — is transit, not
+    knowledge, and the carve-out returns such mid-arrival reads to
+    main's interim-undefined-then-heal (fragile-body crash included);
+    outside the refusal's protection, matching main. No shipped
+    pattern routes link chains through user-scoped docs (the review's
+    population audit is the evidence). Red-first: `executor-dprime-w0`
     "P-arrival-closure" watched red ×3 at the rebased head (22 s
     timeout), green after (9/9 ×3). The ruled re-fire contract
     carries its own pin — "OW51 refusal re-trigger": a

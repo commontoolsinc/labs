@@ -507,7 +507,14 @@ verdict: the relayed read of an absent scoped row reads `undefined`
 exactly as the flat form does, while the OW51 crash class — a missing
 SPACE doc behind a hop (the served-instantiation chain) — refuses
 exactly as §3 built. The change strictly REMOVES refusals; every
-removed refusal returns that read to main's behavior.
+removed refusal returns that read to main's behavior. NAMED residual
+window (the #6179 review, MINOR-3): a scoped row already written
+ELSEWHERE — another device, or a cold/lagging serving replica — is
+transit, not knowledge, and the carve-out returns such mid-arrival
+reads to main's interim-undefined-then-heal (fragile-body crash
+included); outside the refusal's protection, matching main. No
+shipped pattern routes link chains through user-scoped docs — the
+review's population audit is the evidence.
 
 ### 8.3 Red-first
 
@@ -546,6 +553,12 @@ load-bearing on exactly the ruled seam, verified by mutation:
   ("the link appearing later re-resolves"). The gate's explicit
   registration is belt-and-braces for this shape; kept, since other
   read paths may not share the probe's registration.
+- **M-UNION** (the #6179 independent review's sharper kill, run by the
+  reviewer): drop zero-write logs from `fanOutUnionLog` and ONLY this
+  pin goes red — the disposed run's committed log never joins the
+  union subscription, so the foreign arrival re-fires nothing. This
+  pins the union-subscription seam itself, tighter than M-CLEAN's
+  downstream clean-bit seam.
 
 Relation to the fork's options: option 2 (exclude self-produced reads
 only) would have left this pin's foreign-writer arrival un-modeled and
@@ -555,8 +568,9 @@ contract covers both.
 
 ### 8.5 Flagged, not filled (adjacent latent findings, main-line)
 
-Two findings surfaced by instrumentation are OUTSIDE this PR's scope
-and are recorded for their own arcs rather than patched here:
+Two findings surfaced by instrumentation — plus a review-named
+cleanup (item 2) — are OUTSIDE this PR's scope and are recorded for
+their own arcs rather than patched here:
 
 1. **Capture type-shrinking strips `Default<''>`** (ts-transformers):
    the compiled outer argumentSchema declares
@@ -570,7 +584,14 @@ and are recorded for their own arcs rather than patched here:
    it decides refusal-vs-default under the OW51 semantics. Transformer
    territory, pattern-wide blast radius (baselines are append-only) —
    flagged for the owner.
-2. **Era-dependent scope resolution of a relayed PerUser read**: the
+2. **The scope-blocked walk exit re-stamps `viaLinkHop` onto an
+   `undefinedDataLink` result** (link-resolution.ts — the strip inside
+   `undefinedDataLink` and the exit stamp disagree in intent;
+   behaviorally inert today, nothing consumes the flag on an
+   undefined-data link; the review proved the inertness — MINOR-4).
+   Named cleanup: skip the exit re-stamp on the scope-blocked break,
+   with its own pin so the change is non-vacuous. Not taken in #6179.
+3. **Era-dependent scope resolution of a relayed PerUser read**: the
    serving node's probe run reads the SAME relayed draft chain at
    `scopes=["space"]` in one era (18 reads, no narrowing) and at
    `["space","user"]` in a later era (19 reads, discovers user,

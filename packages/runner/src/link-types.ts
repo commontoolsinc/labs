@@ -115,7 +115,14 @@ export type NormalizedLink = {
    * always has. Nor does a dead-end at a USER- or SESSION-scoped row:
    * a principal's instance row exists only once that principal writes
    * it, so its absence is knowledge (the scoped first-write idiom) —
-   * only a missing SPACE-scoped doc marks the result pending. Read-side
+   * only a missing SPACE-scoped doc marks the result pending. One
+   * window sits outside that idiom and outside the refusal's
+   * protection, matching main's behavior: a scoped row already
+   * written elsewhere (another device; a cold or lagging serving
+   * replica) is transit, not knowledge, and its mid-arrival read
+   * takes main's interim-undefined-then-heal. No shipped pattern
+   * routes link chains through user-scoped docs (the #6179 review's
+   * population audit). Read-side
    * only, like `scopeCaps`: never serialized, never part of link
    * identity; consumers that copy links by spread carry it inertly.
    */
