@@ -7,10 +7,9 @@ import {
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
- * objects into the `FabricValue` layer.
- * Provides a common `toNativeValue()` method used by both the shallow and
- * deep unwrap functions, replacing their `instanceof` cascades with a single
- * `instanceof FabricNativeWrapper` check.
+ * objects into the `FabricValue` layer. Provides a common `toNativeValue()`
+ * method used by both the shallow and deep unwrap functions, replacing their
+ * `instanceof` cascades with a single `instanceof FabricNativeWrapper` check.
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {

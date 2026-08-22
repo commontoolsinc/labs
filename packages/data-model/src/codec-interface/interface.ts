@@ -149,22 +149,21 @@ export interface FabricCodec<Encoded> {
 
   /**
    * Decodes a value from the given essential state, which is (alleged /
-   * supposed) to be a value that was produced by an earlier call to
-   * {@link #encode} on a compatible class to this one. The result is expected
-   * to be a _shallow_ decoding; the codec system handles recursively
-   * converting `state` contents as necessary.
+   * supposed) to be a value that was produced by an earlier call to {@link
+   * #encode} on a compatible class to this one. The result is expected to be a
+   * _shallow_ decoding; the codec system handles recursively converting `state`
+   * contents as necessary.
    *
    * The given `typeTag` is what was associated with the given `state` and does
    * not necessarily correspond to {@link #recognizedTypeTag} (depending on how
    * an instance of this class got hooked up).
    *
    * Only ever called on a state for which {@link #canDecode} has returned
-   * `true`, which is the decode side's counterpart to the way
-   * {@link #canEncode} precedes {@link #encode}. That is what lets an
-   * implementation declare the narrower state type it actually decodes and
-   * read its parts as such. `state` is the whole of `Encoded` here because
-   * this interface is what a registry holds, and the codecs in one agree on
-   * nothing narrower.
+   * `true`, which is the decode side's counterpart to the way {@link
+   * #canEncode} precedes {@link #encode}. That is what lets an implementation
+   * declare the narrower state type it actually decodes and read its parts as
+   * such. `state` is the whole of `Encoded` here because this interface is what
+   * a registry holds, and the codecs in one agree on nothing narrower.
    */
   decode(
     typeTag: string,
@@ -208,26 +207,26 @@ export interface FabricCodec<Encoded> {
 export type NonterminalCodec = FabricCodec<FabricValue>;
 
 /**
- * A codec whose essential state is **terminal**: it is already in the domain
- * of one particular wire format, and the walker passes it through rather than
+ * A codec whose essential state is **terminal**: it is already in the domain of
+ * one particular wire format, and the walker passes it through rather than
  * expanding it further.
  *
  * Instantiating {@link FabricCodec} at a format's own value type is what says
  * so. Such a codec is bound to that one format, and a class needing one
  * supplies a separate instance per format it participates in.
  *
- * `FabricBytes` is the clearest case: JSON's codec produces a base64url
- * string, where a format that carries bytes natively wants the bytes
- * themselves, and no one codec can answer both.
+ * `FabricBytes` is the clearest case: JSON's codec produces a base64url string,
+ * where a format that carries bytes natively wants the bytes themselves, and no
+ * one codec can answer both.
  *
  * The difference between the two kinds is not in the shape of a codec -- both
  * have the same members -- but in what its state means to the walker. A class
  * declares which it is by the base class it extends, and that declaration is
  * the only record of it.
  *
- * `Encoded` ranges over the wire formats' own value types. `FabricValue` is
- * not among them, and instantiating at it is unsound; see
- * {@link BaseTerminalCodec}.
+ * `Encoded` ranges over the wire formats' own value types. `FabricValue` is not
+ * among them, and instantiating at it is unsound; see {@link
+ * BaseTerminalCodec}.
  */
 export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
 
@@ -298,20 +297,19 @@ export interface LiveEnvironment {
   ): FabricInstance;
 
   /**
-   * Signals whether a decode call should produce a deep-frozen
-   * result: `true` means the decoded value should be deep-frozen,
-   * `false` means a mutable result is acceptable. Same contract as `frozen`
-   * passed to `cloneIfNecessary()` (see `value-clone.ts`):
-   * `shouldDeepFreeze === true` corresponds to
-   * `cloneIfNecessary(value, { frozen: true })`.
+   * Signals whether a decode call should produce a deep-frozen result: `true`
+   * means the decoded value should be deep-frozen, `false` means a mutable
+   * result is acceptable. Same contract as `frozen` passed to
+   * `cloneIfNecessary()` (see `value-clone.ts`): `shouldDeepFreeze === true`
+   * corresponds to `cloneIfNecessary(value, { frozen: true })`.
    *
    * Required (not optional): every live environment declares it, and gets it
-   * for free by extending `BaseLiveEnvironment`, which centralizes the
-   * getter; the `cloneIfNecessary`-style `true` default lives there.
+   * for free by extending `BaseLiveEnvironment`, which centralizes the getter;
+   * the `cloneIfNecessary`-style `true` default lives there.
    *
-   * Enforcement: a decode deep-freezes its result, and a codec that builds
-   * a value cheaper when it may stay thawed reads this to decide,
-   * producing a deep-frozen result when it is `true`.
+   * Enforcement: a decode deep-freezes its result, and a codec that builds a
+   * value cheaper when it may stay thawed reads this to decide, producing a
+   * deep-frozen result when it is `true`.
    */
   get shouldDeepFreeze(): boolean;
 }

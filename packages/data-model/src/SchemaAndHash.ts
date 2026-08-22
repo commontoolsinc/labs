@@ -4,13 +4,13 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import type { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 /**
- * Deep-frozen container pairing a `JSONSchema` with its content hash.
- * Ensures that schemas are always stored in their canonical deep-frozen
- * form and that the hash is computed once.
+ * Deep-frozen container pairing a `JSONSchema` with its content hash. Ensures
+ * that schemas are always stored in their canonical deep-frozen form and that
+ * the hash is computed once.
  *
- * To create instances, use `internSchema()` from `schema-hash.ts` —
- * it handles freezing, hashing, and caching. The constructor is public
- * for direct use when both the frozen schema and hash are already in hand.
+ * To create instances, use `internSchema()` from `schema-hash.ts` — it handles
+ * freezing, hashing, and caching. The constructor is public for direct use when
+ * both the frozen schema and hash are already in hand.
  *
  * This class accepts `undefined` as its "schema" upon construction as a
  * concession to making the schema intern mechanism work straightforwardly with
@@ -24,10 +24,10 @@ export class SchemaAndHash {
   readonly #hash: FabricHash;
 
   /**
-   * Constructs an instance, from an already-deep-frozen schema and
-   * its pre-computed hash. Throws if the schema is not deep-frozen.
-   * Prefer `internSchema()` from `schema-hash.ts` for the friendly entry
-   * point that handles freezing, hashing, and interning.
+   * Constructs an instance, from an already-deep-frozen schema and its
+   * pre-computed hash. Throws if the schema is not deep-frozen. Prefer
+   * `internSchema()` from `schema-hash.ts` for the friendly entry point that
+   * handles freezing, hashing, and interning.
    */
   constructor(schema: JSONSchema | undefined, hash: FabricHash) {
     if (!isDeepFrozen(schema)) {

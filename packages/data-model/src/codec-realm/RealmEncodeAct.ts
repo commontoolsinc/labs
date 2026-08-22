@@ -132,7 +132,8 @@ export class RealmEncodeAct
         const key = keys[i]!;
 
         // Checked on every object, not just the ones that get rebuilt, so that
-        // the answer does not depend on whether some sibling happened to change.
+        // the answer does not depend on whether some sibling happened to
+        // change.
         RealmEncodeAct.assertEncodableKey(key);
 
         const original = value[key]!;

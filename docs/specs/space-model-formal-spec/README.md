@@ -1,9 +1,9 @@
 # Space Model Formal Spec: Data Model
 
 This directory contains the formal specification for the Space Model data model.
-It is derived from the proposal sections of the original
-[data model spec](../space-model/1-data-model.md), reformulated as a
-self-contained, implementable specification.
+It is derived from the proposal sections of the original [data model
+spec](../space-model/1-data-model.md), reformulated as a self-contained,
+implementable specification.
 
 ## Scope
 
@@ -14,8 +14,8 @@ This spec covers:
   `[CODEC]` or `[JSON_CODEC]` -- yielding a `FabricCodec`) for custom type
   participation in encoding
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
-- **Codec engines** (Section 4) -- boundary-crossing encoding
-  strategy, the `encode()`/`decode()` boundary, and boundary inventory
+- **Codec engines** (Section 4) -- boundary-crossing encoding strategy, the
+  `encode()`/`decode()` boundary, and boundary inventory
 - **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
   wire format for special types, escaping, detection rules, and the `/`-key
   reservation rule
@@ -34,8 +34,8 @@ system, schemas.
   three-layer architecture, the fabric protocol, unknown types, encoding
   contexts, hashing, implementation guidance, and conversion functions.
   (Sections 1-4, 6-8.)
-- [2-hash-byte-format.md](./2-hash-byte-format.md) --
-  Byte-level encoding for the hash algorithm.
+- [2-hash-byte-format.md](./2-hash-byte-format.md) -- Byte-level encoding for
+  the hash algorithm.
 - [3-json-encoding.md](./3-json-encoding.md) -- The JSON wire format for
   `FabricValue`s: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
   objects, standard type encodings, detection, escaping, and the `/`-key

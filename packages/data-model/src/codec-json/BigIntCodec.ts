@@ -16,9 +16,9 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * string encoding the bigint's two's-complement big-endian byte representation.
  * Wire format: `{ "/BigInt@1": "<base64>" }`.
  *
- * The byte encoding is the same one used by the hash
- * (`2-hash-byte-format.md` Section 4.5): minimal two's-complement big-endian, with sign extension
- * as needed.
+ * The byte encoding is the same one used by the hash (`2-hash-byte-format.md`
+ * Section 4.5): minimal two's-complement big-endian, with sign extension as
+ * needed.
  *
  * `BigInt` is a non-`new`-able pseudo-constructor, so it is cast to
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`

@@ -1,7 +1,7 @@
 /**
  * Base class for `LiveEnvironment` implementations. Centralizes the
- * `shouldDeepFreeze` getter so every live environment declares the (required) member
- * via a single shared implementation instead of repeating it.
+ * `shouldDeepFreeze` getter so every live environment declares the (required)
+ * member via a single shared implementation instead of repeating it.
  */
 
 import type { FabricInstance } from "@/interface.ts";

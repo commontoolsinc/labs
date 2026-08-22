@@ -62,7 +62,8 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
     if (decoded !== null) {
       const { tag, state: rawState } = decoded;
 
-      // `CODEC_META_TAGS.quote` literal handling (`3-json-encoding.md` Section 6).
+      // `CODEC_META_TAGS.quote` literal handling (`3-json-encoding.md` Section
+      // 6).
       if (tag === CODEC_META_TAGS.quote) {
         // TODO(danfuzz): Quote content is returned whole, so a key this
         // implementation reserves is admitted here where the `/object` and
@@ -194,9 +195,9 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
   }
 
   /**
-   * Plain objects: recursively decode values and freeze. Any
-   * `/`-prefixed key is reserved per spec — return `ProblematicValue` on
-   * first occurrence rather than silently round-tripping the object.
+   * Plain objects: recursively decode values and freeze. Any `/`-prefixed key
+   * is reserved per spec — return `ProblematicValue` on first occurrence rather
+   * than silently round-tripping the object.
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,

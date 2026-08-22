@@ -62,21 +62,21 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * Returns a shallow clone of the given array carrying nothing but its
  * enumerable index properties and `length`, that is, one which satisfies
  * `isInertArray()` -- a direct `Array` instance, whatever the given array's
- * prototype. Holes are preserved as holes, and
- * elements are copied by reference without themselves being converted or
- * validated, this being a shallow operation.
+ * prototype. Holes are preserved as holes, and elements are copied by reference
+ * without themselves being converted or validated, this being a shallow
+ * operation.
  *
  * This exists for a caller holding an array that has picked up non-index own
- * properties which it knows are not content -- a runtime annotation, say --
- * and which the conversion functions here would therefore reject outright.
- * Calling this is how such a caller says explicitly that it means to drop
- * them. Code with no such warrant should let the rejection happen ("death
- * before confusion").
+ * properties which it knows are not content -- a runtime annotation, say -- and
+ * which the conversion functions here would therefore reject outright. Calling
+ * this is how such a caller says explicitly that it means to drop them. Code
+ * with no such warrant should let the rejection happen ("death before
+ * confusion").
  *
  * The given array's index properties must all be enumerable data properties:
  * the copy reads elements through enumeration, which would execute an
- * accessor-backed index (silently flattening it to its momentary value)
- * and would turn a non-enumerable data index into a hole.
+ * accessor-backed index (silently flattening it to its momentary value) and
+ * would turn a non-enumerable data index into a hole.
  *
  * @param value The array to clean.
  * @param frozen Whether to freeze the result. Defaults to `true`.
@@ -127,9 +127,8 @@ export function shallowCleanArray(
 /**
  * Returns a shallow clone of the given object carrying nothing but its
  * enumerable string-keyed properties, that is, one which satisfies
- * `isInertPlainObject()`. Values are copied by reference
- * without themselves being converted or validated, this being a shallow
- * operation.
+ * `isInertPlainObject()`. Values are copied by reference without themselves
+ * being converted or validated, this being a shallow operation.
  *
  * This is the object counterpart of `shallowCleanArray()`, and exists for the
  * same reason: a caller holding an object that has picked up keys which it
@@ -334,9 +333,9 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.FabricInstance: {
-      // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.)
-      // are already valid `FabricValue` members. Delegate frozenness
-      // handling to `cloneHelper()`.
+      // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.) are
+      // already valid `FabricValue` members. Delegate frozenness handling to
+      // `cloneHelper()`.
       return cloneHelper(
         value as FabricValue,
         freeze,
@@ -494,8 +493,8 @@ function fabricFromNativeValueInternal(
   }
 
   // `FabricSpecialObject` (primitives and protocol types) -- pass through
-  // as-is. Primitives are always frozen; protocol types are managed by
-  // the caller.
+  // as-is. Primitives are always frozen; protocol types are managed by the
+  // caller.
   if (value instanceof FabricSpecialObject) {
     if (isOriginalRecord) {
       converted.set(original, value);
@@ -599,9 +598,8 @@ function rebuildFabricErrorDeep(
  * types. It checks recursively, so all nested values in arrays and objects must
  * also be fabric-convertible.
  *
- * This function is a TypeScript type guard for
- * `FabricConvertibleValue`, which names the recursive shape described
- * above.
+ * This function is a TypeScript type guard for `FabricConvertibleValue`, which
+ * names the recursive shape described above.
  */
 export function isValidFabricConvertibleValue(
   value: unknown,

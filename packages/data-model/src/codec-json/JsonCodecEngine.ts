@@ -53,9 +53,8 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
-   * A plain one: this walk never enters a node, for the reason
-   * {@link #decode} gives, so the act's in-progress set is never
-   * allocated.
+   * A plain one: this walk never enters a node, for the reason {@link #decode}
+   * gives, so the act's in-progress set is never allocated.
    */
   protected override newDecodeAct(
     env: LiveEnvironment,

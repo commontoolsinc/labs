@@ -271,17 +271,16 @@ export function cloneHelper(
 /**
  * Categorical kinds of error that `cloneForMutation()` can fail with.
  *
- * - `"non-mutable-root"` — empty `path` and the root value isn't a kind
- *   for which a mutable handle exists (a primitive, a `FabricPrimitive`,
- *   etc.).
- * - `"non-container-root"` — non-empty `path` and the root isn't a plain
- *   object or array, so there's nothing to descend into.
- * - `"missing-segment"` — a `path` segment names a slot that doesn't
- *   exist on its container, and `createMissing` is `false`.
- * - `"non-container-descent"` — an intermediate segment lands on a value
- *   that isn't a plain object or array, so descent can't continue.
- * - `"non-mutable-leaf"` — the final segment lands on a value for which
- *   no mutable handle exists (a primitive or `FabricPrimitive`).
+ * - `"non-mutable-root"` — empty `path` and the root value isn't a kind for
+ *   which a mutable handle exists (a primitive, a `FabricPrimitive`, etc.).
+ * - `"non-container-root"` — non-empty `path` and the root isn't a plain object
+ *   or array, so there's nothing to descend into.
+ * - `"missing-segment"` — a `path` segment names a slot that doesn't exist on
+ *   its container, and `createMissing` is `false`.
+ * - `"non-container-descent"` — an intermediate segment lands on a value that
+ *   isn't a plain object or array, so descent can't continue.
+ * - `"non-mutable-leaf"` — the final segment lands on a value for which no
+ *   mutable handle exists (a primitive or `FabricPrimitive`).
  */
 export type CloneForMutationErrorKind =
   | "non-mutable-root"
@@ -378,33 +377,32 @@ export interface CloneForMutationOptions {
    * helper descends. Default: `false` (throws `CloneForMutationError` with kind
    * `"missing-segment"` on the first missing slot).
    *
-   * When `createMissing: true`, at each path step where the container at
-   * that key is absent, the helper allocates a fresh container and
-   * splices it into its parent before descending. The new container's
-   * shape (array vs. plain object) is chosen from the NEXT segment that
-   * will be used as a key against it:
+   * When `createMissing: true`, at each path step where the container at that
+   * key is absent, the helper allocates a fresh container and splices it into
+   * its parent before descending. The new container's shape (array vs. plain
+   * object) is chosen from the NEXT segment that will be used as a key against
+   * it:
    *
    * - For intermediate path steps, the next segment is `path[i+1]`.
    * - For the final path step, the next segment is `nextKeyAfterPath` if
    *   supplied; otherwise the empty string (which selects a plain object).
    *
    * Array-index-shaped keys (`isArrayIndexPropertyName(key)`) and the
-   * JSON-Pointer append marker `"-"` select an array; everything else
-   * selects a plain object.
+   * JSON-Pointer append marker `"-"` select an array; everything else selects a
+   * plain object.
    */
   createMissing?: boolean;
 
   /**
-   * Hint for the container shape to create at the final path step when
-   * it's missing and `createMissing: true`. Should be the next key the
-   * caller intends to access against the value-at-path. Ignored when
-   * `createMissing: false` or when the final path step already exists.
-   * Default: `""` (selects a plain object).
+   * Hint for the container shape to create at the final path step when it's
+   * missing and `createMissing: true`. Should be the next key the caller
+   * intends to access against the value-at-path. Ignored when `createMissing:
+   * false` or when the final path step already exists. Default: `""` (selects a
+   * plain object).
    *
-   * Same shape-selection rule as for intermediate steps: array-index-
-   * shaped values (per `isArrayIndexPropertyName`) and the JSON-Pointer
-   * append marker `"-"` select an array; everything else selects a
-   * plain object.
+   * Same shape-selection rule as for intermediate steps: array-index- shaped
+   * values (per `isArrayIndexPropertyName`) and the JSON-Pointer append marker
+   * `"-"` select an array; everything else selects a plain object.
    *
    * Mirrors `v2-path.ensureParentContainers`'s `lastKey` parameter.
    */
