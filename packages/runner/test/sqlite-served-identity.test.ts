@@ -254,7 +254,32 @@ describe("sqlite-served-identity", () => {
       parent,
       runtime,
     );
-    return { builtin, result: () => resultCell! };
+    /** A SECOND instance of the same query (fresh parent, fresh result
+     * cell, fresh per-closure in-flight set) — the determinism pin's
+     * probe: nothing per-instance may reach the request hash. */
+    const makeBuiltin = async () => {
+      const ptx = runtime.edit();
+      const p = runtime.getCell(
+        space,
+        `ow53 query parent ${crypto.randomUUID()}`,
+        undefined,
+        ptx,
+      );
+      expect((await ptx.commit()).error).toBeUndefined();
+      let cell: Cell<QueryState> | undefined;
+      const b = sqliteQuery(
+        inputs as never,
+        (_rtx, result) => {
+          cell = result as Cell<QueryState>;
+        },
+        () => {},
+        [p],
+        p,
+        runtime,
+      );
+      return { builtin: b, result: () => cell! };
+    };
+    return { builtin, result: () => resultCell!, makeBuiltin };
   };
 
   it({
@@ -339,6 +364,45 @@ describe("sqlite-served-identity", () => {
     expect(hashOne).toBeDefined();
     expect(hashTwo).toBeDefined();
     expect(hashOne).not.toBe(hashTwo);
+  });
+
+  it({
+    name:
+      "derives a session-scoped cleared read's request hash from query and identity alone (same session re-staged from a fresh instance, same hash)",
+    sanitizeResources: false,
+  }, async () => {
+    // The distinct-across-sessions pin above would ALSO pass if the hash
+    // carried per-run noise — a nonce splits any two stagings. Staging the
+    // identical (query, user, session) from a FRESH builtin instance
+    // (fresh parent, fresh result cell, fresh in-flight set) must
+    // reproduce the SAME hash: the request identity is derived from the
+    // query and the carried identity, nothing per-run and nothing
+    // per-instance — determinism is what makes the session join a KEY
+    // rather than a cache-buster.
+    const { builtin, result, makeBuiltin } = await clearedQuerySetup(
+      "session",
+    );
+
+    const tx1 = runtime.edit();
+    demandedStamp(tx1, aliceSigner.did(), "sess-one");
+    builtin.action(tx1);
+    const first = (result().withTx(tx1).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx1.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    const second = await makeBuiltin();
+    const tx2 = runtime.edit();
+    demandedStamp(tx2, aliceSigner.did(), "sess-one");
+    second.builtin.action(tx2);
+    const restaged = (second.result().withTx(tx2).get() as
+      | QueryState
+      | undefined)?.requestHash;
+    expect((await tx2.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    expect(first).toBeDefined();
+    expect(restaged).toBe(first);
   });
 
   it({

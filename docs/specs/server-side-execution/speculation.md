@@ -44,7 +44,14 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   committed result (read-through). If inputs changed so the memo key
   differs, the node reads as pending — the UI shows its ordinary loading
   state until the server's result arrives. No exceptions: no "just this
-  one idempotent GET".
+  one idempotent GET". OBLIGATION for the read-through's memo-key
+  comparison (pinned 2026-08-22, inherited by the arrival-witness
+  train's read-through work): a session-scoped CLEARED `sqlite*`
+  result's request hash is session-keyed (builtins.md §2), so a
+  read-through that recomputes the key must reproduce the session
+  component — or key the comparison on the STORED claim's recorded
+  identity — a session-blind recomputation would misread "inputs
+  changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
   is reversible. The overlay records the nonce it acted on.
 - Child-piece instantiation (builtins.md §3): result-as-pattern

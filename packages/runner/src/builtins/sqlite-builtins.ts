@@ -819,7 +819,10 @@ export function sqliteQuery(
     // split together. Unstamped runs (clients, ON-arm speculation, the
     // whole OFF arm) carry no context and keep today's bare-principal
     // shape; USER-scoped cleared results never take this arm at all —
-    // both byte-identical.
+    // both byte-identical. `session` is CELL_SCOPES' only sub-user
+    // member (scope.ts); a future narrower-than-user scope must join
+    // this granularity test (and builtins.md §2's rule) rather than
+    // staying silently session-blind at the new scope.
     const clearanceSession = inputs.readClearance && scope === "session"
       ? runIdentity?.sessionId
       : undefined;

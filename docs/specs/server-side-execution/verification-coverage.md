@@ -5941,9 +5941,11 @@ supply; OW29/OW32/OW34 closed):
     tripwires on it (fails loud, citing this row) rather than
     picking whose rows a cleared read admits; the per-instance
     effect-key gap for NON-clearance
-    user-scoped queries (a reader-blind hash by design means one
-    outbox key across instances — no live surface; the fix direction
-    is the instance key joining the effect target key); and the
+    user/session-scoped queries (a reader-blind hash by design
+    means one scope-name-widened outbox key across ALL the scope's
+    instances, session and user alike — no live surface; the fix
+    direction is the instance key joining the effect target key);
+    and the
     provider READ RPC's partition resolution (recorded 2026-08-22
     by the session-identity build, flagged not filled): a
     sub-space-scoped db's ON-DISK partition resolves from the
@@ -5954,7 +5956,13 @@ supply; OW29/OW32/OW34 closed):
     surface (which FILE gets read, not which cell or key is
     written), outside the 2026-08-22 request-identity ruling, and
     no live surface reaches it (the clearance fixture's db is
-    space-scoped, whose resolution is identity-free). The
+    space-scoped, whose resolution is identity-free) — and it
+    BLOCKS the session split's live completion coverage: until the
+    partition resolves from the requesting identity, a
+    session-scoped cleared query cannot be driven to completion
+    end-to-end, which is why the session-fork close binds staged
+    hashes at unit level and user-granularity sharing in
+    integration, never a session-scoped completion. The
     SESSION-scoped cleared-result collision variant (the #6194
     review's find) is CLOSED — RULED 2026-08-22 (the same ruling as
     the fail-closed arm above) and built in the session-identity
@@ -5982,7 +5990,12 @@ supply; OW29/OW32/OW34 closed):
     sqlite-served-identity (two sessions of one user against a
     session-scoped cleared db: ONE identical hash watched red at
     base, distinct after; the user-scoped session-blind guard green
-    both sides) and in the read-clearance integration file's
+    both sides; a determinism pin re-stages the same session from a
+    fresh builtin instance and expects the SAME hash — the split is
+    identity-derived, not per-run noise; mutant-watched: a salted
+    session arm reddened ONLY this pin, the other 7 steps green),
+    and GUARDED
+    both-sides-green by the read-clearance integration file's
     two-tabs-of-one-user step (one Identity in two harness
     sessions: user-granularity sharing — same cell, same hash —
     green OFF and under the true-ON gate, serving loop live).
