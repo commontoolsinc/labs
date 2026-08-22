@@ -77,6 +77,12 @@ type RealmHandleState = {
  * write down. It crosses a realm boundary as itself instead, structured
  * cloning carrying a `CryptoKey` with its extractability intact.
  *
+ * That refusal makes this class one of the exceptions
+ * `docs/specs/space-model-formal-spec/1-fabric-values.md` allows under
+ * `2.10 Encode Input Contract`: an instance valid as a `FabricValue`, whose
+ * class a codec in the JSON registry claims, and which that format still
+ * cannot express.
+ *
  * Immutable: instances are `Object.freeze()`-d at construction time, and the
  * material arm holds `FabricBytes`, which own their buffers outright. Instance
  * state is elided by the debug renderer, so a private key does not reach a log

@@ -2338,14 +2338,17 @@ passed, or would pass, `isValidFabricValue()` (Section 1). Given such a value,
 an engine's `encode()` produces its format's serialized form or throws for a
 reason the format names: a `FabricSpecialObject` whose class no codec in the
 registry claims, a cycle, or an instance whose class a codec does claim but
-whose present state that format cannot write down.
+whose present state that format cannot express.
 
-The third reason is why validity does not imply encodability. Whether a value
-can be written down is a question about a format, and formats differ: a
-`FabricKeyPair` holding `CryptoKey` handles crosses a realm boundary as itself
-and has no JSON form at all, its material being unreachable to anything that
-writes bytes. A format refusing such a state is meeting its contract, not
-failing it.
+That third reason is a carve-out, and is expected to remain rare. Validity is a
+question about a value; whether it can be written down is a question about a
+format, and the two may disagree — a class can hold a state that one format
+carries and another has no way to represent. A format refusing such a state is
+meeting its contract rather than failing it.
+
+**A class in that position says so in its own documentation.** Nothing in the
+encoding machinery enumerates which classes they are: a format knows what it
+can express, not which classes will hand it something it cannot.
 
 Given anything else, **all error checking is best-effort.** The binding part
 of that is what it forbids rather than what it permits: no check on this path
