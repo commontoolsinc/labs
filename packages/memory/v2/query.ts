@@ -30,7 +30,9 @@ import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   canResolveScopeKey,
   type CellScope,
+  type CommitClass,
   type EntitySnapshot,
+  getServerExecutionConfig,
   type GraphQuery,
   isScopeKey,
   resolveScopeKey,
@@ -130,6 +132,14 @@ export class EngineObjectManager implements ObjectStorageManager {
       branch: this.branch,
       ...(this.readSeq === undefined ? {} : { seq: this.readSeq }),
     });
+  }
+
+  /** The class of the commit at `seq` (the covering commit of a snapshot
+   * whose seq that is — one seq names exactly one commit), or undefined
+   * for seq 0 / an unknown seq. Memoized per engine; see
+   * {@link Engine.commitClassOfSeq}. */
+  coverClassOf(seq: number): CommitClass | undefined {
+    return Engine.commitClassOfSeq(this.engine, seq);
   }
 
   load(
@@ -307,16 +317,24 @@ const snapshotForDocKey = (
   const state = detail === undefined
     ? manager.readState(id, scope, scopeKey)
     : null;
+  const seq = detail?.seq ?? state?.seq ?? 0;
+  // The covering commit's class (speculation.md §4's arrival-witness
+  // predicate, RULED 2026-08-22), ON arm only: the OFF-arm snapshot —
+  // and therefore every OFF-arm frame — stays byte-identical.
+  const coverClass = getServerExecutionConfig()
+    ? manager.coverClassOf(seq)
+    : undefined;
   return {
     branch,
     id,
     ...(scope !== DEFAULT_SCOPE ? { scope } : {}),
-    seq: detail?.seq ?? state?.seq ?? 0,
+    seq,
     document: detail?.document === undefined
       ? state?.document === null || state?.document === undefined
         ? null
         : state.document
       : detail.document,
+    ...(coverClass === undefined ? {} : { coverClass }),
   } satisfies EntitySnapshot;
 };
 

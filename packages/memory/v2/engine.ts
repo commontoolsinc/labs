@@ -2841,6 +2841,58 @@ export type CommitFeedRecord = {
   writes: Array<{ id: EntityId; scopeKey: string }>;
 };
 
+// Per-engine memo of `commit.seq -> commit.class`. A commit's class is
+// immutable once admitted, so an entry never invalidates; bounded — on
+// overflow the memo clears and repopulates from live lookups.
+const COMMIT_CLASS_MEMO_MAX_ENTRIES = 65_536;
+const commitClassMemos = new WeakMap<Engine, Map<number, CommitClass>>();
+
+/**
+ * The class of the commit at `seq` (`commit.seq` is unique across the
+ * whole store — one seq names exactly one commit, on whatever branch),
+ * or undefined when no such commit exists (a seq-0 "absent doc" marker,
+ * or a store older than the seq). The snapshot read that annotates
+ * session frames with the covering commit's class (speculation.md §4's
+ * arrival-witness predicate, RULED 2026-08-22) resolves through this:
+ * every revision's `seq` IS its producing commit's seq, so the covering
+ * class of a doc snapshot is the class of the commit at the snapshot's
+ * seq. Deliberately no branch predicate: a snapshot can resolve to a
+ * parent branch's revision, and commit seqs are global.
+ */
+export const commitClassOfSeq = (
+  engine: Engine,
+  seq: number,
+): CommitClass | undefined => {
+  if (seq <= 0) return undefined;
+  let memo = commitClassMemos.get(engine);
+  if (memo === undefined) {
+    memo = new Map();
+    commitClassMemos.set(engine, memo);
+  }
+  const cached = memo.get(seq);
+  if (cached !== undefined) return cached;
+  const row = engine.database.prepare(
+    `SELECT class FROM "commit" WHERE seq = :seq`,
+  ).get({ seq }) as { class: CommitClass } | undefined;
+  if (row === undefined) return undefined;
+  // "Immutable once admitted" holds for DURABLE rows only: inside a
+  // transaction the same connection reads the staged, rollback-able
+  // commit row, and a rolled-back seq is re-minted by the retry —
+  // possibly under another class (the wave path is exactly that
+  // re-mint). Same discipline as {@link cacheDocumentForRevision}'s
+  // in-transaction backstop, and for the same reason it is the
+  // connection state and not a caller marker: it holds for every
+  // transaction-wrapped caller — `applyCommit` AND `applyWaveCommit`,
+  // which opens its own transaction without staging — rather than for
+  // the one that remembered to set a flag. The mid-transaction read is
+  // still SERVED, just never memoized.
+  if (!engine.database.inTransaction) {
+    if (memo.size >= COMMIT_CLASS_MEMO_MAX_ENTRIES) memo.clear();
+    memo.set(seq, row.class);
+  }
+  return row.class;
+};
+
 /**
  * The accepted-commit feed's catch-up read (protocol.md §3: "the
  * SpaceServer subscribes to the whole space's accepted-commit feed from a

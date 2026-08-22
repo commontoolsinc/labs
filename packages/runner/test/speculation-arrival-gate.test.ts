@@ -53,6 +53,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
+  type CommitClass,
   resolveScopeKey,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
@@ -928,5 +929,396 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(flushed).toBe(0);
     destination.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The ARRIVAL-WITNESS predicate (speculation.md §4, RULED 2026-08-22 —
+  // candidate (B) of the OW33 fork memo): a confirmed cover witnesses
+  // arrival only STRICTLY ABOVE the entry's floor (any commit class), or
+  // AT the floor when the covering commit is DERIVED-class. An
+  // authored-class cover at the floor is the entry's own basis commit —
+  // the setup write that created the computed docs' structure (the
+  // client's own for a new instance, a prior session's for a resumed
+  // one) — and never witnesses the derivation's arrival: the OW33 hole
+  // retired first-run speculations on it 40–260 ms before the served
+  // value landed. The scripted pins below replay the #6195 review's two
+  // decoded store shapes exactly (run 5's new-instance arm: setup at 11,
+  // watermark-only advance covering it, values at 13; run 1's resumed
+  // arm: a PRE-EXISTING values-free watermark at 7 with the victim's
+  // values riding the new settle's first values commit), plus the
+  // both-sides contracts the predicate must preserve: the elision
+  // posture (cover below the floor stands), the legitimate at-floor
+  // derived retirement, above-floor retirement regardless of class, and
+  // the fail-closed unknown-class posture at the floor.
+  // -------------------------------------------------------------------------
+
+  /** A scripted overlay over a fake replica with PER-DOC cover state
+   * ({confirmedSeq, coverClass}), the predicate pins' harness — the same
+   * seams as the trigger-not-relaxation pin above, extended with the
+   * covering commit's class. */
+  const scriptedWitnessOverlay = (options: { floorSeq: number }) => {
+    let nextLocalSeq = 10;
+    const covers = new Map<
+      string,
+      { confirmedSeq: number; coverClass?: CommitClass }
+    >();
+    const replica = {
+      sealNative: (
+        native: { operations: Array<Record<string, unknown>> },
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => {
+        const localSeq = nextLocalSeq++;
+        return {
+          localSeq,
+          commit: {
+            localSeq,
+            // The entry's read basis: one confirmed read at the floor
+            // seq (the setup commit the speculation's reads sit on).
+            reads: {
+              confirmed: [{ id: "of:witness-input", seq: options.floorSeq }],
+              pending: [],
+            },
+            operations: native.operations,
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: (id: string) => ({
+        confirmedSeq: covers.get(id)?.confirmedSeq ?? 0,
+        coverClass: covers.get(id)?.coverClass,
+        pendingLocalSeqs: [] as number[],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+      speculationArrivalObserver: undefined as
+        | ((arrived: readonly { id: string; scope?: string }[]) => void)
+        | undefined,
+    };
+    const watermarkSinks: Array<(value: unknown) => void> = [];
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: (link: { id: string }) => ({
+        sink: (cb: (value: unknown) => void) => {
+          if (link.id === SERVER_EXECUTION_WATERMARK_DOC_ID) {
+            watermarkSinks.push(cb);
+          }
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+    const sealVictim = async (victimId: string) => {
+      const tx = {
+        tx: {
+          sourceAction: { name: "witness-writer" },
+          sealInto: (collector: {
+            sealSpaceCommit: (
+              space: MemorySpace,
+              native: unknown,
+              source: unknown,
+            ) => Promise<unknown>;
+          }) =>
+            collector.sealSpaceCommit(
+              space,
+              {
+                operations: [{
+                  op: "set",
+                  id: victimId,
+                  scope: "user",
+                  value: { value: 1 },
+                }],
+                preconditions: [],
+              },
+              { sourceAction: { name: "witness-writer" } },
+            ).then(() => ({ ok: {} })),
+        },
+      } as unknown as IExtendedStorageTransaction;
+      stampSpeculationRunContext(tx, {
+        actionId: "witness",
+        kind: "derivation",
+      });
+      expect((await destination.seal(tx)).ok).toBeDefined();
+      // The at-seal sweep is a queued microtask; let it run.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    return {
+      destination,
+      replica,
+      sealVictim,
+      setCover: (
+        id: string,
+        cover: { confirmedSeq: number; coverClass?: CommitClass },
+      ) => covers.set(id, cover),
+      pushWatermark: (seq: number) => {
+        for (const sink of watermarkSinks) sink({ seq });
+      },
+      arrive: (id: string) =>
+        replica.speculationArrivalObserver?.([{ id, scope: "user" }]),
+    };
+  };
+
+  it("arrival-witness (B), the NEW-INSTANCE arm (run 5's store shape): an AUTHORED cover at exactly the floor — the client's own setup at 11 — does NOT witness arrival when the values-free advance covers the floor; the derived values commit at 13 does", async () => {
+    const victim = "of:witness-new-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 11 });
+    // The setup commit at 11 wrote the victim's STRUCTURE: an
+    // authored-class confirmed cover at exactly the entry's floor.
+    scripted.setCover(victim, { confirmedSeq: 11, coverClass: "authored" });
+    await scripted.sealVictim(victim);
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    // The values-free advance covers the floor (W ≥ 11) while the
+    // victim's served value is still a wave away. Pre-predicate this
+    // retired the entry on the authored setup cover — the OW33 hole
+    // (the read then saw undefined for 40–260 ms).
+    scripted.pushWatermark(11);
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    // The served derivation lands: a derived-class cover above the
+    // floor. The arrival wake re-sweeps and the entry retires.
+    scripted.setCover(victim, { confirmedSeq: 13, coverClass: "derived" });
+    scripted.arrive(victim);
+    expect(scripted.destination.entryCount(space)).toBe(0);
+    scripted.destination.close();
+  });
+
+  it("arrival-witness (B), the RESUMED-INSTANCE arm (run 1's store shape): a PRIOR session's authored setup cover at the floor plus a PRE-EXISTING values-free watermark does not retire the entry AT SEAL; the new settle's first values commit does", async () => {
+    const victim = "of:witness-resumed-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 7 });
+    // The prior session's setup: an authored confirmed cover at the
+    // floor, already in the replica BEFORE this session speculates —
+    // and the covering watermark already stands (the prior wave's
+    // values-free `watermark→7` commit).
+    scripted.setCover(victim, { confirmedSeq: 7, coverClass: "authored" });
+    await scripted.sealVictim(victim);
+    scripted.pushWatermark(7);
+    // Pre-predicate the entry retired AT SEAL against the pre-existing
+    // cover (run 1's observed shape: entries retired within the seal's
+    // microtask sweep while the victim's values rode the new settle's
+    // FIRST values commit, arriving after the read).
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    // The new settle's first values commit: derived, above the floor.
+    scripted.setCover(victim, { confirmedSeq: 8, coverClass: "derived" });
+    scripted.arrive(victim);
+    expect(scripted.destination.entryCount(space)).toBe(0);
+    scripted.destination.close();
+  });
+
+  it("arrival-witness (B) preserves the ELISION posture: an unchanged authoritative value writes nothing, so the doc's cover stays BELOW the floor and the value-identical echo stands (both sides of the predicate change)", async () => {
+    const victim = "of:witness-elided-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 40 });
+    // The doc's cover is the OLD derived value at 30; the re-run read a
+    // newer input (floor 40) and produced the same output — the server
+    // elides the rewrite, so no cover at/above 40 ever appears.
+    scripted.setCover(victim, { confirmedSeq: 30, coverClass: "derived" });
+    await scripted.sealVictim(victim);
+    scripted.pushWatermark(40);
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    scripted.pushWatermark(50);
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    scripted.destination.close();
+  });
+
+  it("arrival-witness (B) preserves the LEGITIMATE at-floor retirement: a derived-class cover AT the floor — a re-derivation whose run read the already-arrived value at that seq — retires (the case seq-keyed (C) would refuse, stranding chained entries)", async () => {
+    const victim = "of:witness-rederived-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 40 });
+    scripted.setCover(victim, { confirmedSeq: 40, coverClass: "derived" });
+    await scripted.sealVictim(victim);
+    scripted.pushWatermark(40);
+    expect(scripted.destination.entryCount(space)).toBe(0);
+    scripted.destination.close();
+  });
+
+  it("arrival-witness (B) above the floor: ANY confirmed cover strictly above the floor witnesses arrival — class is consulted only at equality (a foreign authored write above the floor retires; the store has spoken past everything this run consumed)", async () => {
+    const victim = "of:witness-above-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 40 });
+    scripted.setCover(victim, { confirmedSeq: 41, coverClass: "authored" });
+    await scripted.sealVictim(victim);
+    scripted.pushWatermark(40);
+    expect(scripted.destination.entryCount(space)).toBe(0);
+    scripted.destination.close();
+  });
+
+  it("arrival-witness (B) fails CLOSED on an unknown class at the floor: a cover whose class the replica does not know (an OFF-arm or pre-predicate frame) does not witness at equality — the standing echo stands, never the undefined read; strictly above the floor it retires as always", async () => {
+    const victim = "of:witness-unknown-victim";
+    const scripted = scriptedWitnessOverlay({ floorSeq: 40 });
+    scripted.setCover(victim, { confirmedSeq: 40 });
+    await scripted.sealVictim(victim);
+    scripted.pushWatermark(40);
+    expect(scripted.destination.entryCount(space)).toBe(1);
+    scripted.setCover(victim, { confirmedSeq: 41 });
+    scripted.arrive(victim);
+    expect(scripted.destination.entryCount(space)).toBe(0);
+    scripted.destination.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The class THREADING (the predicate's plumbing): the replica records
+  // the covering commit's class on its confirmed record — from the
+  // frame's `coverClass` on integrate, preserved across a same-seq
+  // re-upsert without one, dropped when the seq moves without one, and
+  // `authored` for an own commit's promotion — and
+  // `speculationRetirementView` surfaces it to the sweep.
+  // -------------------------------------------------------------------------
+
+  it("class threading: applySessionSync records the frame's coverClass on the confirmed record, preserves it across a same-seq re-upsert without one, and drops it when the seq moves without one; the retirement view surfaces it", async () => {
+    const manager = StorageManager.emulate({ as: aliceSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const replica = runtime.storageManager.open(space).replica as unknown as {
+        applySessionSync(
+          sync: {
+            type: "sync";
+            fromSeq: number;
+            toSeq: number;
+            upserts: Array<Record<string, unknown>>;
+            removes: Array<Record<string, unknown>>;
+          },
+          type: "pull" | "integrate",
+        ): void;
+        speculationRetirementView(
+          id: string,
+          scope?: string,
+        ): { confirmedSeq: number; coverClass?: CommitClass };
+      };
+      const upsert = (
+        seq: number,
+        coverClass?: CommitClass,
+      ) => ({
+        branch: "",
+        id: "of:threading-doc",
+        scope: "space",
+        seq,
+        doc: { value: { n: seq } },
+        ...(coverClass === undefined ? {} : { coverClass }),
+      });
+      const view = () =>
+        replica.speculationRetirementView("of:threading-doc", "space");
+      replica.applySessionSync({
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 5,
+        upserts: [upsert(5, "derived")],
+        removes: [],
+      }, "integrate");
+      expect(view()).toMatchObject({ confirmedSeq: 5, coverClass: "derived" });
+      // A same-seq re-upsert WITHOUT a class (a watch-refresh replay, an
+      // OFF-arm or pre-predicate frame echo) preserves the known class —
+      // the cover is the same commit.
+      replica.applySessionSync({
+        type: "sync",
+        fromSeq: 5,
+        toSeq: 5,
+        upserts: [upsert(5)],
+        removes: [],
+      }, "integrate");
+      expect(view()).toMatchObject({ confirmedSeq: 5, coverClass: "derived" });
+      // A FORWARD move without a class is a different commit: the stale
+      // class must not survive onto it.
+      replica.applySessionSync({
+        type: "sync",
+        fromSeq: 5,
+        toSeq: 6,
+        upserts: [upsert(6)],
+        removes: [],
+      }, "integrate");
+      const moved = view();
+      expect(moved.confirmedSeq).toBe(6);
+      expect(moved.coverClass).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
+  it("class threading: the arrival wake fires when a same-seq frame supplies the class LATE (undefined -> defined) — an entry failed closed at its floor under an unknown class is re-swept when the class arrives, not stranded until an unrelated commit", async () => {
+    const manager = StorageManager.emulate({ as: aliceSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const replica = runtime.storageManager.open(space).replica as unknown as {
+        applySessionSync(
+          sync: {
+            type: "sync";
+            fromSeq: number;
+            toSeq: number;
+            upserts: Array<Record<string, unknown>>;
+            removes: Array<Record<string, unknown>>;
+          },
+          type: "pull" | "integrate",
+        ): void;
+        speculationArrivalObserver:
+          | ((docs: Array<{ id: string; scope?: string }>) => void)
+          | undefined;
+      };
+      const upsert = (seq: number, coverClass?: CommitClass) => ({
+        branch: "",
+        id: "of:wake-doc",
+        scope: "space",
+        seq,
+        doc: { value: { n: seq } },
+        ...(coverClass === undefined ? {} : { coverClass }),
+      });
+      const sync = (up: Record<string, unknown>) =>
+        replica.applySessionSync({
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 5,
+          upserts: [up],
+          removes: [],
+        }, "integrate");
+      // The doc integrates classless BEFORE the observer exists (the
+      // mixed window: a pre-predicate frame, or one from before this
+      // client learned the class).
+      sync(upsert(5));
+      const wakes: Array<Array<{ id: string; scope?: string }>> = [];
+      replica.speculationArrivalObserver = (docs) => wakes.push(docs);
+      // A same-seq echo still without a class: nothing changed, no wake.
+      sync(upsert(5));
+      expect(wakes.length).toBe(0);
+      // The class arrives LATE at the SAME seq: the predicate's inputs
+      // changed, so the arrival wake fires (undefined -> defined).
+      sync(upsert(5, "derived"));
+      expect(wakes.length).toBe(1);
+      expect(wakes[0]).toEqual([{ id: "of:wake-doc", scope: "space" }]);
+      // Already known: a repeat carries nothing new, no second wake.
+      sync(upsert(5, "derived"));
+      expect(wakes.length).toBe(1);
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
+  it("class threading: an own commit's promotion records `authored` (the transact admission class), end to end through a real server round trip", async () => {
+    const alice = openClient(aliceSigner);
+    const doc = alice.getCell<{ value: number }>(
+      space,
+      "threading-own-doc",
+      undefined,
+    );
+    await doc.sync();
+    {
+      const tx = alice.edit();
+      doc.withTx(tx).set({ value: 7 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.storageManager.synced();
+    const view = (alice.storageManager.open(space).replica as unknown as {
+      speculationRetirementView(
+        id: string,
+        scope?: string,
+      ): { confirmedSeq: number; coverClass?: CommitClass };
+    }).speculationRetirementView(
+      doc.getAsNormalizedFullLink().id,
+      "space",
+    );
+    expect(view.confirmedSeq).toBeGreaterThan(0);
+    expect(view.coverClass).toBe("authored");
   });
 });

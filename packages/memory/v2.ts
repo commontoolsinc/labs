@@ -1037,6 +1037,10 @@ export type EntitySnapshot = {
   scopeKey?: ScopeKey;
   seq: number;
   document: EntityDocument | null;
+  /** As on {@link SessionSyncUpsert}: the covering commit's class,
+   * populated only under the server-execution flag and only for
+   * `seq > 0` (a seq-0 snapshot has no covering commit). */
+  coverClass?: CommitClass;
 };
 
 export type GraphQueryResult = {
@@ -1098,6 +1102,21 @@ export type SessionSyncUpsert = {
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
+  /**
+   * The commit CLASS of the covering commit — the commit whose write
+   * produced this snapshot's `seq` (`commit.seq` is unique, and every
+   * revision's seq IS its commit's seq, so the seq names exactly one
+   * commit). Consumed by the speculation overlay's arrival-witness
+   * predicate (speculation.md §4, RULED 2026-08-22): a cover AT an
+   * entry's floor witnesses the authoritative derivation's arrival only
+   * when it is derived-class — an authored structure write at the floor
+   * is the entry's own setup, not the derivation. Populated only under
+   * the server-execution flag; absent on the OFF arm (the OFF wire is
+   * byte-identical), on pre-predicate servers, and on `seq: 0` entries
+   * (no covering commit). Absence reads as "class unknown", which never
+   * witnesses arrival at the floor.
+   */
+  coverClass?: CommitClass;
 };
 
 export type SessionSyncRemove = {

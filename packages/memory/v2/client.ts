@@ -1513,6 +1513,13 @@ export class WatchView {
             : {}),
           seq: upsert.seq,
           document: upsert.doc ?? null,
+          // `upsert.coverClass` is deliberately NOT cached here: no
+          // WatchView consumer reads it (the arrival-witness predicate's
+          // consumer is the runner replica's confirmed record, which
+          // integrates frames directly), and a correct cache would need
+          // the replica's same-seq-preserve rule — a classless refresh
+          // snapshot would otherwise CLEAR a known class. Dead weight
+          // until a real consumer arrives with the rule.
         },
       );
     }

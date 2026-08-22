@@ -128,8 +128,8 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns and runner still carry
-  // Phase-7 entries).
+  // The shell suite's list is empty (patterns carries the one remaining
+  // STEP entry; runner and runtime-client are empty since their lifts).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
@@ -266,25 +266,36 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list holds exactly the pattern-and-data-persistence entry — ROOT-CAUSED by the OW33 triage (2026-08-22): the speculation overlay's arrival-gate witness hole, a ~40% flake, awaiting the arrival-witness fork ruling — printed loudly, never silent", async () => {
+Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and NO file-level skip remains in ANY suite", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
-  assertEquals(out, [
-    "--ignore=integration/pattern-and-data-persistence.test.ts",
+  // No entries: no --ignore flag on stdout…
+  assertEquals(out, []);
+  // …the filter shape keeps the file…
+  const { files, skipped } = serverExecutionOnFilterFiles("runner", [
+    "./integration/pattern-and-data-persistence.test.ts",
   ]);
-  assertMatch(
-    err[0],
-    /runner: SKIP integration\/pattern-and-data-persistence\.test\.ts \(until phase-7\)/,
-  );
-  const [entry] = SERVER_EXECUTION_ON_SKIPS.runner;
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 1);
-  assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /OW33 triage \(2026-08-22/);
-  assertMatch(entry.reason, /ARRIVAL GATE/);
-  assertMatch(entry.reason, /ow33-arrival-witness-fork\.md/);
-  assertMatch(entry.reason, /ow33-triage-report\.md/);
-  assertMatch(entry.reason, /greens 10\/10/);
-  assertMatch(entry.reason, /flip PR needs this list EMPTY/);
+  assertEquals(files, ["./integration/pattern-and-data-persistence.test.ts"]);
+  assertEquals(skipped, []);
+  // …and the report says so loudly.
+  assertMatch(err[0], /runner: no skips — full suite runs\./);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 0);
+  // The lift retired the LAST file-level skip anywhere: every remaining
+  // entry across every suite is a STEP entry (default-app's reload step
+  // under OW45 is the one survivor) — pinned so a re-skip of any FILE
+  // is a deliberate entry, never a leftover, and the flip PR's
+  // list-EMPTY bar now hangs on that one step alone.
+  for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
+    if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
+    assertEquals(
+      SERVER_EXECUTION_ON_SKIPS[suite].filter((skip) =>
+        skip.step === undefined
+      ),
+      [],
+      `${suite}: no FILE-level skip may remain (the arrival-witness lift ` +
+        "cleared the last one)",
+    );
+  }
 });
 
 Deno.test("main: populated lists emit the --ignore flag on stdout", async () => {

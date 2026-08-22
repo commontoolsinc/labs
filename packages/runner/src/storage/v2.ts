@@ -22,6 +22,7 @@ import {
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
+  type CommitClass,
   type CommitPrecondition,
   DEFAULT_BRANCH,
   type DocumentPath,
@@ -353,6 +354,16 @@ type PendingVersion =
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+  /**
+   * The class of the covering commit — the commit whose write produced
+   * `seq` (speculation.md §4's arrival-witness predicate, RULED
+   * 2026-08-22). From the frame's `coverClass` on integrate (populated
+   * by flag-ON servers), or recorded locally at an own commit's
+   * promotion. Undefined when unknown (an OFF-arm or pre-predicate
+   * frame, or `seq` 0) — the sweep treats unknown as never witnessing
+   * arrival at an entry's floor.
+   */
+  coverClass?: CommitClass;
 };
 
 type PendingMaterializedPrefix = MaterializedVersion & {
@@ -427,10 +438,12 @@ const pendingVersion = (
 const confirmedVersion = (
   seq: number,
   value: EntityDocument | undefined,
+  coverClass?: CommitClass,
 ): ConfirmedVersion => ({
   seq,
   value,
   transactionValue: UNCACHED_TRANSACTION_VALUE,
+  ...(coverClass === undefined ? {} : { coverClass }),
 });
 
 const transactionValueForVersion = (
@@ -3080,19 +3093,27 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   /** ISpaceReplica.speculationRetirementView (server-execution v2
-   * Phase 2, speculation.md §4): the doc's confirmed seq plus every
-   * pending layer's localSeq — the overlay destination's retirement
-   * inputs. */
+   * Phase 2, speculation.md §4): the doc's confirmed seq — with the
+   * covering commit's class where known (the arrival-witness predicate,
+   * RULED 2026-08-22) — plus every pending layer's localSeq: the
+   * overlay destination's retirement inputs. */
   speculationRetirementView(
     id: URI,
     scope?: CellScope,
-  ): { confirmedSeq: number; pendingLocalSeqs: number[] } {
+  ): {
+    confirmedSeq: number;
+    coverClass?: CommitClass;
+    pendingLocalSeqs: number[];
+  } {
     const record = this.#docs.get(this.#docKeyOf({ id, scope }));
     if (record === undefined) {
       return { confirmedSeq: 0, pendingLocalSeqs: [] };
     }
     return {
       confirmedSeq: record.confirmed.seq,
+      ...(record.confirmed.coverClass === undefined
+        ? {}
+        : { coverClass: record.confirmed.coverClass }),
       pendingLocalSeqs: [
         ...new Set(record.pending.map((entry) => entry.localSeq)),
       ],
@@ -3335,7 +3356,14 @@ class SpaceReplica implements ISpaceReplica {
         const entry = this.#parkedAccepts.get(parked);
         if (entry === undefined) continue;
         this.#parkedAccepts.delete(parked);
-        this.confirmPending(parked, entry.operations, entry.applied);
+        // Parked accepts are pushed transact accepts (sealed commits
+        // never park — settleSealedCommit confirms directly): authored.
+        this.confirmPending(
+          parked,
+          entry.operations,
+          entry.applied,
+          "authored",
+        );
         entry.settled.resolve();
       }
     }
@@ -3959,11 +3987,20 @@ class SpaceReplica implements ISpaceReplica {
       // per-doc-dropped seals already rely on (wave.ts §3d). Pushed
       // (socket) commits keep full settleAccept semantics — remote
       // parking is untouched.
-      this.confirmPending(localSeq, operations, {
-        seq: v.committed.seq,
-        branch: commit.branch ?? DEFAULT_BRANCH,
-        revisions: [],
-      }, identity);
+      // The cover class: a sealed native commit is the co-hosted
+      // executor's wave commit (speculative seals resolve withdrawn and
+      // never reach here) — the wave admission class, derived.
+      this.confirmPending(
+        localSeq,
+        operations,
+        {
+          seq: v.committed.seq,
+          branch: commit.branch ?? DEFAULT_BRANCH,
+          revisions: [],
+        },
+        "derived",
+        identity,
+      );
       return { ok: {} };
     } finally {
       this.settleInFlightCommit(localSeq);
@@ -5473,12 +5510,36 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       const previousConfirmedSeq = record.confirmed.seq;
+      const previousCoverClass = record.confirmed.coverClass;
+      // The covering commit's class (speculation.md §4's arrival-witness
+      // predicate): the frame's annotation when it carries one; on a
+      // SAME-SEQ re-upsert without one (a watch-refresh replay, an
+      // OFF-arm or pre-predicate frame echo of a commit the promotion
+      // path already classed) the cover is the same commit, so the known
+      // class survives. A forward move without one is a different
+      // commit — the stale class must not ride onto it.
+      const coverClass = upsert.coverClass ??
+        (upsert.seq === previousConfirmedSeq ? previousCoverClass : undefined);
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
+        coverClass,
       );
       record.materialized = undefined;
-      if (arrived !== undefined && upsert.seq > previousConfirmedSeq) {
+      // The arrival wake fires on a FORWARD move — and on a same-seq
+      // frame whose class arrives LATE (undefined -> defined): an entry
+      // failed CLOSED at its floor under an unknown class (a mixed-window
+      // frame from a pre-predicate server, or one integrated before this
+      // client learned the class) is otherwise never re-swept — the
+      // predicate's inputs changed with no covering wake, and the entry
+      // stands until an unrelated commit sweeps it.
+      if (
+        arrived !== undefined &&
+        (upsert.seq > previousConfirmedSeq ||
+          (upsert.seq === previousConfirmedSeq &&
+            previousCoverClass === undefined &&
+            coverClass !== undefined))
+      ) {
         arrived.push({
           id: upsert.id as URI,
           scope: upsert.scope,
@@ -6082,7 +6143,8 @@ class SpaceReplica implements ISpaceReplica {
       !parkable || operations.length === 0 ||
       this.#caughtUpLocalSeq >= localSeq
     ) {
-      this.confirmPending(localSeq, operations, applied);
+      // A pushed transact accept: the session admission class, authored.
+      this.confirmPending(localSeq, operations, applied, "authored");
       return Promise.resolve();
     }
     const settled = Promise.withResolvers<void>();
@@ -6117,7 +6179,8 @@ class SpaceReplica implements ISpaceReplica {
     for (const parked of due) {
       const entry = this.#parkedAccepts.get(parked)!;
       this.#parkedAccepts.delete(parked);
-      this.confirmPending(parked, entry.operations, entry.applied);
+      // Parked accepts are pushed transact accepts: authored.
+      this.confirmPending(parked, entry.operations, entry.applied, "authored");
       entry.settled.resolve();
     }
   }
@@ -6126,6 +6189,12 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
+    // The commit class the promoted cover records (speculation.md §4's
+    // arrival-witness predicate): every promotion here is of a commit
+    // THIS replica issued, so its admission class is knowable locally —
+    // `authored` for a pushed transact accept, `derived` for a sealed
+    // wave commit (settleSealedCommit's arm on a serving runtime).
+    coverClass: CommitClass,
     // The identity the operations were sealed under (F1a's sealed-commit
     // confirm; a pushed commit's is the replica's own).
     identity?: ScopeKeyIdentity,
@@ -6198,6 +6267,7 @@ class SpaceReplica implements ISpaceReplica {
           promoted = confirmedVersion(
             applied.seq,
             prefix.value,
+            coverClass,
           );
           promoted.transactionValue = prefix.transactionValue;
           if (cache.confirmed === previousConfirmed) {
@@ -6211,6 +6281,7 @@ class SpaceReplica implements ISpaceReplica {
               id,
               scope,
             }),
+            coverClass,
           );
         }
       }
