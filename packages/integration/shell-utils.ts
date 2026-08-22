@@ -429,6 +429,13 @@ export class ShellIntegration {
     }
     if (this.#config.failOnConsoleError) {
       const offending = this.#errorLogs.filter((msg) =>
+        // [NDT] triage aid: with FORWARD_WORKER_CONSOLE=1 the worker's
+        // console.error lines reach the page console for OBSERVATION only.
+        // The console-error gate never saw them before forwarding existed,
+        // so they must not change a run's verdict — exclude the forwarded
+        // ("[worker]"-prefixed) lines to keep verdicts comparable.
+        !(Deno.env.get("FORWARD_WORKER_CONSOLE") === "1" &&
+          msg.startsWith("[worker]")) &&
         !this.#config.allowedConsoleErrors.some((pattern) =>
           typeof pattern === "string"
             ? msg.includes(pattern)
