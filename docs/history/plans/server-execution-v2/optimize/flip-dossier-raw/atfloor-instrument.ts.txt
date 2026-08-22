@@ -1,4 +1,6 @@
-// POST-RUN ANNOTATION (2026-08-22, review round). The code below is
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run
+// POST-RUN ANNOTATION (2026-08-22, review round; the shebang above stays
+// on line 1 so the snapshot remains directly runnable). The code below is
 // byte-verbatim the revision that produced atfloor-instrument-on.log (8 ON
 // trials) and the 2-trial OFF control. Two hardening gaps found in review
 // are FIXED in the live worktree copy
@@ -10,8 +12,10 @@
 //     the measured runs: every counted trial's FINAL value was 2, the
 //     click's own consequence, which a rejected click cannot produce;
 // (2) a trial that throws skips its dispose/close cleanup (try/finally in
-//     the live copy) - zero counted trials errored in the measured runs.
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run
+//     the live copy) - no trial entered the instrument's catch path in the
+//     measured runs; trial 8 logged one non-fatal SES_UNHANDLED_REJECTION
+//     (broken schema ref), recorded verbatim in the log file and quoted in
+//     the dossier's SS3.
 // UNTRACKED measurement instrument (flip-readiness dossier, OW33's named
 // residual): the resumed counter-click revert-window measurement.
 //

@@ -283,7 +283,7 @@ counters: ON `commitConflicts`/`commitReverts`/`scheduleRunErrors`
 | post-lockdown message | 50 / 39 / 3 | 182 / 196 | 5 / 97 |
 | room propagation (first → all) | 10 / 3 / 3 | 21 / 291 | 12 / 537 |
 
-Flagged precisely (§4 note 6): three ON micro-steps W4 measured at
+Flagged precisely (§4 note 7): three ON micro-steps W4 measured at
 3–5 ms now read 130–200 ms (message, lockdown, post-lockdown). The
 arrival MEDIANS (above) improved, so this is a step-level shape
 change, not a journey regression; the candidate mechanism — the
@@ -373,7 +373,8 @@ figure), `demandRootEnters` 223, leaves 0, `demandPassMs` **9.0/9.0
 ms per pass** (W4 4.8–11.3); `pushGrowthWakes` 134–161 vs
 `watchWakes` 247–251. **No `walkRuns` key in any run's stats**
 (asserted over the full JSON per run). `demandArrivals` 54/44 (chat),
-20–21 (lunch), 0 (note; the OW33-era note shape). `warmRequests` 0
+25/20/19 (lunch), 0 (note; the OW33-era note shape — W4 read the same
+zero). `warmRequests` 0
 everywhere (no park in these journeys).
 
 **OW37 re-read** (derivedCommits / (authoredSeen − effectAcks), raw
