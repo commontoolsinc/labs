@@ -17,12 +17,11 @@ Draft formal spec — the realm-crossing counterpart to
 
 This format is built around one boundary: worker IPC, where a value is
 constructed, handed to a transport that clones it, decoded on the far side,
-and discarded.
-Everything it asks of a transport is Section 1.1, and what it declines to
-offer is Section 2.4: a payload is readable only by a build implementing the
-same format version. A value that must outlive the build that wrote it, or
-that must be read by something holding no structured-clone channel to the
-writer, uses the JSON encoding.
+and discarded. Everything it asks of a transport is Section 1.1, and what it
+declines to offer is Section 2.4: a payload is readable only by a build
+implementing the same format version. A value that must outlive the build
+that wrote it, or that must be read through a transport not meeting
+Section 1.1, uses the JSON encoding.
 
 Those are separate questions, and Section 1.2 turns on their being separate.
 A durable structured-clone store meets Section 1.1 in full while placing an
