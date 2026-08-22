@@ -15,19 +15,27 @@ Draft formal spec — the realm-crossing counterpart to
 
 ## 1. Overview
 
-This format is built around one boundary: worker IPC, where a value is
-constructed, handed to a transport that clones it, decoded on the far side,
-and discarded. Everything it asks of a transport is Section 1.1, and what it
-declines to offer is Section 2.4: a payload is readable only by a build
-implementing the same format version. A value that must outlive the build
-that wrote it, or that must be read through a transport not meeting
+This format is built around one kind of boundary: a **self-dealing** one,
+internal to a runtime, where whatever encodes a value is what decodes it and
+no other party reads what passes between. Nothing crossing such a boundary is
+owed interoperability, which is what lets the format be as narrow as it is.
+
+Worker IPC is the case it was written for: a value constructed, handed to a
+transport that clones it, decoded on the far side, and discarded. A durable
+store that a runtime writes and later reads back (Section 1.2) is the same
+boundary with time in it, and is the reason the format states its
+requirements of a transport rather than of a mechanism. A value that crosses
+to another party, or that must be read through a transport not meeting
 Section 1.1, uses the JSON encoding.
 
-Those are separate questions, and Section 1.2 turns on their being separate.
-A durable structured-clone store meets Section 1.1 in full while placing an
-unbounded gap between encode and decode, so its two ends need not be the same
-build. Such a store may carry this format under the conditions of Section 1.2,
-and not otherwise.
+Time is what the two instances do not share, and Section 1.2 turns on the
+difference. Section 1.1 is what a transport must preserve; Section 2.4 is
+what the format declines to offer, namely a payload readable by a build other
+than the one that wrote it. Worker IPC closes the gap so completely that the
+second never arises. A durable store meets Section 1.1 in full while leaving
+the gap unbounded, so its two ends need not be the same build — which is what
+Section 1.2's conditions are about, and why a value that must outlive the
+build that wrote it belongs in the JSON encoding.
 
 The two formats divide along what their transports carry. JSON reaches a
 `string`, so every type JavaScript has and JSON lacks — `bigint`, `undefined`,
@@ -74,16 +82,16 @@ The structured clone algorithm provides all three.
 
 ### 1.2 Self-Dealing Storage
 
-A **self-dealing** use of this format writes a value to a durable store and
-reads it back later from the same origin, with no other party in it. Such a
-use is admitted, and `IndexedDB` is the case it is admitted for: that store
-serializes with the structured clone algorithm, so the same mechanism that
+Storage is the self-dealing boundary with time in it: a runtime writes a
+value to a durable store and reads it back later, with no other party in it.
+`IndexedDB` is the case in hand, and it qualifies by the same mechanism worker
+IPC does — that store serializes with the structured clone algorithm, so what
 satisfies Section 1.1 for `postMessage()` satisfies it here.
 
-What the gap costs is Section 2.4. A durable payload can outlive the build
+What the time costs is Section 2.4. A durable payload can outlive the build
 that wrote it, so a reader must expect that refusal rather than treat it as
-unreachable. Three conditions follow, and a use meeting all three is
-self-dealing:
+unreachable. Three conditions follow, and a store meeting all three stays
+within this boundary:
 
 1. **The stored value must be reconstructible from something the store does
    not hold.** This is the condition that decides the question, because it is
