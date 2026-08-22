@@ -51,8 +51,8 @@ the memo key, and each (query, reader) pair materializes its own
 cleared result cell, cleared where the read is served — no two
 readers ever share a result cell. The reader is taken at the
 result's granularity (RULED 2026-08-22): a cleared result whose
-scope is SUB-USER — a session-scoped db narrows it below the
-clearance-forced `user` floor — joins the run's SESSION to the
+scope is `session` (a session-scoped db narrows the result below
+the clearance-forced `user` floor) joins the run's SESSION to the
 request identity alongside the user, one cleared cell per
 query-and-reader-at-matching-granularity, so two sessions of one
 user share neither hash nor effect key; at `user` scope the

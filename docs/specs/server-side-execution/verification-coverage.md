@@ -5969,7 +5969,7 @@ supply; OW29/OW32/OW34 closed):
     session-scoped db's cleared result MUST stay session-scoped (a
     user clamp would memo-collide two session dbs' results in one
     cell); instead the SESSION JOINS the request identity for
-    sub-user-scoped cleared results — one cleared cell per
+    session-scoped cleared results — one cleared cell per
     query-and-reader-at-matching-granularity. The build
     (sqlite-builtins.ts): the hash's `clearanceReader` component
     carries `{user, session}` when the cleared result's scope is

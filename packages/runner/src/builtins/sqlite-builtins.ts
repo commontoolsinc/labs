@@ -805,7 +805,7 @@ export function sqliteQuery(
     const servedRun = runContext !== undefined;
     const runIdentity = runContext?.scopeKeyIdentity;
     const actingReader = sqliteRunActingPrincipal(runtime, tx);
-    // A SUB-USER-scoped cleared result joins the run's SESSION to the
+    // A session-scoped cleared result joins the run's SESSION to the
     // request identity alongside the user (RULED 2026-08-22,
     // verification-coverage.md OW53): one cleared cell per
     // query-and-reader-at-matching-granularity. The session rides the
