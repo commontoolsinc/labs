@@ -1,4 +1,4 @@
-import { Identity } from "@commonfabric/identity";
+import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { Cell } from "@commonfabric/runner";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 
@@ -95,7 +95,7 @@ export class WorkerController extends EventTarget {
       await this.exec(WorkerIPCMessageType.Initialize, {
         did: this.did,
         toolshedUrl: this.toolshedUrl,
-        rawIdentity: this.identity.serialize(),
+        encodedIdentity: realmValueFromKeyPair(this.identity.keyPair),
         experimental: this.experimental,
       });
       this.state = WorkerState.Ready;

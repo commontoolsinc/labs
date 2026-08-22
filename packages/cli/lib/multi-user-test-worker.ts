@@ -27,10 +27,11 @@
  * frame stack).
  */
 
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import {
   createSession,
   Identity,
-  type KeyPairRaw,
+  keyPairFromRealmValue,
 } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -269,7 +270,12 @@ const handlers: Record<
    * participant pattern, and return the classified step list.
    */
   async init(args) {
-    const identity = await Identity.deserialize(args.rawIdentity as KeyPairRaw);
+    const identity = await Identity.fromKeyPair(
+      keyPairFromRealmValue(
+        args.identity as RealmEncodedValue,
+        "Initialization `identity`",
+      ),
+    );
     const session = await createSession({
       identity,
       spaceName: args.spaceName as string,
