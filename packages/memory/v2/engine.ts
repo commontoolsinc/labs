@@ -4,13 +4,6 @@ import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
-
-// The canonical tagged-hash spelling `taggedHashStringOf` produces: the
-// `fid1` algorithm tag ("Fabric ID, Version 1", SHA-256) and 43 chars of
-// unpadded base64url digest. The envelope-reference guard matches this
-// exactly — an unknown future tag is not validated rather than rejected,
-// the same fail-open-for-unreadable posture the guard's comment states.
-const TAGGED_HASH_PATTERN = /^fid1:[A-Za-z0-9_-]{43}$/;
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
@@ -3553,15 +3546,15 @@ const applyCommitTransaction = (
   // through `cid:<schemaHash>`, so a commit that lands metadata without
   // its document creates the same broken closure a dangling link `$ref`
   // would. Only the reserved root `cfc` member is a metadata position —
-  // user data lives under `value` — and only a WELL-FORMED tagged hash is
-  // a reference: the reader fails closed on anything else, so a malformed
-  // string is unreadable rather than unbacked, and validating it would
-  // reject documents (test seeds among them) that never resolved anyway.
+  // user data lives under `value` — and ANY non-empty string there is
+  // the reference: which spellings a runner mints is not this boundary's
+  // domain, so it polices backing, not format. A spelling no content can
+  // verify against is simply unbackable, and a commit naming it refuses
+  // here rather than reading as unreadable later.
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
     if (metadata === null || typeof metadata !== "object") return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
-    if (typeof schemaHash !== "string") return;
-    if (!TAGGED_HASH_PATTERN.test(schemaHash)) return;
+    if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
     requiredSchemaRefs.add(schemaHash);
   };
   for (const [opIndex, operation] of commit.operations.entries()) {

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -97,6 +101,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
     const sourceId = parseLink(
       runtime.getCell(sourceSpace, name, undefined, seed).getAsLink(),
     ).id!;
+    writeSeedEnvelopeDoc(seed, sourceSpace);
     seed.writeOrThrow({
       space: sourceSpace,
       scope: "space",
@@ -106,7 +111,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       value: { secret: "classified", plain: "public" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [
@@ -586,6 +591,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         runtime.getCell(spaceA, "space-atom-source", undefined, seed)
           .getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, spaceA);
       seed.writeOrThrow({
         space: spaceA,
         scope: "space",
@@ -595,7 +601,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         value: { shared: "v" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -681,6 +687,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       const sourceId = parseLink(
         runtime.getCell(spaceB, name, undefined, seed).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, spaceB);
       seed.writeOrThrow({
         space: spaceB,
         scope: "space",
@@ -690,7 +697,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         value: { secret: "classified" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

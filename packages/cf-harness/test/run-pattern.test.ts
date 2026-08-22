@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
@@ -678,11 +682,12 @@ describe("run-pattern", () => {
           seed,
         );
         const sourceId = sourceCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, space);
         seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
           value: { secret: "s3cr3t", amount: 2 },
           cfc: {
             version: 1,
-            schemaHash: "seed-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -749,6 +754,7 @@ describe("run-pattern", () => {
           seed,
         );
         const sourceId = sourceCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, space);
         seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
           value: {
             expenses: [
@@ -758,7 +764,7 @@ describe("run-pattern", () => {
           },
           cfc: {
             version: 1,
-            schemaHash: "seed-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [
@@ -841,11 +847,12 @@ describe("run-pattern", () => {
             seed,
           );
           const id = cell.getAsNormalizedFullLink().id;
+          writeSeedEnvelopeDoc(seed, space);
           seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
             value: { description, amount: i + 1 },
             cfc: {
               version: 1,
-              schemaHash: "seed-schema",
+              schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
               labelMap: {
                 version: 1,
                 entries: [{

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -53,6 +57,7 @@ describe("CFC flow labels (default transition)", () => {
           },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -62,7 +67,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -168,6 +173,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -177,7 +183,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -285,6 +291,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -294,7 +301,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -391,6 +398,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -400,7 +408,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{ path: ["secret"], label: { confidentiality: ["x"] } }],
@@ -490,6 +498,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -499,7 +508,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -657,6 +666,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -666,7 +676,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -747,6 +757,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -756,7 +767,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -819,6 +830,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -828,7 +840,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -918,6 +930,7 @@ describe("CFC flow labels (default transition)", () => {
           { type: "object", properties: { secret: { type: "string" } } },
         ).getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -927,7 +940,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

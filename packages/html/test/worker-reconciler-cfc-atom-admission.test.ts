@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
@@ -52,6 +56,7 @@ Deno.test("worker reconciler CFC atom admission", async (t) => {
       tx,
     );
     const secretLink = secret.getAsNormalizedFullLink();
+    writeSeedEnvelopeDoc(tx, signer.did());
     tx.writeOrThrow({
       space: signer.did(),
       id: secretLink.id!,
@@ -61,7 +66,7 @@ Deno.test("worker reconciler CFC atom admission", async (t) => {
       value: "Sensitive diagnosis: migraine",
       cfc: {
         version: 1,
-        schemaHash: "test-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

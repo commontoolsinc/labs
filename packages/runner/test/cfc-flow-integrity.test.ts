@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -50,11 +54,12 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
     const seed = runtime.edit();
     const cell = runtime.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
       value: { n: 1 },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { integrity } }],
@@ -158,11 +163,12 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
       const seed = runtime.edit();
       const bCell = runtime.getCell(space, "flow-wl-b", undefined, seed);
       const bId = bCell.getAsNormalizedFullLink().id;
+      writeSeedEnvelopeDoc(seed, space);
       seed.writeOrThrow({ space, scope: "space", id: bId, path: [] }, {
         value: { n: 2 },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{ path: [], label: { confidentiality: ["plain"] } }],

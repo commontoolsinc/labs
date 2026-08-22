@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -185,11 +189,12 @@ describe("CFC declared observation classes (C5)", () => {
       const seed = rt.edit();
       const cell = rt.getCell(space, "dobs-shape-secret", undefined, seed);
       const id = cell.getAsNormalizedFullLink().id;
+      writeSeedEnvelopeDoc(seed, space);
       seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
         value: { n: 1 },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{ path: [], label: { confidentiality: ["secret"] } }],

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -96,11 +100,12 @@ const seedLabeledDoc = async (
   const seed = runtime.edit();
   const cell = runtime.getCell(space, id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
+  writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow({ space, id: docId, type: "application/json", path: [] }, {
     value,
     cfc: {
       version: 1,
-      schemaHash: `seed-${id}`,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: { version: 1, entries },
     },
   });

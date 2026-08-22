@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -174,6 +178,7 @@ describe("PatternManager program persistence", () => {
       undefined,
       seed,
     );
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       id: sourceCell.getAsNormalizedFullLink().id,
@@ -183,7 +188,7 @@ describe("PatternManager program persistence", () => {
       value: sourceCell.get(),
       cfc: {
         version: 1,
-        schemaHash: "confidential-pattern-source",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -51,6 +55,7 @@ const seedRecord = async (runtime: Runtime, name: string) => {
     seed,
   );
   const sourceId = sourceCell.getAsNormalizedFullLink().id;
+  writeSeedEnvelopeDoc(seed, signer.did());
   seed.writeOrThrow({
     space: signer.did(),
     scope: "space",
@@ -60,7 +65,7 @@ const seedRecord = async (runtime: Runtime, name: string) => {
     value: { description: "private note", amount: 12 },
     cfc: {
       version: 1,
-      schemaHash: "seed-schema",
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: {
         version: 1,
         entries: [{

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -18,10 +22,13 @@ const signer = await Identity.fromPassphrase(
 // bypassing the commit-boundary derivation + mint-gating (S4) entirely. Only the
 // runtime's own persistence (inside prepareBoundaryCommit's privileged scope)
 // may write there; a non-privileged ["cfc"] write must fail closed in enforce
-// mode and surface a diagnostic in observe.
+// mode and surface a diagnostic in observe. The forgery is the write PATH, not
+// the hash: it names the backed seed document so the observe/disabled arms
+// reach their commit outcome instead of refusing at the storage boundary for
+// an unbacked schema reference.
 const forgedMetadata = {
   version: 1,
-  schemaHash: "forged",
+  schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
   labelMap: {
     version: 1,
     entries: [{
@@ -84,6 +91,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id,
@@ -232,6 +240,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id,
@@ -298,6 +307,7 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Mirror seedPrivilegedCfc: read the current doc, then write the whole
       // envelope at path [] with the cfc record embedded.
       const docAddress = {

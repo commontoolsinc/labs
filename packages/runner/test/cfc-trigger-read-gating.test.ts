@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -393,6 +397,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
           seed,
         );
         const srcId = srcCell.getAsNormalizedFullLink().id;
+        writeSeedEnvelopeDoc(seed, signer.did());
         seed.writeOrThrow({
           space: signer.did(),
           scope: "space",
@@ -402,7 +407,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
           value: "data",
           cfc: {
             version: 1,
-            schemaHash: "seed-h5-ri",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{

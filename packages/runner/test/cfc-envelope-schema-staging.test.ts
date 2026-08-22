@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -32,6 +36,7 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
       runtime.getCell(space, "cfc-envelope-staging-source").getAsLink(),
     ).id!;
     const seed = runtime.edit();
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({
       space,
       scope: "space",
@@ -41,7 +46,7 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
       value: { secret: "classified" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [

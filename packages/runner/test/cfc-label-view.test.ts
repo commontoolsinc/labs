@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -241,6 +245,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -250,7 +255,7 @@ describe("CFC label view helpers", () => {
         value: "labeled content",
         cfc: {
           version: 1,
-          schemaHash: "test-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -295,6 +300,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -304,7 +310,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared", details: "restricted" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -328,6 +334,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -339,7 +346,7 @@ describe("CFC label view helpers", () => {
         },
         cfc: {
           version: 1,
-          schemaHash: "target-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -410,6 +417,7 @@ describe("CFC label view helpers", () => {
       );
       target.set({ inner: source } as never);
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -417,7 +425,7 @@ describe("CFC label view helpers", () => {
         path: ["cfc"],
       }, {
         version: 1,
-        schemaHash: "target-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{
@@ -510,6 +518,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -519,7 +528,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared", details: "restricted" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -543,6 +552,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -552,7 +562,7 @@ describe("CFC label view helpers", () => {
         value: source.getAsLink(),
         cfc: {
           version: 1,
-          schemaHash: "target-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -678,6 +688,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -687,7 +698,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -705,6 +716,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -714,7 +726,7 @@ describe("CFC label view helpers", () => {
         value: source.getAsLink(),
         cfc: {
           version: 1,
-          schemaHash: "target-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -765,6 +777,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -774,7 +787,7 @@ describe("CFC label view helpers", () => {
         value: { title: "as cell" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -796,6 +809,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -805,7 +819,7 @@ describe("CFC label view helpers", () => {
         value: source.getAsLink(),
         cfc: {
           version: 1,
-          schemaHash: "target-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -855,6 +869,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -864,7 +879,7 @@ describe("CFC label view helpers", () => {
         value: { a: "first", b: "second" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -933,6 +948,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -942,7 +958,7 @@ describe("CFC label view helpers", () => {
         value: {},
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -970,6 +986,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const targetLink = parseLink(target.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
@@ -979,7 +996,7 @@ describe("CFC label view helpers", () => {
         value: source.getAsLink(),
         cfc: {
           version: 1,
-          schemaHash: "target-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1042,6 +1059,7 @@ describe("CFC label view helpers", () => {
           [secondLink, { title: "second" }, "authored-second"],
         ] as const
       ) {
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: link.id!,
@@ -1051,7 +1069,7 @@ describe("CFC label view helpers", () => {
           value,
           cfc: {
             version: 1,
-            schemaHash: "item-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -1070,6 +1088,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const listLink = parseLink(list.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: listLink.id!,
@@ -1079,7 +1098,7 @@ describe("CFC label view helpers", () => {
         value: [first.getAsLink(), second.getAsLink()],
         cfc: {
           version: 1,
-          schemaHash: "list-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1146,6 +1165,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -1155,7 +1175,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1173,6 +1193,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const listLink = parseLink(list.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: listLink.id!,
@@ -1182,7 +1203,7 @@ describe("CFC label view helpers", () => {
         value: [source.getAsLink(), source.getAsLink()],
         cfc: {
           version: 1,
-          schemaHash: "list-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1264,6 +1285,7 @@ describe("CFC label view helpers", () => {
         ] as const
       ) {
         const link = parseLink(cell.getAsLink());
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id: link.id!,
@@ -1273,7 +1295,7 @@ describe("CFC label view helpers", () => {
           value,
           cfc: {
             version: 1,
-            schemaHash: "item-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{
@@ -1372,6 +1394,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      writeSeedEnvelopeDoc(tx, signer.did());
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -1381,7 +1404,7 @@ describe("CFC label view helpers", () => {
         value: { body: "labeled content" },
         cfc: {
           version: 1,
-          schemaHash: "test-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{
@@ -1493,6 +1516,7 @@ describe("CFC label view helpers", () => {
       const id = parseLink(cell.getAsLink()).id!;
       const writeDoc = (integrityAtom: string) => {
         const tx = runtime.edit();
+        writeSeedEnvelopeDoc(tx, signer.did());
         tx.writeOrThrow({
           space: signer.did(),
           id,
@@ -1503,7 +1527,7 @@ describe("CFC label view helpers", () => {
           value: { body: "unchanging" },
           cfc: {
             version: 1,
-            schemaHash: "sink-reactivity",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{ path: [], label: { integrity: [integrityAtom] } }],

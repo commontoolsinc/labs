@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
@@ -50,11 +54,12 @@ const seedLabeledDoc = async (
       { type: "object", properties: { body: { type: "string" } } },
     ).getAsLink(),
   ).id!;
+  writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow({ space, scope: "space", id: id as URI, path: [] }, {
     value: { body: "payload" },
     cfc: {
       version: 1,
-      schemaHash: "seed-schema",
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
       labelMap: {
         version: 1,
         entries: [{
@@ -194,13 +199,14 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
         runtime.getCell(space, "inspect-query-type", { type: "string" })
           .getAsLink(),
       ).id!;
+      writeSeedEnvelopeDoc(seed, space);
       seed.writeOrThrow(
         { space, scope: "space", id: queryTypeId as URI, path: [] },
         {
           value: CFC_ATOM_TYPE.Caveat,
           cfc: {
             version: 1,
-            schemaHash: "seed-schema",
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
             labelMap: {
               version: 1,
               entries: [{

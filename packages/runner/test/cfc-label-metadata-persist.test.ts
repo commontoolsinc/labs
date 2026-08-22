@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -50,6 +54,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     ).id!;
     const fullCaveat = cfcAtom.caveat("derived-from", "did:key:alice");
     const seed = runtime.edit();
+    writeSeedEnvelopeDoc(seed, signer.did());
     seed.writeOrThrow({
       space: signer.did(),
       scope: "space",
@@ -59,7 +64,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       value: { secret: "classified", plain: "public" },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [
@@ -253,6 +258,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           .getAsLink(),
       ).id!;
       const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, signer.did());
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
@@ -262,7 +268,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
         value: { attested: "x" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
           labelMap: {
             version: 1,
             entries: [{

@@ -1,3 +1,7 @@
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
@@ -65,11 +69,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
       value,
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: { version: 1, entries },
       },
     });
@@ -1042,11 +1047,12 @@ describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
     const seed = runtime.edit();
     const holder = runtime.getCell(space, "sp-holder", undefined, seed);
     const holderId = holder.getAsNormalizedFullLink().id;
+    writeSeedEnvelopeDoc(seed, space);
     seed.writeOrThrow({ space, scope: "space", id: holderId, path: [] }, {
       value: { slot: { "/": { "link@1": { id: "of:sp-target", path: [] } } } },
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: {
           version: 1,
           entries: [{

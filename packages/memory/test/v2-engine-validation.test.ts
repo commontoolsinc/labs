@@ -683,29 +683,34 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
       }),
     });
 
-    // A `schemaHash` that is not a well-formed tagged hash is not a
-    // reference: the read side fails closed on it, so it is unreadable
-    // rather than unbacked, and rejecting it would break every seeded
-    // fixture that never resolved one.
-    applyCommit(engine, {
-      sessionId: "s:a",
-      commit: commit(4, {
-        operations: [
-          {
-            op: "set",
-            id: "of:junk-envelope-carrier",
-            value: {
-              value: { field: "v" },
-              cfc: {
-                version: 1,
-                schemaHash: "seed-schema",
-                labelMap: { version: 1, entries: [] },
-              },
-            },
-          } as never,
-        ],
-      }),
-    });
+    // The boundary polices backing, not spelling: a `schemaHash` in any
+    // format is the reference, and one no content can verify against is
+    // permanently unbackable — refused here rather than reading as
+    // unreadable later.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [
+              {
+                op: "set",
+                id: "of:junk-envelope-carrier",
+                value: {
+                  value: { field: "v" },
+                  cfc: {
+                    version: 1,
+                    schemaHash: "seed-schema",
+                    labelMap: { version: 1, entries: [] },
+                  },
+                },
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
 
     // The patch spelling of the same landing is validated too.
     const missingSchema = {
