@@ -6,30 +6,36 @@
  *
  * Single-identity caveat (CT-1598): this file runs in one runtime with one
  * identity, so admin gating is exercised by attempting admin actions *before*
- * any join (myName empty → handler bails). The real second-user cases —
- * gating against a non-host user, host takeover, cross-runtime visibility —
- * are covered by multi-user.test.tsx.
+ * any join (the host pointer is unset, so `isHost` is false for everyone).
+ * The real second-user cases — gating against a non-host user, host takeover,
+ * cross-runtime visibility — are covered by multi-user.test.tsx.
  */
 
 import {
   action,
   assert,
   computed,
+  equals,
   pattern,
   TESTS,
   UI,
   wish,
+  Writable,
 } from "commonfabric";
 import {
-  findNodeByProp,
+  findNode,
   hasExactText,
-  propValue,
+  propsOf,
+  readValue,
 } from "../test/vnode-helpers.ts";
+import { JOIN_NEEDS_PROFILE } from "./participant-identity-card.tsx";
 import CozyPoll, {
   dayKeyOf,
+  type LunchProfile,
   type Option,
   type User,
   type Vote,
+  type VoteColor,
 } from "./main.tsx";
 
 // This file's single identity IS the host, so adding options triggers the
@@ -45,6 +51,16 @@ export const fetchMocks = [
   },
 ];
 
+const findNodeByProp = (
+  root: unknown,
+  prop: string,
+  expected: unknown,
+): unknown | undefined =>
+  findNode(root, (node) => {
+    const props = propsOf(node);
+    return props !== undefined && readValue(props[prop]) === expected;
+  });
+
 const SEEDED_OPTION: Option = {
   id: "opt-seeded",
   title: "Leftover Café",
@@ -57,90 +73,54 @@ const COLLIDING_INITIAL_OPTION: Option = {
   addedByName: "Daffodil",
 };
 
-const COLLIDING_INITIAL_USERS: User[] = [
-  {
-    name: "Daffodil",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "Dragonfly",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "Dan",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "Dana",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "dan",
-    avatar: "",
-    color: "#b27722",
-  },
-  {
-    name: "A",
-    avatar: "",
-    color: "#7c3aed",
-  },
-  {
-    name: "a",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "A1",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "Bob Smith",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "Bob  Smith",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "👩🏽‍💻Alice",
-    avatar: "",
-    color: "#7c3aed",
-  },
-  {
-    name: "👩🏽‍💻Bob",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "🇺🇸Alice",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "🇺🇸Bob",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "e\u0301Alice",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "e\u0301Bob",
-    avatar: "",
-    color: "#b27722",
-  },
+/**
+ * Participants whose names share prefixes, so the vote-swatch labels must
+ * disambiguate them. Names and colours only — each one's identity is a profile
+ * cell minted in the pattern body, since a cell cannot be static seed data.
+ */
+const COLLIDING_INITIAL_PEOPLE: Array<[string, string]> = [
+  ["Daffodil", "#2f6f4e"],
+  ["Dragonfly", "#c2573a"],
+  ["Dan", "#3b4a6b"],
+  ["Dana", "#a33b35"],
+  ["dan", "#b27722"],
+  ["A", "#7c3aed"],
+  ["a", "#2f6f4e"],
+  ["A1", "#c2573a"],
+  ["Bob Smith", "#3b4a6b"],
+  ["Bob  Smith", "#a33b35"],
+  ["👩🏽‍💻Alice", "#7c3aed"],
+  ["👩🏽‍💻Bob", "#2f6f4e"],
+  ["🇺🇸Alice", "#c2573a"],
+  ["🇺🇸Bob", "#3b4a6b"],
+  ["e\u0301Alice", "#a33b35"],
+  ["e\u0301Bob", "#b27722"],
+];
+
+/** Each colliding participant's vote colour, in the same order. */
+const COLLIDING_VOTE_COLORS: VoteColor[] = [
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
 ];
 
 export default pattern(() => {
+  // Identity is a profile cell; the test claims the viewer's through the
+  // `overrideViewer` seam the `#profile` wish fills in production.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
   const poll = CozyPoll({});
 
   // Reference times derive from the interval `#now/300` wish — the same
@@ -162,125 +142,65 @@ export default pattern(() => {
   // A vote cast "yesterday" — stored, but hidden by the current-day filter.
   // `castAt` resolves with the wish; until then it reads undefined, which
   // the filter also treats as not-today.
-  const STALE_VOTE: Vote = {
-    voterName: "Stan",
-    optionId: "opt-seeded",
-    voteType: "green",
-    castAt: staleCastAt,
-  };
+  const stan = Writable.of<LunchProfile>({ name: "Stan" });
+  const staleVotes = computed((): Vote[] => [
+    {
+      voter: stan,
+      optionId: "opt-seeded",
+      voteType: "green",
+      castAt: staleCastAt,
+    },
+  ]);
 
   // Second instance seeded with a stale vote, for the current-day filter
   // scenario (castVote always stamps "now", so staleness must be seeded).
+  // Stan claims his identity through the seam before the join step below.
   const stalePoll = CozyPoll({
     options: [SEEDED_OPTION],
-    votes: [STALE_VOTE],
+    votes: staleVotes,
   });
 
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
   const collidingCastAt = computed(() => nowCell.result ?? undefined);
+  const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
+    [name, color],
+    index,
+  ) => ({
+    name,
+    color,
+    profile: Writable.of<LunchProfile>({ name }),
+    voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
+  }));
+  const collidingUsers = computed((): User[] =>
+    collidingPeople.map(({ name, color, profile }) => ({
+      profile,
+      name,
+      avatar: "",
+      color,
+    }))
+  );
+  const collidingVotes = computed((): Vote[] =>
+    collidingPeople.map(({ profile, voteType }) => ({
+      voter: profile,
+      optionId: COLLIDING_INITIAL_OPTION.id,
+      voteType,
+      castAt: collidingCastAt,
+    }))
+  );
   const initialsPoll = CozyPoll({
     options: [COLLIDING_INITIAL_OPTION],
-    users: COLLIDING_INITIAL_USERS,
-    votes: [
-      {
-        voterName: "Daffodil",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dragonfly",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dan",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dana",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "dan",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "A",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "a",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "A1",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Bob Smith",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Bob  Smith",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "👩🏽‍💻Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "👩🏽‍💻Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "🇺🇸Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "🇺🇸Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "e\u0301Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "e\u0301Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-    ],
+    users: collidingUsers,
+    votes: collidingVotes,
   });
+
+  // Fourth instance: a NAME-ONLY claim (no profile cell anywhere) must not
+  // produce an identity. This exercises main's override-vs-wish selection with
+  // the profile side of the claim absent — the browser wish-path shape, where
+  // an absent cell-typed field reads as a truthy empty handle at `asCell`
+  // seams. The join must reject loudly and store NOTHING; the display name
+  // resolving is fine (display is not identity).
+  const ghostPoll = CozyPoll({});
 
   // Profile-first join + the header strip/viewer-chip rendering from stored
   // profile cells are verified at the browser/integration tier (the
@@ -293,6 +213,10 @@ export default pattern(() => {
   // card directly.
 
   // === Actions ===
+
+  const action_become_alex = action(() => {
+    poll.overrideViewer.send({ profile: alex, name: "Alex" });
+  });
 
   const action_try_add_before_join = action(() => {
     poll.addOption.send({ title: "Should not appear" });
@@ -310,12 +234,51 @@ export default pattern(() => {
     poll.logVisit.send({ title: "Sneaky" });
   });
 
+  // A resolved profile is not membership. `castVote` is a public stream, so a
+  // headless caller reaches it with an identity and no roster entry; the UI
+  // never offers the control, which is why nothing else here would catch a
+  // vote that counted anyway.
+  const action_try_vote_before_join = action(() => {
+    poll.castVote.send({ optionId: "any", voteType: "green" });
+  });
+
+  // The same refusal against a REAL option, from an identity that resolves
+  // but never joined — the shape a headless caller actually has once the poll
+  // is populated. Runs last so the viewer switch disturbs nothing before it.
+  const outsider = Writable.of<LunchProfile>({ name: "Outsider" });
+  const action_become_outsider = action(() => {
+    poll.overrideViewer.send({ profile: outsider, name: "Outsider" });
+  });
+  const action_outsider_votes_real_option = action(() => {
+    const first = (poll.options ?? [])[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
+  const assert_no_vote_without_membership = assert(() =>
+    (poll.votes ?? []).length === 0
+  );
+
+  const assert_outsider_left_the_tally_alone = assert(() =>
+    // The switch LANDED — without this the lane passes under whoever was
+    // viewing before, who is joined and may legitimately vote.
+    poll.myName === "Outsider" &&
+    poll.isJoined === false &&
+    // And the standing invariant the guard exists to keep: every stored vote
+    // belongs to somebody on the roster. Stronger than naming the outsider,
+    // since it fails for any non-member's vote rather than this one's.
+    (poll.votes ?? []).every((v) =>
+      (poll.users ?? []).some((u) => equals(u.profile, v.voter))
+    ) &&
+    (poll.users ?? []).every((u) => !equals(u.profile, outsider))
+  );
+
   const action_join_as_alex = action(() => {
-    poll.joinAs.send({ name: "Alex" });
+    poll.joinAs.send({});
   });
 
   const action_try_rejoin_as_alex_two = action(() => {
-    poll.joinAs.send({ name: "Alex Two" });
+    // Same identity joining again: idempotent, not a second participant.
+    poll.joinAs.send({});
   });
 
   const action_add_chipotle = action(() => {
@@ -402,9 +365,11 @@ export default pattern(() => {
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
     poll.myName === "Alex" &&
-    poll.adminName === "Alex" &&
+    poll.hostName === "Alex" &&
     poll.isJoined === true &&
-    poll.isAdmin === true
+    poll.isAdmin === true &&
+    // The loud-rejection channel is empty after a successful join.
+    poll.joinMessage === ""
   );
 
   const assert_immutable_after_join = assert(() =>
@@ -424,7 +389,7 @@ export default pattern(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
-      v?.voterName === "Alex" &&
+      equals(v?.voter, alex) &&
       // A handler-cast vote is stamped with today's castAt, so it must also
       // appear in the current-day view.
       poll.todaysVotes.length === 1 &&
@@ -464,7 +429,7 @@ export default pattern(() => {
   );
 
   const assert_still_alex_host = assert(() =>
-    poll.adminName === "Alex" && poll.isAdmin === true
+    poll.hostName === "Alex" && poll.isAdmin === true
   );
 
   // History lives in the `visits` PerSpace array now; we assert directly on the
@@ -628,10 +593,12 @@ export default pattern(() => {
       "data-vote-swatch-name",
       "👩🏽‍💻Bob",
     );
-    return propValue(daffodil, "role") === "img" &&
-      propValue(daffodil, "aria-label") === "Daffodil: green vote" &&
-      propValue(emojiBob, "role") === "img" &&
-      propValue(emojiBob, "aria-label") === "👩🏽‍💻Bob: red vote";
+    return readValue(propsOf(daffodil)?.role) === "img" &&
+      readValue(propsOf(daffodil)?.["aria-label"]) ===
+        "Daffodil: green vote" &&
+      readValue(propsOf(emojiBob)?.role) === "img" &&
+      readValue(propsOf(emojiBob)?.["aria-label"]) ===
+        "👩🏽‍💻Bob: red vote";
   });
 
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
@@ -661,8 +628,29 @@ export default pattern(() => {
     ) !== undefined
   );
 
+  const action_ghost_claims_name_only = action(() => {
+    ghostPoll.overrideViewer.send({ name: "Ghost" });
+  });
+
+  const action_ghost_tries_join = action(() => {
+    ghostPoll.joinAs.send({});
+  });
+
+  // The gate that matters is the STORE gate: an identity must READ as
+  // present. A truthy-but-empty profile handle joins nobody.
+  const assert_name_only_claim_cannot_join = assert(() =>
+    ghostPoll.users.length === 0 &&
+    ghostPoll.isJoined === false &&
+    ghostPoll.myName === "Ghost" &&
+    ghostPoll.joinMessage === JOIN_NEEDS_PROFILE
+  );
+
+  const action_stale_become_stan = action(() => {
+    stalePoll.overrideViewer.send({ profile: stan, name: "Stan" });
+  });
+
   const action_stale_join_as_stan = action(() => {
-    stalePoll.joinAs.send({ name: "Stan" });
+    stalePoll.joinAs.send({});
   });
 
   // Same color as the hidden stale vote.
@@ -677,7 +665,7 @@ export default pattern(() => {
     const v = stalePoll.todaysVotes[0];
     return todayKey !== "" &&
       stalePoll.todaysVotes.length === 1 &&
-      v?.voterName === "Stan" &&
+      equals(v?.voter, stan) &&
       v?.voteType === "green" &&
       typeof v?.castAt === "number" &&
       dayKeyOf(v.castAt) === todayKey &&
@@ -694,8 +682,11 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
-      // Admin-gated handlers are no-ops before anyone joins (myName empty).
-      // The handler bails on `if (!me || me !== admin) return`. No
+      // Alex claims his identity first (matching production, where the
+      // `#profile` wish resolves before any interaction).
+      { action: action_become_alex },
+      // Admin-gated handlers are no-ops before anyone joins: the host
+      // pointer is still unset, so `isHost` is false for everyone. No
       // separate assertion here — downstream assertions (e.g. only
       // Chipotle ends up in options, only Alex in users) implicitly
       // verify these attempts left no state. See ADMIN-FUTURE.md for
@@ -704,6 +695,8 @@ export default pattern(() => {
       { action: action_try_remove_before_join },
       { action: action_try_reset_before_join },
       { action: action_try_log_before_join },
+      { action: action_try_vote_before_join },
+      { assertion: assert_no_vote_without_membership },
 
       // First join → claims admin
       { action: action_join_as_alex },
@@ -794,12 +787,23 @@ export default pattern(() => {
       { assertion: assert_legacy_option_without_image_renders },
       { assertion: assert_stale_vote_hidden },
       // Same-color click on the stale vote re-casts it for today…
+      { action: action_stale_become_stan },
       { action: action_stale_join_as_stan },
       { action: action_stale_vote_green },
       { assertion: assert_stale_recast_visible },
       // …and a second same-color click toggles today's vote off as usual.
       { action: action_stale_vote_green },
       { assertion: assert_stale_recast_cleared },
+
+      // A name-only claim never becomes an identity.
+      { action: action_ghost_claims_name_only },
+      { action: action_ghost_tries_join },
+      { assertion: assert_name_only_claim_cannot_join },
+
+      // A resolved identity that never joined cannot vote on a real option.
+      { action: action_become_outsider },
+      { action: action_outsider_votes_real_option },
+      { assertion: assert_outsider_left_the_tally_alone },
     ],
     poll,
     stalePoll,

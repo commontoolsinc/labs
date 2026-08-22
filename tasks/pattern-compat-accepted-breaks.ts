@@ -182,4 +182,37 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "contract.",
     record: "docs/history/parking-admin-floor-contract-break.md",
   },
+  {
+    // The lunch poll's identity moved from display names to profile cells
+    // (see docs/history/lunch-poll-identity-break.md). `adminName` published
+    // and accepted the host's display name as the admin key; the host is now
+    // a profile-cell pointer with `hostName` derived from the roster, and
+    // there is no shape that keeps a name-keyed admin surface while removing
+    // name-keyed identity. Everything else the change needed is compatible:
+    // the new identity fields are optional (rows the pattern writes always
+    // carry them; rows stored by the name-keyed predecessor are display
+    // ghosts) and the legacy display fields carry defaults.
+    pattern: "lunch-poll/main.tsx",
+    baselines: ["20260729T022742Z-5bjUubcOZ-gpvz7F"],
+    paths: ["argument.visits[]", "result.adminName"],
+    reason: "Lunch-poll identity moved from display names to profile cells. " +
+      "`adminName` was the name-keyed admin surface — argument input and " +
+      "published result — and cannot survive the removal of name-keyed " +
+      "identity. The host is a profile-cell pointer now, with `hostName` " +
+      "derived from the roster.",
+    record: "docs/history/lunch-poll-identity-break.md",
+  },
+  {
+    // Same decision, seen from the join card: `adminName` was its name-keyed
+    // admin input, and `me` published the viewer's name as identity. Both
+    // surfaces are gone; joined-ness and host status are derived from
+    // profile-cell comparison.
+    pattern: "lunch-poll/participant-identity-card.tsx",
+    baselines: ["20260729T022742Z-KMaq_J9475tWtRxW"],
+    paths: ["result.me"],
+    reason: "Lunch-poll identity moved from display names to profile cells. " +
+      "The card's name-keyed admin input and its published viewer-name " +
+      "identity go with the model they keyed.",
+    record: "docs/history/lunch-poll-identity-break.md",
+  },
 ];
