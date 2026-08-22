@@ -393,6 +393,15 @@ describe("background piece utility functions", () => {
     const fromPassphrase = await getIdentity(undefined, "operator");
     assertEquals(fromPassphrase.did().startsWith("did:key:"), true);
 
+    // Both hold key handles rather than material, which is the point of
+    // leaving the implementation to the platform: what the service keeps, and
+    // what it hands a worker, is a handle. Asserted rather than guarded on
+    // support -- this service runs on Deno, which has ed25519 in Web Crypto,
+    // and a build that quietly lost it would have this service holding its own
+    // signing secret again.
+    assertEquals(fromFile.keyPair.hasMaterial, false);
+    assertEquals(fromPassphrase.keyPair.hasMaterial, false);
+
     await assertRejects(
       () => getIdentity(`${dir}/missing.pem`),
       Error,
@@ -401,7 +410,7 @@ describe("background piece utility functions", () => {
     await assertRejects(
       () => getIdentity(),
       Error,
-      "No IDENTITY or OPERATOR_PASS environemnt set.",
+      "No IDENTITY or OPERATOR_PASS environment set.",
     );
     await Deno.remove(dir, { recursive: true });
   });
@@ -841,7 +850,11 @@ describe("SpaceManager", () => {
 describe("background worker", () => {
   it("handles ready, invalid requests, initialization, run errors, and cleanup", async () => {
     await withRealWorker(async (worker, nextMessage) => {
-      const identity = await Identity.generate({ implementation: "noble" });
+      // The platform's own implementation, as `getIdentity()` leaves it, so
+      // this exercises the key pair the service actually sends: one holding
+      // `CryptoKey` handles, which only the realm encoding can carry.
+      const identity = await Identity.generate();
+      assertEquals(identity.keyPair.hasMaterial, false);
       const ready = await nextMessage((message) => message.type === "ready");
       assertEquals(ready.msgId, -1);
 
