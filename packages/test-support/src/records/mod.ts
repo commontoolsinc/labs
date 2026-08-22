@@ -81,3 +81,4 @@ export {
 export type { CreateObjectOptions, CreateObjectResult } from "./store.ts";
 export { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
 export type { StoredReport, StoredReportGroup } from "./store-reader.ts";
+export { recordsSpooledBy } from "./testing.ts";

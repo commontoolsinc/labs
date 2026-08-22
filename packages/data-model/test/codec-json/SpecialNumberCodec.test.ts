@@ -45,19 +45,19 @@ describe("SpecialNumberCodec", () => {
 
     describe("encode()", () => {
       it('encodes `-0` to the literal `"-0"`', () => {
-        expect(codec.encode(-0)).toBe("-0");
+        expect(codec.encode(-0, env)).toBe("-0");
       });
 
       it('encodes `NaN` to the literal `"NaN"`', () => {
-        expect(codec.encode(NaN)).toBe("NaN");
+        expect(codec.encode(NaN, env)).toBe("NaN");
       });
 
       it('encodes `+Infinity` to the literal `"+Infinity"`', () => {
-        expect(codec.encode(Infinity)).toBe("+Infinity");
+        expect(codec.encode(Infinity, env)).toBe("+Infinity");
       });
 
       it('encodes `-Infinity` to the literal `"-Infinity"`', () => {
-        expect(codec.encode(-Infinity)).toBe("-Infinity");
+        expect(codec.encode(-Infinity, env)).toBe("-Infinity");
       });
 
       it('any `NaN` bit pattern encodes as the literal `"NaN"`', () => {
@@ -65,7 +65,7 @@ describe("SpecialNumberCodec", () => {
         view.setBigUint64(0, 0x7ff8000000000001n, false);
         const nonCanonicalNaN = view.getFloat64(0, false);
         expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
-        expect(codec.encode(nonCanonicalNaN)).toBe("NaN");
+        expect(codec.encode(nonCanonicalNaN, env)).toBe("NaN");
       });
     });
 
@@ -88,19 +88,19 @@ describe("SpecialNumberCodec", () => {
 
     describe("round trip encode-decode", () => {
       it("round-trips `-0` (preserves sign of zero)", () => {
-        const result = codec.decode(expectedTag, codec.encode(-0), env);
+        const result = codec.decode(expectedTag, codec.encode(-0, env), env);
         expect(Object.is(result, -0)).toBe(true);
       });
 
       it("round-trips `NaN`", () => {
-        const result = codec.decode(expectedTag, codec.encode(NaN), env);
+        const result = codec.decode(expectedTag, codec.encode(NaN, env), env);
         expect(Number.isNaN(result)).toBe(true);
       });
 
       it("round-trips `+Infinity`", () => {
         const result = codec.decode(
           expectedTag,
-          codec.encode(Infinity),
+          codec.encode(Infinity, env),
           env,
         );
         expect(result).toBe(Infinity);
@@ -109,7 +109,7 @@ describe("SpecialNumberCodec", () => {
       it("round-trips `-Infinity`", () => {
         const result = codec.decode(
           expectedTag,
-          codec.encode(-Infinity),
+          codec.encode(-Infinity, env),
           env,
         );
         expect(result).toBe(-Infinity);

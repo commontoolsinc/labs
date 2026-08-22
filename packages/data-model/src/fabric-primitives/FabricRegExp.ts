@@ -157,7 +157,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricRegExp): FabricRegExpState {
+      encode(value: FabricRegExp, _env: LiveEnvironment): FabricRegExpState {
         return {
           source: value.#source,
           flags: value.#flags,
@@ -236,7 +236,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       }
 
       /** @inheritDoc */
-      encode(value: FabricRegExp): RealmCodecValue {
+      encode(value: FabricRegExp, _env: LiveEnvironment): RealmCodecValue {
         return {
           source: value.#source,
           flags: value.#flags,

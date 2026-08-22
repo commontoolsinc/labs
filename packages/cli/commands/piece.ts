@@ -70,8 +70,10 @@ import {
   stepPiece,
 } from "../lib/piece.ts";
 import type {
+  CachedResultField,
   ExecutedPieceCallable,
   PieceCallablesListing,
+  PieceInspection,
 } from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
@@ -385,6 +387,144 @@ export function pieceDescribeJson(
     ...(inputs !== undefined ? { inputs } : {}),
     ...verbListingJson(listingPart, all),
   };
+}
+
+/**
+ * The `--- Cached Result Fields ---` section of `cf piece inspect`, without
+ * the blank line that separates it from the section above.
+ *
+ * The `--- Result ---` block prints a live value and a cached one the same
+ * way, so this section names which of the two each field is, and says what
+ * instant a cached one answers for. `sourceCommit` is the commit the argument
+ * document behind `--- Source (Inputs) ---` stands at. Commit numbers order
+ * only when the computed cell and source document share `sourceSpace`; the
+ * section identifies and refuses cross-space comparisons.
+ */
+export function renderCachedResultFields(
+  cached: readonly CachedResultField[],
+  sourceCommit: number | undefined,
+  sourceSpace: string | undefined,
+): string {
+  const lines = ["--- Cached Result Fields ---"];
+  if (cached.length === 0) {
+    lines.push("  (none)");
+    return lines.join("\n");
+  }
+  lines.push(
+    "Each field below crosses computed state holding what its last committed",
+    "derivation produced. Reading the field does not re-derive that state.",
+  );
+  for (const field of cached) {
+    const spaces = new Set<string>(field.cells.map((cell) => cell.space));
+    if (sourceSpace !== undefined) spaces.add(sourceSpace);
+    const crossesSpaces = spaces.size > 1;
+    const cellDescriptions = field.cells.map((cell) => {
+      const commit = cell.derivedAtCommit === undefined
+        ? "the local replica holds no commit for it"
+        : `last derived at commit ${cell.derivedAtCommit}`;
+      return crossesSpaces ? `${commit} in space ${cell.space}` : commit;
+    });
+    const cachedDescription = cellDescriptions.length === 1
+      ? cellDescriptions[0]
+      : `${cellDescriptions.length} computed cells: ${
+        cellDescriptions.join("; ")
+      }`;
+    lines.push(
+      `  - ${field.name}: ${cachedDescription}${
+        sourceCommit === undefined
+          ? ""
+          : `; Source (Inputs) stands at commit ${sourceCommit}${
+            crossesSpaces && sourceSpace !== undefined
+              ? ` in space ${sourceSpace}`
+              : ""
+          }`
+      }${
+        crossesSpaces
+          ? "; commits from different spaces cannot be compared"
+          : ""
+      }`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** The human-readable output for `cf piece inspect`. */
+export function renderPieceInspection(
+  pieceData: PieceInspection,
+  summary: boolean,
+): string {
+  const displayData = summary
+    ? {
+      ...pieceData,
+      source: summarizeForDisplay(pieceData.source),
+      result: summarizeForDisplay(pieceData.result),
+    }
+    : pieceData;
+
+  let output = `
+=== Piece: ${pieceData.id} ===
+Name: ${pieceData.name || "<no name>"}
+Pattern: ${formatPatternRef(pieceData.patternRef)}
+Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
+Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
+Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
+Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
+Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
+
+--- Source (Inputs) ---`;
+
+  if (displayData.source) {
+    output += `\n${safeStringify(displayData.source)}`;
+  } else {
+    output += "\n<no source data>";
+  }
+
+  output += "\n\n--- Result ---";
+  if (displayData.result !== null && displayData.result !== undefined) {
+    const isPlainObject = typeof displayData.result === "object" &&
+      !Array.isArray(displayData.result);
+    if (!summary && isPlainObject) {
+      const filteredResult = {
+        ...(displayData.result as Record<string | symbol, unknown>),
+      };
+      if (UI in filteredResult && typeof filteredResult[UI] === "object") {
+        filteredResult[UI] = "<large UI object - use --json to see full UI>";
+      }
+      output += `\n${safeStringify(filteredResult)}`;
+    } else {
+      output += `\n${safeStringify(displayData.result)}`;
+    }
+  } else {
+    output += "\n<no result data>";
+  }
+
+  output += `\n\n${
+    renderCachedResultFields(
+      pieceData.cachedResultFields,
+      pieceData.sourceCommit,
+      pieceData.sourceSpace,
+    )
+  }`;
+
+  output += "\n\n--- Reading From ---";
+  if (pieceData.readingFrom.length > 0) {
+    pieceData.readingFrom.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  output += "\n\n--- Read By ---";
+  if (pieceData.readBy.length > 0) {
+    pieceData.readBy.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  return output;
 }
 
 export function renderPieceSummaries(
@@ -2143,64 +2283,7 @@ export const piece = targetOptions(
       return;
     }
 
-    // Build formatted output as template
-    let output = `
-=== Piece: ${pieceData.id} ===
-Name: ${pieceData.name || "<no name>"}
-Pattern: ${formatPatternRef(pieceData.patternRef)}
-Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
-Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
-Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
-Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
-Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
-
---- Source (Inputs) ---`;
-
-    if (displayData.source) {
-      output += `\n${safeStringify(displayData.source)}`;
-    } else {
-      output += "\n<no source data>";
-    }
-
-    output += "\n\n--- Result ---";
-    if (displayData.result !== null && displayData.result !== undefined) {
-      const isPlainObject = typeof displayData.result === "object" &&
-        !Array.isArray(displayData.result);
-      if (!options.summary && isPlainObject) {
-        // Filter out large UI objects that clutter the non-summary output
-        const filteredResult = {
-          ...(displayData.result as Record<string | symbol, unknown>),
-        };
-        if (UI in filteredResult && typeof filteredResult[UI] === "object") {
-          filteredResult[UI] = "<large UI object - use --json to see full UI>";
-        }
-        output += `\n${safeStringify(filteredResult)}`;
-      } else {
-        output += `\n${safeStringify(displayData.result)}`;
-      }
-    } else {
-      output += "\n<no result data>";
-    }
-
-    output += "\n\n--- Reading From ---";
-    if (pieceData.readingFrom.length > 0) {
-      pieceData.readingFrom.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    output += "\n\n--- Read By ---";
-    if (pieceData.readBy.length > 0) {
-      pieceData.readBy.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    render(output);
+    render(renderPieceInspection(pieceData, options.summary === true));
   })
   /* piece view */
   .command("view", "Display the rendered view for a piece")

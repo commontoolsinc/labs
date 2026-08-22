@@ -87,7 +87,7 @@ export class FabricMap
        *
        * Stub -- throws until `Map` support is implemented.
        */
-      encode(_value: FabricMap): FabricValue {
+      encode(_value: FabricMap, _env: LiveEnvironment): FabricValue {
         throw new Error("`FabricMap`: not yet implemented");
       }
 

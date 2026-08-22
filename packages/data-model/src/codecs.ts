@@ -79,6 +79,9 @@ const jsonCodecEngine = newDefaultJsonCodecEngine();
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
  * substituted, which throws if anything asks it for a cell.
+ *
+ * `value` must be a valid `FabricValue`; handing this anything else is
+ * best-effort, per the input contract on `BaseCodecEngine.encode()`.
  */
 export function jsonFromFabricValue(
   value: FabricValue,
@@ -169,6 +172,12 @@ const realmCodecEngine = newDefaultRealmCodecEngine();
  *
  * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
  * substituted, which throws if anything asks it for a cell.
+ *
+ * `value` must be a valid `FabricValue`; handing this anything else is
+ * best-effort, per the input contract on `BaseCodecEngine.encode()`. That
+ * contract is what lets a subtree needing no encoding be shared with `value`
+ * rather than copied: vetting one would cost the walk the sharing exists to
+ * avoid, and would charge it to correct input.
  *
  * Named for the `<target>From<Source>Value` family that
  * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both

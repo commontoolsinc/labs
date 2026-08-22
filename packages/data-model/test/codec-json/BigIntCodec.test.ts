@@ -44,32 +44,32 @@ describe("BigIntCodec", () => {
     describe("encode()", () => {
       it("encodes `42n` to base64url of two's complement bytes", () => {
         // 42n -> [0x2a] -> base64 "Kg"
-        expect(codec.encode(42n)).toBe("Kg");
+        expect(codec.encode(42n, env)).toBe("Kg");
       });
 
       it('encodes `0n` to base64 `"AA"`', () => {
         // 0n -> [0x00] -> base64 "AA"
-        expect(codec.encode(0n)).toBe("AA");
+        expect(codec.encode(0n, env)).toBe("AA");
       });
 
       it('encodes `-1n` to base64url `"_w"`', () => {
         // -1n -> [0xFF] -> base64url "_w"
-        expect(codec.encode(-1n)).toBe("_w");
+        expect(codec.encode(-1n, env)).toBe("_w");
       });
 
       it('encodes `1n` to base64 `"AQ"`', () => {
         // 1n -> [0x01] -> base64 "AQ"
-        expect(codec.encode(1n)).toBe("AQ");
+        expect(codec.encode(1n, env)).toBe("AQ");
       });
 
       it("encodes `128n` with sign-extension byte", () => {
         // 128n -> [0x00, 0x80] -> base64 "AIA"
-        expect(codec.encode(128n)).toBe("AIA");
+        expect(codec.encode(128n, env)).toBe("AIA");
       });
 
       it("produces unpadded base64 output (no trailing `=`)", () => {
         // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
-        const b64 = codec.encode(42n) as string;
+        const b64 = codec.encode(42n, env) as string;
         expect(b64).toBe("Kg");
         expect(b64).not.toContain("=");
       });
@@ -117,59 +117,71 @@ describe("BigIntCodec", () => {
 
     describe("round trip encode-decode", () => {
       it("round-trips at top level", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(42n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(42n, env), env);
         expect(decoded).toBe(42n);
       });
 
       it("round-trips a negative `bigint`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(-999n), env);
+        const decoded = codec.decode(
+          expectedTag,
+          codec.encode(-999n, env),
+          env,
+        );
         expect(decoded).toBe(-999n);
       });
 
       it("round-trips a zero `bigint`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(0n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(0n, env), env);
         expect(decoded).toBe(0n);
       });
 
       it("round-trips `1n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(1n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(1n, env), env);
         expect(decoded).toBe(1n);
       });
 
       it("round-trips `-1n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(-1n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(-1n, env), env);
         expect(decoded).toBe(-1n);
       });
 
       it("round-trips a large `bigint`", () => {
         const big = 2n ** 64n;
-        const decoded = codec.decode(expectedTag, codec.encode(big), env);
+        const decoded = codec.decode(expectedTag, codec.encode(big, env), env);
         expect(decoded).toBe(big);
       });
 
       it("round-trips a large negative `bigint`", () => {
         const big = -(2n ** 64n);
-        const decoded = codec.decode(expectedTag, codec.encode(big), env);
+        const decoded = codec.decode(expectedTag, codec.encode(big, env), env);
         expect(decoded).toBe(big);
       });
 
       it("round-trips boundary value `127n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(127n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(127n, env), env);
         expect(decoded).toBe(127n);
       });
 
       it("round-trips boundary value `128n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(128n), env);
+        const decoded = codec.decode(expectedTag, codec.encode(128n, env), env);
         expect(decoded).toBe(128n);
       });
 
       it("round-trips boundary value `-128n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(-128n), env);
+        const decoded = codec.decode(
+          expectedTag,
+          codec.encode(-128n, env),
+          env,
+        );
         expect(decoded).toBe(-128n);
       });
 
       it("round-trips boundary value `-129n`", () => {
-        const decoded = codec.decode(expectedTag, codec.encode(-129n), env);
+        const decoded = codec.decode(
+          expectedTag,
+          codec.encode(-129n, env),
+          env,
+        );
         expect(decoded).toBe(-129n);
       });
     });

@@ -3887,28 +3887,51 @@ describe("cli piece parsing", () => {
       symbol: "default",
       source: { ref: `cf:pattern:${"B".repeat(43)}` },
     };
-    const inspected = await inspectPiece(
-      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
-      {
-        resolvePieceAddress: () => Promise.resolve(PIECE),
-        loadPieces: () =>
-          Promise.resolve({
-            get: () =>
-              Promise.resolve({
-                id: PIECE,
-                name: () => "Notes",
-                getPatternRef: () => Promise.resolve(patternRef),
-                input: { get: () => Promise.resolve({ title: "Input" }) },
-                result: { get: () => Promise.resolve({ title: "Result" }) },
-                readingFrom: () => Promise.resolve([]),
-                readBy: () => Promise.resolve([]),
-              }),
-          } as any),
-      },
-    );
+    const signer = await Identity.fromPassphrase("cf piece inspect provenance");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    try {
+      const space = signer.did();
+      const inspected = await inspectPiece(
+        { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
+        {
+          resolvePieceAddress: () => Promise.resolve(PIECE),
+          loadPieces: () =>
+            Promise.resolve({
+              get: () =>
+                Promise.resolve({
+                  id: PIECE,
+                  name: () => "Notes",
+                  getPatternRef: () => Promise.resolve(patternRef),
+                  input: {
+                    get: () => Promise.resolve({ title: "Input" }),
+                    getCell: () =>
+                      Promise.resolve(runtime.getCell(space, "argument")),
+                  },
+                  result: {
+                    get: () => Promise.resolve({ title: "Result" }),
+                    getCell: () =>
+                      Promise.resolve(runtime.getCell(space, "result")),
+                  },
+                  readingFrom: () => Promise.resolve([]),
+                  readBy: () => Promise.resolve([]),
+                }),
+            } as any),
+        },
+      );
 
-    expect(inspected.patternRef).toEqual(patternRef);
-    expect(inspected.id).toBe(PIECE);
+      expect(inspected.patternRef).toEqual(patternRef);
+      expect(inspected.id).toBe(PIECE);
+      expect(inspected.cachedResultFields).toEqual([]);
+      expect(inspected.sourceCommit).toBeUndefined();
+      expect(inspected.sourceSpace).toBe(space);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 
   it("forwards repository metadata when deploying a home pattern", async () => {

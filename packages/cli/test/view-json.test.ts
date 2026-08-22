@@ -1,10 +1,9 @@
 /**
- * The JSON / JSONC language: a `.json` or `.jsonc` file (opened directly or seen
- * in a diff) is colored as data — object keys apart from string values,
- * numbers, `true`/`false`/`null`, rainbow brackets, JSONC comments — with its
- * object keys forming the navigation tree, and is never run through the
- * TypeScript parser. The highlighter is hand-written and lenient: malformed
- * input colors without throwing.
+ * The JSON, JSONC, and JSON Lines language: a selected file is colored as data
+ * with object keys apart from string values, numbers,
+ * `true`/`false`/`null`, rainbow brackets, and JSONC comments. Object keys in a
+ * single top-level value form the navigation tree. The highlighter is
+ * hand-written and lenient: malformed input colors without throwing.
  */
 
 import { assert, assertEquals } from "@std/assert";
@@ -37,11 +36,59 @@ function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
 Deno.test("json: language metadata selects JSON filenames", () => {
   assertEquals(languageForFile("deno.json").id, "json");
   assertEquals(languageForFile("/a/b/tsconfig.jsonc").id, "json");
+  assertEquals(languageForFile("records.jsonl").id, "json");
+  assertEquals(languageForFile("events.ndjson").id, "json");
+  assertEquals(languageForFile("EVENTS.NDJSON").id, "json");
   assertEquals(languageForFile("UPPER.JSON").id, "json");
   assertEquals(languageForFile("config.json.example").id, "json");
   assertEquals(languageForFile("main.ts").id, "typescript");
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile(undefined).id, "plain-text");
+});
+
+Deno.test("json: line-oriented files use JSON token classes", () => {
+  const src = [
+    '{"testId":"old","canonicalId":"new"}',
+    '{"testId":"next","canonicalId":"current"}',
+  ].join("\n");
+  const lines = languageForFile("tasks/test-identity-aliases.jsonl")
+    .highlightLines(src);
+
+  assertEquals(classesOf(lines, '"testId"'), new Set(["propertyName"]));
+  assertEquals(classesOf(lines, '"old"'), new Set(["string"]));
+  assertEquals(classesOf(lines, '"current"'), new Set(["string"]));
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: line-oriented live edits reuse JSON token classes", () => {
+  const before = '{"event":"created","sequence":1}\n';
+  const after = [
+    '{"event":"created","sequence":1}',
+    '{"event":"updated","sequence":2}',
+    "",
+  ].join("\n");
+  const highlighter = languageForFile("events.ndjson").createHighlighter(
+    before,
+    "events.ndjson",
+  );
+  const lines = highlighter.update(after);
+
+  assertEquals(classesOf(lines, '"event"'), new Set(["propertyName"]));
+  assertEquals(classesOf(lines, '"updated"'), new Set(["string"]));
+  assertEquals(classesOf(lines, "2"), new Set(["number"]));
+  assertEquals(verbatim(lines), after);
+});
+
+Deno.test("json: line-oriented documents expose no partial structure", () => {
+  const language = languageForFile("events.jsonl");
+  const source = [
+    '{"first":1}',
+    '{"second":2}',
+  ].join("\n");
+  const doc = language.parseDocument(source, "events.jsonl");
+
+  assertEquals(doc.structure, []);
+  assertEquals(doc.definitions.size, 0);
 });
 
 Deno.test("json: keys, values, and literals get distinct classes", () => {
@@ -273,6 +320,38 @@ Deno.test("json: a .json file in a diff is colored and navigated as JSON", () =>
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+Deno.test("json: a .jsonl file in a diff uses JSON token classes", () => {
+  const diff = [
+    "diff --git a/events.jsonl b/events.jsonl",
+    "--- a/events.jsonl",
+    "+++ b/events.jsonl",
+    "@@ -1 +1 @@",
+    '-{"event":"created","sequence":1}',
+    '+{"event":"updated","sequence":2}',
+    "",
+  ].join("\n");
+  const model = parseDiff(diff)!;
+  const workspace: DiffWorkspace = {
+    resolve: () => null,
+    read: () => null,
+  };
+  const { doc } = buildDiffDocument(diff, model, workspace);
+  const removed = doc.lines.find((line) => line.bg === "del")!;
+  const added = doc.lines.find((line) => line.bg === "add")!;
+
+  assert(
+    removed.spans.some((span) =>
+      span.text === '"event"' && span.cls === "propertyName"
+    ),
+  );
+  assert(
+    added.spans.some((span) =>
+      span.text === '"updated"' && span.cls === "string"
+    ),
+  );
+  assertEquals(verbatim(doc.lines), diff);
 });
 
 Deno.test("json: editing a line in a json diff recolors it as json", () => {

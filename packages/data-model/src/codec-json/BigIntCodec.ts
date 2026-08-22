@@ -36,7 +36,7 @@ export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue, string> {
   }
 
   /** @inheritDoc */
-  encode(value: bigint): string {
+  encode(value: bigint, _env: LiveEnvironment): string {
     return bigintToUnpaddedBase64url(value);
   }
 

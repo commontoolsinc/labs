@@ -238,7 +238,10 @@ export class FabricKeyPair extends BaseFabricPrimitive {
        * @throws If `value` holds handles, that state having no representation
        *   in this format.
        */
-      encode(value: FabricKeyPair): FabricKeyPairMaterialState {
+      encode(
+        value: FabricKeyPair,
+        _env: LiveEnvironment,
+      ): FabricKeyPairMaterialState {
         if (!value.hasMaterial) {
           throw new Error(
             "Cannot encode a key pair that holds handles: a `CryptoKey` has " +
@@ -299,7 +302,7 @@ export class FabricKeyPair extends BaseFabricPrimitive {
        * Each state names its arm by shape: a `CryptoKey` in the key slots for
        * handles, an `ArrayBuffer` and an algorithm for material.
        */
-      encode(value: FabricKeyPair): RealmCodecValue {
+      encode(value: FabricKeyPair, _env: LiveEnvironment): RealmCodecValue {
         if (!value.hasMaterial) {
           return {
             publicKey: value.#publicKey as CryptoKey,

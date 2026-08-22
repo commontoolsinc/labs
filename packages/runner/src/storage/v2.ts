@@ -13,6 +13,7 @@ import {
   type ConnectionError as IConnectionError,
   type MemorySpace,
   type MIME,
+  type Revision,
   type Signer,
   type TransactionError,
   type URI,
@@ -2766,7 +2767,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#replacementRead = replacementRead;
   }
 
-  get(entry: IMemoryAddress): State | undefined {
+  get(entry: IMemoryAddress): Revision<State> | undefined {
     return this.getState(
       entry.id as URI,
       entry.scope,
@@ -3397,7 +3398,7 @@ class SpaceReplica implements ISpaceReplica {
       .map(([address]) =>
         this.getState(address.id, address.scope, undefined, address.scopeKey)
       )
-      .filter((state): state is State => state !== undefined);
+      .filter((state): state is Revision<State> => state !== undefined);
     this.#subscription.next({
       type: "load",
       space: this.#space,
@@ -6223,7 +6224,7 @@ class SpaceReplica implements ISpaceReplica {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
     explicit?: ScopeKey,
-  ): State | undefined {
+  ): Revision<State> | undefined {
     const visible = this.visibleVersion(id, scope, identity, explicit);
     if (!visible) {
       return undefined;
@@ -6242,7 +6243,7 @@ class SpaceReplica implements ISpaceReplica {
       // own-identity read's state is byte-identical to before.
       ...(explicit !== undefined ? { scopeKey: explicit } : {}),
       since: visible.record.confirmed.seq,
-    } as State;
+    } as Revision<State>;
   }
 
   private visibleDocument(

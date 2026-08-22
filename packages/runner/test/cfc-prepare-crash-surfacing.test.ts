@@ -43,6 +43,7 @@ import {
   wishCommitFailureMessage,
 } from "../src/builtins/wish.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -53,16 +54,21 @@ import type { JSONSchema } from "../src/builder/types.ts";
 const signer = await Identity.fromPassphrase("cfc prepare crash surfacing");
 const space = signer.did();
 
-// The wish-shaped envelope, minimally, mirroring the live schema doc the
-// serving loop persisted (cid:fid1:-3unxof…, extracted from the failing run's
-// store): the SAME ifc-carrying view appears twice — under
-// `candidates.items` (plain properties/items position: this is what makes the
-// doc cfc-relevant, the metadata apply, and the candidate schema recordable)
-// and under `result.anyOf[1]` (the optional-result presence union: the copy
-// `assertNoDivergentIfcBranches` refuses). A confidentiality label needs no
-// write authority, so the FIRST writer's commit lands (exactly as the serving
-// loop's derived commit landed the live envelope), poisoning the stored
-// envelope for every later writer.
+// Two envelope fixtures, either side of RULING 5 (CFC owner, 2026-08-21):
+//
+// - The live wish shape (mirroring the schema doc the
+//   serving loop persisted, cid:fid1:-3unxof…): ONE ifc-carrying branch
+//   (`result.anyOf[1]`) whose sibling `{type:"undefined"}` is syntactically
+//   type-disjoint — is the ruled ADMITTED shape; its merge pin lives in
+//   cfc-schema-merge.test.ts, and its two-writer clean journey below runs
+//   through the REAL wish builtin (the profile-embed lift condition).
+// - `ambiguousWishShapedSchema` keeps the CRASH class alive for the OW50
+//   detectability pins: TWO ifc-carrying branches is genuine ambiguity, which
+//   the narrowed assert still refuses. The `candidates.items` position (plain
+//   properties/items) is what makes the doc cfc-relevant, the metadata apply,
+//   and the candidate schema recordable; a confidentiality label needs no
+//   write authority, so the FIRST writer's commit lands, poisoning the stored
+//   envelope for every later merging writer.
 const profileViewSchema: JSONSchema = {
   type: "object",
   properties: {
@@ -70,13 +76,18 @@ const profileViewSchema: JSONSchema = {
   },
 } as JSONSchema;
 
-const wishShapedSchema: JSONSchema = {
+const altProfileViewSchema: JSONSchema = {
+  type: "string",
+  ifc: { confidentiality: ["other"] },
+} as JSONSchema;
+
+const ambiguousWishShapedSchema: JSONSchema = {
   type: "object",
   properties: {
     result: {
       anyOf: [
-        { type: "undefined" },
         profileViewSchema,
+        altProfileViewSchema,
       ],
     },
     candidates: { type: "array", items: profileViewSchema },
@@ -101,16 +112,17 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
       await storageManager.close();
     });
 
-    /** Seed the doc so its STORED envelope carries the divergent shape (the
-     * first writer never merges — nothing is stored yet — so this commit lands,
-     * as the live serving loop's did). The labeled VALUE under
-     * `candidates.items.name` is what makes the label metadata persist. */
+    /** Seed the doc so its STORED envelope carries the AMBIGUOUS divergent
+     * shape — the class RULING 5's narrowing still refuses (the first writer
+     * never merges — nothing is stored yet — so this commit lands). The
+     * labeled VALUE under `candidates.items.name` is what makes the label
+     * metadata persist. */
     async function seedStoredEnvelope(
       rt: Runtime,
       id: string,
     ): Promise<void> {
       const tx = rt.edit();
-      const cell = rt.getCell(space, id, wishShapedSchema, tx);
+      const cell = rt.getCell(space, id, ambiguousWishShapedSchema, tx);
       cell.set({ candidates: [{ name: "Bob" }] });
       tx.prepareCfc();
       const result = await tx.commit();
@@ -126,7 +138,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
       id: string,
     ): IExtendedStorageTransaction {
       const tx = rt.edit();
-      const cell = rt.getCell(space, id, wishShapedSchema, tx);
+      const cell = rt.getCell(space, id, ambiguousWishShapedSchema, tx);
       // The link SOURCE carries the ifc-labeled view (as the live resolved
       // profile does), so the /result link write is CFC-recorded.
       const resolved = rt.getCell<{ name: string }>(
@@ -223,7 +235,12 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
       let crashingRuns = 0;
       const crashingAction = (actionTx: IExtendedStorageTransaction) => {
         crashingRuns++;
-        const cell = runtime.getCell(space, id, wishShapedSchema, actionTx);
+        const cell = runtime.getCell(
+          space,
+          id,
+          ambiguousWishShapedSchema,
+          actionTx,
+        );
         const resolved = runtime.getCell<{ name: string }>(
           space,
           `${id}-resolved`,
@@ -291,7 +308,24 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
       });
 
-    it("a refused wish-state commit surfaces its reason in the wish UI", async () => {
+    type Journey = {
+      makeRuntime: () => {
+        manager: EmulatedStorageManager;
+        runtime: Runtime;
+        close: () => Promise<void>;
+      };
+      runWishOnce: (
+        prePullLink?: { id: string; scope: string | undefined },
+      ) => Promise<string>;
+      seedTarget: (cellName: string, name: string) => Promise<void>;
+      resolveStateDocLink: () => Promise<
+        { id: string; scope: string | undefined }
+      >;
+    };
+
+    /** One journey per shared in-process server: two runtimes at a time is
+     * the live two-writer topology (the serving loop and the browser). */
+    const makeJourney = (): Journey => {
       const server = makeServer();
       const makeRuntime = () => {
         const manager = EmulatedStorageManager.connectTo(server, {
@@ -311,9 +345,28 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         };
       };
 
-      const runWishOnce = async (): Promise<string> => {
+      const runWish = async (
+        prePullLink?: { id: string; scope: string | undefined },
+      ): Promise<
+        { state: string; stateLink: { id: string; scope: string | undefined } }
+      > => {
         const rt = makeRuntime();
         try {
+          // The live ordering: the served doc (and its label metadata) is in
+          // the client's replica BEFORE the client's own wish action preps.
+          if (prePullLink !== undefined) {
+            const pre = rt.runtime.getCellFromLink(
+              {
+                id: prePullLink.id,
+                space,
+                scope: prePullLink.scope,
+                path: [],
+              } as never,
+              undefined,
+              undefined,
+            );
+            await pre.pull();
+          }
           const { commonfabric } = createTrustedBuilder(rt.runtime);
           const { wish, pattern } = commonfabric;
           const tx = rt.runtime.edit();
@@ -336,12 +389,19 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
           await rt.runtime.idle();
           // Let the failure-surfacing bookkeeping transaction (spawned from a
           // commit callback, with its own bounded retries) land. This file is
-          // on the REAL clock (clock-preload.ts realClockFiles): the two-writer
-          // journey drives live cross-runtime storage transport, the class the
-          // fake clock's auto-advance mode cannot pace.
+          // on the REAL clock (clock-preload.ts realClockFiles): the
+          // two-writer journey drives live cross-runtime storage transport,
+          // the class the fake clock's auto-advance mode cannot pace.
           await new Promise((resolve) => setTimeout(resolve, 200));
           await rt.runtime.idle();
-          return JSON.stringify(result.key("secretWish").get() ?? null);
+          const readTx = rt.runtime.edit();
+          const fieldLink = result.key("secretWish").getAsNormalizedFullLink();
+          const resolved = resolveLink(rt.runtime, readTx, fieldLink);
+          readTx.abort();
+          return {
+            state: JSON.stringify(result.key("secretWish").get() ?? null),
+            stateLink: { id: resolved.id, scope: resolved.scope },
+          };
         } finally {
           await rt.close();
         }
@@ -373,21 +433,109 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         }
       };
 
-      // Writer A resolves and persists the wish-state envelope.
-      await seedTarget("ow50-secret-a", "classified");
-      const stateA = await runWishOnce();
+      let lastLink: { id: string; scope: string | undefined } | undefined;
+      return {
+        makeRuntime,
+        runWishOnce: async (
+          prePullLink?: { id: string; scope: string | undefined },
+        ) => {
+          const { state, stateLink } = await runWish(prePullLink);
+          lastLink = stateLink;
+          return state;
+        },
+        seedTarget,
+        resolveStateDocLink: () => {
+          if (lastLink === undefined) {
+            throw new Error("run the wish before resolving its state doc");
+          }
+          return Promise.resolve(lastLink);
+        },
+      };
+    };
+
+    it("the ruled wish shape merges cleanly across two writers (RULING 5 flip)", async () => {
+      // Red-first for the narrowing: before RULING 5 this journey's second
+      // writer was refused at commit-prep (the crash this suite pinned) and
+      // the state froze at writer A\'s value with a surfaced error. Under the
+      // ruling the single-carrier presence union merges, so writer B\'s
+      // changed /result link LANDS — the profile-embed lift condition.
+      const journey = makeJourney();
+      await journey.seedTarget("ow50-secret-a", "classified");
+      const stateA = await journey.runWishOnce();
       expect(stateA).toContain("classified");
 
-      // Repoint, then writer B\'s changed /result link meets the stored
-      // divergent envelope and its commit is refused.
-      await seedTarget("ow50-secret-b", "still classified");
-      const stateB = await runWishOnce();
+      await journey.seedTarget("ow50-secret-b", "still classified");
+      const stateB = await journey.runWishOnce();
+      expect(stateB).toContain("still classified");
+      expect(stateB).not.toContain('"error"');
+    });
 
-      // The refusal is IN the wish surface: the state carries `error` and an
-      // error UI naming the real cause.
-      expect(stateB).toMatch(/divergent anyOf|commit-prep crashed/);
-      expect(stateB).toContain('"error"');
-      expect(stateB).toContain("$UI");
+    it("a genuinely-ambiguous stored envelope still refuses — and the wish surfaces it", async () => {
+      // Discovery pass (its own server): the wish-state doc id is
+      // content-derived from (space, pattern, result-cell id), so a fresh
+      // server reproduces the same id.
+      const discovery = makeJourney();
+      await discovery.seedTarget("ow50-secret-a", "classified");
+      await discovery.runWishOnce();
+      const stateDoc = await discovery.resolveStateDocLink();
+
+      // The live journey: seed the AMBIGUOUS envelope at that id FIRST (the
+      // first writer never merges, so it lands and poisons the doc), then run
+      // the real wish — its state commit meets the stored ambiguous envelope,
+      // the narrowed assert still refuses (two ifc carriers), and the OW50
+      // surfacing writes the reason into the state doc.
+      const journey = makeJourney();
+      await journey.seedTarget("ow50-secret-a", "classified");
+      {
+        const rt = journey.makeRuntime();
+        try {
+          const tx = rt.runtime.edit();
+          const cell = rt.runtime.getCellFromLink(
+            {
+              id: stateDoc.id,
+              space,
+              scope: stateDoc.scope,
+              path: [],
+            } as never,
+            ambiguousWishShapedSchema,
+            tx,
+          );
+          cell.set({ candidates: [{ name: "Bob" }] });
+          rt.runtime.prepareTxForCommit(tx);
+          const res = await tx.commit();
+          expect(res.error).toBeUndefined();
+          await rt.runtime.idle();
+        } finally {
+          await rt.close();
+        }
+      }
+      await journey.runWishOnce(stateDoc);
+
+      // Read the state DOC directly: the refused wish commit also carried the
+      // piece-result link write, so the result field never resolves — the
+      // surfaced error lives on the doc itself.
+      {
+        const rt = journey.makeRuntime();
+        try {
+          const cell = rt.runtime.getCellFromLink(
+            {
+              id: stateDoc.id,
+              space,
+              scope: stateDoc.scope,
+              path: [],
+            } as never,
+            undefined,
+            undefined,
+          );
+          await cell.pull();
+          const value = JSON.stringify(cell.get() ?? null);
+          expect(value).toMatch(/divergent anyOf|commit-prep crashed/);
+          expect(value).toContain('"error"');
+          expect(value).toContain("$UI");
+        } finally {
+          await rt.close();
+        }
+      }
     });
   });
 

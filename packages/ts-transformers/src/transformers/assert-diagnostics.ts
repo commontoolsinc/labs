@@ -4,7 +4,10 @@ import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { resolvesToCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getNodeText } from "../ast/utils.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  ASSERT_CAPTURE_HELPER_NAME,
+  unwrapExpression,
+} from "../utils/expression.ts";
 
 /**
  * AssertDiagnosticsTransformer: rewrites the body of an `assert(...)` call so
@@ -567,7 +570,7 @@ function captureValue(
   const source = sourceTextOf(unwrapExpression(labelSource));
 
   return context.cfHelpers.createHelperCall(
-    "assertCapture",
+    ASSERT_CAPTURE_HELPER_NAME,
     labelSource,
     undefined,
     [

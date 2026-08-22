@@ -2834,7 +2834,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Inherent in the ruling composed with the pre-existing shared-name
   behavior; convergence clean; SURFACED TO OWNER 2026-08-21 (the
   independent review's F2 — the wildcard residual's sharper sibling;
-  build report FLAG-8). (vi) a via-"owner" crossing into a
+  build report FLAG-8). RATIFIED by the CFC owner 2026-08-21
+  ("ratify", relayed by the coordinator with the RULING-5 batch):
+  first-creator-owns IS the shared-named-space contract — the genesis
+  race's winner holds owner power, peers hold `"*": WRITE` — a settled
+  behavior now, not a residual awaiting a fix. (vi) a via-"owner" crossing into a
   never-materialized home store is granted without genesis forcing and
   then refused forever by the sink's INV-13 mirror — a fail-closed
   livelock unreachable in sanctioned flows; its watcher signature is
@@ -5319,8 +5323,23 @@ supply; OW29/OW32/OW34 closed):
     (API_URL decides whose bytes the server compiles), and the
     historical-stored-sources × new-transformer-rules exposure.
   - **OW49 — the ifc-divergent-anyOf envelope at /result under ON
-    (seat S-I; a CFC-OWNER call — FLAGGED, not scheduled; envelope
-    DECODED 2026-08-21,
+    (seat S-I; RULED 2026-08-21 — CFC owner ("sg", relayed by the
+    coordinator; the owner confirmed CFC ownership): the narrowing is
+    APPROVED per the seat recommendation WITH the adversarial
+    reviewer's cautions as binding constraints — narrow
+    `assertNoDivergentIfcBranches` to actual ambiguity, admitting at
+    most ONE ifc-carrying branch when every ifc-free sibling is
+    type-disjoint from it (conservative disjointness — explicit scalar
+    `type` keywords decided over VALUE-sets, not type strings: the one
+    subtype pair integer ⊂ number is NOT disjoint, review F1; no other
+    semantic subtyping), scoped to anyOf/oneOf (allOf stays refused —
+    unsatisfiable-by-construction under the rule), the merge treating
+    the ifc branch as the policy carrier, holding at all four
+    mergeCfcSchemaEnvelopes call sites, and still recursing INTO the
+    admitted carrier. Built red-first on the seat's deterministic
+    repro (the two-writer journey flipped from crash-surfaced to
+    clean-merge; the genuinely-ambiguous class pinned refused);
+    envelope DECODED 2026-08-21,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
     §2).** Main's `assertNoDivergentIfcBranches` (cfc/schema-merge.ts,
     #3263) fires inside the `raw:wish` action's commit-prep only under
@@ -5348,9 +5367,21 @@ supply; OW29/OW32/OW34 closed):
     branches are type-disjoint from it; merge treats the ifc branch
     as the policy carrier); alternative — remove the combinator from
     the wish's own result declaration (narrower; other ifc-under-union
-    families re-trip). Trigger: lifts the
-    `integration/profile-embed.test.ts` ON skip (the sole remaining
-    blocker after OW48's refutation and OW50's build).
+    families re-trip). BUILT 2026-08-21 per the ruling
+    (`cfc/schema-merge.ts`; red-first both directions —
+    `cfc-schema-merge.test.ts` + `cfc-prepare-crash-surfacing.test.ts`
+    carry the admitted-shape, constraint, and genuine-ambiguity pins;
+    optimize/ruling5-ow49-report.md). LIVE-VERIFIED extinct: 10
+    fresh-store ON runs at the ruling head show ZERO divergence
+    asserts — the wish UI mounts and the profile resolves every run.
+    The row is NOT closed: the ruled closure condition (profile-embed
+    greens ON) did not land — the lift attempt surfaced the NEXT
+    blocker (the resolved-profile amend steps intermittently red 6/10
+    with the amended values durably absent from every store; the
+    OW45+OW31-family cross-space derivation signatures in every run —
+    triage in optimize/ruling5-ow49-report.md §3). Closure and the
+    successor's row-mapping are the coordinator's; the skip entry now
+    names the amend-convergence blocker.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5372,7 +5403,14 @@ supply; OW29/OW32/OW34 closed):
     "would meet whatever refused it the first time" single-shot
     corrected with bounded retries for the transient classes. The
     formerly silent never-mount now shows the refusal's text in the
-    wish surface. Still open (flagged in the report §6): whether
+    wish surface. The throw-to-rejected-commit contract change (the
+    three re-pinned `cfc-policy-of-label` PolicyOf pins) is RATIFIED
+    by the CFC owner 2026-08-21 ("sg", relayed by the coordinator,
+    with the motivation question answered on the record: the change
+    was forward-motivated by the silent-never-mount and the scheduler
+    wedge, no pre-existing test was left broken — the three pins were
+    green before and after, consciously migrated with the same
+    diagnostics delivered through the rejection message). Still open (flagged in the report §6): whether
     modeled CFC refusals should be terminal-classified for the retry
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
@@ -5598,6 +5636,32 @@ supply; OW29/OW32/OW34 closed):
       `docs/development/EXPERIMENTAL_OPTIONS.md` line claiming
       auto-update is "off server-side" is corrected in this PR;
       `serving-loop.md` §3e already stated it correctly.)
+  - **OW57 — the (α3)-family held-wave probe's gate race (a
+    PRE-EXISTING test flake in `executor-events-down.test.ts`, filed
+    2026-08-21 by the #6170 review's G1 so the constructed-depth
+    pin's PR is not blamed when the lane first flakes; renumbered
+    OW56 → OW57 pre-merge for the parallel-mint collision with the
+    durability train's #6173, which keeps OW56 for server-owned
+    program compilation).** The
+    "(α3) + a same-eventId SIBLING tx" step's held-wave construction
+    (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
+    probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
+    wave is still HELD (its "ping" entry not yet durable). The gate
+    engages at the settle's `inputSynced` barrier, and the
+    when-predicate flips only once a seal is visible through the
+    sealed overlay — so a commit whose settle pass checked the gate
+    BEFORE the predicate flipped can complete in that same cycle,
+    landing the ping before the probe: measured 2/15 full-suite reds
+    at #6170's head vs 0/10 on main's version (the pin inserted
+    ahead plausibly shifts timing into the window;
+    fresh-server-per-step rules out state coupling). An event-driven
+    closure is NOT cheap: an unconditional gate starves the drain
+    the step needs (the step's own comment), and holding reliably
+    means restructuring the construction to re-arm on a lost race.
+    Owed: the hardened construction (or an owner call to
+    accept-and-retry the step); until then a red of THIS step with
+    the ping already durable at the probe is this race, not a
+    product regression. No lift trigger (test-harness item).
 
 ## 4. Standing rule
 

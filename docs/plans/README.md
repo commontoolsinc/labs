@@ -40,6 +40,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Choosing which tests a pull request runs](pull-request-test-selection.md)
+  replaces the sixty-seven pull-request jobs with five, each running a subset
+  chosen from what the record store knows about which tests have caught real
+  regressions, and packed to finish inside five minutes. It carries the
+  repository-side topology that lets a new test surface be registered once
+  and picked up by both the full run and the selection, the scoring, flake
+  and packing rules, and the two things a subset breaks and this replaces:
+  coverage becomes a trend rather than a gate, and a regression that only
+  `main` catches is reported back to the change that introduced it.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its

@@ -61,6 +61,10 @@ mapped in [`../README.md`](../README.md).
 
 ## Continuous integration, deployment, and measurement
 
+- [`pr-review-comments.md`](pr-review-comments.md) — reading the review
+  comments on a pull request: the commands that list a reviewer's findings and
+  tell you which threads are still open, which automated reviewers post here,
+  and why `gh pr view` returns none of it
 - [`deploying.md`](deploying.md) — how a commit reaches a host: which jobs
   deploy where, and the contract the bastion's deploy wrapper enforces on what
   they pass it. Read this before editing a deploy step, because that wrapper
