@@ -5660,8 +5660,8 @@ supply; OW29/OW32/OW34 closed):
     pin's PR is not blamed when the lane first flakes; renumbered
     OW56 → OW57 pre-merge for the parallel-mint collision with the
     durability train's #6173, which keeps OW56 for server-owned
-    program compilation): CLOSED (2026-08-21, #6184 —
-    `c31397906`).** The race as filed: the
+    program compilation; tracked as CT-2060): CLOSED (2026-08-21,
+    #6184 — `c31397906`).** The race as filed: the
     "(α3) + a same-eventId SIBLING tx" step's held-wave construction
     (#6096's W3 pins) set `settleGate`/`settleGateWhen` and then
     probed `expect(entriesOf(sidecar)).toEqual([])` — asserting the
