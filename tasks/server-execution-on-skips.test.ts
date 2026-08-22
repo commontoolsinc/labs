@@ -149,7 +149,10 @@ Deno.test("main: the patterns list = ONE step entry (default-app's reload step, 
   // …and the list holds EXACTLY this one step entry — a second entry, a
   // file-level entry, or a silent lift all redden this pin.
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].file, "integration/default-app.test.ts");
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
+    "integration/default-app.test.ts",
+  );
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].step,
     "should persist and reload every rapidly created notebook note",
