@@ -2875,8 +2875,16 @@ export const commitClassOfSeq = (
     `SELECT class FROM "commit" WHERE seq = :seq`,
   ).get({ seq }) as { class: CommitClass } | undefined;
   if (row === undefined) return undefined;
-  if (memo.size >= COMMIT_CLASS_MEMO_MAX_ENTRIES) memo.clear();
-  memo.set(seq, row.class);
+  // "Immutable once admitted" holds for DURABLE rows only: inside an
+  // `applyCommit` transaction the same connection reads the staged,
+  // rollback-able commit row, and a rolled-back seq is re-minted by the
+  // retry (possibly under another class). Same discipline as the staged
+  // document cache: answer from the live read, memoize only outside a
+  // transaction.
+  if (engine.stagedDocumentCache === undefined) {
+    if (memo.size >= COMMIT_CLASS_MEMO_MAX_ENTRIES) memo.clear();
+    memo.set(seq, row.class);
+  }
   return row.class;
 };
 
