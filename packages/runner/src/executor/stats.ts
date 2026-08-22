@@ -228,6 +228,13 @@ export type ServingLoopStats = {
     demandPassMs: number;
     pushGrowthWakes: number;
     watchWakes: number;
+    /** Demand-pass wakes from WARM captures (the explicit warm
+     * request's staged instances entering the tenure's warm demand,
+     * serving-loop.md §1; RULED 2026-08-21) — counted apart so
+     * `watchWakes` keeps meaning exactly the session-watch notifies.
+     * Like the other wake counters, counts notifies before the grace
+     * coalescing. */
+    warmWakes: number;
   };
   /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
    * §6 W4's metric): from the authored commit's ADMISSION on the server
@@ -405,6 +412,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     demandPassMs: 0,
     pushGrowthWakes: 0,
     watchWakes: 0,
+    warmWakes: 0,
   },
   settle: { series: [], dropped: 0 },
   settleAdvances: { count: 0, lastDelta: 0, series: [], dropped: 0 },

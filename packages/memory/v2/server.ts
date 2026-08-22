@@ -418,6 +418,12 @@ export type AdmittedCommitNotice = {
   warm?: true;
 };
 
+// The canonical demand/dirty key encoding, re-exported beside the
+// notice type whose `writes` it keys: the serving loop's warm-demand
+// capture (space-server.ts) keys staged instances with it so warm keys
+// can never drift from the client demand keys the registry holds.
+export { toDirtyKey } from "./query.ts";
+
 /**
  * The ExecutorHost's in-process observer (serving-loop.md §1's wiring):
  * plane (b) — `commitAdmitted` is the admission-side activation hook (an

@@ -38,6 +38,7 @@
 import {
   type AdmittedCommitNotice,
   type Server as MemoryServer,
+  toDirtyKey,
 } from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import type {
@@ -1035,13 +1036,15 @@ export class SpaceServer implements TransactionSealDestination {
       // latch a session's watch change uses).
       let captured = false;
       for (const write of record.writes) {
-        const key = `${write.scopeKey}\0${write.id}`;
+        // The canonical key encoding (the registry's own), so warm keys
+        // can never drift from client demand keys.
+        const key = toDirtyKey(write.id, write.scopeKey);
         if (!this.#warmDemandKeys.has(key)) {
           this.#warmDemandKeys.set(key, write);
           captured = true;
         }
       }
-      if (captured) this.noteDemandChanged();
+      if (captured) this.noteDemandChanged("warm");
     }
     this.#feed.push(record);
     if (
@@ -1144,17 +1147,22 @@ export class SpaceServer implements TransactionSealDestination {
    * derivations of that piece (protocol.md §4: a fresh subscription's
    * recompute lands in a LATER derived commit; arrival is later demand).
    * Input-driven cycles are unaffected (they run their pass regardless). */
-  noteDemandChanged(reason: "watch" | "push-growth" = "watch"): void {
+  noteDemandChanged(reason: "watch" | "push-growth" | "warm" = "watch"): void {
     // MINOR-1: a fresh demand note — bump the generation so a pass that
     // already snapshotted its rows re-latches on completion.
     this.#demandNoteGeneration += 1;
     // (d′) — flag 1/2 instrumentation: count the wake sources
     // (the push-growth notify is the NEW site) and remember that a growth
     // wake fired, so the settle series can class the inputs it covers.
+    // A WARM capture (the explicit warm request's staged instances
+    // entering #warmDemandKeys) counts apart from client watch changes,
+    // so `watchWakes` keeps meaning exactly the session-watch notifies.
     if (reason === "push-growth") {
       this.#options.stats.demand.pushGrowthWakes += 1;
       this.#growthWakeCounter += 1;
       this.#noteGrowthWakeForSettle();
+    } else if (reason === "warm") {
+      this.#options.stats.demand.warmWakes += 1;
     } else {
       this.#options.stats.demand.watchWakes += 1;
     }

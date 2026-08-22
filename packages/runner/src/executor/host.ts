@@ -5,8 +5,13 @@
 // - plane (b): the memory server's admission observer notifies the host
 //   on any AUTHORED admission (an admission-side hook, never a poll) and
 //   on session open; the host activates the space when it meets the
-//   ACTIVE criteria (≥1 live client session or undelivered events — the
-//   latter has no instances until Phase 3 lands events on the wire);
+//   ACTIVE criteria — ≥1 live client session, undelivered events (an
+//   event-carrying admission), or an EXPLICIT WARM REQUEST
+//   (serving-loop.md §1's third trigger, RULED 2026-08-21): a
+//   warm-marked admission notice, set only by the serving-side
+//   provisioning path when its wave staged setup into the space, which
+//   activates a sessionless target where an ordinary authored write
+//   deliberately does not (T11.Q7's write-alone parking);
 // - plane (c): lease acquire/renew by direct table write (the
 //   SpaceServer's cycle);
 // - plane (d): admitted-commit records route to the space's SpaceServer
@@ -15,7 +20,8 @@
 // A park racing an incoming commit self-heals: the hook re-fires on the
 // next admission. Host boot discovery (stream head past eventWatermark ⇒
 // undelivered events ⇒ activate) has nothing to discover until Phase 3;
-// spaces activate on their first session or authored admission.
+// spaces activate on their first session, event, warm request, or
+// session-implying authored admission.
 
 import {
   type AdmittedCommitNotice,

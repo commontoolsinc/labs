@@ -1258,7 +1258,7 @@ watermarkLag, demandArrivals, undemandedNarrowingRuns, earlyEmitRefusals,
 demand: {demandedRows, demandedInstances, demandedInstancesMax,
 demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
 demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
-pushGrowthWakes, watchWakes}, settle: {series, dropped},
+pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
 drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
@@ -1346,8 +1346,10 @@ time — which INCLUDES the awaited structure-load segments
 (`ensurePieceRunning`) for first-demand/pending root keys, NOT only the
 O(rows) reconcile (the reconcile does no per-row engine read and runs on
 registry deltas; the label is wall time, review MINOR-3);
-`pushGrowthWakes`/`watchWakes` count NOTIFIES (the push-time
-`demandChanged` and the `session.watch.set`/`.add` notifies) BEFORE the
+`pushGrowthWakes`/`watchWakes`/`warmWakes` count NOTIFIES (the push-time
+`demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
+request's staged-instance captures — the third kept apart so
+`watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
 300 ms-grace coalescing — a burst is several notifies but one demand pass,
 so these exceed the pass-wake count (review NIT-5); the service (loopback)
 session's notifies are DROPPED — its tracked-set growth is the serving
