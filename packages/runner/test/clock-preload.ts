@@ -125,5 +125,11 @@ installFakeClock({
     // auto-advance turns the renew cadence into a runaway (the guard
     // names SpaceServer.activate's timers).
     "executor-trust-attribution",
+    // The explicit warm-request suite drives a live ExecutorHost (the
+    // staged-setup provisioning + warm activation journeys, park-race
+    // pin included) under the same wall-clock policies — the renew
+    // interval and flush deadline; auto-advance turns the renew cadence
+    // into a runaway (the guard names SpaceServer.activate's timers).
+    "executor-warm-request",
   ],
 });

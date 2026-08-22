@@ -154,6 +154,15 @@ export type ServingLoopStats = {
    * cannot open (disk trouble, or a provisioning target with an
    * unusable path). */
   foreignEngineFailures: number;
+  /** EXPLICIT WARM REQUESTS issued (serving-loop.md §1's third
+   * activation trigger; RULED 2026-08-21): one per foreign provisioning
+   * batch a wave durably committed — the serving-side provisioning path
+   * telling the host that staged setup landed in another space, so a
+   * parked, SESSIONLESS target activates and derives it (the
+   * setup-after-park ordering race's fix — the home-profile reload
+   * residual). Counted at issue; an already-active target consumes the
+   * request as a demand-union no-op. */
+  warmRequests: number;
   /** Server-execution v2 fan-out stage B (design §B5, RULED 2026-08-16
    * accept-and-count): derivation runs under the wave-level FALLBACK
    * identity — an action NOBODY demands with an identity — that
@@ -219,6 +228,13 @@ export type ServingLoopStats = {
     demandPassMs: number;
     pushGrowthWakes: number;
     watchWakes: number;
+    /** Demand-pass wakes from WARM captures (the explicit warm
+     * request's staged instances entering the tenure's warm demand,
+     * serving-loop.md §1; RULED 2026-08-21) — counted apart so
+     * `watchWakes` keeps meaning exactly the session-watch notifies.
+     * Like the other wake counters, counts notifies before the grace
+     * coalescing. */
+    warmWakes: number;
   };
   /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
    * §6 W4's metric): from the authored commit's ADMISSION on the server
@@ -377,6 +393,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   reactivationBackoffs: 0,
   foreignWriteRefusals: 0,
   foreignEngineFailures: 0,
+  warmRequests: 0,
   undemandedNarrowingRuns: 0,
   earlyEmitRefusals: 0,
   demandArrivals: 0,
@@ -395,6 +412,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     demandPassMs: 0,
     pushGrowthWakes: 0,
     watchWakes: 0,
+    warmWakes: 0,
   },
   settle: { series: [], dropped: 0 },
   settleAdvances: { count: 0, lastDelta: 0, series: [], dropped: 0 },

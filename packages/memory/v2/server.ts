@@ -404,6 +404,18 @@ export type AdmittedCommitNotice = {
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
   eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+  /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
+   * trigger; RULED 2026-08-21): set only by the serving-side
+   * provisioning path — a wave's foreign provisioning batch reported
+   * through `noteExecutorCommit` — when this authored commit STAGED
+   * SETUP into another space (protocol.md §2b's sanctioned crossing).
+   * The host activates the target on it even with no live session and
+   * no events (the deliberate, scoped signal the notify-only admission
+   * hook is not — T11.Q7's write-alone parking stays as designed), and
+   * the target's serving loop takes the commit's `writes` as
+   * identity-less warm demand so the staged setup derives. Never set on
+   * client transacts, system writes, or event deliveries. */
+  warm?: true;
 };
 
 /**
