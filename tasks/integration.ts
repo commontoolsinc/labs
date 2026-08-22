@@ -173,8 +173,9 @@ async function startServers(
     return result.code;
   }
 
-  // Successful completion means both servers have bound, passed their
-  // readiness probes, and served the shell through the toolshed.
+  // Successful completion of start-local-dev.sh is the readiness event: both
+  // servers have bound, passed their probes, and served the shell through the
+  // toolshed.
   return 0;
 }
 
