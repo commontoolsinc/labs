@@ -211,6 +211,7 @@ type InternalCellDescriptor = {
 type StartAttempt = {
   readonly lifecycleEpoch: number;
   readonly schedulePatternUpdate: boolean;
+  readonly retryPieceStartFailure: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
   // The result this attempt resolved to, which a link start only learns by
@@ -828,6 +829,11 @@ type DeferredStartResult<R> = {
 
 type DeferredStartOwnership = DeferredCancelOwnership & {
   markPending: () => void;
+};
+
+type PieceStartRecovery = {
+  ownership: DeferredStartOwnership;
+  retry: () => void;
 };
 
 type BoundNodeIO = {
@@ -2286,10 +2292,23 @@ export class Runner {
     resultCell: Cell<T>,
     options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<boolean> {
+    return this.startWithPieceStartRetry(
+      resultCell,
+      options.schedulePatternUpdate ?? true,
+      true,
+    );
+  }
+
+  private startWithPieceStartRetry<T>(
+    resultCell: Cell<T>,
+    schedulePatternUpdate: boolean,
+    retryPieceStartFailure: boolean,
+  ): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
-      schedulePatternUpdate: options.schedulePatternUpdate ?? true,
+      schedulePatternUpdate,
+      retryPieceStartFailure,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
     };
@@ -2450,6 +2469,7 @@ export class Runner {
       awaitSyncBeforeInitialRun?: boolean;
       // See RunnerRunOptions.parentPieceRootId.
       parentPieceRootId?: string;
+      retryPieceStartFailure?: boolean;
     } = {},
   ): Cancel {
     const {
@@ -2457,6 +2477,7 @@ export class Runner {
       givenPattern,
       doNotUpdateOnPatternChange,
       schedulePatternUpdate = true,
+      retryPieceStartFailure: retryInitialPieceStartFailure = false,
     } = options;
     const key = this.getDocKey(resultCell);
     this.locallyStoppedResults.delete(key);
@@ -2500,6 +2521,7 @@ export class Runner {
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
+      retryPieceStartFailure: boolean = true,
     ) => {
       if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
       // Create new cancel group for nodes
@@ -2510,6 +2532,7 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      let instantiated = false;
       if (shouldCommit) {
         // Self-minted instantiation tx (the hot-swap watcher's
         // swapToPattern arm reaches here tx-less): runtime-internal
@@ -2566,6 +2589,7 @@ export class Runner {
             }
           });
         }
+        instantiated = true;
       } finally {
         if (shouldCommit) {
           const teardownAfterFailedCommit = () => {
@@ -2598,6 +2622,12 @@ export class Runner {
             instantiateActionId,
             resultCell.getAsNormalizedFullLink().id,
             teardownAfterFailedCommit,
+            instantiated && retryPieceStartFailure
+              ? this.createPieceStartRecovery(
+                resultCell,
+                schedulePatternUpdate,
+              )
+              : undefined,
           );
         }
       }
@@ -2918,7 +2948,11 @@ export class Runner {
       useTx?: IExtendedStorageTransaction,
     ) => {
       try {
-        instantiatePattern(pattern, useTx);
+        instantiatePattern(
+          pattern,
+          useTx,
+          retryInitialPieceStartFailure,
+        );
       } catch (instantiateError) {
         if (
           useTx !== undefined ||
@@ -3027,6 +3061,12 @@ export class Runner {
           repairActionId,
           resultCell.getAsNormalizedFullLink().id,
           teardownAfterFailedCommit,
+          retryInitialPieceStartFailure
+            ? this.createPieceStartRecovery(
+              resultCell,
+              schedulePatternUpdate,
+            )
+            : undefined,
         );
       }
     };
@@ -3272,6 +3312,7 @@ export class Runner {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
+          retryPieceStartFailure: attempt.retryPieceStartFailure,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -3309,6 +3350,7 @@ export class Runner {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
+          retryPieceStartFailure: attempt.retryPieceStartFailure,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
             // Resumed from a synced state (it just awaited
@@ -3392,6 +3434,28 @@ export class Runner {
     };
     register();
     return ownership;
+  }
+
+  private createPieceStartRecovery<T>(
+    resultCell: Cell<T>,
+    schedulePatternUpdate: boolean,
+  ): PieceStartRecovery {
+    return {
+      ownership: this.createDeferredStartOwnership(resultCell),
+      retry: () => {
+        void this.startWithPieceStartRetry(
+          resultCell,
+          schedulePatternUpdate,
+          false,
+        ).catch((error) => {
+          logger.error(
+            "piece-start-retry-failed",
+            "Piece start retry failed",
+            error,
+          );
+        });
+      },
+    };
   }
 
   private commitDeferredStart<T>(
@@ -4008,6 +4072,7 @@ export class Runner {
       registrationRemoved: boolean;
       cleanupError?: unknown;
     },
+    recovery?: PieceStartRecovery,
   ): void {
     let failureHandled = false;
     const retryFor = (error: unknown): "immediate" | "on-input" =>
@@ -4015,12 +4080,14 @@ export class Runner {
         isStorageTransactionInconsistent(error as { name?: string })
         ? "immediate"
         : "on-input";
-    const retryReadyFor = (error: unknown): Promise<void> | undefined => {
+    const retryReadyFor = (
+      error: unknown,
+    ): (() => Promise<void>) | undefined => {
       if (!isConflictRejection(error as { name?: string })) return undefined;
       const readyToRetry = (error as { readyToRetry?: () => Promise<void> })
         .readyToRetry;
       if (readyToRetry === undefined) return undefined;
-      return Promise.resolve().then(() => readyToRetry());
+      return () => Promise.resolve().then(() => readyToRetry());
     };
     const fail = (error: unknown, retry: "immediate" | "on-input") => {
       if (failureHandled) return;
@@ -4038,6 +4105,7 @@ export class Runner {
         teardown.registrationRemoved,
         retry,
         retryReadyFor(error),
+        recovery,
         error,
       );
     };
@@ -4049,9 +4117,16 @@ export class Runner {
           return;
         }
         const settlement = waveSettlementOf(tx);
-        if (settlement === undefined) return;
+        if (settlement === undefined) {
+          recovery?.ownership.cancel();
+          return;
+        }
         const settled = await settlement;
-        if (settled.error !== undefined) fail(settled.error, "immediate");
+        if (settled.error !== undefined) {
+          fail(settled.error, "immediate");
+        } else {
+          recovery?.ownership.cancel();
+        }
       } catch (error) {
         fail(error, retryFor(error));
       }
@@ -4063,7 +4138,8 @@ export class Runner {
     pieceRootId: string,
     registrationRemoved: boolean,
     retry: "immediate" | "on-input",
-    retryReady: Promise<void> | undefined,
+    retryReady: (() => Promise<void>) | undefined,
+    recovery: PieceStartRecovery | undefined,
     error: unknown,
   ): void {
     logger.error("piece-start-commit-failed", () => [
@@ -4071,26 +4147,58 @@ export class Runner {
       "writes did not land (stage P2-F, F1)",
       error,
     ]);
-    const notify = () => {
+    const observer = this.runtime.pieceStartCommitFailureObserver;
+    if (observer !== undefined) {
+      recovery?.ownership.cancel();
+      const notify = () => {
+        try {
+          observer({
+            actionId,
+            pieceRootId,
+            registrationRemoved,
+            retry,
+            error,
+          });
+        } catch (observerError) {
+          logger.warn("piece-start-commit-observer-failed", () => [
+            "pieceStartCommitFailureObserver threw",
+            observerError,
+          ]);
+        }
+      };
+      if (registrationRemoved && retryReady !== undefined) {
+        retryReady().then(notify, notify);
+      } else {
+        notify();
+      }
+      return;
+    }
+
+    const conflict = isConflictRejection(error as { name?: string });
+    if (
+      !registrationRemoved || retry !== "immediate" || recovery === undefined ||
+      (conflict && retryReady === undefined)
+    ) {
+      recovery?.ownership.cancel();
+      return;
+    }
+    const retryStart = () => {
+      if (recovery.ownership.isCancelled()) return;
+      recovery.ownership.cancel();
       try {
-        this.runtime.pieceStartCommitFailureObserver?.({
-          actionId,
-          pieceRootId,
-          registrationRemoved,
-          retry,
-          error,
-        });
-      } catch (observerError) {
-        logger.warn("piece-start-commit-observer-failed", () => [
-          "pieceStartCommitFailureObserver threw",
-          observerError,
-        ]);
+        recovery.retry();
+      } catch (retryError) {
+        logger.error(
+          "piece-start-retry-failed",
+          "Piece start retry failed",
+          retryError,
+        );
       }
     };
-    if (registrationRemoved && retryReady !== undefined) {
-      retryReady.then(notify, notify);
+    if (retryReady !== undefined) {
+      retryReady().then(retryStart, () => recovery.ownership.cancel());
     } else {
-      notify();
+      retryStart();
     }
   }
 

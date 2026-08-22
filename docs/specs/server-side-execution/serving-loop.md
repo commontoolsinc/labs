@@ -813,6 +813,9 @@ swallowed refusal leaves the piece silently running against setup
 writes that never landed. This includes a contribution that seals and
 is later withdrawn when its wave settles. A failed start removes its
 registration only while that exact node generation is still current.
+When no serving-loop observer owns recovery, a stale-basis failure waits
+for its replica catch-up gate and reconstructs the start once. A second
+failure ends that reconstruction chain.
 The serving loop re-arms matching continuous demand. A wave withdrawal
 or stale-basis rejection wakes the next structure-load pass immediately
 after the conflict's replica catch-up gate settles. A seal or policy failure remains
