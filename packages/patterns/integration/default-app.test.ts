@@ -807,10 +807,8 @@ describe("default-app flow test", () => {
         // barrier under serving, not that they materialize unobserved (the
         // reload rehydration surface is integration/reload/
         // default-app-notebook.test.ts's).
-        let summary:
-          | NotebookSourceSummary
-          | Awaited<ReturnType<typeof collectNotebookSourceState>>
-          | undefined;
+        let summary: NotebookSourceSummary | undefined;
+        let waitFailure: unknown;
         try {
           await waitForCondition(page, notebookSourceStateMatches, {
             args: [noteCreates],
@@ -820,24 +818,24 @@ describe("default-app flow test", () => {
             args: [noteCreates],
           });
         } catch (error) {
-          // A wait's stuck-condition net fired: the state never converged.
-          // Name the failed wait, then fall through so the failure carries
-          // the diagnostics below.
-          console.log("Notebook regression wait failed:", error);
+          // A wait or the sync barrier failed at its net: the state never
+          // converged (or synchronization itself failed). Hold the error so
+          // the failure path below can print diagnostics and then RE-THROW
+          // it — the waits are the step's only signal, and a fresh read
+          // must never stand in for them (a fallback read that fed the
+          // assertions could green a run whose authority wait failed on a
+          // field the assertions don't check).
+          waitFailure = error;
         }
 
-        // Failure path only: no approved summary reached this point (a wait
-        // or the sync barrier failed at its net), so read once for the
-        // diagnostics the failing assertions print. This read is not the
-        // signal — the waits are — so its raciness is harmless.
-        summary ??= await collectNotebookSourceState(page);
-        if (
-          summary.argumentNotesLength !== noteCreates ||
-          summary.noteCount !== noteCreates
-        ) {
+        if (summary === undefined) {
+          // Failure path only: print the diagnostics the thrown failure
+          // cannot carry, from a one-shot read that is expressly NOT the
+          // signal (its raciness is harmless here — the step is already
+          // failing), then re-throw the authority's own error.
           console.log(
             "Notebook rapid create source diagnostics:",
-            JSON.stringify(summary, null, 2),
+            JSON.stringify(await collectNotebookSourceState(page), null, 2),
           );
           console.log(
             "Notebook rapid create render diagnostics:",
@@ -851,8 +849,14 @@ describe("default-app flow test", () => {
               2,
             ),
           );
+          throw waitFailure ??
+            new Error(
+              "the post-sync wait resolved without an approved summary",
+            );
         }
 
+        // Approved path: the assertions bind to the summary the wait handed
+        // back — the state at the instant the predicate approved it.
         assertEquals(summary.argumentNotesLength, noteCreates);
         assertEquals(summary.noteCount, noteCreates);
       } finally {
