@@ -2337,7 +2337,15 @@ Encoding is specified only for a **valid `FabricValue`** — one that has
 passed, or would pass, `isValidFabricValue()` (Section 1). Given such a value,
 an engine's `encode()` produces its format's serialized form or throws for a
 reason the format names: a `FabricSpecialObject` whose class no codec in the
-registry claims, or a cycle.
+registry claims, a cycle, or an instance whose class a codec does claim but
+whose present state that format cannot write down.
+
+The third reason is why validity does not imply encodability. Whether a value
+can be written down is a question about a format, and formats differ: a
+`FabricKeyPair` holding `CryptoKey` handles crosses a realm boundary as itself
+and has no JSON form at all, its material being unreachable to anything that
+writes bytes. A format refusing such a state is meeting its contract, not
+failing it.
 
 Given anything else, **all error checking is best-effort.** The binding part
 of that is what it forbids rather than what it permits: no check on this path
