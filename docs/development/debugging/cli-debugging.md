@@ -82,6 +82,15 @@ deno task cf piece step --piece ID ...  # Runs scheduling step, triggers recompu
 deno task cf get --piece ID totalSpent ...  # Now correct
 ```
 
+`piece inspect` says which values those are. Its `--- Cached Result Fields ---`
+section names every result field whose resolution crosses a computed cell. It
+prints each computed cell's last-derived commit beside the commit the argument
+document stands at. A computed cell which points on to live state still counts,
+because the cached choice of which live state to follow can itself be stale.
+Commit numbers only order within one space; the output names both spaces and
+refuses the comparison when they differ. Result fields the section does not
+name resolve entirely through live state.
+
 ## Inspect Transformed Output
 
 When the question is "what did the compiler emit?", use `cf check` with
