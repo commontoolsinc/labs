@@ -282,6 +282,55 @@ than a detour from it: every part of it is a part of the finished thing.
 Rollback is not skipped, it is sequenced — it returns before the first live
 run, which is the point at which resetting the copy stops being an option.
 
+### The shape of the first increment
+
+Enough to start on, and no more than that.
+
+**The core is library code; the entry point is thin.** Enumerating, reading
+each piece's identity, emitting a plan, and consuming one are ordinary
+functions with no opinion about how they are invoked. They belong beside the
+other piece operations, where they can be tested without a command surface at
+all. Only a small wrapper on top has to decide whether this is spelled as a
+subcommand of an existing group, a group of its own, or something else — so
+that decision is genuinely deferred rather than quietly made, and the first
+increment does not wait on it. A decision made when the first *write*
+operation needs a home is made with more information than one made now.
+
+**The plan is line-oriented JSON.** One header object, then one object per
+piece, and **line order is execution order** — the simplest encoding of a
+constraint that has to survive review, and one a reader can check without
+running anything.
+
+```text
+{"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…"},"op":{"kind":"retarget","source":"topic.tsx","rev":"…"}}
+{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…"}}
+```
+
+Four things this buys, each of them a claim made earlier in this document
+that would otherwise have no mechanism:
+
+- **`expect` and `op` are the two columns rollback swaps.** For a retarget,
+  `expect` holds where the piece is and `op` says where it goes; a rollback
+  plan is the same rows with those exchanged. The property is mechanical
+  rather than aspirational.
+- **The header records both enumerations.** Selection disagreement is the
+  failure this design most wants to catch, and recording both counts is what
+  makes it reviewable afterwards rather than only at run time.
+- **`phase` labels rows; it does not sort them.** Order is already the line
+  order. A phase is for grouping a report and for stopping between groups,
+  which keeps one concept from doing two jobs.
+- **A structured encoding avoids inventing a small language.** Preconditions
+  and operations have fields, and a delimited format would need escaping
+  rules that grow into a parser nobody chose to write.
+
+**The identity read returns the identity and nothing else.** One piece in,
+`{piece, patternIdentity, symbol}` out, no input document, no result, no link
+graph. Whether it surfaces as a flag on the existing per-piece inspection or
+as its own thing resolves with the entry-point question above; the function
+underneath is the same either way, and it is what makes a survey over a large
+board affordable.
+
 ### 1. Survey: enumeration, and the plan
 
 A read-only pass that enumerates a set of pieces, reports what each one
@@ -436,6 +485,8 @@ so session start-up, replica warm-up, and source resolution are paid once.
 Last, because it is an optimization over a spine that must exist first, and
 because it is the only stage gated on measurement.
 
+- [ ] Revisited only after the client's execution responsibilities settle.
+      This stage optimizes work that may not stay here; see the scope section.
 - [ ] Measured at the piece count a real board carries, not a sample of it —
       wall-clock, peak memory, and whether every piece completes.
 - [ ] The spine is unchanged by the strategy: same plan, same preconditions,
@@ -514,7 +565,38 @@ settled before work starts.
    is the floor precisely so that this stays a question rather than a
    prerequisite.
 
-## Out of scope, and where it goes
+## Scope, and what sits next to it
+
+**This is the shape half of a larger division.**
+[Verb evolution](verb-evolution.md) already splits the problem three ways —
+migration handles the shape, versioned interfaces handle the callers, and a
+per-piece upgrade policy handles the rollout. This document is the first of
+those and none of the others. It says how to change many pieces safely; it
+says nothing about which pieces *should* change, when, or on whose authority,
+and a reader who arrives here looking for that should go there instead. The
+division is worth stating because both documents are live and neither is
+legible as a part without it.
+
+**Many pieces in one space, not many spaces.** Every operation here is scoped
+to a single space, because that is what the consumer needs and because the
+alternative is not a free generalization. A run across many spaces changes
+things this design currently settles by assuming one: a plan would need to
+name a space per row rather than once in its header, selection would have to
+enumerate spaces before enumerating pieces, a session strategy would group by
+space before grouping by piece, and a stop would leave a remainder spanning
+spaces rather than a list within one. None of that is precluded — the spine
+survives it — but it is a second design and not a flag.
+
+**How much to invest in a shared session is gated on more than measurement.**
+The execution strategies above are arithmetic about work the client does:
+warming a replica, swapping a source, letting a piece settle. Where that work
+runs is itself moving — [server-primary execution](server-execution-v2.md) is
+sequencing a change to which responsibilities remain client-side. The spine
+is indifferent to the outcome, since selection, preconditions, ordering,
+stopping, and resumption are about operator control rather than about where a
+computation happens. The strategies are not. So the execution strategy stays
+behind a seam and the widest of them stays unbuilt: it is the part most
+likely to be answered rather than optimized.
 
 **What durable state answers "has this piece been migrated?"** The pre-state
 check above answers "has it moved", which is enough for resume and rollback
