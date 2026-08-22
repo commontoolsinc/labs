@@ -593,6 +593,22 @@ export interface WaveCommitOutcome {
    * loop's `events.orphanDeliveriesRefused` feeds from this. */
   orphanDeliveriesRefused: number;
   dispositions: ContributionDisposition[];
+  /** Foreign provisioning batches this wave DURABLY COMMITTED, in commit
+   * order — the serving loop's input for the EXPLICIT WARM REQUEST
+   * (serving-loop.md §1's third activation trigger; RULED 2026-08-21).
+   * Populated as each foreign batch lands, so an abort AFTER some
+   * batches landed still reports them (§2b never rolls a landed foreign
+   * commit back — its setup is durable and the target should warm
+   * regardless of the home commit's fate). `writes` are the staged doc
+   * instances: space-scope ops as `"space"`, scoped ops resolved
+   * against the batch's carried delegated identity (an op the carried
+   * identity cannot name is omitted — it could not be demanded by that
+   * name either). */
+  foreignCommits: Array<{
+    space: MemorySpace;
+    seq: number;
+    writes: Array<{ id: string; scopeKey: ScopeKey }>;
+  }>;
 }
 
 const docInstanceKey = (id: string, scopeKey: string): string =>
@@ -1415,6 +1431,7 @@ export class WaveAccumulator
       committedEventIds: [],
       orphanDeliveriesRefused: 0,
       dispositions: this.#contributions.map(() => ({ kind: "committed" })),
+      foreignCommits: [],
     };
 
     // The lease check (serving-loop.md §2's stop-committing MUST): work
@@ -1846,6 +1863,17 @@ export class WaveAccumulator
         return outcome;
       }
       foreignSeqs.set(key, result.ok.seq);
+      // The warm request's payload (serving-loop.md §1; RULED
+      // 2026-08-21): this batch durably STAGED SETUP into another
+      // space. Recorded immediately — before the home commit's fate is
+      // known — because §2b never rolls a landed foreign commit back:
+      // whatever the wave does next, this setup is durable and its
+      // target should warm.
+      outcome.foreignCommits.push({
+        space: batch.space,
+        seq: result.ok.seq,
+        writes: this.#warmWritesOf(batch),
+      });
     }
 
     // ---- the home commit, re-resolving on sink-reported races ----
@@ -2631,6 +2659,43 @@ export class WaveAccumulator
       }
     }
     return [...batches.entries()].map(([key, batch]) => ({ key, batch }));
+  }
+
+  /** The staged doc instances of one foreign provisioning batch — the
+   * warm request's payload (see `WaveCommitOutcome.foreignCommits`).
+   * Space-scope ops key as `"space"`; scoped ops resolve against the
+   * batch's carried delegated identity, exactly as the engine's
+   * delegated admission keys them (scopes.md §5) — an op the carried
+   * identity cannot name is omitted, since the target could not demand
+   * it by that name either. Deduped per (id, scopeKey). */
+  #warmWritesOf(
+    batch: WaveSpaceCommit,
+  ): Array<{ id: string; scopeKey: ScopeKey }> {
+    const writes = new Map<string, { id: string; scopeKey: ScopeKey }>();
+    for (const op of batch.operations) {
+      if (op.op === "sqlite") continue;
+      let scopeKey: ScopeKey;
+      const scope = normalizeCellScope(op.scope);
+      if (scope === "space") {
+        scopeKey = "space";
+      } else if (batch.delegated !== undefined) {
+        try {
+          scopeKey = resolveScopeKey(scope, {
+            principal: batch.delegated.actingPrincipal,
+            ...(batch.delegated.actingSession !== undefined
+              ? { sessionId: batch.delegated.actingSession as never }
+              : {}),
+          });
+        } catch {
+          continue;
+        }
+      } else {
+        continue;
+      }
+      const key = `${scopeKey}\0${op.id}`;
+      if (!writes.has(key)) writes.set(key, { id: op.id, scopeKey });
+    }
+    return [...writes.values()];
   }
 
   /**

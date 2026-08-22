@@ -154,6 +154,15 @@ export type ServingLoopStats = {
    * cannot open (disk trouble, or a provisioning target with an
    * unusable path). */
   foreignEngineFailures: number;
+  /** EXPLICIT WARM REQUESTS issued (serving-loop.md §1's third
+   * activation trigger; RULED 2026-08-21): one per foreign provisioning
+   * batch a wave durably committed — the serving-side provisioning path
+   * telling the host that staged setup landed in another space, so a
+   * parked, SESSIONLESS target activates and derives it (the
+   * setup-after-park ordering race's fix — the home-profile reload
+   * residual). Counted at issue; an already-active target consumes the
+   * request as a demand-union no-op. */
+  warmRequests: number;
   /** Server-execution v2 fan-out stage B (design §B5, RULED 2026-08-16
    * accept-and-count): derivation runs under the wave-level FALLBACK
    * identity — an action NOBODY demands with an identity — that
@@ -377,6 +386,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   reactivationBackoffs: 0,
   foreignWriteRefusals: 0,
   foreignEngineFailures: 0,
+  warmRequests: 0,
   undemandedNarrowingRuns: 0,
   earlyEmitRefusals: 0,
   demandArrivals: 0,

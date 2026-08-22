@@ -466,6 +466,23 @@ export class SpaceServer implements TransactionSealDestination {
   #passDemandNoteGen = 0;
   /** The demand wake's grace timer (see noteDemandChanged). */
   #demandWakeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** WARM DEMAND (the explicit warm request's demand half —
+   * serving-loop.md §1's third activation trigger, RULED 2026-08-21):
+   * the staged doc instances of warm-marked feed notices, captured at
+   * `enqueueCommit` BEFORE the activation scan's feed filter (a warm
+   * notice's seq is ≤ the scan head on a warm activation, so the feed
+   * record itself is dropped — the capture must not be). The demand
+   * pass unions these as identity-less ROOT keys — the anonymous-
+   * session shape: a key with no demander pair — so a warmed,
+   * SESSIONLESS tenure structure-loads the staged piece and derives it.
+   * Tenure-scoped by construction: the map dies with this SpaceServer
+   * at park (a fresh activation builds a fresh instance), and
+   * recompute-on-demand is the ruled recovery posture for anything a
+   * dying tenure drops (serving-loop.md §6 step 2). */
+  readonly #warmDemandKeys = new Map<
+    string,
+    { id: string; scopeKey: string }
+  >();
   // ---- (d′) — server-settle instrumentation (design §6 W4's
   // metric; §2.8 (c)). Per authored input: admission (the feed notice's
   // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose
@@ -1009,6 +1026,23 @@ export class SpaceServer implements TransactionSealDestination {
    * this space, own derived commits included (skipped by class + holder
    * below — serving-loop.md §3's self-echo rule). */
   enqueueCommit(record: AdmittedCommitNotice): void {
+    if (record.warm === true) {
+      // The warm request's demand half (see #warmDemandKeys): captured
+      // for every warm notice — pre-activation pendings, the
+      // registration drain, and mid-tenure arrivals alike — and a
+      // fresh capture notes a demand change so an idle-waiting loop
+      // runs a fresh demand pass over it (the same grace-coalesced
+      // latch a session's watch change uses).
+      let captured = false;
+      for (const write of record.writes) {
+        const key = `${write.scopeKey}\0${write.id}`;
+        if (!this.#warmDemandKeys.has(key)) {
+          this.#warmDemandKeys.set(key, write);
+          captured = true;
+        }
+      }
+      if (captured) this.noteDemandChanged();
+    }
     this.#feed.push(record);
     if (
       record.class === "authored" && this.#active &&
@@ -2770,6 +2804,25 @@ export class SpaceServer implements TransactionSealDestination {
       }
       pairs.set(demanderPairKey(identity), identity);
     }
+    // WARM DEMAND KEYS (the explicit warm request's demand half — see
+    // #warmDemandKeys): the staged instances enter the key set
+    // identity-less (the anonymous-session shape — a key with no
+    // demander pair) and as structure-load ROOTS, so a warmed,
+    // sessionless tenure loads the staged piece and its writers become
+    // demand roots. Client rows subsume: a key a session already
+    // tracks contributes nothing new here, and the union keeps warm
+    // keys out of the DEPARTED retirement below for this tenure.
+    for (const [key, write] of this.#warmDemandKeys) {
+      if (!rowByKey.has(key)) {
+        rowByKey.set(key, {
+          id: write.id,
+          scope: scopeOfScopeKey(write.scopeKey) as CellScope,
+          scopeKey: write.scopeKey as (typeof rows)[number]["scopeKey"],
+          root: true,
+        });
+      }
+      rootKeys.add(key);
+    }
     // NIT-4: `rowByKey` is already the current-key set (a Map with O(1)
     // `has`); no separate `currentKeys` Set is needed.
     const addressOf = (key: string, row?: { id: string; scope?: string }) => {
@@ -3616,6 +3669,31 @@ export class SpaceServer implements TransactionSealDestination {
       ? advanceTo
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
+    // The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
+    // trigger; RULED 2026-08-21): every foreign provisioning batch this
+    // wave durably committed is reported to the co-hosted memory server
+    // as a warm-marked authored admission — the serving-side
+    // provisioning path telling the host it STAGED SETUP into another
+    // space. The host activates a parked, SESSIONLESS target on it (the
+    // carries-events arm's sibling), and the target's tenure takes the
+    // staged instances as warm demand, so the setup derives — closing
+    // the setup-after-park ordering race (the home-profile reload
+    // residual: an authored admission alone activates nothing by
+    // design, T11.Q7, and nothing else ever re-demanded the setup).
+    // Reported on EVERY outcome shape: a wave that aborted AFTER some
+    // foreign batches landed still staged that setup durably (§2b never
+    // rolls a landed foreign commit back).
+    for (const foreign of outcome.foreignCommits) {
+      this.#options.stats.warmRequests += 1;
+      this.#options.server.noteExecutorCommit({
+        space: foreign.space,
+        seq: foreign.seq,
+        class: "authored",
+        sessionId: this.#holder,
+        writes: foreign.writes,
+        warm: true,
+      });
+    }
     await closing.settled();
     // The drain's in-flight guard: the store has now spoken for every
     // event this wave carried — committed (its mark landed) or requeued
