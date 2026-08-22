@@ -136,18 +136,26 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + ONE step entry (default-app's reload step, under OW45) — the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land) is fully lifted at the FILE level: the gate step lift and SIX file lifts landed across the optimize pass (cellset-lww's own-write race with OW47's close; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss; default-app's FILE skip with OW51's close — the splitDefinitions crash fixed, its create-note step runs ON, only its reload step stays under OW45; cfc-group-chat-demo with OW59's close, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4, every run's store auditing zero service-DID authorship labels; home-profile-reload-durability with the explicit warm request, RULED 2026-08-21 — the serving-side provisioning path's staged setup now activates and derives in a parked, sessionless space, 6/6 fresh-store ON gate; profile-embed with OW47's RE-close — the name-draft own-write loss: the CFC verifier-read basis, arm (b) RULED 2026-08-21, 10/10 green ON at the fix head; and the sqlite identity PAIR with OW53's close, 2026-08-22 — the builtins' ambient-identity reads re-pointed at the run-carried principal, both files 5/5 fresh-store true-ON) — every lift pinned below so a re-skip is a deliberate edit; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = ONE step entry (default-app's reload step, under OW45) — the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land) is fully lifted at the FILE level AND topics-navigation is lifted by the OW33 triage's review pass (2026-08-22 — the recorded fail-fast myName red did not reproduce; the residual 2/10 flake was the unbarriered fid capture, now barriered — 10/10 ON with the echo-drop absorbed twice; the smell is OW60): the gate step lift and SIX gate file lifts landed across the optimize pass (cellset-lww's own-write race with OW47's close; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss; default-app's FILE skip with OW51's close — the splitDefinitions crash fixed, its create-note step runs ON, only its reload step stays under OW45; cfc-group-chat-demo with OW59's close, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4, every run's store auditing zero service-DID authorship labels; home-profile-reload-durability with the explicit warm request, RULED 2026-08-21 — the serving-side provisioning path's staged setup now activates and derives in a parked, sessionless space, 6/6 fresh-store ON gate; profile-embed with OW47's RE-close — the name-draft own-write loss: the CFC verifier-read basis, arm (b) RULED 2026-08-21, 10/10 green ON at the fix head; and the sqlite identity PAIR with OW53's close, 2026-08-22 — the builtins' ambient-identity reads re-pointed at the run-carried principal, both files 5/5 fresh-store true-ON) — every lift pinned below so a re-skip is a deliberate edit; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // File-level entries only in the --ignore flag (step entries never drop
-  // their file), in list order.
-  assertEquals(out, [
-    "--ignore=integration/topics-navigation.test.ts",
-  ]);
+  // NO file-level entries remain (the gate files and topics-navigation
+  // are all lifted), so no --ignore flag is emitted at all — step
+  // entries never drop their file.
+  assertEquals(out, []);
   const report = err[0];
-  assertMatch(
-    report,
-    /patterns: SKIP integration\/topics-navigation\.test\.ts \(until phase-7\)/,
+  // topics-navigation is LIFTED (OW33 triage review pass, 2026-08-22):
+  // the recorded fail-fast myName red did not reproduce at the true ON
+  // topology, and the residual 2/10 flake was the beforeAll's
+  // unbarriered fid capture — now barriered (waitForCellValue), 10/10
+  // green ON with the OW60 echo-drop occurring twice and absorbed. NO
+  // entry, so the file RUNS on the ON arm — pinned here so a re-skip is
+  // a deliberate edit; the echo-drop smell is tracked as OW60, not as a
+  // flaky test.
+  assert(
+    !report.includes("integration/topics-navigation.test.ts"),
+    "topics-navigation must carry NO skip entry (OW33 triage lift; the " +
+      "file runs ON and the echo-drop smell is OW60)",
   );
   // The sqlite identity pair is LIFTED (verification-coverage.md OW53
   // CLOSED, 2026-08-22: the db-owner mint, the cleared-read hash keying,
@@ -256,21 +264,15 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     ),
     false,
   );
-  // topics-navigation keeps the loud-skip contract: its reason names
-  // the red's mechanism and the flip's condition.
-  const topics = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
-    skip.file === "integration/topics-navigation.test.ts"
-  );
-  if (topics === undefined) throw new Error("missing topics-navigation entry");
-  assertEquals(topics.phase, "phase-7");
-  assertMatch(topics.reason, /OW25/);
-  const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
-    skip.file !== "integration/topics-navigation.test.ts"
-  );
+  // With topics-navigation AND the gate files all lifted, the whole
+  // patterns list IS the one remaining step entry; derived from the
+  // actual entries, never assumed.
+  const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns;
   assertEquals(gateEntries.length, 1);
   // NO original first-ON-CI-gate FILE entry remains: the last two — the
-  // sqlite identity pair — lifted with OW53's close (2026-08-22). Only
-  // the default-app reload STEP below is left of the gate set.
+  // sqlite identity pair — lifted with OW53's close (2026-08-22), and
+  // topics-navigation lifted with the OW33 triage's review pass the
+  // same day. Only the default-app reload STEP below is left.
   const fileGateEntries = gateEntries.filter((skip) => skip.step === undefined);
   assertEquals(fileGateEntries.length, 0);
   // ONE step entry remains: default-app's reload step, the OW45 residual the
@@ -311,64 +313,54 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
+    "./integration/topics-navigation.test.ts",
   ]);
   assertEquals(files, [
     "./integration/cellset-lww.test.ts",
     "./integration/convergence-storm.test.ts",
+    "./integration/topics-navigation.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
-Deno.test("main: the runtime-client list holds exactly two STEP-level entries in integration/client.test.ts (the file itself RUNS on the ON arm — no --ignore, no --filter drop; the steps are guarded in-file, bound to these entries) — printed loudly, never silent", async () => {
+Deno.test("main: the runtime-client list is EMPTY — the OW33 triage (2026-08-22) lifted both STEP entries (CT-1606 PerUser header render; single-navigateTo dispatch) on 12/12 green at the true ON topology — so the full suite runs, and the in-file guard resolves to no entry", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runtime-client"], io), 0);
-  // Step entries never drop the file: no --ignore flag on stdout…
+  // No entries: no --ignore flag on stdout…
   assertEquals(out, []);
-  // …and the filter shape keeps the file too.
+  // …the filter shape keeps the file…
   const { files, skipped } = serverExecutionOnFilterFiles("runtime-client", [
     "./integration/client.test.ts",
   ]);
   assertEquals(files, ["./integration/client.test.ts"]);
   assertEquals(skipped, []);
-  // The report names both steps loudly.
-  const report = err[0];
+  // …and the report says so loudly.
   assertMatch(
-    report,
-    /runtime-client: SKIP-STEP integration\/client\.test\.ts :: renders PerUser-derived computed JSX inside cf-screen header slot \(CT-1606\) \(until phase-7; the rest of the file runs\)/,
+    err[0],
+    /runtime-client: no skips — full suite runs\./,
   );
-  assertMatch(
-    report,
-    /runtime-client: SKIP-STEP integration\/client\.test\.ts :: dispatches one navigateTo when a rendered handler changes local state \(until phase-7; the rest of the file runs\)/,
-  );
-  const entries = SERVER_EXECUTION_ON_SKIPS["runtime-client"];
-  assertEquals(entries.length, 2);
-  for (const entry of entries) {
-    assertEquals(entry.file, "integration/client.test.ts");
-    assertEquals(entry.phase, "phase-7");
-    assert(entry.step !== undefined);
-    assertMatch(entry.reason, /UNATTRIBUTED/);
-    assertMatch(entry.reason, /OW33/);
-    assertMatch(entry.reason, /flip PR needs this list EMPTY/);
-    // The guard lookup the test file calls resolves exactly this entry.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS["runtime-client"].length, 0);
+  // The lifted steps' guard lookups resolve to NOTHING, so the steps RUN
+  // on the ON arm — pinned so a re-skip is a deliberate entry, never a
+  // leftover. The `onArmStepSkip` guard calls stay in client.test.ts (the
+  // binding mechanism for any future entry) and are inert without one.
+  for (
+    const step of [
+      "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      "dispatches one navigateTo when a rendered handler changes local state",
+    ]
+  ) {
     assertEquals(
       serverExecutionOnStepSkip(
         "runtime-client",
         "integration/client.test.ts",
-        entry.step,
+        step,
       ),
-      entry,
+      undefined,
     );
   }
-  assertEquals(
-    serverExecutionOnStepSkip(
-      "runtime-client",
-      "integration/client.test.ts",
-      "some step that is not listed",
-    ),
-    undefined,
-  );
 });
 
 Deno.test("validation binds a step entry: the file must name the step and call the guard", async () => {
@@ -413,7 +405,7 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list holds exactly the pattern-and-data-persistence entry — red under the UNIFORM ON posture once the runner integration clients declare it (the lane was MIXED before; OW33) — printed loudly, never silent", async () => {
+Deno.test("main: the runner list holds exactly the pattern-and-data-persistence entry — ROOT-CAUSED by the OW33 triage (2026-08-22): the speculation overlay's arrival-gate witness hole, a ~40% flake, awaiting the arrival-witness fork ruling — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   assertEquals(out, [
@@ -426,9 +418,11 @@ Deno.test("main: the runner list holds exactly the pattern-and-data-persistence 
   const [entry] = SERVER_EXECUTION_ON_SKIPS.runner;
   assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 1);
   assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /UNIFORM|uniform ON/);
-  assertMatch(entry.reason, /MIXED posture/);
-  assertMatch(entry.reason, /OW33/);
+  assertMatch(entry.reason, /OW33 triage \(2026-08-22/);
+  assertMatch(entry.reason, /ARRIVAL GATE/);
+  assertMatch(entry.reason, /ow33-arrival-witness-fork\.md/);
+  assertMatch(entry.reason, /ow33-triage-report\.md/);
+  assertMatch(entry.reason, /greens 10\/10/);
   assertMatch(entry.reason, /flip PR needs this list EMPTY/);
 });
 

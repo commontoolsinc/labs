@@ -1,5 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { assertEquals } from "@std/assert";
@@ -57,6 +58,26 @@ describe("Topics durable navigation", () => {
     await board.result.set(
       { title: SECOND_TITLE, agentName: "Topics navigation test" },
       ["addTopic"],
+    );
+    // Barrier the fid capture on the topics actually holding both created
+    // topics (sink-driven, predicate at quiescence — waiting-in-tests.md's
+    // non-browser shape). Under server execution the set() above resolves
+    // before the SERVED consequence arrives, and when the client's echo run
+    // is dropped (the stream-action validation guard racing `$ctx`
+    // materialization — the OW60 echo-drop smell) nothing covers the gap:
+    // an unbarriered capture read a pre-arrival `topics` and recorded wrong
+    // fids while the board itself was correct (the OW33 triage's 2/10 red,
+    // ow33-triage-report.md §6). In the echo-covered path the ids converge
+    // by cause, so waiting until both titles are readable is correct in
+    // both arms.
+    await waitForCellValue(
+      cc.runtime,
+      resultCell.key("topics"),
+      (topics: Array<{ title?: string } | undefined> | undefined) => {
+        if (!Array.isArray(topics) || topics.length < 2) return false;
+        const titles = topics.map((topic) => topic?.title);
+        return titles.includes(FIRST_TITLE) && titles.includes(SECOND_TITLE);
+      },
     );
     topicFids = [
       (await topicAt(board, 0)).id,
