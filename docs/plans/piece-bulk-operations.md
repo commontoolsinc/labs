@@ -14,7 +14,7 @@ stopped — with three different apply steps hanging off the end.
 
 Building any one of them alone produces a tool that cannot become the other
 two. Retarget is one source across many pieces; rollback is many pieces each
-returning to a different recorded source; repair does not go through the
+returning to its own recorded revision; repair does not go through the
 source path at all. A design that starts from "apply one source to a list of
 pieces" has already excluded two thirds of the subject.
 
@@ -69,7 +69,7 @@ what changes is the deployment they name.
 | --- | --- | --- | --- |
 | **Retarget** | pieces on a given pattern, or an explicit list | one source package to every selected piece | rollback |
 | **Repair** | pieces a supplied fixer would change | that fixer's output, as each piece's whole document | a second fixer, or restore from a content export |
-| **Rollback** | pieces a plan previously moved | each piece's own recorded prior source | a second retarget |
+| **Rollback** | pieces a plan previously moved | each piece's own retained prior revision | a second retarget |
 | **Survey** | any enumerated set | nothing — it reads and reports | n/a; it writes nothing |
 
 They are one subject because the risky parts are identical: deciding what is
@@ -118,17 +118,29 @@ subset, reports success over that subset, and leaves the rest untouched with
 nothing in the output to say so.
 
 That failure is invisible by construction, so the design does not merely
-prefer the collection — it requires **two enumerations to be compared, and a
-disagreement to stop the run**. A count that matches is worth little on its
-own; a count that differs is the strongest signal available that the
-selection is wrong, and it is worth more than any amount of care taken after
-the set is chosen.
+prefer the collection — it requires **a second enumeration, compared by
+containment, with a disagreement stopping the run**. The registry is the
+cheap second source and is expected to be the smaller, so equality is the
+wrong test; the test is that every registered piece on an in-scope identity
+is also in the collection. One that is not is either a member the collection
+read dropped or a piece of the same kind living outside the holder, and
+either way the plan does not account for it — so the run stops, names it,
+and the operator regenerates the plan with it named or excluded by name.
+Where an offline copy of the store is available, as it is on a rehearsal
+clone, a third enumeration — every piece in the space on an in-scope
+identity — is the strongest check of all, and a rehearsal that fails it does
+not proceed to the live run. Both counts and the containment result go into
+the plan's header, so the check is reviewable after the fact and not only at
+run time.
 
 **Plan** freezes the selection into an artifact. See below.
 
-**Check preconditions** proves, before touching anything, that every piece is
-in the state the plan recorded. A piece that is not is reported and the run
-does not start.
+**Check preconditions** classifies every row, before touching anything, from
+one read of its piece: still in the state the plan recorded, and so
+outstanding; already in the state the operation produces, and so landed; or
+in neither, which means something other than this plan moved it. The third is
+reported by name and the run does not start. The first two are what make
+resume a re-invocation rather than a separate mode.
 
 **Apply serially**, in plan order, stopping at the first failure. Serial is
 not a limitation to be optimized away — a parent recomputing over children
@@ -138,8 +150,9 @@ mid-change is the failure this ordering exists to prevent.
 exits zero is not a verdict: the source-update path reports success for a
 piece whose source committed but whose running instance failed to refresh.
 
-**Resume** re-derives what is outstanding on every invocation, so a stopped
-run is continued by re-running the same command.
+**Resume** is the precondition check again: re-running the same command
+re-derives what is outstanding, skips what landed, and stops on what moved
+elsewhere.
 
 ## The plan is the artifact
 
@@ -155,10 +168,11 @@ of:fid1:ccc…  document-hash=9f2c…        repair=<fixer>
 
 Four properties follow from making this a file rather than a command line:
 
-- **Rollback is the same plan with two columns swapped.** The precondition
-  becomes what the retarget produced; the operation becomes each piece's own
-  recorded prior source. This is the property a one-source-many-pieces
-  interface cannot have.
+- **Rollback is derived from the plan, row by row.** The precondition becomes
+  the state the retarget produced; the operation becomes a return to the
+  revision each row recorded its piece at. Nothing has to be re-surveyed or
+  re-supplied, which is the property a one-source-many-pieces interface cannot
+  have.
 - **It is reviewable before it runs, and diffable before it runs again.** A
   plan generated against a clone and a plan generated against production
   should differ only in ways someone can explain.
@@ -174,24 +188,30 @@ re-derived differently each time.
 
 ## Resume is decided from recorded pre-state
 
-A piece is outstanding when it still satisfies its recorded precondition.
-Not when it differs from some target.
+A piece is outstanding when it still satisfies its recorded precondition, and
+landed when it is in the state its operation produces. Both are decided from
+the plan and one read of the piece; neither compiles anything.
 
-This distinction is what makes resume cheap and correct. "Does this piece
-already run the source I am about to apply?" requires compiling the candidate
-and still does not see the source transition, revision history, or repository
-metadata the update path owns — so it cannot be answered honestly. "Has this
-piece left the state the plan recorded for it?" is answerable by reading the
-store, needs no compile and no candidate, and is exactly the question resume
-has to answer.
+The second half is cheap because a pattern identity is a function of authored
+source, not of a compile: the runtime computes the identity a source closure
+will be stored under without compiling it, and a plan carries that value on
+every retarget row beside the source it names. So "is this piece already on
+the identity this row produces?" is answered the same way as "is it still on
+the identity this row recorded?" — by comparing one identity read against a
+value already in the plan. What neither question asks is "does this piece
+already run the source I am about to apply?", which would need a compile and
+still would not see the source transition, revision history, or repository
+metadata the update path owns. Resume never needs that question.
 
 The consequence is that resume costs one read per piece and is decided before
 any write, which is why re-invoking a stopped run is safe and nearly free on
-the pieces that already landed.
+the pieces that already landed — and why a piece on neither identity is a
+stop rather than a skip: nothing in the plan accounts for where it is.
 
-It also bounds what resume can claim. A piece that left its recorded state is
-known to have moved; it is *not* thereby known to be healthy. Verification is
-the separate pass for that, and no amount of pre-state checking substitutes.
+It also bounds what resume can claim. A piece on the identity its row
+produces is known to have moved as planned; it is *not* thereby known to be
+healthy. Verification is the separate pass for that, and no amount of
+pre-state checking substitutes.
 
 ## What a stop leaves behind
 
@@ -213,7 +233,7 @@ store is a known outcome, and the design assumes it.
 ## Where batching lives
 
 Batching is an execution strategy under the apply step, not an operation and
-not the subject. Three strategies exist, and only the first two words of that
+not the subject. Four strategies exist, and only the first two words of that
 sentence are about speed:
 
 - **A process per piece.** Simple and isolated, and it does not work. Across
@@ -270,8 +290,8 @@ much has to exist before it is safe to run:
   against a resettable copy; a live run also needs rollback, which is not an
   improvement on that path but the only reversal available there, and which
   has to be exercised on a copy before it is relied on.
-- **Stage 5 is under all of them.** Session reuse only makes an existing
-  operation faster.
+- **Stage 5 is under all of them.** A whole-run session only makes an
+  existing operation faster.
 
 **The first useful increment is stages 1 and 3.** A rehearsal-only retarget —
 survey the board, apply the source across it, resume when it stops — needs
@@ -302,27 +322,55 @@ constraint that has to survive review, and one a reader can check without
 running anything.
 
 ```text
-{"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7}}
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…"},"op":{"kind":"retarget","source":"topic.tsx","rev":"…"}}
-{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…"}}
+{"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","revisionId":"rev-aaa…"},"op":{"kind":"retarget","source":"topic.tsx","rev":"…","patternIdentity":"Xk3Lp…"}}
+{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…","patternIdentity":"Nq8Hw…"}}
 ```
 
-Four things this buys, each of them a claim made earlier in this document
+and the rollback row derived from the first of those:
+
+```text
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…"},"op":{"kind":"restore","revisionId":"rev-aaa…"}}
+```
+
+Five things this buys, each of them a claim made earlier in this document
 that would otherwise have no mechanism:
 
-- **`expect` and `op` are the two columns rollback swaps.** For a retarget,
-  `expect` holds where the piece is and `op` says where it goes; a rollback
-  plan is the same rows with those exchanged. The property is mechanical
-  rather than aspirational.
-- **The header records both enumerations.** Selection disagreement is the
-  failure this design most wants to catch, and recording both counts is what
-  makes it reviewable afterwards rather than only at run time.
+- **`expect` and `op` together are enough to derive the rollback.** A retarget
+  row's `expect` holds the identity the piece is on and the revision it is at;
+  its `op` holds the source to apply and the identity that source produces,
+  computed from the source without compiling it (a source that mounts other
+  patterns over fabric imports is the exception, and a compile gives the same
+  value). The rollback row's `expect` is that produced identity, and its `op`
+  is a return to the recorded revision. The property is mechanical because
+  each row carries both ends of the move.
+- **A return to a recorded revision is the runtime's own operation, not a
+  second retarget.** Every source update appends a revision to the piece that
+  retains the exact source closure it ran, and the runtime can restore a piece
+  to one of those revisions by its identifier without being handed the source
+  again ([piece source lifecycle](../specs/piece-source-lifecycle.md)). That
+  is what `restore` names. A rollback that instead re-applied an old checkout
+  of the source would re-derive, by hand and from outside the space, what the
+  piece already retains — and would have nothing to apply for a row whose
+  prior source no checkout still matches.
+- **The header records both enumerations and the containment check.**
+  Selection error is the failure this design most wants to catch, and
+  recording the collection count, the registry count, and how many registered
+  in-scope pieces the collection lacks is what makes the check reviewable
+  afterwards rather than only at run time.
 - **`phase` labels rows; it does not sort them.** Order is already the line
   order. A phase is for grouping a report and for stopping between groups,
   which keeps one concept from doing two jobs.
 - **A structured encoding avoids inventing a small language.** Preconditions
   and operations have fields, and a delimited format would need escaping
   rules that grow into a parser nobody chose to write.
+
+**`op` is filled by naming an operation; `expect` is filled by reading.** A
+survey given an operation — a source to retarget to, a fixer to apply —
+emits complete rows. A survey given none emits rows with `expect` alone,
+which is the pre-state record the after-survey is compared against and a
+valid input to a later pass that adds the `op`. The two are one command with
+one optional argument, not two tools.
 
 **The identity read returns the identity and nothing else.** One piece in,
 `{piece, patternIdentity, symbol}` out, no input document, no result, no link
@@ -334,7 +382,8 @@ board affordable.
 ### 1. Survey: enumeration, and the plan
 
 A read-only pass that enumerates a set of pieces, reports what each one
-currently holds, and writes the result as a plan. No writes, and therefore
+currently holds, and writes the result as plan rows — `expect` filled from
+the read, `op` filled when an operation was named. No writes, and therefore
 nothing to undo — which is why it is first, and why it can be run against a
 live deployment before anything else has been built.
 
@@ -343,8 +392,9 @@ has been wrong:
 
 **It enumerates from the holder's collection and cross-checks.** Per the
 spine above, the piece registry is not a list of what exists, and a tool that
-enumerates from it operates on a subset while reporting success. Two
-enumerations, compared, with a disagreement stopping the run.
+enumerates from it operates on a subset while reporting success. The registry
+is compared against the collection by containment, and a registered in-scope
+piece the collection lacks stops the run.
 
 **It reads the identity alone, cheaply, and live.** A piece's pattern
 identity is reachable without running the piece, but the paths that reach it
@@ -364,14 +414,19 @@ not merely take a per-piece startup cost across a board-sized set — it fails
 outright well before finishing, which turns a survey into a partial answer
 that looks like a complete one.
 
-- [ ] Enumeration comes from the holder's collection, and a second
-      enumeration is compared against it.
-- [ ] A disagreement between the two stops the run and reports both counts.
-      A silent subset is the failure this exists to prevent.
+- [ ] Enumeration comes from the holder's collection, and the registry is
+      compared against it by containment: a registered in-scope piece the
+      collection lacks stops the run and is named. A silent subset is the
+      failure this exists to prevent.
+- [ ] Both counts and the containment result are recorded in the plan's
+      header.
 - [ ] One process handles a board-sized set, start to finish.
 - [ ] The read reports live state on every invocation, and a test proves it:
       a read taken after a change reflects the change.
-- [ ] The output is a plan — the same artifact the later stages consume.
+- [ ] The output is a plan — the same artifact the later stages consume —
+      with `expect` filled, and `op` filled when the survey was given an
+      operation. Op-less rows are the pre-state record and a valid input to
+      planning later.
 - [ ] A tally accompanies it, so "do these pieces all agree?" is answered
       without reading every row.
 - [ ] A supplied validator selects the pieces that fail it, naming each one.
@@ -405,11 +460,13 @@ from what the fixer actually does, because they *are* what the fixer does.
 This is why a fixer must be a pure function of the document: a fixer that
 reads a clock or a random source makes all three questions unanswerable.
 
-**A fixer returns the whole document.** The write available for stored data
+**A fixer returns the whole document.** The write a repair goes through
 replaces a piece's input document entirely, so a fixer that returns a
-fragment silently zeroes every field it omitted. The tooling has to hold that
-line rather than trusting it — a document that lost fields the fixer never
-mentioned is a defect, not an intent, and the run should refuse it.
+fragment silently drops every omitted field that has no schema default and
+resets to its default every omitted field that has one. The tooling has to
+hold that line rather than trusting it — a document that lost fields the
+fixer never mentioned is a defect, not an intent, and the run should refuse
+it.
 
 **A fixer must not treat a link as data.** A stored document contains
 references as well as values. Rewriting a reference as a plain value corrupts
@@ -446,8 +503,13 @@ a verdict, and the two stay separate invocations.
 
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] Preconditions are proved for every row before the first write.
+- [ ] Every retarget row carries the identity its source produces, computed
+      without compiling, and the precondition check classifies each piece as
+      outstanding, landed, or moved elsewhere against that row alone.
 - [ ] A run interrupted partway is completed by re-invoking the same command,
-      and the pieces that landed are not rewritten.
+      and the pieces that landed are not rewritten. A piece on neither of its
+      row's identities stops the run by name rather than being skipped or
+      rewritten.
 - [ ] A stopped run names every unattempted piece, not a count of them.
 - [ ] The after-survey distinguishes "moved as planned", "still outstanding",
       and "moved to something the plan did not ask for" — the third being
@@ -465,25 +527,34 @@ a verdict, and the two stay separate invocations.
 
 ### 4. Rollback
 
-The same plan read in the other direction — each row returning its piece to
-the source the plan recorded for it.
+The plan derived in the other direction — each row returning its piece to the
+revision the plan recorded it at, through the runtime's own restore of a
+retained revision rather than through a second retarget.
 
 - [ ] A completed retarget is fully reversed from its own plan, with no
-      second artifact needed.
+      second artifact needed: each rollback row's precondition is the identity
+      the retarget row produced, and its operation names the recorded
+      revision.
+- [ ] The restore of a retained revision is reachable from the same entry
+      point as the other operations. Today it is a runtime operation with no
+      command in front of it, so this stage is where one appears.
 - [ ] Rollback checks preconditions the same way, so a piece changed by
       something else since the retarget stops the reversal rather than being
-      overwritten.
+      overwritten — and a piece already back on its recorded identity is
+      landed, which is what makes a rollback resumable.
 - [ ] A rollback is itself resumable.
 - [ ] The reversal is exercised against a copy, in the drill, before any live
       run is allowed to depend on it. A rollback path first attempted during
       the incident it exists for is not a rollback path.
 
-### 5. Session reuse
+### 5. A session across the whole run
 
-An execution strategy under the apply step: one session serving many pieces,
-so session start-up, replica warm-up, and source resolution are paid once.
-Last, because it is an optimization over a spine that must exist first, and
-because it is the only stage gated on measurement.
+The widest execution strategy under the apply step: one session serving every
+piece in the run rather than a bounded group of them, so session start-up,
+replica warm-up, and source resolution are paid once in total. Grouped
+sessions are stage 3's floor; this stage is only the step from a group to the
+whole run. Last, because it is an optimization over a spine that must exist
+first, and because it is the only stage gated on measurement.
 
 - [ ] Revisited only after the client's execution responsibilities settle.
       This stage optimizes work that may not stay here; see the scope section.
@@ -538,12 +609,17 @@ settled before work starts.
    plan, one flag covering every row turns many decisions into one, which is
    a different risk from the same flag used many times. Per-row or per-run is
    a real choice, not a detail.
-4. **Whether repair gets a narrow write** — *stage 2*. Today the only write
-   for stored data replaces a piece's whole input document, so "change one
-   property" is a whole-document read-modify-write per piece. That is a large
-   blast radius for a small change, and it is the same path that has been
-   observed freezing a stale schema into a live board. Either repair gets a
-   narrower primitive, or the design accepts the wide one and says why.
+4. **Whether repair gets a narrow write** — *stage 2*. Two writes reach a
+   piece's stored input today. One replaces the whole document and re-runs
+   the piece against it. The other writes at a path inside the document, but
+   validates the document it lands in against the piece's schema before
+   committing — which is exactly what a document in need of repair fails, so
+   it refuses the pieces a repair exists for. That leaves "change one
+   property" as a whole-document read-modify-write per piece: a large blast
+   radius for a small change, and the same path that has been observed
+   freezing a stale schema into a live board. Either repair gets a path write
+   that can be told to skip that validation, or the design accepts the wide
+   one and says why.
 5. **How a fixer is supplied** — *stage 2*. A module the run imports and
    calls can be type-checked against the document shape and can be tested
    without a space; a program the run pipes a document through is
@@ -598,14 +674,17 @@ computation happens. The strategies are not. So the execution strategy stays
 behind a seam and the widest of them stays unbuilt: it is the part most
 likely to be answered rather than optimized.
 
-**What durable state answers "has this piece been migrated?"** The pre-state
-check above answers "has it moved", which is enough for resume and rollback
-and is deliberately all this design relies on. A stronger claim — that a
-piece has been migrated, by a particular plan, to a particular source — would
-need durable per-piece state that does not exist today, or an idempotence
-property on the source-update path. Both are questions about piece semantics
-rather than about tooling, and belong with whoever owns the piece source
-transition rather than being settled here.
+**What durable state answers "has this piece been migrated?"** The
+precondition check above answers "is it on the identity this row recorded, or
+on the one this row produces", which is enough for resume and rollback and is
+deliberately all this design relies on. A piece does keep a durable record of
+its own source transitions — the append-only revision log that rollback
+restores from — but that log says what the piece ran and when, not which plan
+moved it or why. A stronger claim, that a piece has been migrated by a
+particular plan, would need that attribution recorded somewhere, and whether
+a revision should carry it is a question about piece semantics rather than
+about tooling. It belongs with whoever owns the piece source transition rather
+than being settled here.
 
 ## Related
 
@@ -616,4 +695,6 @@ transition rather than being settled here.
   instance of the retarget operation, with a manifest, an ordering, and a
   rollback record.
 - [CLI surface shape](cli-surface-shape.md) governs the command vocabulary
-  that decision 4 above would change.
+  that decision 1 above would change.
+- [Piece source lifecycle](../specs/piece-source-lifecycle.md) specifies the
+  revision log a piece keeps and the restore operation rollback is built on.
