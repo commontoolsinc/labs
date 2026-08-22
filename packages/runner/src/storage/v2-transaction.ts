@@ -1528,6 +1528,19 @@ export class V2StorageTransaction implements IStorageTransaction {
       !skipCommitPrecondition &&
       isInternalVerifierRead(readMeta) &&
       !hasDataUriScheme(address.id) &&
+      // Content-addressed documents are EXEMPT from durable serving:
+      // their content is identical on every layer (the replica refuses
+      // a cid: doc whose content does not hash to its id), so the
+      // ordinary view IS the durable content — while the client's own
+      // durable copy may not exist yet during an echo's arrival window
+      // (the echo's staging carries the schema docs its writes
+      // reference, and the covering SERVED commit already persisted the
+      // same docs server-side). Serving "durably absent" here turned
+      // the user's fill into the silent stored-schemaHash-missing
+      // prepare failure. Their layers stay excluded from the blind tx's
+      // verifier basis in `buildReads` — consistent by construction:
+      // the value equals the durable content whichever layer serves it.
+      !address.id.startsWith("cid:") &&
       getBlindStructuralTarget(this) !== undefined &&
       // A replica without a speculation overlay serves no separate
       // durable view — fall through then: the ordinary read IS it.

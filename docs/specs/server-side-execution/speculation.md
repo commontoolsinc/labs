@@ -341,6 +341,53 @@ over speculative bases was CONSIDERED AND REJECTED with that ruling:
 UI components do not commit authored writes derived from intermediate
 speculative values, so the added complexity buys nothing shipped.
 
+### The blind-write reads that consume no overlay value (RULED 2026-08-21)
+
+The refusal above is about DEPENDENCIES — a basis entry stands for a
+value the commit consumed. A blind UI-input write (the
+`markUiInputBlindWriteTx` family: a user's scalar `$value` overwrite,
+last-write-wins by design) consumes no overlay value, so the two read
+classes such a transaction contributes to its commit basis base on the
+doc's NON-speculative stack — confirmed state plus durable in-flight
+layers, speculative layers excluded — instead of turning the user's
+own typed input into a terminal refusal whenever one of their own
+echoes still stands (an echo's standing window is at least a full
+served round trip, and unbounded for a never-served instance):
+
+- The structural existence/shape precondition — the nonRecursive read
+  at the cell's parent (verification-coverage.md OW47's close;
+  `excludeSpeculativeLayers` in `buildReads`).
+- CFC prepare's internal-verifier reads (OW47's second producer, the
+  name-draft triage; RULED 2026-08-21 — arm (b) of the triage's §9
+  fork): the verifier READS and VERIFIES the non-speculative state.
+  The verifier's job is the durable policy state the server will
+  enforce against — an overlay layer never reaches the wire, so
+  deriving policy from it would verify state the server can never
+  see — and the basis named for these reads is the same durable layer
+  set, so verify-durable and name-durable always travel together
+  (never verify-overlay + name-durable).
+
+One read class inside the verifier set is exempt from the VALUE half:
+a CONTENT-ADDRESSED (`cid:`) document's content is identical on every
+layer — the replica refuses content that does not hash to its id — so
+the ordinary view IS the durable content, and the verifier consumes
+it while the read's layers stay excluded from the basis (consistent
+by construction). The exemption matters during the echo's arrival
+window: the echo's staging carries the schema documents its writes
+reference, the covering SERVED commit already persisted the same
+documents server-side, and the client's own durable copy can lag —
+serving the verifier "durably absent" there turned the fill into CFC
+prepare's silent stored-schemaHash-missing abort, the same loss one
+layer deeper.
+
+Both exclusions are about the NAMED BASIS of one commit, never a
+withdrawal: the echo itself stands until its ordinary retirement
+(§4). Value-consuming reads keep the refusal unchanged in every
+transaction shape, and a transaction outside the blind-write family —
+including its verifier reads — keeps naming every layer;
+`speculation-overlay.test.ts` pins the export, the scoping, the
+verify-durable consistency, and the content-addressed exemption.
+
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an
 origin's accept verdict is still in flight skips its entries as

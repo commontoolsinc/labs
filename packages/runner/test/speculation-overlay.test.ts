@@ -24,6 +24,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -1047,6 +1048,161 @@ describe("Phase 2 speculation overlay", () => {
       replica.speculationRetirementView!(draftLink.id, draftLink.scope)
         .pendingLocalSeqs.length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a blind write whose stored schema doc is staged ONLY by the standing echo still EXPORTS — content-addressed reads are layer-indifferent, exempt from durable serving (the profile-embed run-3 live signature)", async () => {
+    // The refinement the first live gate forced: the durable-basis rule
+    // must NOT extend to CONTENT-ADDRESSED reads. During an echo's
+    // arrival window the client's durable view can lack a `cid:` schema
+    // doc the echo's own staging carries (the covering SERVED commit
+    // already persisted the same doc server-side — that lag IS why the
+    // echo still stands), and serving the verifier "durably absent"
+    // there turned the user's fill into CFC prepare's silent
+    // `stored schemaHash … missing or unreadable` abort — the same
+    // observable loss §6's refusal produced, one layer deeper. A cid:
+    // doc's content is identical on EVERY layer (the replica refuses
+    // content that does not hash to its id), so the ordinary
+    // (overlay-inclusive) view IS the durable content: the verifier
+    // may consume it while its layers stay excluded from the blind
+    // tx's basis — consistent by construction.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "cid-staged-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+
+    // Re-point the draft doc's DURABLE stored metadata at a schema whose
+    // cid: doc is NOT durably present anywhere — the ungated path-[]
+    // full-document write (the seeding shape hydration uses; a direct
+    // ["cfc"] write is refused as label forgery).
+    const stagedSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const;
+    const stagedHash = internSchemaAsTaggedHashString(stagedSchema);
+    {
+      const seedTx = clientRuntime.edit();
+      const docAddress = {
+        space,
+        id: draftLink.id,
+        scope: draftLink.scope,
+        type: "application/json" as const,
+        path: [],
+      };
+      const current = seedTx.readOrThrow(docAddress);
+      const base = current && typeof current === "object" ? current : {};
+      seedTx.writeOrThrow(docAddress, {
+        ...base,
+        cfc: {
+          version: 1,
+          labelMap: {
+            entries: [{ path: [], label: {}, origin: "declared" }],
+          },
+          schemaHash: stagedHash,
+        },
+      });
+      expect((await seedTx.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+    }
+
+    // The standing echo: ONE speculative layer carrying the seed value
+    // AND the staged schema doc — exactly the shape a speculative
+    // handler run seals (its `#stageSchemaDocsForValue` staging rides
+    // the same layer). `cid:${stagedHash}` exists ONLY here.
+    const replica = clientManager.open(space).replica;
+    const durableDoc = replica.getDocument(draftLink.id, draftLink.scope);
+    expect(durableDoc).toBeDefined();
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: draftLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { name: "seed-echo" },
+          },
+        }, {
+          op: "set",
+          id: `cid:${stagedHash}` as never,
+          type: "application/json",
+          value: { value: stagedSchema },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(draft.key("name").get()).toBe("seed-echo");
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    const nameCell = draft.key("name");
+    const blindTx = clientRuntime.edit();
+    markUiInputBlindWriteTx(blindTx);
+    const link = nameCell.withTx(blindTx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    setBlindStructuralTarget(blindTx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    nameCell.withTx(blindTx).set("typed-name");
+    unmarkUiInputBlindWriteTx(blindTx);
+    expect(blindTx.getCfcState().relevant).toBe(true);
+    clientRuntime.prepareTxForCommit(blindTx);
+    const outcome = await blindTx.commit();
+
+    // The fill survives: no silent `stored schemaHash … missing or
+    // unreadable` abort, no §6 refusal — one exported commit, the
+    // typed value durable.
+    expect(outcome.error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+    const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
+    expect(after.length).toBe(commitsBefore + 1);
+
+    const readerManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerManager,
+    });
+    try {
+      const readerDraft = readerRuntime.getCell<{ name: string }>(
+        space,
+        "cid-staged-draft",
+        DRAFT_SCHEMA,
+      );
+      await readerDraft.sync();
+      await waitUntil(
+        () => readerDraft.key("name").get() === "typed-name",
+        "the typed value to be durable",
+      );
+    } finally {
+      await readerRuntime.dispose();
+      await readerManager.close();
+    }
   });
 
   it("the SAME CFC-relevant write WITHOUT the blind mark is still refused over a standing echo — the verifier-read basis change is confined to the blind-write tx shape (speculation.md §6 stands)", async () => {

@@ -5044,7 +5044,11 @@ class SpaceReplica implements ISpaceReplica {
     // internal-verifier read of the write-target doc, whose VALUE the
     // transaction read path serves from the same non-speculative stack
     // (v2-transaction.ts) — the verifier verifies durable policy state
-    // and names the durable basis, together.
+    // and names the durable basis, together. Content-addressed (cid:)
+    // reads keep their ordinary overlay value there — identical to the
+    // durable content by construction — while this exclusion still
+    // covers their layers, so an echo-staged schema doc neither aborts
+    // the fill nor dooms its export.
     // The structural existence/shape precondition is evaluated against
     // durable state either way (basisSeq stays the true confirmed basis),
     // DURABLE in-flight layers stay named (dependency + CT-1910
