@@ -207,7 +207,31 @@ Also remaining, flagged (not filled here):
   seat rather than ride this fix.
 - **OW54's give-up-without-consequence corner** stands as recorded
   (its trigger names this lift).
-- **home-profile**: the shared refusal layer clears with this fix;
-  its lift additionally needs the S-B barrier verified on its reload
-  path — reported to the coordinator with a fresh ON run in the PR,
-  not forced here.
+- **home-profile** (one fresh-store ON run at the fix head; reported,
+  not forced): step 1 GREEN in 8 s; step 2 RED at the summary's
+  "Alan Turing" wait (5m18s), and the store decomposes the residual
+  precisely. The S-B question is ANSWERED: every rapid-create space
+  holds its PROGRAM durably (Alan's at seq 3, 124,973 B — the reload
+  did not lose it; the old program-loss orphan class did not
+  reproduce), and zero isolation errors (this flow crosses no amend
+  events, so this PR's fix is not implicated either way). The
+  remaining blocker is an ORDERING race on the derivation-demand
+  seam: Grace's space got setup(seq 2) BEFORE her space's serving
+  tenure, which then derived her name (seq 5, derived, service
+  holder); Alan's space's transient tenure came FIRST (watermark at
+  seq 2), parked, and his setup landed at seq 5 while the creating
+  client's sessions were dead mid-reload — an authored admission
+  into a lease-less space with no live session and no events
+  activates NOTHING (T11.Q7's designed parking), and no later
+  trigger ever arrives: the post-reload summary reads his missing
+  computed name through the HOME space's free cross-space read
+  (which registers a HOME-side wake, not target-side demand) and
+  renders the id placeholder forever. What home-profile's lift
+  needs is a ruling-shaped answer to "what demands a foreign
+  space's underived computed for a cross-space read" — candidates
+  visible in the ruled text: the activation sentence's third,
+  unimplemented trigger ("explicit warm request", serving-loop.md
+  §1) issued by the reading loop for a demanded-but-underived
+  foreign computed; a client session opened on the summarized
+  space; or S-C-shaped healing. Flagged for the owner, not chosen
+  here.
