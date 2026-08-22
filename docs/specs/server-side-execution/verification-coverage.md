@@ -5956,7 +5956,7 @@ supply; OW29/OW32/OW34 closed):
     SESSION-scoped cleared-result collision variant (the #6194
     review's find) is CLOSED — RULED 2026-08-22 (the same ruling as
     the fail-closed arm above) and built in the session-identity
-    train: `narrowestScope` legitimately resolves a cleared
+    train (PR #6196): `narrowestScope` legitimately resolves a cleared
     result to SESSION scope when the db itself is session-scoped,
     and pre-build `clearanceReader` and the effect key carried the
     USER principal only — two sessions of one user on one serving
