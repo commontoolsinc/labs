@@ -59,7 +59,7 @@
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
- * |                            | reader fails closed on unknown versions          |
+ * |                            | reader resolves stored roots' references         |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
