@@ -23,11 +23,10 @@ owed interoperability, which is what lets the format be as narrow as it is.
 Worker IPC is the case it was written for: a value constructed, handed to a
 transport that clones it, decoded on the far side, and discarded. A durable
 store that a runtime writes and later reads back is the same boundary with
-time in it, on the conditions Section 1.2 states, and is the reason the
-format states its
-requirements of a transport rather than of a mechanism. A value that crosses
-to another party, or that must be read through a transport not meeting
-Section 1.1, uses the JSON encoding.
+time in it, on the conditions Section 1.2 states, and is the reason the format
+states its requirements of a transport rather than of a mechanism. A value
+that crosses to another party, or that must be read through a transport not
+meeting Section 1.1, uses the JSON encoding.
 
 Time is what the two instances do not share, and Section 1.2 turns on the
 difference. Section 1.1 is what a transport must preserve; Section 2.4 is
@@ -101,8 +100,7 @@ this boundary:
    not hold.** This is the condition that decides the question, because it is
    what makes a version bump a cache flush rather than data loss. A use whose
    store holds the only copy of anything is outside this boundary, whatever
-   else is true of it, and the medium meeting Section 1.1 does not soften
-   that.
+   else is true of it, and a medium meeting Section 1.1 does not soften it.
 2. **A reader must treat a refused payload as absent**, rather than report it
    as an error. A version bump refuses every stored payload at once, which is
    an expected path and has to be written as one.
