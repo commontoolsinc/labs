@@ -5214,7 +5214,9 @@ supply; OW29/OW32/OW34 closed):
   with the explicit warm request (OW45's row), and profile-embed's
   file entry fell with OW47's re-close, leaving TWO file
   entries — the sqlite identity pair — beside default-app's step
-  entry); they gate the
+  entry; then both sqlite entries fell with OW53's close and
+  topics-navigation with the OW33 triage's review pass (both
+  2026-08-22), leaving default-app's step entry alone); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
@@ -5848,22 +5850,99 @@ supply; OW29/OW32/OW34 closed):
     settled-text conversions (the ledger's browser members) — in
     `optimize/arrival-wait-hardening-report.md`. This row's own
     closure (the storm-loss triage and the settle fix) STANDS.
-  - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
-    semantic asserts under the TRUE ON topology: db-owner — a SECOND
-    user's runtime re-mints itself as the sqlite db handle owner
-    ("bob's runtime must not re-mint itself as the db owner");
-    read-clearance — the cleared-read request hash becomes
-    READER-keyed ("baseline request hash stays reader-blind" fails)
-    and the cleared result doc carries more than the declared
-    surface. The sqlite handle/clearance identity model diverges
-    under served execution — an identity-model decision ADJACENT to
-    OW31's ruled posture but not covered by it (who mints the owner
-    under served runs; what keys the cleared-read request hash).
-    UNTRIAGED whether the fix is model or implementation. Owed: the
-    decision and the fix. Trigger: lifts BOTH
-    `integration/sqlite-db-owner-multi-runtime.test.ts` and
-    `integration/sqlite-read-clearance-multi-runtime.test.ts` ON
-    skips.
+  - **OW53 — the sqlite multi-runtime identity pair under ON: CLOSED
+    (2026-08-22, the OW53 triage+build — determination: BOTH halves
+    IMPLEMENTATION, no model fork).** The row was minted UNTRIAGED
+    whether the fix is model or implementation; the rulings that
+    landed after the mint COMPLETED the model — builtins.md §2 (RULED
+    2026-08-02: the reader principal is part of the memo key, one
+    cleared result cell per (query, reader), "cleared where the read
+    is served"), serving-loop.md §3c (the run's identity, "never the
+    serving runtime's ambient identity"), serving-loop.md §4 (the
+    effect carries the run's identity carriage; the completion's
+    annotations source from it), protocol.md §1 ("identity arrives
+    WITH the work ... carried into keys, not resolved from ambient
+    state"), and 06-cfc.md's dbOwner definition ("the principal that
+    created the SqliteDb cell") — and what remained was code lagging
+    them. Traced at main `51350077e` (true-ON topology, fresh
+    stores): the failure shapes had MOVED off this row's minted text.
+    Db-owner half: the committed owner was the SERVICE DID (the
+    toolshed identity) — not a bob re-mint — because the serving-side
+    creating run carried alice (`scopeKeyIdentity.principal`,
+    `attributionFromScope`) and the OW34 per-run tx snapshot was
+    CORRECT (alice), while the mint read
+    `runtime.trustSnapshotProvider()` — the runtime-ambient service
+    (exactly the direct provider read OW34's Q5 deliberately left
+    here). Read-clearance half: the cleared queries never completed —
+    each reader's claim `{pending, requestHash}` landed per-user (the
+    stamped runs), but the flush's UNSTAMPED writeback resolved the
+    SERVICE's user-partition, found no claim, and no-opped forever
+    (the stage-A OW17 residual flagged in space-server.ts
+    `#commitEffectCompletion`); and both readers' cleared hashes were
+    IDENTICAL (clearanceReader = the ambient provider = service), so
+    the two instances' effects also collided on one outbox key. Four
+    defects, ONE family — ambient identity consumed where the ruled
+    model requires run-carried identity: the owner mint, the
+    cleared-hash keying, the flush-time reader/ceiling reads, and the
+    completion writeback's partition. Fix (sqlite-builtins.ts):
+    `sqliteRunActingPrincipal` — a stamped run's carried actor
+    (`acting.user ?? scopeKeyIdentity.principal`), else the ambient
+    provider (client/OFF byte-identical) — consumed at the mint and
+    the hash; the flush captures the requesting run's reader and
+    `scopeKeyIdentity` and every writeback transaction sets the OW17
+    identity seam (`tx.tx.scopeKeyIdentity`) so its guard reads and
+    writes resolve the REQUESTING instance; reader-keyed hashes also
+    split the effect keys, dissolving the cross-reader outbox
+    collision. Fail-closed arm (FLAGGED, severable — built
+    conservative, one branch): a served creating run with NO carried
+    actor mints NO owner — ownerless handle, dbOwner() fails closed
+    (the OW31 genesis-arm / `homeSpacePrincipalFor` posture, "never
+    the service DID") — where the Q3 keep-service reading would have
+    minted the SERVICE and thereby granted it dbOwner() row
+    admission; owner may overrule. Spec (docs-move-together):
+    06-cfc.md's dbOwner row + Phase 3.b acting-reader sentence.
+    Red-first: `packages/runner/test/sqlite-served-identity.test.ts`
+    — the mint pin WATCHED RED at base (a stamped alice run minted
+    the ambient service DID), the actor-less fail-closed pin RED
+    (service), the unstamped-neutrality guard green both sides, the
+    cleared-hash pin RED (both stamped readers staged ONE
+    service-keyed hash) — plus both integration files re-reproduced
+    RED at main under the true ON topology before the fix (db-owner:
+    owner = the service DID in both views; read-clearance: settle
+    timeout + equal cleared hashes + bare-claim docs). Lift evidence:
+    the true-ON gate (fresh store per run, posture verified —
+    serving-loop waves/derivedCommits live, `serverExecution=true` in
+    every worker — loads 5.9–9.0 recorded per round):
+    `sqlite-db-owner-multi-runtime` 5/5 and
+    `sqlite-read-clearance-multi-runtime` 5/5 (all 3 steps); BOTH ON
+    skips LIFTED (this row's minted trigger). Residuals, recorded
+    not closed: llm-dialog's direct provider read
+    (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
+    and by this close; no ON surface pins it yet); NOTE-6 below
+    (delegated read sessions' demand under the process DID —
+    label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
+    writebacks — `fetch*`/`generate*` — whose hash-guard reads still
+    resolve the service's instances (the OW17 stage-A flag's
+    remaining scope after this row's sqlite carve-out; the
+    space-server.ts `#commitEffectCompletion` comment names the
+    split); the per-instance effect-key gap for NON-clearance
+    user-scoped queries (a reader-blind hash by design means one
+    outbox key across instances — no live surface; the fix direction
+    is the instance key joining the effect target key); and the
+    SESSION-scoped cleared-result collision variant (the #6194
+    review's find): `narrowestScope` legitimately resolves a cleared
+    result to SESSION scope when the db itself is session-scoped,
+    while `clearanceReader` and the effect key carry the USER
+    principal only — two sessions of one user on one serving runtime
+    then share hash + effect key across DISTINCT session instances,
+    and the second rides the in-flight dedupe (starvation until a
+    re-run; ON-only; arguably off-model against builtins.md §2's one
+    cell per (query, reader)). NOT clamped to exactly `user` here: a
+    session-scoped db's cleared result MUST stay session-scoped (a
+    user clamp would memo-collide two session dbs' results in one
+    cell); the undetermined piece is the SESSION joining the request
+    identity for sub-user-scoped cleared results — its own small
+    ruling, flagged not filled.
   - **OW54 — a served EVENT whose commit-prep crashes seals NO
     consequence (adversarial review of PR #6157, F1 —
     CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the

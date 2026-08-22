@@ -219,36 +219,17 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "optimize/ow51-build-report.md §5. Lifts when OW45 closes and the " +
         "step greens ON; the flip PR needs this list EMPTY.",
     },
-    {
-      file: "integration/sqlite-db-owner-multi-runtime.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): red under the TRUE ON topology (the " +
-        "harness posture fix routes ON runs at the lane's toolshed) with " +
-        "a semantic assert — `bob's runtime must not re-mint itself as " +
-        "the db owner`: a second user's runtime re-mints the sqlite db " +
-        "handle owner under ON, the served-execution half of the sqlite " +
-        "identity pair (verification-coverage.md OW53; its sibling below " +
-        "carries the read-clearance half). NOT a demand hole. Evidence: " +
-        "docs/history/plans/server-execution-v2/stage-c/" +
-        "first-on-ci-gate.md. Lifts when OW53 closes and the file greens " +
-        "ON; the flip PR needs this list EMPTY.",
-    },
-    {
-      file: "integration/sqlite-read-clearance-multi-runtime.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): red under the TRUE ON topology with " +
-        "semantic asserts — `baseline request hash stays reader-blind` " +
-        "fails (the cleared-read request hash becomes keyed by READER " +
-        "under ON) and `the cleared result doc carries ONLY the declared " +
-        "surface` fails: the sqlite read-time clearance identity model " +
-        "diverges under served execution — the read-clearance half of " +
-        "the sqlite identity pair (verification-coverage.md OW53). NOT a " +
-        "demand hole. Evidence: docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md. Lifts when OW53 closes and the " +
-        "file greens ON; the flip PR needs this list EMPTY.",
-    },
+    // The sqlite identity pair's two FILE entries were LIFTED (OW53
+    // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
+    // ambient identity — the SERVICE, on a serving runtime — where the
+    // ruled model carries the RUN's acting principal (serving-loop.md
+    // §3c; protocol.md §1). The db-owner mint, the cleared-read hash
+    // keying, and the effect flush's reader and writeback identity now
+    // consume the run-carried principal (client/OFF byte-identical), so
+    // `sqlite-db-owner-multi-runtime` and
+    // `sqlite-read-clearance-multi-runtime` both green under the true ON
+    // topology (fresh-store gate 5/5 each; verification-coverage.md OW53
+    // carries the traces and the lift evidence).
   ],
   runner: [
     {
