@@ -36,8 +36,33 @@ with the survival test as the gate on anything that feels needed.
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. State as of 2026-08-21:
-**LAND-OFF IN PROGRESS — the integration PR is OPEN:
+it in the PR that moves the state.
+
+**State as of 2026-08-21 (evening): OPTIMIZE ON MAIN.** The train is
+LANDED dark (#6096 merged as `71e99fc33`; OW31's ruled identity posture
+followed as #6156 `9d989c0c1`); the phase is the register's OW rows
+(verification-coverage.md §3) plus the flip gates below. Today's delta:
+
+- **The two parked rulings are RULED.** OW51 = **option 3** (this PR,
+  #6179): the refusal's re-trigger is independent of the root-level
+  arrival re-arm; verification found the re-fire contract already held
+  and the deadlock was the refusal mis-firing on SCOPED-row absence —
+  the scoped carve-out + the mutation-verified re-fire pin are the
+  build (ow51-build-report.md §8; the OW51 row is CLOSED). OW34 = all
+  seven §10 recommendations ACCEPTED; its implementation train
+  launched separately.
+- **#6187 MERGED** (`89deb7505`) — the §2b send-axis fix: a served
+  run's send to a foreign stream crosses via the outbox (the LT1 axis
+  is the wave's home space, not the sending cell's); profile-embed's
+  gate moved 4/10 → 7/10 and its skip re-scoped to the name-draft
+  OW47-family residual.
+- **#6186 merge-pending** — OW54 + OW58 minted, OW57's closure
+  withdrawn (re-fetch the register before editing rows near them).
+- **New seats running:** the name-draft triage; arrival-wait
+  hardening.
+
+Prior state (kept for the trail — the paragraphs below describe the
+land itself): **LAND-OFF — the integration PR was
 [#6096](https://github.com/commontoolsinc/labs/pull/6096)
 (`claude/server-exec-v2-land-off` = the train tip `45cca4167` + the
 merge of `origin/main` `bbcc7a348` + the reconciliation + the catch-up

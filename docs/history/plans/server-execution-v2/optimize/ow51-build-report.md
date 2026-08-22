@@ -2,18 +2,16 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW51 build: the RULED option (a) unresolved-input lift semantics are BUILT and PINNED (red-first), but the CARRIER + REFUSAL-SCOPE is an OPEN design question — the naive implementation (refuse on EVERY data-derived dead-end, gated by viaLinkHop) fires far too broadly and BREAKS real patterns in BOTH arms (§6). Semantics preserved; carrier/scope to be redesigned next session. Do not merge #6179."
+reason: "OW51 build: the RULED option (a) unresolved-input lift semantics BUILT and PINNED (red-first); the §6/§7 over-fire classes are CLOSED — the memo-variant fix (§7) closed the alias class, and the §8 RULED option-3 build closed the demand-closure class (a scoped row's absence is knowledge; the refusal re-fire contract pinned and mutation-verified). #6179 is the ruled build."
 ---
 
 # OW51 build — the ruled unresolved-input lift semantics
 
-> **STATUS (2026-08-21): the review's GATING memo-variant fix is BUILT
-> and PINNED (both directions, mutation-verified); it closed the alias
-> class that drove most of the broad breakage. ONE remaining over-fire
-> class is SURFACED — `P-arrival-closure` (a demand-closure
-> self-producing read) still times out; needs a design call before
-> #6179 is green/mergeable. Details in §6 (updated).** Nothing lost:
-> ruling, red-first pins, spec text all preserved.
+> **STATUS (2026-08-21, second ruling): §7's surfaced fork is RULED —
+> option 3 — and BUILT (§8). `P-arrival-closure` greens; the ruled
+> re-fire contract carries a new mutation-verified pin; two adjacent
+> latent findings are FLAGGED, not filled (§8.5). Ruling, red-first
+> pins, spec text all preserved.**
 
 ## 0. The ruling (2026-08-21)
 
@@ -421,3 +419,173 @@ demand closure itself produces. Candidates, none built:
 The memo-variant fix + pins are correct and should land as part of the
 eventual fix regardless of which direction closes the demand-closure
 class.
+
+## 8. The second ruling — option 3 — and the build that closed §7's class
+
+### 8.0 The ruling (2026-08-21), verbatim
+
+The owner, ruling §7's fork:
+
+> client-side doesn't react to its own writes, server should do, but
+> i'm not sure this is about that. what does self-demanded mean? either
+> way, option 3 sounds good
+
+— owner (Berni), 2026-08-21. RULED: option 3 — make the refusal's
+re-trigger independent of the root-level arrival re-arm.
+
+**Coordinator's gloss (coordinator words, not the owner's):** the
+"self-produced" framing was the test's construction, not the class —
+the class is any refusal-disposed served run whose awaited doc arrives
+as a NON-ROOT row for its demanding pair, where the root-keyed re-arm
+is structurally blind; the owner's instinct (the server must react to
+writes its own serving work produces) is exactly what option 3
+delivers, generalized to foreign producers too.
+
+### 8.1 The verified mechanism — where the hypothesis diverged
+
+The build began by verifying the coordinator's hypothesis ("the
+disposal path leaves the pair CURRENT, so the currency check never
+re-runs it; fix: leave the pair NOT-current, or register the dead-end
+address so its arrival marks it not-current"). Instrumented runs of
+`P-arrival-closure` at the rebased head (`fanOutRunFinished`,
+`rearmNotCurrentForDemander`, the refusal gate) showed:
+
+1. **The pair IS marked clean after a refusal-disposal** — the
+   hypothesis's premise holds (`fanOutRunFinished` ran for both refused
+   instance runs: `logDefined=true reads=17 clean=true`). But this is
+   CORRECT, not the defect: the ruled interim output (`undefined`) IS
+   the instance's current value. The hypothesis's fix shape —
+   leave the pair not-current — would REGRESS: `fanOutInstancesToRun`
+   filters on the clean bit, so a never-clean refused instance is
+   re-offered every pass — the F1 hot-loop/starvation shape the W1
+   review already closed once.
+2. **The re-fire contract already holds.** The refusal-disposed run's
+   transaction commits its reactivity log (the dead-end read included —
+   both the gate's `readValueOrThrow` and the walk's own sigil-probe
+   reads), the log joins the node's union subscription
+   (`fanOutUnionLog`), and a later write to the dead-end doc — ANY
+   writer, foreign included — cause-dirties exactly the covered
+   instances (`dirtyFanOutForCause`) and re-runs them. Watched live:
+   Alice's pre-draft instance run REFUSED, her draft write (the
+   arrival) re-ran her instance through the subscription, `echo:A`
+   landed. The root-level arrival re-arm plays no part in this path,
+   and never could: both root-level re-arms mark the node invalid with
+   `fanOutInstances: "keep"`, which re-runs only NOT-clean instances —
+   a disposed (clean) instance is structurally beyond their reach, by
+   construction. Option 3's contract was therefore already delivered
+   by the code as it stood.
+3. **The deadlock was a mis-fired REFUSAL, not a missing re-fire.** In
+   `P-arrival-closure` no arrival ever occurs before the failing wait:
+   the awaited doc is Bob's own per-user draft row, which nobody but
+   Bob can write, and Bob writes it only after the wait. The test
+   expects `"echo:"` — the ABSENT-ARM value (`get() ?? ''`) — i.e. on
+   main the absent scoped row reads `undefined` and the body's
+   fallback computes. The branch's refusal fired on that read because
+   the relay through the nested child's arg doc stores a sigil, which
+   makes the child's handle DATA-DERIVED and defeats the own-root
+   carve-out for the very same absent row the flat form reads as
+   `undefined`. No re-trigger design can green that wait; only not
+   refusing can.
+
+### 8.2 The build — the scoped-absence carve-out
+
+A missing USER- or SESSION-scoped row is KNOWLEDGE, not transit: a
+principal's instance row exists only once that principal writes it
+(the scoped first-write idiom), and the fan-out run supply
+materializes instances by running derivations over exactly such
+absent rows — a refusal there starves every first materialization
+whose scoped input carries no reachable schema default. The dead-end
+therefore marks `pendingHopDoc` only when the missing doc is
+SPACE-scoped (`link-resolution.ts`; contract stated on
+`link-types.ts`'s `pendingHopDoc`). Composition no longer changes the
+verdict: the relayed read of an absent scoped row reads `undefined`
+exactly as the flat form does, while the OW51 crash class — a missing
+SPACE doc behind a hop (the served-instantiation chain) — refuses
+exactly as §3 built. The change strictly REMOVES refusals; every
+removed refusal returns that read to main's behavior.
+
+### 8.3 Red-first
+
+- `executor-dprime-w0` **"P-arrival-closure" watched RED at the
+  rebased head** (e58ca65c7) three times — 22 s timeout at "bob's
+  instance ... through the per-key currency check" each time (passes
+  on plain main). GREEN with the carve-out; full file 9/9 steps green
+  ×3 consecutive runs.
+- The §7-era claim "the root-level arrival re-arm is inert [for Bob],
+  so the re-trigger never fires" was the test comment's language for
+  pair MATERIALIZATION, and §8.1's instrumentation shows it did not
+  describe the deadlock: Bob's instance run DID materialize (the
+  per-key currency check re-armed it — `notCurrentRearms` ticked) and
+  then refused; nothing was awaiting an arrival at all.
+
+### 8.4 The class pin — the ruled re-fire contract, mutation-verified
+
+New pin (same file): **"OW51 refusal re-trigger (the RULED option-3
+contract)"** — a served run REFUSAL-disposed on a genuine unresolved
+input (a stored link to a space doc nobody wrote), then a FOREIGN
+writer (a third session that watches nothing) creates the doc; the
+disposed run re-fires through its registered dead-end read alone and
+the derived value lands. Honesty about its red-first status, per the
+§8.1 finding: **this pin cannot be made red against the current code**
+— the re-fire machinery it pins was never broken, so it guards the
+ruled contract against regression rather than witnessing a fix. It is
+load-bearing on exactly the ruled seam, verified by mutation:
+
+- **M-CLEAN** (remove `dirtyFanOutKey`'s `clean.delete` — a
+  cause-bearing dirty can no longer un-clean a disposed instance):
+  the pin TIMES OUT at "the disposed run to re-fire on the foreign
+  arrival". Watched red under the mutation, green restored.
+- **M-REG** (remove the refusal gate's explicit
+  `tx.readValueOrThrow`): the pin STAYS GREEN — the walk's sigil-probe
+  reads independently register the dead-end at the reactivity layer
+  ("the link appearing later re-resolves"). The gate's explicit
+  registration is belt-and-braces for this shape; kept, since other
+  read paths may not share the probe's registration.
+
+Relation to the fork's options: option 2 (exclude self-produced reads
+only) would have left this pin's foreign-writer arrival un-modeled and
+`P-arrival-closure` still red (Bob's draft row is client-authored, not
+closure-produced); the built carve-out plus the pinned re-fire
+contract covers both.
+
+### 8.5 Flagged, not filled (adjacent latent findings, main-line)
+
+Two findings surfaced by instrumentation are OUTSIDE this PR's scope
+and are recorded for their own arcs rather than patched here:
+
+1. **Capture type-shrinking strips `Default<''>`** (ts-transformers):
+   the compiled outer argumentSchema declares
+   `{"type":"string","default":"","asCell":[{"kind":"cell","scope":"user"}]}`,
+   and the stored link's content-addressed schema
+   (`cid:…`, #6083) still holds `{"default":"","scope":"user"}` — but
+   a computed's shrunk capture schema for a directly-captured argument
+   is a bare `{"type":"string"}`, so the runtime's declared-default
+   carve-out (§3.4) cannot see the default at the read. Invisible on
+   main (undefined flows either way and bodies carry `?? fallback`);
+   it decides refusal-vs-default under the OW51 semantics. Transformer
+   territory, pattern-wide blast radius (baselines are append-only) —
+   flagged for the owner.
+2. **Era-dependent scope resolution of a relayed PerUser read**: the
+   serving node's probe run reads the SAME relayed draft chain at
+   `scopes=["space"]` in one era (18 reads, no narrowing) and at
+   `["space","user"]` in a later era (19 reads, discovers user,
+   narrows) — observed inside `P-arrival-closure` itself. A node whose
+   only user-scoped reads ride such a relay may fail to narrow until
+   a later era re-runs it. Orthogonal to this PR (its pins avoid the
+   dependence); likely interacts with content-addressed `$ref`
+   schema resolution timing — flagged.
+
+### 8.6 Suites at the built head
+
+Rebase first (main moved 9 commits: #6083 content-addressed schemas ON
+by default, #6187 send-site routing, #6178/#6173/#6170): one conflict
+(`tasks/server-execution-on-skips.test.ts`'s gate-set description —
+merged both sides' clauses), all three prior merge commits verified
+clean automerges before flattening; the branch's full pin set re-run
+per-file at the rebased head BEFORE any new work (all green — rebase
+proven neutral). At the built head: the eight branch pins green
+per-file (`unresolved-input-lift` 2 steps, `link-resolution-memo` 3,
+`link-utils` 109, `cell-as-cell` 33, `list-element-link` 4,
+`pattern-binding` 49, `schema-view` 64, `runner` 92);
+`executor-dprime-w0` 9/9 ×3; the full runner battery and the
+default-app ON gate recorded in the PR body alongside the CI lanes.

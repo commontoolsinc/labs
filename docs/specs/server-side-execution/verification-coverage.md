@@ -5440,24 +5440,39 @@ supply; OW29/OW32/OW34 closed):
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam): STILL OPEN — the ruled semantics are
-    BUILT + PINNED (red-first), but the refusal's SCOPE is a design
-    problem (the CLOSED claim below was PREMATURE; corrected
-    2026-08-21 wind-down).** The naive fix (refuse on EVERY
-    data-derived dead-end, gated by `viaLinkHop`) fires in BOTH arms
-    and BREAKS real patterns — the OFF `topics` lift crashes on
-    `undefined` (`.trim`), OFF `parking-coordinator` never
-    materializes, several ON pattern shards likewise (#6179 CI on the
-    green-behind-`dfe9086dc` base). What is settled and preserved: the
-    owner's ruling (below), the red-first pin
-    (`unresolved-input-lift.test.ts`), the spec RULED text
-    (speculation.md §2). The OPEN piece — how to scope the refusal to
-    the true unresolved-input case without refusing the large
-    legitimate-absent population — and the candidate designs are in
-    `docs/history/plans/server-execution-v2/optimize/
-    ow51-build-report.md` §6. Do not merge #6179 until resolved. The
-    rest of this row (the mechanism, the ruling quote, the lift) is
-    the built-not-merged state:
+    ON read-semantics seam): CLOSED (2026-08-21, second ruling —
+    option 3 built).** The refusal-scope fork the first build surfaced
+    (build report §6–§7) was RULED by the owner (option 3: the
+    refusal's re-trigger is independent of the root-level arrival
+    re-arm — "client-side doesn't react to its own writes, server
+    should do … either way, option 3 sounds good") and closed in two
+    parts. (i) The memo-variant fix (§7) closed the alias class,
+    pinned both directions (`link-resolution-memo.test.ts`). (ii) The
+    §8 build closed the demand-closure class: verification showed the
+    re-fire contract ALREADY held (a disposed run's committed log
+    joins the union subscription; any writer's arrival cause-dirties
+    and re-runs it; root-level re-arms keep clean instances and so
+    can never deliver it) — the deadlock was the refusal MIS-FIRING
+    on a SCOPED instance row's absence, which is knowledge (the
+    scoped first-write idiom the fan-out run supply materializes
+    instances over), not transit. `pendingHopDoc` now marks only a
+    missing SPACE-scoped doc (`link-resolution.ts`); the relayed read
+    of an absent user/session row reads `undefined` exactly as the
+    flat form does. Red-first: `executor-dprime-w0`
+    "P-arrival-closure" watched red ×3 at the rebased head (22 s
+    timeout), green after (9/9 ×3). The ruled re-fire contract
+    carries its own pin — "OW51 refusal re-trigger": a
+    refusal-disposed served run re-fires on a FOREIGN writer's
+    arrival through its registered dead-end read alone —
+    mutation-verified load-bearing (clean-bit kill times out; stated
+    honestly, it guards a contract the code already delivered rather
+    than witnessing a fix). Two adjacent latent findings FLAGGED, not
+    filled (report §8.5): capture type-shrinking strips `Default<>`
+    from directly-captured argument schemas, and a relayed PerUser
+    read's scope resolution is era-dependent. Evidence:
+    docs/history/plans/server-execution-v2/optimize/
+    ow51-build-report.md §8. The mechanism, the first ruling, and the
+    lift:
     The undefined read was
     a scheduler lift whose input LINK CHAIN dead-ended at a doc the
     replica could not serve yet (a note's `pendingEdit` reached

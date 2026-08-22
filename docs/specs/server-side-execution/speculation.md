@@ -109,6 +109,15 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      computed that has not produced yet, are unchanged). A dead-end at
      the reader's OWN root doc is likewise not this shape — a
      locally-minted cell's doc does not exist until its first write.
+     Nor is a dead-end at a USER- or SESSION-scoped instance row
+     (RULED 2026-08-21, the option-3 build): a principal's row exists
+     only once that principal writes it, so its absence is knowledge —
+     the scoped first-write idiom — and the fan-out run supply
+     materializes instances by running derivations over exactly such
+     absent rows. Only a missing SPACE-scoped doc behind a hop is an
+     unresolved input; composition does not change the verdict (a
+     per-user cell relayed through a nested pattern's arg doc reads
+     its absent row as `undefined` exactly as the flat form does).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
      it) and the run's transaction aborts with it as the reason —
@@ -118,6 +127,26 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      API question with the owner), so the built coverage is the
      read-propagation path — the OW51 shape — with the deliberate
      body-throw awaiting that export.
+
+  **The serving-side re-trigger, explicit (RULED 2026-08-21 — the
+  option-3 ruling on the demand-closure fork):**
+
+  > client-side doesn't react to its own writes, server should do,
+  > but i'm not sure this is about that. what does self-demanded
+  > mean? either way, option 3 sounds good
+
+  — owner (Berni), 2026-08-21. A refusal-disposed SERVED run's
+  re-trigger is independent of the root-level arrival re-arm: the
+  disposed run's committed log (the registered dead-end read
+  included) joins its node's union subscription, and the awaited
+  doc's arrival — from ANY writer, the serving loop's own work or a
+  foreign session — cause-dirties and re-runs exactly the covered
+  instances. The root-level machinery structurally cannot substitute:
+  a disposed instance is CLEAN (its ruled interim output `undefined`
+  is its current value), and every root-level re-arm keeps clean
+  instances, so only the registered read can re-fire it. Pinned in
+  `executor-dprime-w0.test.ts` ("OW51 refusal re-trigger"),
+  mutation-verified on the clean-bit seam.
 
   Implementation: `link-resolution.ts` (`pendingHopDoc` /
   `viaLinkHop`), `schema.ts`'s lazy branch, `schema-view.ts`
