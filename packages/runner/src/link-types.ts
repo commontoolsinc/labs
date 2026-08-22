@@ -112,9 +112,12 @@ export type NormalizedLink = {
    * `UnresolvedInputError`). A dead-end at the handle's OWN root doc
    * does not set this: a fresh cell's doc does not exist until its
    * first write, and `get() ?? fallback` on it stays `undefined` as it
-   * always has. Read-side only, like `scopeCaps`: never serialized,
-   * never part of link identity; consumers that copy links by spread
-   * carry it inertly.
+   * always has. Nor does a dead-end at a USER- or SESSION-scoped row:
+   * a principal's instance row exists only once that principal writes
+   * it, so its absence is knowledge (the scoped first-write idiom) —
+   * only a missing SPACE-scoped doc marks the result pending. Read-side
+   * only, like `scopeCaps`: never serialized, never part of link
+   * identity; consumers that copy links by spread carry it inertly.
    */
   pendingHopDoc?: true;
   /**

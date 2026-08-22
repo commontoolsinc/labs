@@ -670,7 +670,22 @@ export function resolveLinkTracingDereferences(
       // (see the declaration above; the lazy read boundary refuses on
       // it). A stop at a PRESENT doc, or on the handle's own root doc,
       // is an honest end.
-      if ((followedHop || inputViaLinkHop) && deadEndDocMissing) {
+      //
+      // SPACE scope only: a missing USER- or SESSION-scoped row is
+      // KNOWLEDGE, not transit — a principal's instance row exists only
+      // once that principal writes it (the scoped first-write idiom),
+      // and the fan-out run supply materializes instances by running
+      // derivations over exactly such absent rows, so a refusal here
+      // starves every first materialization whose scoped input carries
+      // no schema default. Composition must not change the verdict
+      // either: relaying a per-user cell through a nested pattern's arg
+      // doc stores a sigil, which makes the child's handle data-derived
+      // — the same absent row that reads `undefined` through the flat
+      // form must read `undefined` through the relay.
+      if (
+        (followedHop || inputViaLinkHop) && deadEndDocMissing &&
+        link.scope === "space"
+      ) {
         pendingDeadEnd = true;
       }
       break;
