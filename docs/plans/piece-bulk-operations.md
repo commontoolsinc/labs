@@ -170,9 +170,9 @@ Four properties follow from making this a file rather than a command line:
 
 - **Rollback is derived from the plan, row by row.** The precondition becomes
   the state the retarget produced; the operation becomes a return to the
-  revision each row recorded its piece at. Nothing has to be re-surveyed or
-  re-supplied, which is the property a one-source-many-pieces interface cannot
-  have.
+  retained revision carrying the identity each row recorded. Nothing has to
+  be re-surveyed or re-supplied, which is the property a one-source-many-pieces
+  interface cannot have.
 - **It is reviewable before it runs, and diffable before it runs again.** A
   plan generated against a clone and a plan generated against production
   should differ only in ways someone can explain.
@@ -323,36 +323,46 @@ running anything.
 
 ```text
 {"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","revisionId":"rev-aaa…"},"op":{"kind":"retarget","source":"topic.tsx","rev":"…","patternIdentity":"Xk3Lp…"}}
-{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…","patternIdentity":"Nq8Hw…"}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","retained":true},"op":{"kind":"retarget","source":"topic.tsx","rev":"…","patternIdentity":"Xk3Lp…"}}
+{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…","patternIdentity":"Nq8Hw…"}}
 ```
 
 and the rollback row derived from the first of those:
 
 ```text
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…"},"op":{"kind":"restore","revisionId":"rev-aaa…"}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…"},"op":{"kind":"restore","patternIdentity":"PB0Gum…"}}
 ```
 
 Five things this buys, each of them a claim made earlier in this document
 that would otherwise have no mechanism:
 
 - **`expect` and `op` together are enough to derive the rollback.** A retarget
-  row's `expect` holds the identity the piece is on and the revision it is at;
-  its `op` holds the source to apply and the identity that source produces,
-  computed from the source without compiling it (a source that mounts other
-  patterns over fabric imports is the exception, and a compile gives the same
-  value). The rollback row's `expect` is that produced identity, and its `op`
-  is a return to the recorded revision. The property is mechanical because
-  each row carries both ends of the move.
+  row's `expect` holds the identity the piece is on, whether the source behind
+  that identity is still retained in the space, and — for a piece that already
+  keeps a revision log — the revision it is at; its `op` holds the source to
+  apply and the identity that source produces, computed from the source
+  without compiling it (a source that mounts other patterns over fabric
+  imports is the exception, and a compile gives the same value). The rollback
+  row's `expect` is that produced identity, and its `op` restores the retained
+  revision carrying the recorded one. The property is mechanical because each
+  row carries both ends of the move.
 - **A return to a recorded revision is the runtime's own operation, not a
   second retarget.** Every source update appends a revision to the piece that
   retains the exact source closure it ran, and the runtime can restore a piece
-  to one of those revisions by its identifier without being handed the source
-  again ([piece source lifecycle](../specs/piece-source-lifecycle.md)). That
-  is what `restore` names. A rollback that instead re-applied an old checkout
-  of the source would re-derive, by hand and from outside the space, what the
-  piece already retains — and would have nothing to apply for a row whose
-  prior source no checkout still matches.
+  to one of those revisions without being handed the source again
+  ([piece source lifecycle](../specs/piece-source-lifecycle.md)). That is what
+  `restore` names. A piece with no revision log yet gets one from the retarget
+  itself: the transition first appends a baseline revision retaining the
+  source the piece was on, provided that source is still retained in the
+  space — so for most pieces the rollback target exists only after the
+  retarget, which is why the rollback row names the recorded identity rather
+  than a revision the survey could not have read. A piece whose prior source
+  is no longer retained has no restore target, and the survey says so up
+  front (`retained`), because the read that answers it is available before
+  the run. A rollback that instead re-applied an old checkout of the source
+  would re-derive, by hand and from outside the space, what the piece
+  already retains — and is exactly, and only, what the unretained rows need
+  an operator to supply before a live run.
 - **The header records both enumerations and the containment check.**
   Selection error is the failure this design most wants to catch, and
   recording the collection count, the registry count, and how many registered
@@ -420,6 +430,9 @@ that looks like a complete one.
       failure this exists to prevent.
 - [ ] Both counts and the containment result are recorded in the plan's
       header.
+- [ ] Each row records whether the source behind its recorded identity is
+      still retained in the space, so a row with no rollback target is known
+      before the run rather than during the incident.
 - [ ] One process handles a board-sized set, start to finish.
 - [ ] The read reports live state on every invocation, and a test proves it:
       a read taken after a change reflects the change.
@@ -533,8 +546,12 @@ retained revision rather than through a second retarget.
 
 - [ ] A completed retarget is fully reversed from its own plan, with no
       second artifact needed: each rollback row's precondition is the identity
-      the retarget row produced, and its operation names the recorded
-      revision.
+      the retarget row produced, and its operation restores the retained
+      revision carrying the recorded identity.
+- [ ] A row whose prior source was not retained is refused by rollback with
+      the reason named, never silently skipped — and a live run is not
+      started with such rows unless the operator has supplied the legacy
+      source for them or accepted, by name, that they cannot be rolled back.
 - [ ] The restore of a retained revision is reachable from the same entry
       point as the other operations. Today it is a runtime operation with no
       command in front of it, so this stage is where one appears.
