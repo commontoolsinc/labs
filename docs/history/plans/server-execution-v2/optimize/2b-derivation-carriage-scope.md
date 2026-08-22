@@ -134,9 +134,30 @@ outbox to the wave's OWN space).
   already expose it structurally.
 - `packages/runner/src/cell.ts` (serving branch): the arm selector
   compares `resolvedToValueLink.space` against the installed
-  destination's `space`, falling back to the old cell-space proxy
-  only for destinations that name none (bare same-space test
-  doubles).
+  destination's `space`. Fail-closed: an outbox-capable destination
+  (`stageOutboundAppend` present) that names no `space` is refused
+  loudly — guessing from the cell's space is the mis-axis itself;
+  the cell-space proxy survives only for seal-only test doubles
+  with no outbox at all (same-space harnesses by construction,
+  whose cross-space arm refuses on the missing outbox anyway).
+  `stageOutboundAppend` is declared on the interface (the
+  structural cast retired).
+
+The axis change moves TWO routing cells, and both are deliberate:
+
+- **(cell=foreign, resolved=foreign)** — the defect cell: previously
+  the LT1 raw write (the isolation-error kill); now the outbox's
+  cross-space append. The observed profile-embed blocker.
+- **(cell=foreign, resolved=home)** — an aliased HOME target reached
+  through a foreign handle: previously the OUTBOX, self-addressed at
+  the wave's own space (post-commit self-delivery under the
+  producing server's service envelope, LT5's crossing shape); now
+  LT1. That is the ruled reading — events.md §2's same-space
+  emission is never a separate commit and never the outbox — and
+  its identity model changes with the move: a write-level LT1 entry
+  inside the wave's own derived commit, the inherited actor at
+  write level, `eventWatermark` dedupe, same-wave in-process
+  processing.
 
 Red-first pin (`packages/runner/test/executor-cross-space.test.ts`,
 "a served run's send to a FOREIGN stream cell crosses via the
@@ -144,9 +165,20 @@ outbox"): a served event-handler-stamped run, home-anchored, sends
 to a stream cell whose own space IS the foreign space. Watched RED
 on the unmodified tree — `StorageTransactionWriteIsolationError` at
 `CellImpl.send`, byte-identical to the live stack — then GREEN with
-the fix: the outbox delivers the entry into the foreign sidecar
-with `firedAt` from the CARRIED actor, and the delivered append
-ACTIVATES the target space's own loop (the (c) arm's trigger).
+the fix: the outbox delivers EXACTLY ONE entry into the foreign
+sidecar with `firedAt` carrying the acting user AND session (the
+LT5/LT6 carriage halves), and the delivered append ACTIVATES the
+target space's own loop (the (c) arm's trigger). The activation
+assertion is bound non-vacuously (the adversarial review's
+MINOR-1): the foreign stream doc is created ENGINE-DIRECT, so no
+session and no admission ever touches the space before the send — a
+pre-send probe asserts the space INACTIVE, and that probe was
+watched FAILING against two weaker constructions (a shared client
+creating the doc after host attach; a dedicated setup client
+disposed pre-attach whose session lingered server-side) before the
+engine-direct shape made it hold. What the final wait then binds is
+exactly the carries-events admission arm — a delivered cross-space
+append activating a sessionless target.
 
 Suites at the fix (one file per invocation): executor-cross-space
 14, executor-events-down 19, executor-outbox 18, executor-wave 43,

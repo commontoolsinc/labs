@@ -18,6 +18,7 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
@@ -1320,9 +1321,26 @@ export interface TransactionSealDestination {
    * cross-space append (events.md §2; protocol.md §2b). The SpaceServer
    * and the wave accumulator both expose it; a destination that names
    * none (bare test doubles) leaves the send site on the sending cell's
-   * own space as the proxy — a same-space-only harness shape.
+   * own space as the proxy — a same-space-only harness shape. An
+   * outbox-capable destination ({@link stageOutboundAppend} present)
+   * MUST name it: the send site refuses the decision rather than
+   * guessing (a wrong guess is the pre-fix cross-space raw write).
    */
   readonly space?: MemorySpace;
+
+  /**
+   * Stage a cross-space event append onto the CURRENT wave for the run
+   * owning `tx` (events.md §2's cross-space arm; serving-loop.md §5):
+   * the entry becomes a durable outbox row inside the wave's own store
+   * transaction — iff the run's contribution survives the wave commit —
+   * and the acting identity travels WITH it. The send site (cell.ts's
+   * serving branch) dispatches here whenever a served run's emission
+   * targets a space other than {@link space}.
+   */
+  stageOutboundAppend?(
+    tx: IExtendedStorageTransaction,
+    row: OutboxAppendRow,
+  ): void;
 
   /**
    * Take ownership of a sealed transaction's post-commit effects
