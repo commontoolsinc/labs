@@ -102,7 +102,7 @@ Deno.test("json: large line-oriented records highlight without throwing", () => 
   assertEquals(verbatim(lines), src);
 });
 
-Deno.test("json: line-oriented live edits reuse JSON token classes", () => {
+Deno.test("json: line-oriented live edits preserve record isolation", () => {
   const before = '{"event":"created","sequence":1}\n';
   const after = [
     '{"event":"created","sequence":1}',
@@ -119,6 +119,23 @@ Deno.test("json: line-oriented live edits reuse JSON token classes", () => {
   assertEquals(classesOf(lines, '"updated"'), new Set(["string"]));
   assertEquals(classesOf(lines, "2"), new Set(["number"]));
   assertEquals(verbatim(lines), after);
+
+  const malformed = [
+    '{"event":"unterminated',
+    '{"event":"recovered","sequence":3}',
+  ].join("\n");
+  const recoveredLines = highlighter.update(malformed);
+
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"event"'),
+    new Set(["propertyName"]),
+  );
+  assertEquals(
+    classesOf(recoveredLines.slice(1), '"recovered"'),
+    new Set(["string"]),
+  );
+  assertEquals(classesOf(recoveredLines.slice(1), "3"), new Set(["number"]));
+  assertEquals(verbatim(recoveredLines), malformed);
 });
 
 Deno.test("json: line-oriented documents expose no partial structure", () => {
