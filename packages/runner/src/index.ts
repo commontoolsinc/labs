@@ -116,7 +116,10 @@ export {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "./storage/reactivity-log.ts";
-export { resolveLink } from "./link-resolution.ts";
+export {
+  resolveLink,
+  resolveLinkTracingDereferences,
+} from "./link-resolution.ts";
 export {
   areLinksSame,
   getMetaLink,
