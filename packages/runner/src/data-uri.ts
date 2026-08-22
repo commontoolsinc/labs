@@ -41,6 +41,7 @@ import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
+  inlineExternalSchemaRefsInValue,
   isCellLink,
   KeepAsCell,
   parseLink,
@@ -147,8 +148,14 @@ export function dataUriFromValueWithResolvedLinks(
     }
   }
 
+  // Links serialized into a `data:` document carry their schemas inline
+  // (see inlineExternalSchemaRefsInValue): the document is its id, so a
+  // content-addressed reference inside it has no carrying write to install
+  // its closure.
   return dataUriFromValue(
-    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+    inlineExternalSchemaRefsInValue(
+      traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+    ),
   );
 }
 

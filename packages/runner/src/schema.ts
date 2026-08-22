@@ -60,7 +60,10 @@ import {
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -1619,8 +1622,16 @@ class TransformObjectCreator
         this.labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
-      const schema = asCellCompoundSchemaForValue(link.schema, value) ??
-        link.schema;
+      // A reference-form schema resolves here — materialization is a
+      // structural use (asCell handles, defaults), and the handle minted
+      // below works over the resolved document. The link itself keeps its
+      // reference; an unresolvable one behaves as the schemaless
+      // degradation (a plain proxy read, no handle, no defaults).
+      const structuralSchema = isObjectNotArray(link.schema)
+        ? resolveExternalRootRefForStructure(link.schema)
+        : link.schema;
+      const schema = asCellCompoundSchemaForValue(structuralSchema, value) ??
+        structuralSchema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest

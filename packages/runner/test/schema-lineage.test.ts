@@ -11,6 +11,7 @@ import { type JSONSchema } from "../src/builder/types.ts";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -82,7 +83,7 @@ describe("Schema Lineage", () => {
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
-      expect(cell.schema).toEqual(schema);
+      expect(resolvedSchema(cell.schema)).toEqual(schema);
 
       // When we access a nested property, it should have the correct schema
       const countCell = cell.key("count");
@@ -193,7 +194,7 @@ describe("Schema Lineage", () => {
 
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
-      expect(cell.schema).toEqual(numberSchema);
+      expect(resolvedSchema(cell.schema)).toEqual(numberSchema);
       expect(cell.get()).toBe(5);
     });
 
@@ -343,7 +344,7 @@ describe("Schema propagation end-to-end example", () => {
 
     const cValue = c.get() as any;
     expect(isCell(cValue.props.value)).toBe(true);
-    expect(cValue.props.value.schema).toEqual({
+    expect(resolvedSchema(cValue.props.value.schema)).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
       additionalProperties: false,

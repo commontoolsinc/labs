@@ -11,6 +11,7 @@
  */
 
 import { describe, it } from "@std/testing/bdd";
+import { resolvedSchema } from "../../runner/test/schema-ref-helpers.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
@@ -851,7 +852,7 @@ describe("verb-undeclared-field", () => {
       // The coupling every refusal below rests on: the shape the transformer
       // emits is one that drops what it does not name.
       await withList("undeclared-shape", ({ root }) => {
-        expect(root.key("addItem").schema).toEqual({
+        expect(resolvedSchema(root.key("addItem").schema)).toEqual({
           type: "object",
           properties: { title: { type: "string" }, done: { type: "boolean" } },
           required: ["title", "done"],

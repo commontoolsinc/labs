@@ -32,6 +32,7 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   Cell,
+  decomposeSchema,
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
@@ -44,9 +45,13 @@ import {
   isCellResult,
   isReadableCell,
   isSlugAddress,
+  lookupSchemaDocument,
+  mapSubschemas,
   type MemorySpace,
   NAME,
   type NormalizedFullLink,
+  parseExternalSchemaRef,
+  recomposeSchema,
   resolveLink,
   resolveLinkTracingDereferences,
   Runtime,
@@ -2360,7 +2365,15 @@ export function withDeclaredFieldProse(
   served: JSONSchema | true,
   declared: JSONSchema | undefined,
 ): JSONSchema | true {
-  if (served === true || declared === undefined || !isObjectOrArray(served)) {
+  if (served === true || !isObjectOrArray(served)) {
+    return served;
+  }
+  // A caller-facing surface serves the expanded form: a schema stored as a
+  // content-addressed reference recomposes here, with `$defs` names
+  // recovered from the declared document — the stored form knows a
+  // definition only by its hash.
+  served = expandServedSchemaReference(served, declared);
+  if (declared === undefined || !isObjectOrArray(served)) {
     return served;
   }
   const edits: DescriptionEdit[] = [];
@@ -2375,6 +2388,99 @@ export function withDeclaredFieldProse(
     { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
   );
   return applyDescriptionEdits(served, edits);
+}
+
+/**
+ * Recomposes a served schema stored as a content-addressed reference into
+ * its expanded form, keeping the reference's siblings (a `description`
+ * beside a `$ref` stays beside the expansion). An unresolvable reference is
+ * served as it is — the surface cannot invent structure.
+ */
+function expandServedSchemaReference(
+  served: JSONSchema & object,
+  declared: JSONSchema | undefined,
+): JSONSchema {
+  const ref = served.$ref;
+  if (typeof ref !== "string" || parseExternalSchemaRef(ref) === undefined) {
+    return served;
+  }
+  const nameByHash = declaredDefNamesByHash(declared);
+  let recomposed: JSONSchema;
+  try {
+    recomposed = recomposeSchema(ref, lookupSchemaDocument, {
+      nameFor: (hash) => nameByHash.get(hash),
+    });
+  } catch {
+    return served;
+  }
+  const { $ref: _expanded, ...siblings } = served as Record<string, unknown>;
+  return isObjectOrArray(recomposed)
+    ? { ...recomposed, ...siblings } as JSONSchema
+    : recomposed;
+}
+
+/**
+ * The declared document's `$defs` names, keyed by the content hash each
+ * definition decomposes to — the same hashes the served document's
+ * references carry, so a recomposition can put the author's names back.
+ *
+ * Each definition maps under TWO hashes: as declared, and with every
+ * `description` stripped. Descriptions participate in schema hashing, and
+ * the served structural document may carry a definition without the prose
+ * the author declared — hashing only the prose-bearing form would miss it,
+ * and the name would fall back to a hash-derived one exactly for the
+ * definitions an author documented best.
+ */
+function declaredDefNamesByHash(
+  declared: JSONSchema | undefined,
+): Map<string, string> {
+  const names = new Map<string, string>();
+  if (!isObjectOrArray(declared) || !isObjectOrArray(declared.$defs)) {
+    return names;
+  }
+  const strippedDefs = Object.fromEntries(
+    Object.entries(declared.$defs).map((
+      [name, def],
+    ) => [name, withoutSchemaProse(def as JSONSchema)]),
+  );
+  const defGroups = [declared.$defs, strippedDefs as typeof declared.$defs];
+  for (const name of Object.keys(declared.$defs)) {
+    for (const defs of defGroups) {
+      try {
+        const { rootRef } = decomposeSchema(
+          {
+            $ref: encodeJsonPointer(["#", "$defs", name]),
+            $defs: defs,
+          } as Parameters<typeof decomposeSchema>[0],
+        );
+        const parsed = parseExternalSchemaRef(rootRef);
+        if (parsed !== undefined && !names.has(parsed.taggedHash)) {
+          names.set(parsed.taggedHash, name);
+        }
+      } catch {
+        // An undecomposable definition keeps its hash-derived name.
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * `schema` with every SCHEMA-NODE `description` removed — the one keyword
+ * `withDeclaredFieldProse` folds, so the stripped form is the structural
+ * shape a prose-free served document hashes to. The walk is schema-aware:
+ * data-bearing keyword values (`default`, `const`, `enum`, `examples`) are
+ * opaque, so a data member that happens to be NAMED `description` rides
+ * through untouched.
+ */
+function withoutSchemaProse(schema: JSONSchema): JSONSchema {
+  if (!isObjectOrArray(schema)) return schema;
+  const { description: _prose, ...rest } = schema as Record<string, unknown>;
+  return mapSubschemas(
+    rest as Parameters<typeof mapSubschemas>[0],
+    (child) => withoutSchemaProse(child),
+    { includeUnused: true, includeDefs: true },
+  );
 }
 
 /**

@@ -1,3 +1,7 @@
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
@@ -13,6 +17,7 @@ import {
   findAndInlineDataUriLinks,
 } from "../src/data-uri.ts";
 import { Runtime } from "../src/runtime.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -20,6 +25,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("data URI inlining", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -694,13 +708,14 @@ describe("data URI inlining", () => {
         "/": {
           [LINK_V1_TAG]: {
             path: ["level1", "level2"],
-            // Schema should be resolved for the nested path
-            schema: {
+            // Schema should be resolved for the nested path (and re-emitted
+            // as a reference to the narrowed document)
+            schema: externalRefTo({
               type: "object",
               properties: {
                 level3: { type: "string" },
               },
-            },
+            }),
           },
         },
       });
@@ -854,7 +869,7 @@ describe("data URI inlining", () => {
         "/": {
           [LINK_V1_TAG]: {
             path: ["field", "subfield"],
-            schema: { type: "string" },
+            schema: externalRefTo({ type: "string" }),
           },
         },
       });

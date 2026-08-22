@@ -1,3 +1,7 @@
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
@@ -24,6 +28,7 @@ import {
   isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   causalFormOfBinding,
   findAllWriteRedirectCells,
@@ -40,6 +45,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("pattern-binding", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -575,7 +589,8 @@ describe("pattern-binding", () => {
         resultCell,
       ) as { profile: unknown };
 
-      expect(parseLink(result.profile, resultCell)).toEqual({
+      const parsed = parseLink(result.profile, resultCell)!;
+      expect({ ...parsed, schema: resolvedSchema(parsed.schema) }).toEqual({
         ...argumentCell.getAsNormalizedFullLink(),
         path: ["profile"],
         scope: "user",
@@ -606,7 +621,7 @@ describe("pattern-binding", () => {
             partialCause: "name",
             path: [],
             scope: "space",
-            schema: { default: "Ada" },
+            schema: externalRefTo({ default: "Ada" }),
           },
         });
       } finally {

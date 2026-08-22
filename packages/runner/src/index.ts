@@ -1,3 +1,10 @@
+export {
+  decomposeSchema,
+  parseExternalSchemaRef,
+  recomposeSchema,
+} from "./schema-decompose.ts";
+export { lookupSchemaDocument } from "./schema-registry.ts";
+export { mapSubschemas } from "./schema-walk.ts";
 export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,

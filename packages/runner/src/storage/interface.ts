@@ -140,6 +140,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProvider;
+  /**
+   * Whether SPACE's replica holds server-confirmed verified content for
+   * `cid:<hash>` — the write-side elision seam for schema-document
+   * staging. Confirmed only: a pending local write is not evidence the
+   * server holds the document. Consults an already-open replica and
+   * answers false otherwise; false stages, which is always the safe
+   * direction.
+   */
+  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -1080,6 +1089,12 @@ export interface IStorageTransaction {
    * instead of materializing novelty/history attestations.
    */
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+  /**
+   * The manager's `isSchemaDocPersisted`, reachable from the transaction
+   * (the staging scan runs inside one). Optional the same way; absent
+   * means never elide.
+   */
+  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction

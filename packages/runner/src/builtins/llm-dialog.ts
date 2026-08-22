@@ -47,6 +47,8 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
+import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
@@ -2176,11 +2178,60 @@ function toolInputRequiredIntegrityFailure(
   value: unknown,
   path: string,
   trust: CfcFloorTrustContext,
+  root?: unknown,
+  visited?: Set<unknown>,
 ): string | undefined {
   if (!isObjectOrArray(schema)) {
     return undefined;
   }
-  const ifc = schema.ifc;
+  // A reference-form schema resolves before the walk, through the
+  // fail-closed resolver: this is a security gate, so an unresolvable
+  // reference refuses the call — a floor could hide behind it. Deliberately
+  // NOT resolveExternalRootRefForStructure, whose reference-unchanged miss
+  // would read as nothing-to-refuse. A LOCAL reference resolves against the
+  // owning document (`root`) the recursion carries — a member of a recursive
+  // group arrives as a bare pointer with its floor behind it — and following
+  // an external reference makes the resolved document the owning root for
+  // everything under it.
+  let structural = schema;
+  // A schema that declares its own `$defs` opens a scope: local references
+  // under it resolve against IT, not the inherited document. The same
+  // child-root rule the CFC schema walkers apply.
+  let structuralRoot: JSONSchema = cfcSchemaChildRoot(
+    schema as JSONSchema,
+    (root ?? schema) as JSONSchema,
+  );
+  const ref = structural.$ref;
+  if (typeof ref === "string") {
+    try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        structural,
+        structuralRoot,
+      );
+      if (!isObjectOrArray(resolved)) return undefined;
+      structural = resolved;
+      if (isExternalSchemaRef(ref)) {
+        structuralRoot = resolved;
+      }
+      structuralRoot = cfcSchemaChildRoot(
+        structural as JSONSchema,
+        structuralRoot,
+      );
+    } catch {
+      return `field "${
+        path || "(root)"
+      }" carries a schema reference this session cannot resolve; ` +
+        `refusing the call (fail closed)`;
+    }
+  }
+  // A compound branch recurses on the SAME value, so a self-referential
+  // group could otherwise walk forever. Everything reachable at this value
+  // position is gated the first time its (interned, identity-stable)
+  // resolution appears; a repeat is the cycle closing.
+  const seen = visited ?? new Set<unknown>();
+  if (seen.has(structural)) return undefined;
+  seen.add(structural);
+  const ifc = structural.ifc;
   if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
@@ -2201,8 +2252,8 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  if (isObjectOrArray(schema.properties)) {
-    for (const [key, childSchema] of Object.entries(schema.properties)) {
+  if (isObjectOrArray(structural.properties)) {
+    for (const [key, childSchema] of Object.entries(structural.properties)) {
       // Only gate fields the model actually supplied. An absent (e.g. optional)
       // field carries no value to gate; treating it as `undefined` would fail
       // an optional field's floor and over-block the call. A required field the
@@ -2218,6 +2269,7 @@ function toolInputRequiredIntegrityFailure(
         value[key],
         path ? `${path}.${key}` : key,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2231,13 +2283,13 @@ function toolInputRequiredIntegrityFailure(
   // previously went entirely ungated: this walk never descended
   // prefixItems.
   if (Array.isArray(value)) {
-    const prefixItems = Array.isArray(schema.prefixItems)
-      ? schema.prefixItems
+    const prefixItems = Array.isArray(structural.prefixItems)
+      ? structural.prefixItems
       : undefined;
     for (let index = 0; index < value.length; index++) {
       const slotSchema = prefixItems !== undefined && index < prefixItems.length
         ? prefixItems[index]
-        : schema.items;
+        : structural.items;
       if (!isObjectOrArray(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
@@ -2246,6 +2298,7 @@ function toolInputRequiredIntegrityFailure(
         value[index],
         `${path}[${index}]`,
         trust,
+        structuralRoot,
       );
       if (failure !== undefined) {
         return failure;
@@ -2256,7 +2309,7 @@ function toolInputRequiredIntegrityFailure(
   // branch. For a required-integrity FLOOR, requiring the union across
   // branches is the fail-safe (over-require) direction, matching walkIfcSchema.
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-    const branches = schema[key];
+    const branches = structural[key];
     if (Array.isArray(branches)) {
       for (const branch of branches) {
         const failure = toolInputRequiredIntegrityFailure(
@@ -2266,6 +2319,8 @@ function toolInputRequiredIntegrityFailure(
           value,
           path,
           trust,
+          structuralRoot,
+          seen,
         );
         if (failure !== undefined) {
           return failure;
@@ -2485,6 +2540,7 @@ export const llmToolExecutionHelpers = {
   effectiveObservationCeiling,
   stripFrameworkProvidedFields,
   applyAutoProvidedSandboxId,
+  toolInputRequiredIntegrityFailure,
 };
 
 /**

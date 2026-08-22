@@ -17,7 +17,7 @@ import {
   collectExternalSchemaRefHashes,
   parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
-import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
+import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
@@ -35,9 +35,10 @@ describe("schema-doc-writer", () => {
   let readerStorage: EmulatedStorageManager;
   let writer: Runtime;
   let space: MemorySpace;
+  let signer: Identity;
 
   beforeEach(async () => {
-    const signer = await Identity.fromPassphrase("schema-doc-writer");
+    signer = await Identity.fromPassphrase("schema-doc-writer");
     server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     writerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
     readerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
@@ -50,9 +51,10 @@ describe("schema-doc-writer", () => {
   });
 
   afterEach(async () => {
-    // The ambient flag is realm-sticky; later test files must see it off,
-    // and the sync schema table (disabled by the flag) must come back.
-    setContentAddressedSchemasConfig(false);
+    // The ambient flag is realm-sticky; later test files must see its
+    // default, and the sync schema table (disabled by the flag-on Runtime
+    // construction above) must come back to its own.
+    resetContentAddressedSchemasConfig();
     resetSyncSchemaTableConfig();
     await writer.dispose();
     await writerStorage.close();
@@ -197,6 +199,81 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("elides a closure the space's server has confirmed", async () => {
+    // Confirmed-persistence elision: once the server acknowledged a commit
+    // carrying the documents, a later transaction referencing the same
+    // closure stages nothing — content addressing makes the confirmed copy
+    // immutable, so the skip cannot race a change.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { elidedField: { type: "string" } },
+    };
+    const sigilA = sigilFor(schema);
+    const first = writer.edit();
+    first.writeValueOrThrow(
+      { space, id: "of:elide-a" as URI, scope: "space", path: [] },
+      { person: sigilA },
+    );
+    expect((await first.commit()).ok).toBeDefined();
+    await writerStorage.synced();
+
+    const sigilB = sigilFor(schema);
+    const second = writer.edit();
+    second.writeValueOrThrow(
+      { space, id: "of:elide-b" as URI, scope: "space", path: [] },
+      { person: sigilB },
+    );
+    const staged = [...second.getWriteDetails?.(space) ?? []].map((detail) =>
+      detail.address.id
+    );
+    expect(staged.some((id) => id.startsWith("cid:"))).toBe(false);
+    expect((await second.commit()).ok).toBeDefined();
+  });
+
+  it("stages for a replica that has not confirmed the closure", async () => {
+    // The elision keys on THIS replica's server-confirmed state, not on
+    // the registry: a fresh manager against the same server has confirmed
+    // nothing, so its writer re-delivers — and the commit boundary accepts
+    // the content-identical re-set.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { restagedField: { type: "string" } },
+    };
+    const sigilA = sigilFor(schema);
+    const first = writer.edit();
+    first.writeValueOrThrow(
+      { space, id: "of:restage-a" as URI, scope: "space", path: [] },
+      { person: sigilA },
+    );
+    expect((await first.commit()).ok).toBeDefined();
+    await writerStorage.synced();
+
+    const otherStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const other = new Runtime({
+      storageManager: otherStorage,
+      apiUrl: new URL(import.meta.url),
+      experimental: { contentAddressedSchemas: true },
+    });
+    try {
+      const sigilB = sigilFor(schema);
+      const tx = other.edit();
+      tx.writeValueOrThrow(
+        { space, id: "of:restage-b" as URI, scope: "space", path: [] },
+        { person: sigilB },
+      );
+      const staged = [...tx.getWriteDetails?.(space) ?? []].map((detail) =>
+        detail.address.id
+      );
+      expect(staged.some((id) => id.startsWith("cid:"))).toBe(true);
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await other.dispose();
+      await otherStorage.close();
+    }
+  });
+
   it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {
@@ -279,6 +356,89 @@ describe("schema-doc-writer", () => {
     expect(String(result.error?.message)).toContain(
       "neither included in the commit nor stored in the space",
     );
+  });
+
+  it("resolves the skip warning's message when its logger speaks", async () => {
+    // The sibling case above pins the count on a DISABLED logger; this one
+    // runs the same skip with the logger on, so the warning's lazy message
+    // resolves. A thunk is the one part of the path a silent run never
+    // executes, and one that throws would turn a warning into a crash
+    // exactly when someone turns the logger on to look.
+    const materializeLogger = getLogger("extended-storage-transaction");
+    const skipKey = "schema-doc-materialize";
+    const skipsBefore = materializeLogger.countsByKey[skipKey]?.warn ?? 0;
+    const wasDisabled = materializeLogger.disabled;
+    const wasLevel = materializeLogger.level;
+    materializeLogger.disabled = false;
+    materializeLogger.level = "warn";
+    try {
+      const absentHash = internSchemaAsTaggedHashString({
+        type: "string",
+        title: "never-registered-loud-ref",
+      });
+      const handCrafted = {
+        "/": {
+          "link@1": {
+            id: "of:unsupplied-loud-target",
+            path: [],
+            schema: { $ref: `cid:${absentHash}` },
+          },
+        },
+      };
+      const tx = writer.edit();
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: "of:unsupplied-loud-root" as URI,
+          scope: "space",
+          path: [],
+        },
+        { crafted: handCrafted },
+      );
+      const result = await tx.commit();
+      expect(result.ok).toBeUndefined();
+      expect(materializeLogger.countsByKey[skipKey]?.warn ?? 0).toBe(
+        skipsBefore + 1,
+      );
+    } finally {
+      materializeLogger.disabled = wasDisabled;
+      materializeLogger.level = wasLevel;
+    }
+  });
+
+  it("stages nothing with the flag off, so the commit boundary rejects the reference", async () => {
+    // Rollback semantics: an explicit `false` stops emission AND delivery.
+    // The reference below is one the registry could supply — the flag-on
+    // sigil stamping registered it — but the flag-off writer does not
+    // stage its closure, so the server's commit-time validation refuses
+    // the write. Turning the flag off stops the writer writing; documents
+    // already stored keep satisfying that validation on their own.
+    const schema: JSONSchemaObj = {
+      type: "string",
+      title: "flag-off-registered-ref",
+    };
+    const sigil = sigilFor(schema);
+    const offStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const offRuntime = new Runtime({
+      storageManager: offStorage,
+      apiUrl: new URL(import.meta.url),
+      experimental: { contentAddressedSchemas: false },
+    });
+    try {
+      const tx = offRuntime.edit();
+      tx.writeValueOrThrow(
+        { space, id: "of:flag-off-root" as URI, scope: "space", path: [] },
+        { person: sigil },
+      );
+      const result = await tx.commit();
+      expect(result.ok).toBeUndefined();
+      expect(String(result.error?.message)).toContain(
+        "neither included in the commit nor stored in the space",
+      );
+    } finally {
+      await offRuntime.dispose();
+      await offStorage.close();
+    }
   });
 
   it("materializes a schema document once for two links that share it", async () => {

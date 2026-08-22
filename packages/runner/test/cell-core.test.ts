@@ -8,6 +8,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
+import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { JSONSchema, type Pattern } from "../src/builder/types.ts";
@@ -657,7 +658,7 @@ describe("Cell", () => {
 
     const reloadedResultCell = resultCell.withTx(tx);
     const argumentLink = getMetaLink(reloadedResultCell, "argument");
-    expect(argumentLink?.schema).toEqual(argumentSchema);
+    expect(resolvedSchema(argumentLink?.schema)).toEqual(argumentSchema);
 
     const argumentCell = reloadedResultCell.getArgumentCell<{ input: number }>(
       argumentSchema,

@@ -1,3 +1,7 @@
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
@@ -27,6 +31,7 @@ import {
   lift,
 } from "../src/builder/module.ts";
 import { reactive } from "../src/builder/reactive.ts";
+import { externalRefTo } from "./schema-ref-helpers.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -48,6 +53,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("module", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -385,7 +399,7 @@ describe("module", () => {
           $alias: {
             partialCause: ["a", "b"],
             path: [],
-            schema: { default: 1 },
+            schema: externalRefTo({ default: 1 }),
             scope: "space",
           },
         },

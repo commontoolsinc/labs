@@ -77,6 +77,7 @@ import {
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
+  inlineExternalSchemaRefsInValue,
   isCellLink,
   isNormalizedFullLink,
   isSigilLink,
@@ -2638,9 +2639,15 @@ export class Runtime {
     // is the link it names, not a container to descend into -- and an
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
+    // Links serialized into a `data:` document carry their schemas inline
+    // (see inlineExternalSchemaRefsInValue): the document is its id, so a
+    // content-addressed reference inside it has no carrying write to install
+    // its closure.
     const asDataURI = dataUriFromValue(
-      fabricFromNativeValue(
-        flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+      inlineExternalSchemaRefsInValue(
+        fabricFromNativeValue(
+          flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+        ),
       ),
     );
     return createCell(

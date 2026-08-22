@@ -9,7 +9,11 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { isObjectOrArray } from "../../utils/src/types.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
+import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
@@ -146,6 +150,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   rawValue: unknown,
   base: Cell<unknown>,
   tx?: IExtendedStorageTransaction,
+  root?: JSONSchema,
 ): JSONSchema | undefined {
   if (
     !isObjectOrArray(schema) || !isObjectOrArray(rawValue) ||
@@ -154,6 +159,39 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   ) {
     return schema;
   }
+
+  // A schema at rest can be a content-addressed reference
+  // (`docs/specs/content-addressed-schemas.md`), which carries no structure
+  // to walk. Judge the relaxation on the resolved document; a reference
+  // whose closure has not arrived stays a reference, which the walk below
+  // finds nothing to relax in — the same conservative fallback as a chain
+  // the resolver cannot complete. A member of a recursive group arrives as
+  // a LOCAL pointer whose definitions live on the owning document the
+  // recursion carries as `root`; resolving against it is what lets the
+  // relaxation see `properties` and `required` inside a nested definition.
+  // Either miss keeps the strict pre-existing behavior.
+  let structural = resolveExternalRootRefForStructure(schema);
+  let structuralRoot: JSONSchema;
+  if (structural !== schema) {
+    structuralRoot = structural;
+  } else {
+    // A schema declaring its own `$defs` opens a scope: local references
+    // under it resolve against IT, not the inherited document — the same
+    // child-root rule the CFC schema walkers apply.
+    structuralRoot = cfcSchemaChildRoot(structural, root ?? structural);
+    const ref = (structural as { $ref?: unknown }).$ref;
+    if (typeof ref === "string" && ref.startsWith("#")) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        structural as Parameters<
+          typeof ContextualFlowControl.resolveSchemaRefs
+        >[0],
+        structuralRoot,
+      );
+      if (!isObjectOrArray(resolved)) return schema;
+      structural = resolved;
+    }
+  }
+  structuralRoot = cfcSchemaChildRoot(structural, structuralRoot);
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.
@@ -209,7 +247,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 
   let changed = false;
 
-  let required = schema.required;
+  let required = structural.required;
   if (Array.isArray(required)) {
     const kept = required.filter(
       (prop) =>
@@ -222,7 +260,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
     }
   }
 
-  let properties = schema.properties;
+  let properties = structural.properties;
   if (isObjectOrArray(properties)) {
     let newProperties: Record<string, JSONSchema> | undefined;
     for (const [key, propSchema] of Object.entries(properties)) {
@@ -234,6 +272,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         propValue,
         base,
         tx,
+        structuralRoot,
       );
       if (relaxed !== propSchema) {
         newProperties ??= { ...(properties as Record<string, JSONSchema>) };
@@ -248,7 +287,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
 
   if (!changed) return schema;
   return {
-    ...schema,
+    ...structural,
     ...(properties !== undefined ? { properties } : {}),
     ...(required !== undefined ? { required } : {}),
   } as JSONSchema;

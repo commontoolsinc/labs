@@ -84,7 +84,10 @@ import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereferenceTraces,
@@ -1127,11 +1130,13 @@ export class CellImpl<T extends FabricValue>
       resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
     }
 
+    // The link's schema may ride as a content-addressed reference; the
+    // stream marker lives on the resolved document.
+    const streamSchema = isObjectNotArray(resolvedToValueLink.schema)
+      ? resolveExternalRootRefForStructure(resolvedToValueLink.schema)
+      : resolvedToValueLink.schema;
     if (
-      ContextualFlowControl.getAsCellValues(resolvedToValueLink.schema).at(
-        0,
-      ) ===
-        "stream"
+      ContextualFlowControl.getAsCellValues(streamSchema).at(0) === "stream"
     ) {
       return true;
     }
@@ -4140,9 +4145,9 @@ function schemaWithDefaultAndScope<T>(
 export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isObjectOrArray(schema) && isCellScope(schema.scope)
-    ? schema.scope
-    : undefined;
+  if (!isObjectNotArray(schema)) return undefined;
+  schema = resolveExternalRootRefForStructure(schema);
+  return isCellScope(schema.scope) ? schema.scope : undefined;
 }
 
 /**
