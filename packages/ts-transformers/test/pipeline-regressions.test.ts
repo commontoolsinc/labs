@@ -241,6 +241,7 @@ Deno.test(
       "PatternContextValidationTransformer",
       "MergeablePushValidationTransformer",
       "VerbReturnValidationTransformer",
+      "IndirectBuilderCallbackValidationTransformer",
       "CfcPolicyAuthoringTransformer",
       "CfcPolicyOfValidationTransformer",
       "JsxExpressionSiteRouterTransformer",

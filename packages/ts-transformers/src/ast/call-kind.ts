@@ -722,8 +722,9 @@ function unwrapHardenedCallbackExpression(
 /**
  * Whether `expression` names a callback. Recognizes the schema-first `handler`
  * form, keeps the trailing-options check from spread-replacing a callback with
- * the injected result options, and anchors a builder artifact whose callback is
- * reached indirectly.
+ * the injected result options, anchors a builder artifact whose callback is
+ * reached indirectly, and gates which argument the indirect-callback
+ * validation stage judges.
  *
  * Callback-ness is SEMANTIC — the checker's call signatures — never a
  * whitelist of spellings. Inline arrows, const references, function

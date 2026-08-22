@@ -21,7 +21,6 @@ interface Verbs {
     ping: Stream<Ping, PingResult>;
     pingNamed: Stream<Ping, PingResult>;
     pingDeclared: Stream<Ping, PingResult>;
-    pingViaProperty: Stream<Ping, PingResult>;
     poke: Stream<Ping>;
 }
 // The schema-first authored form: the author supplies the event and state
@@ -101,32 +100,6 @@ const pingDeclared = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
-// A callback reached through property access — the spelling no syntax list
-// anticipated. Callback-ness is the checker's call signatures, so any
-// callable expression recognizes the form; a schema is never callable.
-const callbacks = __cfHelpers.__cf_data({
-    echoViaProperty(event: Ping, _state: {
-        count: number;
-    }): PingResult {
-        return { echoed: event.word };
-    },
-});
-const pingViaProperty = handler({
-    type: "object",
-    properties: { word: { type: "string" } },
-    required: ["word"],
-}, {
-    type: "object",
-    properties: { count: { type: "number", asCell: ["cell"] } },
-}, callbacks.echoViaProperty, { resultSchema: {
-        type: "object",
-        properties: {
-            echoed: {
-                type: "string"
-            }
-        },
-        required: ["echoed"]
-    } as const satisfies __cfHelpers.JSONSchema });
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler({
@@ -145,7 +118,6 @@ export default pattern(() => {
         ping: ping({ count }).for({ stream: ["__patternResult", "ping"] }, true),
         pingNamed: pingNamed({ count }).for({ stream: ["__patternResult", "pingNamed"] }, true),
         pingDeclared: pingDeclared({ count }).for({ stream: ["__patternResult", "pingDeclared"] }, true),
-        pingViaProperty: pingViaProperty({ count }).for({ stream: ["__patternResult", "pingViaProperty"] }, true),
         poke: poke({ count }).for({ stream: ["__patternResult", "poke"] }, true)
     };
 }, {
@@ -167,16 +139,12 @@ export default pattern(() => {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         },
-        pingViaProperty: {
-            $ref: "#/$defs/Ping",
-            asCell: ["stream"]
-        },
         poke: {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         }
     },
-    required: ["ping", "pingNamed", "pingDeclared", "pingViaProperty", "poke"],
+    required: ["ping", "pingNamed", "pingDeclared", "poke"],
     $defs: {
         Ping: {
             type: "object",
@@ -205,6 +173,5 @@ __cfReg({
     ping,
     pingNamed,
     pingDeclared,
-    pingViaProperty,
     poke
 });
