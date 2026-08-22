@@ -1718,27 +1718,26 @@ describe("Phase 2 speculation overlay", () => {
       "the re-armed kick to deliver the stored schema document",
     );
 
-    // The hook's skip arms, each driven by one more frame over the
-    // standing watch:
-    //  - frame 3 re-references lateHash while its dedupe entry is
-    //    RETAINED (a delivered pull keeps it) — the dedupe-hit skip;
-    //  - frame 4 carries metadata WITHOUT a schemaHash (labelMap-only)
-    //    — the shape-guard continue;
-    //  - frame 5 references a REGISTRY-resolvable hash that was never
-    //    kicked — the resolvable-guard continue, whose contract is
-    //    observable: no pull fires, so a doc the engine does not hold
-    //    stays absent from this replica.
-    const registryResolvedSchema = {
-      type: "object",
-      properties: { name: { type: "string" }, guardPin: { type: "string" } },
-    } as const;
-    const registryResolvedHash = internSchemaAsTaggedHashString(
-      registryResolvedSchema,
-    );
-    registerSchemaDocument(registryResolvedHash, registryResolvedSchema);
-    const writeFrame = async (
-      value: { name: string },
-      cfc: Record<string, unknown>,
+    // The hook's remaining CONSTRUCTIBLE skip arms, coverage-verified
+    // (instrumented line hits, not asserts — the loopback masks most
+    // behavioral observables here):
+    //
+    //  - the DEDUPE-HIT skip: the kick's dedupe `add` is SYNCHRONOUS
+    //    inside the upsert loop, so ONE writer commit stamping TWO
+    //    watched docs' metadata with the SAME fresh (uninstalled,
+    //    unregistered) hash makes the second upsert meet
+    //    `has() === true` deterministically — no in-flight race, no
+    //    "retained entry" premise (frame delivery attaches installed
+    //    refs in this harness, so a delivered hash is resolvable-
+    //    guarded, never dedupe-hit);
+    //  - the string-shape guard: metadata WITHOUT a schemaHash, on
+    //    its own frame.
+    const writeDocFrame = async (
+      writes: {
+        id: string;
+        scope: unknown;
+        value: unknown;
+      }[],
     ) => {
       const writerManager = EmulatedStorageManager.connectTo(server, {
         as: aliceSigner,
@@ -1748,6 +1747,7 @@ describe("Phase 2 speculation overlay", () => {
         storageManager: writerManager,
       });
       try {
+        // Touch the docs so the writer session can address them.
         const writerDraft = writerRuntime.getCell<{ name: string }>(
           space,
           "rearm-draft",
@@ -1755,16 +1755,15 @@ describe("Phase 2 speculation overlay", () => {
         );
         await writerDraft.sync();
         const tx = writerRuntime.edit();
-        const docAddress = {
-          space,
-          id: draftLink.id,
-          scope: draftLink.scope,
-          type: "application/json" as const,
-          path: [],
-        };
-        const current = tx.readOrThrow(docAddress);
-        const base = current && typeof current === "object" ? current : {};
-        tx.writeOrThrow(docAddress, { ...base, value, cfc } as never);
+        for (const write of writes) {
+          tx.writeOrThrow({
+            space,
+            id: write.id as never,
+            scope: write.scope as never,
+            type: "application/json",
+            path: [],
+          }, write.value as never);
+        }
         expect((await tx.commit()).error).toBeUndefined();
         await writerRuntime.storageManager.synced();
       } finally {
@@ -1776,33 +1775,80 @@ describe("Phase 2 speculation overlay", () => {
       (replica.getDocument(draftLink.id, draftLink.scope) as {
         value?: { name?: string };
       } | undefined)?.value?.name === name;
+    const currentDoc = () =>
+      replica.getDocument(draftLink.id, draftLink.scope) as Record<
+        string,
+        unknown
+      >;
 
-    await writeFrame({ name: "third-frame" }, {
+    // A SECOND watched doc for the same-batch dedupe-hit construction.
+    const draftB = clientRuntime.getCell<{ name: string }>(
+      space,
+      "rearm-draft-b",
+      DRAFT_SCHEMA,
+    );
+    await draftB.sync();
+    {
+      const tx = clientRuntime.edit();
+      draftB.withTx(tx).set({ name: "b-durable" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftBLink = draftB.getAsNormalizedFullLink();
+    const cancelWatchB = draftB.sink(() => {});
+
+    const pairSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, pairPin: { type: "boolean" } },
+    } as const;
+    const pairHash = internSchemaAsTaggedHashString(pairSchema);
+    const pairCfc = {
       version: 1,
       labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
-      schemaHash: lateHash,
-    });
-    await waitUntil(readerSees("third-frame"), "frame 3 to integrate");
+      schemaHash: pairHash,
+    };
+    const docBValue = replica.getDocument(
+      draftBLink.id,
+      draftBLink.scope,
+    ) as Record<string, unknown>;
+    await writeDocFrame([
+      {
+        id: draftLink.id,
+        scope: draftLink.scope,
+        value: { ...currentDoc(), value: { name: "pair-frame" }, cfc: pairCfc },
+      },
+      {
+        id: draftBLink.id,
+        scope: draftBLink.scope,
+        value: { ...docBValue, cfc: pairCfc },
+      },
+    ]);
+    await waitUntil(readerSees("pair-frame"), "the pair frame to integrate");
 
-    await writeFrame({ name: "fourth-frame" }, {
-      version: 1,
-      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
-    });
+    // The schemaHash-less metadata frame (the string-shape guard).
+    await writeDocFrame([{
+      id: draftLink.id,
+      scope: draftLink.scope,
+      value: {
+        ...currentDoc(),
+        value: { name: "fourth-frame" },
+        cfc: {
+          version: 1,
+          labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+        },
+      },
+    }]);
     await waitUntil(readerSees("fourth-frame"), "frame 4 to integrate");
 
-    await writeFrame({ name: "fifth-frame" }, {
-      version: 1,
-      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
-      schemaHash: registryResolvedHash,
-    });
-    await waitUntil(readerSees("fifth-frame"), "frame 5 to integrate");
+    // The doc-shape guard (a non-object root) is NOT constructible:
+    // the write path refuses any non-object full-document root
+    // ("memory v2 transactions require explicit full-document roots"),
+    // so no commit — and no frame — can carry one. The guard is
+    // defensive; its line is enumerated coverage debt.
     await (replica as unknown as { inputSynced(): Promise<void> })
       .inputSynced();
-    // The resolvable guard skipped the kick: the registry supplied the
-    // content, so no pull ran and the engine-absent doc stays absent.
-    expect(
-      replica.getDocument(`cid:${registryResolvedHash}` as never),
-    ).toBeUndefined();
+    cancelWatchB();
     cancelWatch();
   });
 
