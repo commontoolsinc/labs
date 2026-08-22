@@ -3065,6 +3065,44 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   ExecutorHost) are single-process harnesses, OFF by construction in
   either lane. Trigger: with OW32's triage (the same "client under ON
   never settles/renders" family); the flip PR needs the skip list EMPTY.
+  **TRIAGED (2026-08-22, main 51350077e — every member re-reproduced
+  at the true ON topology before theorizing; report:
+  docs/history/plans/server-execution-v2/optimize/ow33-triage-report.md):
+  (b) and (c) are HEALED — 12/12 green (10 on the ON-built binary,
+  fresh store, posture probed per run; both steps executing) — their
+  STEP skips LIFTED; (d) is HEALED (counter 50/50, 5/5). The
+  UNTRIAGED demand question is DISCHARGED: `pull()`'s sync joins the
+  session's tracked set and the server serves both instances durably
+  every run — the ruled `.pull`-for-round-one flow works. (a)
+  persists as a rotating flake (4/8 original-file runs red in the
+  triage series; 1-2 of 8-10 in instrumented variants) whose
+  failing read alternates between the new and the resumed instance,
+  ROOT-CAUSED to the speculation overlay's ARRIVAL GATE
+  (speculation.md §4, RULED 2026-08-16): the
+  implementation witnesses arrival as `confirmedSeq(writtenDoc) >=
+  floor`, and a first-run speculation's computed docs carry the
+  client's OWN authored STRUCTURE write at exactly the floor seq, so
+  any watermark >= floor (wave 1 of a budget-split settle serving
+  the OTHER instance) retires the entry on the client's own write
+  while the served value is a wave away (40–260 ms observed) and the
+  bare read falls in the hole. Fix direction determined by the ruled
+  sentence; the witness PREDICATE is a design fork FLAGGED for the
+  owner (four candidates, their edges, and a recommendation:
+  optimize/ow33-arrival-witness-fork.md) — no build until ruled; the
+  runner skip stays re-tensed, lift bar 10/10 at the true ON
+  topology once the ruled predicate lands. The topics-navigation
+  sibling's recorded fail-fast myName validation red did NOT
+  reproduce (9/11 green at the true topology); its residual 2/10
+  flake is a different surface — the controller's addTopic ECHO run
+  dropped at the stream-action validation guard (`$ctx` resolving
+  without the required derived `crossrefs` at send time; topics
+  still created correctly server-side: store exactly-two, events
+  28/28 appended==processed) plus the unbarriered `topicAt` capture
+  — with a flagged question, not filled: should that guard take the
+  OW51 refusal+retrigger disposition instead of a silent skip
+  (#6179 scoped the refusal to the schema-aware lazy READ path, so
+  extending it is a spec decision). Its file skip stays,
+  re-tensed.**
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 
