@@ -805,6 +805,27 @@ export function sqliteQuery(
     const servedRun = runContext !== undefined;
     const runIdentity = runContext?.scopeKeyIdentity;
     const actingReader = sqliteRunActingPrincipal(runtime, tx);
+    // A session-scoped cleared result joins the run's SESSION to the
+    // request identity alongside the user (RULED 2026-08-22,
+    // verification-coverage.md OW53): one cleared cell per
+    // query-and-reader-at-matching-granularity. The session rides the
+    // hash's reader component, and through the hash the effect/outbox
+    // key — without it, two sessions of one user on one serving runtime
+    // share hash AND key across DISTINCT session instances of the
+    // result cell, and the second rides the first's in-flight dedupe
+    // (starvation until an unrelated re-run). Sourced from the run's
+    // `scopeKeyIdentity` — the SAME identity the flush's writebacks
+    // resolve instances against, so request identity and cell instance
+    // split together. Unstamped runs (clients, ON-arm speculation, the
+    // whole OFF arm) carry no context and keep today's bare-principal
+    // shape; USER-scoped cleared results never take this arm at all —
+    // both byte-identical. `session` is CELL_SCOPES' only sub-user
+    // member (scope.ts); a future narrower-than-user scope must join
+    // this granularity test (and builtins.md §2's rule) rather than
+    // staying silently session-blind at the new scope.
+    const clearanceSession = inputs.readClearance && scope === "session"
+      ? runIdentity?.sessionId
+      : undefined;
     const hash = computeInputHashFromValue({
       db,
       sql: inputs.sql,
@@ -819,8 +840,15 @@ export function sqliteQuery(
       // reader is part of the query identity (belt-and-suspenders with the
       // per-user result scope above — a cleared result is never keyed only by
       // the boolean; builtins.md §2: the reader principal is part of the
-      // memo key). Absent for non-clearance queries so they do not re-hash.
-      clearanceReader: inputs.readClearance ? (actingReader ?? null) : null,
+      // memo key). At session granularity the reader component ALSO carries
+      // the run's session (RULED 2026-08-22 — see `clearanceSession` above);
+      // row admission stays a USER-principal question either way. Absent for
+      // non-clearance queries so they do not re-hash.
+      clearanceReader: inputs.readClearance
+        ? (clearanceSession !== undefined
+          ? { user: actingReader ?? null, session: clearanceSession }
+          : (actingReader ?? null))
+        : null,
     });
     // Dedup against COMMITTED state (and, stage G, against this node's
     // own in-flight RPC): the claim marker commits with the REQUESTING
@@ -969,10 +997,14 @@ export function sqliteQuery(
               onExceed: inputs.onExceed,
               // Phase 3.b read-time clearance: the reader is the acting
               // principal of the REQUESTING run (same identity the ceiling
-              // placeholders resolve against, and the same one the request
-              // hash above is keyed by). A served request with no carried
-              // reader passes undefined and the clearance path refuses —
-              // fail closed, never cleared FOR the service.
+              // placeholders resolve against, and the USER half of the
+              // request hash's reader component above — the session half,
+              // where the result scope carries one, splits the CELL and the
+              // keys, never row admission: rows name principals, and which
+              // rows a user may read does not vary by their session). A
+              // served request with no carried reader passes undefined and
+              // the clearance path refuses — fail closed, never cleared FOR
+              // the service.
               readClearance: inputs.readClearance
                 ? { reader: flushActingPrincipal }
                 : undefined,

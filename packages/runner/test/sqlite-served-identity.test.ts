@@ -198,11 +198,14 @@ describe("sqlite-served-identity", () => {
   });
 
   /** Seed rows for both readers and return a query builtin over the db,
-   * plus the result cell captured from its first run. */
-  const clearedQuerySetup = async () => {
+   * plus the result cell captured from its first run. `dbScope` narrows
+   * the db (and so the cleared result, via `narrowestScope`) below the
+   * clearance-forced `user` floor. */
+  const clearedQuerySetup = async (dbScope?: "session") => {
     const db = {
       id: `of:ow53-${crypto.randomUUID()}`,
       tables: clearedTables(),
+      ...(dbScope !== undefined && { scope: dbScope }),
     } as unknown as SqliteDbRef;
     const seedTx = runtime.edit();
     seedTx.recordSqliteWrite!(space, {
@@ -251,7 +254,32 @@ describe("sqlite-served-identity", () => {
       parent,
       runtime,
     );
-    return { builtin, result: () => resultCell! };
+    /** A SECOND instance of the same query (fresh parent, fresh result
+     * cell, fresh per-closure in-flight set) — the determinism pin's
+     * probe: nothing per-instance may reach the request hash. */
+    const makeBuiltin = async () => {
+      const ptx = runtime.edit();
+      const p = runtime.getCell(
+        space,
+        `ow53 query parent ${crypto.randomUUID()}`,
+        undefined,
+        ptx,
+      );
+      expect((await ptx.commit()).error).toBeUndefined();
+      let cell: Cell<QueryState> | undefined;
+      const b = sqliteQuery(
+        inputs as never,
+        (_rtx, result) => {
+          cell = result as Cell<QueryState>;
+        },
+        () => {},
+        [p],
+        p,
+        runtime,
+      );
+      return { builtin: b, result: () => cell! };
+    };
+    return { builtin, result: () => resultCell!, makeBuiltin };
   };
 
   it({
@@ -292,5 +320,121 @@ describe("sqlite-served-identity", () => {
     // ambient provider consumed instead, both runs hash the SERVICE and
     // the two hashes collide reader-blind.
     expect(aliceHash).not.toBe(bobHash);
+  });
+
+  it({
+    name:
+      "keys a session-scoped cleared read's request identity by the run's session (two sessions of one user stage distinct hashes)",
+    sanitizeResources: false,
+  }, async () => {
+    // RULED 2026-08-22 (verification-coverage.md OW53): a SUB-USER-scoped
+    // cleared result — a session-scoped db narrows `narrowestScope` below
+    // the clearance-forced `user` floor — joins the run's SESSION to the
+    // request identity alongside the user: one cleared cell per
+    // query-and-reader-at-matching-granularity. Pre-ruling, two sessions
+    // of one user shared hash AND effect key across DISTINCT session
+    // instances of one result cell, and the second rode the first's
+    // in-flight dedupe (starvation until an unrelated re-run). The hash
+    // is the ONLY session carrier in that identity: the outbox key
+    // `sqliteQuery:<hash>@<id>:<scope>` widens by scope NAME, not
+    // instance, so distinct hashes are what split the keys. As
+    // throughout this file, the pin reads each run's STAGED claim —
+    // completion (each session instance settling with the reader's
+    // cleared rows) is the true-ON integration pair's realm: post-run
+    // scoped-instance reads here are refused for want of an execution
+    // lease (protocol.md §2's read row).
+    const { builtin, result } = await clearedQuerySetup("session");
+
+    const tx1 = runtime.edit();
+    demandedStamp(tx1, aliceSigner.did(), "sess-one");
+    builtin.action(tx1);
+    const hashOne = (result().withTx(tx1).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx1.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    const tx2 = runtime.edit();
+    demandedStamp(tx2, aliceSigner.did(), "sess-two");
+    builtin.action(tx2);
+    const hashTwo = (result().withTx(tx2).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx2.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    expect(hashOne).toBeDefined();
+    expect(hashTwo).toBeDefined();
+    expect(hashOne).not.toBe(hashTwo);
+  });
+
+  it({
+    name:
+      "derives a session-scoped cleared read's request hash from query and identity alone (same session re-staged from a fresh instance, same hash)",
+    sanitizeResources: false,
+  }, async () => {
+    // The distinct-across-sessions pin above would ALSO pass if the hash
+    // carried per-run noise — a nonce splits any two stagings. Staging the
+    // identical (query, user, session) from a FRESH builtin instance
+    // (fresh parent, fresh result cell, fresh in-flight set) must
+    // reproduce the SAME hash: the request identity is derived from the
+    // query and the carried identity, nothing per-run and nothing
+    // per-instance — determinism is what makes the session join a KEY
+    // rather than a cache-buster.
+    const { builtin, result, makeBuiltin } = await clearedQuerySetup(
+      "session",
+    );
+
+    const tx1 = runtime.edit();
+    demandedStamp(tx1, aliceSigner.did(), "sess-one");
+    builtin.action(tx1);
+    const first = (result().withTx(tx1).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx1.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    const second = await makeBuiltin();
+    const tx2 = runtime.edit();
+    demandedStamp(tx2, aliceSigner.did(), "sess-one");
+    second.builtin.action(tx2);
+    const restaged = (second.result().withTx(tx2).get() as
+      | QueryState
+      | undefined)?.requestHash;
+    expect((await tx2.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    expect(first).toBeDefined();
+    expect(restaged).toBe(first);
+  });
+
+  it({
+    name:
+      "keeps a user-scoped cleared read's request identity session-blind (two sessions of one user share one hash)",
+    sanitizeResources: false,
+  }, async () => {
+    // The unchanged arm of the 2026-08-22 ruling: at USER granularity the
+    // session never joins the request identity, so two sessions of one
+    // user share the user-scoped cleared cell AND its hash — the sharing
+    // IS the contract (one cleared cell per query-and-reader-at-matching-
+    // granularity), and the hash shape stays byte-identical to the
+    // pre-ruling reader keying. Green on both sides of the session fix.
+    const { builtin, result } = await clearedQuerySetup();
+
+    const tx1 = runtime.edit();
+    demandedStamp(tx1, aliceSigner.did(), "sess-one");
+    builtin.action(tx1);
+    const hashOne = (result().withTx(tx1).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx1.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    const tx2 = runtime.edit();
+    demandedStamp(tx2, aliceSigner.did(), "sess-two");
+    builtin.action(tx2);
+    const hashTwo = (result().withTx(tx2).get() as QueryState | undefined)
+      ?.requestHash;
+    expect((await tx2.commit()).error).toBeUndefined();
+    await runtime.settled();
+
+    expect(hashOne).toBeDefined();
+    expect(hashOne).toBe(hashTwo);
   });
 });

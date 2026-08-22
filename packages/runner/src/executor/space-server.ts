@@ -1780,7 +1780,11 @@ export class SpaceServer implements TransactionSealDestination {
         // engine rows are annotated with below — so the demanded run's
         // instance sees the served result locally at verdict, not only
         // through the wire. Residual, FLAGGED (not filled), now scoped
-        // to the fetch*/generate* families: their writeback transactions
+        // to every non-sqlite effect kind — the fetch*/generate*
+        // families, llm, and llm-dialog (which additionally marks
+        // completions at 4 sites with bare `llmDialog:`-prefixed keys
+        // never widened by effectTargetKey, a separate pre-existing
+        // quirk): their writeback transactions
         // are unstamped, so their hash-guard READS resolve against the
         // service's instances and a per-instance node's effect
         // completion is unpinned there. sqlite-query is CARVED OUT
