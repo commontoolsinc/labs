@@ -5310,13 +5310,25 @@ supply; OW29/OW32/OW34 closed):
     it. Fixed red-first (the host re-buffers the consumed warm
     notices on either failure arm; `executor-warm-request.test.ts`'s
     post-drain-failure pin, watched red at the drained root never
-    reaching the eventual successor). The remaining loss window of
-    this family is the PROCESS-crash one recorded above. Review
-    observation, recorded: a tenure's warm-demand key set grows
-    monotonically until park — bounded by the provisioning volume
-    aimed at the space per tenure, and worth a stats eye
-    (`warmRequests` per space) if a provisioning-heavy space ever
-    holds a very long tenure.
+    reaching the eventual successor). The re-buffer collects what the
+    activation CONSUMED — its argument and the drained buffer — so
+    the family's remaining losses are TWO: the PROCESS-crash window
+    recorded above, and a mid-activate-arrival SLIVER (no crash
+    required): a warm notice arriving AFTER the successor registered
+    and BEFORE its `activate()` failed routes through the
+    existing-server arm straight into the doomed server's feed — in
+    neither re-buffer collection. Recovery caveat, stated: re-buffered
+    notices activate nothing by themselves — they recover on the next
+    QUALIFYING trigger (a session open, an event, or another warm
+    request), which in the strict no-backstop shape may be indefinite;
+    the diagnostic read is §7's `warmRequests` against the target
+    space's subsequent serving activity (requests issued with no
+    derived commits following). Review observation, recorded: a
+    tenure's warm-demand key set grows monotonically until park —
+    bounded by the provisioning volume aimed at the space per tenure,
+    and worth a stats eye (`warmRequests` — a loop-global counter; no
+    per-space breakdown exists today) if a provisioning-heavy space
+    ever holds a very long tenure.
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
     (optimize-on-main client-durability pass; report:
