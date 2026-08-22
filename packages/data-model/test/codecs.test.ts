@@ -21,7 +21,10 @@ import {
   fabricFromJsonValue,
   jsonFromFabricValue,
   plainObjectFromJson,
+  realmFromFabricValue,
 } from "@/codecs.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { isValidFabricValue } from "@/fabric-value.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
@@ -117,6 +120,46 @@ describe("codecs", () => {
     expect(jsonFromFabricValue("hello")).toBe('fvj1:"hello"');
     expect(jsonFromFabricValue(true)).toBe("fvj1:true");
     expect(jsonFromFabricValue(null)).toBe("fvj1:null");
+  });
+
+  describe("a state the format cannot write down", () => {
+    // `2.10 Encode Input Contract` names three reasons `encode()` throws for a
+    // value that is otherwise valid. This is the third: the class is claimed
+    // by a codec in the registry, and that codec refuses this instance's
+    // state. Asserted through the engine rather than the codec, because the
+    // contract the spec states is the engine's.
+    it(
+      "throws through the engine, where the format has no form for it",
+      async () => {
+        const pair = new FabricKeyPair(
+          await crypto.subtle.generateKey("Ed25519", false, [
+            "sign",
+            "verify",
+          ]) as CryptoKeyPair,
+        );
+
+        // Valid, and claimed: neither of the other two reasons applies.
+        expect(isValidFabricValue(pair)).toBe(true);
+        expect(createDefaultJsonRegistry().codecFromValue(pair)).toBeDefined();
+
+        expect(() => jsonFromFabricValue(pair)).toThrow(
+          /no JSON representation/,
+        );
+      },
+    );
+
+    it("encodes for a format that does have a form for it", async () => {
+      const pair = new FabricKeyPair(
+        await crypto.subtle.generateKey("Ed25519", false, [
+          "sign",
+          "verify",
+        ]) as CryptoKeyPair,
+      );
+
+      // The refusal is the JSON format's, not the value's: the same instance
+      // crosses a realm boundary as itself.
+      expect(() => realmFromFabricValue(pair)).not.toThrow();
+    });
   });
 
   describe("edge case", () => {
