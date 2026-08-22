@@ -2,16 +2,17 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW34-family DESIGN (for owner ruling; no implementation in this PR): per-run CFC trust attribution for served execution — the FLAG-5 seam where served rows' authored-by / represents-principal labels name the SERVICE signer because the runtime-level trust snapshot (storageManager.as) is attached per-transaction at edit(). Mechanism verified against code with anchors; options per section; ONE recommended design (stamper-attached per-run snapshots, label semantics = the acting user, OFF byte-identical, fresh-store migration); invariants as testable pins; acceptance = the cfc-group-chat-demo ON lift + store-dump label audit. Gates the ON flip (the skip list must be EMPTY)."
+reason: "OW34-family DESIGN (RULED 2026-08-21 — all seven §10 recommendations adopted as recommended; built by the OW34-family implementation train in the same PR that lands this document): per-run CFC trust attribution for served execution — the FLAG-5 seam where served rows' authored-by / represents-principal labels name the SERVICE signer because the runtime-level trust snapshot (storageManager.as) is attached per-transaction at edit(). Mechanism verified against code with anchors; options per section; ONE recommended design (stamper-attached per-run snapshots, label semantics = the acting user, OFF byte-identical, fresh-store migration); invariants as testable pins; acceptance = the cfc-group-chat-demo ON lift + store-dump label audit. Gates the ON flip (the skip list must be EMPTY)."
 ---
 
 # OW34 attribution design — per-run CFC trust for served execution
 
 Author: OW34 DESIGN agent. Worktree `/Users/berni/labs-worktrees/ow34-design`,
 branch `claude/server-exec-v2-ow34-design` off `origin/main` @ `59cde49ef`.
-Date: 2026-08-21. Status: **design for ruling** — the owner rules on this
-document before any implementation train starts. This is a design pass; the
-branch carries this document and nothing else.
+Date: 2026-08-21. Status: **RULED 2026-08-21** — the owner adopted all seven
+§10 recommendations as recommended (the ruling record heads §10). Built by
+the OW34-family implementation train (branch
+`claude/server-exec-v2-ow34-implement`), which lands this document.
 
 Register anchors: OW31's residual (iii) (verification-coverage.md §3 — "CFC
 AUTHORSHIP LABELS on served rows still carry the SERVICE signer … per-run CFC
@@ -645,14 +646,29 @@ NAMED OUT, with its home:
 
 ## 10. Open questions for the owner (numbered; each with a recommendation)
 
+**RULING RECORD.** The owner (Berni) ruled in chat, 2026-08-21:
+
+> "decision 2: all sounds good. does the doc note examples for actor-less
+> runs? just curious"
+
+All seven questions are RULED 2026-08-21, each adopted as recommended; the
+per-question markers below record the binding reading. The aside's answer:
+yes — Q3 names the actor-less examples (structure loads, the watermark
+write, pattern-swap setup, factory-time loads), and §1b's structural note
+names the one mint-capable actor-less path (setup/defaults materialization
+via the initial-schema-default carve-out).
+
 1. **Label semantics: (a) acting user only, or (b) acting user + a
-   served-provenance mark?** Recommendation: **(a)** for this lift. (b)
+   served-provenance mark?** **RULED 2026-08-21: (a), as recommended.**
+   Recommendation: **(a)** for this lift. (b)
    re-opens the client/durable label divergence the fix exists to close,
    costs a new gated atom family, and duplicates an audit trail the memory
    plane already records per-commit; if a product surface later needs
    value-plane served-execution audit, option C's snapshot field is the
    prepared extension point, with its own spec sentence then.
-2. **Does the derivation arm ship now?** Attaching the demanded
+2. **Does the derivation arm ship now?** **RULED 2026-08-21: ships, as
+   recommended — severable if review surfaces a consumer.** Attaching the
+   demanded
    `scopeKeyIdentity.principal` to derivation-run snapshots is
    behaviorally inert today (derivations cannot mint current-principal
    labels — 1b's structural note; concept floors are inert on serving
@@ -665,7 +681,10 @@ NAMED OUT, with its home:
    (prepare precedes seal — 1d).
 3. **Actor-less stamped runs (plain bookkeeping, wave-fallback
    derivations): keep the ambient service snapshot, or clear it to
-   undefined (fail-closed placeholder minting)?** Recommendation: **keep
+   undefined (fail-closed placeholder minting)?** **RULED 2026-08-21: keep
+   the ambient service snapshot, as recommended; the owner-gated
+   system-pattern-restage caveat stays a flagged named follow-up,
+   arbitrated by §9-6's store audit.** Recommendation: **keep
    the service snapshot** — zero behavior change for paths that today
    work (structure loads, watermark, pattern-swap setup, factory-time
    loads), aligned with protocol.md §1's "the SpaceServer's own writes".
@@ -685,7 +704,9 @@ NAMED OUT, with its home:
    gates surface a service-named mint from this path, dispose of it THEN
    — owner-resolved snapshot or a threaded carriage — as a named
    follow-up, not silently here.
-4. **Spec home.** Recommendation: one binding sentence in
+4. **Spec home.** **RULED 2026-08-21: as recommended — the serving-loop.md
+   §3c binding sentence, the SC entry, and the register re-tense, landed
+   with the build.** Recommendation: one binding sentence in
    serving-loop.md §3c (where per-run CFC is already normative), shaped
    like: *"The run's CFC trust snapshot carries the run's ACTING
    principal — the event's server-stamped actor, the demanded instance's
@@ -698,17 +719,21 @@ NAMED OUT, with its home:
    (iii) → closed-by, the OW34-family note updated). The build lands
    spec + code together per the standing rule.
 5. **The direct provider reads (sqlite, llm-dialog): re-point now or
-   leave to OW53?** Recommendation: **leave** — they are OW53's identity-
+   leave to OW53?** **RULED 2026-08-21: leave to OW53, as recommended.**
+   Recommendation: **leave** — they are OW53's identity-
    model decision (db ownership, clearance keying), not label attribution;
    this design only guarantees the tx snapshot they would re-point at is
    right. Re-pointing them here would smuggle an OW53 ruling in through a
    label fix.
-6. **`TrustSnapshot.id` shape for served runs.** Recommendation:
+6. **`TrustSnapshot.id` shape for served runs.** **RULED 2026-08-21:
+   uniform `principal:<did>`, as recommended.** Recommendation:
    `principal:<acting user>` — uniform with every client snapshot; `id`
    is presence-checked and digest-bound but nothing branches on its text,
    so uniformity beats a `served:` marker (which would be option (b)'s
    distinction smuggled into a field nothing should read).
-7. **Register row for the build.** The residual currently lives inside
+7. **Register row for the build.** **RULED 2026-08-21: the implementation
+   train mints its own register row, as recommended.** The residual
+   currently lives inside
    OW31's row (iii) with "OW34's family" as its name. Recommendation: the
    implementation train mints its own row at the then-next free OW number
    (OW56 is being taken by open #6173) titled "OW34-family: per-run CFC
