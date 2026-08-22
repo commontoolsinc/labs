@@ -749,6 +749,17 @@ action's public write. Therefore, normatively:
 - Handler runs are actions: a server-side handler run gets per-run CFC
   exactly as its client run did. D-v2-1 moves WHERE handlers run, never
   the enforcement unit.
+- **The run's CFC trust snapshot carries the run's ACTING principal** —
+  the event's server-stamped actor, the demanded instance's principal,
+  or the delegated carriage's actor — never the serving runtime's
+  ambient identity; a run with no acting principal keeps the service
+  snapshot and cannot mint current-principal claims. (OW34-family,
+  RULED 2026-08-21. The snapshot attaches at the SpaceServer's run
+  stamp, before the run's first read, so the mid-run grant writes and
+  the commit-prep label mints of one run read one value. SC-38 in
+  `docs/specs/cfc-spec-changes.md` records the current-principal
+  family's served-execution reading; verification-coverage.md OW59 is
+  the coverage row.)
 
 FORBIDDEN: wave-level label unions; deferring any CFC check to commit
 or admission time; a server bypass ("the server is trusted") — the

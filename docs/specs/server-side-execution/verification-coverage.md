@@ -2818,13 +2818,12 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   persist do not carry the carriage (no run context is reachable at
   those triggers today) — their foreign-write case stays fail-closed
   refused; if live gates surface residual refusals from them, that is
-  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS
-  (`authored-by`/`represents-principal`) on served rows still carry
-  the SERVICE signer: they come from the runtime-level CFC trust
-  snapshot (`storageManager.as`), NOT the memory-plane carriage this
-  build landed — so cfc-group-chat-demo's CI shape does NOT lift on
-  this build alone; per-run CFC attribution is a CFC-owner seam
-  (OW34's family), flagged rather than filled. (iv) the ruled
+  the named follow-up, not a re-widening. (iii) CFC AUTHORSHIP LABELS on served rows carrying the SERVICE
+  signer (the runtime-level ambient trust snapshot, not this build's
+  memory-plane carriage): CLOSED-BY **OW59** (2026-08-21, the
+  OW34-family implementation train — per-run trust snapshots attached
+  at the SpaceServer's run stamp; design RULED 2026-08-21). The
+  cfc-group-chat-demo lift rode that train, not this build. (iv) the ruled
   ACL-only-read allowance is exercised as the server-side owner
   resolution at session.open; no raw ACL-doc query surface was built
   (nothing needs one — smaller surface, permissive clause). (v) SHARED
@@ -5752,6 +5751,66 @@ supply; OW29/OW32/OW34 closed):
     deliberate pass, not a side-swipe. Trigger: next seal-machinery
     pass, or first live sighting of a stranded-unconsequenced entry
     with a guarded id and no notice.
+  - **OW59 — OW34-family: per-run CFC trust attribution for served
+    runs (the FLAG-5 seam; design RULED 2026-08-21, all seven §10
+    recommendations adopted): CLOSED (2026-08-21, the OW34-family
+    implementation train).** The defect as designed against: a served
+    run's `__ctCurrentPrincipal` mints (authored-by /
+    represents-principal) resolved against the RUNTIME-level ambient
+    trust snapshot — `storageManager.as`, the SERVICE — so every
+    durable served row carried service-DID authorship labels
+    (rootcause §2a's store shape; the first-ON-CI-gate row-2 red),
+    collapsing the authorship-verification property to a tautology
+    and blocking the `cfc-group-chat-demo` ON lift. The build, per
+    the design's §8: `Runtime.trustSnapshotForPrincipal(principal)`
+    — `{id: "principal:<did>", actingPrincipal, revision}` on the
+    runtime's ONE trust-revision composition site (the default
+    provider refactored onto it, so a trust-config change invalidates
+    per-run served digests exactly as ambient ones — INV-G); the
+    SpaceServer's `#stampRun` attaches the per-run snapshot via
+    `tx.setCfcTrustSnapshot(...)` with the ruled precedence —
+    `delegated.acting.user`, else the handler's acting
+    (LT6-inherited pairs included), else a demanded derivation's
+    `scopeKeyIdentity.principal` (the Q2 arm — ships, severable),
+    else the ambient service snapshot stays (the Q3 ruling:
+    actor-less bookkeeping and wave-fallback derivations are the
+    loop's own writes). Spec: serving-loop.md §3c's binding sentence
+    + SC-38 (cfc-spec-changes.md). Lift evidence
+    (`executor-trust-attribution.test.ts`): the FLAG-5 mint pin
+    WATCHED RED at base — the persisted subjects were the service
+    DID, the §2a query shape verbatim — and green with the fix (the
+    served docs' authored-by / represents-principal subjects equal
+    the entry's `firedAt.user`); INV-E negative arms (a
+    schema-authored literal-DID claim still refuses "must be runtime
+    resolved"; an unprivileged direct `["cfc"]` labelMap rewrite on a
+    minted envelope still fails closed with the S18
+    "unprivileged write to protected cfc path" reason, the stored
+    envelope untouched); per-wave multi-principal (two users' runs in
+    one drain mint each run's own user, both commits recheck clean —
+    no `cfc-prepared-digest-mismatch`); replay (a re-drained entry
+    mints from the DURABLE entry's actor; a second activation re-runs
+    nothing — ONE consequence commit per eventId — and the labels
+    stay byte-identical); the live stamp seam's precedence pinned on
+    the real stamper (delegated / acting / LT6-inherited / demanded /
+    actor-less-keeps-service); OFF-arm neutrality (no stamper ⇒ no
+    snapshot call — the OFF client and flag-ON client speculation
+    leave the edit()-attached ambient snapshot untouched); INV-G
+    revision-composition equality with and without a trust config.
+    The `cfc-group-chat-demo` ON gate is this row's live lift
+    condition (the skip entry is removed by this train); the
+    store-dump audit (zero authored-by / represents-principal atoms
+    naming the service DID — INV-D) arbitrates Q3's flagged caveat:
+    a serving-side system-pattern restage of an owner-gated pattern
+    (the setup/defaults mint carve-out) would mint
+    `represents-principal: <service>` under keep-service; if a live
+    gate ever surfaces that shape, the named follow-up is an
+    owner-resolved snapshot (OW31's ACL owner resolution), not a
+    silent widening. Out of scope, left where the ruling put them:
+    the sqlite/llm-dialog direct RUNTIME-provider reads (OW53's
+    identity-model decision — the per-run tx snapshot is the
+    substrate a fix would re-point them at); label option (b)'s
+    served-provenance mark (future, on product need, with its own
+    spec sentence).
 
 ## 4. Standing rule
 

@@ -235,44 +235,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "needs this list EMPTY.",
     },
     {
-      file: "integration/cfc-group-chat-demo.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): TWO write-path defects, one per failure " +
-        "point, NEITHER a demand hole (the served derivation chain was " +
-        "clean end-to-end: 33–41 derived commits, healthy demand " +
-        "counters). CI shape (Alice's authorship check): served " +
-        "events-down rows carry the SERVICE identity — authored-by/" +
-        "represents-principal name the service signer, not Alice — so CFC " +
-        "authorship verification stays 'unverified' forever; this IS the " +
-        "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
-        "build LANDED 2026-08-21, but the authorship labels come from " +
-        "the runtime-level CFC trust snapshot (storageManager.as), not " +
-        "the memory-plane carriage that build landed, so this shape does " +
-        "NOT lift on it alone (the flagged CFC-attribution residual in " +
-        "OW31's register row; OW34's family). Local " +
-        "shape (Bob's send click): Bob's messageDraft $value binding " +
-        "write into the serve-owned user-scope instance doc NEVER reaches " +
-        "the store (0/4 runs incl. a 300 s probe; his session committed " +
-        "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
-        "never flips — the client own-write durability seam, " +
-        "verification-coverage.md OW47. OW47 is CLOSED (2026-08-21, " +
-        "optimize pass): the mechanism was the speculation.md §6 export " +
-        "refusal firing on a blind write's structural parent read that " +
-        "named a standing handler-echo layer; fixed in storage/v2.ts " +
-        "buildReads (excludeSpeculativeLayers) with unit + cellset-lww " +
-        "lift evidence — see optimize/ow47-client-durability-report.md. " +
-        "Mechanism + store/log evidence: docs/history/plans/" +
-        "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). OW31's build and OW47 are both DONE " +
-        "(2026-08-21); what remains is the FLAG-5 CFC-attribution seam " +
-        "(the trust snapshot supplying the SERVICE identity to served " +
-        "authorship labels — OW34's family, flagged in OW31's register " +
-        "row). Lifts when that seam closes and the file greens ON; the " +
-        "flip PR needs this list EMPTY.",
-    },
-    {
       file: "integration/profile-embed.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
