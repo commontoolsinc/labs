@@ -93,12 +93,24 @@ describe("executor-warm-request", () => {
   let clientManager: SharedServerStorageManager;
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
+  /** One-shot activation-failure stub (the post-drain failure pin): the
+   * next runtime construction for this space THROWS — the activation
+   * dies inside `server.activate()` and lands in the host's
+   * activate-failed arm, the same landing as a lease-unavailable
+   * refusal for the state under test. Cleared when consumed. */
+  let failNextRuntimeFor: MemorySpace | undefined;
 
   const newHost = (): ExecutorHost =>
     new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
       createRuntime: (space) => {
+        if (failNextRuntimeFor === space) {
+          failNextRuntimeFor = undefined;
+          return Promise.reject(
+            new Error("stubbed one-shot activation failure (test)"),
+          );
+        }
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
           servingHomeSpace: space,
@@ -124,6 +136,7 @@ describe("executor-warm-request", () => {
   beforeEach(() => {
     server = newSharedServer();
     servingRuntime = undefined;
+    failNextRuntimeFor = undefined;
   });
 
   afterEach(async () => {
@@ -413,6 +426,100 @@ describe("executor-warm-request", () => {
       await waitUntil(
         () => terminals() >= t1 + 3,
         "BOTH warm notices' staged roots reaching the successor's demand pass",
+        30_000,
+      );
+    } finally {
+      cancel();
+    }
+  });
+
+  it("re-buffers drained warm notices when the activation they were drained into FAILS — the warm demand reaches the eventual successor (OW46-family, no crash required)", async () => {
+    host = newHost();
+
+    // A live target, activated the ordinary way (as in the park-race
+    // pin); the failure under test is downstream of ordinary activation.
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const pSigner = await Identity.fromPassphrase("warm fail space");
+    const pSpace = pSigner.did() as MemorySpace;
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      pSpace,
+      "warm-fail-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () => host!.spaceServer(pSpace)?.active === true,
+        "the fail target's initial activation",
+      );
+      const target = host!.spaceServer(pSpace)!;
+      const pEngine = await server.engineForSpace(pSpace);
+      const terminals = () => host!.stats().structureLoadTerminal;
+      const t0 = terminals();
+      await waitUntil(
+        () => terminals() >= t0 + 1,
+        "the first tenure terminalizing the client's absent watch root",
+        30_000,
+      );
+      const t1 = terminals();
+
+      // Arm the one-shot failure, then fire ONE warm notice in the park
+      // window: the host buffers it and chains the reactivation, whose
+      // activation DRAINS the buffer into the successor and then dies
+      // on the stubbed runtime construction — the post-drain failure
+      // (the lease-unavailable refusal lands in the same arm). Before
+      // the fix, the drained notice died with that server and nothing
+      // re-issued it.
+      failNextRuntimeFor = pSpace;
+      const parked = target.park("idle");
+      const seq = serverSeq(pEngine);
+      server.noteExecutorCommit({
+        space: pSpace,
+        seq,
+        class: "authored",
+        sessionId: "warm-fail-issuer",
+        writes: [{ id: "of:warm-fail-c1", scopeKey: "space" }],
+        warm: true,
+      });
+      await parked;
+      // The stubbed failure has consumed the reactivation (the stub
+      // clears itself when it fires) and the space has no server.
+      await waitUntil(
+        () =>
+          failNextRuntimeFor === undefined &&
+          host!.spaceServer(pSpace) === undefined,
+        "the stubbed activation failure consuming the reactivation",
+        30_000,
+      );
+
+      // The recovery trigger: a SECOND warm notice (a later provisioning
+      // batch) activates the space for real. The re-buffered first
+      // notice must ride along — the successor's demand pass must hold
+      // BOTH staged roots (+ the session's re-terminalizing watch root):
+      // delta +3. Before the fix this wait timed out at +2 — c1's warm
+      // demand died with the failed activation.
+      server.noteExecutorCommit({
+        space: pSpace,
+        seq: serverSeq(pEngine),
+        class: "authored",
+        sessionId: "warm-fail-issuer",
+        writes: [{ id: "of:warm-fail-c2", scopeKey: "space" }],
+        warm: true,
+      });
+      await waitUntil(
+        () => host!.spaceServer(pSpace)?.active === true,
+        "the recovery activation on the second warm notice",
+        30_000,
+      );
+      await waitUntil(
+        () => terminals() >= t1 + 3,
+        "BOTH warm roots (the re-buffered and the fresh) reaching the successor's demand pass",
         30_000,
       );
     } finally {

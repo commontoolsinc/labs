@@ -399,6 +399,11 @@ export class ExecutorHost {
       await this.#backoffSleep(delayMs);
       if (this.#closed || this.#spaces.get(space)?.active) return;
     }
+    // The warm notices this activation CONSUMES (the argument now; the
+    // drained buffer appends at drain time): re-buffered by the failure
+    // arms below — see #rebufferConsumedWarm. Collected from the start
+    // so an early throw (the engine open) loses nothing either.
+    const consumedWarm = pending.filter((notice) => notice.warm === true);
     try {
       const engine = await this.#options.server.engineForSpace(space);
       // The sink's session key IS the DR1 holder, whose process-instance
@@ -459,10 +464,14 @@ export class ExecutorHost {
       if (buffered !== undefined) {
         this.#pendingNotices.delete(space);
         for (const notice of buffered) server.enqueueCommit(notice);
+        for (const notice of buffered) {
+          if (notice.warm === true) consumedWarm.push(notice);
+        }
       }
       const activated = await server.activate();
       if (!activated) {
         this.#spaces.delete(space);
+        this.#rebufferConsumedWarm(space, consumedWarm);
         return;
       }
       if (this.#closed) {
@@ -474,8 +483,35 @@ export class ExecutorHost {
       }
     } catch (error) {
       this.#spaces.delete(space);
+      this.#rebufferConsumedWarm(space, consumedWarm);
       logger.error("activate-failed", `activation of ${space} failed`, error);
     }
+  }
+
+  /** Re-buffer the warm notices a FAILED activation consumed — its
+   * `pending` argument plus what it drained from `#pendingNotices` —
+   * so the next trigger's activation drains them into a live
+   * successor. A warm notice is a ONE-SHOT signal from a provisioning
+   * wave that has already committed: nothing re-issues it, and in the
+   * home-profile shape there is no client backstop — an activation
+   * dying AFTER the drain (`activate()` refusing on a rival process's
+   * unexpired lease, or throwing) would otherwise strand the staged
+   * setup underived with no crash anywhere (the OW46-family
+   * no-crash-required loss; pinned in executor-warm-request.test.ts).
+   * Prepended: the consumed notices are older than anything buffered
+   * while the failed activation was in flight. */
+  #rebufferConsumedWarm(
+    space: MemorySpace,
+    consumedWarm: readonly AdmittedCommitNotice[],
+  ): void {
+    if (consumedWarm.length === 0) return;
+    const standing = this.#pendingNotices.get(space);
+    this.#pendingNotices.set(
+      space,
+      standing === undefined
+        ? [...consumedWarm]
+        : [...consumedWarm, ...standing],
+    );
   }
 
   /** A cancellable backoff sleep: close() flushes the wakers so a

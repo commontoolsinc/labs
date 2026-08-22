@@ -142,7 +142,14 @@ the tenure — recompute-on-demand, §6 step 2, is the recovery posture
 for anything a dying tenure drops), and the request itself is a
 one-shot in-process signal, not a durable row — loss across a process
 crash in the staged-but-underived window is the OW46 silent-park
-observability family.
+observability family. One deliberate side effect, stated: the
+warm notice rides `noteExecutorCommit`, whose dirtiness marking means a
+foreign provisioning batch's staged writes now also PUSH to any client
+session subscribed to those docs in the target space — previously those
+engine-direct commits produced no notice at all, so a subscribed client
+saw them only on its next own sync. Beneficial (staleness removed),
+never load-bearing: no client in the ruled flows subscribes to setup
+docs before activation.
 
 Wiring, by plane. Every byte between these components travels on
 exactly ONE of two planes; the split is what keeps bookkeeping off

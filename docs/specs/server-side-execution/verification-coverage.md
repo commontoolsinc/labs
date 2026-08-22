@@ -5295,6 +5295,22 @@ supply; OW29/OW32/OW34 closed):
     stayed quiet. The counter's live purpose stands unchanged for
     genuinely dead spaces (OW45's named die-before-flush residual;
     its revisit trigger reads this counter in real ON usage).
+    **Family variant, closed same-day (the warm request's adversarial
+    review; no crash required)**: an activation FAILURE after the
+    host drained buffered warm notices into it — `activate()`
+    refusing on a rival process's unexpired lease, or throwing —
+    stranded the staged setup underived with no crash anywhere: the
+    warm one-shot died with the failed server and nothing re-issued
+    it. Fixed red-first (the host re-buffers the consumed warm
+    notices on either failure arm; `executor-warm-request.test.ts`'s
+    post-drain-failure pin, watched red at the drained root never
+    reaching the eventual successor). The remaining loss window of
+    this family is the PROCESS-crash one recorded above. Review
+    observation, recorded: a tenure's warm-demand key set grows
+    monotonically until park — bounded by the provisioning volume
+    aimed at the space per tenure, and worth a stats eye
+    (`warmRequests` per space) if a provisioning-heavy space ever
+    holds a very long tenure.
   - **OW47 — client own-write durability under ON (seats S-E/S-F/S-G;
     rootcause §2b + the cellset-lww reproducer). CLOSED 2026-08-21
     (optimize-on-main client-durability pass; report:

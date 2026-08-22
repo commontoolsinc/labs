@@ -37,6 +37,7 @@ import {
   type ScopeKeyIdentity,
   STREAM_ENTRIES_DOC_PREFIX,
 } from "@commonfabric/memory/v2";
+import { toDirtyKey } from "@commonfabric/memory/v2/server";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type {
   CommitError,
@@ -647,7 +648,7 @@ export const warmWritesOf = (
     } else {
       continue;
     }
-    const key = `${scopeKey}\0${op.id}`;
+    const key = toDirtyKey(op.id, scopeKey);
     if (!writes.has(key)) writes.set(key, { id: op.id, scopeKey });
   }
   return [...writes.values()];
