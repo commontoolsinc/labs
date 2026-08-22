@@ -5211,6 +5211,35 @@ class SpaceReplica implements ISpaceReplica {
       ) {
         continue;
       }
+      // [NDT] per-read census for tracked draft-flow docs: which reads the
+      // tx journal recorded, their marker metadata, and which drop rule (if
+      // any) takes them out of the commit set. Identifies the PRODUCER of
+      // the pending-layer-naming read.
+      if (ndtState().docs.has(read.id)) {
+        const meta = read.meta as Record<string | symbol, unknown> | undefined;
+        const markers = meta === undefined ? [] : [
+          ...Object.keys(meta),
+          ...Object.getOwnPropertySymbols(meta).map((symbol) =>
+            String(symbol.description ?? symbol.toString())
+          ),
+        ];
+        const dropped = isReadIgnoredForCommit(read.meta)
+          ? "ignoreReadForCommit"
+          : (isReadExcludedFromConflict(read.meta) &&
+              read.nonRecursive === true)
+          ? "excludeFromConflict"
+          : "KEPT";
+        ndtLog("read-census", {
+          space: this.#space.slice(-8),
+          localSeq,
+          id: read.id.slice(-12),
+          path: read.path,
+          nr: read.nonRecursive === true,
+          journalIndex: (read as { journalIndex?: number }).journalIndex,
+          markers,
+          disposition: dropped,
+        });
+      }
       // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is not
       // a value-equality concurrency precondition: a blind `set` must not lose the
       // own-write race on its own write-target read. Drop it from the conflict set.
