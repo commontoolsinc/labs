@@ -146,6 +146,7 @@ describe("unresolved-input lift semantics (RULED 2026-08-21)", () => {
     {
       const tx = readerRuntime.edit();
       readerRuntime.run(tx, compiled, argument, result);
+      readerRuntime.prepareTxForCommit(tx);
       expect((await tx.commit()).error).toBeUndefined();
     }
     return { argument, result };
