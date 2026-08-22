@@ -60,8 +60,8 @@ const declaredWrite = async (
   return { cidWrites, stored: stored?.cfc };
 };
 
-describe("CFC decomposed envelopes (version 2)", () => {
-  it("persists a version-2 envelope whose root and definition are separate documents", async () => {
+describe("CFC decomposed envelopes", () => {
+  it("persists an envelope whose root and definition are separate documents", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
@@ -69,7 +69,7 @@ describe("CFC decomposed envelopes (version 2)", () => {
         runtime,
         "decomposed-target",
       );
-      expect(stored?.version).toBe(2);
+      expect(stored?.version).toBe(1);
       expect(stored?.labelMap.entries.length).toBeGreaterThan(0);
       // The root rides the transaction, and so does the `$defs` member the
       // decomposition split out — at least two distinct documents.
@@ -89,12 +89,12 @@ describe("CFC decomposed envelopes (version 2)", () => {
     }
   });
 
-  it("re-derives the same version-2 envelope from the recomposed stored form (SC-11 skip)", async () => {
+  it("re-derives the same decomposed envelope from the recomposed stored form (SC-11 skip)", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
       const first = await declaredWrite(runtime, "decomposed-idempotent");
-      expect(first.stored?.version).toBe(2);
+      expect(first.stored?.version).toBe(1);
       await storageManager.synced();
 
       // The same declared write again: the stored envelope loads through
@@ -155,6 +155,10 @@ describe("CFC decomposed envelopes (version 2)", () => {
         getDocument(id: string): { cfc?: CfcMetadata } | undefined;
       }).getDocument(targetId);
       expect(stored?.cfc?.version).toBe(1);
+      const envDoc = (runtime.storageManager.open(space).replica as unknown as {
+        getDocument(id: string): { value?: unknown } | undefined;
+      }).getDocument(`cid:${stored!.cfc!.schemaHash}`);
+      expect(JSON.stringify(envDoc?.value)).not.toContain('"cid:');
     } finally {
       await runtime.dispose();
       await storageManager.close();

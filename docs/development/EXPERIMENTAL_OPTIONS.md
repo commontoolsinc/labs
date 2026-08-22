@@ -675,23 +675,27 @@ the per-epic implementation notes).
 - **Toggle via.** `RuntimeOptions.cfcDecomposedEnvelopes` (a plain boolean).
 - **Added by.** Robin McCollum, in the CFC envelope → cid-system convergence
   (CT-2062, 2026-08-22; rung 3 after PR #6199's rungs 1–2).
-- **Purpose.** When on, the envelope persist path writes version-2 CFC
-  metadata whose `schemaHash` names a DECOMPOSED root document: `$defs`
-  members become separate content-addressed documents, shared with the
-  link-schema document family and elided once the space's server confirms
-  them. Off writes the version-1 inline form. Reading is version-agnostic
-  in either setting, and the storage commit boundary validates the whole
-  closure either way.
-- **Current default and planned end state.** `false` by default. The target
-  is `true`, after which version 1 remains readable indefinitely.
-- **Status on 2026-08-22.** Implemented, off by default. The flip is gated
-  on deployment reach, not on code here: a runner that predates the
-  envelope version guard treats version-2 metadata as no metadata at all
-  (silent under-labeling), so every deployed reader must fail closed on
-  unknown envelope versions before any space sees a version-2 write.
-- **Path to removal.** Once the default flips and no version-1 writer
-  remains deployed, the dial retires and version 2 becomes the only
-  spelling the persist path emits.
+- **Purpose.** When on, the envelope persist path stores the DECOMPOSED
+  spelling: the metadata's `schemaHash` names a root document whose
+  `$defs` members are separate content-addressed documents, shared with
+  the link-schema document family and elided once the space's server
+  confirms them. Off stores the self-contained inline form. Reading is
+  the same either way — every `$ref: cid:` member a stored root carries
+  resolves (space-read, content-verified) or the envelope is unreadable
+  (fail closed) — and the storage commit boundary validates the whole
+  closure at write time.
+- **Current default and planned end state.** `false` by default. The
+  target is `true`; inline envelopes remain readable indefinitely.
+- **Status on 2026-08-22.** Implemented, off by default. The flip is
+  gated on deployment reach, not on code here: a runner that predates
+  reference resolution walks a decomposed root's `$ref: cid:` members as
+  inert schema content and silently under-labels, so every deployed
+  reader must resolve (or fail closed) before decomposed writes become
+  the default. Reference-form declared schemas already leave
+  reference-carrying roots behind in narrower cases, which is what bounds
+  how old a reader can be either way.
+- **Path to removal.** Once the default flips, the dial retires and the
+  decomposed spelling becomes the only one the persist path emits.
 
 ### `cfcPolicyEvaluation`
 

@@ -520,10 +520,12 @@ export interface RuntimeOptions {
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
   /**
-   * Defaults to `false`. When true, the envelope persist path writes
-   * version-2 CFC metadata whose `schemaHash` names a decomposed root
-   * document (children shared with link-schema documents); off writes the
-   * version-1 inline form. Reading is version-agnostic either way.
+   * Defaults to `false`. When true, the envelope persist path stores the
+   * decomposed spelling: the metadata's `schemaHash` names a root document
+   * whose `$defs` members are separate content-addressed documents, shared
+   * with the link-schema family. Off stores the self-contained inline
+   * form. Reading resolves references whenever the stored root carries
+   * them, in either setting.
    */
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
   /**

@@ -748,10 +748,10 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
 
 Deno.test("walks a CFC envelope's schema-document closure transitively", async () => {
   await withEngine((engine) => {
-    // A version-2 envelope stores a DECOMPOSED root: the root document
-    // references its definitions as `$ref: cid:` members. The closure
-    // walk must follow those references — a root without its definition
-    // is the same broken closure as missing the root itself.
+    // A decomposed envelope root references its definitions as
+    // `$ref: cid:` members. The closure walk must follow those
+    // references — a root without its definition is the same broken
+    // closure as missing the root itself.
     const childSchema = {
       type: "string",
       ifc: { confidentiality: ["decomposed"] },
@@ -768,7 +768,7 @@ Deno.test("walks a CFC envelope's schema-document closure transitively", async (
       value: {
         value: { secret: "v" },
         cfc: {
-          version: 2,
+          version: 1,
           schemaHash: rootHash,
           labelMap: { version: 1, entries: [] },
         },

@@ -39,7 +39,7 @@ export class UnknownCfcMetadataVersionError extends Error {
   }
 }
 
-const KNOWN_CFC_METADATA_VERSIONS: ReadonlySet<unknown> = new Set([1, 2]);
+const KNOWN_CFC_METADATA_VERSIONS: ReadonlySet<unknown> = new Set([1]);
 
 const isCfcMetadata = (value: unknown): value is CfcMetadata =>
   isObjectNotArray(value) && KNOWN_CFC_METADATA_VERSIONS.has(value.version) &&

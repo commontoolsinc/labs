@@ -28,6 +28,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
+  containsExternalSchemaRef,
   decomposeSchema,
   formatExternalSchemaRef,
   parseExternalSchemaRef,
@@ -4473,13 +4474,15 @@ const coalesceLabelEntries = (
  * Whether two envelope spellings decompose to the SAME root document —
  * equality over the content-addressed form, where authored `$defs` names
  * (which recomposition does not preserve) are matching-inert. This is the
- * equality that keeps a version-2 envelope idempotent across the
+ * equality that keeps a reference-carrying envelope idempotent across the
  * store→recompose→re-derive cycle: the recomposed stored schema and the
  * freshly declared candidate differ in definition names alone, and the
  * spelling-sensitive equality would otherwise send them into a merge that
- * respells (and therefore re-hashes) an unchanged envelope. A spelling
- * that refuses decomposition simply fails the check and the caller falls
- * through as before.
+ * respells (and therefore re-hashes) an unchanged envelope. Stored roots
+ * carry references with or without the decomposed-write flag — a
+ * reference-form declared schema leaves one behind — so this arm is
+ * unconditional. A spelling that refuses decomposition simply fails the
+ * check and the caller falls through as before.
  */
 const decomposeToSameRoot = (
   left: JSONSchema,
@@ -4598,14 +4601,16 @@ export const loadSchemaDocument = (
 };
 
 /**
- * The envelope schema in the INLINE form every consumer walks. A version-1
- * envelope stores that form directly; a version-2 envelope stores a
- * decomposed root whose `$ref: cid:` closure completes it, so the closure
- * is recomposed here — every member read from the SPACE and
- * content-verified through `loadSchemaDocument`, never taken from the
- * registry alone, so a registry hit cannot mask a document the space does
- * not hold. A missing or unverifiable member throws, and the caller's
- * taxonomy turns that into an unreadable envelope (fail closed).
+ * The envelope schema in the INLINE form every consumer walks. A
+ * self-contained root is returned as stored, spelling untouched. A root
+ * carrying `$ref: cid:` members — a decomposed write, or the root a
+ * reference-form declared schema left behind — is recomposed: one read
+ * policy, every member resolved or the envelope is unreadable (fail
+ * closed). Members are read from the SPACE and content-verified through
+ * `loadSchemaDocument`, never taken from the registry alone, so a
+ * registry hit cannot mask a document the space does not hold; each
+ * verified member is then registered, so in-session resolvers (the
+ * decompose-root equality below among them) can supply the closure.
  */
 const loadEnvelopeSchema = (
   tx: IExtendedStorageTransaction,
@@ -4613,11 +4618,16 @@ const loadEnvelopeSchema = (
   metadata: CfcMetadata,
 ): JSONSchema => {
   const root = loadSchemaDocument(tx, space, metadata.schemaHash);
-  if (metadata.version === 1) return root;
+  if (!containsExternalSchemaRef(root)) return root;
   return internSchema(recomposeSchema(
     formatExternalSchemaRef(metadata.schemaHash),
-    (hash) =>
-      hash === metadata.schemaHash ? root : loadSchemaDocument(tx, space, hash),
+    (hash) => {
+      const document = hash === metadata.schemaHash
+        ? root
+        : loadSchemaDocument(tx, space, hash);
+      registerSchemaDocument(hash, document);
+      return document;
+    },
   ));
 };
 
@@ -5529,8 +5539,7 @@ export const prepareBoundaryCommit = (
       storedSchema = stored.schema;
       try {
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
-            (state.decomposedEnvelopes &&
-              decomposeToSameRoot(storedSchema, schema)) ||
+            decomposeToSameRoot(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
           : mergeCfcSchemaEnvelopes(storedSchema, schema, {
@@ -6683,15 +6692,15 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
-    // Version 2 (decomposed) when the flag asks for it and the schema
-    // decomposes to a bare root; the version-1 inline form otherwise.
-    // Reading is version-agnostic — `loadEnvelopeSchema` recomposes — so
-    // the flag only ever decides what the NEXT envelope write spells.
+    // The flag decides only the stored SPELLING: decomposed root when it
+    // asks for it and the schema decomposes to a bare root, the inline
+    // form otherwise. Reading resolves references whenever the stored
+    // root carries them, so both spellings are the same envelope.
     const envelopeRoot = state.decomposedEnvelopes
       ? decomposeEnvelopeRoot(schemaAndHash.schema)
       : undefined;
     const metadata: CfcMetadata = {
-      version: envelopeRoot === undefined ? 1 : 2,
+      version: 1,
       schemaHash: envelopeRoot?.rootHash ?? schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,

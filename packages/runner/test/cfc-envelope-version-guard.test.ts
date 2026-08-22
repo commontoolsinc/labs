@@ -1,8 +1,9 @@
 import {
-  SEED_ENVELOPE_SCHEMA,
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -122,7 +123,7 @@ describe("CFC envelope version guard", () => {
     }
   });
 
-  it("loads a version-2 envelope whose root document carries no references", async () => {
+  it("loads an envelope whose stored root references its definition", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -130,14 +131,58 @@ describe("CFC envelope version guard", () => {
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
-      // Version 2 over a self-contained root: recomposition is the
-      // identity, so the envelope loads without any flag being set.
-      const id = await seedWithVersion(runtime, "version-guard-v2", 2);
+      // One read policy, no version distinction: a version-1 root carrying
+      // `$ref: cid:` members (the trail a reference-form declared schema
+      // leaves) resolves through the space, or the envelope is unreadable.
+      const child = internSchema(
+        {
+          type: "string",
+          ifc: { confidentiality: ["guarded"] },
+        } as JSONSchema,
+        true,
+      );
+      const root = internSchema(
+        {
+          type: "object",
+          properties: { secret: { $ref: `cid:${child.taggedHashString}` } },
+        } as JSONSchema,
+        true,
+      );
+      const id = parseLink(
+        runtime.getCell(space, "version-guard-refs").getAsLink(),
+      ).id!;
+      const seed = runtime.edit();
+      for (const sah of [child, root]) {
+        seed.writeOrThrow({
+          space,
+          scope: "space",
+          id: `cid:${sah.taggedHashString}` as `${string}:${string}`,
+          path: [],
+        }, { value: sah.schema });
+      }
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { secret: "sealed" },
+        cfc: {
+          version: 1,
+          schemaHash: root.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["guarded"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
       const tx = runtime.edit();
       const envelope = loadStoredCfcEnvelope(tx, { space, id });
       expect(envelope.status).toBe("loaded");
       if (envelope.status !== "loaded") throw new Error("unreachable");
-      expect(envelope.schema).toEqual(SEED_ENVELOPE_SCHEMA);
+      const spelled = JSON.stringify(envelope.schema);
+      expect(spelled).not.toContain("cid:");
+      expect(spelled).toContain('"guarded"');
       tx.abort();
     } finally {
       await runtime.dispose();

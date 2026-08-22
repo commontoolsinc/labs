@@ -264,19 +264,19 @@ export type LabelMapEntry = {
 };
 
 /**
- * How a {@link CfcMetadata}'s `schemaHash` names its schema: version 1
- * hashes a self-contained inline schema document; version 2 hashes a
- * DECOMPOSED root document whose `$ref: cid:` closure completes the
- * schema — readers recompose it, and the storage commit boundary
- * validates the whole closure. The `labelMap` format is identical in
- * both. A version outside this union is an envelope the build cannot
+ * `schemaHash` names the envelope's ROOT schema document. The root may be
+ * self-contained (the inline form) or reference further documents through
+ * `$ref: cid:` members (the decomposed form) — one read policy covers
+ * both: every external reference must resolve, verified against its own
+ * address, and a member that cannot is an unreadable envelope (fail
+ * closed). The storage commit boundary validates the whole closure at
+ * write time, so a committed envelope's references are always backed. A
+ * `version` outside this union is an envelope the build cannot
  * interpret, and every reader fails closed on it rather than treating
  * the document as unlabeled.
  */
-export type CfcMetadataVersion = 1 | 2;
-
 export type CfcMetadata = {
-  version: CfcMetadataVersion;
+  version: 1;
   schemaHash: string;
   labelMap: {
     version: 1;
@@ -584,12 +584,15 @@ export type CfcTriggerReadGating = boolean;
 export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
 
 /**
- * Whether the envelope persist path writes version-2 metadata whose
- * `schemaHash` names a DECOMPOSED root document (see {@link CfcMetadata}).
- * Off writes the version-1 inline form; either build reads both. Ships
- * behind a flag because a version-2 envelope is unreadable to runners
- * that predate the version guard: they must all fail closed on an
- * unknown version before any space sees a version-2 write.
+ * Whether the envelope persist path stores the DECOMPOSED spelling: the
+ * metadata's `schemaHash` names a root document whose `$defs` members are
+ * separate content-addressed documents (see {@link CfcMetadata}). Off
+ * stores the self-contained inline form. Reading resolves references
+ * whenever the stored root carries them, in either setting. Ships behind
+ * a flag because a runner that predates reference resolution walks a
+ * decomposed root's `$ref: cid:` members as inert schema content and
+ * silently under-labels: every deployed reader must resolve (or fail
+ * closed) before any space sees a decomposed write.
  */
 export type CfcDecomposedEnvelopes = boolean;
 

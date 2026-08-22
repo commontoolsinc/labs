@@ -138,8 +138,9 @@ describe("stored CFC envelope gathering", () => {
     }
   });
 
-  // Version-2 metadata names a DECOMPOSED root; the gatherer recomposes
-  // the closure, verifying every member against its own address.
+  // A root carrying `$ref: cid:` members — a decomposed write, or the
+  // trail a reference-form declared schema leaves — recomposes at load,
+  // every member verified against its own address.
   const decomposedFixture = () => {
     const child = internSchema(
       { type: "string", ifc: { confidentiality: ["sealed"] } } as JSONSchema,
@@ -155,15 +156,11 @@ describe("stored CFC envelope gathering", () => {
     return { child, root };
   };
 
-  const metadataV2 = (schemaHash: string) => ({
-    cfc: { version: 2, schemaHash, labelMap: { version: 1, entries: [] } },
-  });
-
-  it("recomposes a version-2 envelope's closure into one inline schema", () => {
+  it("recomposes a reference-carrying root's closure into one inline schema", () => {
     const { child, root } = decomposedFixture();
     const result = loadStoredCfcEnvelope(
       fakeTxOverDocuments({
-        "of:doc": metadataV2(root.taggedHashString),
+        "of:doc": metadataNaming(root.taggedHashString),
         [`cid:${root.taggedHashString}`]: { value: root.schema },
         [`cid:${child.taggedHashString}`]: { value: child.schema },
       }),
@@ -179,11 +176,11 @@ describe("stored CFC envelope gathering", () => {
     }
   });
 
-  it("reports a version-2 envelope whose definition document is missing as unreadable", () => {
+  it("reports an envelope whose definition document is missing as unreadable", () => {
     const { root } = decomposedFixture();
     const result = loadStoredCfcEnvelope(
       fakeTxOverDocuments({
-        "of:doc": metadataV2(root.taggedHashString),
+        "of:doc": metadataNaming(root.taggedHashString),
         [`cid:${root.taggedHashString}`]: { value: root.schema },
       }),
       envelopeTarget,
@@ -195,7 +192,7 @@ describe("stored CFC envelope gathering", () => {
     }
   });
 
-  it("reports a version-2 envelope whose definition document is poisoned as unreadable", () => {
+  it("reports an envelope whose definition document is poisoned as unreadable", () => {
     const { child, root } = decomposedFixture();
     const poisoned = internSchema(
       { type: "number" } as JSONSchema,
@@ -203,7 +200,7 @@ describe("stored CFC envelope gathering", () => {
     ).schema;
     const result = loadStoredCfcEnvelope(
       fakeTxOverDocuments({
-        "of:doc": metadataV2(root.taggedHashString),
+        "of:doc": metadataNaming(root.taggedHashString),
         [`cid:${root.taggedHashString}`]: { value: root.schema },
         [`cid:${child.taggedHashString}`]: { value: poisoned },
       }),
