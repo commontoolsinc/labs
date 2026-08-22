@@ -1,3 +1,10 @@
+export {
+  decomposeSchema,
+  parseExternalSchemaRef,
+  recomposeSchema,
+} from "./schema-decompose.ts";
+export { lookupSchemaDocument } from "./schema-registry.ts";
+export { mapSubschemas } from "./schema-walk.ts";
 export { Runtime } from "./runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
@@ -116,7 +123,10 @@ export {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "./storage/reactivity-log.ts";
-export { resolveLink } from "./link-resolution.ts";
+export {
+  resolveLink,
+  resolveLinkTracingDereferences,
+} from "./link-resolution.ts";
 export {
   areLinksSame,
   getMetaLink,

@@ -20,7 +20,10 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../src/schema-registry.ts";
-import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { LINK_V1_TAG, type URI } from "../src/sigil-types.ts";
 import { defer } from "@commonfabric/utils/defer";
@@ -681,7 +684,7 @@ describe("schema-doc-sync", () => {
         selectorField: { selectorLeafField: "resident" },
       });
     } finally {
-      setContentAddressedSchemasConfig(false);
+      resetContentAddressedSchemasConfig();
     }
   });
 });

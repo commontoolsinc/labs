@@ -161,9 +161,19 @@ export abstract class BaseCodecEngine<
    * `NULL_LIVE_ENVIRONMENT`, so a codec asking such an environment for a
    * cell fails by name rather than on `undefined`.
    *
+   * **The input contract.** `value` must be a valid `FabricValue`, which is
+   * the question `isValidFabricValue()` answers. Given one, this works.
+   * Given anything else, what checking happens is best-effort: nothing on
+   * this path spends time on correct input in order to catch incorrect
+   * input, so a non-member may encode, may encode to something wrong, or may
+   * throw, and which of those it does is not promised. The same licence
+   * reaches a codec's `canEncode()` and `encode()`, both of which may take a
+   * valid `FabricValue` as given.
+   *
    * @throws If `value` holds something the format cannot carry: a
-   *   `FabricSpecialObject` whose class no codec in the registry claims, a
-   *   cycle, or an object that is no kind of `FabricValue` at all.
+   *   `FabricSpecialObject` whose class no codec in the registry claims, or a
+   *   cycle. A value that is no `FabricValue` at all falls under the input
+   *   contract above rather than here.
    */
   encode(
     value: FabricValue,

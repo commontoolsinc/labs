@@ -1,12 +1,17 @@
 // Example-based schema tests: field mapping via interim cells, nested sinks
 // via asCell, and nested sinks with aliases.
 
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { SigilLink } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -20,6 +25,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("Schema - Examples", () => {
+  // These pins were written against the flag-on writer (reference-form
+  // link schemas); the flag's build default is off, so they opt in.
+  beforeEach(() => {
+    setContentAddressedSchemasConfig(true);
+  });
+  afterEach(() => {
+    resetContentAddressedSchemasConfig();
+  });
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -344,13 +358,13 @@ describe("Schema - Examples", () => {
       });
 
       // Make sure the schema is correct and it is still anchored at the root
-      expect(current.schema).toEqual({ type: "string" });
+      expect(resolvedSchema(current.schema)).toEqual({ type: "string" });
       expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
         id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
         scope: "space",
-        schema: current.schema,
+        schema: externalRefTo({ type: "string" }),
       });
 
       // .get() the currently selected cell. This should not change when
@@ -379,7 +393,7 @@ describe("Schema - Examples", () => {
         path: ["foo"],
         space,
         scope: "space",
-        schema: omitSchema,
+        schema: externalRefTo(omitSchema),
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);

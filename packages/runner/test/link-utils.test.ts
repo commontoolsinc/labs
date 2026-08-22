@@ -15,6 +15,7 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  inlineExternalSchemaRefsInValue,
   isAliasBinding,
   isCellLink,
   isSigilLink,
@@ -27,7 +28,14 @@ import {
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
+import {
+  resetContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "../src/schema-doc-config.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -539,27 +547,34 @@ describe("link-utils", () => {
 
   describe("createSigilLinkFromParsedLink", () => {
     it("should create sigil link from normalized link", () => {
-      const normalizedLink: NormalizedLink = {
-        id: "of:test",
-        path: ["nested", "value"],
-        space: space,
-        schema: { type: "number" },
-      };
+      // Reference emission is flag-gated; this pin opts in explicitly so
+      // it holds whatever the build's default is.
+      setContentAddressedSchemasConfig(true);
+      try {
+        const normalizedLink: NormalizedLink = {
+          id: "of:test",
+          path: ["nested", "value"],
+          space: space,
+          schema: { type: "number" },
+        };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink, {
-        includeSchema: true,
-      });
+        const result = createSigilLinkFromParsedLink(normalizedLink, {
+          includeSchema: true,
+        });
 
-      expect(result).toEqual({
-        "/": {
-          [LINK_V1_TAG]: {
-            id: "of:test",
-            path: ["nested", "value"],
-            space: space,
-            schema: { type: "number" },
+        expect(result).toEqual({
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:test",
+              path: ["nested", "value"],
+              space: space,
+              schema: externalRefTo({ type: "number" }),
+            },
           },
-        },
-      });
+        });
+      } finally {
+        resetContentAddressedSchemasConfig();
+      }
     });
 
     it("serializes scoped links and parses inherited link scope from the base", () => {
@@ -689,7 +704,9 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true });
 
-      expect(linkRefPayload(result).schema).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual(
+        schema,
+      );
     });
 
     it("should strip stream cell schemas from links when requested", () => {
@@ -716,7 +733,7 @@ describe("link-utils", () => {
         schema,
       }, { includeSchema: true, keepAsCell: KeepAsCell.None });
 
-      expect(linkRefPayload(result).schema).toEqual({
+      expect(resolvedSchema(linkRefPayload(result).schema)).toEqual({
         type: "object",
         properties: {
           title: { type: "string" },
@@ -730,6 +747,85 @@ describe("link-utils", () => {
         },
         required: ["title"],
       });
+    });
+  });
+
+  describe("inlineExternalSchemaRefsInValue", () => {
+    it("carries a link whose schema is boolean through unchanged", () => {
+      // The inliner touches only object schemas carrying an external
+      // reference. A boolean schema is a valid carried schema and not a
+      // reference, so the value rides through as it is.
+      const sigil = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:boolean-schema-target",
+            path: [],
+            schema: true,
+          },
+        },
+      };
+      const value = { entry: sigil };
+      expect(inlineExternalSchemaRefsInValue(value)).toEqual(value);
+    });
+  });
+
+  describe("sanitizeSchemaForLinks through references", () => {
+    it("re-externalizes a nested document the strip changed", () => {
+      // Document B carries the marker; document A reaches it only by
+      // reference. A sanitize that stops at the reference looks clean and
+      // is not: the first reader to resolve B rediscovers the marker and
+      // mints a handle where a plain value is expected. The node must stay
+      // a reference, so the strip moves its target instead of inlining.
+      const documentB = {
+        type: "string",
+        asCell: ["cell"],
+      } as unknown as JSONSchema;
+      const hashB = internSchemaAsTaggedHashString(documentB);
+      registerSchemaDocument(hashB, documentB);
+      const documentA = {
+        type: "object",
+        properties: { name: { $ref: `cid:${hashB}` } },
+      } as unknown as JSONSchema;
+      const hashA = internSchemaAsTaggedHashString(documentA);
+      registerSchemaDocument(hashA, documentA);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashA}` } as unknown as JSONSchema,
+      ) as { properties: { name: { $ref?: string } } };
+
+      // The root resolves inline (re-externalized at the emission site);
+      // the nested position stays a REFERENCE — callers pin the served
+      // shape — moved off the tainted document.
+      const movedRef = sanitized.properties.name.$ref;
+      expect(typeof movedRef).toBe("string");
+      expect(movedRef).not.toBe(`cid:${hashB}`);
+      // The whole reachable closure is now marker-free.
+      const resolvedTarget = resolvedSchema(
+        sanitized.properties.name as JSONSchema,
+      );
+      expect(JSON.stringify(resolvedTarget)).not.toContain("asCell");
+      expect((resolvedTarget as { type?: string }).type).toBe("string");
+    });
+
+    it("keeps a reference to a clean document verbatim", () => {
+      const cleanDoc = {
+        type: "string",
+        title: "already-clean",
+      } as unknown as JSONSchema;
+      const hashClean = internSchemaAsTaggedHashString(cleanDoc);
+      registerSchemaDocument(hashClean, cleanDoc);
+      const container = {
+        type: "object",
+        properties: { note: { $ref: `cid:${hashClean}` } },
+      } as unknown as JSONSchema;
+      const hashContainer = internSchemaAsTaggedHashString(container);
+      registerSchemaDocument(hashContainer, container);
+
+      const sanitized = sanitizeSchemaForLinks(
+        { $ref: `cid:${hashContainer}` } as unknown as JSONSchema,
+      ) as { properties: { note: { $ref?: string } } };
+
+      expect(sanitized.properties.note.$ref).toBe(`cid:${hashClean}`);
     });
   });
 

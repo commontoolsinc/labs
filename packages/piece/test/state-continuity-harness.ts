@@ -34,6 +34,7 @@ import { fromFileUrl } from "@std/path/from-file-url";
 // `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
 // a `FabricSpecialObject` (bytes, an epoch). Neither survives a structural
 // comparison unaided — see `comparableState`.
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
@@ -49,10 +50,12 @@ import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
 import {
   type Cell,
   CHIP_UI,
+  decomposeSchema,
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
   isCell,
   isStream,
+  parseExternalSchemaRef,
   Runtime,
   TILE_UI,
   UI,
@@ -939,8 +942,58 @@ export function isReduction(value: unknown): boolean {
  *   nothing. Whatever else changes, the two must not be allowed to collapse
  *   again.
  */
+/**
+ * Whether one side is a schema written as a content-addressed reference and
+ * the other the same schema written out. Representation is not state: a
+ * vintage that held a schema inline is preserved by an update that wrote
+ * `{"$ref": "cid:…"}` naming the same content. Recomposing the reference and
+ * comparing structurally does not settle this — recomposition derives `$defs`
+ * names from content hashes where the inline side carries the author's — so
+ * the INLINE side is decomposed instead, and the two canonical root
+ * references either match or they do not. `undefined` means neither side is
+ * a bare reference and the ordinary walk decides; a bare reference paired
+ * with anything that does not decompose to it is a change.
+ */
+function externalSchemaRefEquivalent(
+  before: unknown,
+  after: unknown,
+): boolean | undefined {
+  const bareRefOf = (value: unknown): string | undefined => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return undefined;
+    }
+    const keys = Object.keys(value);
+    if (keys.length !== 1 || keys[0] !== "$ref") return undefined;
+    const ref = (value as { $ref?: unknown }).$ref;
+    return typeof ref === "string" && parseExternalSchemaRef(ref) !== undefined
+      ? ref
+      : undefined;
+  };
+  const canonicalRefOf = (value: unknown): string | undefined => {
+    const own = bareRefOf(value);
+    if (own !== undefined) return own;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return undefined;
+    }
+    try {
+      return decomposeSchema(value as JSONSchemaObj).rootRef;
+    } catch {
+      return undefined;
+    }
+  };
+  if (bareRefOf(before) === undefined && bareRefOf(after) === undefined) {
+    return undefined;
+  }
+  const beforeRef = canonicalRefOf(before);
+  const afterRef = canonicalRefOf(after);
+  if (beforeRef === undefined || afterRef === undefined) return false;
+  return beforeRef === afterRef;
+}
+
 function isPreserved(before: unknown, after: unknown): boolean {
   if (before === undefined) return true;
+  const schemaEquivalent = externalSchemaRefEquivalent(before, after);
+  if (schemaEquivalent !== undefined) return schemaEquivalent;
   if (isReduction(before) || isReduction(after)) {
     return deepEqual(before, after);
   }
@@ -1114,6 +1167,8 @@ function lostAnything(before: unknown, after: unknown): boolean {
   if (isEmptyValue(before)) return false;
   // Held something, holds nothing now.
   if (isEmptyValue(after)) return true;
+  // A schema whose representation changed still carries everything it did.
+  if (externalSchemaRefEquivalent(before, after) === true) return false;
   if (isReduction(before) || isReduction(after)) return false;
   // A CONTAINER that stopped being one took everything under it with it,
   // whichever direction the flip went. Guarding only the array side let

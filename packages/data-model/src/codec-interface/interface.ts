@@ -107,7 +107,12 @@ export interface FabricCodec<Encoded> {
    */
   get recognizedTypeTag(): string | undefined;
 
-  /** Returns `true` if this handler can encode the state of the given value. */
+  /**
+   * Returns `true` if this handler can encode the state of the given value.
+   *
+   * May take `value` as a valid `FabricValue`; see `BaseCodecEngine.encode()`
+   * for the input contract that makes that safe to assume.
+   */
   canEncode(value: FabricValue): boolean;
 
   /**
@@ -172,6 +177,11 @@ export interface FabricCodec<Encoded> {
    * called after {@link #canEncode} has confirmed that `value` is encodable by
    * this instance. The result is expected to be a _shallow_ encoding; the
    * codec system handles recursion as necessary.
+   *
+   * Two things an implementation may take as given: that `value` is a valid
+   * `FabricValue`, and that this instance's own {@link #canEncode} has
+   * returned `true` for it. Re-checking either is work spent on input that is
+   * correct by contract; see `BaseCodecEngine.encode()`.
    *
    * `env` is what a codec reaches the running system through, the same one
    * {@link #decode} is handed.

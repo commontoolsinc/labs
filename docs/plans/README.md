@@ -65,6 +65,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
+  repairing, and rolling back many pieces as one reviewable, resumable
+  operation over a shared plan — with batching as an execution strategy
+  underneath rather than the subject.
 - [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
   unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
   and then live.

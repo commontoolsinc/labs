@@ -61,8 +61,9 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * test). `settleGateWhen` scopes the hold: the serving loop runs a
  * settle in EVERY cycle (empty ones included), so an unconditional gate
  * would catch some idle cycle already in flight and starve the drain
- * the test needs — the predicate lets exactly the cycle that SEALED the
- * watched state hang. Undefined everywhere else.
+ * the test needs. The predicate must become true before the intended
+ * cycle reaches the barrier; a flag set by the handler gives that cycle
+ * a causal name. Undefined everywhere else.
  *
  * The second seam, the drain's SYNC gate (`syncGate` / `syncGateWhen`,
  * the seal→outcome-window pin): the serving drain awaits the sidecar
@@ -2404,11 +2405,18 @@ describe("Phase 3 events-down (serving side)", () => {
     try {
       const servingSeen = w.servingC;
       // The s2 handler records every tag; for the derivation's "ping" it
-      // ALSO commits the sibling tx inline (the intent half).
+      // ALSO commits the sibling tx inline (the intent half) — and ARMS
+      // the settle gate as its first act, so the arming is sequenced
+      // before this cycle's settle reaches its barrier (see the gate
+      // installation below).
+      let holdArmed = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
-          if (tag === "ping") stampSibling(w.serving, tx, sideServing);
+          if (tag === "ping") {
+            holdArmed = true;
+            stampSibling(w.serving, tx, sideServing);
+          }
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2435,15 +2443,13 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open once EITHER of the copy's two seals is visible
-      // through the sealed overlay. The seal chain runs emitter → sibling
-      // (committed inline by the handler) → the handler's own tx, so the
-      // sibling's write is the earliest event-handler seal the settle's
-      // barrier can observe — the same chain position the (α3) pin's
-      // handler seal holds; the handler's seal then joins the held wave.
+      // Hold the wave open for the cycle that RUNS the copy: the handler
+      // arms the gate as its first act, and that assignment is sequenced
+      // before the cycle's settle reaches its barrier, so the hold catches
+      // the sealing cycle structurally. An idle settle already in flight
+      // still passes: nothing arms until the copy actually runs.
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () =>
-        sideView() === 1 || seenView().includes("ping");
+      servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);

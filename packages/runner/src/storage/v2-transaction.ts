@@ -1040,6 +1040,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     return new this(manager);
   }
 
+  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+    return this.storage.isSchemaDocPersisted?.(space, hash) ?? false;
+  }
+
   status(): StorageTransactionStatus {
     if (this.#state.status === "done") {
       if (this.#state.result.error) {
