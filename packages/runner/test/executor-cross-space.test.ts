@@ -43,9 +43,14 @@ import {
 } from "@commonfabric/memory/v2/scheduler-basis";
 import {
   applyCommit,
+  read as readDoc,
   selectDocHead,
   serverSeq,
 } from "@commonfabric/memory/v2/engine";
+import {
+  streamEntriesDocId,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { UI } from "../src/builder/types.ts";
 import {
   getPatternEnvironment,
@@ -775,6 +780,152 @@ describe("Phase 5 cross-space serving", () => {
       expect(meta.class).toBe("authored");
       expect(meta.acting_principal).toBe(aliceSigner.did());
       expect(meta.capability_ref).toBe("event-consequence:e-sa");
+    } finally {
+      cancel();
+    }
+  });
+
+  it("a served run's send to a FOREIGN stream cell crosses via the outbox: LT1's same-space axis is the WAVE's home space, never the sending cell's space (LT1/LT5; events.md §2; protocol.md §2b)", async () => {
+    host = newHost();
+
+    // Alice's client demands a home doc so the HOME space activates.
+    // The client never touches the FOREIGN space: the foreign stream
+    // doc is created ENGINE-DIRECT below, so no session and no
+    // admission notice ever reaches the host for that space — it is
+    // genuinely INACTIVE until the delivered append, and the
+    // activation assertion at the end binds the carries-events
+    // admission arm (host.ts #onCommitAdmitted), not a leftover
+    // session-open activation. (Probe-verified: with a client session
+    // creating the stream doc instead, the pre-send inactive probe
+    // below fails — the space is already active before the send.)
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const streamDocId = clientRuntime.getCell<unknown>(
+      foreignSpace,
+      "xspace-send-stream",
+      undefined,
+    ).getAsNormalizedFullLink().id;
+    {
+      const fEngine = await server.engineForSpace(foreignSpace);
+      applyCommit(fEngine, {
+        sessionId: "xspace-setup",
+        space: foreignSpace,
+        principal: aliceSigner.did(),
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: streamDocId,
+            value: { value: { $stream: true } } as never,
+          }],
+        },
+      });
+    }
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      homeSpace,
+      "xspace-send-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () =>
+          servingRuntime !== undefined &&
+          host!.spaceServer(homeSpace)?.active === true,
+        "home space activation",
+      );
+      const serving = servingRuntime!;
+
+      // The DIRECT FOREIGN HANDLE shape (a wish-result export's
+      // `setName` stream): the sending cell's OWN space IS the foreign
+      // target space, so cell.space === resolved.space === FOREIGN.
+      // The serving runtime's own foreign read session is
+      // service-principal and never activates the space.
+      const servingStream = serving.getCell<unknown>(
+        foreignSpace,
+        "xspace-send-stream",
+        undefined,
+      );
+      await servingStream.sync();
+      const homeAnchor = serving.getCell<{ n: number }>(
+        homeSpace,
+        "xspace-send-anchor",
+        undefined,
+      );
+
+      // The pre-send inactive probe: the foreign space has no
+      // SpaceServer yet — what activates it below must therefore be
+      // the DELIVERED APPEND, nothing earlier.
+      expect(host!.spaceServer(foreignSpace)?.active ?? false).toBe(false);
+
+      // A served event-handler run, HOME-anchored: the run's tx holds
+      // the home writer before the handler body sends (the consequenced
+      // mark's shape on a real dispatch).
+      const tx = serving.edit();
+      stampWaveRunContext(tx, {
+        actionId: "xspace-send-handler",
+        kind: "event-handler",
+        eventId: "e-xspace-send",
+        acting: { user: aliceSigner.did(), session: "sess-xspace" },
+        capabilityRef: "event-consequence:e-xspace-send",
+      });
+      homeAnchor.withTx(tx).set({ n: 1 });
+      // The routing axis under test: the emission's target space is
+      // judged against the WAVE's home space, so this foreign-handle
+      // send stages the outbox's cross-space append (events.md §2) —
+      // never a raw entries write into a second space's writer, which
+      // the one-tx-one-space rule refuses (protocol.md §2b).
+      servingStream.withTx(tx).send({ hello: "across" });
+      expect((await tx.commit()).error).toBeUndefined();
+
+      // The outbox delivers the append into the FOREIGN stream's
+      // sidecar, firedAt stamped from the CARRIED actor (LT5: the
+      // envelope is the producing server's service identity;
+      // admissibility and attribution from the validated carriage).
+      const fEngine = await server.engineForSpace(foreignSpace);
+      const sidecarId = streamEntriesDocId({
+        id: servingStream.getAsNormalizedFullLink().id,
+        path: [],
+      });
+      const deliveredEntries = () => {
+        const value = readDoc(fEngine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return (value?.entries ?? []).filter((entry) =>
+          entry.firedAt?.user === aliceSigner.did()
+        );
+      };
+      await waitUntil(
+        () => deliveredEntries().length > 0,
+        "the outbox-delivered entry with the carried actor",
+        30_000,
+      );
+      // EXACTLY ONE delivery (the eventId dedupe holds), carrying the
+      // full LT5/LT6 identity: the acting session travels with the
+      // acting user.
+      expect(deliveredEntries().length).toBe(1);
+      expect(deliveredEntries()[0].firedAt?.session).toBe("sess-xspace");
+      // The delivered append is an AUTHORED admission carrying an
+      // event: the arrival activates the target space's own serving
+      // loop (serving-loop.md §1's event-append criterion; the
+      // carries-events arm activates even with no client session) —
+      // the single deriver that consequences it (protocol.md §2b's
+      // derived-into-foreign FORBIDDEN row stays intact).
+      await waitUntil(
+        () => host!.spaceServer(foreignSpace)?.active === true,
+        "the target space's activation on the delivered append",
+        30_000,
+      );
+      // A later observation point (post-activation): the delivery is
+      // STILL exactly one entry — no duplicate landed behind the first
+      // probe.
+      expect(deliveredEntries().length).toBe(1);
     } finally {
       cancel();
     }
