@@ -56,8 +56,7 @@ clearance-forced `user` floor — joins the run's SESSION to the
 request identity alongside the user, one cleared cell per
 query-and-reader-at-matching-granularity, so two sessions of one
 user share neither hash nor effect key; at `user` scope the
-request identity stays session-blind, byte-identical to the
-2026-08-02 reader keying. Row admission is a user-principal
+request identity stays session-blind. Row admission is a user-principal
 question at every granularity — the session splits the cell and
 the keys, never which rows the user may read.
 

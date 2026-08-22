@@ -5917,7 +5917,9 @@ supply; OW29/OW32/OW34 closed):
     serving-loop waves/derivedCommits live, `serverExecution=true` in
     every worker — loads 5.9–9.0 recorded per round):
     `sqlite-db-owner-multi-runtime` 5/5 and
-    `sqlite-read-clearance-multi-runtime` 5/5 (all 3 steps); BOTH ON
+    `sqlite-read-clearance-multi-runtime` 5/5 (all 3 steps as then
+    present; PR #6196 adds a fourth two-tabs step — the session-fork
+    close below — run 4/4 under the same gate topology); BOTH ON
     skips LIFTED (this row's minted trigger). Residuals, recorded
     not closed: llm-dialog's direct provider read
     (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
@@ -5925,10 +5927,10 @@ supply; OW29/OW32/OW34 closed):
     (delegated read sessions' demand under the process DID —
     label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
     writebacks — every non-sqlite effect kind: the
-    `fetch*`/`generate*` families and llm-dialog (which additionally
-    marks completions at 4 sites with bare `llmDialog:`-prefixed
-    keys never widened by `effectTargetKey` — a separate
-    pre-existing quirk) — whose hash-guard reads still
+    `fetch*`/`generate*` families, `llm`, and llm-dialog (which
+    additionally marks completions at 4 sites with bare
+    `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
+    a separate pre-existing quirk) — whose hash-guard reads still
     resolve the service's instances (the OW17 stage-A flag's
     remaining scope after this row's sqlite carve-out; the
     space-server.ts `#commitEffectCompletion` comment names the
