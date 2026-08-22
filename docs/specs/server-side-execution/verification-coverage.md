@@ -5150,7 +5150,8 @@ supply; OW29/OW32/OW34 closed):
   `tasks/server-execution-on-skips.ts` (at the gate: SIX file entries
   + TWO step-level entries; the skip-list test pins the CURRENT set —
   both step entries were lifted the same day, cellset-lww with OW47's
-  close and convergence-storm with OW52's, leaving the six file
+  close and convergence-storm with OW52's, and profile-embed's file
+  entry fell with OW47's re-close, leaving five file
   entries); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
@@ -5302,7 +5303,95 @@ supply; OW29/OW32/OW34 closed):
     REMOVED. The `integration/cfc-group-chat-demo.test.ts` file skip
     REMAINS: its CI shape is OW31's §2b acting-identity carriage
     (that train lifts it jointly; the OW47 half of its reason is
-    closed).
+    closed). **RE-OPENED AND RE-CLOSED 2026-08-21 (the SECOND
+    layer-naming producer — the CFC internal-verifier read; ruling:
+    arm (b) of the name-draft triage's §9 fork, owner 2026-08-21).**
+    The close above covered the blind write's STRUCTURAL read and its
+    report's §5 deliberately left the CFC-read corner "refusing loudly
+    rather than widening the exclusion" — the profile-embed residual
+    proved the consequence: `storedMetadataFor` (cfc/prepare.ts), the
+    verifier's path-[] recursive read of the write-target doc issued
+    AFTER `unmarkUiInputBlindWriteTx` by design, entered the commit
+    set with no exclusion, so under a standing startEditing seed echo
+    the basis named the echo layer and §6 refused the USER's name fill
+    terminally — refusing in the WORKER console where nothing
+    forwards, while the served `saveName` then amended the STALE SEED
+    value (store-proven; the triage measured the loss at one
+    knife-edge rate across three arms, 2/10 pre-#6187, 2/10 at its
+    head, 1/10 on merged main —
+    `../../history/plans/server-execution-v2/optimize/name-draft-loss-triage.md`).
+    The ruled fix (this close): the blind-write tx's verifier reads
+    base on the doc's NON-speculative stack — the VALUE they consume
+    (`ISpaceReplica.getNonSpeculativeDocument`, served by the
+    transaction read path) and the basis they contribute
+    (`excludeSpeculativeLayers` in `buildReads`) — so the verifier
+    verifies exactly the durable policy state the server will enforce
+    against, and verify-durable + name-durable travel together. Four
+    completions the live gates forced (each caught live — the
+    forwarded worker console and a local commit-outcome tap — the triage's harness aid, landed with
+    this close): (1) CONTENT-ADDRESSED (`cid:`) reads keep their
+    ordinary overlay value — identical to the durable content by
+    construction (the replica refuses content that does not hash to
+    its id) — while their layers stay basis-excluded; during the
+    echo's arrival window the client's durable copy of an echo-staged
+    schema doc can lag the server's, and serving the verifier "durably
+    absent" there moved the silent loss into CFC prepare's
+    `stored schemaHash … missing or unreadable` abort (the first live
+    red's signature). (2) Stored `/cfc` metadata can reference a
+    schema document NO client view holds — a frame delivers metadata
+    without its schemaHash refs (store-proven: the server held the
+    `cid:` doc as a head while the client's prepare died on it) — so
+    `loadSchemaDocument` falls back to the realm schema registry,
+    which holds only hash-verified content and which
+    `ensureSchemaDocument` now populates at the stamping site
+    (whoever stamped the reference held the content); this also
+    un-silences the triage's flagged pre-existing "missing or
+    unreadable" worker class wherever the stamper's session is alive.
+    (3) The live stamper is the SERVER's own derivation and the ON
+    watch frames carry no refs, so no in-process source could resolve
+    — `hydrateArrivedCfcSchemaRefs` (storage/v2.ts) pulls the
+    referenced `cid:` document as arrived metadata integrates
+    (deferred, deduped, failure-retried on a later frame), the
+    standing-watch sibling of the explicit-sync path's existing
+    `syncCfcSchemaDocument` hydration; not unit-pinnable in the
+    emulated harness (loopback frames already carry refs — a pin
+    there is vacuous by construction), so the ON gate below is its
+    red-first bench. (4) The verifier read's commit-set entry is
+    scoped to what it CONSUMES: `storedMetadataFor` reads AT
+    `["cfc"]`, never the document root (the triage's arm (c), the
+    path half of the ruled arm (b)) — the root-recursive read made
+    the whole doc a value dependency at the reader's confirmed basis,
+    which lags exactly while the echo stands, so the covering served
+    commit's own value patch killed the fill server-side as
+    `stale confirmed read … conflicted with` (the commit-outcome tap's
+    signature, store-confirmed: basis = the draft mint's seq, head =
+    the served seed's); a concurrent `/cfc` change still conflicts —
+    the precondition the ruling kept. Pinned red-first
+    in `speculation-overlay.test.ts`, six ways: the CFC-relevant
+    blind write over a standing echo EXPORTS (base red:
+    `SpeculativeBasisError` naming the echo layer; exactly one engine
+    commit — re-issues nothing, cannot double-apply); the echo-staged
+    cid: shape EXPORTS (base red: the schemaHash-missing abort); the
+    registry-only stored-schemaHash shape EXPORTS (base red: the same
+    abort, the second live signature); the exported fill's
+    commit-set verifier reads sit AT ["cfc"] (base red: path []); the
+    SAME write without the blind mark is STILL REFUSED (the exclusion
+    never leaves the `unmarkUiInputBlindWriteTx` family); and the
+    verifier-shaped read in a blind tx sees the DURABLE doc while an
+    ordinary read in the same tx sees the overlay (verify-durable
+    consistency, both directions). Value-consuming reads keep the
+    ruled §6 refusal untouched (the standing pin). Lift evidence: the
+    profile-embed ON gate at the fix head — TEN fresh-store runs,
+    **10/10 GREEN**, 10–16 s each (the loss's reds ran 300 s+; the
+    triage's three-arm baseline for this defect was 2/10–2/10–1/10
+    red), the name AND bio amends STORE-DURABLE in every run (4
+    value-bearing commit rows each, queried post-teardown — never the
+    render), posture verified per run (`shellServerExecutionDefine` +
+    live `servingLoop`), per-iteration fresh store on :8125,
+    self-referential API_URL/MEMORY_URL, loads 4.6–10.9 recorded —
+    and the `integration/profile-embed.test.ts` skip entry is
+    REMOVED (its two prior blockers fell to RULING 5/OW49 and the §2b
+    derivation-carriage close; this was the last).
   - **OW48 — CLOSED 2026-08-21 (refuted premise; optimize-on-main
     served-wish seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5391,10 +5480,13 @@ supply; OW29/OW32/OW34 closed):
     (executor-cross-space.test.ts's outbox-arm pin); the amends now
     cross via the outbox with the carried actor and are durably
     present in both stores. The ten-run gate at that fix head
-    separated a REMAINING, different-family red (the client
-    name-draft own-write loss, OW47's family — the skip entry names
-    it), so profile-embed's green-ON condition is still open. Closure
-    and the successor's row-mapping are the coordinator's.
+    separated a REMAINING, different-family red — the client
+    name-draft own-write loss, OW47's family — which the verifier-read
+    basis close (OW47's re-close above, RULED 2026-08-21) has since
+    CLOSED: profile-embed greens ON at that fix head and its skip
+    entry is removed, so the ruled closure condition (profile-embed
+    greens ON) is now MET. Declaring this row closed on that evidence
+    remains the coordinator's call, per the row's own provision.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)

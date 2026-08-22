@@ -136,7 +136,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): six file entries (default-app, cfc-group-chat-demo, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ZERO step entries — both gate step lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss); profile-embed's entry was re-scoped a third time by the §2b derivation-carriage close (the send-site LT1-vs-outbox axis fix landed the amend crossing durably; the remaining blocker is the client name-draft own-write loss, OW47's family) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): five file entries (default-app, cfc-group-chat-demo, home-profile-reload-durability, the sqlite identity pair) and ZERO step entries — both gate step lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss), and profile-embed's FILE entry fell with OW47's re-close (the name-draft own-write loss: the CFC verifier-read basis, arm (b) RULED 2026-08-21 — its two earlier blockers fell to RULING 5/OW49 and the §2b derivation-carriage close) — every gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
@@ -145,7 +145,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "--ignore=integration/topics-navigation.test.ts," +
     "integration/default-app.test.ts," +
     "integration/cfc-group-chat-demo.test.ts," +
-    "integration/profile-embed.test.ts," +
     "integration/home-profile-reload-durability.test.ts," +
     "integration/sqlite-db-owner-multi-runtime.test.ts," +
     "integration/sqlite-read-clearance-multi-runtime.test.ts",
@@ -159,7 +158,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     const file of [
       "default-app",
       "cfc-group-chat-demo",
-      "profile-embed",
       "home-profile-reload-durability",
       "sqlite-db-owner-multi-runtime",
       "sqlite-read-clearance-multi-runtime",
@@ -191,22 +189,18 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     ),
     false,
   );
-  // profile-embed's entry names its CURRENT blocker, not a closed one:
-  // the §2b derivation-carriage close (2026-08-21) landed the amend
-  // crossing (send-site LT1-vs-outbox axis; the amends are durably
-  // present cross-space), so the entry's reason must now name the
-  // remaining client name-draft own-write loss — pinned so a stale
-  // re-broadening is a deliberate edit.
-  {
-    const profileEmbed = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
+  // profile-embed is LIFTED (verification-coverage.md OW47's re-close,
+  // RULED 2026-08-21: the name-draft own-write loss — the CFC
+  // verifier-read basis, the file's LAST blocker after RULING 5/OW49
+  // and the §2b derivation-carriage close): no entry, so the file RUNS
+  // on the ON arm — the lift's CI evidence, pinned so a re-skip is a
+  // deliberate edit.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
       skip.file === "integration/profile-embed.test.ts"
-    );
-    if (profileEmbed === undefined) {
-      throw new Error("missing profile-embed entry");
-    }
-    assertMatch(profileEmbed.reason, /NAME-DRAFT own-write loss/);
-    assertMatch(profileEmbed.reason, /2b-derivation-carriage-scope\.md/);
-  }
+    ),
+    false,
+  );
   // The two-browser gates RUN in the ON arm: cfc-group-chat-two-browsers
   // (fan-out stage B) and lunch-poll-vote (W3.1's S1 + the 6/6 lift).
   assertEquals(
@@ -243,7 +237,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
-  assertEquals(gateEntries.length, 6);
+  assertEquals(gateEntries.length, 5);
   for (const entry of gateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
@@ -269,7 +263,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "./integration/convergence-storm.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 7);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 6);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
