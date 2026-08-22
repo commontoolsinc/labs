@@ -157,13 +157,14 @@ export function chooseGeneratedPortOffset(
 // Starts the dev servers for the given offset. Returns the start-local-dev.sh
 // exit code: 0 on success, PORT_IN_USE_EXIT on a port collision, or another
 // non-zero code for any other startup failure.
-async function startServers(
+export async function startServers(
   portOffset: number,
   rootDir: string,
   env: Record<string, string> = {},
+  run: typeof runCommand = runCommand,
 ): Promise<number> {
   console.log(`Starting servers with PORT_OFFSET=${portOffset}...`);
-  const result = await runCommand(
+  const result = await run(
     ["bash", "scripts/start-local-dev.sh", `--port-offset=${portOffset}`],
     { cwd: rootDir, env, inheritStdio: true },
   );
