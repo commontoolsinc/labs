@@ -141,10 +141,21 @@ can seal a consequence for a served entry, checked one by one:
    notice's durable landing the drain-in-flight guard holds
    ("marked", released only by the wave outcome); after it lands the
    entry is consequenced and excluded from the drain; if the notice
-   FAILS to seal, the guard releases, the entry re-drains, and the
-   arm seals again — convergence to exactly one durable consequence,
-   the same self-healing loop the existing error/drop notices use.
-   A re-admission of the same eventId at a new seq falls to the
+   fails to seal by THROWING at staging, REJECTING its commit
+   promise, or entering a wave whose outcome withdraws it, the guard
+   releases, the entry re-drains, and the arm seals again —
+   convergence to exactly one durable consequence, the same
+   self-healing loop the existing error/drop notices use. AMENDED by
+   the #6186 adversarial review (MAJOR-1, probe-confirmed): the
+   self-heal does NOT cover a notice commit that RESOLVES `{error}`
+   pre-destination (the `rejectCommitBeforeStorage` shape) — the
+   `.catch` release fires on rejection only, the wave-outcome release
+   covers only wave-carried ids, and the entry then strands
+   guarded-unconsequenced until park. That wedge is PRE-EXISTING
+   (reproduced through the throw arm, this PR's code uninvolved) and
+   is minted as register row OW58 with the owed guard fix; within
+   THIS PR's class the exactly-once claim stands as pinned. A
+   re-admission of the same eventId at a new seq falls to the
    existing SKIP arm (its notice annotates the duplicate entry, not
    this one).
 6. **The dispatch is single-shot**: `tx.commit().then(...)` settles
@@ -201,4 +212,36 @@ task's flags):
   `scheduler-commit-backpressure` (9), `cfc-writer-claim-
   correspondence` (17), `mergeable-append-multispace-conflict` (2).
 - The full runner battery (`deno task test` in packages/runner) at
-  the end — result in the PR's test plan.
+  the rebased head: `ok | 1274 passed (7304 steps) | 0 failed
+  (11m43s)`.
+
+## 6. Review response (the #6186 adversarial round)
+
+Verdict LANDABLE-WITH-FIXES; the src change confirmed correct and
+both pins independently re-established (revert probe red;
+widened-discriminator mutation red on the boundary pin).
+Dispositions:
+
+- **MAJOR-1** (the §4.5 convergence claim's confirmed-false branch):
+  §4.5 amended above to scope the self-heal to
+  thrown/rejected/wave-carried notice failures; the resolved-error
+  guard wedge minted as register row OW58 (pre-existing since
+  Phase 3, probe-confirmed through the throw arm, reachability
+  PLAUSIBLE via a labeled sidecar under enforce mode) with the owed
+  guard fix; the OW54 row cross-references it.
+- **MINOR-2** (the transient prep-crash sub-case): recorded as-built
+  in the OW54 row — the discriminator seals OW50's modeled
+  prep-crash recordings terminally even when the crash cause was
+  transient; the re-drain-instead question goes to the owner's
+  one-liner list, semantics unchanged.
+- **MINOR-3** (events.md §5 parenthetical): aligned — the terminal
+  commit-rule refusal (`RowLabelCommitError`) now named beside
+  transport/authorization/abort.
+- **NOTE-4** (requeue helpers shed `served`): per flag-don't-fill the
+  carriage is NOT copied through (that would silently decide served
+  retry semantics); both `requeueForNameResolution` and
+  `requeueForBackoff` now ASSERT served-absence loudly, with the
+  comment naming the undecided semantics. Unreachable today (served
+  copies queue `retries: false`), so the assert is the tripwire; no
+  red-first pin exists for an unreachable arm.
+- **NOTES 5/6**: no action, per the review.

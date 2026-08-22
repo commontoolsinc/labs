@@ -437,7 +437,8 @@ loop's duty).
   `eventWatermark` advances past it, and the unconditional
   dropped-write report still fires; the seal is the served give-up
   arm's discriminated `served.onFailure` (scheduler/events.ts). Every
-  OTHER commit refusal of a served event (transport, authorization, a
+  OTHER commit refusal of a served event (a terminal commit-rule
+  refusal — `RowLabelCommitError` — transport, authorization, a
   handler abort) seals nothing: the entry stays pending and the wave
   cadence re-drains it — served copies opt out of scheduler-side
   backoff because the wave IS their retry cadence (serving-loop.md

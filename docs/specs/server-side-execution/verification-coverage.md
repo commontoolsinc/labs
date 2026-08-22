@@ -5541,14 +5541,25 @@ supply; OW29/OW32/OW34 closed):
     shrunk the exposed class to genuinely ambiguous envelopes; the
     corner is now closed for the whole pre-storage-rejection message
     class (genuine ambiguity, unreadable stored envelopes, prepared
-    digest drift). Scope honesty, deliberate and pinned: non-CFC
+    digest drift). Sub-case honesty (the #6186 review's MINOR-2,
+    recorded as-built): the message class also covers OW50's modeled
+    prep-crash recordings ("commit-prep crashed: …"), so a prep crash
+    caused by TRANSIENT local state seals a terminal error consequence
+    where a re-drain might have succeeded — whether transient
+    prep-crashes deserve the re-drain instead is on the owner's
+    one-liner list; the behavior here is as-built, not ruled. Scope
+    honesty, deliberate and pinned: non-CFC
     give-ups (transport, authorization, a handler abort, opt-out)
     still seal nothing and re-drain on the wave cadence; and a served
     TERMINAL rejection (`RowLabelCommitError`, the storage-time
     commit-rule refusal) also seals no consequence today — an
     adjacent residual of the same shape, FLAGGED (not silently
     included) in docs/history/plans/server-execution-v2/optimize/
-    ow54-build-report.md.
+    ow54-build-report.md. The sealed consequence itself rides the
+    consequence-notice machinery, whose resolved-error guard wedge is
+    the OW58 row below (pre-existing, not introduced by the OW54 fix):
+    a notice whose commit RESOLVES `{error}` pre-destination strands
+    the entry guarded-unconsequenced until park.
   - **OW55 — the serving runtimes' pattern-fetch trust surface
     (adversarial review of PR #6157, F7; the OW48 investigation's
     security-adjacent residual; minted 2026-08-21).** Under ON,
@@ -5688,6 +5699,39 @@ supply; OW29/OW32/OW34 closed):
     THIS step with the ping already durable at the probe is this
     race, not a product regression, and not the inserting PR's
     defect. No lift trigger (test-harness item).
+  - **OW58 — the consequence-notice resolved-error guard wedge
+    (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
+    minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
+    #6186).** `#sealEventConsequenceNotice` (executor/space-server.ts)
+    seals the skip/error/drop consequences in its own transaction,
+    and its guard-release paths do not cover a commit that RESOLVES
+    `{error}`: the `.catch` beside the seal releases the
+    drain-in-flight guard on promise REJECTION only, and the
+    wave-outcome release covers only eventIds the wave actually
+    carried — a notice refused PRE-destination
+    (`rejectCommitBeforeStorage`, extended-storage-transaction.ts,
+    which resolves the commit promise with `{error}` rather than
+    rejecting it) never enters a wave, so NEITHER path fires. The
+    guard stays "marked", every re-drain skips the guarded id, and
+    park's `#drainInFlight.clear()` is the only remaining release:
+    the entry strands unconsequenced for the space's whole active
+    tenure — the OPPOSITE failure of OW54's forever-re-drain.
+    Probe evidence (the #6186 reviewer): a flag-gated patch forcing
+    the notice commit to resolve `{error}` left 3 events with
+    runsByKind 1/1/1 and ALL unconsequenced across two scanned waves,
+    reproduced through the THROW arm — the OW54 diff uninvolved.
+    Reachability: PLAUSIBLE, no live repro yet — a LABELED sidecar
+    doc under enforce mode makes the notice tx CFC-relevant (its
+    entry-field writes), and nothing prepares that tx (`commit()`
+    self-prepares only in observe mode), so the commit resolves the
+    CFC pre-storage `{error}` — the wedge shape. Owed: the small
+    guard fix — consume the commit RESULT (`sealed.then((r) => …)`
+    releasing the guard when `r?.error` is set, beside the existing
+    `.catch`) — and consider preparing the notice tx before commit;
+    the seal path is (α)-critical, so the fix belongs to its own
+    deliberate pass, not a side-swipe. Trigger: next seal-machinery
+    pass, or first live sighting of a stranded-unconsequenced entry
+    with a guarded id and no notice.
 
 ## 4. Standing rule
 
