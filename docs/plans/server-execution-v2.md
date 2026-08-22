@@ -38,7 +38,26 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-22 (this PR): the default-app reload STEP's charge
+**Delta 2026-08-22 (this PR): the arrival-witness fork RULED (candidate
+(B)) and BUILT — the runner `pattern-and-data-persistence` skip LIFTED,
+the LAST file-level ON skip.** The overlay's arrival gate now witnesses
+a cover AT an entry's floor only when the covering commit is
+DERIVED-class (strictly above the floor any class witnesses; unknown
+class at the floor fails closed toward the standing echo) — the
+class-blind gate had retired first-run speculations on their own
+AUTHORED setup cover at the floor, 40–260 ms before the served value
+landed (the OW33 rotating flake, both arms). The covering commit's
+class rides session frames as the flag-gated `coverClass` field (OFF
+wire byte-identical) into the replica's confirmed record and the
+sweep. Lift: 10/10 green at the true ON topology (ON-built binary,
+fresh store + posture probe per run). Binding sentence:
+speculation.md §4's arrival-witness predicate; ruling + build record:
+the register's OW33 row and
+[`optimize/ow33-arrival-witness-fork.md`](../history/plans/server-execution-v2/optimize/ow33-arrival-witness-fork.md).
+The ON skip list now holds ONE entry, the default-app reload STEP
+(OW45) — the flip PR's list-EMPTY bar hangs on that step alone.
+
+**Delta 2026-08-22 (#6198): the default-app reload STEP's charge
 SPLIT — its test half CLOSED, its product half ISOLATED; the skip
 entry STAYS, reworded.** The step's red population was BIMODAL and
 the old post-wait single-shot read could not tell the halves apart.

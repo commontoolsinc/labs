@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-22
 archived: 2026-08-22
-reason: "Fork memo for the owner (flag-don't-fill): the speculation overlay's arrival-gated retirement (RULED 2026-08-16) is implemented as a doc-granular seq comparison that accepts an AUTHORED structure write at the floor as the arrival witness — the client's own setup for a new instance, a prior session's for a resumed one — retiring first-run speculations before the served value lands (the OW33 pattern-and-data-persistence flake). Five candidate witness predicates with their edges (four inference predicates over the confirmed record, plus the explicit arrival signal); a recommendation on file; no build until ruled."
+reason: "Fork memo for the owner (flag-don't-fill): the speculation overlay's arrival-gated retirement (RULED 2026-08-16) is implemented as a doc-granular seq comparison that accepts an AUTHORED structure write at the floor as the arrival witness — the client's own setup for a new instance, a prior session's for a resumed one — retiring first-run speculations before the served value lands (the OW33 pattern-and-data-persistence flake). Five candidate witness predicates with their edges (four inference predicates over the confirmed record, plus the explicit arrival signal). RULED 2026-08-22 (owner: agreed with all the recommendations above, continue): recommendation (B) adopted — strictly-above-floor, derived-class-only at equality, seq-keyed (C) the ruled fallback — and BUILT in the same pass (the coverClass frame/promotion threading, the sweep predicate, red-first pins for both arms)."
 ---
 
 # The arrival-witness fork (OW33) — what counts as "the authoritative derivation has ARRIVED"?
@@ -182,7 +182,7 @@ backstop).
    already owns handler retirement; the sweep is its backstop and
    uses the same gate)?
 
-## Recommendation (on file, not a fill)
+## Recommendation — RULED AND BUILT (2026-08-22)
 
 (B) — strictly-above-floor with derived-class-only equality — is the
 smallest predicate that (i) closes both observed arms, (ii) keeps the
@@ -195,6 +195,46 @@ arm only. Seq-keyed (C) is the zero-plumbing fallback if the class
 threading is unwanted, at the stranding cost stated above;
 sub-question 2 should be answered explicitly rather than inherited
 from the predicate choice. The triage did NOT build any candidate.
+
+**RULED (owner, on the recommendations above):**
+
+> "agreed with all the recommendations above, continue"
+
+— owner (Berni), 2026-08-22. This adopts **(B)** — retire on a
+confirmed cover STRICTLY ABOVE the floor (any class), or AT the floor
+only on a DERIVED-class cover — with seq-keyed **(C)** the ruled
+fallback if (B)'s implementation surfaced an unforeseen wall (it did
+not). Built in the same pass:
+
+- **The predicate** in the sweep's arrival gate
+  (`overlay-destination.ts` `#sweep`): at `confirmedSeq === floor`,
+  only a `coverClass === "derived"` cover witnesses; an unknown class
+  at the floor fails CLOSED (toward the standing, value-identical
+  echo, never the undefined read); strictly above the floor any
+  confirmed cover witnesses, unchanged.
+- **The class threading**, the equality arm's cost as assessed: the
+  covering commit's class (an existing server-side fact —
+  `revision.seq` IS `commit.seq`, one PK lookup) rides session frames
+  as an optional `coverClass` upsert field populated only under the
+  server-execution flag (the OFF wire is byte-identical, pinned in
+  `v2-cover-class-frames.test.ts`); the client replica records it on
+  its confirmed record — frames on integrate, the same-seq echo
+  preserving a known class, `authored` at own-transact promotion,
+  `derived` at the sealed wave confirm — and
+  `speculationRetirementView` surfaces it to the sweep.
+- **Red-first pins for both arms** in
+  `speculation-arrival-gate.test.ts`, replaying the decoded store
+  shapes (run 5's new-instance arm, run 1's resumed retire-at-seal
+  arm) — red at base, green with (B) — plus both-sides pins for the
+  elision posture (sub-question 1: (B) preserves the standing echo
+  exactly), the legitimate at-floor derived retirement, and
+  above-floor-any-class (sub-question 2, answered in the binding
+  sentence: above the floor the store has spoken and any class
+  retires — the LWW posture the (B) edge names). The scope
+  (sub-question 3) follows the gate's structure: the one shared sweep
+  gate serves both origins, so the event-handler backstop inherits
+  the predicate; the consequence-mark path stays first-line and
+  untouched.
 
 ## Acceptance evidence for whichever predicate is ruled
 

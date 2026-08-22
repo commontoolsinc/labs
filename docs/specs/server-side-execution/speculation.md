@@ -279,9 +279,11 @@ On each pushed `derived` commit with `derivedThrough = W` and
    (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
    the entry wrote holds a CONFIRMED value at seq `≥` that floor (the
    authoritative derivation for the instance this client reads has
-   ARRIVED) — regardless of value agreement (the store wins); keep
-   live-input echoes whose authored commit is still unacked or not yet
-   covered by `W` (the user is mid-typing), and keep echoes whose
+   ARRIVED; what counts as the witness at exactly the floor is the
+   arrival-witness predicate, RULED 2026-08-22 — the arrival-gate
+   paragraph below) — regardless of value agreement (the store wins);
+   keep live-input echoes whose authored commit is still unacked or not
+   yet covered by `W` (the user is mid-typing), and keep echoes whose
    written instance the store has not yet spoken for (nothing to win
    with — see the arrival-gate paragraph below).
 4. If any local intents remain un-consequenced (offline queue, in-flight
@@ -365,7 +367,35 @@ would have retired anyway (the store has spoken for the instance at seq
 Pinned in `speculation-arrival-gate.test.ts` (the E2 shape end to end,
 mutation: wake removed → the entry stands until an unrelated commit;
 scripted: an arrival for an unwritten doc sweeps nothing, an arrival
-while `W < floor` retires nothing).** Two riders ride with the
+while `W < floor` retires nothing).** **The arrival-witness predicate
+(RULED 2026-08-22 — owner, on the OW33 fork memo's recommendation): a
+confirmed cover WITNESSES arrival for a written doc when its seq is
+STRICTLY ABOVE the entry's floor — whatever its commit class: the
+store has spoken past everything this speculation consumed — or when
+it sits AT the floor and its covering commit is DERIVED-class
+(protocol.md §1's producer vocabulary): the legitimate at-floor
+arrival is a re-derivation whose run read the already-arrived value
+at that very seq. An authored-class cover at the floor is the entry's
+own basis commit — the setup write that created the computed docs'
+structure (the client's own for a new instance, a prior session's for
+a resumed one) — and never witnesses the derivation's arrival: the
+class-blind gate retired first-run speculations on it 40–260 ms
+before the served value landed, the ruled sentence's own excluded
+class (the OW33 hole). A cover whose class the replica does not know
+(an OFF-arm or pre-predicate frame) does not witness at the floor
+either — fail toward the standing, value-identical echo, never the
+undefined read. The elision posture above is unchanged: no rewrite
+means the doc's seq stays BELOW the floor, and the predicate is never
+consulted. Carriage: the covering commit's class rides session-frame
+upserts as `coverClass` (populated only under the flag — the OFF wire
+is byte-identical), is recorded on the replica's confirmed record
+(frames on integrate; `authored`/`derived` at own-commit promotions),
+and reaches the sweep through `speculationRetirementView`. Pinned in
+`speculation-arrival-gate.test.ts` (both observed arms replayed
+red-first from the decoded store shapes; elision, at-floor-derived,
+and above-floor-any-class both-sides; mutation-checked in both
+directions) and `v2-cover-class-frames.test.ts` (the frame carriage,
+both arms).** Two riders ride with the
 gate: SUPERSEDE-BY-NEWER — a
 newer entry of the same writer whose WHOLE-DOC ops cover every doc an
 older entry wrote retires the older one at seal (the drop of a lower

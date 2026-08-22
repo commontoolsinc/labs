@@ -3116,7 +3116,43 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   guard's silent echo skip; flagged there: whether it should take
   the OW51 refusal+retrigger disposition is a spec decision — #6179
   scoped the refusal to the schema-aware lazy READ path). The
-  patterns skip entry is REMOVED.**
+  patterns skip entry is REMOVED.** **RULED AND CLOSED (2026-08-22):
+  the arrival-witness fork is RULED — owner ("agreed with all the
+  recommendations above, continue"): candidate (B) of the fork memo
+  adopted — a confirmed cover witnesses arrival STRICTLY ABOVE the
+  entry's floor whatever its class, and AT the floor only when the
+  covering commit is DERIVED-class; unknown class at the floor fails
+  CLOSED toward the standing, value-identical echo; seq-keyed (C)
+  the ruled fallback, not needed — and BUILT (speculation.md §4's
+  arrival-witness predicate sentence, binding): the sweep's gate in
+  `overlay-destination.ts` consults the covering commit's class at
+  equality, threaded as the optional `coverClass` session-frame
+  field (populated only under the flag — the OFF wire is
+  byte-identical, key-set-pinned in `v2-cover-class-frames.test.ts`)
+  through the replica's confirmed record (frames on integrate, the
+  same-seq echo preserving a known class, `authored` at own-transact
+  promotion, `derived` at the sealed wave confirm) into
+  `speculationRetirementView`. Red-first: both observed arms
+  replayed as deterministic scripted pins from the decoded store
+  shapes (run 5's new arm — authored setup cover at floor 11,
+  values-free advance, derived values at 13; run 1's resumed arm —
+  pre-existing watermark at 7, retire-at-seal), red at base
+  (entryCount 0 — the entry retired on the authored cover), green
+  with (B); the elision posture, the legitimate at-floor derived
+  retirement, and above-floor-any-class pinned both-sides;
+  mutation-checked in both directions (class-demanded-above-floor
+  kills 5 pins including 3 pre-existing arrival pins;
+  equality-never-witnesses kills the at-floor-derived pin). The
+  runner skip entry is LIFTED — the LAST file-level skip — on
+  **10/10 green at the true ON topology** (ON-built binary sha256
+  `d3ef4a47f4354977…`, fresh store per run, posture probed per run:
+  `shellServerExecutionDefine === "true"` + `servingLoop` present;
+  1-min loads 4.2–6.5; per-run stores show the loop serving — run
+  7: 7 authored + 13 derived commits). Suites at the fix head:
+  runner 1280 (7359 steps), memory 564 (274 steps), skips pins
+  17/17, repo typecheck/fmt/lint green. OW60 is NOT closed by this
+  predicate, as the fork memo said: a dropped echo run seals no
+  overlay entry, so no witness predicate can reach it.**
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 

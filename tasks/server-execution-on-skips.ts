@@ -242,44 +242,26 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // topology (fresh-store gate 5/5 each; verification-coverage.md OW53
     // carries the traces and the lift evidence).
   ],
-  runner: [
-    {
-      file: "integration/pattern-and-data-persistence.test.ts",
-      phase: "phase-7",
-      reason: "OW33 triage (2026-08-22, main 51350077e — supersedes the " +
-        "2026-08-16 'no sink → no demand / speculation did not surface' " +
-        "mechanism note): ROOT-CAUSED, still red — now a FLAKE (4/8 " +
-        "original-file runs red in the triage series; 1-2 of 8-10 in " +
-        "instrumented variants) whose failing read rotates between the " +
-        "phase-3 new piece and the phase-2 resumed piece. The demand half is fine: `pull()`'s sync " +
-        "registers the session watch, the server serves BOTH instances' " +
-        "derivations (derived commits in the store every run), so the " +
-        "ruled `.pull`-for-round-one flow works. The red is the " +
-        "speculation overlay's ARRIVAL GATE (speculation.md §4, RULED " +
-        "2026-08-16): it witnesses arrival as `confirmedSeq(writtenDoc) " +
-        ">= floor`, and a first-run speculation's written computed docs " +
-        "got their STRUCTURE written by an AUTHORED setup commit at " +
-        "exactly the floor seq (the client's OWN phase-3 setup for the " +
-        "new instance; a PRIOR session's setup for the resumed one). " +
-        "Store-proven invariant, both arms: the covering watermark " +
-        "reaches the client at least one frame BEFORE the victim's " +
-        "served value — via a values-free advance commit or a values " +
-        "wave that precedes the victim's, or pre-existing for the " +
-        "resumed arm; NEVER an exhausted wave, which freezes " +
-        "`derivedThrough` (space-server.ts) — and the only confirmed " +
-        "cover at/above the floor is that authored structure write, so " +
-        "the entry retires on it while the served value is frames away " +
-        "(~40-260 ms observed), and the bare `getAsQueryResult()` read " +
-        "falls in the hole. The fix " +
-        "direction is the ruled sentence itself ('the authoritative " +
-        "derivation ... has ARRIVED'); the witness predicate is a design " +
-        "fork awaiting the owner — docs/history/plans/server-execution-" +
-        "v2/optimize/ow33-arrival-witness-fork.md. Evidence: " +
-        "ow33-triage-report.md same dir. Lifts when the ruled predicate " +
-        "lands and this file greens 10/10 at the true ON topology; the " +
-        "flip PR needs this list EMPTY.",
-    },
-  ],
+  // pattern-and-data-persistence LIFTED (the arrival-witness predicate,
+  // RULED 2026-08-22 — candidate (B) of the OW33 fork memo, built with
+  // red-first pins for both observed arms): the entry's root cause was
+  // the speculation overlay's ARRIVAL GATE witnessing arrival as
+  // `confirmedSeq(writtenDoc) >= floor`, class-blind — a first-run
+  // speculation's computed docs carry an AUTHORED setup cover at
+  // exactly the floor seq (the client's own phase-3 setup for the new
+  // instance; a prior session's for the resumed one), so the entry
+  // retired 40-260 ms before the served value landed and the bare read
+  // saw undefined (a rotating ~4/8 flake). The ruled predicate: a
+  // cover witnesses STRICTLY ABOVE the floor (any class), or AT the
+  // floor only when derived-class; unknown class at the floor fails
+  // closed toward the standing echo. Lift evidence: 10/10 green at the
+  // true ON topology (ON-built binary sha256 d3ef4a47f4354977…, fresh
+  // store per run, posture probed per run — shellServerExecutionDefine
+  // "true" + servingLoop present; loads 4.2-6.5; per-run stores show
+  // the loop serving, e.g. 13 derived commits in run 7). The register
+  // row (verification-coverage.md OW33) and the fork memo carry the
+  // ruling and the build.
+  runner: [],
   // The two STEP-level entries this list held (the CT-1606 PerUser header
   // render, 3/3 red 2026-08-16; the single-navigateTo dispatch, 1/3 red)
   // were LIFTED by the OW33 triage (2026-08-22, main 51350077e): both
