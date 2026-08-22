@@ -5495,6 +5495,23 @@ supply; OW29/OW32/OW34 closed):
     intent-quiescence barrier under ON (OFF's idle implies own-send
     consequence visibility; ON's does not) — a spec question beside
     OW47's pending-commit-barrier seat, surfaced in the report.
+    ADDENDUM (2026-08-22, arrival-wait-hardening pass): the report's
+    §7 claim that this fix also covered the census's group-chat
+    waitFor flakes (items 1+3) is CORRECTED — those recurred
+    post-merge with quiescence clean (runs 32543810077 /
+    32547606642) and were a different race entirely: the test's
+    chained draft→trusted-send events, on different streams with
+    cross-stream serve order unpromised (events.md §4), let the
+    served handler no-op SILENTLY on a pre-draft view, so the
+    awaited write never existed — terminal before any wait began.
+    Root-caused, made deterministic (delay injection at the seam),
+    and closed — helper gates on the arrived-consequence signal
+    (`SpeculationOverlayDestination.waitForIntentQuiescence` /
+    `MultiRuntimeSession.awaitEventConsequences`, pinned both with
+    killing mutations), plus the staged-publish / spec-gallery
+    settled-text conversions (the ledger's browser members) — in
+    `optimize/arrival-wait-hardening-report.md`. This row's own
+    closure (the storm-loss triage and the settle fix) STANDS.
   - **OW53 — the sqlite multi-runtime identity pair under ON.** Two
     semantic asserts under the TRUE ON topology: db-owner — a SECOND
     user's runtime re-mints itself as the sqlite db handle owner

@@ -541,6 +541,65 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     expect(failures()).toBe(failuresBefore + 1);
     destination.close();
   });
+
+  it("quiescence waiter: waitForIntentQuiescence resolves when the LAST outstanding intent retires — not on an earlier retire — immediately when nothing is outstanding, and on close", async () => {
+    const { scripted, destination } = scriptedDestination();
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+
+    // Nothing outstanding: resolves immediately (probe by flag — a race
+    // against a bare resolved sentinel loses by one microtask hop).
+    let immediate = false;
+    destination.waitForIntentQuiescence().then(() => {
+      immediate = true;
+    });
+    await flushMicrotasks();
+    expect(immediate).toBe(true);
+
+    destination.trackIntent(SPACE, SIDECAR, "evt-1");
+    destination.trackIntent(SPACE, SIDECAR, "evt-2");
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries = [
+        { eventId: "evt-1", stream: { id: "s", path: [] }, seq: 1 },
+        { eventId: "evt-2", stream: { id: "s", path: [] }, seq: 2 },
+      ];
+    }, [["value", "entries"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(2);
+
+    let resolved = false;
+    const quiesced = destination.waitForIntentQuiescence().then(() => {
+      resolved = true;
+    });
+
+    // First retire: ONE intent still outstanding — the waiter must NOT
+    // resolve (killing mutation: flushing on every untrack instead of on
+    // the set emptying trips here).
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(1);
+    expect(resolved).toBe(false);
+
+    // Last retire (a dropped mark is equally terminal): the set empties,
+    // the waiter resolves.
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![1].status = "dropped";
+      value.entries![1].reason = "gone";
+    }, [
+      ["value", "entries", "1", "status"],
+      ["value", "entries", "1", "reason"],
+    ]);
+    await flushMicrotasks();
+    await quiesced;
+    expect(resolved).toBe(true);
+
+    // Close settles a parked waiter (nothing can retire afterwards).
+    destination.trackIntent(SPACE, SIDECAR, "evt-3");
+    const parked = destination.waitForIntentQuiescence();
+    destination.close();
+    await parked;
+  });
 });
 
 // ─── W2.1: the cascade-echo retirement (scripted; the MARK path) ────────

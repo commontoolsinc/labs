@@ -57,11 +57,29 @@ async function createGroupChatHarness(): Promise<MultiRuntimeHarness> {
   });
 }
 
+// Each helper below chains TWO events: a draft write, then a trusted
+// action whose served handler reads that draft — and silently no-ops
+// when it reads it empty (`prepareTrustedMessageSend` and friends
+// return null on a blank draft). Events on DIFFERENT streams have no
+// cross-stream serve-order guarantee (events.md §4: per stream,
+// commit-seq order; across streams, no claim), so under ON a loaded
+// serving loop can serve the trusted action against a pre-draft view —
+// the action terminalizes cleanly as a no-op, and a downstream arrival
+// wait then times out on a write that never happened (the 2026-08-22
+// ON-lane flake: runs 32543810077 and 32547606642, quiescence clean,
+// zero errors, next step healthy). The real UI forbids that
+// interleaving — the trusted control stays disabled until the SERVED
+// draft state round-trips (the browser test waits `waitForDisabled`,
+// OW47 S-G) — so these helpers gate the same way: fire the trusted
+// action only after the draft event's terminal consequence has arrived
+// back at this session (`awaitEventConsequences`), which puts the
+// draft's commit in the space's history before the action is served.
 async function saveProfile(
   session: MultiRuntimeSession,
   name: string,
 ): Promise<void> {
   await session.send("setProfileDraft", name);
+  await session.awaitEventConsequences();
   await session.send("saveProfile", {}, {
     surface: PROFILE_SURFACE,
     action: SAVE_PROFILE_ACTION,
@@ -73,6 +91,7 @@ async function sendMessage(
   body: string,
 ): Promise<void> {
   await session.send("setMessageDraft", body);
+  await session.awaitEventConsequences();
   await session.send("sendTrustedMessage", {}, {
     surface: SEND_SURFACE,
     action: SEND_ACTION,
@@ -84,6 +103,7 @@ async function addRoom(
   name: string,
 ): Promise<void> {
   await session.send("setRoomDraft", name);
+  await session.awaitEventConsequences();
   await session.send("addTrustedRoom", {}, {
     surface: ROOM_SURFACE,
     action: ADD_ROOM_ACTION,
