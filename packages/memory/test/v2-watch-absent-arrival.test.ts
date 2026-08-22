@@ -31,6 +31,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
+import { fromDocKey, type QueryDocKey } from "../v2/query.ts";
 import type { EntitySnapshot } from "../v2.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
@@ -70,6 +71,18 @@ const harness = async (storeName: string) => {
 };
 
 describe("memory v2 watch arrival on absent docs", () => {
+  it("parses a doc key whose entity id contains slashes (module-derived handler ids, data: ids): the wake key for such a miss survives the round trip instead of being dropped", () => {
+    const parsed = fromDocKey(
+      `${SPACE}/space/of:module/pkg/file.tsx:7:1` as QueryDocKey,
+    );
+    expect(parsed).toEqual({
+      space: SPACE,
+      scope: "space",
+      scopeKey: "space",
+      id: "of:module/pkg/file.tsx:7:1",
+    });
+  });
+
   it("delivers a watch's ROOT doc when it is created after the watch was registered", async () => {
     const h = await harness("memory-v2-watch-absent-root-arrival");
     try {

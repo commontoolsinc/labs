@@ -1249,18 +1249,22 @@ export const fromDocKey = (key: QueryDocKey): {
   scope: CellScope;
   scopeKey: ScopeKey;
 } => {
-  // Scope-key segments never contain "/" (their parts are
-  // encodeURIComponent-encoded), so the three-way split is exact; the
-  // scope NAME is recovered from the instance key because readers resolve
-  // rows by (scope, session identity) as before. The instance key itself
-  // is returned too: the M4/M1 paths (stage F) address rows by exact
+  // The SPACE (a did) and the scope-key segment (its parts are
+  // encodeURIComponent-encoded) never contain "/", so the first two
+  // separators are exact and everything after them is the ID — which CAN
+  // contain "/" (module-derived handler ids, `data:` ids). The scope
+  // NAME is recovered from the instance key because readers resolve rows
+  // by (scope, session identity) as before. The instance key itself is
+  // returned too: the M4/M1 paths (stage F) address rows by exact
   // instance rather than re-resolving from the session.
-  const parts = key.split("/");
-  if (parts.length === 3) {
-    const [space, scopeKey, id] = parts;
-    if (isScopeKey(scopeKey)) {
-      return { space, scope: scopeOfScopeKey(scopeKey), scopeKey, id };
-    }
+  const [space, scopeKey, ...rest] = key.split("/");
+  if (rest.length > 0 && isScopeKey(scopeKey)) {
+    return {
+      space,
+      scope: scopeOfScopeKey(scopeKey),
+      scopeKey,
+      id: rest.join("/"),
+    };
   }
   throw new Error(`invalid memory v2 query doc key: ${key}`);
 };
