@@ -1264,10 +1264,10 @@ holding material is constructed from an algorithm name and the two keys' bytes,
 which it copies unless handed a `FabricBytes`, that being already immutable and
 sole-owned.
 
-**Only the material state is representable outside a live realm.** A
-`CryptoKey`'s material is reachable only through `SubtleCrypto.exportKey()`,
-which is asynchronous where a codec's `encode()` is synchronous, and which a
-non-extractable key refuses outright. So:
+**Only the material state can be written down.** A `CryptoKey`'s material is
+reachable only through `SubtleCrypto.exportKey()`, which is asynchronous where
+a codec's `encode()` is synchronous, and which a non-extractable key refuses
+outright. So:
 
 - The JSON encoding **refuses** a pair holding handles: encoding one throws
   (Section 3 of [3-json-encoding.md](./3-json-encoding.md), under
@@ -1280,9 +1280,14 @@ non-extractable key refuses outright. So:
   [4-realm-encoding.md](./4-realm-encoding.md)), which is what a transport
   preserving `CryptoKey` makes possible.
 
-The refusals are the point rather than a gap. The formats that persist and
-inspect a value are exactly the ones that must not be able to represent a key
-whose whole purpose is that its material cannot be extracted.
+The refusals are the point rather than a gap. A format that writes a value
+down is exactly the one that must not be able to represent a key whose whole
+purpose is that its material cannot be extracted. Carrying a handle is a
+different thing: the key arrives with its extractability unchanged, and
+whoever reads it gains nothing a holder of the original did not have. That is
+what lets a pair holding handles reach a durable structured-clone store
+(Section 1.2 of [4-realm-encoding.md](./4-realm-encoding.md)) while staying
+unrepresentable in JSON.
 
 #### 1.4.12 `FabricLink`
 

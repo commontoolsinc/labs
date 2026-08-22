@@ -8,7 +8,8 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
  * `FabricValue` takes when it is handed to `structuredClone()` or
- * `postMessage()` to reach another realm.
+ * `postMessage()` to reach another realm, or to a durable store that
+ * serializes the same way.
  *
  * The format is specified by `4-realm-encoding.md` of the formal spec, which
  * is the authority on the shape of an encoded value, the marker and its rules,

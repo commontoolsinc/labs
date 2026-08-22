@@ -41,7 +41,8 @@ system, schemas.
   objects, standard type encodings, detection, escaping, and the `/`-key
   reservation rule.
 - [4-realm-encoding.md](./4-realm-encoding.md) -- The realm-crossing wire
-  format, for `structuredClone()` and `postMessage()`: the `[marker, tree]`
+  format, for `structuredClone()` and `postMessage()` and for self-dealing
+  storage in a durable structured-clone store: the `[marker, tree]`
   outer envelope, identity-based detection, standard type encodings, cycles
   and sharing, and the ownership contract each direction carries -- an encoded
   tree sharing structure with the value it came from, and a decoded one

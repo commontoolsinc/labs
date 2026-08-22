@@ -15,11 +15,20 @@ Draft formal spec — the realm-crossing counterpart to
 
 ## 1. Overview
 
-This format exists for one boundary: worker IPC, where a value is constructed,
-handed to a transport that clones it, decoded on the far side, and discarded.
-It is not a storage format and has no persistence story. A value written down
-for later, or read by something that did not receive it directly, uses the JSON
-encoding.
+This format is built around one boundary: worker IPC, where a value is
+constructed, handed to a transport that clones it, decoded on the far side,
+and discarded.
+Everything it asks of a transport is Section 1.1, and what it declines to
+offer is Section 2.4: a payload is readable only by a build implementing the
+same format version. A value that must outlive the build that wrote it, or
+that must be read by something holding no structured-clone channel to the
+writer, uses the JSON encoding.
+
+Those are separate questions, and Section 1.2 turns on their being separate.
+A durable structured-clone store meets Section 1.1 in full while placing an
+unbounded gap between encode and decode, so its two ends need not be the same
+build. Such a store may carry this format under the conditions of Section 1.2,
+and not otherwise.
 
 The two formats divide along what their transports carry. JSON reaches a
 `string`, so every type JavaScript has and JSON lacks — `bigint`, `undefined`,
@@ -63,6 +72,40 @@ ordinary data as a tagged value. A transport is therefore something to verify
 against this contract before use, not something to try and see.
 
 The structured clone algorithm provides all three.
+
+### 1.2 Self-Dealing Storage
+
+A **self-dealing** use of this format writes a value to a durable store and
+reads it back later from the same origin, with no other party in it. Such a
+use is admitted, and `IndexedDB` is the case it is admitted for: that store
+serializes with the structured clone algorithm, so the same mechanism that
+satisfies Section 1.1 for `postMessage()` satisfies it here.
+
+What the gap costs is Section 2.4. A durable payload can outlive the build
+that wrote it, so a reader must expect that refusal rather than treat it as
+unreachable. Three conditions follow, and a use meeting all three is
+self-dealing:
+
+1. **The stored value must be reconstructible from something the store does
+   not hold.** This is the condition that decides the question, because it is
+   what makes a version bump a cache flush rather than data loss. A store
+   holding the only copy of anything is not self-dealing, whatever else is
+   true of it.
+2. **A reader must treat a refused payload as absent**, rather than report it
+   as an error. A version bump refuses every stored payload at once, which is
+   an expected path and has to be written as one.
+3. **A reader must decode strictly.** A lenient decode yields a
+   `ProblematicValue` at the root, which is worse here than a miss: it is a
+   result that reads as one.
+
+A `CryptoKey` is what this admits that no other format could carry, and
+Section 1.1 is also what makes storing one safe: extractability arrives
+unchanged, so a key held as a handle is still a handle when it comes back, and
+its material was never written down to begin with.
+
+None of this obliges a store to be durable in fact. A browser evicts what it
+likes, and a reader built for the refusal in condition 2 is already built for
+that.
 
 ## 2. The Outer Envelope and the Marker
 
@@ -169,11 +212,18 @@ otherwise control: `postMessage()` spans tabs, windows and frames, any of which
 could pair two different deployments, and a payload written by a build the
 decoder does not understand is refused rather than walked.
 
-The check earns little in the deployment this format is for, where both ends
-are the same build and the marker always matches. It costs one comparison, and
-it is what makes adoption safe to state as a rule: without it a decoder takes
-an arbitrary object as its marker, every tagged form beneath goes unrecognized,
-and a foreign tree decodes as ordinary data instead of being refused.
+The check earns little across worker IPC, where both ends are the same build
+and the marker always matches. It costs one comparison, and it is what makes
+adoption safe to state as a rule: without it a decoder takes an arbitrary
+object as its marker, every tagged form beneath goes unrecognized, and a
+foreign tree decodes as ordinary data instead of being refused.
+
+On a self-dealing store (Section 1.2) it earns everything, and is the whole of
+what that use rests on. There a mismatch is expected rather than exceptional:
+a payload written before a version bump is refused on the first read after it,
+and a reader takes that refusal as a miss. This format offers no reading of an
+earlier version's payload and no decoder is obliged to attempt one, which is
+why Section 1.2 admits only stores whose contents can be rebuilt.
 
 ## 3. Type Encodings
 
@@ -388,6 +438,10 @@ On the boundary this format exists for, none of this costs a caller anything —
 the tree is the receiver's own clone of a value it will not be handed again,
 which is the whole reason the copy can be elided. A caller wanting two readings
 of one payload keeps the value it decoded, not the tree it decoded from.
+
+A self-dealing store (Section 1.2) satisfies this the same way and for the
+same reason: a read deserializes afresh, so what it hands back is the reader's
+own and reading twice means reading the store twice.
 
 ## 6. Refusals
 
