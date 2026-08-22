@@ -251,8 +251,11 @@ export type ServedEventDispatch = {
   lt1?: { emitterTx: IExtendedStorageTransaction };
   onFailure?: (
     outcome: {
-      /** `error`: the handler THREW — the error is the consequence
-       * (events.md §5). `dropped`: no runnable handler exists — §5's
+      /** `error`: the handler THREW, or its commit was refused
+       * PRE-STORAGE by deterministic CFC enforcement (the served
+       * give-up arm's discriminated call, scheduler/events.ts) —
+       * either way the error is the consequence (events.md §5).
+       * `dropped`: no runnable handler exists — §5's
        * drop predicate, the notice is the consequence. `deferred`: the
        * handler could not be REACHED yet (a cold-view piece load — the
        * creation-race shape OW19 warns about): no consequence is
@@ -348,9 +351,11 @@ export type QueuedEvent = {
    * per-event carriage. `firedAt` is the server-stamped acting identity
    * the handler runs as (LD1); `streamEntry` locates the durable entry
    * whose `consequenced` mark rides the handler's own transaction; and
-   * `onFailure` is the drain's hook for the two arms that need a
-   * consequence written OUTSIDE the handler tx — the handler THREW (the
-   * error is the consequence, events.md §5) or the event DROPPED (no
+   * `onFailure` is the drain's hook for the arms that need a
+   * consequence written OUTSIDE the handler tx — the handler THREW, the
+   * commit was refused pre-storage by deterministic CFC enforcement
+   * (the give-up arm's discriminated call; both: the error is the
+   * consequence, events.md §5), or the event DROPPED (no
    * runnable handler — the §5 drop predicate). Success needs no
    * callback: the mark rode the tx. Absent on every client-side event.
    */

@@ -437,12 +437,23 @@ loop's duty).
   `eventWatermark` advances past it, and the unconditional
   dropped-write report still fires; the seal is the served give-up
   arm's discriminated `served.onFailure` (scheduler/events.ts). Every
-  OTHER commit refusal of a served event (a terminal commit-rule
-  refusal — `RowLabelCommitError` — transport, authorization, a
-  handler abort) seals nothing: the entry stays pending and the wave
-  cadence re-drains it — served copies opt out of scheduler-side
-  backoff because the wave IS their retry cadence (serving-loop.md
-  §3d).
+  OTHER failed commit of a served event seals nothing, and its entry
+  — unconsequenced — is re-drained by a later wave. Two delivery
+  paths, one durable fate: a PRE-SEAL refusal (transport,
+  authorization, a handler abort — the non-CFC give-up classes)
+  settles the copy through the scheduler's commit disposition, which
+  drops it without scheduler-side retry (served copies opt out of
+  backoff; the wave IS their retry cadence, serving-loop.md §3d). A
+  STORAGE-TIME commit-rule refusal (`RowLabelCommitError`) never
+  reaches that disposition on a served copy — the handler tx sealed
+  into the wave and its commit resolved at seal-accept — and instead
+  refuses the WAVE's store commit: the refused wave reports the
+  event's contributions as requeued (`aborted: "rejected"`,
+  executor/wave.ts), the drain guard releases, and the pending entry
+  re-drains. The terminal classification of `RowLabelCommitError`
+  (storage/rejection.ts) stops in-flight RETRYING on the
+  direct-commit path; it never stops the durable entry's
+  re-dispatch.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
   in fired order — PER STREAM: a stream's sidecar carries only that

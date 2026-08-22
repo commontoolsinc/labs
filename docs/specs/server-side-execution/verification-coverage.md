@@ -5550,11 +5550,18 @@ supply; OW29/OW32/OW34 closed):
     one-liner list; the behavior here is as-built, not ruled. Scope
     honesty, deliberate and pinned: non-CFC
     give-ups (transport, authorization, a handler abort, opt-out)
-    still seal nothing and re-drain on the wave cadence; and a served
-    TERMINAL rejection (`RowLabelCommitError`, the storage-time
-    commit-rule refusal) also seals no consequence today — an
-    adjacent residual of the same shape, FLAGGED (not silently
-    included) in docs/history/plans/server-execution-v2/optimize/
+    still seal nothing and re-drain on the wave cadence; and a
+    storage-time commit-rule refusal (`RowLabelCommitError`) of a
+    served event also seals no consequence today — verified (#6186
+    Cubic round): it never reaches the scheduler's terminal
+    disposition on a served copy (the handler tx sealed and resolved
+    at seal-accept), it refuses the WAVE's store commit instead, and
+    the refused wave reports the event's contributions as requeued
+    (`aborted: "rejected"`, executor/wave.ts) — guard released,
+    unconsequenced entry re-drained, the same durable fate through
+    the wave verdict channel. An adjacent residual of the same shape,
+    FLAGGED (not silently included) in
+    docs/history/plans/server-execution-v2/optimize/
     ow54-build-report.md. The sealed consequence itself rides the
     consequence-notice machinery, whose resolved-error guard wedge is
     the OW58 row below (pre-existing, not introduced by the OW54 fix):
