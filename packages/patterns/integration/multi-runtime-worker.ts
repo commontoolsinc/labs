@@ -447,18 +447,53 @@ const handlers: Record<
   // speaks, so a wedged consequence degrades loudly instead of hanging the
   // harness. The OFF arm has no overlay and resolves immediately.
   async eventQuiescence({ timeoutMs }) {
-    const runtime = controller().runtime;
-    const budget = typeof timeoutMs === "number" ? timeoutMs : 10_000;
-    const deadline = Date.now() + budget;
-    for (;;) {
-      const pending = runtime.speculationOverlay?.pendingIntentCount ?? 0;
-      if (pending === 0) return { pending: 0 };
-      if (Date.now() >= deadline) return { pending };
-      // Plain timer wait: consequence pushes arrive on the WebSocket and the
-      // overlay's intent listener runs in a microtask on the replica
-      // notification, so nothing here needs nudging — just time.
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const overlay = controller().runtime.speculationOverlay;
+    if (overlay === undefined || overlay.pendingIntentCount === 0) {
+      return { pending: 0 };
     }
+    const budget = typeof timeoutMs === "number" ? timeoutMs : 10_000;
+    // Event-driven with a budget: the overlay resolves the quiescence
+    // waiter from the same untrack step that retires the last intent
+    // (consequence pushes arrive on the WebSocket; nothing here needs
+    // nudging), raced against the budget timer. A waiter whose race the
+    // timer wins stays parked until the set empties or the overlay
+    // closes — a spent resolver, not a leak (growth is bounded by the
+    // caller's settle rounds and every parked waiter flushes together).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budgetElapsed = new Promise<"budget">((resolve) => {
+      timer = setTimeout(() => resolve("budget"), budget);
+    });
+    const raced = await Promise.race([
+      overlay.waitForIntentQuiescence().then(() => "quiescent" as const),
+      budgetElapsed,
+    ]);
+    clearTimeout(timer);
+    return {
+      pending: raced === "quiescent" ? 0 : overlay.pendingIntentCount,
+    };
+  },
+
+  // Wait — with no budget of its own — until every event this runtime
+  // fired has reached a terminal consequence (consequenced, errored,
+  // dropped, or refused) that has ARRIVED back here: the overlay's
+  // outstanding-intent set is empty (speculation.md §4 step 2). The
+  // gate a test needs between two CHAINED events whose second served
+  // handler reads state the first one writes: events on DIFFERENT
+  // streams have no cross-stream serve-order guarantee (events.md §2 —
+  // per stream only), so firing the second while the first is in
+  // flight can serve it against a pre-first view; a precondition-
+  // reading handler then no-ops SILENTLY (the 2026-08-22 ON-lane
+  // group-chat flake). Once the first event's consequence has arrived
+  // back, its commit is in the space's history, so any later-fired
+  // event is served against a view that includes it. Backstopped by
+  // the harness RPC timeout, which names this session and command;
+  // instant on the OFF arm (no overlay) and when nothing is
+  // outstanding. First-order only, like the count it drains — a
+  // server-side cascade child is no session's intent.
+  async awaitEventConsequences() {
+    const overlay = controller().runtime.speculationOverlay;
+    if (overlay !== undefined) await overlay.waitForIntentQuiescence();
+    return {};
   },
 
   // Force an ordered-after round trip on every open space connection, so any

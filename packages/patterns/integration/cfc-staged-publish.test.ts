@@ -11,7 +11,7 @@ import {
 import {
   clickTrustedActionAndWaitForText,
   fillCfInput,
-  waitForText,
+  waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -89,7 +89,14 @@ describe("cfc staged publish integration test", () => {
       "#saved-title",
       "Launch checklist",
     );
-    await waitForText(page, "#stage-pill", "saved");
+    // Settled waits throughout: each pill/body text is the EFFECT of the
+    // trusted click's served round trip, and a plain DOM watch cannot
+    // pump the page's own pending pull work — the state can sit one
+    // settle away from being drawn until the stuck-condition net fires
+    // (docs/development/waiting-in-tests.md; the ON-lane "#stage-pill →
+    // saved" 5 m timeouts in the 2026-08-20 attribution ledger were this
+    // wait). The settle is the pump; absent server state still fails.
+    await waitForSettledText(page, "#stage-pill", "saved");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -97,7 +104,7 @@ describe("cfc staged publish integration test", () => {
       "#reviewed-title",
       "Launch checklist",
     );
-    await waitForText(page, "#stage-pill", "reviewed");
+    await waitForSettledText(page, "#stage-pill", "reviewed");
 
     await clickTrustedActionAndWaitForText(
       page,
@@ -105,8 +112,8 @@ describe("cfc staged publish integration test", () => {
       "#published-title",
       "Launch checklist",
     );
-    await waitForText(page, "#stage-pill", "published");
-    await waitForText(
+    await waitForSettledText(page, "#stage-pill", "published");
+    await waitForSettledText(
       page,
       "#published-body",
       "Ship the staged publish demo with trusted UI gates.",

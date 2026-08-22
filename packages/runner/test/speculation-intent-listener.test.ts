@@ -541,6 +541,113 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     expect(failures()).toBe(failuresBefore + 1);
     destination.close();
   });
+
+  it("quiescence waiter: waitForIntentQuiescence resolves when the LAST outstanding intent retires — not on an earlier retire — immediately when nothing is outstanding, and on close", async () => {
+    const { scripted, destination } = scriptedDestination();
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+
+    // Nothing outstanding: resolves immediately (probe by flag — a race
+    // against a bare resolved sentinel loses by one microtask hop).
+    let immediate = false;
+    destination.waitForIntentQuiescence().then(() => {
+      immediate = true;
+    });
+    await flushMicrotasks();
+    expect(immediate).toBe(true);
+
+    destination.trackIntent(SPACE, SIDECAR, "evt-1");
+    destination.trackIntent(SPACE, SIDECAR, "evt-2");
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries = [
+        { eventId: "evt-1", stream: { id: "s", path: [] }, seq: 1 },
+        { eventId: "evt-2", stream: { id: "s", path: [] }, seq: 2 },
+      ];
+    }, [["value", "entries"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(2);
+
+    let resolved = false;
+    const quiesced = destination.waitForIntentQuiescence().then(() => {
+      resolved = true;
+    });
+
+    // First retire: ONE intent still outstanding — the waiter must NOT
+    // resolve (killing mutation: flushing on every untrack instead of on
+    // the set emptying trips here).
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(1);
+    expect(resolved).toBe(false);
+
+    // Last retire (a dropped mark is equally terminal): the set empties,
+    // the waiter resolves.
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![1].status = "dropped";
+      value.entries![1].reason = "gone";
+    }, [
+      ["value", "entries", "1", "status"],
+      ["value", "entries", "1", "reason"],
+    ]);
+    await flushMicrotasks();
+    await quiesced;
+    expect(resolved).toBe(true);
+
+    // Close settles a parked waiter (nothing can retire afterwards).
+    destination.trackIntent(SPACE, SIDECAR, "evt-3");
+    const parked = destination.waitForIntentQuiescence();
+    destination.close();
+    await parked;
+  });
+
+  it("quiescence waiter, two sidecars: draining ONE sidecar's whole set while another sidecar still holds an intent does NOT resolve the waiter (killing mutation: flushing when a sidecar's set empties instead of when the whole tracked map does)", async () => {
+    const { scripted, destination } = scriptedDestination();
+    const SIDECAR_B = "of:stream-events:listener-b";
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+    scripted.seed(SPACE, SIDECAR_B, { entries: [] });
+
+    destination.trackIntent(SPACE, SIDECAR, "evt-a");
+    destination.trackIntent(SPACE, SIDECAR_B, "evt-b");
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries = [
+        { eventId: "evt-a", stream: { id: "s", path: [] }, seq: 1 },
+      ];
+    }, [["value", "entries"]]);
+    scripted.deliver(SPACE, SIDECAR_B, (value) => {
+      value.entries = [
+        { eventId: "evt-b", stream: { id: "s2", path: [] }, seq: 1 },
+      ];
+    }, [["value", "entries"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(2);
+
+    let resolved = false;
+    const quiesced = destination.waitForIntentQuiescence().then(() => {
+      resolved = true;
+    });
+
+    // Retire evt-a: sidecar A's set drains ENTIRELY (its per-sidecar Set
+    // empties and is deleted) while sidecar B still holds evt-b. The
+    // one-sidecar pin above cannot see this arm — its first retire
+    // leaves the shared sidecar's set non-empty — so this is the pin
+    // for the sidecar-drain flush mutant.
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(1);
+    expect(resolved).toBe(false);
+
+    // Retire evt-b: the whole tracked map empties; the waiter resolves.
+    scripted.deliver(SPACE, SIDECAR_B, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    await quiesced;
+    expect(resolved).toBe(true);
+    destination.close();
+  });
 });
 
 // ─── W2.1: the cascade-echo retirement (scripted; the MARK path) ────────

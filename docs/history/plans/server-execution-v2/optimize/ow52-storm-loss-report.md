@@ -257,3 +257,19 @@ the full file — both census tests included, 7 steps per run —
 6–17 s per run, zero quiescence-budget warnings. The census's
 load-dependence caveat applies to any local bench; the mechanism
 coverage above is the primary argument, the 24/24 the corroboration.
+
+**CORRECTION (2026-08-22): this addendum's coverage claim is
+falsified.** The identical failure recurred twice POST-merge (main run
+32543810077 at a docs-only head; PR #6186 run 32547606642), and the
+failing logs carry ZERO quiescence-budget warnings — every settle round
+found the intent set already empty, so the settle race this fix closes
+was not what failed. The census's group-chat flakes were a DIFFERENT
+race: the test's chained draft→trusted-send events land on different
+streams, cross-stream serve order is unpromised (events.md §2), and the
+served trusted handler silently no-ops on a pre-draft view — the
+awaited message is never appended, terminally, before any wait begins,
+so no settle (and no timeout) could ever observe it. This fix's settle
+mechanism remains correct for the mid-drain read race it was built for
+(the storm shape above). The chained-event race is root-caused, made
+deterministic, and closed in
+[`arrival-wait-hardening-report.md`](arrival-wait-hardening-report.md).
