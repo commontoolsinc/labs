@@ -476,18 +476,24 @@ the staleness pin instead of the layer-naming pin. A concurrent
 `/cfc` change still conflicts: that is the precondition the ruling
 kept when it chose basing over dropping the read class entirely.
 
-One read class inside the verifier set is exempt from the VALUE half:
-a CONTENT-ADDRESSED (`cid:`) document's content is identical on every
-layer — the replica refuses content that does not hash to its id — so
-the ordinary view IS the durable content, and the verifier consumes
-it while the read's layers stay excluded from the basis (consistent
-by construction). The exemption matters during the echo's arrival
-window: the echo's staging carries the schema documents its writes
-reference, the covering SERVED commit already persisted the same
-documents server-side, and the client's own durable copy can lag —
-serving the verifier "durably absent" there turned the fill into CFC
-prepare's silent stored-schemaHash-missing abort, the same loss one
-layer deeper. Resolution is location-indifferent one step further:
+One read class is exempt from BOTH halves: a CONTENT-ADDRESSED
+(`cid:`) document's content is identical on every layer and at every
+seq — the engine and every replica refuse content that does not hash
+to its id — so a cid: read carries NO commit-time concurrency
+precondition at all. The verifier consumes the ordinary view (which
+IS the durable content), and the read contributes no conflict-set
+entry whatsoever: neither named layers nor a confirmed-seq basis.
+There is no staleness for the engine's scan to find, and a
+resolution served from the overlay or the realm registry would
+otherwise export an unsatisfiable `confirmed {seq: 0}` for a doc
+whose first install is a real revision row; presence is owned by
+server-side closure validation. The exemption matters during the
+echo's arrival window: the echo's staging carries the schema
+documents its writes reference, the covering SERVED commit already
+persisted the same documents server-side, and the client's own
+durable copy can lag — serving the verifier "durably absent" there
+turned the fill into CFC prepare's silent stored-schemaHash-missing
+abort, the same loss one layer deeper. Resolution is location-indifferent one step further:
 stored `/cfc` metadata can reference a schema document NO replica
 view holds (a frame delivers metadata without its schemaHash refs),
 so `loadSchemaDocument` falls back to the realm schema registry —

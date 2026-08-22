@@ -5615,8 +5615,11 @@ class SpaceReplica implements ISpaceReplica {
    * legal state while the stamper's own commit is in flight), re-arms
    * the dedupe so the next frame carrying the reference kicks again —
    * without the re-arm the delivery-gap window was permanent for the
-   * session. Failures log HERE: the replica-level pull never crosses
-   * the manager's sync-load logging wrappers, so this is the only
+   * session. The empty-completion re-kick is SILENT and frame-paced:
+   * one pull per hash per frame batch, no backoff — a permanently
+   * absent hash re-pulls once per arriving frame without a log.
+   * Failures log HERE: the replica-level pull never crosses the
+   * manager's sync-load logging wrappers, so this is the only
    * client-side trace before the prepare abort. */
   private hydrateArrivedCfcSchemaRefs(sync: SessionSync): void {
     for (const upsert of sync.upserts) {

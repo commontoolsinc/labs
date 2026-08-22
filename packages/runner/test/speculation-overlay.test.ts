@@ -1717,6 +1717,92 @@ describe("Phase 2 speculation overlay", () => {
       () => replica.getDocument(`cid:${lateHash}` as never) !== undefined,
       "the re-armed kick to deliver the stored schema document",
     );
+
+    // The hook's skip arms, each driven by one more frame over the
+    // standing watch:
+    //  - frame 3 re-references lateHash while its dedupe entry is
+    //    RETAINED (a delivered pull keeps it) — the dedupe-hit skip;
+    //  - frame 4 carries metadata WITHOUT a schemaHash (labelMap-only)
+    //    — the shape-guard continue;
+    //  - frame 5 references a REGISTRY-resolvable hash that was never
+    //    kicked — the resolvable-guard continue, whose contract is
+    //    observable: no pull fires, so a doc the engine does not hold
+    //    stays absent from this replica.
+    const registryResolvedSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, guardPin: { type: "string" } },
+    } as const;
+    const registryResolvedHash = internSchemaAsTaggedHashString(
+      registryResolvedSchema,
+    );
+    registerSchemaDocument(registryResolvedHash, registryResolvedSchema);
+    const writeFrame = async (
+      value: { name: string },
+      cfc: Record<string, unknown>,
+    ) => {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const writerDraft = writerRuntime.getCell<{ name: string }>(
+          space,
+          "rearm-draft",
+          DRAFT_SCHEMA,
+        );
+        await writerDraft.sync();
+        const tx = writerRuntime.edit();
+        const docAddress = {
+          space,
+          id: draftLink.id,
+          scope: draftLink.scope,
+          type: "application/json" as const,
+          path: [],
+        };
+        const current = tx.readOrThrow(docAddress);
+        const base = current && typeof current === "object" ? current : {};
+        tx.writeOrThrow(docAddress, { ...base, value, cfc } as never);
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    };
+    const readerSees = (name: string) => () =>
+      (replica.getDocument(draftLink.id, draftLink.scope) as {
+        value?: { name?: string };
+      } | undefined)?.value?.name === name;
+
+    await writeFrame({ name: "third-frame" }, {
+      version: 1,
+      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+      schemaHash: lateHash,
+    });
+    await waitUntil(readerSees("third-frame"), "frame 3 to integrate");
+
+    await writeFrame({ name: "fourth-frame" }, {
+      version: 1,
+      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+    });
+    await waitUntil(readerSees("fourth-frame"), "frame 4 to integrate");
+
+    await writeFrame({ name: "fifth-frame" }, {
+      version: 1,
+      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+      schemaHash: registryResolvedHash,
+    });
+    await waitUntil(readerSees("fifth-frame"), "frame 5 to integrate");
+    await (replica as unknown as { inputSynced(): Promise<void> })
+      .inputSynced();
+    // The resolvable guard skipped the kick: the registry supplied the
+    // content, so no pull ran and the engine-absent doc stays absent.
+    expect(
+      replica.getDocument(`cid:${registryResolvedHash}` as never),
+    ).toBeUndefined();
     cancelWatch();
   });
 
@@ -1726,9 +1812,10 @@ describe("Phase 2 speculation overlay", () => {
     // verifier view served an existing (empty-envelope) doc as DELETED
     // — its root read `undefined` where the transaction's ordinary
     // semantics give `{}`. The durable root now serves the replica
-    // state directly: root `{}`, `["cfc"]` descent a swallowed
-    // NotFound — "no metadata", the correct verdict for an envelope
-    // that exists and carries none.
+    // state directly: root `{}`, and the `["cfc"]` descent resolves
+    // ok(undefined) directly (an object root with the key absent) —
+    // "no metadata", the correct verdict for an envelope that exists
+    // and carries none.
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
