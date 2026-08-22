@@ -1,32 +1,43 @@
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import * as ed25519 from "@noble/ed25519";
 
 import {
   AsBytes,
   DIDKey,
-  InsecureCryptoKeyPair,
   Result,
   Signature,
   Signer,
   Verifier,
 } from "../interface.ts";
-import { AuthorizationError, bytesToDid, didToBytes } from "./utils.ts";
+import {
+  AuthorizationError,
+  bytesToDid,
+  didToBytes,
+  ED25519_ALG,
+} from "./utils.ts";
 
 export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   /**
-   * The key material, held as `FabricBytes` so that it is immutable for as
-   * long as this instance exists. Nothing the constructor was handed, and
-   * nothing handed out since, can alter what this signs with.
+   * The key pair, holding material. Immutable through to the bytes, so
+   * nothing the constructor was handed, and nothing handed out since, can
+   * alter what this signs with.
    */
-  #privateKey: FabricBytes;
-  #publicKey: FabricBytes;
+  #keyPair: FabricKeyPair;
 
   #verifier: NobleEd25519Verifier<ID> | null = null;
 
-  /** Constructs an instance holding its own immutable copy of `keypair`. */
-  constructor(keypair: InsecureCryptoKeyPair) {
-    this.#privateKey = new FabricBytes(keypair.privateKey);
-    this.#publicKey = new FabricBytes(keypair.publicKey);
+  /**
+   * Constructs an instance. `keyPair` must hold material, this being the
+   * implementation that signs with it.
+   */
+  constructor(keyPair: FabricKeyPair) {
+    if (!keyPair.hasMaterial) {
+      throw new Error("Not a noble key pair: it holds handles.");
+    }
+    this.#keyPair = keyPair;
   }
 
   /**
@@ -36,7 +47,7 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
    * made where one is actually required rather than on every read.
    */
   privateKey(): FabricBytes {
-    return this.#privateKey;
+    return this.#keyPair.privateKeyBytes;
   }
 
   did() {
@@ -45,24 +56,21 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   get verifier(): NobleEd25519Verifier<ID> {
     if (!this.#verifier) {
-      this.#verifier = new NobleEd25519Verifier(this.#publicKey);
+      this.#verifier = new NobleEd25519Verifier(this.#keyPair.publicKeyBytes);
     }
     return this.#verifier;
   }
 
   /** @inheritDoc */
-  serialize(): InsecureCryptoKeyPair {
-    return {
-      privateKey: this.#privateKey.slice(),
-      publicKey: this.#publicKey.slice(),
-    };
+  get keyPair(): FabricKeyPair {
+    return this.#keyPair;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
     try {
       const signature = await ed25519.signAsync(
         payload,
-        this.#privateKey.slice(),
+        this.#keyPair.privateKeyBytes.slice(),
       );
 
       return { ok: signature as Signature<T> };
@@ -75,7 +83,9 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     privateKey: Uint8Array,
   ): Promise<NobleEd25519Signer<ID>> {
     const publicKey = await ed25519.getPublicKeyAsync(privateKey);
-    return new NobleEd25519Signer({ publicKey, privateKey });
+    return new NobleEd25519Signer(
+      new FabricKeyPair(ED25519_ALG, publicKey, privateKey),
+    );
   }
 
   static async generate<ID extends DIDKey>(): Promise<NobleEd25519Signer<ID>> {
@@ -83,8 +93,8 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     return await NobleEd25519Signer.fromRaw(privateKey);
   }
 
-  static deserialize<ID extends DIDKey>(keypair: InsecureCryptoKeyPair) {
-    return Promise.resolve(new NobleEd25519Signer<ID>(keypair));
+  static fromKeyPair<ID extends DIDKey>(keyPair: FabricKeyPair) {
+    return Promise.resolve(new NobleEd25519Signer<ID>(keyPair));
   }
 }
 

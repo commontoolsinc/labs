@@ -813,27 +813,39 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  const document = tx.readOrThrow({
+  // Read AT ["cfc"], never the whole document: this read is a commit-time
+  // concurrency precondition scoped to what the verifier CONSUMES. A
+  // path-[] recursive read made the whole document a value dependency, so
+  // a concurrent, metadata-irrelevant value write between the reader's
+  // confirmed basis and the server head conflicted the commit — for a
+  // blind UI-input fill during its own echo's arrival window (the
+  // client's confirmed basis lags exactly then), that killed the user's
+  // typed input as a stale-confirmed-read conflict the moment the §6
+  // layer-naming half was fixed (verification-coverage.md OW47's
+  // re-close; the name-draft triage's arm (c), the path half of the
+  // ruled arm (b)). A concurrent /cfc change still conflicts — the
+  // precondition the ruling kept.
+  const metadata = tx.readOrThrow({
     space,
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(document) || !isObjectOrArray(document.cfc)) {
+  if (!isObjectOrArray(metadata)) {
     return undefined;
   }
-  const version = (document.cfc as { version?: unknown }).version;
-  if (version !== undefined && version !== 1 && version !== 2) {
+  const version = (metadata as { version?: unknown }).version;
+  if (version !== undefined && version !== 1) {
     // Fail closed on a format this build postdates: reading the envelope
     // as version 1 would walk a schema it cannot interpret and silently
     // under-label. Callers on the commit path turn this into an
     // unreadable envelope (rejected in enforcing modes) or abort loudly.
     throw new UnknownCfcMetadataVersionError(version);
   }
-  return document.cfc as CfcMetadata;
+  return metadata as CfcMetadata;
 };
 
 /**
@@ -4538,19 +4550,21 @@ const ensureSchemaDocument = (
     );
   }
   // The envelope document rides the SAME staging path as link-schema
-  // documents: registration makes it resolvable in-session (content
-  // re-verified against the hash), and the closure staging brings the
-  // per-transaction dedupe, the confirmed-persistence elision, and
-  // dependency recursion — inert while envelopes are stored inline, and
-  // what makes a decomposed envelope deliverable without a new write
-  // path. The read side stays `loadSchemaDocument`'s space-read with
-  // verification: a registry hit must never mask a document the SPACE
-  // does not hold.
+  // documents: registration makes it resolvable in-session — content
+  // re-verified against the hash, and `loadSchemaDocument` falls back to
+  // exactly this registration where no replica holds the cid: document
+  // (a frame delivers `/cfc` metadata without its schemaHash refs, and a
+  // speculative run's staged copy retires with its layer) — and the
+  // closure staging brings the per-transaction dedupe, the
+  // confirmed-persistence elision, and dependency recursion. The read
+  // side stays space-FIRST with verification: the registry supplies only
+  // what the space does not hold, never replaces what it does.
   registerSchemaDocument(schemaHash, schema);
   if (tx.stageSchemaDocClosure !== undefined) {
     tx.stageSchemaDocClosure(space, schemaHash);
     return;
   }
+
   const id = `cid:${schemaHash}`;
   // Do not pre-read the content-addressed schema document here. A read-before-
   // write can make otherwise idempotent schema persistence fail with stale-read
@@ -4583,6 +4597,20 @@ export const loadSchemaDocument = (
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isObjectOrArray(existing) || existing.value === undefined) {
+    // The replica does not hold the document — but content addressing
+    // makes resolution location-indifferent: the realm's schema-document
+    // registry holds only content VERIFIED against its hash at
+    // registration (delivery, link/traverse resolution, local staging),
+    // so a registered copy IS the stored document. Stored metadata can
+    // legitimately reference a document this client never fetched as a
+    // doc — a frame delivers `/cfc` metadata without carrying its
+    // schemaHash refs — and refusing there killed the commit on a
+    // resolution gap, not a policy (silently, in the worker: the
+    // name-draft triage's flagged "missing or unreadable" class).
+    const registered = lookupSchemaDocument(schemaHash);
+    if (registered !== undefined) {
+      return registered;
+    }
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
   const schema = existing.value as JSONSchema;

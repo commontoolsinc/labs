@@ -234,7 +234,7 @@ returns a plain-JSON AST node):
 |---|---|
 | `match(f.col, /re/, {group?, min?})` | run the regex (forced global) over the column's text ⟹ the ordered list of matches (or capture `group`). The universal field extractor — split + clean in one; subsumes JSON arrays and dirty `Name <addr>` lists. **Strict-if-present:** a non-empty value yielding zero matches fails closed at evaluation (never under-label); `min` makes the field a required anchor |
 | `principal(protocol, match(…))` | `did:<protocol>:<v>` for each extracted `v` (distributes over the match list). Normalization is protocol-implied: `mailto`/`web` lowercase + trim; `did:key` untouched (base58 is case-sensitive) |
-| `dbOwner()` | the db's owner — the principal that created the SqliteDb cell, resolved from the db ref (a fixed db property, so the rule stays pure; for a per-user-scoped db this is that user) |
+| `dbOwner()` | the db's owner — the principal that created the SqliteDb cell, resolved from the db ref (a fixed db property, so the rule stays pure; for a per-user-scoped db this is that user). Creation under SERVED execution mints the CREATING RUN's acting principal — the demanded run's carried identity, never the serving runtime's ambient (service) identity (`docs/specs/server-side-execution/serving-loop.md` §3c); a served creating run with no carried actor mints NO owner, and `dbOwner()` fails closed (RATIFIED — RULED 2026-08-22; `docs/specs/server-side-execution/verification-coverage.md` OW53 records the ruling) |
 | `all(...t)` | separate **conjunctive** clauses, one per atom — the default confidentiality combinator |
 | `any(...t)` | **one OR-clause**: any alternative satisfies it (CFC spec §3.1.8). Serializes into the rule as an authored OR-clause (un-reserved by Epic E1) — never silently lowered to the conjunctive form |
 | `intersect(...t)` | set ∩ over integrity atom sets (the trust-floor meet) — integrity only |
@@ -380,7 +380,19 @@ be un-counted), where the mode is rejected outright.
 
 **Read-time clearance (Phase 3.b).** Filtering by *who is asking*, rather than
 by a declared contract: `db.query(sql, { readClearance: true })` keeps only the
-rows the **acting reader** may read and drops the rest. A reader may read a row
+rows the **acting reader** may read and drops the rest. The acting reader is
+the requesting RUN's acting principal: on a client, the client's own user;
+under SERVED execution, the demanded run's carried principal — never the
+serving runtime's ambient (service) identity
+(`docs/specs/server-side-execution/serving-loop.md` §3c; the reader keys the
+request hash and the per-`(query, reader)` cleared result cell —
+`docs/specs/server-side-execution/builtins.md` §2). The reader keys that
+request identity at the result's own granularity: a cleared result whose
+scope narrows below `user` (a session-scoped db) joins the run's SESSION to
+the request hash — and, through it, the effect key — alongside the user
+(RULED 2026-08-22; `docs/specs/server-side-execution/verification-coverage.md`
+OW53), so two sessions of one user materialize distinct cleared cells;
+which rows a reader may read never varies by session. A reader may read a row
 iff, for **every** conjunctive clause of the row's re-derived confidentiality,
 the reader is one of that clause's alternatives (the label stores concrete
 principals — `dbOwner()` is resolved at eval time — so this is exact-match; a

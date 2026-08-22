@@ -44,7 +44,14 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   committed result (read-through). If inputs changed so the memo key
   differs, the node reads as pending — the UI shows its ordinary loading
   state until the server's result arrives. No exceptions: no "just this
-  one idempotent GET".
+  one idempotent GET". OBLIGATION for the read-through's memo-key
+  comparison (pinned 2026-08-22, inherited by the arrival-witness
+  train's read-through work): a session-scoped CLEARED `sqlite*`
+  result's request hash is session-keyed (builtins.md §2), so a
+  read-through that recomputes the key must reproduce the session
+  component — or key the comparison on the STORED claim's recorded
+  identity — a session-blind recomputation would misread "inputs
+  changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
   is reversible. The overlay records the nonce it acted on.
 - Child-piece instantiation (builtins.md §3): result-as-pattern
@@ -272,9 +279,11 @@ On each pushed `derived` commit with `derivedThrough = W` and
    (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
    the entry wrote holds a CONFIRMED value at seq `≥` that floor (the
    authoritative derivation for the instance this client reads has
-   ARRIVED) — regardless of value agreement (the store wins); keep
-   live-input echoes whose authored commit is still unacked or not yet
-   covered by `W` (the user is mid-typing), and keep echoes whose
+   ARRIVED; what counts as the witness at exactly the floor is the
+   arrival-witness predicate, RULED 2026-08-22 — the arrival-gate
+   paragraph below) — regardless of value agreement (the store wins);
+   keep live-input echoes whose authored commit is still unacked or not
+   yet covered by `W` (the user is mid-typing), and keep echoes whose
    written instance the store has not yet spoken for (nothing to win
    with — see the arrival-gate paragraph below).
 4. If any local intents remain un-consequenced (offline queue, in-flight
@@ -358,7 +367,40 @@ would have retired anyway (the store has spoken for the instance at seq
 Pinned in `speculation-arrival-gate.test.ts` (the E2 shape end to end,
 mutation: wake removed → the entry stands until an unrelated commit;
 scripted: an arrival for an unwritten doc sweeps nothing, an arrival
-while `W < floor` retires nothing).** Two riders ride with the
+while `W < floor` retires nothing).** **The arrival-witness predicate
+(RULED 2026-08-22 — owner, on the OW33 fork memo's recommendation): a
+confirmed cover WITNESSES arrival for a written doc when its seq is
+STRICTLY ABOVE the entry's floor — whatever its commit class: the
+store has spoken past everything this speculation consumed — or when
+it sits AT the floor and its covering commit is DERIVED-class
+(protocol.md §1's producer vocabulary): the legitimate at-floor
+arrival is a re-derivation whose run read the already-arrived value
+at that very seq. An authored-class cover at the floor is the entry's
+own basis commit — the setup write that created the computed docs'
+structure (the client's own for a new instance, a prior session's for
+a resumed one) — and never witnesses the derivation's arrival: the
+class-blind gate retired first-run speculations on it 40–260 ms
+before the served value landed, the ruled sentence's own excluded
+class (the OW33 hole). A cover whose class the replica does not know
+(an OFF-arm or pre-predicate frame) does not witness at the floor
+either — fail toward the standing echo (value-identical in the
+observed arms; an unknown-class cover at the floor could be a foreign
+write whose value differs, and the next cover settles it), never the
+undefined read. A `system`-class cover at the floor does not witness
+either: the predicate demands the derivation itself — `derived` — not
+merely a server-side write (`!== "derived"`, conservative, converging
+on the next cover). The elision posture above is unchanged: no rewrite
+means the doc's seq stays BELOW the floor, and the predicate is never
+consulted. Carriage: the covering commit's class rides session-frame
+upserts as `coverClass` (populated only under the flag — the OFF wire
+is byte-identical), is recorded on the replica's confirmed record
+(frames on integrate; `authored`/`derived` at own-commit promotions),
+and reaches the sweep through `speculationRetirementView`. Pinned in
+`speculation-arrival-gate.test.ts` (both observed arms replayed
+red-first from the decoded store shapes; elision, at-floor-derived,
+and above-floor-any-class both-sides; mutation-checked in both
+directions) and `v2-cover-class-frames.test.ts` (the frame carriage,
+both arms).** Two riders ride with the
 gate: SUPERSEDE-BY-NEWER — a
 newer entry of the same writer whose WHOLE-DOC ops cover every doc an
 older entry wrote retires the older one at seal (the drop of a lower
@@ -438,6 +480,77 @@ Rebase-to-confirmed / CAS-translation machinery for authored writes
 over speculative bases was CONSIDERED AND REJECTED with that ruling:
 UI components do not commit authored writes derived from intermediate
 speculative values, so the added complexity buys nothing shipped.
+
+### The blind-write reads that consume no overlay value (RULED 2026-08-21)
+
+The refusal above is about DEPENDENCIES — a basis entry stands for a
+value the commit consumed. A blind UI-input write (the
+`markUiInputBlindWriteTx` family: a user's scalar `$value` overwrite,
+last-write-wins by design) consumes no overlay value, so the two read
+classes such a transaction contributes to its commit basis base on the
+doc's NON-speculative stack — confirmed state plus durable in-flight
+layers, speculative layers excluded — instead of turning the user's
+own typed input into a terminal refusal whenever one of their own
+echoes still stands (an echo's standing window is at least a full
+served round trip, and unbounded for a never-served instance):
+
+- The structural existence/shape precondition — the nonRecursive read
+  at the cell's parent (verification-coverage.md OW47's close;
+  `excludeSpeculativeLayers` in `buildReads`).
+- CFC prepare's internal-verifier reads (OW47's second producer, the
+  name-draft triage; RULED 2026-08-21 — arm (b) of the triage's §9
+  fork): the verifier READS and VERIFIES the non-speculative state.
+  The verifier's job is the durable policy state the server will
+  enforce against — an overlay layer never reaches the wire, so
+  deriving policy from it would verify state the server can never
+  see — and the basis named for these reads is the same durable layer
+  set, so verify-durable and name-durable always travel together
+  (never verify-overlay + name-durable).
+
+The verifier read's commit-set entry is scoped to what it CONSUMES —
+the stored-metadata read sits AT `["cfc"]`, never at the document
+root. A root-recursive read made the whole document a value
+dependency at the reader's confirmed basis, and the blind fill's
+basis lags exactly while its own echo stands (the arrival window), so
+the covering served commit's value patch conflicted the fill
+server-side as a stale confirmed read — the same silent loss through
+the staleness pin instead of the layer-naming pin. A concurrent
+`/cfc` change still conflicts: that is the precondition the ruling
+kept when it chose basing over dropping the read class entirely.
+
+One read class is exempt from BOTH halves: a CONTENT-ADDRESSED
+(`cid:`) document's content is identical on every layer and at every
+seq — the engine and every replica refuse content that does not hash
+to its id — so a cid: read carries NO commit-time concurrency
+precondition at all. The verifier consumes the ordinary view (which
+IS the durable content), and the read contributes no conflict-set
+entry whatsoever: neither named layers nor a confirmed-seq basis.
+There is no staleness for the engine's scan to find, and a
+resolution served from the overlay or the realm registry would
+otherwise export an unsatisfiable `confirmed {seq: 0}` for a doc
+whose first install is a real revision row; presence is owned by
+server-side closure validation. The exemption matters during the
+echo's arrival window: the echo's staging carries the schema
+documents its writes reference, the covering SERVED commit already
+persisted the same documents server-side, and the client's own
+durable copy can lag — serving the verifier "durably absent" there
+turned the fill into CFC prepare's silent stored-schemaHash-missing
+abort, the same loss one layer deeper. Resolution is location-indifferent one step further:
+stored `/cfc` metadata can reference a schema document NO replica
+view holds (a frame delivers metadata without its schemaHash refs),
+so `loadSchemaDocument` falls back to the realm schema registry —
+which holds only content verified against its hash, and which the
+metadata-stamping site itself populates (`ensureSchemaDocument`
+registers what it writes: whoever stamped the reference held the
+content, the standing echo's own derivation included).
+
+Both exclusions are about the NAMED BASIS of one commit, never a
+withdrawal: the echo itself stands until its ordinary retirement
+(§4). Value-consuming reads keep the refusal unchanged in every
+transaction shape, and a transaction outside the blind-write family —
+including its verifier reads — keeps naming every layer;
+`speculation-overlay.test.ts` pins the export, the scoping, the
+verify-durable consistency, and the content-addressed exemption.
 
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an

@@ -40,6 +40,9 @@ export const sameSnapshot = (
   if (left === undefined || right === undefined) {
     return left === right;
   }
+  // `coverClass` is deliberately not compared: it is a pure function of
+  // `seq` (one seq names exactly one commit, whose class is immutable),
+  // so it cannot differ while seq matches.
   return left.branch === right.branch &&
     left.id === right.id &&
     left.scopeKey === right.scopeKey &&
@@ -72,6 +75,9 @@ export const toCacheEntry = (
       scopeKey: instanceKey,
       seq: entity.seq,
       deleted: true,
+      ...(entity.coverClass === undefined
+        ? {}
+        : { coverClass: entity.coverClass }),
     };
   }
   return {
@@ -81,6 +87,9 @@ export const toCacheEntry = (
     scopeKey: instanceKey,
     seq: entity.seq,
     doc: entity.document,
+    ...(entity.coverClass === undefined
+      ? {}
+      : { coverClass: entity.coverClass }),
   };
 };
 
@@ -116,7 +125,9 @@ export const toWireUpsert = (
 ): SessionSyncUpsert => {
   // Field order matches the pre-instance-keying cache entry exactly
   // (branch, id, scope, seq, then deleted|doc), so serialized frames are
-  // byte-identical to before the re-key.
+  // byte-identical to before the re-key. `coverClass` (the arrival
+  // witness's class annotation, populated only under the ON arm) appends
+  // after the keying field for the same reason.
   if (entry.deleted === true) {
     return {
       branch: entry.branch,
@@ -125,6 +136,9 @@ export const toWireUpsert = (
       seq: entry.seq,
       deleted: true,
       ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+      ...(entry.coverClass === undefined
+        ? {}
+        : { coverClass: entry.coverClass }),
     };
   }
   return {
@@ -134,6 +148,7 @@ export const toWireUpsert = (
     seq: entry.seq,
     ...(entry.doc === undefined ? {} : { doc: entry.doc }),
     ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+    ...(entry.coverClass === undefined ? {} : { coverClass: entry.coverClass }),
   };
 };
 

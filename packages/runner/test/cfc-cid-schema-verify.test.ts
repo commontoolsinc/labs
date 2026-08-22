@@ -62,7 +62,18 @@ const fakeTxOverDocuments = (
   documents: Record<string, unknown>,
 ): IExtendedStorageTransaction =>
   ({
-    readOrThrow: (target: { id: string }) => documents[target.id],
+    // Honors the read PATH like the real transaction (the stored-metadata
+    // read is scoped to ["cfc"] — a path-blind stub would hand a whole
+    // document to a subtree read and misreport "no metadata" as a
+    // malformed envelope).
+    readOrThrow: (target: { id: string; path?: readonly string[] }) => {
+      let value: unknown = documents[target.id];
+      for (const segment of target.path ?? []) {
+        if (value === null || typeof value !== "object") return undefined;
+        value = (value as Record<string, unknown>)[segment];
+      }
+      return value;
+    },
   }) as unknown as IExtendedStorageTransaction;
 
 const envelopeTarget = { space, id: "of:doc", scope: "space" } as const;
@@ -141,9 +152,13 @@ describe("stored CFC envelope gathering", () => {
   // A root carrying `$ref: cid:` members — a decomposed write, or the
   // trail a reference-form declared schema leaves — recomposes at load,
   // every member verified against its own address.
-  const decomposedFixture = () => {
+  // One fixture per test: `loadSchemaDocument` falls back to the realm
+  // registry on replica absence, and a test that loads a closure registers
+  // it — a SHARED fixture would let one test's registration satisfy the
+  // next test's deliberately missing document.
+  const decomposedFixture = (tag: string) => {
     const child = internSchema(
-      { type: "string", ifc: { confidentiality: ["sealed"] } } as JSONSchema,
+      { type: "string", ifc: { confidentiality: [tag] } } as JSONSchema,
       true,
     );
     const root = internSchema(
@@ -157,7 +172,7 @@ describe("stored CFC envelope gathering", () => {
   };
 
   it("recomposes a reference-carrying root's closure into one inline schema", () => {
-    const { child, root } = decomposedFixture();
+    const { child, root } = decomposedFixture("sealed-recomposed");
     const result = loadStoredCfcEnvelope(
       fakeTxOverDocuments({
         "of:doc": metadataNaming(root.taggedHashString),
@@ -172,12 +187,12 @@ describe("stored CFC envelope gathering", () => {
       const spelled = JSON.stringify(result.schema);
       // Self-contained: the definition arrived inline, no reference left.
       expect(spelled).not.toContain("cid:");
-      expect(spelled).toContain('"sealed"');
+      expect(spelled).toContain('"sealed-recomposed"');
     }
   });
 
   it("reports an envelope whose definition document is missing as unreadable", () => {
-    const { root } = decomposedFixture();
+    const { root } = decomposedFixture("sealed-missing");
     const result = loadStoredCfcEnvelope(
       fakeTxOverDocuments({
         "of:doc": metadataNaming(root.taggedHashString),
@@ -193,7 +208,7 @@ describe("stored CFC envelope gathering", () => {
   });
 
   it("reports an envelope whose definition document is poisoned as unreadable", () => {
-    const { child, root } = decomposedFixture();
+    const { child, root } = decomposedFixture("sealed-poisoned");
     const poisoned = internSchema(
       { type: "number" } as JSONSchema,
       true,

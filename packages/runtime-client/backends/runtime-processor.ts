@@ -17,7 +17,12 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import { DID, Identity, type Session } from "@commonfabric/identity";
+import {
+  DID,
+  Identity,
+  keyPairFromRealmValue,
+  type Session,
+} from "@commonfabric/identity";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
@@ -608,9 +613,16 @@ export class RuntimeProcessor {
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
-    const identity = await Identity.deserialize(data.identity);
+    const identity = await Identity.fromKeyPair(
+      keyPairFromRealmValue(data.identity, "Initialization `identity`"),
+    );
     const spaceIdentity = data.spaceIdentity
-      ? await Identity.deserialize(data.spaceIdentity)
+      ? await Identity.fromKeyPair(
+        keyPairFromRealmValue(
+          data.spaceIdentity,
+          "Initialization `spaceIdentity`",
+        ),
+      )
       : undefined;
     const space = data.spaceDid;
     const telemetry = new RuntimeTelemetry();

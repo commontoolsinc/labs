@@ -1,4 +1,4 @@
-import { isKeyPairRaw, KeyPairRaw } from "@commonfabric/identity";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export enum WorkerIPCMessageType {
@@ -10,12 +10,16 @@ export enum WorkerIPCMessageType {
 export type InitializationData = {
   did: string;
   toolshedUrl: string;
-  // TODO(danfuzz): this is one of the two crossings the `InsecureCryptoKeyPair`
-  // marker in `@commonfabric/identity`'s `interface.ts` is about. The key
-  // material is a plain `Uint8Array` pair because that is what structured
-  // clone carries; `codec-realm` carries a `FabricBytes`, which would make the
-  // bytes immutable end to end rather than only within a signer.
-  rawIdentity: KeyPairRaw;
+  /**
+   * The service's signer, as a `codec-realm` encoding of the `FabricKeyPair`
+   * it signs with. Encoded rather than plain because that is the one format
+   * which carries either state of a key pair -- key handles included --
+   * across a realm boundary whole.
+   *
+   * The name is load-bearing: `safeFormat()` in `./worker.ts` redacts this key
+   * out of everything it logs, and it redacts by name.
+   */
+  encodedIdentity: RealmEncodedValue;
   experimental?: {
     modernCellRep?: boolean;
   };
@@ -27,7 +31,11 @@ export function isInitializationData(
   return !!(isObjectNotArray(value) &&
     typeof value.did === "string" &&
     typeof value.toolshedUrl === "string" &&
-    isKeyPairRaw(value.rawIdentity));
+    // The envelope's shape and no more: what it decodes to is settled by the
+    // decode itself, in `initialize()`, the marker in slot zero being
+    // recognizable only there.
+    Array.isArray(value.encodedIdentity) &&
+    (value.encodedIdentity.length === 2));
 }
 
 export type RunData = {

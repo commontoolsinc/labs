@@ -14,6 +14,7 @@ import { Database } from "@db/sqlite";
 import {
   applyCommit,
   close,
+  commitClassOfSeq,
   type Engine,
   open,
   ProtocolError,
@@ -172,4 +173,89 @@ Deno.test("commit class: a pre-class store migrates, backfilling 'authored'", as
     { seq: 1, class: "authored" },
     { seq: 2, class: "system" },
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// commitClassOfSeq (the arrival-witness predicate's server-side read,
+// speculation.md §4): the unknown-seq arm answers undefined, and the memo
+// declines to record inside ANY transaction — `applyCommit` brackets its
+// transaction with the staged document cache, but `applyWaveCommit` opens its
+// own transaction WITHOUT staging, so the guard is the CONNECTION state
+// (`database.inTransaction`), not a caller marker. A rolled-back seq is
+// re-minted by the retry, possibly under another class; a memo entry written
+// mid-transaction would serve that phantom class forever.
+// ---------------------------------------------------------------------------
+
+Deno.test("commitClassOfSeq: seq 0, negative, and unknown seqs answer undefined (fail-closed substrate of the at-floor witness)", async () => {
+  const { engine } = await createEngine();
+  try {
+    assertEquals(commitClassOfSeq(engine, 0), undefined);
+    assertEquals(commitClassOfSeq(engine, -1), undefined);
+    // No commit admitted yet: every positive seq is unknown.
+    assertEquals(commitClassOfSeq(engine, 1), undefined);
+    applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "authored",
+    });
+    assertEquals(commitClassOfSeq(engine, 1), "authored");
+    // Still undefined past the head — and the unknown answer was not memoized:
+    // the same seq admitted later answers its real class. ('system' here:
+    // 'derived' is unclaimable off the flag, and this arm runs flagless.)
+    assertEquals(commitClassOfSeq(engine, 2), undefined);
+    applyCommit(engine, {
+      sessionId: "server:direct",
+      commit: setCommit(2, "of:doc-1"),
+      commitClass: "system",
+    });
+    assertEquals(commitClassOfSeq(engine, 2), "system");
+  } finally {
+    close(engine);
+  }
+});
+
+Deno.test("commitClassOfSeq: a mid-transaction read is served but never memoized — a rolled-back seq re-minted under another class answers the new class, not the phantom", async () => {
+  const { engine } = await createEngine();
+  try {
+    applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "authored",
+    });
+    // A transaction stages a derived-class commit at seq 2, reads its class
+    // mid-transaction (served from the staged row), then rolls back — the
+    // applyWaveCommit shape: its own transaction, no staged-cache bracket.
+    class Rollback extends Error {}
+    let midTransaction: string | undefined = "unread";
+    try {
+      engine.database.transaction(() => {
+        engine.database.exec(
+          `INSERT INTO "commit" (seq, session_id, local_seq, original,
+             resolution, class)
+           VALUES (2, 'session-a', 2, '{}', '{}', 'derived')`,
+        );
+        midTransaction = commitClassOfSeq(engine, 2);
+        throw new Rollback();
+      }).immediate();
+    } catch (error) {
+      if (!(error instanceof Rollback)) throw error;
+    }
+    assertEquals(midTransaction, "derived");
+    // Rolled back: the row is gone, and the answer must say so — a memo entry
+    // recorded mid-transaction would still say "derived" here.
+    assertEquals(commitClassOfSeq(engine, 2), undefined);
+    // The retry re-mints seq 2 under ANOTHER class; the phantom would shadow
+    // it for every future frame annotation at this seq.
+    applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(2, "of:doc-1"),
+      commitClass: "authored",
+    });
+    assertEquals(commitClassOfSeq(engine, 2), "authored");
+  } finally {
+    close(engine);
+  }
 });

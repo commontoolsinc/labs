@@ -12,12 +12,12 @@ export type {
 
 /**
  * The signing half of the principal contract as the memory protocol uses it:
- * an {@link IdentitySigner} without the `serialize()` method that hands back
- * raw key material.
+ * an {@link IdentitySigner} without the `keyPair` accessor that hands back its
+ * key material.
  */
 export type Signer<ID extends DID = DID> = Omit<
   IdentitySigner<ID>,
-  "serialize"
+  "keyPair"
 >;
 
 export type AsString<T> = string & {

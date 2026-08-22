@@ -1,3 +1,4 @@
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import { base64pad } from "multiformats/bases/base64";
 
 import {
@@ -5,7 +6,7 @@ import {
   Ed25519Signer,
   Ed25519Verifier,
 } from "./ed25519/index.ts";
-import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
+import { AsBytes, DIDKey, Signer, Verifier } from "./interface.ts";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
@@ -40,9 +41,9 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return this.#keypair.sign(payload);
   }
 
-  // Serialize this identity for storage.
-  serialize(): KeyPairRaw {
-    return this.#keypair.serialize();
+  /** This identity's key pair. */
+  get keyPair(): FabricKeyPair {
+    return this.#keypair.keyPair;
   }
 
   // Derive a new `Identity` given a seed string.
@@ -150,11 +151,11 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return Identity.fromRaw(base64pad.decode(stringKey), config);
   }
 
-  // Deserialize `input` from storage into an `Identity`.
-  static async deserialize<ID extends DIDKey>(
-    input: KeyPairRaw,
+  /** Reconstitutes an `Identity` from the key pair it hands out. */
+  static async fromKeyPair<ID extends DIDKey>(
+    keyPair: FabricKeyPair,
   ): Promise<Identity<ID>> {
-    return new Identity(await Ed25519Signer.deserialize(input));
+    return new Identity(await Ed25519Signer.fromKeyPair(keyPair));
   }
 }
 

@@ -152,6 +152,24 @@ testBothImpls(
   },
 );
 
+Deno.test("each implementation refuses the key pair state it cannot sign with", async () => {
+  const material = (await NobleEd25519Signer.fromRaw(TEST_PRIVATE_KEY)).keyPair;
+  assertThrows(
+    () => new NativeEd25519Signer(material, TEST_DID),
+    Error,
+    "holds material",
+  );
+
+  if (!await isNativeEd25519Supported()) return;
+
+  const handles = (await NativeEd25519Signer.fromRaw(TEST_PRIVATE_KEY)).keyPair;
+  assertThrows(
+    () => new NobleEd25519Signer(handles),
+    Error,
+    "holds handles",
+  );
+});
+
 // Run tests with both implentations
 function testBothImpls(
   name: string,

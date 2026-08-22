@@ -1,18 +1,12 @@
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import * as bip39 from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 
-import {
-  AsBytes,
-  DIDKey,
-  isCryptoKeyPair,
-  isInsecureCryptoKeyPair,
-  KeyPairRaw,
-  Signer,
-  Verifier,
-} from "../interface.ts";
+import { AsBytes, DIDKey, Signer, Verifier } from "../interface.ts";
 import { NativeEd25519Signer, NativeEd25519Verifier } from "./native.ts";
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import {
+  ED25519_ALG,
   ed25519RawToPkcs8,
   fromPEM,
   generateEd25519Pkcs8,
@@ -47,8 +41,8 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#impl.verifier;
   }
 
-  serialize(): KeyPairRaw {
-    return this.#impl.serialize();
+  get keyPair(): FabricKeyPair {
+    return this.#impl.keyPair;
   }
 
   did() {
@@ -59,11 +53,16 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#impl.sign(payload);
   }
 
-  // Only "noble" implementations can be converted to PKCS8, since we need the
-  // raw material. Asks the implementation directly rather than inspecting what
-  // `serialize()` returns: that would build a pair object and a second array
-  // only to discard both, and the question here is which implementation this
-  // is, which the type already answers.
+  /**
+   * This signer's key in PKCS8 form.
+   *
+   * Narrows to the implementation rather than asking the key pair which state
+   * it is in: the bytes come from that class's own `privateKey()`, and the
+   * narrowing is what makes that call reachable.
+   *
+   * @throws If this is not a "noble" implementation, the raw material being
+   *   what the conversion needs.
+   */
   toPkcs8() {
     if (this.#impl instanceof NobleEd25519Signer) {
       return toPEM(ed25519RawToPkcs8(this.#impl.privateKey().slice()));
@@ -135,18 +134,30 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return await Ed25519Signer.fromRaw(bytes, config);
   }
 
-  static async deserialize<ID extends DIDKey>(
-    input: KeyPairRaw,
+  /**
+   * Reconstitutes a signer from the key pair it hands out.
+   *
+   * Which implementation does so is decided by the pair itself rather than by
+   * a `config`: only "noble" can sign with material and only "webcrypto" can
+   * sign with handles, so the state the pair is in names the one
+   * implementation that can carry it.
+   *
+   * @throws If the pair is for another algorithm.
+   */
+  static async fromKeyPair<ID extends DIDKey>(
+    keyPair: FabricKeyPair,
   ): Promise<Ed25519Signer<ID>> {
-    if (isCryptoKeyPair(input)) {
-      return new Ed25519Signer(
-        await NativeEd25519Signer.deserialize<ID>(input),
+    if (keyPair.algorithm !== ED25519_ALG) {
+      throw new Error(
+        `Not an ${ED25519_ALG} key pair: it is for ${keyPair.algorithm}.`,
       );
-    } else if (isInsecureCryptoKeyPair(input)) {
-      return new Ed25519Signer(await NobleEd25519Signer.deserialize(input));
-    } else {
-      throw new Error("common-identity: Could not deserialize key.");
     }
+
+    return new Ed25519Signer(
+      keyPair.hasMaterial
+        ? await NobleEd25519Signer.fromKeyPair<ID>(keyPair)
+        : await NativeEd25519Signer.fromKeyPair<ID>(keyPair),
+    );
   }
 }
 

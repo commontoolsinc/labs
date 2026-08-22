@@ -1,4 +1,6 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
+
+import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
@@ -7,7 +9,6 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
 import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
 import { Identity } from "../src/identity.ts";
-import type { InsecureCryptoKeyPair } from "../src/interface.ts";
 
 Deno.test("Identity generates mnemonics", async () => {
   const [identity, mnemonic] = await Identity.generateMnemonic();
@@ -84,7 +85,8 @@ Deno.test("toRaw is asymmetric — byte order is preserved", async () => {
 });
 
 Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", async () => {
-  // serialize() hands out the live internal buffer; toRaw must not.
+  // The pair `keyPair` hands out is immutable; `toRaw()` answers with bytes a
+  // caller owns, and so has a copy to make where that one does not.
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "noble",
   });
@@ -93,27 +95,49 @@ Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", as
   assertEquals(identity.toRaw()[0], 7, "the identity's seed must be unchanged");
 });
 
-Deno.test("a native signer's serialize() cannot be used to reach it", async () => {
-  // The native arm holds a `CryptoKeyPair`, not `FabricBytes`, so its safety
-  // comes from the object it returns rather than from the key type: the
-  // `CryptoKey`s are opaque, but the pair around them is ordinary, and
-  // reassigning a member of a shared one would reach the signer.
+Deno.test("a native signer's key pair cannot be used to reach it", async () => {
+  // The native arm holds `CryptoKey`s, which are opaque and carry no reachable
+  // material. What remains to check is the pair around them: one instance
+  // serves every call, so a holder able to reassign a key in it would reach
+  // the signer.
   if (!await isNativeEd25519Supported()) return;
 
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "webcrypto",
   });
-  const first = identity.serialize() as CryptoKeyPair;
+  const keyPair = identity.keyPair;
 
-  // One frozen pair serves every call here: the keys are opaque and the pair
-  // cannot be reassigned, so no holder can reach the signer through it. That
-  // is the requirement -- not that the calls differ.
-  assert(Object.isFrozen(first), "the pair must not be reassignable");
+  assert(Object.isFrozen(keyPair), "the pair must not be reassignable");
   assertThrows(
     () => {
-      (first as { privateKey: CryptoKey }).privateKey = first.publicKey;
+      (keyPair as { publicCryptoKey: CryptoKey }).publicCryptoKey =
+        keyPair.privateCryptoKey;
     },
     TypeError,
+  );
+
+  // The `CryptoKeyPair` record is minted per call, so a caller that reassigns
+  // a member of one alters nothing anyone else reads.
+  const record = keyPair.cryptoKeyPair;
+  record.privateKey = record.publicKey;
+  assertEquals(keyPair.cryptoKeyPair.privateKey, keyPair.privateCryptoKey);
+});
+
+Deno.test("fromKeyPair refuses a pair for another algorithm", async () => {
+  // A pair holding material says which algorithm it is for and is otherwise
+  // indistinguishable from an ed25519 one, both keys being 32 bytes.
+  const seed = new Uint8Array(32).fill(7);
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  const wrong = new FabricKeyPair(
+    "X25519",
+    identity.keyPair.publicKeyBytes,
+    identity.keyPair.privateKeyBytes,
+  );
+
+  await assertRejects(
+    () => Identity.fromKeyPair(wrong),
+    Error,
+    "X25519",
   );
 });
 
@@ -135,7 +159,7 @@ Deno.test("a verifier built from raw bytes copies them", async () => {
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "noble",
   });
-  const publicKey = (identity.serialize() as InsecureCryptoKeyPair).publicKey;
+  const publicKey = identity.keyPair.publicKeyBytes.slice();
   const verifier = await NobleEd25519Verifier.fromRaw(publicKey);
   const payload = new Uint8Array(32).fill(9);
   const signature = await identity.sign(payload);
