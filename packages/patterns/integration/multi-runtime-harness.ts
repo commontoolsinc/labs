@@ -336,7 +336,7 @@ export class MultiRuntimeSession {
    * This is the gate between two CHAINED events whose second served
    * handler reads state the first one writes (a draft-then-trusted-
    * action pair): events on different streams have no cross-stream
-   * serve-order guarantee (events.md §4), so firing the second while
+   * serve-order guarantee (events.md §2), so firing the second while
    * the first is in flight can serve it against a pre-first view — a
    * precondition-reading handler then no-ops silently, an interleaving
    * the real UI forbids (the trusted control stays disabled until the

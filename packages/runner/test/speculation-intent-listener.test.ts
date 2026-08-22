@@ -600,6 +600,54 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     destination.close();
     await parked;
   });
+
+  it("quiescence waiter, two sidecars: draining ONE sidecar's whole set while another sidecar still holds an intent does NOT resolve the waiter (killing mutation: flushing when a sidecar's set empties instead of when the whole tracked map does)", async () => {
+    const { scripted, destination } = scriptedDestination();
+    const SIDECAR_B = "of:stream-events:listener-b";
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+    scripted.seed(SPACE, SIDECAR_B, { entries: [] });
+
+    destination.trackIntent(SPACE, SIDECAR, "evt-a");
+    destination.trackIntent(SPACE, SIDECAR_B, "evt-b");
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries = [
+        { eventId: "evt-a", stream: { id: "s", path: [] }, seq: 1 },
+      ];
+    }, [["value", "entries"]]);
+    scripted.deliver(SPACE, SIDECAR_B, (value) => {
+      value.entries = [
+        { eventId: "evt-b", stream: { id: "s2", path: [] }, seq: 1 },
+      ];
+    }, [["value", "entries"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(2);
+
+    let resolved = false;
+    const quiesced = destination.waitForIntentQuiescence().then(() => {
+      resolved = true;
+    });
+
+    // Retire evt-a: sidecar A's set drains ENTIRELY (its per-sidecar Set
+    // empties and is deleted) while sidecar B still holds evt-b. The
+    // one-sidecar pin above cannot see this arm — its first retire
+    // leaves the shared sidecar's set non-empty — so this is the pin
+    // for the sidecar-drain flush mutant.
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(1);
+    expect(resolved).toBe(false);
+
+    // Retire evt-b: the whole tracked map empties; the waiter resolves.
+    scripted.deliver(SPACE, SIDECAR_B, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    await quiesced;
+    expect(resolved).toBe(true);
+    destination.close();
+  });
 });
 
 // ─── W2.1: the cascade-echo retirement (scripted; the MARK path) ────────

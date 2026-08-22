@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-22
+archived: 2026-08-22
+reason: "Arrival-wait hardening: the reopened ON-lane group-chat 'cross-session arrival' flakes (census items 1+3, runs 32543810077/32547606642) were never the arrival wait — the test's chained draft→trusted-send events raced cross-stream serve order (unpromised, events.md §2) and the served handler no-oped silently on a pre-draft view. Fix: an event-driven arrived-consequence gate (overlay waitForIntentQuiescence / harness awaitEventConsequences) between chained events, a deterministic delay-injected pin, and settled-text conversions for the staged-publish/spec-gallery browser members (census item 2). No timeout changed."
+---
+
 # Arrival-wait hardening: the reopened ON-lane flake cluster
 
 Optimize-on-main pass, 2026-08-22. The reopened group-chat
@@ -54,7 +61,7 @@ honest; the write it awaited never happened. Mechanism:
   (`prepareTrustedMessageSend` returns null on a blank draft — by
   design; same shape in `commitTrustedProfileSave` and
   `prepareTrustedRoomAdd`).
-- events.md §4 rules serve ordering: *"per stream, events process in
+- events.md §2 rules serve ordering: *"per stream, events process in
   commit-seq order. Across streams in one space, wave order (arrival).
   No global ordering claim."* The two events live on different
   streams, so nothing promises the draft's consequence is applied
@@ -70,7 +77,15 @@ honest; the write it awaited never happened. Mechanism:
   why the browser test's OW47 S-G fix was precisely "wait
   `waitForDisabled(false)` before Bob's click". The multi-runtime
   helpers had no equivalent gate — they fired the trusted action into
-  a UI-impossible window.
+  a UI-impossible window. The UI's protection is in fact STRONGER than
+  the enablement read: the UI writes the draft through the cf-input
+  `$value` BINDING — an authored client commit, transport-ordered
+  before the click's event append on the same socket — not through a
+  `setMessageDraft` event, so the served handler's read view includes
+  the draft regardless of enablement timing; the enablement-read
+  framing alone would not cover a hypothetical pattern whose
+  precondition is handler-written and whose control enables off the
+  speculative echo, and no such flow exists in this pattern.
 
 **Product verdict: not a product regression.** The server served both
 events within its ruled contract; the test manufactured an ordering

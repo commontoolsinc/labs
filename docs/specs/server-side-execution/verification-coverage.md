@@ -5501,7 +5501,7 @@ supply; OW29/OW32/OW34 closed):
     post-merge with quiescence clean (runs 32543810077 /
     32547606642) and were a different race entirely: the test's
     chained draft→trusted-send events, on different streams with
-    cross-stream serve order unpromised (events.md §4), let the
+    cross-stream serve order unpromised (events.md §2), let the
     served handler no-op SILENTLY on a pre-draft view, so the
     awaited write never existed — terminal before any wait began.
     Root-caused, made deterministic (delay injection at the seam),

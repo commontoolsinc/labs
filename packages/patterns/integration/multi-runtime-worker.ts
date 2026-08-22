@@ -479,7 +479,7 @@ const handlers: Record<
   // outstanding-intent set is empty (speculation.md §4 step 2). The
   // gate a test needs between two CHAINED events whose second served
   // handler reads state the first one writes: events on DIFFERENT
-  // streams have no cross-stream serve-order guarantee (events.md §4 —
+  // streams have no cross-stream serve-order guarantee (events.md §2 —
   // per stream only), so firing the second while the first is in
   // flight can serve it against a pre-first view; a precondition-
   // reading handler then no-ops SILENTLY (the 2026-08-22 ON-lane

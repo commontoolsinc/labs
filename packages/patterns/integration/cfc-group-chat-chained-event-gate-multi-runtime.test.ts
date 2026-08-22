@@ -4,7 +4,7 @@
  * A trusted action whose SERVED handler reads a precondition cell
  * written by an immediately-preceding event (draft → trusted send) is
  * racy by design under ON: events on different streams have no
- * cross-stream serve-order guarantee (events.md §4 — per stream,
+ * cross-stream serve-order guarantee (events.md §2 — per stream,
  * commit-seq order; across streams, no claim), and the group-chat
  * handlers silently no-op on an empty draft
  * (`prepareTrustedMessageSend` returns null). The real UI forbids the
@@ -113,8 +113,10 @@ describe("group chat chained-event gates across sessions", () => {
   }
 
   it("firing the trusted send once the SENDER observes the draft appends the message (the UI-enablement gate, both arms)", async () => {
-    const h = await ensureHarness();
     try {
+      // Inside the try: a harness-creation throw must still hit this
+      // step's dispose arm rather than leak workers and sockets.
+      const h = await ensureHarness();
       await writer.send("setMessageDraft", "Observed body", undefined, {
         idle: false,
       });
@@ -144,8 +146,9 @@ describe("group chat chained-event gates across sessions", () => {
   });
 
   it("awaitEventConsequences alone is a sufficient gate under ON (the overlay primitive the same-session helpers rely on)", async () => {
-    const h = await ensureHarness();
     try {
+      // Inside the try for the same leak-safety as step 1.
+      const h = await ensureHarness();
       if (!SERVER_EXECUTION_ON) {
         // The primitive being pinned is the speculation overlay's
         // intent quiescence, which exists only on the ON arm; under OFF

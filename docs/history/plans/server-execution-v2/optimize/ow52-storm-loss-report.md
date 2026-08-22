@@ -265,7 +265,7 @@ failing logs carry ZERO quiescence-budget warnings — every settle round
 found the intent set already empty, so the settle race this fix closes
 was not what failed. The census's group-chat flakes were a DIFFERENT
 race: the test's chained draft→trusted-send events land on different
-streams, cross-stream serve order is unpromised (events.md §4), and the
+streams, cross-stream serve order is unpromised (events.md §2), and the
 served trusted handler silently no-ops on a pre-draft view — the
 awaited message is never appended, terminally, before any wait begins,
 so no settle (and no timeout) could ever observe it. This fix's settle

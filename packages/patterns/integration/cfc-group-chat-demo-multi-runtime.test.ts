@@ -61,7 +61,7 @@ async function createGroupChatHarness(): Promise<MultiRuntimeHarness> {
 // action whose served handler reads that draft — and silently no-ops
 // when it reads it empty (`prepareTrustedMessageSend` and friends
 // return null on a blank draft). Events on DIFFERENT streams have no
-// cross-stream serve-order guarantee (events.md §4: per stream,
+// cross-stream serve-order guarantee (events.md §2: per stream,
 // commit-seq order; across streams, no claim), so under ON a loaded
 // serving loop can serve the trusted action against a pre-draft view —
 // the action terminalizes cleanly as a no-op, and a downstream arrival
