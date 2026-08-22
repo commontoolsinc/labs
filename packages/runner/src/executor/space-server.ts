@@ -2280,17 +2280,13 @@ export class SpaceServer implements TransactionSealDestination {
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
     let queued = 0;
-    // Process ACROSS sidecars in append commit-seq order — events.md §2's
-    // ordering sentence: per stream, commit-seq order; across streams in
-    // one space, wave (arrival) order. The doc-major loop this replaces
-    // honored only the per-doc half, and its view-lag arm skipped PAST a
-    // deferred entry: a later-arrived event on a warm sidecar then
-    // consequenced ahead of an earlier deferred one — with one user's
-    // last two clicks landing on two streams, the earlier click's write
-    // landed LAST and the terminal state was wrong (the OW45 arm-B
-    // gate's b01 red: `usedCreateAnotherNote` ending true after the
-    // final Create had cleared it; store-verified inversion). Seq-less
-    // legacy entries sort last, as before; the sidecar-id tie-break
+    // Pending entries process ACROSS sidecars in append commit-seq
+    // order — events.md §2: per stream, commit-seq order; across streams
+    // in one space, arrival order. A deferral (a lagging sidecar view or
+    // a failed sidecar sync) is a BARRIER, not a skip: every entry at or
+    // behind the deferred entry's arrival position waits with it, so a
+    // later arrival's consequence can never land ahead of an earlier
+    // one. Seq-less legacy entries sort last; the sidecar-id tie-break
     // keeps one wave's co-committed entries in a stable order.
     const ordered = pendingDocs
       .flatMap((doc) => doc.entries.map((entry) => ({ doc, entry })))

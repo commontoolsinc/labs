@@ -1,30 +1,32 @@
-// A session's watch must re-fire when a doc its query READ AS ABSENT is
-// later created — the arrival half of the ruled re-fire contract ("a
-// refusal-disposed read re-fires on a foreign writer's arrival through its
-// registered dead-end read alone", verification-coverage.md OW51/OW45).
-//
-// Under server execution this is the FIRST-HYDRATION path: the server
-// materializes a piece a beat after the client learns its id, so the
-// client's first pull of a piece doc can evaluate before the birth commit.
-// The client legitimately never re-pulls — its selector tracker records the
-// pull as covered, and every later read is answered locally — so the ONLY
-// heal is this server-side re-fire. A creation flow ends with a write
-// followed by pure reads (the quiet-space tail), so a watch that misses the
-// birth starves every read of that doc for the session's life while a
-// fresh session reads it fine: the OW45 arm-B starvation, store-verified
-// zero-loss.
-//
-// Two shapes, one gate: the wake pass keys off `session.trackedIds`, which
-// is built from DELIVERED entities only, so a doc a query touched while it
-// was absent — a watch ROOT evaluated pre-birth, or a link-HOP target the
-// walk dead-ended on — never enters the set, and the birth commit fails
-// the touched check before `refreshTrackedGraph` (which would heal the
-// root shape) is ever consulted.
-//
-// The nets below bound a genuinely stuck delivery (waiting-in-tests.md's
-// honest-bound case): the waits are on the watch view's own update stream,
-// and on the loopback transport a healthy delivery lands on the next task
-// turn, so the nets add no time to a green run.
+/**
+ * A session's watch must re-fire when a doc its query READ AS ABSENT is
+ * later created — the arrival half of the ruled re-fire contract ("a
+ * refusal-disposed read re-fires on a foreign writer's arrival through
+ * its registered dead-end read alone", verification-coverage.md
+ * OW51/OW45).
+ *
+ * Under server execution this is the FIRST-HYDRATION path: the server
+ * materializes a piece a beat after the client learns its id, so the
+ * client's first pull of a piece doc can evaluate before the birth
+ * commit. The client legitimately never re-pulls — its selector tracker
+ * records the pull as covered, and every later read is answered locally
+ * — so the ONLY heal is this server-side re-fire. A creation flow ends
+ * with a write followed by pure reads (the quiet-space tail), so a
+ * watch that misses the birth starves every read of that doc for the
+ * session's life while a fresh session reads it fine: the OW45 arm-B
+ * starvation, store-verified zero-loss.
+ *
+ * Two shapes, one gate: the wake pass keys off `session.trackedIds`.
+ * An absent watch ROOT enters it through its delivered seq-0 absence
+ * marker; a link-HOP target the walk dead-ended on enters through the
+ * graph state's MISS SET (`TrackedGraphState.missed`) — wake-reactivity
+ * only, never delivered — and either way the birth commit passes the
+ * touched check and `refreshTrackedGraph` delivers the real document.
+ *
+ * The waits await the watch view's own update stream — the delivery
+ * event itself; a genuinely stuck delivery is the harness's
+ * stuck-test detector's to diagnose.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -38,33 +40,6 @@ import {
 } from "./v2-auth-test-helpers.ts";
 
 const SPACE = "did:key:z6Mk-memory-v2-watch-absent-arrival";
-
-/** Bound a stuck delivery: yields the update, or throws naming the doc
- * whose birth never reached the watching session. */
-const deliveredWithin = async <T>(
-  pending: Promise<T>,
-  doc: string,
-  ms = 10_000,
-): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const net = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `the birth of ${doc} never reached the watching session ` +
-              `(the touched gate saw no tracked id for it)`,
-          ),
-        ),
-      ms,
-    );
-  });
-  try {
-    return await Promise.race([pending, net]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
 
 const harness = async (storeName: string) => {
   const server = new Server({
@@ -138,7 +113,7 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
 
-      const update = await deliveredWithin(pending, "of:doc:unborn-root");
+      const update = await pending;
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
       expect(entities.map((entity) => entity.id)).toContain(
@@ -233,12 +208,238 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
 
-      const update = await deliveredWithin(pending, "of:doc:unborn-target");
+      const update = await pending;
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
-      expect(entities.map((entity) => entity.id)).toContain(
-        "of:doc:unborn-target",
+      const target = entities.find(
+        (entity) => entity.id === "of:doc:unborn-target",
       );
+      // The BORN document, not an absence marker: the delivered entity
+      // carries the created value at a committed sequence.
+      expect(target?.document).toEqual({ value: { name: "target" } });
+      expect(target?.seq).toBeGreaterThanOrEqual(1);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("keeps a dirtied-but-still-absent hop target OFF the wire and still waiting: a creation and deletion coalesced into one batch re-fires the query, the re-evaluation finds the doc absent, no absence entity is delivered, and the NEXT real creation still arrives", async () => {
+    const h = await harness("memory-v2-watch-absent-hop-still-absent");
+    try {
+      await h.writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:referrer-2",
+          value: {
+            value: {
+              name: "referrer",
+              primary: {
+                "/": {
+                  "link@1": {
+                    id: "of:doc:flicker-target",
+                    path: [],
+                    space: SPACE,
+                  },
+                },
+              },
+            },
+          },
+        }],
+      });
+
+      const nodeSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          primary: { $ref: "#/$defs/node" },
+        },
+        $defs: {
+          node: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              primary: { $ref: "#/$defs/node" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const view = await h.observer.watchAdd([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:referrer-2",
+            selector: { path: [], schema: nodeSchema },
+          }],
+        },
+      }]);
+      expect(view.entities.map((entity) => entity.id)).toEqual([
+        "of:doc:referrer-2",
+      ]);
+
+      const updates = view.subscribe();
+      const pending = updates.next();
+
+      // The target flickers: created and deleted in ONE batch, so the
+      // dirty pass re-fires the query while the doc is STILL absent at
+      // evaluation. The miss must stay a miss — routed back into the
+      // miss set, never into the tracker whose entries reach the wire —
+      // so no frame is emitted for the flicker.
+      await h.writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:doc:flicker-target",
+            value: { value: { name: "flicker" } },
+          },
+          { op: "delete", id: "of:doc:flicker-target" },
+        ],
+      });
+
+      // The REAL creation. The first update the subscription yields is
+      // this one — resolving `pending`, which was registered BEFORE the
+      // flicker batch, with the final value proves the flicker emitted
+      // no frame of its own.
+      await h.writer.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:flicker-target",
+          value: { value: { name: "target" } },
+        }],
+      });
+
+      const update = await pending;
+      expect(update.done).toBe(false);
+      const entities = update.value.entities as EntitySnapshot[];
+      const target = entities.find(
+        (entity) => entity.id === "of:doc:flicker-target",
+      );
+      expect(target?.document).toEqual({ value: { name: "target" } });
+      expect(target?.seq).toBeGreaterThanOrEqual(1);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("retires a miss when its referrer is repointed away: the target's later birth neither wakes the query nor delivers an unreachable document", async () => {
+    const h = await harness("memory-v2-watch-absent-hop-repointed");
+    try {
+      await h.writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:referrer-3",
+          value: {
+            value: {
+              name: "referrer",
+              primary: {
+                "/": {
+                  "link@1": {
+                    id: "of:doc:orphaned-target",
+                    path: [],
+                    space: SPACE,
+                  },
+                },
+              },
+            },
+          },
+        }],
+      });
+
+      const nodeSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          primary: { $ref: "#/$defs/node" },
+        },
+        $defs: {
+          node: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              primary: { $ref: "#/$defs/node" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const view = await h.observer.watchAdd([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:referrer-3",
+            selector: { path: [], schema: nodeSchema },
+          }],
+        },
+      }]);
+      expect(view.entities.map((entity) => entity.id)).toEqual([
+        "of:doc:referrer-3",
+      ]);
+
+      const updates = view.subscribe();
+
+      // The referrer is REPOINTED away from the absent target: its
+      // re-walk records no dead-end any more, so the miss retires with
+      // its last attribution.
+      let pending = updates.next();
+      await h.writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:referrer-3",
+          value: { value: { name: "repointed" } },
+        }],
+      });
+      {
+        const update = await pending;
+        expect(update.done).toBe(false);
+        const entities = update.value.entities as EntitySnapshot[];
+        expect(entities.map((entity) => entity.id)).toEqual([
+          "of:doc:referrer-3",
+        ]);
+      }
+
+      // The former target is born. Nothing in the query links it: no
+      // frame may deliver it. The next frame the subscription yields is
+      // the follow-up referrer write — resolving with THAT frame, and
+      // without the orphaned doc in it, proves the birth emitted
+      // nothing.
+      pending = updates.next();
+      await h.writer.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:orphaned-target",
+          value: { value: { name: "orphaned" } },
+        }],
+      });
+      await h.writer.transact({
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:referrer-3",
+          value: { value: { name: "repointed-again" } },
+        }],
+      });
+      const update = await pending;
+      expect(update.done).toBe(false);
+      const entities = update.value.entities as EntitySnapshot[];
+      expect(entities.map((entity) => entity.id)).toEqual([
+        "of:doc:referrer-3",
+      ]);
+      expect(
+        entities.some((entity) => entity.id === "of:doc:orphaned-target"),
+      ).toBe(false);
     } finally {
       await h.close();
     }

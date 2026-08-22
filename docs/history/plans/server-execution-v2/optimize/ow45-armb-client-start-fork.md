@@ -73,13 +73,16 @@ A ConflictError here is the ordinary optimistic-concurrency outcome —
 and at first hydration it is the EXPECTED outcome shape: the piece was
 just born server-side, the serving loop's derived commits are always
 in flight at that moment, so the client's start tx basis is stale by
-construction whenever the interleaving is tight. The cancel is
-terminal: the client-side piece context never starts, its node wiring
-and demand registration (the piece-start pre-sync of argument-bound
-inputs, runner.ts ~4072) never run, and every read that depends on
-them returns `undefined` for the session's life. The load-coupled
-lottery (14 straight greens then 3/5 red at equal nominal load) is
-the interleaving window widening under load.
+construction whenever the interleaving is tight. The sequence is
+install-then-rollback: `startWithTx` has already installed the
+client-side piece inside the transaction when the commit's refusal
+lands, and the error arm's `ownership.cancel()` tears that
+just-installed context down — after which nothing re-attempts the
+start, so the piece context is absent for the session and every read
+that depends on it returns `undefined`. (The argument pre-sync at
+runner.ts ~4072 is the separate RESUME path's; it is not what dies
+here.) The load-coupled lottery (14 straight greens then 3/5 red at
+equal nominal load) is the interleaving window widening under load.
 
 The h01/h05 single-chain shape is the same die-off later in the start
 walk (the start got far enough to register most demand before a

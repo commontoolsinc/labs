@@ -5528,7 +5528,16 @@ supply; OW29/OW32/OW34 closed):
     at its 10 s net, both pins green with the fix; the list-defer
     suite and the (d′) demand-set equality
     (`executor-dprime-w0.test.ts`) green with the miss-set shape
-    where the tracker-marker shape had broken both. Disclosed
+    where the tracker-marker shape had broken both. The PR's review
+    pass hardened the lifecycle: a miss carries its REFERRER
+    attribution (the walk hands the dead-ended link's holder to the
+    recorder), a referrer's re-walk releases its previous
+    attributions — so a link edited away retires the miss instead of
+    leaving a stale wake and an unreachable delivery on birth
+    (mutation-killed pin: "retires a miss when its referrer is
+    repointed away") — and a dirtied-but-still-absent miss stays a
+    miss (never the tracker, whose entries reach the wire; pinned by
+    the coalesced create+delete flicker test). Disclosed
     ripple: misses join `trackedIds` and therefore the (d′) demand
     rows, so a dangling same-space `of:` link can park a structure
     load until its target exists — bounded, OW46's
@@ -5563,6 +5572,7 @@ supply; OW29/OW32/OW34 closed):
     old-shape stall is the die-off at the front; b01's shape hid
     inside the population as "the product not answering" with the
     client blameless.
+  - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
     `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`).**

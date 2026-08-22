@@ -99,24 +99,31 @@ export type GraphQueryWalkOptions = {
    */
   identity: ScopeKeyIdentity;
   /**
-   * Receives one entry per SAME-SPACE document a value-link hop tried to
-   * read and found ABSENT, keyed like the schema tracker and carrying the
-   * target-rooted selector the read needed. A value link the walk
-   * dead-ends on is a READ of that document, so the graph must stay
-   * reactive to it: the miss set is what lets the target's later CREATION
-   * re-fire the query — the session wake pass and the dirty refresh both
-   * consult it — and without one a quiet space never heals the miss (the
-   * OW45 arm-B first-read lottery: first-hydration create-then-read ends
-   * with a write followed by pure reads, so no later commit exists to
-   * deliver through). Deliberately SEPARATE from the schema tracker:
-   * tracker entries materialize as delivered entities — absence markers
-   * on the wire — while a miss is server-side reactivity only, and the
-   * client's view stays exactly as today until the document exists (the
-   * dedicated absence-confirmation flows depend on that). The meta-doc
-   * loader keeps tracking its absent targets in the tracker (delivered
-   * whole, marker included) — its narrower pre-existing contract.
+   * Receives one call per SAME-SPACE document a value-link hop tried to
+   * read and found ABSENT: the miss's tracker-style key, the
+   * target-rooted selector the read needed, and the key of the REFERRER
+   * document whose link dead-ended. A value link the walk dead-ends on
+   * is a READ of that document, so the graph must stay reactive to it:
+   * the recorded miss is what lets the target's later CREATION re-fire
+   * the query — the session wake pass and the dirty refresh both consult
+   * it — and without one a quiet space never heals the miss (the OW45
+   * arm-B first-read lottery: first-hydration create-then-read ends with
+   * a write followed by pure reads, so no later commit exists to deliver
+   * through). The referrer key is the miss's lifecycle: a referrer that
+   * is re-walked and no longer dead-ends retires the misses it
+   * attributed. Deliberately SEPARATE from the schema tracker: tracker
+   * entries materialize as delivered entities — absence markers on the
+   * wire — while a miss is server-side reactivity only, and the client's
+   * view stays exactly as today until the document exists (the dedicated
+   * absence-confirmation flows depend on that). The meta-doc loader
+   * keeps tracking its absent targets in the tracker (delivered whole,
+   * marker included) — its narrower pre-existing contract.
    */
-  missedDocs?: MapSetStringToPathSelectors;
+  onMissedDoc?: (
+    missKey: string,
+    selector: SchemaPathSelector,
+    referrerKey: string | undefined,
+  ) => void;
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
   /** Counters to add into. */
@@ -144,28 +151,31 @@ export class GraphQueryWalk {
     this.#manager = options.manager;
     this.#space = options.space;
     this.#identity = options.identity;
-    const { space, identity, missedDocs } = options;
+    const { space, identity, onMissedDoc } = options;
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
       options.schemaTracker,
       identity,
       true,
       undefined,
-      // Record a value-link dead-end in the caller's MISS SET (see
-      // `missedDocs` above for the contract and why it is not the schema
-      // tracker). Same-space only: a foreign-space target can never ride
-      // this space's per-space watch, and the client's own cross-space
-      // load kick owns that case. The recorded selector is the
-      // target-rooted shape the read needed, so the arrival re-walk
-      // delivers the closure this read would have reached.
-      missedDocs === undefined ? undefined : (link, _sourceSpace) => {
+      // Record a value-link dead-end with the caller (see `onMissedDoc`
+      // above for the contract and why it is not the schema tracker).
+      // Same-space only: a foreign-space target can never ride this
+      // space's per-space watch, and the client's own cross-space load
+      // kick owns that case. The recorded selector is the target-rooted
+      // shape the read needed, so the arrival re-walk delivers the
+      // closure this read would have reached.
+      onMissedDoc === undefined ? undefined : (link, _sourceSpace, source) => {
         if (link.space !== space) return;
-        missedDocs.add(
+        onMissedDoc(
           schemaTrackerKey(space, link.id, link.scope, identity),
           internPathSelector({
             path: ["value", ...link.path],
             schema: link.schema ?? false,
           }),
+          source === undefined
+            ? undefined
+            : schemaTrackerKey(space, source.id, source.scope, identity),
         );
       },
     );

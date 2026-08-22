@@ -60,11 +60,21 @@ export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
   /** Value-link dead-ends the query's walks read as ABSENT (see
-   * GraphQueryWalkOptions.missedDocs): keyed like the tracker, never
+   * GraphQueryWalkOptions.onMissedDoc): keyed like the tracker, never
    * delivered — a miss keeps the graph reactive to the document's later
    * creation (the wake pass and the dirty refresh consult it) without
    * putting an absence marker on the wire. */
   missed: MapSetStringToPathSelectors;
+  /** missKey → the REFERRER keys whose links dead-ended on it. A miss
+   * lives while any referrer attributes it: a referrer that is
+   * re-walked clears its attributions first, so a link edited away
+   * retires the miss instead of leaving a stale wake (an
+   * attribution-less miss — defensive, no known producer — retires
+   * only on its own arrival). */
+  missedBy: Map<string, Set<string>>;
+  /** referrerKey → the miss keys it attributed (the reverse index the
+   * re-walk clears by). */
+  missesOf: Map<string, Set<string>>;
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
@@ -291,6 +301,12 @@ export const cloneTrackedGraphState = (
 ): TrackedGraphState => {
   const tracker = state.tracker.clone();
   const missed = state.missed.clone();
+  const missedBy = new Map(
+    [...state.missedBy].map(([key, refs]) => [key, new Set(refs)] as const),
+  );
+  const missesOf = new Map(
+    [...state.missesOf].map(([key, misses]) => [key, new Set(misses)] as const),
+  );
 
   const manager = new EngineObjectManager(
     engine,
@@ -304,6 +320,8 @@ export const cloneTrackedGraphState = (
     branch: state.branch,
     tracker,
     missed,
+    missedBy,
+    missesOf,
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
@@ -664,6 +682,73 @@ const validateSelectorSchemaRefs = (
   }
 };
 
+/** The walk-side recorder over a graph state's miss structures: records
+ * the miss's selector and its referrer attribution (see
+ * GraphQueryWalkOptions.onMissedDoc for the contract). */
+const missRecorderFor = (
+  state: Pick<TrackedGraphState, "missed" | "missedBy" | "missesOf">,
+): (
+  missKey: string,
+  selector: SchemaPathSelector,
+  referrerKey: string | undefined,
+) => void =>
+(missKey, selector, referrerKey) => {
+  state.missed.add(missKey, selector);
+  if (referrerKey === undefined) return;
+  let refs = state.missedBy.get(missKey);
+  if (refs === undefined) {
+    refs = new Set();
+    state.missedBy.set(missKey, refs);
+  }
+  refs.add(referrerKey);
+  let misses = state.missesOf.get(referrerKey);
+  if (misses === undefined) {
+    misses = new Set();
+    state.missesOf.set(referrerKey, misses);
+  }
+  misses.add(missKey);
+};
+
+/** Retire one miss outright: the target arrived (or every referrer let
+ * go) — drop its selectors and both attribution directions. */
+const retireMiss = (
+  state: Pick<TrackedGraphState, "missed" | "missedBy" | "missesOf">,
+  missKey: string,
+): void => {
+  state.missed.delete(missKey);
+  const refs = state.missedBy.get(missKey);
+  if (refs !== undefined) {
+    for (const referrerKey of refs) {
+      const misses = state.missesOf.get(referrerKey);
+      if (misses === undefined) continue;
+      misses.delete(missKey);
+      if (misses.size === 0) state.missesOf.delete(referrerKey);
+    }
+    state.missedBy.delete(missKey);
+  }
+};
+
+/** A referrer is about to be re-walked: its previous attributions no
+ * longer stand (the walk re-records the ones that still dead-end). A
+ * miss whose last attribution goes retires with it. */
+const releaseReferrerMisses = (
+  state: Pick<TrackedGraphState, "missed" | "missedBy" | "missesOf">,
+  referrerKey: string,
+): void => {
+  const misses = state.missesOf.get(referrerKey);
+  if (misses === undefined) return;
+  state.missesOf.delete(referrerKey);
+  for (const missKey of misses) {
+    const refs = state.missedBy.get(missKey);
+    if (refs === undefined) continue;
+    refs.delete(referrerKey);
+    if (refs.size === 0) {
+      state.missedBy.delete(missKey);
+      state.missed.delete(missKey);
+    }
+  }
+};
+
 export const trackGraph = (
   space: string,
   engine: Engine.Engine,
@@ -693,7 +778,11 @@ export const trackGraph = (
     reuse?.managers?.set(managerKey, manager);
   }
   const schemaTracker = new MapSetStringToPathSelectors(true);
-  const missed = new MapSetStringToPathSelectors(true);
+  const missState = {
+    missed: new MapSetStringToPathSelectors(true),
+    missedBy: new Map<string, Set<string>>(),
+    missesOf: new Map<string, Set<string>>(),
+  };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -701,7 +790,7 @@ export const trackGraph = (
     manager,
     space: space as MemorySpace,
     schemaTracker,
-    missedDocs: missed,
+    onMissedDoc: missRecorderFor(missState),
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
@@ -762,7 +851,7 @@ export const trackGraph = (
     state: {
       branch,
       tracker: schemaTracker,
-      missed,
+      ...missState,
       entities,
       memo: sharedMemo,
       manager,
@@ -810,7 +899,7 @@ export const extendTrackedGraph = (
       },
       selector,
       state.tracker,
-      state.missed,
+      missRecorderFor(state),
       state.memo,
       stats,
     );
@@ -920,6 +1009,10 @@ export const refreshTrackedGraph = (
   stats: QueryTraversalStats;
 } | null => {
   const affectedDocs = new Map<QueryDocKey, Set<SchemaPathSelector>>();
+  // Dirty docs the query had MISSED, kept apart from the tracked ones:
+  // their re-evaluation routes a still-absent outcome back into the miss
+  // set (never the tracker, whose entries reach the wire).
+  const affectedMisses = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   const invalidations = new Map<CellScope, Set<string>>();
   const identity = identityOf(state.manager);
   for (const dirtyId of dirtyIds) {
@@ -956,12 +1049,10 @@ export const refreshTrackedGraph = (
     // life (OW45 arm B).
     const missedSelectors = state.missed.get(key);
     if (missedSelectors !== undefined && missedSelectors.size > 0) {
-      const merged = affectedDocs.get(key) ?? new Set<SchemaPathSelector>();
-      for (const selector of missedSelectors) merged.add(selector);
-      affectedDocs.set(key, merged);
+      affectedMisses.set(key, new Set(missedSelectors));
     }
   }
-  if (affectedDocs.size === 0) {
+  if (affectedDocs.size === 0 && affectedMisses.size === 0) {
     return null;
   }
 
@@ -975,9 +1066,13 @@ export const refreshTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
 
+  const recorder = missRecorderFor(state);
   for (const key of affectedDocs.keys()) {
     state.tracker.delete(key);
-    state.missed.delete(key);
+    // The re-walk below re-records this referrer's still-live misses;
+    // attributions from its PREVIOUS walk no longer stand, so a link
+    // edited away retires its miss instead of leaving a stale wake.
+    releaseReferrerMisses(state, key);
   }
 
   for (const [key, selectors] of affectedDocs) {
@@ -989,14 +1084,41 @@ export const refreshTrackedGraph = (
         { id, scope, scopeKey },
         selector,
         state.tracker,
-        state.missed,
+        recorder,
         sharedMemo,
         stats,
       );
     }
   }
+  // Re-evaluate the dirtied misses. A BORN target is visited — it enters
+  // the tracker (and the update assembly below delivers it) — and its
+  // miss retires; a still-absent one keeps its miss and attributions
+  // untouched (the throwaway sink swallows the absent re-registration:
+  // a miss never migrates into the tracker, whose entries reach the
+  // wire).
+  const stillAbsent = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of affectedMisses) {
+    const { id, scope, scopeKey } = fromDocKey(key);
+    for (const selector of selectors) {
+      evaluateTrackedDocument(
+        space,
+        manager,
+        { id, scope, scopeKey },
+        selector,
+        state.tracker,
+        recorder,
+        sharedMemo,
+        stats,
+        stillAbsent,
+      );
+    }
+    if (state.tracker.has(key)) {
+      retireMiss(state, key);
+    }
+  }
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
+  for (const key of affectedMisses.keys()) touched.add(key);
   for (const address of manager.loadedAddresses()) {
     const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
     const previous = state.entities.get(key);
@@ -1073,9 +1195,20 @@ const evaluateTrackedDocument = (
   address: { id: string; scope?: CellScope; scopeKey?: ScopeKey },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
-  missed: MapSetStringToPathSelectors,
+  onMissedDoc: (
+    missKey: string,
+    selector: SchemaPathSelector,
+    referrerKey: string | undefined,
+  ) => void,
   sharedMemo: SchemaMemo,
   stats: QueryTraversalStats,
+  // Where an ABSENT document's selector lands. A watch ROOT records in
+  // the tracker — absence is delivered as the seq-0 marker entity — while
+  // a re-evaluated MISS must NOT migrate into the delivered set: a
+  // dirtied-but-still-absent target (a creation and deletion coalesced
+  // into one batch, say) keeps waiting for a real arrival, so its
+  // caller passes a sink the wire never sees.
+  absentSink: MapSetStringToPathSelectors = schemaTracker,
 ) => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
@@ -1087,7 +1220,7 @@ const evaluateTrackedDocument = (
     );
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
-    schemaTracker.add(docKey, internPathSelector(selector));
+    absentSink.add(docKey, internPathSelector(selector));
     return;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
@@ -1096,7 +1229,7 @@ const evaluateTrackedDocument = (
     manager,
     space: space as MemorySpace,
     schemaTracker,
-    missedDocs: missed,
+    onMissedDoc,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
