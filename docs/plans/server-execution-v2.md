@@ -48,9 +48,12 @@ followed as #6156 `9d989c0c1`); the phase is the register's OW rows
   arrival re-arm; verification found the re-fire contract already held
   and the deadlock was the refusal mis-firing on SCOPED-row absence —
   the scoped carve-out + the mutation-verified re-fire pin are the
-  build (ow51-build-report.md §8; the OW51 row is CLOSED). OW34 = all
-  seven §10 recommendations ACCEPTED; its implementation train
-  launched separately.
+  build (ow51-build-report.md §8). The row stays OPEN on one SURFACED
+  residual (§8.5b): an unidentified eager consumer observes the
+  `viaLinkHop` carrier (schema-examples' alias-sink shape red on both
+  bases) — carrier disposition owed, #6179 holds. OW34 = all seven
+  §10 recommendations ACCEPTED; its implementation train launched
+  separately.
 - **#6187 MERGED** (`89deb7505`) — the §2b send-axis fix: a served
   run's send to a foreign stream crosses via the outbox (the LT1 axis
   is the wave's home space, not the sending cell's); profile-embed's

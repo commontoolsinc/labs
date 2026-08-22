@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW51 build: the RULED option (a) unresolved-input lift semantics BUILT and PINNED (red-first); the §6/§7 over-fire classes are CLOSED — the memo-variant fix (§7) closed the alias class, and the §8 RULED option-3 build closed the demand-closure class (a scoped row's absence is knowledge; the refusal re-fire contract pinned and mutation-verified). #6179 is the ruled build."
+reason: "OW51 build: the RULED option (a) semantics BUILT and PINNED; §7's alias class closed (memo variant); §8's RULED option-3 build closed the demand-closure class (scoped absence is knowledge; re-fire contract pinned, mutation-verified). ONE SURFACED residual (§8.5b): an unidentified EAGER consumer observes the viaLinkHop carrier — schema-examples' VDOM alias-sink shape red on BOTH bases (§7's flake exclusion was a mis-verification; §3's observability audit falsified twice) — carrier disposition owed. Do not merge #6179 until ruled."
 ---
 
 # OW51 build — the ruled unresolved-input lift semantics
@@ -10,8 +10,12 @@ reason: "OW51 build: the RULED option (a) unresolved-input lift semantics BUILT 
 > **STATUS (2026-08-21, second ruling): §7's surfaced fork is RULED —
 > option 3 — and BUILT (§8). `P-arrival-closure` greens; the ruled
 > re-fire contract carries a new mutation-verified pin; two adjacent
-> latent findings are FLAGGED, not filled (§8.5). Ruling, red-first
-> pins, spec text all preserved.**
+> latent findings are FLAGGED, not filled (§8.5). ONE SURFACED
+> residual (§8.5b, same day): an unidentified EAGER consumer observes
+> the `viaLinkHop` carrier — `schema-examples`' VDOM alias-sink shape
+> is red on BOTH bases, §7's flake exclusion was a mis-verification —
+> carrier disposition owed; do not merge until ruled. Ruling,
+> red-first pins, spec text all preserved.**
 
 ## 0. The ruling (2026-08-21)
 
@@ -574,6 +578,86 @@ and are recorded for their own arcs rather than patched here:
    a later era re-runs it. Orthogonal to this PR (its pins avoid the
    dependence); likely interacts with content-addressed `$ref`
    schema resolution timing — flagged.
+
+### 8.5b STOP-AND-SURFACE (second): an EAGER consumer observes the carrier — schema-examples red on BOTH bases; §7's exclusion was a mis-verification
+
+Found by this session's verification breadth (the §6 incident's
+mandate), bisected to a clean parent/self flip, and re-established on
+a quiet machine after a parallel agent's process kills contaminated
+one measurement window (the contaminated executor results were re-run
+per-file and are green; this finding is NOT contamination — it
+reproduces deterministically local-clean AND on CI's own runners at
+two consecutive heads).
+
+**The failure.** `schema-examples.test.ts` "should support nested
+sinks via asCell with aliases" — the VDOM shape, per the test's own
+comment — fails deterministically (~20 ms, a sink callback crashing
+on an undefined root read) WITH the branch and passes WITHOUT it, on
+BOTH bases:
+
+| head | verdict |
+| --- | --- |
+| OLD main `380d233f3` (the original merge-base) | GREEN |
+| OLD-base semantics build `890436c7b` | RED |
+| current main `89deb7505` | GREEN ×3 |
+| rebased RED-pin commit `a56fa8558` (test-only parent) | GREEN ×2 |
+| rebased semantics build `8e7ef8c79` (self) | RED ×2 |
+| every later branch head incl. the option-3 tip | RED |
+
+So: NOT a rebase interaction (the #6083 suspicion is refuted by the
+old-main pair), and §7's exclusion of this exact red as "fails
+identically on pure main (a pre-existing local-env sink-teardown
+flake)" was a MIS-VERIFICATION — on both bases main is green and the
+branch is red.
+
+**The trigger, isolated to one line-class.** Neutralizing ONLY
+`markDerived` on `parseLink`'s BASELESS arm (a stored sigil parsed
+with no base) greens the test with everything else intact — the walk
+changes, the refusal gate, the memo variant, and the two based arms
+all stay. The refusal itself never fires here (instrumented: the lazy
+branch is never entered), and the eager object-arm required-check is
+not the undefined's source either — the stamp is observed by some
+OTHER eager-path consumer, unidentified within this session's
+time-box.
+
+**The mechanism shape (instrumented).** Main itself has a transient
+here: the test commits its three docs without awaiting, the sinks'
+first runs race it, crash once on undefined (`schedule-error` logged,
+identical on main), and HEAL on re-fire. Under the stamp the
+asymmetry inverts: the root sink's first run reads the REAL value,
+and a LATER re-fire reads the PRESENT doc as UNDEFINED — a
+present-value eager read regressing, permanently. **This falsifies
+§3's core safety claim** ("Lazy-branch only: eager reads … keep
+today's behavior" / "product-code observability: NONE") — for the
+second time, after §7's memo finding, an unforeseen consumer of the
+enumerable carrier field has produced a real product-behavior break.
+
+**Why this is surfaced rather than absorbed (the §6 precedent).** A
+one-line neutralization of the baseless arm would green the test —
+but the baseless arm IS part of the OW51 fix's carrier for handles
+minted from stored sigils, so that patch would need its own
+verification that the OW51 crash class stays closed, and it would be
+the SECOND whack-a-mole patch on a carrier whose safety audit has now
+been falsified twice. The evidence increasingly favors §6's candidate
+2 — carry the provenance OUTSIDE the link object (per-read-context) —
+which is a design disposition above this session's authority. The
+options, for the ruling:
+
+1. **Neutralize arm 1** (stored-sigil parses stay unstamped when no
+   base is supplied; the based arms keep the provenance): smallest
+   diff; must re-verify the OW51 production shape still refuses (the
+   asCell mint path supplies a base, so the based arms may suffice —
+   unverified).
+2. **Find and fix the eager consumer** (make it ignore the field):
+   continues the enumerable-carrier design; third patch of its kind;
+   the consumer is not yet identified.
+3. **Re-carrier per §6 candidate 2** (read-context provenance, no
+   field on links): structurally closes the whole observer class and
+   removes the assertion churn; the §7 memo term becomes unnecessary;
+   larger build.
+
+Until ruled, #6179 carries this red (CI: the runner shard holding
+schema-examples) and MUST NOT MERGE.
 
 ### 8.6 Suites at the built head
 
