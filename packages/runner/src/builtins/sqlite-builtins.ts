@@ -68,6 +68,36 @@ type WireParams = SqliteParamsWire | undefined;
 const errMsg = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/**
+ * The acting principal THIS run carries, for the sqlite builtins' identity
+ * consumptions — the db-owner mint and the read-clearance reader (OW53).
+ *
+ * On a SERVED (wave-stamped) run the answer is the run-carried actor —
+ * the event's stamped actor, else the demanded instance's principal —
+ * never the serving runtime's ambient identity, which is the SERVICE
+ * (serving-loop.md §3c; protocol.md §1: identity arrives WITH the work
+ * and is "carried into keys, not resolved from ambient state"). A served
+ * run that carries no actor answers undefined, and each consumption site
+ * fails closed rather than falling back to the service DID (the
+ * `homeSpacePrincipalFor` posture).
+ *
+ * On an UNSTAMPED run — every client run, ON-arm speculation included,
+ * and the whole OFF arm — the ambient provider IS the acting user, so
+ * the answer is byte-identical to the pre-OW53 direct provider read.
+ *
+ * Exported for unit testing only — not part of the builtin surface.
+ */
+export function sqliteRunActingPrincipal(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+): string | undefined {
+  const context = waveRunContextOf(tx);
+  if (context !== undefined) {
+    return context.acting?.user ?? context.scopeKeyIdentity?.principal;
+  }
+  return runtime.trustSnapshotProvider()?.actingPrincipal;
+}
+
 /** Allocate a result cell linked to the parent/pattern cells, at `scope` (the
  *  author-declared scope of the SqliteDb / its query result). The base entity
  *  id is scope-independent; `scope` only re-addresses which scoped instance the
@@ -552,9 +582,18 @@ export function sqliteDatabase(
       // {__ctDbOwner} ceiling placeholders would then admit the wrong
       // principal. An ownerless prior handle stays ownerless (dbOwner()
       // fails closed) rather than adopting a later opener.
+      //
+      // "The principal creating this handle" is the acting principal of
+      // the CREATING RUN (06-cfc.md's dbOwner row read under
+      // serving-loop.md §3c): on a served creation that is the demanded
+      // run's carried principal — the runtime-ambient provider there is
+      // the SERVICE, and minting it would grant the service dbOwner()
+      // row admission (OW53). A served creating run with no carried
+      // actor mints NO owner — fail closed, like the OW31 genesis arm —
+      // never the service DID.
       const owner = prior !== undefined
         ? prior.owner
-        : runtime.trustSnapshotProvider()?.actingPrincipal;
+        : sqliteRunActingPrincipal(runtime, tx);
       // Materialize to plain JSON: the stored handle must be SELF-CONTAINED.
       // A raw `set` of the inputs proxy would capture `tables` as a LINK into
       // this pattern's doc graph — whose rule-term splits no schema-driven
@@ -737,6 +776,15 @@ export function sqliteQuery(
       result.withTx(tx).set({ pending: false, error: errMsg(error) });
       return;
     }
+    // The acting reader of THIS run (OW53): the run-carried principal on a
+    // served run, the ambient provider (= the user) on a client. Captured
+    // here — with the run's instance identity — for the flush below: the
+    // flush runs OUTSIDE the run, on transactions of its own, where the
+    // ambient identity is the SERVICE on a serving runtime.
+    const runContext = waveRunContextOf(tx);
+    const servedRun = runContext !== undefined;
+    const runIdentity = runContext?.scopeKeyIdentity;
+    const actingReader = sqliteRunActingPrincipal(runtime, tx);
     const hash = computeInputHashFromValue({
       db,
       sql: inputs.sql,
@@ -750,10 +798,9 @@ export function sqliteQuery(
       // Phase 3.b: a cleared result depends on WHO is asking, so the acting
       // reader is part of the query identity (belt-and-suspenders with the
       // per-user result scope above — a cleared result is never keyed only by
-      // the boolean). Absent for non-clearance queries so they do not re-hash.
-      clearanceReader: inputs.readClearance
-        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
-        : null,
+      // the boolean; builtins.md §2: the reader principal is part of the
+      // memo key). Absent for non-clearance queries so they do not re-hash.
+      clearanceReader: inputs.readClearance ? (actingReader ?? null) : null,
     });
     // Dedup against COMMITTED state (and, stage G, against this node's
     // own in-flight RPC): the claim marker commits with the REQUESTING
@@ -765,7 +812,7 @@ export function sqliteQuery(
       stored: result.withTx(tx).get(),
       hash,
       inFlightHere: inFlightIssues.has(hash),
-      servedRun: waveRunContextOf(tx) !== undefined,
+      servedRun,
     });
     if (decision === "hit") {
       // The §4 memo hit (server-execution v2): the committed result records
@@ -789,12 +836,35 @@ export function sqliteQuery(
       kind: "sqlite-query",
       async flush() {
         inFlightIssues.add(hash);
+        // The requesting RUN's identity, applied to every writeback
+        // transaction of this flush (OW53; serving-loop.md §4: the effect
+        // carries the run's identity carriage, and the completion's reads
+        // and writes resolve the ORIGINAL run's instance). Without it the
+        // writeback's hash-guard read resolves the SERVICE's instance of a
+        // per-user result cell — where no claim exists — and the completion
+        // no-ops forever (the stage-A residual flagged in
+        // space-server.ts `#commitEffectCompletion`). Set inside the
+        // editWithRetry callback so every retry's fresh transaction
+        // carries it, before that transaction's first read. Unstamped
+        // requesting runs (clients, the OFF arm) captured no identity and
+        // leave the manager's own in force — byte-identical to before.
+        const applyRunIdentity = (wtx: IExtendedStorageTransaction) => {
+          if (runIdentity !== undefined) wtx.tx.scopeKeyIdentity = runIdentity;
+        };
+        // The acting reader at flush time: the CAPTURED run principal for
+        // a served request (the flush's own ambient is the service); the
+        // ambient provider read for an unstamped one (today's client/OFF
+        // path, byte for byte — including its read-at-flush-time timing).
+        const flushActingPrincipal = servedRun
+          ? actingReader
+          : runtime.trustSnapshotProvider()?.actingPrincipal;
         try {
           // Write an error result for THIS request, guarded against a newer query
           // (different inputs -> different hash) that superseded it mid-flight.
           const failQuery = (error: string) =>
             runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
+              applyRunIdentity(wtx);
               if (result.withTx(wtx).get()?.requestHash !== hash) return;
               result.withTx(wtx).set({
                 pending: false,
@@ -857,8 +927,7 @@ export function sqliteQuery(
             let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
             if (ceiling !== undefined) {
               const resolved = resolveCeilingPlaceholders(ceiling, {
-                actingPrincipal: runtime.trustSnapshotProvider()
-                  ?.actingPrincipal,
+                actingPrincipal: flushActingPrincipal,
                 owner: db.owner,
               });
               if ("error" in resolved) {
@@ -875,10 +944,14 @@ export function sqliteQuery(
               staticConfidentiality: staticConfidentialityOf(labelSchema),
               ceiling,
               onExceed: inputs.onExceed,
-              // Phase 3.b read-time clearance: the reader is the acting principal
-              // (same identity the ceiling placeholders resolve against).
+              // Phase 3.b read-time clearance: the reader is the acting
+              // principal of the REQUESTING run (same identity the ceiling
+              // placeholders resolve against, and the same one the request
+              // hash above is keyed by). A served request with no carried
+              // reader passes undefined and the clearance path refuses —
+              // fail closed, never cleared FOR the service.
               readClearance: inputs.readClearance
-                ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+                ? { reader: flushActingPrincipal }
                 : undefined,
             });
             if ("error" in rowLabels) {
@@ -910,6 +983,7 @@ export function sqliteQuery(
               : keptRows) as unknown[];
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
+              applyRunIdentity(wtx);
               // Stale-writeback guard: a newer query (different inputs -> different
               // hash) may have superseded this one while the RPC was in flight.
               // Only write back if the result cell still records THIS request.
