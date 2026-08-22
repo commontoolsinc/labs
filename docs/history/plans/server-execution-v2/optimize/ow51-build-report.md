@@ -694,8 +694,8 @@ now fully named — and it OVERTURNS §8.5b's attribution:
 carries TWO deep-equals over a BASELESS `parseLink` output (the
 aliases pin, lines 362/391) — exactly the §3-documented
 assertion-churn class. The churn commit updated six files
-(link-utils, runner, pattern-binding, cell-as-cell, list-element-link)
-and MISSED this one. The first assertion throws
+(link-utils, runner, pattern-binding, cell-as-cell, list-element-link,
+link-resolution-memo) and MISSED this one. The first assertion throws
 (`Actual` carries `viaLinkHop: true`, `Expected` does not — the
 watched red names the consumer in its own diff), and everything
 §8.5b read as a product regression is teardown fallout of that early
