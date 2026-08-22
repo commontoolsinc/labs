@@ -3080,29 +3080,43 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   ROOT-CAUSED to the speculation overlay's ARRIVAL GATE
   (speculation.md §4, RULED 2026-08-16): the
   implementation witnesses arrival as `confirmedSeq(writtenDoc) >=
-  floor`, and a first-run speculation's computed docs carry the
-  client's OWN authored STRUCTURE write at exactly the floor seq, so
-  any watermark >= floor (wave 1 of a budget-split settle serving
-  the OTHER instance) retires the entry on the client's own write
-  while the served value is a wave away (40–260 ms observed) and the
+  floor`, and a first-run speculation's computed docs carry an
+  AUTHORED STRUCTURE write at exactly the floor seq — the client's
+  OWN setup for the new instance, a PRIOR session's setup for the
+  resumed one. Store-proven invariant (both decoded red stores, both
+  arms; independently reproduced by the #6195 review): the covering
+  watermark reaches the client at least one frame BEFORE the
+  victim's served value — via a values-free advance commit or a
+  values wave preceding the victim's, or pre-existing for the
+  resumed arm; never an exhausted wave, which freezes
+  `derivedThrough` (space-server.ts) — and the only confirmed cover
+  at/above the floor is that authored structure write, so the entry
+  retires on it while the served value is frames away (40–260 ms
+  observed) and the
   bare read falls in the hole. Fix direction determined by the ruled
   sentence; the witness PREDICATE is a design fork FLAGGED for the
-  owner (four candidates, their edges, and a recommendation:
+  owner (five candidates, their edges, and a recommendation:
   optimize/ow33-arrival-witness-fork.md) — no build until ruled; the
   runner skip stays re-tensed, lift bar 10/10 at the true ON
   topology once the ruled predicate lands. The topics-navigation
   sibling's recorded fail-fast myName validation red did NOT
   reproduce (9/11 green at the true topology); its residual 2/10
-  flake is a different surface — the controller's addTopic ECHO run
+  flake was a different surface — the controller's addTopic ECHO run
   dropped at the stream-action validation guard (`$ctx` resolving
   without the required derived `crossrefs` at send time; topics
   still created correctly server-side: store exactly-two, events
-  28/28 appended==processed) plus the unbarriered `topicAt` capture
-  — with a flagged question, not filled: should that guard take the
-  OW51 refusal+retrigger disposition instead of a silent skip
-  (#6179 scoped the refusal to the schema-aware lazy READ path, so
-  extending it is a spec decision). Its file skip stays,
-  re-tensed.**
+  28/28 appended==processed) plus the unbarriered `topicAt` capture.
+  LIFTED (the review pass, 2026-08-22): the capture is barriered on
+  both created topics being readable (waitForCellValue — the
+  waiting-in-tests non-browser shape; the red-first evidence is the
+  recorded 2/10 red series, the exact mechanism the barrier closes),
+  10/10 green at the true ON topology WITH the echo-drop occurring
+  in 2 of the 10 gate runs and absorbed — the smell persists and is
+  now tracked as its own row, OW60 (the stream-action validation
+  guard's silent echo skip; flagged there: whether it should take
+  the OW51 refusal+retrigger disposition is a spec decision — #6179
+  scoped the refusal to the schema-aware lazy READ path). The
+  patterns skip entry is REMOVED.**
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 
@@ -6159,6 +6173,39 @@ supply; OW29/OW32/OW34 closed):
     `session.principal` into the demander identity) —
     label-inert (no mint reads it) and operator-allowlisted; an
     identity-model decision for OW53's family, not this row's.
+  - **OW60 — the echo-drop smell: the stream-action validation guard
+    silently skips a client echo run whose composite `$ctx` has not
+    materialized (OW33 triage review pass, 2026-08-22; the canary
+    moved here from the topics-navigation flake).** The trace, exact
+    (ow33-triage-report.md §6): on a flag-ON Deno controller,
+    `board.result.set(..., ["addTopic"])` fires the stream handler
+    whose `$ctx` schema REQUIRES `myName`/`topics`/`crossrefs`; at
+    send time the resolved `$ctx` can hold `myName: ""` and
+    `topics: []` while the derived `crossrefs` member is still
+    missing, and the pre-OW51 validation guard
+    (`packages/runner/src/runner.ts` — "action argument is
+    undefined (potential schema mismatch) -- not running") SKIPS
+    the echo run silently: no refusal, no re-trigger, no echo
+    cover. The board stays CORRECT (the event still appends; the
+    served run has the materialized `$ctx`; store exactly-two
+    topics, events appended == processed) — the loss is purely the
+    client's speculative cover, so any unbarriered read between the
+    drop and the served arrival sees pre-consequence state.
+    Occurrence ~2/10 on the topics-navigation setup at the true ON
+    topology, OBSERVED SURVIVING the test-side fix (the barriered
+    fid capture absorbed the drop in 2 of the 10 lift-gate runs —
+    the smell persists; only its test-flake symptom is closed).
+    FLAGGED, not filled: whether this guard should take the OW51
+    refusal+retrigger disposition (dispose as a non-event,
+    re-trigger when the reads change) is a spec decision — #6179
+    deliberately scoped the refusal to the schema-aware lazy READ
+    path, and a composite-context validation failure is a
+    neighboring but distinct shape; a ruling here gets its own
+    events.md/speculation.md sentence before any build. Trigger:
+    the next echo-semantics pass, or any live surface where a
+    dropped echo's missing cover is user-visible (the OW33
+    arrival-witness fork's fix would NOT close this — a dropped
+    run seals no overlay entry at all).**
 
 ## 4. Standing rule
 

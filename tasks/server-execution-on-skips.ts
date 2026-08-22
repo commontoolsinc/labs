@@ -89,13 +89,14 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
  * The OW33-family entries this paragraph tracked have moved (OW33
- * triage, 2026-08-22): the two STEP-level `runtime-client` entries are
- * LIFTED (12/12 green at the true ON topology — see the runtime-client
- * list's comment), and the surviving `runner` entry
- * (`pattern-and-data-persistence`) and `patterns` entry
- * (`topics-navigation`) carry ROOT-CAUSED reasons superseding their
- * UNTRIAGED 2026-08-15/16 notes — the speculation overlay's
- * arrival-witness hole and its capture-read sibling
+ * triage, 2026-08-22): the two STEP-level `runtime-client` entries and
+ * the `patterns` topics-navigation entry are LIFTED (12/12 and 10/10
+ * green at the true ON topology — see each list's comment; the topics
+ * lift barriers the test's fid capture and moves the echo-drop smell
+ * to verification-coverage.md OW60), and the surviving `runner` entry
+ * (`pattern-and-data-persistence`) carries a ROOT-CAUSED reason
+ * superseding its UNTRIAGED 2026-08-16 note — the speculation
+ * overlay's arrival-witness hole
  * (docs/history/plans/server-execution-v2/optimize/
  * ow33-triage-report.md). The ON arm otherwise runs the full
  * suites; the flip PR lands only once this list is empty again.
@@ -169,36 +170,23 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // removed by construction, the two-deriver interim's CAS storm with
   // it — the exact unskipping condition the entry named. That gate now
   // runs (and passes) ON.
+  // topics-navigation LIFTED by the OW33 triage's review pass
+  // (2026-08-22, main 51350077e): the entry's recorded fail-fast red
+  // (`missing required property myName` at PiecePropIo.set →
+  // validateWriteDestination) did NOT reproduce in 11 true-ON runs, and
+  // the residual 2/10 flake was a TEST-POSTURE defect — the beforeAll's
+  // unbarriered `topicAt` fid capture reading a pre-arrival `topics`
+  // when the client's echo run is dropped (the OW60 echo-drop smell,
+  // verification-coverage.md — the board itself was always correct
+  // server-side). The capture is now barriered on both created topics
+  // being readable (waitForCellValue, the waiting-in-tests non-browser
+  // shape). Lift evidence: 10/10 green on the ON-built binary
+  // (sha256 68331b3f…, fresh store, posture probed per run) WITH the
+  // echo-drop occurring in 2 of the 10 runs and absorbed by the
+  // barrier — the exact former 2/10 red mechanism, no longer failing.
+  // The product smell the flake used to witness stays tracked as
+  // verification-coverage.md OW60, not as a flaky test.
   patterns: [
-    {
-      file: "integration/topics-navigation.test.ts",
-      phase: "phase-7",
-      reason: "OW33 triage (2026-08-22, main 51350077e — supersedes the " +
-        "2026-08-15 fail-fast note): the recorded red — `updated result " +
-        "does not match its write destination: missing required property " +
-        "myName` at the controller's prop set (PiecePropIo.set → " +
-        "validateWriteDestination) — did NOT reproduce in 11 runs at the " +
-        "true ON topology (ON-built binary sha256 68331b3f…, fresh " +
-        "store, posture probed per run). What remains is a 2/10 FLAKE at " +
-        "a different surface: the controller client's addTopic ECHO run " +
-        "is dropped at the stream-action validation guard (`stream " +
-        "action argument is undefined -- not running`, runner.ts) " +
-        "because its `$ctx` resolves without the required derived " +
-        "`crossrefs` member at send time; the topics are still created " +
-        "correctly SERVER-side (browser renders both; store holds " +
-        "exactly two; events appended == processed), but the " +
-        "beforeAll's `topicAt` capture — `pull()`-then-read with no " +
-        "served-arrival barrier and no speculative cover after the " +
-        "drop — captures wrong topic ids and the navigation assert " +
-        "fails on ids, not behavior. Same read-contract family as the " +
-        "runner entry above (the OW33 arrival-witness fork), plus a " +
-        "flagged question: should the stream-action validation drop " +
-        "take the OW51 refusal+retrigger disposition instead of a " +
-        "silent skip? Evidence: docs/history/plans/server-execution-v2/" +
-        "optimize/ow33-triage-report.md. Lifts when the residual flake " +
-        "greens 10/10 at the true ON topology; the flip PR needs this " +
-        "list EMPTY.",
-    },
     // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
     {
       // OW51's FILE-level skip was LIFTED (2026-08-21, the optimize pass):
@@ -278,12 +266,19 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "speculation overlay's ARRIVAL GATE (speculation.md §4, RULED " +
         "2026-08-16): it witnesses arrival as `confirmedSeq(writtenDoc) " +
         ">= floor`, and a first-run speculation's written computed docs " +
-        "got their STRUCTURE written by the client's own AUTHORED setup " +
-        "commit at exactly the floor seq — so any watermark >= floor " +
-        "(wave 1 of a budget-split settle serving the OTHER instance) " +
-        "retires the entry on the client's own structure write while the " +
-        "served value is still a wave away (~40-260 ms observed), and " +
-        "the bare `getAsQueryResult()` read falls in the hole. The fix " +
+        "got their STRUCTURE written by an AUTHORED setup commit at " +
+        "exactly the floor seq (the client's OWN phase-3 setup for the " +
+        "new instance; a PRIOR session's setup for the resumed one). " +
+        "Store-proven invariant, both arms: the covering watermark " +
+        "reaches the client at least one frame BEFORE the victim's " +
+        "served value — via a values-free advance commit or a values " +
+        "wave that precedes the victim's, or pre-existing for the " +
+        "resumed arm; NEVER an exhausted wave, which freezes " +
+        "`derivedThrough` (space-server.ts) — and the only confirmed " +
+        "cover at/above the floor is that authored structure write, so " +
+        "the entry retires on it while the served value is frames away " +
+        "(~40-260 ms observed), and the bare `getAsQueryResult()` read " +
+        "falls in the hole. The fix " +
         "direction is the ruled sentence itself ('the authoritative " +
         "derivation ... has ARRIVED'); the witness predicate is a design " +
         "fork awaiting the owner — docs/history/plans/server-execution-" +

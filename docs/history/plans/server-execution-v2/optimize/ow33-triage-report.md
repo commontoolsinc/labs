@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-22
 archived: 2026-08-22
-reason: "OW33 triage at main 51350077e: three of the family's four skip surfaces are GREEN at the true ON topology and LIFTED or lift-ready (CT-1606 PerUser render and single-navigateTo 12/12 — both STEP skips lifted; derive_array_leak 5/5 with the counter at 50/50), topics-navigation's recorded fail-fast myName red did not reproduce (9/11 green; a NEW 2/10 flake characterized), and the one persisting red (pattern-and-data-persistence, now a rotating flake — 4/8 original-file runs red in the triage series) is ROOT-CAUSED to the speculation overlay's arrival-gate witness hole — the gate accepts the client's own authored structure write as the arrival witness — with the predicate choice surfaced as a fork memo (ow33-arrival-witness-fork.md), not filled."
+reason: "OW33 triage at main 51350077e (+ the #6195 review pass): four of the family's five surfaces are GREEN at the true ON topology and LIFTED (CT-1606 PerUser render and single-navigateTo 12/12 — both STEP skips lifted; derive_array_leak 5/5 counter 50/50; topics-navigation's recorded fail-fast myName red did not reproduce and its residual 2/10 flake was the unbarriered fid capture — barriered, 10/10 with the echo-drop absorbed twice, skip LIFTED, the smell minted as register row OW60), and the one persisting red (pattern-and-data-persistence, a rotating flake — 4/8 original-file runs red) is ROOT-CAUSED to the speculation overlay's arrival-gate witness hole — the gate accepts an authored structure write at the floor as the arrival witness — with the predicate choice surfaced as a fork memo (ow33-arrival-witness-fork.md), not filled."
 ---
 
 # OW33 triage — the ON-posture Deno-client family, re-reproduced at main
@@ -51,7 +51,7 @@ filled.
 | (b) `runtime-client client.test.ts` :: CT-1606 PerUser header render | never reaches first render in 15 s, 3/3 | **GREEN 12/12** (10 binary + 2 source), renders in ~1 s | HEALED; STEP skip **LIFTED** |
 | (c) same file :: single navigateTo dispatch | flaky 1/3 — two dispatches for one fire | **GREEN 12/12** | HEALED; STEP skip **LIFTED** |
 | (d) `runner/integration/derive_array_leak.test.ts` | 0 of 50 increments land (warned; green only via memory assert) | **counter 50/50, 5/5 runs** | HEALED (was never skip-listed; row re-tensed) |
-| sibling: `patterns/integration/topics-navigation.test.ts` | fails FAST at the controller prop set: `missing required property myName` (PiecePropIo.set → validateWriteDestination) | that red **did NOT reproduce in 11 runs** (9/11 green); a NEW 2/10 flake at a different surface (§6) | skip STAYS, reason re-tensed to the residual flake |
+| sibling: `patterns/integration/topics-navigation.test.ts` | fails FAST at the controller prop set: `missing required property myName` (PiecePropIo.set → validateWriteDestination) | that red **did NOT reproduce in 11 runs** (9/11 green); the residual 2/10 flake was the unbarriered fid capture (§6) — barriered in the review pass, then **10/10 green** with the echo-drop absorbed twice | test-posture fix + skip **LIFTED**; the echo-drop smell minted as **OW60** |
 
 ## 2. Member (a): the arrival-gate witness hole
 
@@ -79,33 +79,57 @@ value through this read path either" — is superseded on both halves:
   DO seal overlay entries — which are then **retired before the served
   value arrives**.
 
-### The mechanism, step by step (instrumented red run)
+### The mechanism, step by step (instrumented red runs; store-decoded)
 
-1. Phase 3's setup commits authored at seq S (input cell + the run's
-   result/computed docs' STRUCTURE — the creation act).
+1. A setup commit writes authored at some seq — the input cell plus
+   the piece's result/computed docs' STRUCTURE (the creation act).
+   For the NEW instance that commit is the client's own phase-3 setup
+   at seq S; for the RESUMED instance it is a PRIOR session's setup
+   commit (phase 2's), already confirmed in the store.
 2. The client speculatively runs both instances; each derivation seals
-   an overlay entry with `floor = S` (its reads sit on the setup
-   commit) and `writtenDocs` = its computed docs.
-3. The serving loop settles the S admission over a BUDGET-SPLIT wave
-   pair (`wavesBudgetExhausted` observed): wave 1 commits ONE
-   instance's values (+ the watermark move covering S), wave 2 commits
-   the other's — 41–262 ms later in the observed runs.
-4. When the wave-1 frame's watermark reaches the client, the overlay
-   sweep runs. The other instance's entries pass the ARRIVAL gate
-   spuriously: the gate (overlay-destination.ts `#sweep`) witnesses
-   arrival as `confirmedSeq(writtenDoc) >= floor` — and the computed
-   docs' confirmed head IS the client's own authored STRUCTURE write
-   at exactly seq S = floor. The entries retire; the pending layers
-   drop; live entry count hits 0 (sampled: entries sealed at
-   `liveEntries=2`, retired to 0 within the same millisecond burst).
-5. The bare `getAsQueryResult()` read lands in the hole — `undefined`
-   — and heals when wave 2 applies (measured 41–262 ms after the read
-   point). Whichever instance's wave lands second is the victim, which
-   is why the failing assert rotates (run 0: resumed instance; later
-   runs: new instance — both signatures observed at main; the
-   register's original deterministic phase-3 red is this same hole
-   with the resumed instance's floor already watermark-covered at seal
-   time, retiring instantly).
+   an overlay entry whose `floor` sits at its setup commit's seq (its
+   reads sit on that commit) and whose `writtenDocs` are its computed
+   docs.
+3. **The store-proven invariant (both decoded red stores, both
+   arms):** the watermark covering the entry's floor reaches the
+   client AT LEAST ONE FRAME BEFORE the victim's served value, and
+   the ONLY confirmed cover at/above the floor is an AUTHORED
+   STRUCTURE write — never a derived value. The two arms: the
+   NEW-instance victim's cover is the client's OWN setup commit at
+   exactly the floor seq; the RESUMED-instance victim's cover is the
+   PRIOR session's authored setup write (run 0's entries retired at
+   seal against a PRE-EXISTING values-free watermark-only commit from
+   the prior wave — `derived-8: watermark→7`, no values — while the
+   victim's values rode the FIRST values commit of the new settle,
+   `derived-10`, arriving after the read).
+4. How W gets ahead of the victim's value, honestly scoped: an
+   EXHAUSTED wave FREEZES the watermark (`space-server.ts` — both
+   `inputAdvanceTo` and `derivedThrough` take `this.#watermark` when
+   `exhausted`), so under budget exhaustion
+   (`wavesBudgetExhausted` observed in these runs) the covering W
+   rides a LATER values wave or a VALUES-FREE advance commit; and
+   with several writers in one settle, demand-arrival order can put
+   the victim's writer in a later wave while W rides the first values
+   wave. Either way the covering W's frame precedes the victim's
+   served value at the client.
+5. When that covering W arrives (or already stands, the resumed arm),
+   the overlay sweep runs and the victim's entries pass the ARRIVAL
+   gate spuriously: the gate (overlay-destination.ts `#sweep`)
+   witnesses arrival as `confirmedSeq(writtenDoc) >= floor`, and the
+   computed docs' confirmed head IS the authored STRUCTURE write at
+   the floor. The entries retire; the pending layers drop; live entry
+   count hits 0 (sampled: entries sealed at `liveEntries=2`, retired
+   to 0 within the same millisecond burst — or instantly at seal when
+   the cover pre-exists).
+6. The bare `getAsQueryResult()` read lands in the hole — `undefined`
+   — and heals when the victim's served value applies (measured
+   41–262 ms after the read point). Which instance is the victim
+   follows from whose served value lands after the covering W's frame
+   — which is why the failing assert rotates (run 0: resumed
+   instance, cover pre-existing; later runs: new instance, cover =
+   own setup; both signatures observed at main, and independently
+   reproduced by the #6195 review with both signatures, entries=0 at
+   the read, heal +36 ms).
 
 The RULED arrival sentence (speculation.md §4, 2026-08-16) is
 explicit that coverage without arrival is the OW32
@@ -120,12 +144,15 @@ has several candidates with real semantic edges — that choice is the
 fork memo, flagged not filled.
 
 Evidence trail (scratch logs, per-run stores): the original file red
-4/8 across the first series, 2/10 and 1/8 in instrumented variants; overlay `entryCount == 0` at the read
-point in EVERY run (green runs were green because the served value
-had already applied); seal narration showing derivation-kind seals
-registering then retiring inside the same burst; store timelines
-showing structure-at-S authored, values-at->S derived, split across
-two derived commits with the watermark riding the first.
+4/8 across the first series, 2/10 and 1/8 in instrumented variants;
+overlay `entryCount == 0` at the read point in EVERY run (green runs
+were green because the served value had already applied); seal
+narration showing derivation-kind seals registering then retiring
+inside the same burst; store timelines showing structure authored at
+the floor seq, values derived above it, split across separate derived
+commits — with the covering watermark arriving via a values-free
+advance commit or riding a values wave that precedes the victim's
+(never an exhausted wave: those freeze `derivedThrough`).
 
 ### Disposition
 
@@ -177,7 +204,7 @@ running several toolsheds its MEMORY ratio may measure a bystander
 process — the counter half, which is the OW33 signal, is
 process-exact either way.
 
-## 6. Sibling: topics-navigation — the recorded red is gone; a new 2/10 flake characterized
+## 6. Sibling: topics-navigation — the recorded red is gone; the residual flake closed by a barriered capture; skip LIFTED
 
 At the true ON topology (ON binary, fresh store per series): 9/11
 runs green (1 initial + 10-run gate, 8/10). The register's recorded
@@ -220,35 +247,77 @@ questions for the owner — the guard's disposition is not determined
 by the OW51 ruling as scoped (#6179 scoped the refusal to the
 schema-aware lazy READ path).
 
-Skip entry STAYS at file level; reason re-tensed to the residual
-flake with the 10/10 lift condition.
+### The review pass: the capture barriered, the skip LIFTED, the smell minted as OW60
+
+The #6195 review took the lift path (its F4): the unbarriered capture
+is the waiting-in-tests doctrine's exact class — a capture racing the
+serve — so the beforeAll's fid capture is now BARRIERED on both
+created topics being readable (`waitForCellValue` over the board
+result's `topics` key, sink-driven with the predicate applied at
+quiescence; both titles present). In the echo-covered path the ids
+converge by cause, so the barrier is correct in both arms. The
+red-first evidence for the fix is the recorded 2/10 red series above
+— the exact mechanism the barrier closes; a deterministic on-demand
+reproduction of the race is not constructible without instrumenting
+the runtime, so the mechanism trace stands as the red.
+
+The lift gate, re-run with the barrier (fresh store `bin3`, same
+ON-built binary, posture probed; loads 5.8–6.5):
+
+| run | result | echo-drop observed |
+| --- | --- | --- |
+| 1–8 | green (6–12 s) | no |
+| 9 | green | YES — dropped and ABSORBED |
+| 10 | green | YES — dropped and ABSORBED |
+
+**10/10 green — with the echo-drop occurring at its natural ~2/10
+rate in runs 9–10 and no longer failing the test.** That is the
+strongest available validation: the exact former red mechanism
+recurred under the fix and was absorbed. The file's skip entry is
+REMOVED.
+
+The canary function the flake was serving moves to a NAMED register
+record instead: the echo-drop product smell — the stream-action
+validation guard silently skipping an echo run whose composite
+`$ctx` has not materialized, predating the OW51 refusal semantics —
+is minted as verification-coverage.md **OW60**, carrying the full
+trace and the flagged disposition question (refusal+retrigger vs
+silent skip), so the smell stays tracked without a flaky test
+carrying it.
 
 ## 7. Register and skip-list deltas shipped with this report
 
 - `tasks/server-execution-on-skips.ts`: both runtime-client STEP
-  entries REMOVED (12/12 gate); the runner and topics entries'
-  reasons re-tensed to the root-caused mechanisms; the header
-  narrative updated. The in-file `onArmStepSkip` guard calls stay in
-  `client.test.ts` — the binding mechanism for any future entry,
-  inert without one.
+  entries REMOVED (12/12 gate) and the patterns topics-navigation
+  entry REMOVED (the review pass's barriered 10/10 gate); the
+  surviving runner entry's reason re-tensed to the root-caused
+  mechanism; the header narrative updated. The in-file
+  `onArmStepSkip` guard calls stay in `client.test.ts` — the binding
+  mechanism for any future entry, inert without one.
 - `tasks/server-execution-on-skips.test.ts`: the three content pins
   reconciled to the new register state (empty runtime-client list
   pinned so a re-skip is a deliberate entry; the re-tensed reasons'
   load-bearing substrings pinned).
-- verification-coverage.md OW33 row: triage delta appended
+- `packages/patterns/integration/topics-navigation.test.ts`: the
+  beforeAll fid capture barriered (`waitForCellValue`; the review
+  pass's F4).
+- verification-coverage.md: the OW33 row's triage delta
   (re-reproduction results, the discharged demand question, the
-  arrival-witness fork's flag, the topics re-tense).
+  arrival-witness fork's flag, the topics lift), and the NEW OW60
+  row (the echo-drop smell's named record).
 
 ## 8. Flagged, not filled
 
 1. **The arrival-witness predicate** (§2; the fork memo) — awaiting
    the owner's ruling before any build.
 2. **The stream-action validation drop vs the OW51 refusal
-   disposition** (§6) — the guard silently skips a run whose composite
-   `$ctx` is missing a required derived member; under the ruled
-   refusal semantics a comparable unresolved READ refuses and
-   re-triggers. Extending that disposition to this guard is a spec
-   decision, not an implementation detail.
+   disposition** (§6; now register row OW60) — the guard silently
+   skips a run whose composite `$ctx` is missing a required derived
+   member; under the ruled refusal semantics a comparable unresolved
+   READ refuses and re-triggers. Extending that disposition to this
+   guard is a spec decision, not an implementation detail. The smell
+   demonstrably persists (absorbed twice inside the 10/10 lift
+   gate).
 3. **`pull()`'s read contract under ON** — `pull()` resolves on
    client idle + settled loads; it does not await a served round.
    Today the speculative cover is what makes pull-then-read
