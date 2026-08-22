@@ -59,6 +59,12 @@ export type QueryDocKey = `${string}/${ScopeKey}/${string}`;
 export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
+  /** Value-link dead-ends the query's walks read as ABSENT (see
+   * GraphQueryWalkOptions.missedDocs): keyed like the tracker, never
+   * delivered — a miss keeps the graph reactive to the document's later
+   * creation (the wake pass and the dirty refresh consult it) without
+   * putting an absence marker on the wire. */
+  missed: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: SchemaMemo;
   manager: EngineObjectManager;
@@ -284,6 +290,7 @@ export const cloneTrackedGraphState = (
   state: TrackedGraphState,
 ): TrackedGraphState => {
   const tracker = state.tracker.clone();
+  const missed = state.missed.clone();
 
   const manager = new EngineObjectManager(
     engine,
@@ -296,6 +303,7 @@ export const cloneTrackedGraphState = (
   return {
     branch: state.branch,
     tracker,
+    missed,
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
@@ -685,6 +693,7 @@ export const trackGraph = (
     reuse?.managers?.set(managerKey, manager);
   }
   const schemaTracker = new MapSetStringToPathSelectors(true);
+  const missed = new MapSetStringToPathSelectors(true);
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -692,6 +701,7 @@ export const trackGraph = (
     manager,
     space: space as MemorySpace,
     schemaTracker,
+    missedDocs: missed,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
@@ -752,6 +762,7 @@ export const trackGraph = (
     state: {
       branch,
       tracker: schemaTracker,
+      missed,
       entities,
       memo: sharedMemo,
       manager,
@@ -799,6 +810,7 @@ export const extendTrackedGraph = (
       },
       selector,
       state.tracker,
+      state.missed,
       state.memo,
       stats,
     );
@@ -936,6 +948,18 @@ export const refreshTrackedGraph = (
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
     }
+    // A dirty doc the query's walks MISSED (read as absent) re-fires the
+    // query exactly like a tracked one: this is the arrival half of the
+    // dead-end read contract — the write that creates the document is the
+    // event that heals every read that dead-ended on it. Without this, a
+    // first-hydration miss on a quiet space starves for the session's
+    // life (OW45 arm B).
+    const missedSelectors = state.missed.get(key);
+    if (missedSelectors !== undefined && missedSelectors.size > 0) {
+      const merged = affectedDocs.get(key) ?? new Set<SchemaPathSelector>();
+      for (const selector of missedSelectors) merged.add(selector);
+      affectedDocs.set(key, merged);
+    }
   }
   if (affectedDocs.size === 0) {
     return null;
@@ -953,6 +977,7 @@ export const refreshTrackedGraph = (
 
   for (const key of affectedDocs.keys()) {
     state.tracker.delete(key);
+    state.missed.delete(key);
   }
 
   for (const [key, selectors] of affectedDocs) {
@@ -964,6 +989,7 @@ export const refreshTrackedGraph = (
         { id, scope, scopeKey },
         selector,
         state.tracker,
+        state.missed,
         sharedMemo,
         stats,
       );
@@ -1047,6 +1073,7 @@ const evaluateTrackedDocument = (
   address: { id: string; scope?: CellScope; scopeKey?: ScopeKey },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
+  missed: MapSetStringToPathSelectors,
   sharedMemo: SchemaMemo,
   stats: QueryTraversalStats,
 ) => {
@@ -1069,6 +1096,7 @@ const evaluateTrackedDocument = (
     manager,
     space: space as MemorySpace,
     schemaTracker,
+    missedDocs: missed,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,

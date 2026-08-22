@@ -2280,38 +2280,69 @@ export class SpaceServer implements TransactionSealDestination {
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) return 0;
     let queued = 0;
-    for (const doc of pendingDocs) {
-      // Materialize the sidecar into the SERVING replica before any
-      // index-addressed mark can be written against it: a cold view
-      // would materialize ghost entries (the engine's admission guard
-      // refuses the resulting wave — the failure mode this sync
-      // exists to prevent). The stream's own doc is synced too so the
-      // no-handler auto-load's meta chain reads a warm view.
-      try {
-        await runtime.getCellFromLink({
-          space,
-          id: doc.id as never,
-          scope: "space",
-          path: [],
-        }).sync();
-      } catch (error) {
-        logger.warn("event-sidecar-sync-failed", () => [
-          `sidecar sync for ${doc.id} failed; its events defer to the ` +
-          "next wave",
-          error,
-        ]);
-        this.#armDeferredRescan();
-        continue;
-      }
-      // The FULL stored log — mark indices address positions in it.
-      const stored = ((Engine.read(engine, { id: doc.id })?.value ??
-        {}) as StreamEventsDocValue).entries ?? [];
-      const runnable = [...doc.entries].sort(
-        (a, b) =>
-          (a.seq ?? Number.MAX_SAFE_INTEGER) -
-          (b.seq ?? Number.MAX_SAFE_INTEGER),
+    // Process ACROSS sidecars in append commit-seq order — events.md §2's
+    // ordering sentence: per stream, commit-seq order; across streams in
+    // one space, wave (arrival) order. The doc-major loop this replaces
+    // honored only the per-doc half, and its view-lag arm skipped PAST a
+    // deferred entry: a later-arrived event on a warm sidecar then
+    // consequenced ahead of an earlier deferred one — with one user's
+    // last two clicks landing on two streams, the earlier click's write
+    // landed LAST and the terminal state was wrong (the OW45 arm-B
+    // gate's b01 red: `usedCreateAnotherNote` ending true after the
+    // final Create had cleared it; store-verified inversion). Seq-less
+    // legacy entries sort last, as before; the sidecar-id tie-break
+    // keeps one wave's co-committed entries in a stable order.
+    const ordered = pendingDocs
+      .flatMap((doc) => doc.entries.map((entry) => ({ doc, entry })))
+      .sort((a, b) =>
+        ((a.entry.seq ?? Number.MAX_SAFE_INTEGER) -
+          (b.entry.seq ?? Number.MAX_SAFE_INTEGER)) ||
+        a.doc.id.localeCompare(b.doc.id)
       );
-      for (const entry of runnable) {
+    // Sidecars materialize into the SERVING replica on first touch, once
+    // per pass: a cold view would materialize ghost entries (the
+    // engine's admission guard refuses the resulting wave — the failure
+    // mode the sync exists to prevent). The stream's own doc is synced
+    // too so the no-handler auto-load's meta chain reads a warm view.
+    // The stored log is captured beside the sync — mark indices address
+    // positions in it.
+    const sidecars = new Map<
+      string,
+      { stored: StreamEventsDocValue["entries"] } | "sync-failed"
+    >();
+    for (const { doc, entry } of ordered) {
+      let sidecar = sidecars.get(doc.id);
+      if (sidecar === undefined) {
+        try {
+          await runtime.getCellFromLink({
+            space,
+            id: doc.id as never,
+            scope: "space",
+            path: [],
+          }).sync();
+          sidecar = {
+            stored: ((Engine.read(engine, { id: doc.id })?.value ??
+              {}) as StreamEventsDocValue).entries ?? [],
+          };
+        } catch (error) {
+          logger.warn("event-sidecar-sync-failed", () => [
+            `sidecar sync for ${doc.id} failed; its events — and every ` +
+            "later-arrived event behind them — defer to the next wave",
+            error,
+          ]);
+          sidecar = "sync-failed";
+        }
+        sidecars.set(doc.id, sidecar);
+      }
+      if (sidecar === "sync-failed") {
+        // Deferral is a BARRIER, not a skip: everything at or behind
+        // this entry's arrival position waits with it, or a later
+        // arrival's consequence lands ahead of an earlier one.
+        this.#armDeferredRescan();
+        break;
+      }
+      const stored = sidecar.stored ?? [];
+      {
         const index = stored.findIndex((candidate) =>
           candidate?.eventId === entry.eventId &&
           candidate?.seq === entry.seq
@@ -2344,10 +2375,14 @@ export class SpaceServer implements TransactionSealDestination {
           if (viewEntry?.eventId !== entry.eventId) {
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${JSON.stringify(viewEntry)} at index ${index}`,
+              `${JSON.stringify(viewEntry)} at index ${index}; ` +
+              "later-arrived events wait behind it",
             ]);
+            // The same barrier as above: the deferred entry's
+            // still-catching-up view must not let later arrivals run
+            // ahead of it.
             this.#armDeferredRescan();
-            continue;
+            break;
           }
         }
         // Only a NUMERIC-seq consequenced twin skips this entry

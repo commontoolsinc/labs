@@ -5469,7 +5469,100 @@ supply; OW29/OW32/OW34 closed):
     workdir, and its h06-h10 burner phase self-invalidated (the step
     skipped) when the skip ENTRY's restoration landed in the working
     tree mid-gate — the 3/5 rate is the five valid runs h01-h05.
-  - **OW46 — the silent forever-park is invisible (seat S-D;
+    **ARM-B TRIAGE 2026-08-22 (evening): the starvation family is
+    THREE defects — two FIXED red-first, one isolated LIVE and
+    FORKED; the step entry STAYS.** The instrumented bench (the
+    name-draft triage's FORWARD_WORKER_CONSOLE aid + fresh-store
+    harness at merged main) caught two reds in four runs, each a
+    DIFFERENT member: (i) **run b01 — the event drain's deferral arm
+    reordered one user's clicks (FIXED).** Store-verified: the
+    `usedCreateAnotherNote` doc's terminal write is `true` at
+    19:41-equivalent seq 90 AFTER the final Create's clearing `false`
+    at seq 85 — a deferred Create-Another (five `event-view-lag`
+    deferrals logged on its sidecar) consequenced after the
+    later-arrived Create on its own healthy sidecar, violating
+    events.md §2's stated order (per stream commit-seq; across
+    streams arrival). The client read the state correctly — the
+    PRODUCT state was wrong, so the value-wait's 300 s report was
+    faithful. Fix: the drain processes ACROSS sidecars in append
+    commit-seq order and a deferral (view-lag or sidecar-sync
+    failure) is a BARRIER — later arrivals wait behind it — instead
+    of a skip (`space-server.ts` `#drainStreamEvents`); red-first pin
+    watched `["A","B","A"]` pre-fix and green after
+    (`executor-events-down.test.ts` "arrival order across streams",
+    deterministic via a transient sidecar-sync-failure seam; the
+    view-lag arm is the same barrier, pinned through that sibling —
+    the emulated harness cannot hold an async view lag across passes,
+    the OW47-hydration precedent's shape, so the live ON gate remains
+    the view-lag half's bench). (ii) **The walk's
+    absent-hop-target demand hole (FIXED, the register's candidate
+    mechanism made precise).** A server graph walk that dead-ends on
+    a link-hop target absent at evaluation recorded NOTHING for it
+    (`followPointer` returns before `trackVisitedDoc`; the meta-doc
+    loader already tracked its absent targets, with the re-fire
+    rationale in its comment), so the target's birth commit failed
+    the session wake pass's touched check (`trackedIds` derives from
+    DELIVERED entities) and the standing watch never delivered it —
+    while the client's selector tracker legitimately answered every
+    re-read locally after the first pull (a schema-false pull is
+    covered by any registered selector) and `#docPullKicks` is
+    one-shot. On a quiet space (create-then-read ends with a write
+    then pure reads — the store shows the last commit ONE SECOND
+    after the 7th append in every red) no later commit exists to
+    heal, so the absence is permanent for the session: the
+    first-read lottery. Fix: the walk records the dead-end in a MISS
+    SET on the tracked graph state (`TrackedGraphState.missed`,
+    same-space only, fed by the server walk's `onMissingLinkTarget`)
+    — wake-reactivity ONLY, folded into `session.trackedIds` beside
+    the delivered entities at every rebuild/fold site, and consulted
+    by the dirty refresh so the birth re-evaluates and delivers the
+    real document. Deliberately NOT the schema tracker: tracker
+    entries materialize as delivered entities, and putting absence
+    markers for every dangling value link on the wire changed client
+    replica state at scale and broke the deliberate
+    absence-confirmation flow (the list-resume-container-defer
+    harness caught it — the first cut of this fix rode the tracker
+    and wedged that suite's held-transport step; absent ROOTS keep
+    their narrower pre-existing marker contract). Red-first:
+    `v2-watch-absent-arrival.test.ts` — the hop pin watched starving
+    at its 10 s net, both pins green with the fix; the list-defer
+    suite and the (d′) demand-set equality
+    (`executor-dprime-w0.test.ts`) green with the miss-set shape
+    where the tracker-marker shape had broken both. Disclosed
+    ripple: misses join `trackedIds` and therefore the (d′) demand
+    rows, so a dangling same-space `of:` link can park a structure
+    load until its target exists — bounded, OW46's
+    `structureLoadStuck` counter surfaces it, and the never-a-piece
+    id classes (computed:/cid:/watermark) stay excluded by the
+    serving loop's existing root filter. (iii) **run b04 — the flag-ON client's
+    navigate-deferred piece start dies terminally on the
+    first-hydration race (ISOLATED LIVE, FORKED — the remaining
+    charge).** The h04 whole-piece shape reproduced with the worker
+    console forwarded: the client's deferred start tx REFUSED with
+    `ConflictError: stale confirmed read: computed:… at seq 0
+    conflicted with seq 10` — its basis read the served piece's
+    computed docs PRE-BIRTH while the serving side materialized them
+    — then `pattern-load-error`, then silence; the error arm of the
+    deferred-start commit cancels ownership with NO retry
+    (`runner.ts` ~3453), so the piece never starts client-side, its
+    demand never registers, and every dependent read is undefined
+    for the session (root doc readable via the registry closure —
+    98 stored chip labels — every link hop dead; ZERO
+    `sync-load-failure` lines, excluding the swallowed-pull class
+    for this red). Dispositions and recommendation — (a)
+    retry-on-conflict now, (b) adopt-not-start under ON as the
+    model's destination, (c) heal-on-read re-opens the ruled S-C
+    with new evidence — in
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`.
+    The skip entry therefore STAYS, its reason updated to the
+    refined map; the lift bar is unchanged (the client-start class
+    closes and the fixed step greens ON 10/10 quiet-and-loaded —
+    unreachable while a per-run lottery can kill the client's piece
+    context). Retro-reading the h-runs: h01/h05's converged-but-one-
+    chain shape is the same die-off later in the start walk; rf2's
+    old-shape stall is the die-off at the front; b01's shape hid
+    inside the population as "the product not answering" with the
+    client blameless.
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
     `../../history/plans/server-execution-v2/optimize/ow47-client-durability-report.md`).**
