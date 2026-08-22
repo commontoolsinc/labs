@@ -1503,13 +1503,19 @@ export class Runtime {
    * path is deliberately fire-and-forget (start() resolves before its
    * commit settles), so without this seam the refusal Result was
    * SWALLOWED and the piece silently ran against stale setup. The
-   * SpaceServer installs the observer at activation and counts the
-   * failure into §7's `structureLoadFailures` (a demanded-structure
-   * load that failed, asynchronously); the runner's loud error log
-   * rides the same reporting call in every arm.
+   * SpaceServer installs the observer at activation, counts the failure
+   * into §7's `structureLoadFailures`, and re-arms continuous demand for
+   * the named piece root. The runner's error log rides the same reporting
+   * call in every arm.
    */
   pieceStartCommitFailureObserver:
-    | ((failure: { actionId: string; error: unknown }) => void)
+    | ((failure: {
+      actionId: string;
+      pieceRootId: string;
+      registrationRemoved: boolean;
+      retry: "immediate" | "on-input";
+      error: unknown;
+    }) => void)
     | undefined;
 
   /**

@@ -49,7 +49,11 @@ import {
   SpaceServer,
   STRUCTURE_LOAD_STUCK_AFTER,
 } from "../src/executor/space-server.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import {
+  stampWaveContinuation,
+  stampWaveRunContext,
+  waveSettlementOf,
+} from "../src/executor/wave.ts";
 import {
   emptyServingLoopStats,
   type ServingLoopStats,
@@ -406,6 +410,92 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.deferSealedEffects(probeTx, [effect])).toBe(true);
     expect(created.deferredEffectWaveCount).toBe(0);
     expect(flushed).toBe(0);
+  });
+
+  it("keeps a commit-callback continuation in its producer wave while parking and refuses a successor", async () => {
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+    const producerCell = runtime.getCell<{ value: number }>(
+      space,
+      "park-boundary producer",
+      undefined,
+    );
+    const childCell = runtime.getCell<{ value: number }>(
+      space,
+      "park-boundary child",
+      undefined,
+    );
+    const producerTx = runtime.edit();
+    runtime.stampServerRun(producerTx, {
+      actionId: "test/park-boundary-producer",
+      kind: "event-handler",
+      eventId: "event-at-park-boundary",
+    });
+    producerCell.withTx(producerTx).set({ value: 1 });
+
+    const releaseSeal = Promise.withResolvers<void>();
+    const originalSealInto = producerTx.tx.sealInto!.bind(producerTx.tx);
+    producerTx.tx.sealInto = async (sink) => {
+      await releaseSeal.promise;
+      return await originalSealInto(sink);
+    };
+
+    let childTx: IExtendedStorageTransaction | undefined;
+    let childCommit: Promise<unknown> | undefined;
+    const successorTx = runtime.edit();
+    runtime.stampServerRun(successorTx, {
+      actionId: "test/park-boundary-successor",
+      kind: "bookkeeping",
+    });
+    const successorCell = runtime.getCell<{ value: number }>(
+      space,
+      "park-boundary successor",
+      undefined,
+    );
+    successorCell.withTx(successorTx).set({ value: 3 });
+    let successorSeal: Promise<unknown> | undefined;
+    producerTx.addCommitCallback((committedTx, result) => {
+      if (result.error !== undefined) return;
+      const child = runtime.edit();
+      runtime.stampServerRun(child, {
+        actionId: "test/park-boundary-child",
+        kind: "event-handler",
+        eventId: "event-at-park-boundary",
+      });
+      stampWaveContinuation(child, committedTx);
+      childCell.withTx(child).set({ value: 2 });
+      childTx = child;
+      childCommit = child.commit();
+      successorSeal = successorTx.commit();
+    });
+
+    const producerCommit = producerTx.commit();
+    const parked = created.park("continuation boundary test");
+    releaseSeal.resolve();
+
+    expect((await producerCommit).error).toBeUndefined();
+    await parked;
+    expect((await successorSeal!) as { error?: unknown }).toHaveProperty(
+      "error",
+    );
+    expect(childTx).toBeDefined();
+    expect((await childCommit!) as { error?: unknown }).not.toHaveProperty(
+      "error",
+    );
+    const childSettlement = waveSettlementOf(childTx!);
+    expect(childSettlement).toBeDefined();
+    expect((await childSettlement!).error).toBeDefined();
+    expect(
+      Engine.read(engine, {
+        id: producerCell.getAsNormalizedFullLink().id,
+      })?.value,
+    ).toBeUndefined();
+    expect(
+      Engine.read(engine, {
+        id: childCell.getAsNormalizedFullLink().id,
+      })?.value,
+    ).toBeUndefined();
   });
 
   it("clamps the W advance to the shadow floor — the min/max composition and serving-loop.md §7's counter, full suppression and the remove sentinel included — and the shadow-flip wake lifts the clamp promptly (Phase 2 settle input barrier)", async () => {

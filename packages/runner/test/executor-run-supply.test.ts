@@ -23,8 +23,8 @@
 // - the F1 fold-in (RULED 2026-08-13, option c): a piece-start setup
 //   commit that fails on the serving runtime surfaces loudly through
 //   `Runtime.pieceStartCommitFailureObserver` instead of being
-//   swallowed by the fire-and-forget start path (the piece silently
-//   running against stale setup was the filed hazard).
+//   swallowed by the fire-and-forget start path, and removes the invalid
+//   registration so a later demand can start the piece again.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -32,11 +32,17 @@ import { Identity } from "@commonfabric/identity";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
-import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
+import {
+  stampWaveRunContext,
+  WaveAccumulator,
+  waveRunContextOf,
+} from "../src/executor/wave.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type {
   IExtendedStorageTransaction,
+  IStorageTransactionInconsistent,
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -735,6 +741,16 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
+  const stampRun = (
+    tx: IExtendedStorageTransaction,
+    info: ServerRunInfo,
+  ): void => {
+    stampWaveRunContext(tx, {
+      actionId: info.actionId,
+      kind: info.kind,
+    });
+  };
+
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -787,6 +803,25 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
       symbol: v3Ref.symbol,
     });
     await tx2.commit();
+    return cell;
+  };
+
+  const stoppedPiece = async (name: string) => {
+    const tx = runtime.edit();
+    const v1 = await runtime.patternManager.compilePattern(
+      programOf(V1_NO_HANDLER),
+      { space, tx },
+    );
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      name,
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+    expect((await tx.commit()).error).toBeUndefined();
+    await running.pull();
+    runtime.runner.stop(cell);
     return cell;
   };
 
@@ -844,46 +879,607 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     runtime.clearSealDestination();
   });
 
-  it("surfaces a refused fire-and-forget piece-INSTANTIATE commit through the observer (the start path's own arm, not only the repair's)", async () => {
+  it("waits for conflict catch-up before surfacing a failed piece-INSTANTIATE retry", async () => {
     // A HEALTHY piece — no repair involved: run V1, stop, restart. The
     // restart's startCore mints the self-minted fire-and-forget
     // instantiation tx (`piece-instantiate/<root>`) — the arm the F1
     // hazard was actually filed about (start() resolves before the
     // commit settles, so a swallowed refusal leaves the piece silently
     // running against writes that never landed).
-    const tx = runtime.edit();
     const pm = runtime.patternManager;
-    const v1 = await pm.compilePattern(programOf(V1_NO_HANDLER), {
-      space,
-      tx,
+    for (const gateOutcome of ["resolve", "reject"] as const) {
+      const tx = runtime.edit();
+      const v1 = await pm.compilePattern(programOf(V1_NO_HANDLER), {
+        space,
+        tx,
+      });
+      const cell = runtime.getCell<Record<string, unknown>>(
+        space,
+        `p2f-f2-restart-${gateOutcome}`,
+        undefined,
+        tx,
+      );
+      const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+      await tx.commit();
+      await running.pull();
+      runtime.runner.stop(cell);
+
+      // A destination that REFUSES exactly the instantiate seal and
+      // passes everything else through natively — the same deterministic
+      // wave-side refusal stand-in as the repair test above.
+      const refused: string[] = [];
+      const refusedSeal = Promise.withResolvers<void>();
+      const gateEntered = Promise.withResolvers<void>();
+      const readyToRetry = Promise.withResolvers<void>();
+      runtime.installSealDestination({
+        seal: (sealTx: IExtendedStorageTransaction) => {
+          const context = waveRunContextOf(sealTx);
+          if (context?.actionId.startsWith("piece-instantiate/")) {
+            refused.push(context.actionId);
+            refusedSeal.resolve();
+            return Promise.resolve({
+              error: Object.assign(
+                new Error("test conflict for the piece-instantiate seal"),
+                {
+                  name: "ConflictError" as const,
+                  transaction: {} as never,
+                  conflict: {
+                    space,
+                    the: "application/json" as const,
+                    of: cell.getAsNormalizedFullLink().id as never,
+                  },
+                  readyToRetry: () => {
+                    gateEntered.resolve();
+                    return readyToRetry.promise;
+                  },
+                },
+              ),
+            });
+          }
+          return sealTx.tx.commit();
+        },
+      }, {
+        runStamper: (stampTx, info) => {
+          stampWaveRunContext(stampTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      });
+
+      const surfaced: Array<{ actionId: string; error: unknown }> = [];
+      const surfacedFailure = Promise.withResolvers<void>();
+      runtime.pieceStartCommitFailureObserver = (failure) => {
+        surfaced.push(failure);
+        surfacedFailure.resolve();
+      };
+
+      // Fire-and-forget by design: start resolves true while the refused
+      // commit settles behind it.
+      const started = await runtime.start(cell);
+      expect(started).toBe(true);
+      await refusedSeal.promise;
+      await gateEntered.promise;
+      const registrationKey = entityKey(
+        cell.getAsNormalizedFullLink(),
+        runtime.scopeKeyIdentity,
+      );
+
+      // The refusal genuinely happened…
+      expect(refused.length).toBeGreaterThanOrEqual(1);
+      // The invalid graph is removed immediately, but continuous demand must
+      // not restart it until the conflict's replica catch-up gate settles.
+      expect(runtime.runner.cancels.has(registrationKey)).toBe(false);
+      expect(surfaced.length).toBe(0);
+      if (gateOutcome === "resolve") {
+        readyToRetry.resolve();
+      } else {
+        readyToRetry.reject(new Error("test conflict catch-up failure"));
+      }
+      await surfacedFailure.promise;
+
+      // The failure surfaces after catch-up and a later start is clean.
+      expect(surfaced.length).toBe(1);
+      expect(surfaced[0].actionId.startsWith("piece-instantiate/")).toBe(true);
+
+      runtime.clearSealDestination();
+      expect(await runtime.start(cell)).toBe(true);
+      await runtime.idle();
+      expect(runtime.runner.cancels.has(registrationKey)).toBe(true);
+    }
+  });
+
+  it("restarts a conflicted piece-INSTANTIATE when no observer owns recovery", async () => {
+    const cell = await stoppedPiece("p2f-client-conflict-retry");
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const retryCommitted = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        if (instantiateSeals === 1) {
+          return {
+            error: Object.assign(new Error("test client start conflict"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: cell.getAsNormalizedFullLink().id as never,
+              },
+              readyToRetry: () => {
+                gateEntered.resolve();
+                return readyToRetry.promise;
+              },
+            }),
+          };
+        }
+        const committed = await sealTx.tx.commit();
+        retryCommitted.resolve();
+        return committed;
+      },
+    }, {
+      runStamper: stampRun,
     });
-    const cell = runtime.getCell<Record<string, unknown>>(
-      space,
-      "p2f-f2-restart",
-      undefined,
-      tx,
+
+    expect(await runtime.start(cell)).toBe(true);
+    await gateEntered.promise;
+    const registrationKey = entityKey(
+      cell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
     );
-    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
-    await tx.commit();
-    await running.pull();
+    expect(runtime.runner.cancels.has(registrationKey)).toBe(false);
+
+    readyToRetry.resolve();
+    await retryCommitted.promise;
+    await runtime.idle();
+
+    expect(instantiateSeals).toBe(2);
+    expect(runtime.runner.cancels.has(registrationKey)).toBe(true);
+  });
+
+  it("does not restart a conflicted piece-INSTANTIATE after an explicit stop", async () => {
+    const cell = await stoppedPiece("p2f-client-conflict-stopped");
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const gateSettled = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        return {
+          error: Object.assign(new Error("test client start conflict"), {
+            name: "ConflictError" as const,
+            transaction: {} as never,
+            conflict: {
+              space,
+              the: "application/json" as const,
+              of: cell.getAsNormalizedFullLink().id as never,
+            },
+            readyToRetry: async () => {
+              gateEntered.resolve();
+              await readyToRetry.promise;
+              gateSettled.resolve();
+            },
+          }),
+        };
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await gateEntered.promise;
     runtime.runner.stop(cell);
 
-    // A destination that REFUSES exactly the instantiate seal and
-    // passes everything else through natively — the same deterministic
-    // wave-side refusal stand-in as the repair test above.
-    const refused: string[] = [];
+    readyToRetry.resolve();
+    await gateSettled.promise;
+    await Promise.resolve();
+
+    expect(instantiateSeals).toBe(1);
+    expect(
+      runtime.runner.cancels.has(
+        entityKey(
+          cell.getAsNormalizedFullLink(),
+          runtime.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not restart a conflicted piece-INSTANTIATE without a catch-up gate", async () => {
+    const cell = await stoppedPiece("p2f-client-conflict-without-gate");
+    const conflictReturned = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
     runtime.installSealDestination({
-      seal: (sealTx: IExtendedStorageTransaction) => {
-        const context = waveRunContextOf(sealTx);
-        if (context?.actionId.startsWith("piece-instantiate/")) {
-          refused.push(context.actionId);
-          return Promise.resolve({
-            error: {
-              name: "StorageTransactionAborted" as const,
-              message: "test refusal of the piece-instantiate seal",
-              reason: new Error("p2f-f2-test-refusal"),
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        conflictReturned.resolve();
+        return {
+          error: Object.assign(new Error("test conflict without catch-up"), {
+            name: "ConflictError" as const,
+            transaction: {} as never,
+            conflict: {
+              space,
+              the: "application/json" as const,
+              of: cell.getAsNormalizedFullLink().id as never,
+            },
+          }),
+        };
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await conflictReturned.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(instantiateSeals).toBe(1);
+  });
+
+  it("leaves recovery with the observer that owned the failure", async () => {
+    const cell = await stoppedPiece("p2f-observer-owned-conflict");
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const observerCalled = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        return {
+          error: Object.assign(new Error("test observer-owned conflict"), {
+            name: "ConflictError" as const,
+            transaction: {} as never,
+            conflict: {
+              space,
+              the: "application/json" as const,
+              of: cell.getAsNormalizedFullLink().id as never,
+            },
+            readyToRetry: () => {
+              gateEntered.resolve();
+              return readyToRetry.promise;
+            },
+          }),
+        };
+      },
+    }, {
+      runStamper: stampRun,
+    });
+    runtime.pieceStartCommitFailureObserver = () => {
+      observerCalled.resolve();
+      throw new Error("test observer failure after claiming recovery");
+    };
+
+    expect(await runtime.start(cell)).toBe(true);
+    await gateEntered.promise;
+    readyToRetry.resolve();
+    await observerCalled.promise;
+    await Promise.resolve();
+
+    expect(instantiateSeals).toBe(1);
+  });
+
+  it("restarts a conflicted piece-START-REPAIR when no observer owns recovery", async () => {
+    const cell = await brickedPiece();
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const retryCommitted = Promise.withResolvers<void>();
+    let repairSeals = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-start-repair/")) {
+          return await sealTx.tx.commit();
+        }
+        repairSeals++;
+        if (repairSeals === 1) {
+          return {
+            error: Object.assign(new Error("test client repair conflict"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: cell.getAsNormalizedFullLink().id as never,
+              },
+              readyToRetry: () => {
+                gateEntered.resolve();
+                return readyToRetry.promise;
+              },
+            }),
+          };
+        }
+        const committed = await sealTx.tx.commit();
+        retryCommitted.resolve();
+        return committed;
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await gateEntered.promise;
+    readyToRetry.resolve();
+    await retryCommitted.promise;
+    await runtime.idle();
+
+    expect(repairSeals).toBe(2);
+    expect(
+      runtime.runner.cancels.has(
+        entityKey(
+          cell.getAsNormalizedFullLink(),
+          runtime.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not restart a piece-START-REPAIR after a second conflict", async () => {
+    const cell = await brickedPiece();
+    const firstGateEntered = Promise.withResolvers<void>();
+    const firstReadyToRetry = Promise.withResolvers<void>();
+    const secondConflict = Promise.withResolvers<void>();
+    const secondFailureInspected = Promise.withResolvers<void>();
+    let repairSeals = 0;
+    let secondCatchUpCalls = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-start-repair/")) {
+          return await sealTx.tx.commit();
+        }
+        repairSeals++;
+        const firstAttempt = repairSeals === 1;
+        if (!firstAttempt) secondConflict.resolve();
+        const error = Object.assign(new Error("test client repair conflict"), {
+          name: "ConflictError" as const,
+          transaction: {} as never,
+          conflict: {
+            space,
+            the: "application/json" as const,
+            of: cell.getAsNormalizedFullLink().id as never,
+          },
+          readyToRetry: firstAttempt
+            ? () => {
+              firstGateEntered.resolve();
+              return firstReadyToRetry.promise;
+            }
+            : undefined,
+        });
+        if (!firstAttempt) {
+          Object.defineProperty(error, "readyToRetry", {
+            get: () => {
+              secondFailureInspected.resolve();
+              return () => {
+                secondCatchUpCalls++;
+                return Promise.reject(
+                  new Error("test second repair catch-up failure"),
+                );
+              };
             },
           });
+        }
+        return { error };
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await firstGateEntered.promise;
+    firstReadyToRetry.resolve();
+    await secondConflict.promise;
+    await secondFailureInspected.promise;
+    await Promise.resolve();
+
+    expect(repairSeals).toBe(2);
+    expect(secondCatchUpCalls).toBe(0);
+    expect(
+      runtime.runner.cancels.has(
+        entityKey(
+          cell.getAsNormalizedFullLink(),
+          runtime.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("restores the retry budget for a later pattern swap", async () => {
+    const cell = await stoppedPiece("p2f-client-conflict-then-swap");
+    const patternTx = runtime.edit();
+    const nextPattern = await runtime.patternManager.compilePattern(
+      programOf(`${V1_NO_HANDLER}// later pattern revision\n`),
+      { space, tx: patternTx },
+    );
+    const nextPatternRef = runtime.patternManager.getArtifactEntryRef(
+      nextPattern,
+    )!;
+    expect((await patternTx.commit()).error).toBeUndefined();
+
+    const firstGateEntered = Promise.withResolvers<void>();
+    const firstReadyToRetry = Promise.withResolvers<void>();
+    const firstRetryCommitted = Promise.withResolvers<void>();
+    const swapGateEntered = Promise.withResolvers<void>();
+    const swapReadyToRetry = Promise.withResolvers<void>();
+    const swapRetryCommitted = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        if (instantiateSeals === 1 || instantiateSeals === 3) {
+          const firstConflict = instantiateSeals === 1;
+          return {
+            error: Object.assign(new Error("test client start conflict"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: cell.getAsNormalizedFullLink().id as never,
+              },
+              readyToRetry: () => {
+                if (firstConflict) {
+                  firstGateEntered.resolve();
+                  return firstReadyToRetry.promise;
+                }
+                swapGateEntered.resolve();
+                return swapReadyToRetry.promise;
+              },
+            }),
+          };
+        }
+        const committed = await sealTx.tx.commit();
+        if (instantiateSeals === 2) {
+          firstRetryCommitted.resolve();
+        } else {
+          swapRetryCommitted.resolve();
+        }
+        return committed;
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await firstGateEntered.promise;
+    firstReadyToRetry.resolve();
+    await firstRetryCommitted.promise;
+    await runtime.idle();
+
+    const pointerTx = runtime.edit();
+    cell.withTx(pointerTx).setMetaRaw("patternIdentity", nextPatternRef);
+    expect((await pointerTx.commit()).error).toBeUndefined();
+    await swapGateEntered.promise;
+    swapReadyToRetry.resolve();
+    await swapRetryCommitted.promise;
+    await runtime.idle();
+
+    expect(instantiateSeals).toBe(4);
+    expect(cell.getMetaRaw("patternIdentity")).toEqual(nextPatternRef);
+    expect(
+      runtime.runner.cancels.has(
+        entityKey(
+          cell.getAsNormalizedFullLink(),
+          runtime.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not restart a piece-INSTANTIATE after a second conflict", async () => {
+    const cell = await stoppedPiece("p2f-client-conflict-retry-bound");
+    const firstGateEntered = Promise.withResolvers<void>();
+    const firstReadyToRetry = Promise.withResolvers<void>();
+    const secondConflict = Promise.withResolvers<void>();
+    const secondFailureInspected = Promise.withResolvers<void>();
+    let instantiateSeals = 0;
+    let secondCatchUpCalls = 0;
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (!actionId?.startsWith("piece-instantiate/")) {
+          return await sealTx.tx.commit();
+        }
+        instantiateSeals++;
+        const firstAttempt = instantiateSeals === 1;
+        if (!firstAttempt) secondConflict.resolve();
+        const error = Object.assign(new Error("test client start conflict"), {
+          name: "ConflictError" as const,
+          transaction: {} as never,
+          conflict: {
+            space,
+            the: "application/json" as const,
+            of: cell.getAsNormalizedFullLink().id as never,
+          },
+          readyToRetry: firstAttempt
+            ? () => {
+              firstGateEntered.resolve();
+              return firstReadyToRetry.promise;
+            }
+            : undefined,
+        });
+        if (!firstAttempt) {
+          Object.defineProperty(error, "readyToRetry", {
+            get: () => {
+              secondFailureInspected.resolve();
+              return () => {
+                secondCatchUpCalls++;
+                return Promise.reject(
+                  new Error("test second conflict catch-up failure"),
+                );
+              };
+            },
+          });
+        }
+        return {
+          error,
+        };
+      },
+    }, {
+      runStamper: stampRun,
+    });
+
+    expect(await runtime.start(cell)).toBe(true);
+    await firstGateEntered.promise;
+    firstReadyToRetry.resolve();
+    await secondConflict.promise;
+    await secondFailureInspected.promise;
+    await Promise.resolve();
+
+    expect(instantiateSeals).toBe(2);
+    expect(secondCatchUpCalls).toBe(0);
+    expect(
+      runtime.runner.cancels.has(
+        entityKey(
+          cell.getAsNormalizedFullLink(),
+          runtime.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("removes a piece-start registration when its sealed contribution is withdrawn", async () => {
+    const cell = await brickedPiece();
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (targetSpace) => storageManager.open(targetSpace).replica,
+    });
+    const instantiateSealed = Promise.withResolvers<{
+      actionId: string | undefined;
+      result: Awaited<ReturnType<TransactionSealDestination["seal"]>>;
+    }>();
+    runtime.installSealDestination({
+      seal: async (sealTx: IExtendedStorageTransaction) => {
+        const actionId = waveRunContextOf(sealTx)?.actionId;
+        if (actionId?.startsWith("piece-start-repair/")) {
+          const result = await wave.seal(sealTx);
+          instantiateSealed.resolve({ actionId, result });
+          return result;
         }
         return sealTx.tx.commit();
       },
@@ -896,29 +1492,113 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
       },
     });
 
-    const surfaced: Array<{ actionId: string; error: unknown }> = [];
+    const surfacedFailure = Promise.withResolvers<void>();
+    let withdrawnFailure:
+      | Parameters<NonNullable<Runtime["pieceStartCommitFailureObserver"]>>[0]
+      | undefined;
     runtime.pieceStartCommitFailureObserver = (failure) => {
-      surfaced.push(failure);
+      withdrawnFailure = failure;
+      surfacedFailure.resolve();
     };
+    expect(await runtime.start(cell)).toBe(true);
+    const sealed = await instantiateSealed.promise;
+    expect(sealed.actionId?.startsWith("piece-start-repair/")).toBe(true);
+    expect(sealed.result.error).toBeUndefined();
 
-    // Fire-and-forget by design: start resolves true while the refused
-    // commit settles behind it.
-    const started = await runtime.start(cell);
-    expect(started).toBe(true);
+    const registrationKey = entityKey(
+      cell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
+    expect(runtime.runner.cancels.has(registrationKey)).toBe(true);
+    wave.abandon("test withdrawal after a successful seal");
+    await wave.settled();
+    await surfacedFailure.promise;
+    expect(runtime.runner.cancels.has(registrationKey)).toBe(false);
+    expect(withdrawnFailure?.registrationRemoved).toBe(true);
+    expect(withdrawnFailure?.retry).toBe("immediate");
+    runtime.clearSealDestination();
+  });
+
+  it("keeps a newer hot-swap when an older piece-INSTANTIATE commit fails", async () => {
+    const tx = runtime.edit();
+    const pm = runtime.patternManager;
+    const v1 = await pm.compilePattern(programOf(V1_NO_HANDLER), {
+      space,
+      tx,
+    });
+    const v3 = await pm.compilePattern(programOf(V3_WITH_HANDLER), {
+      space,
+      tx,
+    });
+    const v3Ref = pm.getArtifactEntryRef(v3)!;
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "p2f-f2-superseded-failure",
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    const pendingSeal = Promise.withResolvers<
+      Awaited<ReturnType<TransactionSealDestination["seal"]>>
+    >();
+    const instantiateSealed = Promise.withResolvers<void>();
+    runtime.installSealDestination({
+      seal: (sealTx: IExtendedStorageTransaction) => {
+        if (
+          waveRunContextOf(sealTx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          instantiateSealed.resolve();
+          return pendingSeal.promise;
+        }
+        return sealTx.tx.commit();
+      },
+    }, {
+      runStamper: (stampTx, info) => {
+        stampWaveRunContext(stampTx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        });
+      },
+    });
+
+    const surfacedFailure = Promise.withResolvers<void>();
+    let supersededFailure:
+      | Parameters<NonNullable<Runtime["pieceStartCommitFailureObserver"]>>[0]
+      | undefined;
+    runtime.pieceStartCommitFailureObserver = (failure) => {
+      supersededFailure = failure;
+      surfacedFailure.resolve();
+    };
+    expect(await runtime.start(cell)).toBe(true);
+    await instantiateSealed.promise;
+
+    runtime.clearSealDestination();
+    const pointerTx = runtime.edit();
+    cell.withTx(pointerTx).setMetaRaw("patternIdentity", v3Ref);
+    await pointerTx.commit();
     await runtime.idle();
 
-    // The refusal genuinely happened…
-    expect(refused.length).toBeGreaterThanOrEqual(1);
-    // …and SURFACED through the observer (neutralization red: silence
-    // the instantiate arm's commit().then/.catch reporting in
-    // instantiatePattern and this never fires).
-    const deadline = Date.now() + 5_000;
-    while (surfaced.length === 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(surfaced.length).toBeGreaterThanOrEqual(1);
-    expect(surfaced[0].actionId.startsWith("piece-instantiate/")).toBe(true);
-    runtime.clearSealDestination();
+    const inconsistent: IStorageTransactionInconsistent = {
+      name: "StorageTransactionInconsistent",
+      message: "test stale basis for a superseded instantiation",
+      address: cell.getAsNormalizedFullLink(),
+      from: () => inconsistent,
+    };
+    pendingSeal.resolve({ error: inconsistent });
+    await surfacedFailure.promise;
+
+    const registrationKey = entityKey(
+      cell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
+    expect(runtime.runner.cancels.has(registrationKey)).toBe(true);
+    expect(cell.getMetaRaw("patternIdentity")).toEqual(v3Ref);
+    expect(supersededFailure?.registrationRemoved).toBe(false);
+    expect(supersededFailure?.retry).toBe("immediate");
   });
 
   it("stamps the piece-start repair seal with the sanctioned bookkeeping kind (the §3d piece-start site, RULED 2026-08-13)", async () => {

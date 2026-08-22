@@ -343,6 +343,25 @@ export function waveSettlementOf(
   return waveSettlements.get(tx);
 }
 
+const waveContinuations = new WeakMap<
+  IExtendedStorageTransaction,
+  IExtendedStorageTransaction
+>();
+
+/** Keep a transaction in the wave that accepted its producing transaction. */
+export function stampWaveContinuation(
+  tx: IExtendedStorageTransaction,
+  producerTx: IExtendedStorageTransaction,
+): void {
+  waveContinuations.set(tx, producerTx);
+}
+
+export function waveContinuationOf(
+  tx: IExtendedStorageTransaction,
+): IExtendedStorageTransaction | undefined {
+  return waveContinuations.get(tx);
+}
+
 /**
  * The addressing/attribution pair on one batched write is the wire-shape
  * module's `DerivedWriteAnnotation` (protocol.md §1, §7): one shared

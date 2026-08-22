@@ -83,7 +83,11 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
-import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
+import {
+  stampWaveContinuation,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "./executor/wave.ts";
 import {
   causalFormOfBinding,
   findAllWriteRedirectCells,
@@ -211,6 +215,7 @@ type InternalCellDescriptor = {
 type StartAttempt = {
   readonly lifecycleEpoch: number;
   readonly schedulePatternUpdate: boolean;
+  readonly retryPieceStartFailure: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
   // The result this attempt resolved to, which a link start only learns by
@@ -824,6 +829,15 @@ type RunResult<R> = {
 type DeferredStartResult<R> = {
   resultCell: Cell<R>;
   cancelDeferredStart?: Cancel;
+};
+
+type DeferredStartOwnership = DeferredCancelOwnership & {
+  markPending: () => void;
+};
+
+type PieceStartRecovery = {
+  ownership: DeferredStartOwnership;
+  retry: () => void;
 };
 
 type BoundNodeIO = {
@@ -2282,10 +2296,23 @@ export class Runner {
     resultCell: Cell<T>,
     options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<boolean> {
+    return this.startWithPieceStartRetry(
+      resultCell,
+      options.schedulePatternUpdate ?? true,
+      true,
+    );
+  }
+
+  private startWithPieceStartRetry<T>(
+    resultCell: Cell<T>,
+    schedulePatternUpdate: boolean,
+    retryPieceStartFailure: boolean,
+  ): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
-      schedulePatternUpdate: options.schedulePatternUpdate ?? true,
+      schedulePatternUpdate,
+      retryPieceStartFailure,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
     };
@@ -2446,6 +2473,7 @@ export class Runner {
       awaitSyncBeforeInitialRun?: boolean;
       // See RunnerRunOptions.parentPieceRootId.
       parentPieceRootId?: string;
+      retryPieceStartFailure?: boolean;
     } = {},
   ): Cancel {
     const {
@@ -2453,6 +2481,7 @@ export class Runner {
       givenPattern,
       doNotUpdateOnPatternChange,
       schedulePatternUpdate = true,
+      retryPieceStartFailure: retryInitialPieceStartFailure = false,
     } = options;
     const key = this.getDocKey(resultCell);
     this.locallyStoppedResults.delete(key);
@@ -2496,6 +2525,7 @@ export class Runner {
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
+      retryPieceStartFailure: boolean = true,
     ) => {
       if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
       // Create new cancel group for nodes
@@ -2506,6 +2536,7 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      let instantiated = false;
       if (shouldCommit) {
         // Self-minted instantiation tx (the hot-swap watcher's
         // swapToPattern arm reaches here tx-less): runtime-internal
@@ -2562,8 +2593,25 @@ export class Runner {
             }
           });
         }
+        instantiated = true;
       } finally {
         if (shouldCommit) {
+          const teardownAfterFailedCommit = () => {
+            if (cancelNodes !== nodeCancel) {
+              return { registrationRemoved: false };
+            }
+            if (this.cancels.get(key) !== cancel) {
+              return { registrationRemoved: false };
+            }
+            this.cancels.delete(key);
+            this.allCancels.delete(cancel);
+            try {
+              cancel();
+              return { registrationRemoved: true };
+            } catch (cleanupError) {
+              return { registrationRemoved: true, cleanupError };
+            }
+          };
           this.runtime.prepareTxForCommit(actualTx);
           // Fire-and-forget by design (start() resolves before the
           // commit settles), but NEVER swallowed (stage P2-F, the F1
@@ -2573,13 +2621,18 @@ export class Runner {
           // and, on a serving runtime, counted.
           const instantiateActionId =
             `piece-instantiate/${resultCell.sourceURI}`;
-          actualTx.commit().then(({ error }) => {
-            if (error !== undefined) {
-              this.reportPieceStartCommitFailure(instantiateActionId, error);
-            }
-          }).catch((error) => {
-            this.reportPieceStartCommitFailure(instantiateActionId, error);
-          });
+          this.commitPieceStart(
+            actualTx,
+            instantiateActionId,
+            resultCell.getAsNormalizedFullLink().id,
+            teardownAfterFailedCommit,
+            instantiated && retryPieceStartFailure
+              ? this.createPieceStartRecovery(
+                resultCell,
+                schedulePatternUpdate,
+              )
+              : undefined,
+          );
         }
       }
     };
@@ -2899,7 +2952,11 @@ export class Runner {
       useTx?: IExtendedStorageTransaction,
     ) => {
       try {
-        instantiatePattern(pattern, useTx);
+        instantiatePattern(
+          pattern,
+          useTx,
+          retryInitialPieceStartFailure,
+        );
       } catch (instantiateError) {
         if (
           useTx !== undefined ||
@@ -2985,25 +3042,36 @@ export class Runner {
         // cleanup() does) would clobber that live registration and orphan its
         // graph. Delete the key only while it still holds our cancel — the same
         // guard createDeferredStartOwnership uses — and always drop/invoke ours.
+        const repairedNodes = cancelNodes;
         const teardownAfterFailedCommit = () => {
-          if (this.cancels.get(key) === cancel) this.cancels.delete(key);
+          if (cancelNodes !== repairedNodes) {
+            return { registrationRemoved: false };
+          }
+          if (this.cancels.get(key) !== cancel) {
+            return { registrationRemoved: false };
+          }
+          this.cancels.delete(key);
           this.allCancels.delete(cancel);
-          cancel();
+          try {
+            cancel();
+            return { registrationRemoved: true };
+          } catch (cleanupError) {
+            return { registrationRemoved: true, cleanupError };
+          }
         };
         const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
-        repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) {
-            // Surfaced BEFORE the teardown (stage P2-F, the F1
-            // fold-in): the pre-P2-F path tore the registration down
-            // silently — correct liveness, invisible failure.
-            this.reportPieceStartCommitFailure(repairActionId, result.error);
-            teardownAfterFailedCommit();
-          }
-        });
-        repairTx.commit().catch((error) => {
-          this.reportPieceStartCommitFailure(repairActionId, error);
-          teardownAfterFailedCommit();
-        });
+        this.commitPieceStart(
+          repairTx,
+          repairActionId,
+          resultCell.getAsNormalizedFullLink().id,
+          teardownAfterFailedCommit,
+          retryInitialPieceStartFailure
+            ? this.createPieceStartRecovery(
+              resultCell,
+              schedulePatternUpdate,
+            )
+            : undefined,
+        );
       }
     };
 
@@ -3248,6 +3316,7 @@ export class Runner {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
+          retryPieceStartFailure: attempt.retryPieceStartFailure,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -3285,6 +3354,7 @@ export class Runner {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulePatternUpdate: attempt.schedulePatternUpdate,
+          retryPieceStartFailure: attempt.retryPieceStartFailure,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
             // Resumed from a synced state (it just awaited
@@ -3326,7 +3396,7 @@ export class Runner {
 
   private createDeferredStartOwnership<T>(
     resultCell: Cell<T>,
-  ): DeferredCancelOwnership {
+  ): DeferredStartOwnership {
     const key = this.getDocKey(resultCell);
     const base = useDeferredCancelOwnership((installedCancel) => {
       // A result key can be stopped and restarted while deferred startup is
@@ -3340,7 +3410,7 @@ export class Runner {
     // reach the pending start and tombstone it. The entry goes as soon as the
     // start settles either way: it installed a registration, which owns itself
     // from then on, or it was cancelled.
-    const ownership: DeferredCancelOwnership = {
+    const ownership: DeferredStartOwnership = {
       cancel: () => {
         unregister();
         base.cancel();
@@ -3350,6 +3420,7 @@ export class Runner {
         unregister();
         return base.markInstalled(registration);
       },
+      markPending: () => register(),
     };
     const unregister = () => {
       const pending = this.pendingDeferredStarts.get(key);
@@ -3357,13 +3428,114 @@ export class Runner {
       pending.delete(ownership);
       if (pending.size === 0) this.pendingDeferredStarts.delete(key);
     };
-    let pending = this.pendingDeferredStarts.get(key);
-    if (pending === undefined) {
-      pending = new Set();
-      this.pendingDeferredStarts.set(key, pending);
-    }
-    pending.add(ownership);
+    const register = () => {
+      let pending = this.pendingDeferredStarts.get(key);
+      if (pending === undefined) {
+        pending = new Set();
+        this.pendingDeferredStarts.set(key, pending);
+      }
+      pending.add(ownership);
+    };
+    register();
     return ownership;
+  }
+
+  private createPieceStartRecovery<T>(
+    resultCell: Cell<T>,
+    schedulePatternUpdate: boolean,
+  ): PieceStartRecovery {
+    return {
+      ownership: this.createDeferredStartOwnership(resultCell),
+      retry: () => {
+        void this.startWithPieceStartRetry(
+          resultCell,
+          schedulePatternUpdate,
+          false,
+        ).catch((error) => {
+          logger.error(
+            "piece-start-retry-failed",
+            "Piece start retry failed",
+            error,
+          );
+        });
+      },
+    };
+  }
+
+  private commitDeferredStart<T>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    ownership: DeferredStartOwnership,
+    installedCancel: Cancel | undefined,
+    retryAfterConflict: (() => void) | undefined,
+    afterCommit: () => void,
+    failureMessage: string,
+  ): void {
+    const fail = (error: unknown) => {
+      const key = this.getDocKey(resultCell);
+      let registrationRemoved = false;
+      if (
+        installedCancel !== undefined &&
+        this.cancels.get(key) === installedCancel
+      ) {
+        this.cancels.delete(key);
+        this.allCancels.delete(installedCancel);
+        registrationRemoved = true;
+        try {
+          installedCancel();
+        } catch (cleanupError) {
+          logger.warn(
+            "deferred-start-cleanup-failed",
+            "Cleanup after a failed deferred start transaction failed",
+            cleanupError,
+          );
+        }
+      }
+      logger.error("tx-commit-error", failureMessage, error);
+      const readyToRetry = (error as
+        | {
+          readyToRetry?: () => Promise<void>;
+        }
+        | null
+        | undefined)?.readyToRetry;
+      if (
+        !registrationRemoved || retryAfterConflict === undefined ||
+        !isConflictRejection(error as { name?: string }) ||
+        typeof readyToRetry !== "function"
+      ) {
+        ownership.cancel();
+        return;
+      }
+      ownership.markPending();
+      void (async () => {
+        try {
+          await readyToRetry();
+          if (!ownership.isCancelled()) retryAfterConflict();
+        } catch {
+          ownership.cancel();
+        }
+      })();
+    };
+    void (async () => {
+      try {
+        const committed = await tx.commit();
+        if (committed.error !== undefined) {
+          fail(committed.error);
+          return;
+        }
+        const settlement = waveSettlementOf(tx);
+        if (settlement !== undefined) {
+          const settled = await settlement;
+          if (settled.error !== undefined) {
+            fail(settled.error);
+            return;
+          }
+        }
+        if (!ownership.isCancelled()) afterCommit();
+      } catch (error) {
+        fail(error);
+      }
+    })();
   }
 
   private cancelPendingDeferredStarts(
@@ -3373,6 +3545,107 @@ export class Runner {
     if (pending === undefined) return;
     this.pendingDeferredStarts.delete(key);
     for (const ownership of pending) ownership.cancel();
+  }
+
+  private startDeferredAfterProducerSettlement(
+    tx: IExtendedStorageTransaction,
+    ownership: DeferredStartOwnership,
+    start: () => void,
+  ): void {
+    const cancelSafely = () => {
+      try {
+        ownership.cancel();
+      } catch (error) {
+        logger.warn(
+          "deferred-start-cleanup-failed",
+          "Cleanup after a withdrawn producer wave failed",
+          error,
+        );
+      }
+    };
+    const startSafely = () => {
+      try {
+        start();
+      } catch (error) {
+        cancelSafely();
+        logger.error(
+          "runner-start",
+          "Deferred start failed after producer settlement",
+          error,
+        );
+      }
+    };
+    const settlement = waveSettlementOf(tx);
+    if (waveRunContextOf(tx)?.kind === "event-handler") {
+      startSafely();
+      if (settlement !== undefined) {
+        void settlement.then(
+          (settled) => {
+            if (settled.error !== undefined) cancelSafely();
+          },
+          (error) => {
+            cancelSafely();
+            logger.error(
+              "runner-start",
+              "Deferred start wave settlement failed",
+              error,
+            );
+          },
+        );
+      }
+      return;
+    }
+    if (settlement === undefined) {
+      startSafely();
+      return;
+    }
+    void settlement.then(
+      (settled) => {
+        if (settled.error !== undefined) {
+          cancelSafely();
+          return;
+        }
+        if (!ownership.isCancelled()) startSafely();
+      },
+      (error) => {
+        cancelSafely();
+        logger.error(
+          "runner-start",
+          "Deferred start wave settlement failed",
+          error,
+        );
+      },
+    );
+  }
+
+  private stampDeferredStart(
+    tx: IExtendedStorageTransaction,
+    actionId: string,
+    producerTx: IExtendedStorageTransaction,
+    speculativeConsequence?: { eventId: string },
+  ): void {
+    const producerContext = waveRunContextOf(producerTx);
+    if (producerContext?.kind === "event-handler") {
+      this.runtime.stampServerRun(tx, {
+        actionId,
+        kind: "event-handler",
+        eventId: producerContext.eventId,
+        acting: producerContext.acting,
+        scopeKeyIdentity: producerContext.scopeKeyIdentity,
+        actionScopeKey: producerContext.actionScopeKey,
+      });
+      stampWaveContinuation(tx, producerTx);
+      return;
+    }
+    this.runtime.stampServerRun(tx, {
+      actionId,
+      ...(speculativeConsequence === undefined
+        ? { kind: "bookkeeping" as const }
+        : {
+          kind: "event-handler" as const,
+          eventId: speculativeConsequence.eventId,
+        }),
+    });
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -3385,7 +3658,7 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
+    tx.addCommitCallback((committedTx, result) => {
       if (result.error) {
         // The callback that would install this start is the one running now,
         // so a failed transaction leaves nothing to reach the pending entry
@@ -3396,87 +3669,69 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
-      // Minted inside a commit callback — by definition outside any
-      // scheduler run; the deferred start's node wiring is piece
-      // machinery, stamped bookkeeping per serving-loop.md §3d. A
-      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
-      // speculative-consequence stamp (2026-08-13): it is a handler
-      // CONSEQUENCE (the receipt + result wrapper of a speculative
-      // echo), so it stamps event-handler-kind and the overlay
-      // diverts it — committing it authored would race the SERVING
-      // side's own deferred start for the create-only receipt, and a
-      // client win would suppress the served navigateTo (no intent
-      // would ever be computed). §3d's bookkeeping-only rule governs
-      // internal writes at the wave seal destination, which this
-      // client-side start tx never reaches. The serving side and the
-      // OFF arm keep bookkeeping.
-      this.runtime.stampServerRun(startTx, {
-        actionId: `piece-start/${resultLink.id}`,
-        ...(speculativeConsequence !== undefined
-          ? {
-            kind: "event-handler" as const,
-            eventId: speculativeConsequence.eventId,
+      const attempt = (allowConflictRetry: boolean) => {
+        const startTx = this.runtime.edit();
+        try {
+          this.stampDeferredStart(
+            startTx,
+            `piece-start/${resultLink.id}`,
+            committedTx,
+            speculativeConsequence,
+          );
+          // Phase 4 (builtins.md §4): a deferred start minted from an
+          // EVENT-HANDLER run carries that run's event context across to
+          // the start tx, so a navigateTo instantiated under it can address
+          // the firing session (navigate-context.ts's capture point 1).
+          const navigateContext = navigateEventContextFromRunInfo(
+            waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+          );
+          if (navigateContext !== undefined) {
+            setNavigateEventContext(startTx, navigateContext);
           }
-          : { kind: "bookkeeping" as const }),
-      });
-      // Phase 4 (builtins.md §4): a deferred start minted from an
-      // EVENT-HANDLER run carries that run's event context across to
-      // the start tx, so a navigateTo instantiated under it can address
-      // the firing session (navigate-context.ts's capture point 1).
-      const navigateContext = navigateEventContextFromRunInfo(
-        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-      );
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
-        resultLink,
-        undefined,
-        startTx,
-      );
-      try {
-        if (
-          ownership.markInstalled(
-            this.startWithTx(
-              startTx,
-              committedResultCell,
-              givenPattern,
-              options,
-            ),
-          )
-        ) {
-          startTx.abort("Deferred runner start was cancelled");
-          return;
-        }
-        this.runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
-          if (error) {
-            ownership.cancel();
-            logger.error(
-              "tx-commit-error",
-              "Error committing deferred start transaction",
-              error,
-            );
+          const committedResultCell = this.runtime.getCellFromLink<T>(
+            resultLink,
+            undefined,
+            startTx,
+          );
+          const installedCancel = this.startWithTx(
+            startTx,
+            committedResultCell,
+            givenPattern,
+            options,
+          );
+          if (ownership.markInstalled(installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.pullCellOnceInPullMode(committedResultCell);
-          }
-        }).catch((error) => {
-          ownership.cancel();
-          logger.error(
-            "tx-commit-error",
-            "Deferred start transaction commit rejected",
-            error,
+          this.runtime.prepareTxForCommit(startTx);
+          this.commitDeferredStart(
+            startTx,
+            committedResultCell,
+            ownership,
+            installedCancel,
+            allowConflictRetry ? () => attempt(false) : undefined,
+            () => {
+              if (pullOnceAfterStart) {
+                this.pullCellOnceInPullMode(committedResultCell);
+              }
+            },
+            "Error committing deferred start transaction",
           );
-        });
-      } catch (error) {
-        startTx.abort(error);
-        ownership.cancel();
-        logger.error("runner-start", "Deferred start failed", error);
-        throw error;
-      }
+        } catch (error) {
+          if (waveRunContextOf(committedTx)?.kind === "event-handler") {
+            this.runtime.installedSealDestination
+              ?.noteEventConsequenceFailure?.(committedTx);
+          }
+          startTx.abort(error);
+          ownership.cancel();
+          logger.error("runner-start", "Deferred start failed", error);
+        }
+      };
+      this.startDeferredAfterProducerSettlement(
+        committedTx,
+        ownership,
+        () => attempt(true),
+      );
     });
     return ownership.cancel;
   }
@@ -3492,7 +3747,7 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
+    tx.addCommitCallback((committedTx, result) => {
       if (result.error) {
         // Settled here for the same reason as the start above: this callback
         // is the only thing that reaches the pending entry, so a failed
@@ -3502,87 +3757,77 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
-      // Minted inside a commit callback — outside any scheduler run;
-      // bookkeeping per serving-loop.md §3d, like the deferred start
-      // above (and with the same §3d-RULED speculative-consequence
-      // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
-      // is a speculative handler CONSEQUENCE and diverts to the
-      // overlay instead of racing the serving side's receipt create).
-      this.runtime.stampServerRun(startTx, {
-        actionId: `piece-start/${resultLink.id}`,
-        ...(speculativeConsequence !== undefined
-          ? {
-            kind: "event-handler" as const,
-            eventId: speculativeConsequence.eventId,
-          }
-          : { kind: "bookkeeping" as const }),
-      });
-      // Phase 4 (builtins.md §4): carry the instantiating event-handler
-      // run's event context to the start tx — capture point 1, as in
-      // startAfterSuccessfulCommit above.
-      const navigateContext = navigateEventContextFromRunInfo(
-        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-      );
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
-        resultLink,
-        pattern.resultSchema,
-        startTx,
-      );
-      try {
-        if (
-          ownership.markInstalled(
-            this.runWithStartOwnership(
-              startTx,
-              pattern,
-              inputs,
-              committedResultCell,
-            ).installedCancel,
-          )
-        ) {
-          startTx.abort("Deferred runner start was cancelled");
-          return;
-        }
-        if (markCreateOnlyResult) {
-          startTx.markCreateOnly?.(
-            committedResultCell.getAsNormalizedFullLink(),
+      const attempt = (allowConflictRetry: boolean) => {
+        const startTx = this.runtime.edit();
+        try {
+          this.stampDeferredStart(
+            startTx,
+            `piece-start/${resultLink.id}`,
+            committedTx,
+            speculativeConsequence,
           );
-        }
-        this.runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
-          if (error) {
-            ownership.cancel();
-            logger.error(
-              "tx-commit-error",
-              "Error committing deferred cross-space pattern transaction",
-              error,
-            );
+          // Phase 4 (builtins.md §4): carry the instantiating event-handler
+          // run's event context to the start tx — capture point 1, as in
+          // startAfterSuccessfulCommit above.
+          const navigateContext = navigateEventContextFromRunInfo(
+            waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+          );
+          if (navigateContext !== undefined) {
+            setNavigateEventContext(startTx, navigateContext);
+          }
+          const committedResultCell = this.runtime.getCellFromLink<T>(
+            resultLink,
+            pattern.resultSchema,
+            startTx,
+          );
+          const installedCancel = this.runWithStartOwnership(
+            startTx,
+            pattern,
+            inputs,
+            committedResultCell,
+          ).installedCancel;
+          if (ownership.markInstalled(installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.pullCellOnceInPullMode(committedResultCell);
+          if (markCreateOnlyResult) {
+            startTx.markCreateOnly?.(
+              committedResultCell.getAsNormalizedFullLink(),
+            );
           }
-        }).catch((error) => {
+          this.runtime.prepareTxForCommit(startTx);
+          this.commitDeferredStart(
+            startTx,
+            committedResultCell,
+            ownership,
+            installedCancel,
+            allowConflictRetry ? () => attempt(false) : undefined,
+            () => {
+              if (pullOnceAfterStart) {
+                this.pullCellOnceInPullMode(committedResultCell);
+              }
+            },
+            "Error committing deferred cross-space pattern transaction",
+          );
+        } catch (error) {
+          if (waveRunContextOf(committedTx)?.kind === "event-handler") {
+            this.runtime.installedSealDestination
+              ?.noteEventConsequenceFailure?.(committedTx);
+          }
+          startTx.abort(error);
           ownership.cancel();
           logger.error(
-            "tx-commit-error",
-            "Deferred cross-space pattern transaction rejected",
+            "runner-start",
+            "Deferred cross-space pattern failed",
             error,
           );
-        });
-      } catch (error) {
-        startTx.abort(error);
-        ownership.cancel();
-        logger.error(
-          "runner-start",
-          "Deferred cross-space pattern failed",
-          error,
-        );
-        throw error;
-      }
+        }
+      };
+      this.startDeferredAfterProducerSettlement(
+        committedTx,
+        ownership,
+        () => attempt(true),
+      );
     });
     return ownership.cancel;
   }
@@ -3922,13 +4167,85 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
-  /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
-   * setup/instantiation commit failure is fire-and-forget by design but
-   * NEVER silent — loud in every arm, and handed to the serving
-   * runtime's installed observer (the SpaceServer counts it into §7's
-   * structureLoadFailures). */
+  /** Commit a fire-and-forget piece start and observe its durable wave
+   * settlement. A failed start is reported and its current registration is
+   * removed by the caller's generation-aware teardown. */
+  private commitPieceStart(
+    tx: IExtendedStorageTransaction,
+    actionId: string,
+    pieceRootId: string,
+    teardownAfterFailedCommit: () => {
+      registrationRemoved: boolean;
+      cleanupError?: unknown;
+    },
+    recovery?: PieceStartRecovery,
+  ): void {
+    let failureHandled = false;
+    const retryFor = (error: unknown): "immediate" | "on-input" =>
+      isConflictRejection(error as { name?: string }) ||
+        isStorageTransactionInconsistent(error as { name?: string })
+        ? "immediate"
+        : "on-input";
+    const retryReadyFor = (
+      error: unknown,
+    ): (() => Promise<void>) | undefined => {
+      if (!isConflictRejection(error as { name?: string })) return undefined;
+      const readyToRetry = (error as { readyToRetry?: () => Promise<void> })
+        .readyToRetry;
+      if (readyToRetry === undefined) return undefined;
+      return () => Promise.resolve().then(() => readyToRetry());
+    };
+    const fail = (error: unknown, retry: "immediate" | "on-input") => {
+      if (failureHandled) return;
+      failureHandled = true;
+      const teardown = teardownAfterFailedCommit();
+      if (teardown.cleanupError !== undefined) {
+        logger.warn("piece-start-cleanup-failed", () => [
+          `cleanup after failed piece-start commit ${actionId} failed`,
+          teardown.cleanupError,
+        ]);
+      }
+      this.reportPieceStartCommitFailure(
+        actionId,
+        pieceRootId,
+        teardown.registrationRemoved,
+        retry,
+        retryReadyFor(error),
+        recovery,
+        error,
+      );
+    };
+    void (async () => {
+      try {
+        const committed = await tx.commit();
+        if (committed.error !== undefined) {
+          fail(committed.error, retryFor(committed.error));
+          return;
+        }
+        const settlement = waveSettlementOf(tx);
+        if (settlement === undefined) {
+          recovery?.ownership.cancel();
+          return;
+        }
+        const settled = await settlement;
+        if (settled.error !== undefined) {
+          fail(settled.error, "immediate");
+        } else {
+          recovery?.ownership.cancel();
+        }
+      } catch (error) {
+        fail(error, retryFor(error));
+      }
+    })();
+  }
+
   private reportPieceStartCommitFailure(
     actionId: string,
+    pieceRootId: string,
+    registrationRemoved: boolean,
+    retry: "immediate" | "on-input",
+    retryReady: (() => Promise<void>) | undefined,
+    recovery: PieceStartRecovery | undefined,
     error: unknown,
   ): void {
     logger.error("piece-start-commit-failed", () => [
@@ -3936,13 +4253,58 @@ export class Runner {
       "writes did not land (stage P2-F, F1)",
       error,
     ]);
-    try {
-      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
-    } catch (observerError) {
-      logger.warn("piece-start-commit-observer-failed", () => [
-        "pieceStartCommitFailureObserver threw",
-        observerError,
-      ]);
+    const observer = this.runtime.pieceStartCommitFailureObserver;
+    if (observer !== undefined) {
+      recovery?.ownership.cancel();
+      const notify = () => {
+        try {
+          observer({
+            actionId,
+            pieceRootId,
+            registrationRemoved,
+            retry,
+            error,
+          });
+        } catch (observerError) {
+          logger.warn("piece-start-commit-observer-failed", () => [
+            "pieceStartCommitFailureObserver threw",
+            observerError,
+          ]);
+        }
+      };
+      if (registrationRemoved && retryReady !== undefined) {
+        retryReady().then(notify, notify);
+      } else {
+        notify();
+      }
+      return;
+    }
+
+    const conflict = isConflictRejection(error as { name?: string });
+    if (
+      !registrationRemoved || retry !== "immediate" || recovery === undefined ||
+      (conflict && retryReady === undefined)
+    ) {
+      recovery?.ownership.cancel();
+      return;
+    }
+    const retryStart = () => {
+      if (recovery.ownership.isCancelled()) return;
+      recovery.ownership.cancel();
+      try {
+        recovery.retry();
+      } catch (retryError) {
+        logger.error(
+          "piece-start-retry-failed",
+          "Piece start retry failed",
+          retryError,
+        );
+      }
+    };
+    if (retryReady !== undefined) {
+      retryReady().then(retryStart, () => recovery.ownership.cancel());
+    } else {
+      retryStart();
     }
   }
 

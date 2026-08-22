@@ -114,3 +114,33 @@ too, at the width the exception above describes. A launch whose child is
 still gated holds that child through the pending start and nothing else, so a
 release that passed it over would let the child start after the pattern that
 launched it is gone.
+
+When the producing transaction seals into a server-execution wave, its commit
+callback means that the wave accepted the contribution. The contribution is
+not durable until the wave settles. The pending start waits for that
+settlement before installing its registration and staging its own setup. A
+withdrawn producing contribution cancels the pending start. A transaction
+outside a wave has no separate settlement and starts from its successful
+commit callback as before. When the child's setup transaction enters a later
+wave, that wave must also settle before the start succeeds. A withdrawal
+releases the registration and follows the same bounded conflict recovery as a
+setup transaction rejected at its seal.
+
+An event-handler child is part of the producing event's consequences. It
+installs from the successful commit callback so its setup joins the producing
+wave. Waiting for that wave to settle would let the event become consequenced
+before the child joined it. The setup transaction carries the producing event's
+identity, so a setup conflict requeues the event and its other contributions.
+It also names the producer transaction as its wave owner. This keeps the setup
+in the producing wave when the serving loop has detached that wave for its
+final seal drain. The producing wave's settlement still owns the registration:
+a withdrawal releases it. If setup fails before it can seal, the runner marks
+the producing event failed on that wave.
+
+The callback installs the registration while staging the start's own setup
+transaction. If that transaction conflicts, the callback removes only the
+registration it installed, waits for the conflict's `readyToRetry` catch-up
+gate, and constructs the start once more against the fresh state. A stop or
+release while the gate is pending prevents that reconstruction. A conflict
+without a catch-up gate, a non-conflict failure, or a second conflict settles
+the pending start without another attempt.

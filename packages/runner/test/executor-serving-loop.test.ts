@@ -606,6 +606,112 @@ describe("stage F serving loop", () => {
     expect(stats.structureLoadFailures).toBe(0);
   });
 
+  it("retries a continuously demanded piece after fresh input follows an asynchronous start failure", async () => {
+    const authorManager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const author = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: authorManager,
+    });
+    try {
+      const pattern = await author.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { Writable, pattern } from 'commonfabric';",
+            "export default pattern<{}, { value: Writable<number> }>(() => {",
+            "  return { value: new Writable(1).for('value') };",
+            "});",
+          ].join("\n"),
+        }],
+      }, { space });
+      const tx = author.edit();
+      const result = author.getCell<{ value: number }>(
+        space,
+        "async-start-retry-result",
+        pattern.resultSchema,
+        tx,
+      );
+      author.run(tx, pattern, {}, result);
+      expect((await tx.commit()).error).toBeUndefined();
+      await result.pull();
+    } finally {
+      await author.dispose();
+      await authorManager.close();
+    }
+
+    const firstFailure = Promise.withResolvers<void>();
+    const retried = Promise.withResolvers<void>();
+    const conflictRetried = Promise.withResolvers<void>();
+    let starts = 0;
+    let freshInputStarted = false;
+    let retrySawFreshInput = false;
+    onServingRuntime = (runtime) => {
+      const start = runtime.start.bind(runtime);
+      runtime.start = async (cell, options) => {
+        const started = await start(cell, options);
+        if (!started) return false;
+        starts += 1;
+        if (starts === 1) {
+          runtime.runner.stop(cell);
+          runtime.pieceStartCommitFailureObserver?.({
+            actionId: `piece-instantiate/${cell.sourceURI}`,
+            pieceRootId: cell.getAsNormalizedFullLink().id,
+            registrationRemoved: true,
+            retry: "on-input",
+            error: new Error("test asynchronous start failure"),
+          });
+          firstFailure.resolve();
+        } else if (starts === 2) {
+          retrySawFreshInput = freshInputStarted;
+          runtime.runner.stop(cell);
+          runtime.pieceStartCommitFailureObserver?.({
+            actionId: `piece-instantiate/${cell.sourceURI}`,
+            pieceRootId: cell.getAsNormalizedFullLink().id,
+            registrationRemoved: true,
+            retry: "immediate",
+            error: new Error("test stale-basis start failure"),
+          });
+          retried.resolve();
+        } else {
+          conflictRetried.resolve();
+        }
+        return true;
+      };
+      return Promise.resolve();
+    };
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    openClient();
+
+    const demanded = clientRuntime.getCell<{ value: number }>(
+      space,
+      "async-start-retry-result",
+    );
+    await demanded.sync();
+    await firstFailure.promise;
+    freshInputStarted = true;
+    const kick = clientRuntime.edit();
+    kick.writeValueOrThrow(
+      {
+        space,
+        id: "of:async-start-retry-kick" as never,
+        scope: "space",
+        path: ["value"],
+      },
+      1,
+    );
+    expect((await kick.commit()).error).toBeUndefined();
+    await retried.promise;
+
+    expect(starts).toBe(2);
+    expect(retrySawFreshInput).toBe(true);
+    await conflictRetried.promise;
+    expect(starts).toBe(3);
+    expect(host.stats().structureLoadFailures).toBe(2);
+  });
+
   it("lands a resumed map derivation whose result container was never persisted: the recovery seed commits bookkeeping-class instead of storming the §3d unstamped refusal (lunch-gate leg A)", async () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
 

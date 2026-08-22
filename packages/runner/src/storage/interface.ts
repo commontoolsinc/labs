@@ -1312,6 +1312,11 @@ export interface ITransactionSealSink {
 export interface TransactionSealDestination {
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
 
+  /** Mark the producing event failed when one of its consequences cannot seal. */
+  noteEventConsequenceFailure?(
+    producerTx: IExtendedStorageTransaction,
+  ): void;
+
   /**
    * Take ownership of a sealed transaction's post-commit effects
    * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands

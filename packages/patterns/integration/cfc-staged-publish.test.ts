@@ -11,6 +11,7 @@ import {
 import {
   clickTrustedActionAndWaitForText,
   fillCfInput,
+  waitForRuntimeIdle,
   waitForText,
 } from "./cfc-browser-helpers.ts";
 
@@ -71,6 +72,7 @@ describe("cfc staged publish integration test", () => {
       },
       identity,
     });
+    await waitForRuntimeIdle(page);
 
     await fillCfInput(
       page,

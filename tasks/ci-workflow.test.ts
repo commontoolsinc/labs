@@ -563,7 +563,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
 });
 
-Deno.test("every deno.yml job that writes a JUnit file spools and ships test records (the ON lanes' observability gap: 25 pattern-ON flakes had to be censused from raw Actions logs because the two server-execution ON jobs set no CF_TEST_RECORDS_DIR and had no ship step — records the dashboard never saw)", async () => {
+Deno.test("every deno.yml JUnit job spools and ships test records", async () => {
   const contents = withoutComments(await workflow("deno.yml"));
   const missing: string[] = [];
   let junitJobs = 0;
@@ -575,6 +575,14 @@ Deno.test("every deno.yml job that writes a JUnit file spools and ships test rec
       missing.push(
         `${jobId}: writes a JUnit file but has no test-records-ship step`,
       );
+    } else {
+      const ship = stepBlock(job, "📤 Ship test records");
+      if (!ship.includes("if: always()")) {
+        missing.push(`${jobId}: does not ship test records after a failure`);
+      }
+      if (!ship.includes("junit:")) {
+        missing.push(`${jobId}: does not gather its JUnit file`);
+      }
     }
     if (!job.includes("CF_TEST_RECORDS_DIR:")) {
       missing.push(
@@ -587,4 +595,60 @@ Deno.test("every deno.yml job that writes a JUnit file spools and ships test rec
   // Pin the search itself: zero junit jobs would mean the extraction
   // broke, not that the repository stopped writing JUnit files.
   assert(junitJobs >= 7, `only ${junitJobs} JUnit-writing jobs found`);
+});
+
+Deno.test("test-records-ship forwards its optional variant input", async () => {
+  const action = await Deno.readTextFile(
+    new URL(
+      "../.github/actions/test-records-ship/action.yml",
+      import.meta.url,
+    ),
+  );
+  assertStringIncludes(action, "  variant:\n");
+  assertStringIncludes(action, "SHIP_VARIANT: ${{ inputs.variant }}");
+  assertStringIncludes(action, 'args+=(--variant "$SHIP_VARIANT")');
+});
+
+Deno.test("server-execution variant rollout waits for relay support", async () => {
+  const contents = withoutComments(await workflow("deno.yml"));
+  const packageJob = jobBlock(
+    contents,
+    "package-integration-test-server-execution-on",
+  );
+  const patternJob = jobBlock(
+    contents,
+    "pattern-integration-test-server-execution-on",
+  );
+  assertStringIncludes(
+    packageJob,
+    "--junit-path=../../test-results/${JUNIT_NAME}.xml",
+  );
+  assertStringIncludes(packageJob, "JUNIT_NAME: ${{ matrix.junit_name }}");
+  assertStringIncludes(
+    stepBlock(packageJob, "📤 Ship test records"),
+    "glob=test-results/${{ matrix.junit_name }}.xml",
+  );
+  assertStringIncludes(
+    patternJob,
+    "--junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+  );
+  assertStringIncludes(
+    stepBlock(patternJob, "📤 Ship test records"),
+    "glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+  );
+
+  for (
+    const jobId of [
+      "package-integration-test",
+      "pattern-integration-test",
+      "package-integration-test-server-execution-on",
+      "pattern-integration-test-server-execution-on",
+    ]
+  ) {
+    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
+    assert(
+      !ship.includes("variant:"),
+      `${jobId}: variants start only after relay support reaches main`,
+    );
+  }
 });
