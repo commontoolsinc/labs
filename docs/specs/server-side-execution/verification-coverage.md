@@ -5893,14 +5893,17 @@ supply; OW29/OW32/OW34 closed):
     identity seam (`tx.tx.scopeKeyIdentity`) so its guard reads and
     writes resolve the REQUESTING instance; reader-keyed hashes also
     split the effect keys, dissolving the cross-reader outbox
-    collision. Fail-closed arm (FLAGGED, severable — built
-    conservative, one branch): a served creating run with NO carried
-    actor mints NO owner — ownerless handle, dbOwner() fails closed
-    (the OW31 genesis-arm / `homeSpacePrincipalFor` posture, "never
-    the service DID") — where the Q3 keep-service reading would have
-    minted the SERVICE and thereby granted it dbOwner() row
-    admission; owner may overrule. Spec (docs-move-together):
-    06-cfc.md's dbOwner row + Phase 3.b acting-reader sentence.
+    collision. Fail-closed arm (RULED 2026-08-22 — ratified as
+    built; the owner, Berni: "agreed with all the recommendations
+    above, continue" — one ruling over the presented batch: this
+    arm, and the session-identity join below): a served creating
+    run with NO carried actor mints NO owner — ownerless handle,
+    dbOwner() fails closed (the OW31 genesis-arm /
+    `homeSpacePrincipalFor` posture, "never the service DID") — and
+    the Q3 keep-service reading, which would have minted the
+    SERVICE and thereby granted it dbOwner() row admission, is
+    REJECTED. Spec (docs-move-together): 06-cfc.md's dbOwner row +
+    Phase 3.b acting-reader sentence.
     Red-first: `packages/runner/test/sqlite-served-identity.test.ts`
     — the mint pin WATCHED RED at base (a stamped alice run minted
     the ambient service DID), the actor-less fail-closed pin RED
@@ -5921,28 +5924,66 @@ supply; OW29/OW32/OW34 closed):
     and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
     label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
-    writebacks — `fetch*`/`generate*` — whose hash-guard reads still
+    writebacks — every non-sqlite effect kind: the
+    `fetch*`/`generate*` families and llm-dialog (which additionally
+    marks completions at 4 sites with bare `llmDialog:`-prefixed
+    keys never widened by `effectTargetKey` — a separate
+    pre-existing quirk) — whose hash-guard reads still
     resolve the service's instances (the OW17 stage-A flag's
     remaining scope after this row's sqlite carve-out; the
     space-server.ts `#commitEffectCompletion` comment names the
-    split); the per-instance effect-key gap for NON-clearance
+    split); the acting≠demanded split: every context the stamper
+    produces derives `acting` FROM the demanded pair where both
+    exist, so a run whose two halves disagree is an identity-model
+    question no ruling has decided — `sqliteRunActingPrincipal`
+    tripwires on it (fails loud, citing this row) rather than
+    picking whose rows a cleared read admits; the per-instance
+    effect-key gap for NON-clearance
     user-scoped queries (a reader-blind hash by design means one
     outbox key across instances — no live surface; the fix direction
     is the instance key joining the effect target key); and the
+    provider READ RPC's partition resolution (recorded 2026-08-22
+    by the session-identity build, flagged not filled): a
+    sub-space-scoped db's ON-DISK partition resolves from the
+    TRANSPORT session — memory/v2/server.ts `sqliteQuery`'s
+    `resolveScopeKey(db.scope, {principal: session.principal,
+    sessionId: message.sessionId})`, the service's own session on a
+    serving runtime — same ambient-identity family, distinct
+    surface (which FILE gets read, not which cell or key is
+    written), outside the 2026-08-22 request-identity ruling, and
+    no live surface reaches it (the clearance fixture's db is
+    space-scoped, whose resolution is identity-free). The
     SESSION-scoped cleared-result collision variant (the #6194
-    review's find): `narrowestScope` legitimately resolves a cleared
+    review's find) is CLOSED — RULED 2026-08-22 (the same ruling as
+    the fail-closed arm above) and built in the session-identity
+    train: `narrowestScope` legitimately resolves a cleared
     result to SESSION scope when the db itself is session-scoped,
-    while `clearanceReader` and the effect key carry the USER
-    principal only — two sessions of one user on one serving runtime
-    then share hash + effect key across DISTINCT session instances,
-    and the second rides the in-flight dedupe (starvation until a
-    re-run; ON-only; arguably off-model against builtins.md §2's one
-    cell per (query, reader)). NOT clamped to exactly `user` here: a
+    and pre-build `clearanceReader` and the effect key carried the
+    USER principal only — two sessions of one user on one serving
+    runtime shared hash + effect key across DISTINCT session
+    instances, and the second rode the in-flight dedupe (starvation
+    until a re-run; ON-only; off-model against builtins.md §2's one
+    cell per (query, reader)). NOT clamped to exactly `user`: a
     session-scoped db's cleared result MUST stay session-scoped (a
     user clamp would memo-collide two session dbs' results in one
-    cell); the undetermined piece is the SESSION joining the request
-    identity for sub-user-scoped cleared results — its own small
-    ruling, flagged not filled.
+    cell); instead the SESSION JOINS the request identity for
+    sub-user-scoped cleared results — one cleared cell per
+    query-and-reader-at-matching-granularity. The build
+    (sqlite-builtins.ts): the hash's `clearanceReader` component
+    carries `{user, session}` when the cleared result's scope is
+    `session`, sourced from the run's `scopeKeyIdentity` — the same
+    identity the flush's writebacks resolve instances against, so
+    request identity and cell instance split together — and the
+    effect/outbox key splits through the hash; user-scoped cleared
+    results and the whole unstamped arm (clients, ON-arm
+    speculation, OFF) are byte-identical. Pinned red-first in
+    sqlite-served-identity (two sessions of one user against a
+    session-scoped cleared db: ONE identical hash watched red at
+    base, distinct after; the user-scoped session-blind guard green
+    both sides) and in the read-clearance integration file's
+    two-tabs-of-one-user step (one Identity in two harness
+    sessions: user-granularity sharing — same cell, same hash —
+    green OFF and under the true-ON gate, serving loop live).
   - **OW54 — a served EVENT whose commit-prep crashes seals NO
     consequence (adversarial review of PR #6157, F1 —
     CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
