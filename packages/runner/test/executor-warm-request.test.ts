@@ -321,4 +321,98 @@ describe("executor-warm-request", () => {
       cancel();
     }
   });
+
+  it("merges EVERY warm notice racing one park into the successor tenure's demand — a second notice in the park window is not dropped (PR #6191 review P1)", async () => {
+    host = newHost();
+
+    // A live target space: client demand activates it the ordinary way
+    // (the race under test is downstream of activation mechanics, so
+    // the plain session-open trigger is the cheapest live tenure).
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const pSigner = await Identity.fromPassphrase("warm race space");
+    const pSpace = pSigner.did() as MemorySpace;
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      pSpace,
+      "warm-race-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () => host!.spaceServer(pSpace)?.active === true,
+        "the race target's initial activation",
+      );
+      const target = host!.spaceServer(pSpace)!;
+      const pEngine = await server.engineForSpace(pSpace);
+      const terminals = () => host!.stats().structureLoadTerminal;
+      // Let the FIRST tenure's demand pass settle: the client's watch
+      // root is an absent doc with no pattern meta, so it terminalizes
+      // exactly once — the baseline the successor's arithmetic builds
+      // on (the session's registry rows survive the park, so the
+      // SUCCESSOR terminalizes the same root once again).
+      const t0 = terminals();
+      await waitUntil(
+        () => terminals() >= t0 + 1,
+        "the first tenure terminalizing the client's absent watch root",
+        30_000,
+      );
+      const t1 = terminals();
+
+      // The park-window race: park() flips the tenure inactive
+      // SYNCHRONOUSLY and tears down asynchronously, so two warm
+      // notices fired here land while the server is REGISTERED,
+      // INACTIVE, and NOT yet re-activating — each chains the
+      // park-reactivation continuation, and only ONE #activate call
+      // wins. The fix buffers both notices for the successor; before
+      // it, the second notice's warm demand died with the old tenure.
+      const parked = target.park("idle");
+      const seq = serverSeq(pEngine);
+      server.noteExecutorCommit({
+        space: pSpace,
+        seq,
+        class: "authored",
+        sessionId: "warm-race-issuer",
+        writes: [{ id: "of:warm-race-c1", scopeKey: "space" }],
+        warm: true,
+      });
+      server.noteExecutorCommit({
+        space: pSpace,
+        seq,
+        class: "authored",
+        sessionId: "warm-race-issuer",
+        writes: [{ id: "of:warm-race-c2", scopeKey: "space" }],
+        warm: true,
+      });
+      await parked;
+
+      // The successor tenure must hold BOTH staged instances as warm
+      // demand: each is an absent doc with no pattern meta, so each
+      // captured root TERMINALIZES exactly once (stage P2-F's
+      // confirmed-synced-no-meta state) — the per-root, once-per-
+      // episode counter that distinguishes one captured root from
+      // two. The successor's expected delta is exactly THREE: the
+      // client session's surviving watch root re-terminalizes, plus
+      // c1, plus c2. Before the fix this wait timed out at +2 — the
+      // first notice reactivated the space, the second was dropped
+      // with the dying tenure.
+      await waitUntil(
+        () => host!.spaceServer(pSpace)?.active === true,
+        "reactivation on the warm notices racing the park",
+        30_000,
+      );
+      await waitUntil(
+        () => terminals() >= t1 + 3,
+        "BOTH warm notices' staged roots reaching the successor's demand pass",
+        30_000,
+      );
+    } finally {
+      cancel();
+    }
+  });
 });

@@ -206,15 +206,33 @@ export class ExecutorHost {
       // no longer active, no activation in flight) is the third case:
       // chain a fresh activation behind the park so a space with live
       // demand is never left unserved by the race. A WARM notice racing
-      // the park re-carries itself into the successor activation: the
-      // dying tenure's feed (and its captured warm demand) dies with
-      // it, so the fresh SpaceServer must re-capture from the notice.
+      // the park BUFFERS for the successor activation (drained at its
+      // registration, exactly like the mid-activation window below):
+      // the dying tenure's feed — and the warm capture that just went
+      // into it — die with the tenure, and SEVERAL warm notices in one
+      // park window chain ONE shared reactivation, so a notice passed
+      // by argument would be dropped for every notice but the first
+      // (#activate joins the in-flight activation without merging its
+      // pending list — the #6191 review's P1).
       existing.enqueueCommit(notice);
       if (!existing.active && !this.#activating.has(notice.space)) {
+        if (notice.warm === true) {
+          // Only in the true parking window (no successor in flight):
+          // once a successor is activating, the enqueue above already
+          // reached a feed that survives — its registration drain has
+          // either run against this buffer or the notice landed on the
+          // registered server directly.
+          let buffered = this.#pendingNotices.get(notice.space);
+          if (buffered === undefined) {
+            buffered = [];
+            this.#pendingNotices.set(notice.space, buffered);
+          }
+          buffered.push(notice);
+        }
         this.#reactivateAfterPark(
           existing,
           notice.space as MemorySpace,
-          notice.warm === true ? notice : undefined,
+          notice.warm === true,
         );
       }
       return;
@@ -300,20 +318,23 @@ export class ExecutorHost {
    * event-only admission racing the park (a delegated cross-space
    * delivery with no client anywhere) chains through here, and a
    * sessions-only gate declined it — the delivered event sat unserved
-   * until an unrelated trigger. A WARM notice racing the park
-   * (`warmNotice`) satisfies the gate the same way — the staged setup
-   * is durable and undemanded, exactly the state the warm request
-   * exists for — and re-enters the successor's feed so its warm demand
-   * is re-captured (the dying tenure's capture died with it). */
+   * until an unrelated trigger. A WARM notice racing the park (`warm`)
+   * satisfies the gate the same way — the staged setup is durable and
+   * undemanded, exactly the state the warm request exists for. The
+   * notice itself travels through `#pendingNotices` (buffered by the
+   * caller, drained at the successor's registration), NOT as an
+   * argument: several warm notices in one park window share ONE
+   * reactivation, and only a buffer merges them all (the #6191
+   * review's P1). */
   #reactivateAfterPark(
     parking: SpaceServer,
     space: MemorySpace,
-    warmNotice?: AdmittedCommitNotice,
+    warm = false,
   ): void {
     void parking.whenParked.then(async () => {
       if (this.#closed || this.#spaces.get(space)?.active) return;
       if (
-        warmNotice === undefined &&
+        !warm &&
         !this.#options.server.hasLiveSessionsForSpace(space, {
           excludePrincipal: this.#options.serviceIdentity,
         })
@@ -332,7 +353,7 @@ export class ExecutorHost {
         // The engine read awaited: re-check the activation preconditions.
         if (this.#closed || this.#spaces.get(space)?.active) return;
       }
-      void this.#activate(space, warmNotice === undefined ? [] : [warmNotice]);
+      void this.#activate(space, []);
     });
   }
 
