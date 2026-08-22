@@ -5379,9 +5379,22 @@ supply; OW29/OW32/OW34 closed):
     blocker (the resolved-profile amend steps intermittently red 6/10
     with the amended values durably absent from every store; the
     OW45+OW31-family cross-space derivation signatures in every run —
-    triage in optimize/ruling5-ow49-report.md §3). Closure and the
-    successor's row-mapping are the coordinator's; the skip entry now
-    names the amend-convergence blocker.
+    triage in optimize/ruling5-ow49-report.md §3). That
+    amend-convergence blocker was ROOT-CAUSED AND CLOSED 2026-08-21
+    by the §2b derivation-carriage scoping pass
+    (optimize/2b-derivation-carriage-scope.md): ONE send-site defect —
+    cell.ts's serving branch picked the LT1-vs-outbox arm by the
+    sending CELL's space instead of the WAVE's home space, so the
+    served amend handlers' sends into the profile's exported streams
+    (direct foreign cell handles) raw-wrote the foreign space and
+    died on the one-tx-one-space isolation error — fixed red-first
+    (executor-cross-space.test.ts's outbox-arm pin); the amends now
+    cross via the outbox with the carried actor and are durably
+    present in both stores. The ten-run gate at that fix head
+    separated a REMAINING, different-family red (the client
+    name-draft own-write loss, OW47's family — the skip entry names
+    it), so profile-embed's green-ON condition is still open. Closure
+    and the successor's row-mapping are the coordinator's.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)

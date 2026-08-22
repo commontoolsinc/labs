@@ -43,9 +43,14 @@ import {
 } from "@commonfabric/memory/v2/scheduler-basis";
 import {
   applyCommit,
+  read as readDoc,
   selectDocHead,
   serverSeq,
 } from "@commonfabric/memory/v2/engine";
+import {
+  streamEntriesDocId,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { UI } from "../src/builder/types.ts";
 import {
   getPatternEnvironment,
@@ -775,6 +780,118 @@ describe("Phase 5 cross-space serving", () => {
       expect(meta.class).toBe("authored");
       expect(meta.acting_principal).toBe(aliceSigner.did());
       expect(meta.capability_ref).toBe("event-consequence:e-sa");
+    } finally {
+      cancel();
+    }
+  });
+
+  it("a served run's send to a FOREIGN stream cell crosses via the outbox: LT1's same-space axis is the WAVE's home space, never the sending cell's space (LT1/LT5; events.md §2; protocol.md §2b)", async () => {
+    host = newHost();
+
+    // Alice's client creates the FOREIGN stream doc natively, then
+    // demands a home doc so the HOME space activates.
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    const clientStream = clientRuntime.getCell<unknown>(
+      foreignSpace,
+      "xspace-send-stream",
+      undefined,
+    );
+    await clientStream.sync();
+    {
+      const tx = clientRuntime.edit();
+      clientStream.withTx(tx).setRaw({ $stream: true });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+
+    const demandCell = clientRuntime.getCell<{ ping: number }>(
+      homeSpace,
+      "xspace-send-demand",
+      undefined,
+    );
+    const cancel = demandCell.sink(() => {});
+    try {
+      await waitUntil(
+        () =>
+          servingRuntime !== undefined &&
+          host!.spaceServer(homeSpace)?.active === true,
+        "home space activation",
+      );
+      const serving = servingRuntime!;
+
+      // The DIRECT FOREIGN HANDLE shape (a wish-result export's
+      // `setName` stream): the sending cell's OWN space IS the foreign
+      // target space, so cell.space === resolved.space === FOREIGN.
+      const servingStream = serving.getCell<unknown>(
+        foreignSpace,
+        "xspace-send-stream",
+        undefined,
+      );
+      await servingStream.sync();
+      const homeAnchor = serving.getCell<{ n: number }>(
+        homeSpace,
+        "xspace-send-anchor",
+        undefined,
+      );
+
+      // A served event-handler run, HOME-anchored: the run's tx holds
+      // the home writer before the handler body sends (the consequenced
+      // mark's shape on a real dispatch).
+      const tx = serving.edit();
+      stampWaveRunContext(tx, {
+        actionId: "xspace-send-handler",
+        kind: "event-handler",
+        eventId: "e-xspace-send",
+        acting: { user: aliceSigner.did(), session: "sess-xspace" },
+        capabilityRef: "event-consequence:e-xspace-send",
+      });
+      homeAnchor.withTx(tx).set({ n: 1 });
+      // Pre-fix this send took the LT1 same-space arm (the axis was the
+      // sending cell's space) and its raw entries write opened a second
+      // space's writer inside the home-anchored tx — the
+      // one-tx-one-space isolation error (protocol.md §2b) killed the
+      // handler run and the emission was LOST. The axis is the wave's
+      // home space: a foreign target stages the outbox row instead.
+      servingStream.withTx(tx).send({ hello: "across" });
+      expect((await tx.commit()).error).toBeUndefined();
+
+      // The outbox delivers the append into the FOREIGN stream's
+      // sidecar, firedAt stamped from the CARRIED actor (LT5: the
+      // envelope is the producing server's service identity;
+      // admissibility and attribution from the validated carriage).
+      const fEngine = await server.engineForSpace(foreignSpace);
+      const sidecarId = streamEntriesDocId({
+        id: servingStream.getAsNormalizedFullLink().id,
+        path: [],
+      });
+      await waitUntil(
+        () => {
+          const value = readDoc(fEngine, { id: sidecarId })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries ?? []).some((entry) =>
+            entry.firedAt?.user === aliceSigner.did()
+          );
+        },
+        "the outbox-delivered entry with the carried actor",
+        30_000,
+      );
+      // The delivered append is an AUTHORED admission carrying an
+      // event: the arrival activates the target space's own serving
+      // loop (serving-loop.md §1's event-append criterion) — the
+      // single deriver that consequences it (protocol.md §2b's
+      // derived-into-foreign FORBIDDEN row stays intact).
+      await waitUntil(
+        () => host!.spaceServer(foreignSpace)?.active === true,
+        "the target space's activation on the delivered append",
+        30_000,
+      );
     } finally {
       cancel();
     }

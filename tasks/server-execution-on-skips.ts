@@ -276,36 +276,44 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       file: "integration/profile-embed.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land), re-scoped twice by the optimize-on-main " +
-        "served-wish seat. The ORIGINAL killer — OW49, " +
-        "`assertNoDivergentIfcBranches` refusing the wish builtin's own " +
-        '`anyOf[{type:"undefined"}, <requested schema>]` /result ' +
-        "declaration — is FIXED: RULING 5 (CFC owner, 2026-08-21) narrowed " +
-        "the assert to actual ambiguity (verification-coverage.md OW49; " +
-        "runner cfc/schema-merge.ts), and 10 fresh-store live ON runs at " +
-        "the ruling head show the assert EXTINCT (0 occurrences; the wish " +
-        "UI mounts and the profile resolves every run). The lift attempt " +
-        "then surfaced the NEXT blocker: the resolved-profile AMEND steps " +
-        "are intermittently red (6/10 — setName/badge 4x, setBio 2x, " +
-        "300 s waits; passes take 19–41 s), and the amended values are " +
-        "durably ABSENT from EVERY run's store, pass and fail — the " +
-        "passing renders ride a non-durable echo. Standing signatures in " +
-        "every run: 60–70 foreign-write refusals of the home wave running " +
-        "the profile module's lifts (cf:module/…:applyInitialName, " +
-        "__cfLift_*) into the profile's own space with no §2b carriage, " +
-        "and the profile space never activates a serving wave — the " +
-        "rootcause §1 / OW45+OW31-family surface, newly REACHABLE now " +
-        "that OW49's kill is gone; row-mapping with the coordinator " +
-        "(triage: optimize/ruling5-ow49-report.md §3). NOT a demand " +
-        "hole. Gate record: docs/history/plans/server-execution-v2/" +
-        "stage-c/first-on-ci-gate.md; seat evidence: " +
-        "docs/history/plans/server-execution-v2/optimize/" +
-        "ow48-50-wish-path-report.md. " +
-        "OW48 was REFUTED as environment contamination (stale " +
-        "localhost:8000 toolshed serving pre-#6019 sources); OW50's " +
-        "failure surfacing is BUILT. Lifts when the amend-convergence " +
-        "blocker closes and the file greens ON; the flip PR needs this " +
-        "list EMPTY.",
+        "the FLIP, not the land), re-scoped THREE times as each blocker " +
+        "fell. OW49's divergent-anyOf kill: FIXED (RULING 5; " +
+        "verification-coverage.md OW49), live-extinct. The " +
+        "amend-convergence blocker (the OW45+OW31-family signature — " +
+        "amended values durably absent from EVERY store, the passing " +
+        "renders riding a non-durable echo): ROOT-CAUSED AND CLOSED by " +
+        "the §2b derivation-carriage scoping pass — ONE send-site " +
+        "defect, cell.ts's serving branch picking the LT1-vs-outbox arm " +
+        "by the sending CELL's space instead of the WAVE's home space, " +
+        "so the served saveName/saveBio handlers' sends into the " +
+        "profile's exported streams (direct foreign cell handles) " +
+        "raw-wrote the foreign space and died on the one-tx-one-space " +
+        "isolation error; the emission was lost. Fixed red-first " +
+        "(executor-cross-space.test.ts's outbox-arm pin); the amends now " +
+        "cross via the outbox with the carried actor, the profile " +
+        "space's own loop activates and derives, and the values are " +
+        "durably present in both stores — the BIO amend landed durably " +
+        "in EVERY gate run, red runs included. Evidence: docs/history/" +
+        "plans/server-execution-v2/optimize/" +
+        "2b-derivation-carriage-scope.md. REMAINING blocker (the " +
+        "re-scope): the NAME-DRAFT own-write loss — the client's " +
+        "cf-input $value write of the name draft (a plain TEST-space " +
+        "authored write) intermittently never lands as ANY commit " +
+        "(fillCfInput's host commit() resolves and verifies, yet the " +
+        "store never sees the value), so the served saveName reads an " +
+        "empty draft and correctly no-ops; 3 of 10 fresh-store gate " +
+        "runs at the fix head (300 s badge timeouts; greens take " +
+        "11-23 s; not load-correlated — a green passed at load 18 and " +
+        "reds landed at 8-15, and the BIO amend crossed durably in " +
+        "every red). OW47's family (client own-write " +
+        "durability; its cellset-lww fix landed a DIFFERENT mechanism — " +
+        "the blind-write structural read; this write dies with the " +
+        "startEditing seed echo standing on the draft doc, the " +
+        "value-consuming arm OW47 deliberately kept refusing). NOT a " +
+        "demand hole. Gate record: docs/history/plans/" +
+        "server-execution-v2/stage-c/first-on-ci-gate.md. Lifts when " +
+        "the draft-write loss closes and the file greens ON; the flip " +
+        "PR needs this list EMPTY.",
     },
     {
       file: "integration/home-profile-reload-durability.test.ts",

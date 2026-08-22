@@ -1313,6 +1313,18 @@ export interface TransactionSealDestination {
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
 
   /**
+   * The HOME space of the wave this destination seals into (the space
+   * the serving loop serves). The send site's LT1-vs-outbox decision
+   * reads it: an emission targeting THIS space rides the wave's own
+   * commit (LT1's same-space arm), any other space stages the outbox's
+   * cross-space append (events.md §2; protocol.md §2b). The SpaceServer
+   * and the wave accumulator both expose it; a destination that names
+   * none (bare test doubles) leaves the send site on the sending cell's
+   * own space as the proxy — a same-space-only harness shape.
+   */
+  readonly space?: MemorySpace;
+
+  /**
    * Take ownership of a sealed transaction's post-commit effects
    * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands
    * external effects to the OUTBOX post-wave-commit — never at seal

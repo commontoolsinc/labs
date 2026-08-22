@@ -1729,7 +1729,23 @@ export class CellImpl<T extends FabricValue>
           // is refused at the seal — the early-emit guard, fail-closed.
           // Handler runs (explicit `firedAt` actor) are unchanged.
           const acting = actingForEmission(context, this.tx);
-          if (resolvedToValueLink.space === this.space) {
+          // The LT1-vs-outbox axis is the WAVE'S HOME SPACE (LT1: a
+          // SAME-SPACE server-emitted append rides the wave's own
+          // derived commit; events.md §2's cross-space arm is the
+          // outbox). The sending CELL's space is not that axis: a
+          // foreign stream reached through a direct foreign cell handle
+          // (a wish-result export — profile-embed's `setName`) has
+          // cell.space === resolved.space === the FOREIGN space, and
+          // the same-space arm's raw entries write would open a second
+          // space's writer inside the run's home-anchored transaction —
+          // the one-tx-one-space isolation error (protocol.md §2b) that
+          // kills the handler run and loses the emission. A destination
+          // that names no space (bare test doubles) keeps the
+          // cell-space proxy: those harnesses are same-space by
+          // construction.
+          const servingSpace = this.runtime.installedSealDestination?.space ??
+            this.space;
+          if (resolvedToValueLink.space === servingSpace) {
             // LT1 same-space carriage: the entry rides the current tx.
             // The engine stamps its stream `seq` at the wave commit
             // (the batch declares it); `firedAt` is the inherited
