@@ -235,65 +235,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "step greens ON; the flip PR needs this list EMPTY.",
     },
     {
-      file: "integration/profile-embed.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land), re-scoped THREE times as each blocker " +
-        "fell. OW49's divergent-anyOf kill: FIXED (RULING 5; " +
-        "verification-coverage.md OW49), live-extinct. The " +
-        "amend-convergence blocker (the OW45+OW31-family signature — " +
-        "amended values durably absent from EVERY store, the passing " +
-        "renders riding a non-durable echo): ROOT-CAUSED AND CLOSED by " +
-        "the §2b derivation-carriage scoping pass — ONE send-site " +
-        "defect, cell.ts's serving branch picking the LT1-vs-outbox arm " +
-        "by the sending CELL's space instead of the WAVE's home space, " +
-        "so the served saveName/saveBio handlers' sends into the " +
-        "profile's exported streams (direct foreign cell handles) " +
-        "raw-wrote the foreign space and died on the one-tx-one-space " +
-        "isolation error; the emission was lost. Fixed red-first " +
-        "(executor-cross-space.test.ts's outbox-arm pin); the amends now " +
-        "cross via the outbox with the carried actor, the profile " +
-        "space's own loop activates and derives, and the values are " +
-        "durably present in both stores — the BIO amend landed durably " +
-        "in EVERY gate run, red runs included. Evidence: docs/history/" +
-        "plans/server-execution-v2/optimize/" +
-        "2b-derivation-carriage-scope.md. REMAINING blocker (the " +
-        "re-scope): the NAME-DRAFT own-write loss — the client's " +
-        "cf-input $value write of the name draft (a plain TEST-space " +
-        "authored write) intermittently never lands as ANY commit " +
-        "(fillCfInput's host commit() resolves and verifies, yet the " +
-        "store never sees the value), so the served saveName reads an " +
-        "empty draft and correctly no-ops; 3 of 10 fresh-store gate " +
-        "runs at the fix head (300 s badge timeouts; greens take " +
-        "11-23 s; not load-correlated — a green passed at load 18 and " +
-        "reds landed at 8-15, and the BIO amend crossed durably in " +
-        "every red). OW47's family (client own-write " +
-        "durability; its cellset-lww fix landed a DIFFERENT mechanism — " +
-        "the blind-write structural read; this write dies with the " +
-        "startEditing seed echo standing on the draft doc, the " +
-        "value-consuming arm OW47 deliberately kept refusing). NOT a " +
-        "demand hole. Gate record: docs/history/plans/" +
-        "server-execution-v2/stage-c/first-on-ci-gate.md. Lifts when " +
-        "the draft-write loss closes and the file greens ON; the flip " +
-        "PR needs this list EMPTY.",
-    },
-    // home-profile-reload-durability LIFTED (2026-08-21, the explicit
-    // warm request — serving-loop.md §1's third activation trigger,
-    // RULED 2026-08-21): the §2b derivation-carriage report's §4 had
-    // decomposed the residual to a setup-after-park ORDERING RACE —
-    // authored setup landing in a parked, sessionless space activates
-    // nothing (T11.Q7's designed parking) and nothing ever re-demands
-    // it. The serving-side provisioning path now issues a warm request
-    // when its wave stages setup into another space; the target
-    // activates and derives it (plus the sink localSeq collision fix
-    // the warm activation exposed — executor-warm-request.test.ts pins
-    // both). Lift evidence: 6/6 fresh-store ON gate runs at the fix
-    // head, both steps green in 12–24 s (the prior red: step 2's
-    // "Alan Turing" wait timing out at 5m+), posture verified and
-    // loads recorded per run; warmRequests 4–6 per run in the live
-    // stats. The entry's full history: git log on this file and
-    // verification-coverage.md's OW45 row.
-    {
       file: "integration/sqlite-db-owner-multi-runtime.test.ts",
       phase: "phase-7",
       reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +

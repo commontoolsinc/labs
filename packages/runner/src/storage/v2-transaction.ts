@@ -78,7 +78,9 @@ import {
   type OpSuppression,
 } from "./mergeable-ops.ts";
 import {
+  getBlindStructuralTarget,
   ignoreReadForCommit,
+  isInternalVerifierRead,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
@@ -1499,6 +1501,86 @@ export class V2StorageTransaction implements IStorageTransaction {
         },
       };
     }
+
+    // A CFC internal-verifier read of a blind UI-input write transaction
+    // bases on the doc's NON-speculative stack (RULED 2026-08-21;
+    // verification-coverage.md OW47, second producer — the name-draft
+    // triage): the verifier verifies the durable policy state the server
+    // will enforce against — a client speculation layer never reaches
+    // the wire, so deriving from it verified state the server can never
+    // see, and the basis it contributed made the §6 export refusal
+    // terminal on the user's own typed input. `buildReads`
+    // (storage/v2.ts) names the same durable layer set for these reads,
+    // so verify-durable and name-durable travel together. Scoped tight:
+    // only the blind-write tx shape (the structural target survives the
+    // unmark), and only reads issued AFTER the blind window closes —
+    // CFC prepare's own reads. In-window reads keep the transaction's
+    // ordinary view (they are machinery reads the commit set drops via
+    // `ignoreReadForCommit`), value-consuming reads keep their overlay
+    // view and the ruled §6 refusal, and every other transaction is
+    // byte-identical to before. CFC prepare consults the transaction's
+    // own writes through its write set (`writeValueForTarget`) before
+    // falling back to this read, so serving replica state here loses
+    // nothing the verifier needs. Served fresh and cache-bypassed: the
+    // frozen-reads cache describes the transaction's checkout view, and
+    // a durable-view value must neither take from it nor land in it.
+    if (
+      !skipCommitPrecondition &&
+      isInternalVerifierRead(readMeta) &&
+      !hasDataUriScheme(address.id) &&
+      // Content-addressed documents are EXEMPT from durable serving:
+      // their content is identical on every layer (the replica refuses
+      // a cid: doc whose content does not hash to its id), so the
+      // ordinary view IS the durable content — while the client's own
+      // durable copy may not exist yet during an echo's arrival window
+      // (the echo's staging carries the schema docs its writes
+      // reference, and the covering SERVED commit already persisted the
+      // same docs server-side). Serving "durably absent" here turned
+      // the user's fill into the silent stored-schemaHash-missing
+      // prepare failure. Their layers stay excluded from the blind tx's
+      // verifier basis in `buildReads` — consistent by construction:
+      // the value equals the durable content whichever layer serves it.
+      !address.id.startsWith("cid:") &&
+      getBlindStructuralTarget(this) !== undefined &&
+      // A replica without a speculation overlay serves no separate
+      // durable view — fall through then: the ordinary read IS it.
+      branch.replica.getNonSpeculativeDocument !== undefined
+    ) {
+      const durable = branch.replica.getNonSpeculativeDocument(
+        address.id,
+        address.scope,
+        this.#scopeKeyIdentity,
+      );
+      if (!doc.validated) {
+        doc.validated = true;
+      }
+      const durableRoot: IAttestation = {
+        address: {
+          id: address.id,
+          type: address.type ?? DOCUMENT_MIME,
+          scope: address.scope,
+          path: [],
+        },
+        // Served DIRECTLY, never through the empty-collapse
+        // (`toTransactionDocumentValue` maps a PRESENT-but-empty
+        // document to `undefined`): the verifier must see the doc's
+        // durable state as it is — a present-empty envelope reads as
+        // `{}` at the root and as no-metadata under `["cfc"]`, not as
+        // a deleted document.
+        value: durable as unknown as FabricValue | undefined,
+      };
+      const result = readAttestation(durableRoot, memoryAddress);
+      if (result.error) {
+        return { error: result.error.from(address.space) };
+      }
+      return {
+        ok: {
+          ...result.ok,
+          value: freezeReadValue(result.ok.value),
+        },
+      };
+    }
+
     // The frozen-reads cache describes the current root — writes invalidate it
     // along the chain they touch — so a read resolving against an earlier epoch
     // neither takes from it nor adds to it.

@@ -136,14 +136,13 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): THREE file entries (profile-embed, the sqlite identity pair) and ONE step entry (default-app's reload step, under OW45) — the gate step lifts and three file lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss; default-app's FILE skip with OW51's close — the splitDefinitions crash fixed, its create-note step runs ON, only its reload step stays under OW45; cfc-group-chat-demo with OW59's close, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4, every run's store auditing zero service-DID authorship labels; home-profile-reload-durability with the explicit warm request, RULED 2026-08-21 — the serving-side provisioning path's staged setup now activates and derives in a parked, sessionless space, 6/6 fresh-store ON gate); profile-embed's entry was re-scoped a third time by the §2b derivation-carriage close (the send-site LT1-vs-outbox axis fix landed the amend crossing durably; the remaining blocker is the client name-draft own-write loss, OW47's family) — every FILE gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): TWO file entries (the sqlite identity pair) and ONE step entry (default-app's reload step, under OW45) — the gate step lifts and four file lifts landed across the optimize pass (cellset-lww's own-write race with OW47's close; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss; default-app's FILE skip with OW51's close — the splitDefinitions crash fixed, its create-note step runs ON, only its reload step stays under OW45; cfc-group-chat-demo with OW59's close, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4, every run's store auditing zero service-DID authorship labels; home-profile-reload-durability with the explicit warm request, RULED 2026-08-21 — the serving-side provisioning path's staged setup now activates and derives in a parked, sessionless space, 6/6 fresh-store ON gate; profile-embed with OW47's RE-close — the name-draft own-write loss: the CFC verifier-read basis, arm (b) RULED 2026-08-21, 10/10 green ON at the fix head) — every FILE gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
   // their file), in list order.
   assertEquals(out, [
     "--ignore=integration/topics-navigation.test.ts," +
-    "integration/profile-embed.test.ts," +
     "integration/sqlite-db-owner-multi-runtime.test.ts," +
     "integration/sqlite-read-clearance-multi-runtime.test.ts",
   ]);
@@ -154,7 +153,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   );
   for (
     const file of [
-      "profile-embed",
       "sqlite-db-owner-multi-runtime",
       "sqlite-read-clearance-multi-runtime",
     ]
@@ -206,22 +204,18 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "home-profile-reload-durability must carry NO skip entry (the warm " +
       "request landed; the file runs ON)",
   );
-  // profile-embed's entry names its CURRENT blocker, not a closed one:
-  // the §2b derivation-carriage close (2026-08-21) landed the amend
-  // crossing (send-site LT1-vs-outbox axis; the amends are durably
-  // present cross-space), so the entry's reason must now name the
-  // remaining client name-draft own-write loss — pinned so a stale
-  // re-broadening is a deliberate edit.
-  {
-    const profileEmbed = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
+  // profile-embed is LIFTED (verification-coverage.md OW47's re-close,
+  // RULED 2026-08-21: the name-draft own-write loss — the CFC
+  // verifier-read basis, the file's LAST blocker after RULING 5/OW49
+  // and the §2b derivation-carriage close): no entry, so the file RUNS
+  // on the ON arm — the lift's CI evidence, pinned so a re-skip is a
+  // deliberate edit.
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
       skip.file === "integration/profile-embed.test.ts"
-    );
-    if (profileEmbed === undefined) {
-      throw new Error("missing profile-embed entry");
-    }
-    assertMatch(profileEmbed.reason, /NAME-DRAFT own-write loss/);
-    assertMatch(profileEmbed.reason, /2b-derivation-carriage-scope\.md/);
-  }
+    ),
+    false,
+  );
   // cfc-group-chat-demo is LIFTED (verification-coverage.md OW59 closed,
   // the OW34-family train, 2026-08-21): a served run's CFC trust snapshot
   // carries the acting principal, so the authorship labels name the acting
@@ -269,13 +263,13 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
-  assertEquals(gateEntries.length, 4);
-  // Every ORIGINAL first-ON-CI-gate FILE entry (the three that have not
+  assertEquals(gateEntries.length, 3);
+  // Every ORIGINAL first-ON-CI-gate FILE entry (the two that have not
   // lifted): phase-7, the gate report path, an owed register row (OW31 or a
   // freshly minted OW45–OW53), the honest no-demand-hole classification, and
   // the flip's EMPTY-list condition.
   const fileGateEntries = gateEntries.filter((skip) => skip.step === undefined);
-  assertEquals(fileGateEntries.length, 3);
+  assertEquals(fileGateEntries.length, 2);
   for (const entry of fileGateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
@@ -328,7 +322,7 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     "./integration/convergence-storm.test.ts",
   ]);
   assertEquals(skipped, []);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 5);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 4);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

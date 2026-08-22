@@ -2229,6 +2229,27 @@ export interface ISpaceReplica extends ISpace {
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
 
+  /**
+   * The doc's NON-speculative document: confirmed state plus only the
+   * durable pending layers (own commits awaiting their verdict),
+   * skipping client speculation overlay layers (entries sealed
+   * `speculative: true` — speculation.md §1). This is the state a CFC
+   * internal-verifier read of a blind UI-input write transaction bases
+   * on (RULED 2026-08-21; verification-coverage.md OW47, second
+   * producer): the verifier verifies the durable policy state the
+   * server will enforce against — a speculation layer never reaches
+   * the wire — and the value read here matches the basis `buildReads`
+   * names for such reads (speculative layers excluded). Optional:
+   * implementations without a speculation overlay may omit it, and
+   * readers fall back to {@link getDocument}, whose view is then
+   * identical.
+   */
+  getNonSpeculativeDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined;
+
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,

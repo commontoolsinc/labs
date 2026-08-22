@@ -60,6 +60,7 @@ import type { Cell } from "../cell.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
+  lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { isSubschema } from "../schema-walk.ts";
@@ -115,6 +116,7 @@ import {
 } from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
+  isInternalVerifierRead,
   isMergeableOpRead,
   isReadExcludedFromConflict,
   isReadIgnoredForCommit,
@@ -2493,6 +2495,10 @@ class SpaceReplica implements ISpaceReplica {
   // teardown rejects every in-flight request.
   readonly #suppressedVerdicts = new Set<Promise<void>>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
+  // Schema-hash hydration dedupe (hydrateArrivedCfcSchemaRefs): hashes
+  // whose cid: pull is in flight or has succeeded; a failed pull removes
+  // its entry so a later frame can retry.
+  readonly #kickedCfcSchemaPulls = new Set<string>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     string,
@@ -3019,6 +3025,50 @@ class SpaceReplica implements ISpaceReplica {
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
     return this.visibleDocument(uri, scope, identity);
+  }
+
+  /** ISpaceReplica.getNonSpeculativeDocument (RULED 2026-08-21;
+   * verification-coverage.md OW47, second producer): the doc's view
+   * over confirmed state plus only its DURABLE pending layers,
+   * skipping the client speculation overlay (#speculativeLocalSeqs).
+   * The value side of the blind-write verifier-read basis — the same
+   * layers `buildReads` names for such reads. */
+  getNonSpeculativeDocument(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined {
+    const record = this.#docs.get(
+      docKey(uri, this.instanceKey(scope, identity)),
+    );
+    if (!record) {
+      return undefined;
+    }
+    const hasSpeculative = record.pending.some((entry) =>
+      this.#speculativeLocalSeqs.has(entry.localSeq)
+    );
+    if (!hasSpeculative) {
+      // No speculation on this doc: the non-speculative view IS the
+      // visible view (served from the prefix cache).
+      return this.visibleDocument(uri, scope, identity);
+    }
+    // Fold only the durable pending layers over the confirmed base, in
+    // stack order. The durable subset is a SUBSEQUENCE of the pending
+    // array, not a prefix, so the prefix materialization cache does not
+    // apply; a doc carrying speculation is a bounded transient (the
+    // overlay destination retires it), so this stays a cold path.
+    let value = record.confirmed.value;
+    for (const entry of record.pending) {
+      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
+        continue;
+      }
+      value = applyPendingVersion(value, entry, {
+        space: this.#space,
+        id: uri,
+        scope,
+      });
+    }
+    return value;
   }
 
   /** Whether an optimistic local write for this doc is still pending — not
@@ -4994,6 +5044,16 @@ class SpaceReplica implements ISpaceReplica {
     // unbounded for a never-served instance, so "the user typed while an
     // echo stood" is a routine state, not a race (rootcause §2b; the
     // cellset-lww end-to-end step; the group-chat messageDraft shape).
+    // The blind-write tx's SECOND layer-naming producer passes true too
+    // (RULED 2026-08-21; the name-draft triage): CFC prepare's
+    // internal-verifier read of the write-target doc, whose VALUE the
+    // transaction read path serves from the same non-speculative stack
+    // (v2-transaction.ts) — the verifier verifies durable policy state
+    // and names the durable basis, together. Content-addressed (cid:)
+    // reads keep their ordinary overlay value there — identical to the
+    // durable content by construction — while this exclusion still
+    // covers their layers, so an echo-staged schema doc neither aborts
+    // the fill nor dooms its export.
     // The structural existence/shape precondition is evaluated against
     // durable state either way (basisSeq stays the true confirmed basis),
     // DURABLE in-flight layers stay named (dependency + CT-1910
@@ -5081,7 +5141,19 @@ class SpaceReplica implements ISpaceReplica {
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id)
+        hasDataUriScheme(read.id) ||
+        // Content-addressed documents carry no commit-time concurrency
+        // precondition at all: their content can never change (the engine
+        // and every replica refuse content that does not hash to the id),
+        // so there is no staleness for a conflict check to find — while
+        // the client's confirmed basis for a cid: doc it resolved from
+        // its overlay or the realm registry is 0, and the doc's first
+        // INSTALL is a real revision row, so exporting that read killed
+        // the commit as `stale confirmed read: cid:… at seq 0` exactly
+        // in the delivery-gap window the resolution fallbacks serve
+        // (layer-indifference extended from layers to seqs; the
+        // server-side closure validation owns presence).
+        read.id.startsWith("cid:")
       ) {
         continue;
       }
@@ -5142,6 +5214,16 @@ class SpaceReplica implements ISpaceReplica {
         toCommitReadPath(read.path),
         read.nonRecursive === true,
         typeof read.meta?.seq === "number" ? read.meta.seq : undefined,
+        // A CFC internal-verifier read of a blind UI-input write tx
+        // bases on the doc's NON-speculative stack (RULED 2026-08-21;
+        // OW47's second producer — the name-draft triage): the read's
+        // VALUE was served from that stack (v2-transaction.ts read()),
+        // so the layers named here must be the same durable set —
+        // verify-durable and name-durable travel together. Confined to
+        // the blind-write tx shape: `structuralTarget` survives the
+        // unmark exactly so commit-time emission can recognize it, and
+        // a verifier read in any other tx keeps naming every layer.
+        structuralTarget !== undefined && isInternalVerifierRead(read.meta),
       );
     }
     // The blind UI-input write's single structural existence/shape precondition: a
@@ -5515,6 +5597,81 @@ class SpaceReplica implements ISpaceReplica {
           error,
         ]);
       }
+    }
+    this.hydrateArrivedCfcSchemaRefs(sync);
+  }
+
+  /** Schema-hash hydration for arrived metadata (verification-coverage.md
+   * OW47's re-close): a frame delivers a doc's `/cfc` metadata WITHOUT its
+   * `schemaHash` refs — the delivery validation covers link-position
+   * schemas only — so stored metadata can reference a `cid:` document no
+   * local source resolves, and the next commit whose CFC prepare consults
+   * it (a blind fill's durable verifier read above all) dies on
+   * `stored schemaHash … missing or unreadable`. Pull the referenced
+   * document as the metadata arrives: deferred a microtask (never
+   * re-entrant inside frame application), deduped per replica while a
+   * kick is in flight or has DELIVERED. A pull that fails, or that
+   * completes WITHOUT the document (not yet installed server-side — a
+   * legal state while the stamper's own commit is in flight), re-arms
+   * the dedupe so the next frame carrying the reference kicks again —
+   * without the re-arm the delivery-gap window was permanent for the
+   * session. The empty-completion re-kick is SILENT and frame-paced:
+   * one pull per hash per frame batch, no backoff — a permanently
+   * absent hash re-pulls once per arriving frame without a log.
+   * Failures log HERE: the replica-level pull never crosses the
+   * manager's sync-load logging wrappers, so this is the only
+   * client-side trace before the prepare abort. */
+  private hydrateArrivedCfcSchemaRefs(sync: SessionSync): void {
+    for (const upsert of sync.upserts) {
+      if (upsert.deleted === true) continue;
+      const id = upsert.id;
+      if (typeof id !== "string" || id.startsWith("cid:")) continue;
+      const doc = upsert.doc;
+      if (!isObjectNotArray(doc)) continue;
+      const cfc = (doc as { cfc?: unknown }).cfc;
+      if (!isObjectNotArray(cfc)) continue;
+      const schemaHash = (cfc as { schemaHash?: unknown }).schemaHash;
+      if (typeof schemaHash !== "string" || schemaHash.length === 0) {
+        continue;
+      }
+      if (this.#kickedCfcSchemaPulls.has(schemaHash)) continue;
+      if (
+        lookupSchemaDocument(schemaHash) !== undefined ||
+        this.getDocument(`cid:${schemaHash}` as URI) !== undefined
+      ) {
+        continue;
+      }
+      this.#kickedCfcSchemaPulls.add(schemaHash);
+      queueMicrotask(() => {
+        this.sync(`cid:${schemaHash}` as URI)
+          .then((result) => {
+            if (result.error !== undefined) {
+              logger.warn("cfc-schema-hydration-failed", () => [
+                "arrived-metadata schema pull failed; a later frame " +
+                "carrying the reference re-kicks",
+                { schemaHash, error: String(result.error) },
+              ]);
+              this.#kickedCfcSchemaPulls.delete(schemaHash);
+              return;
+            }
+            if (
+              lookupSchemaDocument(schemaHash) === undefined &&
+              this.getDocument(`cid:${schemaHash}` as URI) === undefined
+            ) {
+              // Completed empty: the document is not installed
+              // server-side yet. Re-arm, so the next reference-carrying
+              // frame retries instead of the window going permanent.
+              this.#kickedCfcSchemaPulls.delete(schemaHash);
+            }
+          }, (error) => {
+            logger.warn("cfc-schema-hydration-failed", () => [
+              "arrived-metadata schema pull threw; a later frame " +
+              "carrying the reference re-kicks",
+              { schemaHash, error: String(error) },
+            ]);
+            this.#kickedCfcSchemaPulls.delete(schemaHash);
+          });
+      });
     }
   }
 

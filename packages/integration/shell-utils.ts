@@ -385,6 +385,15 @@ export class ShellIntegration {
     // to be set after the page has an origin to store it against and before the
     // login below.
     await enablePatternCoverage(page);
+    // [NDT] triage aid: seed the worker-console host toggle before login so
+    // the worker runtime's console (where the storage taps live) reaches the
+    // page console — and, with PIPE_CONSOLE, the test output. Same
+    // read-at-runtime-creation contract as patternCoverage above.
+    if (Deno.env.get("FORWARD_WORKER_CONSOLE") === "1") {
+      await page.evaluate(() => {
+        globalThis.localStorage.setItem("forwardWorkerConsole", "true");
+      });
+    }
     await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
@@ -418,6 +427,13 @@ export class ShellIntegration {
     }
     if (this.#config.failOnConsoleError) {
       const offending = this.#errorLogs.filter((msg) =>
+        // [NDT] triage aid: with FORWARD_WORKER_CONSOLE=1 the worker's
+        // console.error lines reach the page console for OBSERVATION only.
+        // The console-error gate never saw them before forwarding existed,
+        // so they must not change a run's verdict — exclude the forwarded
+        // ("[worker]"-prefixed) lines to keep verdicts comparable.
+        !(Deno.env.get("FORWARD_WORKER_CONSOLE") === "1" &&
+          msg.startsWith("[worker]")) &&
         !this.#config.allowedConsoleErrors.some((pattern) =>
           typeof pattern === "string"
             ? msg.includes(pattern)
