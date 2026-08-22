@@ -10,12 +10,19 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
-import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
+import {
+  stampWaveRunContext,
+  WaveAccumulator,
+  type WaveCommitSink,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "../src/executor/wave.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import type {
   IExtendedStorageTransaction,
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
 // Each drives the public API only: a parent pattern, a child reached through
@@ -387,6 +394,305 @@ describe("child run ownership", () => {
     // waiting to be tombstoned.
     expect(runtime.runner.cancels.has(key(result))).toBe(true);
     expect(pending.size).toBe(0);
+    runtime.runner.stop(result);
+  });
+
+  it("waits for producer and start waves before settling a commit-gated start", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const producerWave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    const startWave = new WaveAccumulator({
+      space,
+      basisSeq: 1,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    let activeWave = producerWave;
+    let sealChain = Promise.resolve();
+    const startSealed = Promise.withResolvers<IExtendedStorageTransaction>();
+    runtime.installSealDestination(
+      {
+        seal: (sealTx) => {
+          const wave = activeWave;
+          const sealed = sealChain.then(() => wave.seal(sealTx));
+          sealChain = sealed.then(() => undefined, () => undefined);
+          return sealed.then((result) => {
+            if (
+              waveRunContextOf(sealTx)?.actionId.startsWith("piece-start/") &&
+              waveSettlementOf(sealTx) !== undefined
+            ) {
+              startSealed.resolve(sealTx);
+            }
+            return result;
+          });
+        },
+      },
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    const producerTx = runtime.edit();
+    const tx = new TransactionWrapper(producerTx);
+    producerTx.tx.immediate = true;
+    (producerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    stampWaveRunContext(producerTx, {
+      actionId: "producer-for-deferred-start",
+      kind: "bookkeeping",
+    });
+    const marker = runtime.getCell<{ ready: boolean }>(
+      space,
+      "producer marker for deferred pattern run",
+      undefined,
+      producerTx,
+    );
+    marker.withTx(tx).set({ ready: true });
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start after producer wave settlement",
+      undefined,
+      producerTx,
+    );
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: IExtendedStorageTransaction,
+        resultCell: Cell<unknown>,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+    };
+    harness.runPatternAfterSuccessfulCommit(
+      tx,
+      result,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+
+    expect((await producerTx.commit()).error).toBeUndefined();
+    expect(waveSettlementOf(producerTx)).toBeDefined();
+    expect(waveSettlementOf(tx)).toBeUndefined();
+    await Promise.resolve();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(1);
+
+    activeWave = startWave;
+    const acceptingSink = (head: number, seq: number): WaveCommitSink => ({
+      currentHeads: (_target, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [`${doc.id} ${doc.scopeKey}`, head])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([]),
+      commitWave: () => Promise.resolve({ ok: { seq } }),
+    });
+    const producerOutcome = await producerWave.commitWave(
+      acceptingSink(0, 1),
+    );
+    await producerWave.settled();
+    expect(producerOutcome.dispositions).toEqual([{ kind: "committed" }]);
+
+    const startTx = await startSealed.promise;
+    await sealChain;
+    expect(waveSettlementOf(startTx)).toBeDefined();
+    expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    const startOutcome = await startWave.commitWave(acceptingSink(1, 2));
+    await startWave.settled();
+    expect(startOutcome.dispositions).toEqual([{ kind: "committed" }]);
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    runtime.runner.stop(result);
+  });
+
+  it("cancels a commit-gated start when its producing wave withdraws", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: runtime.scopeKeyIdentity,
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    runtime.installSealDestination(wave);
+
+    const producerTx = runtime.edit();
+    const tx = new TransactionWrapper(producerTx);
+    producerTx.tx.immediate = true;
+    (producerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    stampWaveRunContext(producerTx, {
+      actionId: "withdrawn-producer-for-deferred-start",
+      kind: "bookkeeping",
+    });
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start after withdrawn producer wave",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    expect((await producerTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+    wave.abandon("test producer withdrawal");
+    await wave.settled();
+    await Promise.resolve();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(0);
+  });
+
+  it("rebuilds a commit-gated start when its own wave withdraws", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const newWave = (basisSeq: number) =>
+      new WaveAccumulator({
+        space,
+        basisSeq,
+        scopeKeyIdentity: runtime.scopeKeyIdentity,
+        replicaFor: (target) => storageManager.open(target).replica,
+      });
+    const producerWave = newWave(0);
+    const firstStartWave = newWave(1);
+    const recoveryWave = newWave(1);
+    let activeWave = producerWave;
+    let sealChain = Promise.resolve();
+    const firstStartSealed = Promise.withResolvers<void>();
+    const recoveryStartSealed = Promise.withResolvers<void>();
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: (sealTx) => {
+          const wave = activeWave;
+          const sealed = sealChain.then(() => wave.seal(sealTx));
+          sealChain = sealed.then(() => undefined, () => undefined);
+          return sealed.then((result) => {
+            if (
+              waveRunContextOf(sealTx)?.actionId.startsWith("piece-start/") &&
+              waveSettlementOf(sealTx) !== undefined
+            ) {
+              startSeals++;
+              if (startSeals === 1) firstStartSealed.resolve();
+              if (startSeals === 2) recoveryStartSealed.resolve();
+            }
+            return result;
+          });
+        },
+      },
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    stampWaveRunContext(tx, {
+      actionId: "producer-for-withdrawn-start-wave",
+      kind: "bookkeeping",
+    });
+    const marker = runtime.getCell<{ ready: boolean }>(
+      space,
+      "producer marker for withdrawn start wave",
+      undefined,
+      tx,
+    );
+    marker.withTx(tx).set({ ready: true });
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start whose own wave withdraws",
+      undefined,
+      tx,
+    );
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: IExtendedStorageTransaction,
+        resultCell: Cell<unknown>,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+    };
+    harness.runPatternAfterSuccessfulCommit(
+      tx,
+      result,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    activeWave = firstStartWave;
+    const acceptingSink: WaveCommitSink = {
+      currentHeads: (_target, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [`${doc.id} ${doc.scopeKey}`, 0])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([]),
+      commitWave: () => Promise.resolve({ ok: { seq: 1 } }),
+    };
+    const producerOutcome = await producerWave.commitWave(acceptingSink);
+    await producerWave.settled();
+    expect(producerOutcome.dispositions).toEqual([{ kind: "committed" }]);
+    await firstStartSealed.promise;
+    await sealChain;
+
+    activeWave = recoveryWave;
+    firstStartWave.abandon("test start-wave withdrawal");
+    await firstStartWave.settled();
+    await recoveryStartSealed.promise;
+    await sealChain;
+    expect(startSeals).toBe(2);
+
+    const recoveryOutcome = await recoveryWave.commitWave({
+      ...acceptingSink,
+      commitWave: () => Promise.resolve({ ok: { seq: 2 } }),
+    });
+    await recoveryWave.settled();
+    expect(recoveryOutcome.dispositions).toEqual([{ kind: "committed" }]);
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(true);
     runtime.runner.stop(result);
   });
 

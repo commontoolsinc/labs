@@ -115,6 +115,17 @@ still gated holds that child through the pending start and nothing else, so a
 release that passed it over would let the child start after the pattern that
 launched it is gone.
 
+When the producing transaction seals into a server-execution wave, its commit
+callback means that the wave accepted the contribution. The contribution is
+not durable until the wave settles. The pending start waits for that
+settlement before installing its registration and staging its own setup. A
+withdrawn producing contribution cancels the pending start. A transaction
+outside a wave has no separate settlement and starts from its successful
+commit callback as before. When the child's setup transaction enters a later
+wave, that wave must also settle before the start succeeds. A withdrawal
+releases the registration and follows the same bounded conflict recovery as a
+setup transaction rejected at its seal.
+
 The callback installs the registration while staging the start's own setup
 transaction. If that transaction conflicts, the callback removes only the
 registration it installed, waits for the conflict's `readyToRetry` catch-up

@@ -3512,13 +3512,26 @@ export class Runner {
         }
       })();
     };
-    tx.commit().then(({ error }) => {
-      if (error !== undefined) {
+    void (async () => {
+      try {
+        const committed = await tx.commit();
+        if (committed.error !== undefined) {
+          fail(committed.error);
+          return;
+        }
+        const settlement = waveSettlementOf(tx);
+        if (settlement !== undefined) {
+          const settled = await settlement;
+          if (settled.error !== undefined) {
+            fail(settled.error);
+            return;
+          }
+        }
+        if (!ownership.isCancelled()) afterCommit();
+      } catch (error) {
         fail(error);
-        return;
       }
-      if (!ownership.isCancelled()) afterCommit();
-    }).catch(fail);
+    })();
   }
 
   private cancelPendingDeferredStarts(
@@ -3528,6 +3541,47 @@ export class Runner {
     if (pending === undefined) return;
     this.pendingDeferredStarts.delete(key);
     for (const ownership of pending) ownership.cancel();
+  }
+
+  private startDeferredAfterProducerSettlement(
+    tx: IExtendedStorageTransaction,
+    ownership: DeferredStartOwnership,
+    start: () => void,
+  ): void {
+    const startSafely = () => {
+      try {
+        start();
+      } catch (error) {
+        ownership.cancel();
+        logger.error(
+          "runner-start",
+          "Deferred start failed after producer settlement",
+          error,
+        );
+      }
+    };
+    const settlement = waveSettlementOf(tx);
+    if (settlement === undefined) {
+      startSafely();
+      return;
+    }
+    void settlement.then(
+      (settled) => {
+        if (settled.error !== undefined) {
+          ownership.cancel();
+          return;
+        }
+        if (!ownership.isCancelled()) startSafely();
+      },
+      (error) => {
+        ownership.cancel();
+        logger.error(
+          "runner-start",
+          "Deferred start wave settlement failed",
+          error,
+        );
+      },
+    );
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -3540,7 +3594,7 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
+    tx.addCommitCallback((committedTx, result) => {
       if (result.error) {
         // The callback that would install this start is the one running now,
         // so a failed transaction leaves nothing to reach the pending entry
@@ -3620,10 +3674,13 @@ export class Runner {
           startTx.abort(error);
           ownership.cancel();
           logger.error("runner-start", "Deferred start failed", error);
-          throw error;
         }
       };
-      attempt(true);
+      this.startDeferredAfterProducerSettlement(
+        committedTx,
+        ownership,
+        () => attempt(true),
+      );
     });
     return ownership.cancel;
   }
@@ -3639,7 +3696,7 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
+    tx.addCommitCallback((committedTx, result) => {
       if (result.error) {
         // Settled here for the same reason as the start above: this callback
         // is the only thing that reaches the pending entry, so a failed
@@ -3718,10 +3775,13 @@ export class Runner {
             "Deferred cross-space pattern failed",
             error,
           );
-          throw error;
         }
       };
-      attempt(true);
+      this.startDeferredAfterProducerSettlement(
+        committedTx,
+        ownership,
+        () => attempt(true),
+      );
     });
     return ownership.cancel;
   }
