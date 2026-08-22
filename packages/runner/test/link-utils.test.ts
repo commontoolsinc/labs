@@ -242,12 +242,17 @@ describe("link-utils", () => {
       const cell = runtime.getCell(space, "test");
       const result = parseLink(cell.toSigilLinkOrNull(), cell);
 
+      // A sigil-parsed link is DATA-DERIVED (OW51): parseLink stamps a
+      // read-side `viaLinkHop` so a later read dead-ending at its doc is an
+      // unresolved input, not a known absence. Identity + serialization
+      // ignore it; the assertions carry it because they compare full output.
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
@@ -269,6 +274,7 @@ describe("link-utils", () => {
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
+        viaLinkHop: true,
       });
     });
 
@@ -291,6 +297,7 @@ describe("link-utils", () => {
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
+        viaLinkHop: true,
       });
     });
 
@@ -314,6 +321,7 @@ describe("link-utils", () => {
         space: space,
         schema: { type: "number" },
         overwrite: "redirect",
+        viaLinkHop: true,
       });
     });
 
@@ -335,6 +343,7 @@ describe("link-utils", () => {
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
@@ -350,6 +359,7 @@ describe("link-utils", () => {
 
       expect(result).toEqual({
         path: ["nested", "value"],
+        viaLinkHop: true,
       });
 
       // Don't allow `id: undefined`, etc.
@@ -369,6 +379,7 @@ describe("link-utils", () => {
         space: space,
         scope: "space",
         schema: undefined,
+        viaLinkHop: true,
       });
     });
 
@@ -598,6 +609,7 @@ describe("link-utils", () => {
         path: ["nested"],
         space,
         scope: "session",
+        viaLinkHop: true,
       });
 
       expect(parseLink({
@@ -617,6 +629,7 @@ describe("link-utils", () => {
         path: [],
         space,
         scope: "user",
+        viaLinkHop: true,
       });
     });
 

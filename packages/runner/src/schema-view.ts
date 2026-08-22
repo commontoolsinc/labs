@@ -83,7 +83,7 @@ const logger = getLogger("schema-view", { enabled: false, level: "warn" });
  * non-event, not a failure.
  */
 export class SchemaMismatchError extends Error {
-  override readonly name = "SchemaMismatchError";
+  override readonly name: string = "SchemaMismatchError";
   readonly link: NormalizedFullLink;
   readonly reason: string;
 
@@ -100,6 +100,38 @@ export function isSchemaMismatchError(
   error: unknown,
 ): error is SchemaMismatchError {
   return error instanceof SchemaMismatchError;
+}
+
+/**
+ * The RULED unresolved-input refusal (OW51, owner ruling 2026-08-21;
+ * speculation.md §2): a lazy read whose link chain dead-ended at a
+ * hop-target doc the replica cannot serve (`pendingHopDoc` on the
+ * resolved link — link-types.ts) refuses with one of these instead of
+ * handing `undefined` into the action body. A subclass of
+ * {@link SchemaMismatchError} so every existing disposal seam treats it
+ * as the same non-event: the run's output is `undefined`, no action
+ * failure is surfaced, and the reads registered so far re-trigger the
+ * run when any of them change — the arriving doc included. Thrown by
+ * the lazy branch in schema.ts; also throwable by an action body itself
+ * (the ruling's "a lift can throw a specific error" clause), taking the
+ * identical disposition through the same catches.
+ */
+export class UnresolvedInputError extends SchemaMismatchError {
+  override readonly name: string = "UnresolvedInputError";
+
+  constructor(link: NormalizedFullLink) {
+    super(
+      link,
+      "unresolved input: the link chain dead-ends at a doc this replica " +
+        "cannot serve yet",
+    );
+  }
+}
+
+export function isUnresolvedInputError(
+  error: unknown,
+): error is UnresolvedInputError {
+  return error instanceof UnresolvedInputError;
 }
 
 // `schemaAtPath` reports a property the schema does not select by handing back
@@ -395,7 +427,7 @@ const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
  * evaluated. Reading one out anyway would return a value where an eager read
  * leaves it absent.
  */
-const defaultForAbsentValue = (
+export const defaultForAbsentValue = (
   schema: JSONSchema | undefined,
 ): FabricValue | undefined =>
   isObjectOrArray(schema) ? declaredDefault(schema) : undefined;

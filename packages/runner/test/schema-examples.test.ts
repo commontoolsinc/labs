@@ -359,12 +359,15 @@ describe("Schema - Examples", () => {
 
       // Make sure the schema is correct and it is still anchored at the root
       expect(resolvedSchema(current.schema)).toEqual({ type: "string" });
+      // parseLink of a serialized sigil stamps the read-side data-derived
+      // mark (OW51's `viaLinkHop`).
       expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
         id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
         scope: "space",
         schema: externalRefTo({ type: "string" }),
+        viaLinkHop: true,
       });
 
       // .get() the currently selected cell. This should not change when
@@ -388,12 +391,14 @@ describe("Schema - Examples", () => {
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
+      // Same stamp on this serialized-sigil parse (OW51 `viaLinkHop`).
       expect(parseLink(first.getAsLink({ includeSchema: true }))).toEqual({
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
         scope: "space",
         schema: externalRefTo(omitSchema),
+        viaLinkHop: true,
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);

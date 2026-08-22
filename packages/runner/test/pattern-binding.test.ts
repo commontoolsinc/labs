@@ -596,6 +596,8 @@ describe("pattern-binding", () => {
         scope: "user",
         schema: profileSchema,
         overwrite: "redirect",
+        // parseLink of a sigil stamps the read-side data-derived mark (OW51).
+        viaLinkHop: true,
       });
     });
 

@@ -136,14 +136,13 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): five file entries (default-app, profile-embed, home-profile-reload-durability, the sqlite identity pair) and ZERO step entries — both gate step lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss); profile-embed's entry was re-scoped a third time by the §2b derivation-carriage close (the send-site LT1-vs-outbox axis fix landed the amend crossing durably; the remaining blocker is the client name-draft own-write loss, OW47's family) — every gate entry names its mechanism, the gate report, and its owed OW row; cfc-group-chat-demo is LIFTED (OW59 CLOSED 2026-08-21, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4 — three fresh-store lift runs plus a quiet-machine solo run — every run's store auditing zero service-DID authorship labels); lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) + the FIRST ON-LANE CI GATE set (2026-08-21, skip-and-land): FOUR file entries (profile-embed, home-profile-reload-durability, the sqlite identity pair) and ONE step entry (default-app's reload step, under OW45) — the gate step lifts and two file lifts landed the same day (cellset-lww's own-write race with OW47's close, the optimize pass; convergence-storm's storm step with OW52's close — its red was the harness settle racing the serving drain, not a loss; default-app's FILE skip with OW51's close — the splitDefinitions crash fixed, its create-note step runs ON, only its reload step stays under OW45; cfc-group-chat-demo with OW59's close, the OW34-family train: per-run trust snapshots — the file greens under the true ON topology 4/4, every run's store auditing zero service-DID authorship labels); profile-embed's entry was re-scoped a third time by the §2b derivation-carriage close (the send-site LT1-vs-outbox axis fix landed the amend crossing durably; the remaining blocker is the client name-draft own-write loss, OW47's family) — every FILE gate entry names its mechanism, the gate report, and its owed OW row; lunch-poll-vote (W3.1's lift) and cfc-group-chat-demo-two-browsers (fan-out B) still RUN — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // File-level entries only in the --ignore flag (step entries never drop
   // their file), in list order.
   assertEquals(out, [
     "--ignore=integration/topics-navigation.test.ts," +
-    "integration/default-app.test.ts," +
     "integration/profile-embed.test.ts," +
     "integration/home-profile-reload-durability.test.ts," +
     "integration/sqlite-db-owner-multi-runtime.test.ts," +
@@ -156,7 +155,6 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   );
   for (
     const file of [
-      "default-app",
       "profile-embed",
       "home-profile-reload-durability",
       "sqlite-db-owner-multi-runtime",
@@ -170,6 +168,15 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
       ),
     );
   }
+  // default-app's FILE skip was LIFTED (OW51 CLOSED, 2026-08-21): the
+  // splitDefinitions crash is fixed and the file runs ON. Only the reload
+  // step remains, guarded under OW45 — it appears as a SKIP-STEP, never a
+  // file-level SKIP (so default-app is absent from the --ignore list above
+  // and present as a step here).
+  assertMatch(
+    report,
+    /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
+  );
   // The convergence-storm storm-step entry was LIFTED (OW52 CLOSED,
   // 2026-08-21: the 23/40 red was the harness's served-topology settle
   // racing the serving drain — no loss at any seam; the settle now waits
@@ -249,14 +256,17 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
   if (topics === undefined) throw new Error("missing topics-navigation entry");
   assertEquals(topics.phase, "phase-7");
   assertMatch(topics.reason, /OW25/);
-  // Every first-ON-CI-gate entry: phase-7, the gate report path, an owed
-  // register row (OW31 or a freshly minted OW45–OW53), the honest
-  // no-demand-hole classification, and the flip's EMPTY-list condition.
   const gateEntries = SERVER_EXECUTION_ON_SKIPS.patterns.filter((skip) =>
     skip.file !== "integration/topics-navigation.test.ts"
   );
   assertEquals(gateEntries.length, 5);
-  for (const entry of gateEntries) {
+  // Every ORIGINAL first-ON-CI-gate FILE entry (the four that have not
+  // lifted): phase-7, the gate report path, an owed register row (OW31 or a
+  // freshly minted OW45–OW53), the honest no-demand-hole classification, and
+  // the flip's EMPTY-list condition.
+  const fileGateEntries = gateEntries.filter((skip) => skip.step === undefined);
+  assertEquals(fileGateEntries.length, 4);
+  for (const entry of fileGateEntries) {
     assertEquals(entry.phase, "phase-7");
     assertMatch(entry.reason, /First ON-lane CI gate \(2026-08-21/);
     assertMatch(entry.reason, /first-on-ci-gate\.md/);
@@ -264,12 +274,39 @@ Deno.test("main: the patterns list = topics-navigation (Phase 4's mixed-posture 
     assertMatch(entry.reason, /(NOT|NEITHER) a demand hole/i);
     assertMatch(entry.reason, /flip PR needs this list EMPTY/);
   }
-  // ZERO step entries remain — both gate step lifts landed
-  // (cellset-lww with OW47, its in-file guard removed with the entry;
-  // convergence-storm with OW52, its guard kept and resolving to NO
-  // entry). A re-listed step is a deliberate edit here.
+  // ONE step entry remains: default-app's reload step, the OW45 residual the
+  // OW51 fix unmasked (cellset-lww's OW47 and convergence-storm's OW52 step
+  // lifts landed earlier the same day). It carries the same phase, the
+  // no-demand-hole classification, the EMPTY-list condition, and its owed
+  // row (OW45) + build-report evidence — but points at the OW51 build report,
+  // not the first-ON-CI-gate report, because it is a POST-lift residual, not
+  // an original gate red.
   const steps = gateEntries.filter((skip) => skip.step !== undefined);
-  assertEquals(steps.map((skip) => skip.file), []);
+  assertEquals(steps.map((skip) => skip.file), [
+    "integration/default-app.test.ts",
+  ]);
+  const reloadStep = steps[0];
+  assertEquals(reloadStep.phase, "phase-7");
+  assertEquals(
+    reloadStep.step,
+    "should persist and reload every rapidly created notebook note",
+  );
+  assertMatch(reloadStep.reason, /OW45/);
+  assertMatch(reloadStep.reason, /OW51 fix/);
+  assertMatch(reloadStep.reason, /ow51-build-report\.md/);
+  assertMatch(reloadStep.reason, /(NOT|NEITHER) a demand hole/i);
+  assertMatch(reloadStep.reason, /flip PR needs this list EMPTY/);
+  // BOUND: the guard lookup default-app.test.ts calls resolves exactly this
+  // entry (the validator additionally checks the file names the step and
+  // calls the guard).
+  assertEquals(
+    serverExecutionOnStepSkip(
+      "patterns",
+      reloadStep.file,
+      reloadStep.step!,
+    ),
+    reloadStep,
+  );
   // Lifted files pass through the shard filter untouched (and a step
   // entry, were one re-listed, would never drop its file).
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [

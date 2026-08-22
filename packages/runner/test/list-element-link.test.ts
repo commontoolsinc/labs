@@ -60,6 +60,8 @@ describe("listElementLink", () => {
       scope: "space",
       path: ["value"],
       schema,
+      // a linkSlot is a sigil link — parseLink stamps viaLinkHop (OW51).
+      viaLinkHop: true,
     });
   });
 
@@ -69,6 +71,7 @@ describe("listElementLink", () => {
       space: "did:key:list",
       scope: "space",
       path: ["value"],
+      viaLinkHop: true,
     });
   });
 
@@ -91,6 +94,7 @@ describe("listElementLink", () => {
           scope: "space",
           path: ["value"],
           schema,
+          viaLinkHop: true,
         });
       expect(schemaAtPath.calls).toHaveLength(0);
     } finally {

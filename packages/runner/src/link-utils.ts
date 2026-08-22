@@ -124,12 +124,19 @@ export function parseLink(
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
   if (isPrimitiveCellLink(value)) {
+    // A sigil-parsed link is DATA-DERIVED (link-types.ts `viaLinkHop`):
+    // it names somebody else's doc, so a later read that dead-ends at
+    // that doc missing is an unresolved input, not a known absence.
+    const markDerived = <L extends NormalizedLink | undefined>(link: L): L =>
+      link === undefined ? link : { ...link, viaLinkHop: true as const };
     if (!base) {
-      return parseLinkPrimitive(value);
+      return markDerived(parseLinkPrimitive(value));
     } else if (isAnyCell(base)) {
-      return parseLinkPrimitive(value, base.getAsNormalizedFullLink());
+      return markDerived(
+        parseLinkPrimitive(value, base.getAsNormalizedFullLink()),
+      );
     } else if (isNormalizedLink(base)) {
-      return parseLinkPrimitive(value, base);
+      return markDerived(parseLinkPrimitive(value, base));
     }
     throw new Error(`Unexpected link base: ${base}`);
   }
