@@ -516,11 +516,13 @@ with the ruling.
   JSON (7 runs), `run-ledger.txt`, `chat-series.txt`,
   `lunch-steps.txt`, `note-series.txt`, the at-floor instrument's ON
   log + source snapshot.
-- Big artifacts (worktree, not committed): per-run dirs with
-  `test.log`, `toolshed.log`, `meta.json`, `stats-pre/post.json`,
-  `load-samples.txt`, and every run's sqlite store, under the seat
-  session's scratchpad `…/scratchpad/bench/runs/<run>/`; binaries
-  `…/scratchpad/bench/bin/toolshed-{off,on}`.
+- Big artifacts (worktree, untracked, not committed): per-run dirs
+  with `test.log`, `toolshed.log`, `meta.json`, `stats-pre/post.json`,
+  `load-samples.txt`, and every run's sqlite store, under
+  `/Users/berni/labs-worktrees/flip-dossier/.bench-artifacts/runs/<run>/`,
+  beside the driver scripts and `sha256.txt`. The binaries themselves
+  were deleted after the runs (disk); their build recipe (§2) and
+  sha256 (ledger + §2's table) reproduce them.
 - Protocol ancestry: [`../stage-c/w4-acceptance-report.md`](../stage-c/w4-acceptance-report.md)
   (and through it the re-benchmark's §2 recipe); comparator ruling:
   the plan's measurement-caveat bullet + register OW38.
