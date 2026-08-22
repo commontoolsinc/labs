@@ -1301,11 +1301,14 @@ describe("asCell with schema", () => {
 
     const rawItems = c.getRaw()?.items;
     const expectedCellLink = d.getAsNormalizedFullLink();
+    // parseLink of a stored sigil stamps the read-side data-derived mark
+    // (OW51); the source `d` link came off a Cell and does not.
+    const expectedDerived = { ...expectedCellLink, viaLinkHop: true as const };
 
     expect(rawItems?.map((item) => parseLink(item, c))).toEqual([
-      expectedCellLink,
-      expectedCellLink,
-      expectedCellLink,
+      expectedDerived,
+      expectedDerived,
+      expectedDerived,
     ]);
   });
 

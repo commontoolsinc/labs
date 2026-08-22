@@ -204,73 +204,35 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     },
     // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
     {
+      // OW51's FILE-level skip was LIFTED (2026-08-21, the optimize pass):
+      // the `splitDefinitions` undefined-read crash is FIXED (the RULED
+      // unresolved-input lift semantics — verification-coverage.md OW51
+      // CLOSED) and default-app runs ON, its "should create a note" step
+      // (the served-instantiation surface that recorded OW51) green ON
+      // 10/10 with ZERO occurrences. What remains is this ONE step, guarded
+      // under OW45 — see below.
       file: "integration/default-app.test.ts",
+      step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21, run 32447348664; " +
-        "skip-and-land — gates the FLIP, not the land): the browser " +
-        "console gate (integration/shell-utils.ts afterEach) trips on " +
-        "`TypeError: Cannot read properties of undefined (reading " +
-        "'split')` at `splitDefinitions` " +
-        "(api/patterns/notes/reference-block.ts:62) inside note.tsx lift " +
-        "callbacks. ROOT-CAUSED by the optimize-phase triage " +
-        "(2026-08-21): ARRIVAL ORDERING — a scheduler lift on a freshly " +
-        "SERVED-instantiated note runs while its input's link chain " +
-        "(through the piece's result/process doc to the " +
-        "schema-default-only pendingEdit cell) is still materializing in " +
-        "the reading runtime's replica view; the mid-chain resolution " +
-        "yields undefined and the leaf default:null is never consulted. " +
-        "NOT a demand hole (the gate's classification stands — the value " +
-        "is served and lands; the read races its arrival), and NOT " +
-        "client-only (the toolshed's serving runtime hits the same " +
-        "TypeError in its pull-settle loop); racy and load-sensitive " +
-        "(W4's loaded bench 2-for-2 at n=20; quiet-box browser runs " +
-        "mostly green); OFF green by construction (instantiate-and-read " +
-        "in one runtime). The fix fork is FLAGGED for the owner " +
-        "(defer-on-unresolved-chain in the runner vs lifts tolerating " +
-        "undefined during arrival — both change a stated/relied-upon " +
-        "semantic). Evidence: docs/history/plans/server-execution-v2/" +
-        "optimize/ow51-undefined-read-report.md (and " +
-        "stage-c/first-on-ci-gate.md). Lifts when verification-" +
-        "coverage.md OW51 closes and the file greens ON; the flip PR " +
-        "needs this list EMPTY.",
-    },
-    {
-      file: "integration/cfc-group-chat-demo.test.ts",
-      phase: "phase-7",
-      reason: "First ON-lane CI gate (2026-08-21; skip-and-land — gates " +
-        "the FLIP, not the land): TWO write-path defects, one per failure " +
-        "point, NEITHER a demand hole (the served derivation chain was " +
-        "clean end-to-end: 33–41 derived commits, healthy demand " +
-        "counters). CI shape (Alice's authorship check): served " +
-        "events-down rows carry the SERVICE identity — authored-by/" +
-        "represents-principal name the service signer, not Alice — so CFC " +
-        "authorship verification stays 'unverified' forever; this IS the " +
-        "owed OW31/§2b acting-identity carriage build (post-merge, " +
-        "pre-flip), now with a CI surface as its lift evidence — OW31's " +
-        "build LANDED 2026-08-21, but the authorship labels come from " +
-        "the runtime-level CFC trust snapshot (storageManager.as), not " +
-        "the memory-plane carriage that build landed, so this shape does " +
-        "NOT lift on it alone (the flagged CFC-attribution residual in " +
-        "OW31's register row; OW34's family). Local " +
-        "shape (Bob's send click): Bob's messageDraft $value binding " +
-        "write into the serve-owned user-scope instance doc NEVER reaches " +
-        "the store (0/4 runs incl. a 300 s probe; his session committed " +
-        "12 OTHER writes meanwhile), so the served sendDisabled correctly " +
-        "never flips — the client own-write durability seam, " +
-        "verification-coverage.md OW47. OW47 is CLOSED (2026-08-21, " +
-        "optimize pass): the mechanism was the speculation.md §6 export " +
-        "refusal firing on a blind write's structural parent read that " +
-        "named a standing handler-echo layer; fixed in storage/v2.ts " +
-        "buildReads (excludeSpeculativeLayers) with unit + cellset-lww " +
-        "lift evidence — see optimize/ow47-client-durability-report.md. " +
-        "Mechanism + store/log evidence: docs/history/plans/" +
-        "server-execution-v2/stage-c/on-render-stall-rootcause.md §2 (and " +
-        "first-on-ci-gate.md). OW31's build and OW47 are both DONE " +
-        "(2026-08-21); what remains is the FLAG-5 CFC-attribution seam " +
-        "(the trust snapshot supplying the SERVICE identity to served " +
-        "authorship labels — OW34's family, flagged in OW31's register " +
-        "row). Lifts when that seam closes and the file greens ON; the " +
-        "flip PR needs this list EMPTY.",
+      reason: "The OW51 fix (RULED unresolved-input lift semantics, " +
+        "2026-08-21) LIFTED this file's FILE-level skip — the " +
+        "`splitDefinitions` crash is gone (ON 10/10, zero occurrences) and " +
+        "the 'should create a note' step runs ON. This REMAINING step " +
+        "stays skipped under OW45 (the reload-durability class): removing " +
+        "the OW51 crash UNMASKED an OW45-surface flake the crash had been " +
+        "hiding — after a rapid-create-and-RELOAD the reloaded notebook's " +
+        "`noteCount` derived value can read `undefined` past the step's " +
+        "`waitForCondition` (1/10 local ON: `assertEquals(summary." +
+        "noteCount, 7)` saw undefined; the OW51 fix's ruled disposition " +
+        "makes the unresolved reload read cleanly undefined + retrigger, " +
+        "and a slow runner reads the interim before the heal). Same " +
+        "reload-durability family as home-profile-reload-durability " +
+        "(verification-coverage.md OW45, seats S-B/S-C — client barriers " +
+        "and heal-on-read); an event-driven wait on `noteCount` is the " +
+        "test-side close, OW45's territory not OW51's. NOT a demand hole; " +
+        "OFF green. Evidence: docs/history/plans/server-execution-v2/" +
+        "optimize/ow51-build-report.md §5. Lifts when OW45 closes and the " +
+        "step greens ON; the flip PR needs this list EMPTY.",
     },
     {
       file: "integration/home-profile-reload-durability.test.ts",

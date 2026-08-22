@@ -343,6 +343,10 @@ describe("runPattern", () => {
       ...resultCellLink,
       schema: resultSchema,
       overwrite: "redirect",
+      // getMetaLink parses the stored sigil, which carries the read-side
+      // data-derived mark (OW51 `viaLinkHop`); resultCellLink came off a
+      // Cell and does not, so add it to the expected shape.
+      viaLinkHop: true,
     });
     // getDerivedInternalCell doesn't generate a redirect link,
     // but that's what we want to match, so add that property.

@@ -780,3 +780,29 @@ participant's clause; the multi-party conjunction dissolves exactly when all
 are present — §5.3.3 stated operationally). Registry row + a note in §5.3.4
 pointing at the reserved shape. Authoring sketch:
 `cfc-exchange-rules-authoring-extensions.md` §4.
+
+## From the served-execution attribution build (OW34-family, RULED 2026-08-21)
+
+Design of record:
+`docs/history/plans/server-execution-v2/optimize/ow34-attribution-design.md`.
+The serving-side binding sentence lives in
+`docs/specs/server-side-execution/serving-loop.md` §3c; the coverage row is
+verification-coverage.md OW59.
+
+**SC-38 [normative] The current-principal family's served-execution reading
+— the audit-3.5 principal-resolution chain (§6/§8.15).** `open`. The
+`__ctCurrentPrincipal` placeholder (authored-by / represents-principal /
+`ownerPrincipal` subjects) resolves at commit-prep against the transaction's
+trust snapshot, and under served execution that snapshot is PER-RUN: it
+carries the run's acting principal — the event's server-stamped actor, the
+demanded instance's principal, or the delegated carriage's actor — never the
+serving runtime's ambient service identity. The resolved labels are
+indistinguishable from the same run's client-side mint (no served-provenance
+mark; the memory plane already records the delegation per commit via
+`acting_principal` + `capabilityRef`). A run with no acting principal keeps
+the ambient service snapshot. Literal-DID current-principal subjects stay
+refused at authoring; the only path to a user-named label remains a run
+actually carrying that user's acting identity. Proposed edit: when the
+audit-3.5 chain is written into §6/§8.15, state the snapshot's per-run
+binding and the acting-principal resolution as the normative reading for
+serving hosts, citing serving-loop.md §3c.

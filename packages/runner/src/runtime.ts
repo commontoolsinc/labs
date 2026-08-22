@@ -810,6 +810,12 @@ export class Runtime {
   /** Optional pattern statement-coverage collector; see RuntimeOptions. */
   readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
+  // The runtime's trust revision — `<runtime id>` with the trust-config
+  // digest folded in when one is configured. The ONE composition site for
+  // every snapshot this runtime mints (the default provider and
+  // trustSnapshotForPrincipal), so a trust-config change invalidates
+  // per-run served snapshots exactly as it does ambient client ones.
+  readonly #trustRevision: string;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present with built-in defaults). */
   readonly experimental: ExperimentalOptions;
@@ -1165,6 +1171,28 @@ export class Runtime {
   }
 
   constructor(options: RuntimeOptions) {
+    // Validate-then-apply: option combinations are refused BEFORE any
+    // process-global write (the ambient experimental-flag propagation
+    // below, the server-execution enabler), so a refused construction
+    // leaves no trace in the process — the try/catch further down rolls
+    // back only the enabler, and everything above it must not need
+    // rolling back. A serving runtime uses the DEFAULT trust-snapshot
+    // provider — the run stamper attaches per-run snapshots via
+    // trustSnapshotForPrincipal (serving-loop.md §3c), whose revision is
+    // the runtime's own; a custom provider would be silently bypassed
+    // for every acting run and would compose a revision the stamper
+    // does not know. Fail loud instead.
+    if (
+      options.servingPosture === true &&
+      options.trustSnapshotProvider !== undefined
+    ) {
+      throw new Error(
+        "A serving runtime cannot take a custom trustSnapshotProvider: " +
+          "the run stamper attaches per-run trust snapshots composed on " +
+          "the runtime's own trust revision (serving-loop.md §3c), which " +
+          "would silently bypass the custom provider for acting runs.",
+      );
+    }
     this.experimental = {
       modernCellRep: undefined,
       commitPreconditions: undefined,
@@ -1317,14 +1345,11 @@ export class Runtime {
       // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
       this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
       const actingPrincipal = options.storageManager.as.did() as DID;
-      const trustRevision = this.cfcTrustConfig === undefined
+      this.#trustRevision = this.cfcTrustConfig === undefined
         ? this.id
         : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
-      this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
-        id: `principal:${actingPrincipal}`,
-        actingPrincipal,
-        revision: trustRevision,
-      }));
+      this.trustSnapshotProvider = options.trustSnapshotProvider ??
+        (() => this.trustSnapshotForPrincipal(actingPrincipal));
       this.userIdentityDID = options.storageManager.as.did() as DID;
       this.moduleRegistry = new ModuleRegistry(this);
       this.patternManager = new PatternManager(this);
@@ -2073,6 +2098,32 @@ export class Runtime {
     pieceRootIds: readonly string[],
   ): readonly ScopeKeyIdentity[] | undefined {
     return this.#serverRunDemanderResolver?.(pieceRootIds);
+  }
+
+  /**
+   * A trust snapshot for one acting principal (serving-loop.md §3c: a
+   * served run's CFC trust snapshot carries the run's ACTING principal,
+   * never the serving runtime's ambient identity). The SpaceServer's run
+   * stamper attaches these per transaction via `setCfcTrustSnapshot`, so
+   * the current-principal label mints, the mid-run grant writes, and the
+   * concept-floor evaluation of a served run all resolve against the
+   * principal the run acts as. `revision` is the runtime's own trust
+   * revision — the same composition the default provider uses — so a
+   * trust-config change invalidates per-run prepared digests exactly as
+   * it does ambient ones. On a runtime constructed with a CUSTOM
+   * `trustSnapshotProvider` this still composes the RUNTIME's revision,
+   * not the provider's. The DEFAULT provider routes every ordinary
+   * edit() transaction through this method; the run stamper is the
+   * ADDITIONAL serving-path caller, and a serving runtime refuses a
+   * custom provider at construction, so the two composition paths can
+   * never disagree on a serving runtime.
+   */
+  trustSnapshotForPrincipal(principal: string): TrustSnapshot {
+    return {
+      id: `principal:${principal}`,
+      actingPrincipal: principal,
+      revision: this.#trustRevision,
+    };
   }
 
   /**

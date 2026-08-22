@@ -100,6 +100,45 @@ export type NormalizedLink = {
    * silently lift the caps that boundary is supposed to enforce.
    */
   scopeCaps?: readonly ScopeCapAtDepth[];
+  /**
+   * Link resolution FOLLOWED at least one hop and then dead-ended at a
+   * doc the replica cannot serve (the sigil probe reported the DOC
+   * itself missing — not merely an absent path in a present doc). The
+   * chain may well continue inside that doc once it arrives, so nothing
+   * about the value at this link is knowable yet: under the lazy
+   * (action-body) read path this is an UNRESOLVED INPUT and the read
+   * refuses instead of handing `undefined` into the body (the RULED
+   * OW51 semantics, 2026-08-21 — schema.ts's lazy branch throws
+   * `UnresolvedInputError`). A dead-end at the handle's OWN root doc
+   * does not set this: a fresh cell's doc does not exist until its
+   * first write, and `get() ?? fallback` on it stays `undefined` as it
+   * always has. Nor does a dead-end at a USER- or SESSION-scoped row:
+   * a principal's instance row exists only once that principal writes
+   * it, so its absence is knowledge (the scoped first-write idiom) —
+   * only a missing SPACE-scoped doc marks the result pending. One
+   * window sits outside that idiom and outside the refusal's
+   * protection, matching main's behavior: a scoped row already
+   * written elsewhere (another device; a cold or lagging serving
+   * replica) is transit, not knowledge, and its mid-arrival read
+   * takes main's interim-undefined-then-heal. No shipped pattern
+   * routes link chains through user-scoped docs (the #6179 review's
+   * population audit). Read-side
+   * only, like `scopeCaps`: never serialized, never part of link
+   * identity; consumers that copy links by spread carry it inertly.
+   */
+  pendingHopDoc?: true;
+  /**
+   * This link is DATA-DERIVED: parsed from a stored sigil link, or
+   * produced by a resolution that followed at least one hop. A handle
+   * minted from such a link points at somebody else's doc — the doc's
+   * absence may be transit (not yet arrived), unlike a locally-minted
+   * cell's own doc, whose absence before its first write is knowledge
+   * (the `get() ?? fallback` idiom). Consulted only by link resolution
+   * when a walk dead-ends at a missing doc (see `pendingHopDoc`).
+   * Read-side only, like `scopeCaps`: never serialized, never part of
+   * link identity.
+   */
+  viaLinkHop?: true;
 };
 
 /**

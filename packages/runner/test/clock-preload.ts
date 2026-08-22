@@ -119,5 +119,11 @@ installFakeClock({
     // virtual timers diverge from the bucket's time source (Date.now) —
     // the rate gate would regenerate its refill sleep unboundedly.
     "executor-outbox-budget",
+    // The OW34-family trust-attribution suite drives a live
+    // ExecutorHost (served handler runs minting CFC labels) under the
+    // same wall-clock policies — the renew interval and flush deadline;
+    // auto-advance turns the renew cadence into a runaway (the guard
+    // names SpaceServer.activate's timers).
+    "executor-trust-attribution",
   ],
 });

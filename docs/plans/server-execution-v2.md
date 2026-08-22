@@ -36,8 +36,40 @@ with the survival test as the gate on anything that feels needed.
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
-it in the PR that moves the state. State as of 2026-08-21:
-**LAND-OFF IN PROGRESS — the integration PR is OPEN:
+it in the PR that moves the state.
+
+**State as of 2026-08-21 (evening): OPTIMIZE ON MAIN.** The train is
+LANDED dark (#6096 merged as `71e99fc33`; OW31's ruled identity posture
+followed as #6156 `9d989c0c1`); the phase is the register's OW rows
+(verification-coverage.md §3) plus the flip gates below. Today's delta:
+
+- **The two parked rulings are RULED.** OW51 = **option 3** (this PR,
+  #6179): the refusal's re-trigger is independent of the root-level
+  arrival re-arm; verification found the re-fire contract already held
+  and the deadlock was the refusal mis-firing on SCOPED-row absence —
+  the scoped carve-out + the mutation-verified re-fire pin are the
+  build (ow51-build-report.md §8). The §8.5b surfaced residual
+  (schema-examples red on both bases) is root-caused and CLOSED
+  (§8.5c): the consumer was the test's own missed assertion-churn
+  site — no product-code consumer; the row is CLOSED and #6179 holds
+  only for the coordinator's delta review. OW34 = all seven §10
+  recommendations ACCEPTED; its implementation train launched
+  separately.
+- **Four PRs MERGED tonight** (latest `572b07cbc`): **#6187** — the
+  §2b send-axis fix (a served run's send to a foreign stream crosses
+  via the outbox; profile-embed's gate 4/10 → 7/10, skip re-scoped to
+  the name-draft OW47-family residual); **#6186** — a served event
+  refused pre-storage by CFC seals an error consequence (OW54; OW58
+  minted, OW57's closure withdrawn); **#6189** — chained test events
+  gated on arrived consequences (settle stimulus-effect text waits);
+  **#6190** — a served run's CFC trust snapshot carries the acting
+  principal (OW34-family; the group-chat skip lifted under OW59).
+  This PR (#6179) carries the default-app lift.
+- **Trains in flight:** verifier-read-basis; warm-request; the
+  name-draft triage; arrival-wait hardening.
+
+Prior state (kept for the trail — the paragraphs below describe the
+land itself): **LAND-OFF — the integration PR was
 [#6096](https://github.com/commontoolsinc/labs/pull/6096)
 (`claude/server-exec-v2-land-off` = the train tip `45cca4167` + the
 merge of `origin/main` `bbcc7a348` + the reconciliation + the catch-up
