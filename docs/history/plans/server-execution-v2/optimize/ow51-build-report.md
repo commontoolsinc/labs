@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-21
 archived: 2026-08-21
-reason: "OW51 build: the RULED option (a) semantics BUILT and PINNED; §7's alias class closed (memo variant); §8's RULED option-3 build closed the demand-closure class (scoped absence is knowledge; re-fire contract pinned, mutation-verified). ONE SURFACED residual (§8.5b): an unidentified EAGER consumer observes the viaLinkHop carrier — schema-examples' VDOM alias-sink shape red on BOTH bases (§7's flake exclusion was a mis-verification; §3's observability audit falsified twice) — carrier disposition owed. Do not merge #6179 until ruled."
+reason: "OW51 build: the RULED option (a) semantics BUILT and PINNED; §7's alias class closed (memo variant); §8's RULED option-3 build closed the demand-closure class (scoped absence is knowledge; re-fire contract pinned, mutation-verified). The §8.5b surfaced residual (schema-examples red on both bases; §7's flake exclusion was a mis-verification) is root-caused and CLOSED in §8.5c: the consumer was the test's own missed assertion-churn site — no product-code consumer; the §3 audit stands. #6179 holds for the coordinator's delta review."
 ---
 
 # OW51 build — the ruled unresolved-input lift semantics
@@ -10,12 +10,13 @@ reason: "OW51 build: the RULED option (a) semantics BUILT and PINNED; §7's alia
 > **STATUS (2026-08-21, second ruling): §7's surfaced fork is RULED —
 > option 3 — and BUILT (§8). `P-arrival-closure` greens; the ruled
 > re-fire contract carries a new mutation-verified pin; two adjacent
-> latent findings are FLAGGED, not filled (§8.5). ONE SURFACED
-> residual (§8.5b, same day): an unidentified EAGER consumer observes
-> the `viaLinkHop` carrier — `schema-examples`' VDOM alias-sink shape
-> is red on BOTH bases, §7's flake exclusion was a mis-verification —
-> carrier disposition owed; do not merge until ruled. Ruling,
-> red-first pins, spec text all preserved.**
+> latent findings are FLAGGED, not filled (§8.5). The §8.5b surfaced
+> residual (`schema-examples` red on both bases) is root-caused and
+> CLOSED in §8.5c: the consumer was the test's own missed
+> assertion-churn site, no product-code consumer exists, and the §3
+> audit stands — §7's flake exclusion remains corrected as a
+> mis-verification. Ruling, red-first pins, spec text all
+> preserved.**
 
 ## 0. The ruling (2026-08-21)
 
@@ -658,6 +659,64 @@ options, for the ruling:
 
 Until ruled, #6179 carries this red (CI: the runner shard holding
 schema-examples) and MUST NOT MERGE.
+
+### 8.5c The consumer, NAMED — §8.5b's mechanism attribution corrected; the residual CLOSED
+
+The coordinator directed find-the-consumer-first (option 2 as a
+prerequisite, not a disposition). The differential trace ran the
+failing test stamped vs baseless-arm-neutralized with instrumentation
+at five layers (resolution exits, sink runs, scheduler invalidation
+causes, storage change before/after, route destroy) and the chain is
+now fully named — and it OVERTURNS §8.5b's attribution:
+
+**The consumer is the test's own assertions.** `schema-examples.test.ts`
+carries TWO deep-equals over a BASELESS `parseLink` output (the
+aliases pin, lines 362/391) — exactly the §3-documented
+assertion-churn class. The churn commit updated six files
+(link-utils, runner, pattern-binding, cell-as-cell, list-element-link)
+and MISSED this one. The first assertion throws
+(`Actual` carries `viaLinkHop: true`, `Expected` does not — the
+watched red names the consumer in its own diff), and everything
+§8.5b read as a product regression is teardown fallout of that early
+throw: the suite's `afterEach` runs `runtime.dispose()` while the
+test's DELIBERATELY-unawaited seed commit and its sinks are still in
+flight → the commit dies with `TransactionError: memory replica
+closed` (route destroy stack = afterEach → dispose →
+EmulatedStorageManager.close), the optimistic docs RETRACT
+(change stream: three whole-doc present→UNDEF events), and the leaked
+sink actions re-run against the disposed storage, read the docs as
+missing, and crash with the `TypeError` that CI surfaced as the
+headline failure.
+
+**Corrections to §8.5b, stated plainly:**
+
+- There is NO product-code consumer of the carrier. §3's
+  product-code-observability audit STANDS (the §7 memo term remains
+  the one product-side observer, already fixed and pinned).
+- "An eager read of a PRESENT doc regressing to undefined" was the
+  disposed-runtime window, not a carrier effect.
+- The coordinator's classification question: the observation is
+  deep-equality of link objects IN A TEST ASSERTION — not the
+  memo-variant key, not a product equality/identity leak, not a
+  product field read.
+- §8.5b's inference "the audit has been falsified twice" is therefore
+  WITHDRAWN; the §6-candidate-2 re-carrier trigger ("equality/identity
+  leaks broadly, or a second consumer") is NOT met.
+
+**The fix (the coordinator's arm (a), maximally clean):** the same
+churn convention as the six sibling files — the two expected objects
+gain `viaLinkHop: true` with the OW51 comment (`8777de478`).
+Red-first: the red was watched VIA the named consumer (the assertion
+diff), green after — ×3 stability runs, then the full pin set
+(9 files incl. schema-examples), the executor sweep per-file, the
+runner batch, and the default-app ON gate re-check recorded in the PR
+body. The gate note: the fix is TEST-ONLY — `git diff` over
+`packages/*/src` between the 10/10 gate's binary head and this head
+is EMPTY — so the 10/10 stands for this runtime; fresh compliance
+runs ride the same binary.
+
+The §8.5b register residual is CLOSED with this; the PR keeps its
+[HOLD] title until the coordinator's delta review clears it.
 
 ### 8.6 Suites at the built head
 

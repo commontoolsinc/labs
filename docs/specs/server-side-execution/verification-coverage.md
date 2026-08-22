@@ -5440,15 +5440,18 @@ supply; OW29/OW32/OW34 closed):
     budget, and whether the browser should run raw:wish at all under
     ON given the served result is already durable.
   - **OW51 — the default-app `splitDefinitions` undefined-read (the
-    ON read-semantics seam): the ruled semantics + option-3 build are
-    DONE (2026-08-21, second ruling), with ONE SURFACED carrier
-    residual holding the row OPEN — an unidentified EAGER consumer
-    observes the `viaLinkHop` carrier: `schema-examples`' VDOM
-    alias-sink shape is red with the branch on BOTH bases (main green
-    both; §7's flake exclusion was a mis-verification; trigger
-    isolated to `parseLink`'s baseless-arm stamp; build report §8.5b
-    carries the bisect table and the three disposition options —
-    an owner/coordinator call). Do not merge #6179 until ruled.** The refusal-scope fork the first build surfaced
+    ON read-semantics seam): CLOSED (2026-08-21, second ruling —
+    option 3 built; the §8.5b surfaced residual root-caused and
+    closed same day, §8.5c).** The residual's consumer was NAMED
+    under the coordinator's find-first directive: `schema-examples`'
+    two baseless-`parseLink` deep-equals — the §3 assertion-churn
+    class the churn commit missed in that one file; the visible
+    crash cascade was afterEach-teardown fallout over the test's
+    unawaited seed commit. No product-code consumer of the carrier
+    exists; the §3 observability audit stands; §7's flake exclusion
+    stays corrected as a mis-verification. Fixed by the same churn
+    convention (`8777de478`), red watched via the named assertion
+    diff.** The refusal-scope fork the first build surfaced
     (build report §6–§7) was RULED by the owner (option 3: the
     refusal's re-trigger is independent of the root-level arrival
     re-arm — "client-side doesn't react to its own writes, server

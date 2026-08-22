@@ -48,11 +48,12 @@ followed as #6156 `9d989c0c1`); the phase is the register's OW rows
   arrival re-arm; verification found the re-fire contract already held
   and the deadlock was the refusal mis-firing on SCOPED-row absence —
   the scoped carve-out + the mutation-verified re-fire pin are the
-  build (ow51-build-report.md §8). The row stays OPEN on one SURFACED
-  residual (§8.5b): an unidentified eager consumer observes the
-  `viaLinkHop` carrier (schema-examples' alias-sink shape red on both
-  bases) — carrier disposition owed, #6179 holds. OW34 = all seven
-  §10 recommendations ACCEPTED; its implementation train launched
+  build (ow51-build-report.md §8). The §8.5b surfaced residual
+  (schema-examples red on both bases) is root-caused and CLOSED
+  (§8.5c): the consumer was the test's own missed assertion-churn
+  site — no product-code consumer; the row is CLOSED and #6179 holds
+  only for the coordinator's delta review. OW34 = all seven §10
+  recommendations ACCEPTED; its implementation train launched
   separately.
 - **#6187 MERGED** (`89deb7505`) — the §2b send-axis fix: a served
   run's send to a foreign stream crosses via the outbox (the LT1 axis
