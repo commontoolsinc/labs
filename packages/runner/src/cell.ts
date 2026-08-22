@@ -1729,7 +1729,39 @@ export class CellImpl<T extends FabricValue>
           // is refused at the seal — the early-emit guard, fail-closed.
           // Handler runs (explicit `firedAt` actor) are unchanged.
           const acting = actingForEmission(context, this.tx);
-          if (resolvedToValueLink.space === this.space) {
+          // The LT1-vs-outbox axis is the WAVE'S HOME SPACE (LT1: a
+          // SAME-SPACE server-emitted append rides the wave's own
+          // derived commit; events.md §2's cross-space arm is the
+          // outbox). The sending CELL's space is not that axis: a
+          // foreign stream reached through a direct foreign cell handle
+          // (a wish-result export — profile-embed's `setName`) has
+          // cell.space === resolved.space === the FOREIGN space, and
+          // the same-space arm's raw entries write would open a second
+          // space's writer inside the run's home-anchored transaction —
+          // the one-tx-one-space isolation error (protocol.md §2b) that
+          // kills the handler run and loses the emission. Fail-closed:
+          // an OUTBOX-CAPABLE destination that names no home space
+          // cannot route this decision, and guessing from the cell's
+          // space is exactly the mis-axis this branch exists to avoid —
+          // refuse loudly. A destination with no outbox at all (bare
+          // seal-only test doubles) keeps the cell-space proxy: those
+          // harnesses are same-space by construction, and their
+          // cross-space arm below refuses on the missing outbox anyway.
+          const destination = this.runtime.installedSealDestination;
+          if (
+            destination?.stageOutboundAppend !== undefined &&
+            destination.space === undefined
+          ) {
+            throw new Error(
+              "server-side emission refused: the installed seal " +
+                "destination stages outbound appends but names no home " +
+                "space, so the LT1-vs-outbox routing axis (the WAVE's " +
+                "home space — events.md §2; protocol.md §2b) cannot be " +
+                "resolved. Expose `space` on the destination.",
+            );
+          }
+          const servingSpace = destination?.space ?? this.space;
+          if (resolvedToValueLink.space === servingSpace) {
             // LT1 same-space carriage: the entry rides the current tx.
             // The engine stamps its stream `seq` at the wave commit
             // (the batch declares it); `firedAt` is the inherited
@@ -1876,14 +1908,6 @@ export class CellImpl<T extends FabricValue>
                 }
                 : {}),
             };
-            const destination = this.runtime.installedSealDestination as
-              | {
-                stageOutboundAppend?: (
-                  tx: IExtendedStorageTransaction,
-                  row: OutboxAppendRow,
-                ) => void;
-              }
-              | undefined;
             if (destination?.stageOutboundAppend === undefined) {
               throw new Error(
                 "cross-space event emission requires the serving loop's " +

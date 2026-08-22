@@ -5379,9 +5379,22 @@ supply; OW29/OW32/OW34 closed):
     blocker (the resolved-profile amend steps intermittently red 6/10
     with the amended values durably absent from every store; the
     OW45+OW31-family cross-space derivation signatures in every run —
-    triage in optimize/ruling5-ow49-report.md §3). Closure and the
-    successor's row-mapping are the coordinator's; the skip entry now
-    names the amend-convergence blocker.
+    triage in optimize/ruling5-ow49-report.md §3). That
+    amend-convergence blocker was ROOT-CAUSED AND CLOSED 2026-08-21
+    by the §2b derivation-carriage scoping pass
+    (optimize/2b-derivation-carriage-scope.md): ONE send-site defect —
+    cell.ts's serving branch picked the LT1-vs-outbox arm by the
+    sending CELL's space instead of the WAVE's home space, so the
+    served amend handlers' sends into the profile's exported streams
+    (direct foreign cell handles) raw-wrote the foreign space and
+    died on the one-tx-one-space isolation error — fixed red-first
+    (executor-cross-space.test.ts's outbox-arm pin); the amends now
+    cross via the outbox with the carried actor and are durably
+    present in both stores. The ten-run gate at that fix head
+    separated a REMAINING, different-family red (the client
+    name-draft own-write loss, OW47's family — the skip entry names
+    it), so profile-embed's green-ON condition is still open. Closure
+    and the successor's row-mapping are the coordinator's.
   - **OW50 — CLOSED 2026-08-21 (built; optimize-on-main served-wish
     seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5500,37 +5513,73 @@ supply; OW29/OW32/OW34 closed):
     skips.
   - **OW54 — a served EVENT whose commit-prep crashes seals NO
     consequence (adversarial review of PR #6157, F1 —
-    CONFIRMED-by-trace; minted 2026-08-21).** Pre-#6157, a prep crash
-    on the EVENT path threw out of `prepareTxForCommit` inside the
-    event finalize, was caught by the `.catch((error) =>
-    finalize(error))` chain, and took the handler-error arm —
-    `served.onFailure({kind: "error"})` sealed an ERROR consequence
-    and the durable LT1 entry was consequenced. With OW50's totality
-    (`prepareCfc` records the crash as a modeled pre-storage
-    rejection), the same crash now classifies on the event path as a
-    give-up "non-retryable" disposition: `runFinalCommitCallback()` +
-    `reportDroppedCfcRejectedWrite`, but NO `served.onFailure` and
-    nothing seals a consequence (the pre-storage rejection returns
-    before the `#sealDestination.seal` branch). The drain-in-flight
-    guard releases in the "queued" state, the durable entry stays
-    unconsequenced, and the post-wave re-arm re-drains it — "the wave
-    IS the retry cadence" — so a DETERMINISTIC prep crash (the OW49
-    poison-envelope class) is a forever re-drain, and under #6158's
-    settle wait the unretired client intent pays the full bounded
-    quiescence timeout per settle round (bounded and loud by design,
-    but every round). Scope honesty: the give-up-without-consequence
-    gap PRE-EXISTS for modeled CFC refusals; what changed is that the
-    CRASH class — previously the one class that DID seal an error
-    consequence — joins it. Exposure today: none live (the poisoned
-    class is reactive wish docs; profile-embed is skipped ON). Owed:
-    seal an error consequence for a served event whose commit is
-    refused pre-storage with a deterministic CFC reason (mirror the
-    terminal arm's honesty), or route CFC pre-storage rejections on
-    served events through `served.onFailure({kind: "error"})` — the
-    events seal path is (α)-critical, so the fix belongs to a
-    deliberate pass, not a side-swipe. Trigger: the OW49 fix arc or
-    the `integration/profile-embed.test.ts` ON-skip lift, whichever
-    comes first.
+    CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
+    OW54 follow-on fix — the give-up arm's discriminated
+    `served.onFailure`).** The gap as confirmed: a deterministic CFC
+    pre-storage rejection of a served event's commit (the
+    "CFC enforcement rejected commit" class,
+    `rejectCommitBeforeStorage` — including a prep CRASH, which OW50's
+    totality records as a modeled rejection of this class) classified
+    give-up "non-retryable", and the give-up arm settled the commit
+    callback and reported the dropped write but sealed NO consequence:
+    the durable entry stayed unconsequenced and re-drained every wave
+    ("the wave IS the retry cadence"), and under #6158's settle wait
+    the unretired client intent paid the full bounded quiescence
+    timeout per settle round. Pre-OW50 the same crash THREW from
+    `prepareTxForCommit` and took the ERROR arm, which seals "the
+    error IS the consequence". The fix restores that contract on the
+    modeled path: the give-up arm, when the event is served AND the
+    error is the deterministic CFC pre-storage rejection (the SAME
+    message-prefix discriminator `reportDroppedCfcRejectedWrite` keys
+    on — `isCfcRejectedCommitError`, scheduler/events.ts), calls
+    `served.onFailure({kind: "error", message})` before settling, and
+    the error consequence seals through the drain's existing notice
+    machinery (events.md §5 now states the class). Lift evidence: the
+    red-first pin in `executor-events-down.test.ts` ("the give-up
+    arm's CFC discriminator (OW54)") — RED on the unmodified base
+    (the served copy took the give-up disposition twice for one
+    eventId across two waves, no consequence, and the wait for the
+    seal timed out), GREEN with the fix (exactly ONE completed run,
+    ONE consequence commit naming the event, ONE dropped-write
+    report, the entry's `error` carries the refusal, the watermark
+    advances, and a second poisoned fire seals its own consequence
+    behind it) — plus the scope-boundary pin ("a NON-CFC give-up on a
+    served event keeps the re-drain cadence": a handler `tx.abort()`
+    re-drains unconsequenced with no frontier advance, green on base
+    AND after, so the non-CFC cadence is byte-identical). #6158
+    interaction, recorded: with the consequence sealed, the client
+    intent retires through the normal arrived-terminal-consequence
+    path, so the unretired-intent settle-timeout class for this shape
+    disappears. RULING-5 interaction, resolved: the narrowing had
+    shrunk the exposed class to genuinely ambiguous envelopes; the
+    corner is now closed for the whole pre-storage-rejection message
+    class (genuine ambiguity, unreadable stored envelopes, prepared
+    digest drift). Sub-case honesty (the #6186 review's MINOR-2,
+    recorded as-built): the message class also covers OW50's modeled
+    prep-crash recordings ("commit-prep crashed: …"), so a prep crash
+    caused by TRANSIENT local state seals a terminal error consequence
+    where a re-drain might have succeeded — whether transient
+    prep-crashes deserve the re-drain instead is on the owner's
+    one-liner list; the behavior here is as-built, not ruled. Scope
+    honesty, deliberate and pinned: non-CFC
+    give-ups (transport, authorization, a handler abort, opt-out)
+    still seal nothing and re-drain on the wave cadence; and a
+    storage-time commit-rule refusal (`RowLabelCommitError`) of a
+    served event also seals no consequence today — verified (#6186
+    Cubic round): it never reaches the scheduler's terminal
+    disposition on a served copy (the handler tx sealed and resolved
+    at seal-accept), it refuses the WAVE's store commit instead, and
+    the refused wave reports the event's contributions as requeued
+    (`aborted: "rejected"`, executor/wave.ts) — guard released,
+    unconsequenced entry re-drained, the same durable fate through
+    the wave verdict channel. An adjacent residual of the same shape,
+    FLAGGED (not silently included) in
+    docs/history/plans/server-execution-v2/optimize/
+    ow54-build-report.md. The sealed consequence itself rides the
+    consequence-notice machinery, whose resolved-error guard wedge is
+    the OW58 row below (pre-existing, not introduced by the OW54 fix):
+    a notice whose commit RESOLVES `{error}` pre-destination strands
+    the entry guarded-unconsequenced until park.
   - **OW55 — the serving runtimes' pattern-fetch trust surface
     (adversarial review of PR #6157, F7; the OW48 investigation's
     security-adjacent residual; minted 2026-08-21).** Under ON,
@@ -5642,26 +5691,67 @@ supply; OW29/OW32/OW34 closed):
     pin's PR is not blamed when the lane first flakes; renumbered
     OW56 → OW57 pre-merge for the parallel-mint collision with the
     durability train's #6173, which keeps OW56 for server-owned
-    program compilation).** The
+    program compilation; tracked as CT-2060).** The
     "(α3) + a same-eventId SIBLING tx" step's held-wave construction
     (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
     probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
-    wave is still HELD (its "ping" entry not yet durable). The gate
-    engages at the settle's `inputSynced` barrier, and the
-    when-predicate flips only once a seal is visible through the
-    sealed overlay — so a commit whose settle pass checked the gate
-    BEFORE the predicate flipped can complete in that same cycle,
-    landing the ping before the probe: measured 2/15 full-suite reds
-    at #6170's head vs 0/10 on main's version (the pin inserted
-    ahead plausibly shifts timing into the window;
-    fresh-server-per-step rules out state coupling). An event-driven
-    closure is NOT cheap: an unconditional gate starves the drain
-    the step needs (the step's own comment), and holding reliably
-    means restructuring the construction to re-arm on a lost race.
-    Owed: the hardened construction (or an owner call to
-    accept-and-retry the step); until then a red of THIS step with
-    the ping already durable at the probe is this race, not a
-    product regression. No lift trigger (test-harness item).
+    wave is still HELD (its "ping" entry not yet durable). As
+    originally filed, the when-predicate flipped only once a seal was
+    visible through the sealed overlay, so a commit whose settle pass
+    checked the gate BEFORE the flip could complete in that same
+    cycle, landing the ping before the probe: measured 2/15
+    full-suite reds at #6170's head vs 0/10 on main's version (a pin
+    inserted ahead plausibly shifts timing into the window;
+    fresh-server-per-step rules out state coupling). #6184
+    (`c31397906`) landed a HARDENING: the gate now ARMS from the
+    handler itself — a flag set synchronously as the handler starts —
+    intending the sealing cycle to be held structurally while idle
+    cycles pass. The hardening REDUCED but did not eliminate the
+    race. Measured at the #6184 construction (the OW54 follow-on
+    PR's runs, 2026-08-21, with that PR's two tests inserted ahead
+    of the step): 14/15 full-file runs green, ONE red with the
+    identical signature — the ping durable AND consequenced at the
+    probe (`expect(...).toEqual([])` received the consequenced ping
+    entry) — on a loaded machine at `b775787b6`; five runs of plain
+    main's version at the same head were green. Owed, still: a
+    construction that holds under insertion-shifted timing (or an
+    owner call to accept-and-retry the step); until then a red of
+    THIS step with the ping already durable at the probe is this
+    race, not a product regression, and not the inserting PR's
+    defect. No lift trigger (test-harness item).
+  - **OW58 — the consequence-notice resolved-error guard wedge
+    (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
+    minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by
+    #6186).** `#sealEventConsequenceNotice` (executor/space-server.ts)
+    seals the skip/error/drop consequences in its own transaction,
+    and its guard-release paths do not cover a commit that RESOLVES
+    `{error}`: the `.catch` beside the seal releases the
+    drain-in-flight guard on promise REJECTION only, and the
+    wave-outcome release covers only eventIds the wave actually
+    carried — a notice refused PRE-destination
+    (`rejectCommitBeforeStorage`, extended-storage-transaction.ts,
+    which resolves the commit promise with `{error}` rather than
+    rejecting it) never enters a wave, so NEITHER path fires. The
+    guard stays "marked", every re-drain skips the guarded id, and
+    park's `#drainInFlight.clear()` is the only remaining release:
+    the entry strands unconsequenced for the space's whole active
+    tenure — the OPPOSITE failure of OW54's forever-re-drain.
+    Probe evidence (the #6186 reviewer): a flag-gated patch forcing
+    the notice commit to resolve `{error}` left 3 events with
+    runsByKind 1/1/1 and ALL unconsequenced across two scanned waves,
+    reproduced through the THROW arm — the OW54 diff uninvolved.
+    Reachability: PLAUSIBLE, no live repro yet — a LABELED sidecar
+    doc under enforce mode makes the notice tx CFC-relevant (its
+    entry-field writes), and nothing prepares that tx (`commit()`
+    self-prepares only in observe mode), so the commit resolves the
+    CFC pre-storage `{error}` — the wedge shape. Owed: the small
+    guard fix — consume the commit RESULT (`sealed.then((r) => …)`
+    releasing the guard when `r?.error` is set, beside the existing
+    `.catch`) — and consider preparing the notice tx before commit;
+    the seal path is (α)-critical, so the fix belongs to its own
+    deliberate pass, not a side-swipe. Trigger: next seal-machinery
+    pass, or first live sighting of a stranded-unconsequenced entry
+    with a guarded id and no notice.
 
 ## 4. Standing rule
 
