@@ -5132,9 +5132,13 @@ supply; OW29/OW32/OW34 closed):
   converge on the register's already-owed **OW31/§2b write-authority
   carriage build** (cfc-group-chat-demo's served rows carrying the
   SERVICE identity; home-profile's `compile-cache/writeback` fallback
-  refused without carriage): NO new row is minted for what OW31
-  already owes — those skip entries point at OW31, which now carries
-  two CI surfaces as its lift evidence. A ninth CI-red family member,
+  refused without carriage): NO new row was minted at the gate for
+  what OW31 already owed — both skip entries pointed at OW31 then.
+  The group-chat surface has since split and closed: its memory-plane
+  carriage half closed with OW31's build, its CFC-attribution half
+  (the service-identity authorship labels) closed by **OW59** (the
+  OW34-family train), which lifted that skip — so OW31's remaining CI
+  surface is home-profile's, riding OW31/OW45. A ninth CI-red family member,
   `cfc-group-chat-demo-multi-runtime`, was the test HARNESS's own
   mixed posture (the self-hosted OFF-arm standalone server refusing
   the ON workers' event appends deterministically) — fixed IN the
@@ -5150,8 +5154,9 @@ supply; OW29/OW32/OW34 closed):
   `tasks/server-execution-on-skips.ts` (at the gate: SIX file entries
   + TWO step-level entries; the skip-list test pins the CURRENT set —
   both step entries were lifted the same day, cellset-lww with OW47's
-  close and convergence-storm with OW52's, leaving the six file
-  entries); they gate the
+  close and convergence-storm with OW52's, and the group-chat file
+  entry was lifted with OW59's close, leaving five file entries);
+  they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:

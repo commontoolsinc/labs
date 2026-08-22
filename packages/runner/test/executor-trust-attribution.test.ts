@@ -973,22 +973,56 @@ describe("executor-trust-attribution", () => {
       }
     });
 
-    it("refuses to construct a SERVING runtime with a custom trustSnapshotProvider — the run stamper would silently bypass it for every acting run", async () => {
+    it("refuses to construct a SERVING runtime with a custom trustSnapshotProvider — and the refused construction leaves NO ambient trace: a runtime built afterward is byte-identical to one built before (validate-then-apply; the guard precedes every process-global flag write)", async () => {
       const manager = StorageManager.emulate({ as: serviceSigner });
+      // CONTROL: the effective experimental record before the refused
+      // construction (flag-less, so it reads the ambient state through).
+      const controlManager = StorageManager.emulate({ as: aliceSigner });
+      const control = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: controlManager,
+      });
+      const controlExperimental = { ...control.experimental };
       try {
         expect(() =>
           new Runtime({
             apiUrl: new URL(import.meta.url),
             storageManager: manager,
             servingPosture: true,
-            experimental: { serverExecution: true },
+            experimental: {
+              serverExecution: true,
+              // A flag whose ambient write precedes the old guard site:
+              // under throw-after-apply this leaks into the process and
+              // shows up in the probe below (the Cubic P1 leak).
+              contentAddressedSchemas: !controlExperimental
+                .contentAddressedSchemas,
+            },
             trustSnapshotProvider: () => ({
               id: "custom-provider",
               actingPrincipal: serviceSigner.did(),
             }),
           })
         ).toThrow("custom trustSnapshotProvider");
+        // PROBE: a flag-less runtime built AFTER the refusal must behave
+        // as if the failed construction never happened — its effective
+        // experimental record equals the control's.
+        const probeManager = StorageManager.emulate({ as: bobSigner });
+        const probe = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: probeManager,
+        });
+        try {
+          expect(probe.experimental.contentAddressedSchemas).toBe(
+            controlExperimental.contentAddressedSchemas,
+          );
+          expect({ ...probe.experimental }).toEqual(controlExperimental);
+        } finally {
+          await probe.dispose();
+          await probeManager.close();
+        }
       } finally {
+        await control.dispose();
+        await controlManager.close();
         await manager.close();
       }
     });
