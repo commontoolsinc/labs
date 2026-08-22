@@ -826,6 +826,10 @@ type DeferredStartResult<R> = {
   cancelDeferredStart?: Cancel;
 };
 
+type DeferredStartOwnership = DeferredCancelOwnership & {
+  markPending: () => void;
+};
+
 type BoundNodeIO = {
   inputs: FabricExecValue;
   outputs: FabricExecValue;
@@ -3346,7 +3350,7 @@ export class Runner {
 
   private createDeferredStartOwnership<T>(
     resultCell: Cell<T>,
-  ): DeferredCancelOwnership {
+  ): DeferredStartOwnership {
     const key = this.getDocKey(resultCell);
     const base = useDeferredCancelOwnership((installedCancel) => {
       // A result key can be stopped and restarted while deferred startup is
@@ -3360,7 +3364,7 @@ export class Runner {
     // reach the pending start and tombstone it. The entry goes as soon as the
     // start settles either way: it installed a registration, which owns itself
     // from then on, or it was cancelled.
-    const ownership: DeferredCancelOwnership = {
+    const ownership: DeferredStartOwnership = {
       cancel: () => {
         unregister();
         base.cancel();
@@ -3370,6 +3374,7 @@ export class Runner {
         unregister();
         return base.markInstalled(registration);
       },
+      markPending: () => register(),
     };
     const unregister = () => {
       const pending = this.pendingDeferredStarts.get(key);
@@ -3377,13 +3382,79 @@ export class Runner {
       pending.delete(ownership);
       if (pending.size === 0) this.pendingDeferredStarts.delete(key);
     };
-    let pending = this.pendingDeferredStarts.get(key);
-    if (pending === undefined) {
-      pending = new Set();
-      this.pendingDeferredStarts.set(key, pending);
-    }
-    pending.add(ownership);
+    const register = () => {
+      let pending = this.pendingDeferredStarts.get(key);
+      if (pending === undefined) {
+        pending = new Set();
+        this.pendingDeferredStarts.set(key, pending);
+      }
+      pending.add(ownership);
+    };
+    register();
     return ownership;
+  }
+
+  private commitDeferredStart<T>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    ownership: DeferredStartOwnership,
+    installedCancel: Cancel | undefined,
+    retryAfterConflict: (() => void) | undefined,
+    afterCommit: () => void,
+    failureMessage: string,
+  ): void {
+    const fail = (error: unknown) => {
+      const key = this.getDocKey(resultCell);
+      let registrationRemoved = false;
+      if (
+        installedCancel !== undefined &&
+        this.cancels.get(key) === installedCancel
+      ) {
+        this.cancels.delete(key);
+        this.allCancels.delete(installedCancel);
+        registrationRemoved = true;
+        try {
+          installedCancel();
+        } catch (cleanupError) {
+          logger.warn(
+            "deferred-start-cleanup-failed",
+            "Cleanup after a failed deferred start transaction failed",
+            cleanupError,
+          );
+        }
+      }
+      logger.error("tx-commit-error", failureMessage, error);
+      const readyToRetry = (error as
+        | {
+          readyToRetry?: () => Promise<void>;
+        }
+        | null
+        | undefined)?.readyToRetry;
+      if (
+        !registrationRemoved || retryAfterConflict === undefined ||
+        !isConflictRejection(error as { name?: string }) ||
+        typeof readyToRetry !== "function"
+      ) {
+        ownership.cancel();
+        return;
+      }
+      ownership.markPending();
+      void (async () => {
+        try {
+          await readyToRetry();
+          if (!ownership.isCancelled()) retryAfterConflict();
+        } catch {
+          ownership.cancel();
+        }
+      })();
+    };
+    tx.commit().then(({ error }) => {
+      if (error !== undefined) {
+        fail(error);
+        return;
+      }
+      if (!ownership.isCancelled()) afterCommit();
+    }).catch(fail);
   }
 
   private cancelPendingDeferredStarts(
@@ -3416,87 +3487,79 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
-      // Minted inside a commit callback — by definition outside any
-      // scheduler run; the deferred start's node wiring is piece
-      // machinery, stamped bookkeeping per serving-loop.md §3d. A
-      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
-      // speculative-consequence stamp (2026-08-13): it is a handler
-      // CONSEQUENCE (the receipt + result wrapper of a speculative
-      // echo), so it stamps event-handler-kind and the overlay
-      // diverts it — committing it authored would race the SERVING
-      // side's own deferred start for the create-only receipt, and a
-      // client win would suppress the served navigateTo (no intent
-      // would ever be computed). §3d's bookkeeping-only rule governs
-      // internal writes at the wave seal destination, which this
-      // client-side start tx never reaches. The serving side and the
-      // OFF arm keep bookkeeping.
-      this.runtime.stampServerRun(startTx, {
-        actionId: `piece-start/${resultLink.id}`,
-        ...(speculativeConsequence !== undefined
-          ? {
-            kind: "event-handler" as const,
-            eventId: speculativeConsequence.eventId,
-          }
-          : { kind: "bookkeeping" as const }),
-      });
-      // Phase 4 (builtins.md §4): a deferred start minted from an
-      // EVENT-HANDLER run carries that run's event context across to
-      // the start tx, so a navigateTo instantiated under it can address
-      // the firing session (navigate-context.ts's capture point 1).
-      const navigateContext = navigateEventContextFromRunInfo(
-        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-      );
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
-        resultLink,
-        undefined,
-        startTx,
-      );
-      try {
-        if (
-          ownership.markInstalled(
-            this.startWithTx(
-              startTx,
-              committedResultCell,
-              givenPattern,
-              options,
-            ),
-          )
-        ) {
-          startTx.abort("Deferred runner start was cancelled");
-          return;
+      const attempt = (allowConflictRetry: boolean) => {
+        const startTx = this.runtime.edit();
+        // Minted inside a commit callback — by definition outside any
+        // scheduler run; the deferred start's node wiring is piece
+        // machinery, stamped bookkeeping per serving-loop.md §3d. A
+        // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
+        // speculative-consequence stamp (2026-08-13): it is a handler
+        // CONSEQUENCE (the receipt + result wrapper of a speculative
+        // echo), so it stamps event-handler-kind and the overlay
+        // diverts it — committing it authored would race the SERVING
+        // side's own deferred start for the create-only receipt, and a
+        // client win would suppress the served navigateTo (no intent
+        // would ever be computed). §3d's bookkeeping-only rule governs
+        // internal writes at the wave seal destination, which this
+        // client-side start tx never reaches. The serving side and the
+        // OFF arm keep bookkeeping.
+        this.runtime.stampServerRun(startTx, {
+          actionId: `piece-start/${resultLink.id}`,
+          ...(speculativeConsequence !== undefined
+            ? {
+              kind: "event-handler" as const,
+              eventId: speculativeConsequence.eventId,
+            }
+            : { kind: "bookkeeping" as const }),
+        });
+        // Phase 4 (builtins.md §4): a deferred start minted from an
+        // EVENT-HANDLER run carries that run's event context across to
+        // the start tx, so a navigateTo instantiated under it can address
+        // the firing session (navigate-context.ts's capture point 1).
+        const navigateContext = navigateEventContextFromRunInfo(
+          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+        );
+        if (navigateContext !== undefined) {
+          setNavigateEventContext(startTx, navigateContext);
         }
-        this.runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
-          if (error) {
-            ownership.cancel();
-            logger.error(
-              "tx-commit-error",
-              "Error committing deferred start transaction",
-              error,
-            );
+        const committedResultCell = this.runtime.getCellFromLink<T>(
+          resultLink,
+          undefined,
+          startTx,
+        );
+        try {
+          const installedCancel = this.startWithTx(
+            startTx,
+            committedResultCell,
+            givenPattern,
+            options,
+          );
+          if (ownership.markInstalled(installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.pullCellOnceInPullMode(committedResultCell);
-          }
-        }).catch((error) => {
-          ownership.cancel();
-          logger.error(
-            "tx-commit-error",
-            "Deferred start transaction commit rejected",
-            error,
+          this.runtime.prepareTxForCommit(startTx);
+          this.commitDeferredStart(
+            startTx,
+            committedResultCell,
+            ownership,
+            installedCancel,
+            allowConflictRetry ? () => attempt(false) : undefined,
+            () => {
+              if (pullOnceAfterStart) {
+                this.pullCellOnceInPullMode(committedResultCell);
+              }
+            },
+            "Error committing deferred start transaction",
           );
-        });
-      } catch (error) {
-        startTx.abort(error);
-        ownership.cancel();
-        logger.error("runner-start", "Deferred start failed", error);
-        throw error;
-      }
+        } catch (error) {
+          startTx.abort(error);
+          ownership.cancel();
+          logger.error("runner-start", "Deferred start failed", error);
+          throw error;
+        }
+      };
+      attempt(true);
     });
     return ownership.cancel;
   }
@@ -3522,87 +3585,79 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
-      // Minted inside a commit callback — outside any scheduler run;
-      // bookkeeping per serving-loop.md §3d, like the deferred start
-      // above (and with the same §3d-RULED speculative-consequence
-      // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
-      // is a speculative handler CONSEQUENCE and diverts to the
-      // overlay instead of racing the serving side's receipt create).
-      this.runtime.stampServerRun(startTx, {
-        actionId: `piece-start/${resultLink.id}`,
-        ...(speculativeConsequence !== undefined
-          ? {
-            kind: "event-handler" as const,
-            eventId: speculativeConsequence.eventId,
-          }
-          : { kind: "bookkeeping" as const }),
-      });
-      // Phase 4 (builtins.md §4): carry the instantiating event-handler
-      // run's event context to the start tx — capture point 1, as in
-      // startAfterSuccessfulCommit above.
-      const navigateContext = navigateEventContextFromRunInfo(
-        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
-      );
-      if (navigateContext !== undefined) {
-        setNavigateEventContext(startTx, navigateContext);
-      }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
-        resultLink,
-        pattern.resultSchema,
-        startTx,
-      );
-      try {
-        if (
-          ownership.markInstalled(
-            this.runWithStartOwnership(
-              startTx,
-              pattern,
-              inputs,
-              committedResultCell,
-            ).installedCancel,
-          )
-        ) {
-          startTx.abort("Deferred runner start was cancelled");
-          return;
+      const attempt = (allowConflictRetry: boolean) => {
+        const startTx = this.runtime.edit();
+        // Minted inside a commit callback — outside any scheduler run;
+        // bookkeeping per serving-loop.md §3d, like the deferred start
+        // above (and with the same §3d-RULED speculative-consequence
+        // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
+        // is a speculative handler CONSEQUENCE and diverts to the
+        // overlay instead of racing the serving side's receipt create).
+        this.runtime.stampServerRun(startTx, {
+          actionId: `piece-start/${resultLink.id}`,
+          ...(speculativeConsequence !== undefined
+            ? {
+              kind: "event-handler" as const,
+              eventId: speculativeConsequence.eventId,
+            }
+            : { kind: "bookkeeping" as const }),
+        });
+        // Phase 4 (builtins.md §4): carry the instantiating event-handler
+        // run's event context to the start tx — capture point 1, as in
+        // startAfterSuccessfulCommit above.
+        const navigateContext = navigateEventContextFromRunInfo(
+          waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+        );
+        if (navigateContext !== undefined) {
+          setNavigateEventContext(startTx, navigateContext);
         }
-        if (markCreateOnlyResult) {
-          startTx.markCreateOnly?.(
-            committedResultCell.getAsNormalizedFullLink(),
-          );
-        }
-        this.runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
-          if (error) {
-            ownership.cancel();
-            logger.error(
-              "tx-commit-error",
-              "Error committing deferred cross-space pattern transaction",
-              error,
-            );
+        const committedResultCell = this.runtime.getCellFromLink<T>(
+          resultLink,
+          pattern.resultSchema,
+          startTx,
+        );
+        try {
+          const installedCancel = this.runWithStartOwnership(
+            startTx,
+            pattern,
+            inputs,
+            committedResultCell,
+          ).installedCancel;
+          if (ownership.markInstalled(installedCancel)) {
+            startTx.abort("Deferred runner start was cancelled");
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.pullCellOnceInPullMode(committedResultCell);
+          if (markCreateOnlyResult) {
+            startTx.markCreateOnly?.(
+              committedResultCell.getAsNormalizedFullLink(),
+            );
           }
-        }).catch((error) => {
+          this.runtime.prepareTxForCommit(startTx);
+          this.commitDeferredStart(
+            startTx,
+            committedResultCell,
+            ownership,
+            installedCancel,
+            allowConflictRetry ? () => attempt(false) : undefined,
+            () => {
+              if (pullOnceAfterStart) {
+                this.pullCellOnceInPullMode(committedResultCell);
+              }
+            },
+            "Error committing deferred cross-space pattern transaction",
+          );
+        } catch (error) {
+          startTx.abort(error);
           ownership.cancel();
           logger.error(
-            "tx-commit-error",
-            "Deferred cross-space pattern transaction rejected",
+            "runner-start",
+            "Deferred cross-space pattern failed",
             error,
           );
-        });
-      } catch (error) {
-        startTx.abort(error);
-        ownership.cancel();
-        logger.error(
-          "runner-start",
-          "Deferred cross-space pattern failed",
-          error,
-        );
-        throw error;
-      }
+          throw error;
+        }
+      };
+      attempt(true);
     });
     return ownership.cancel;
   }

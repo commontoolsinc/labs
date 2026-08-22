@@ -648,28 +648,32 @@ describe("stage F serving loop", () => {
     let starts = 0;
     let freshInputStarted = false;
     let retrySawFreshInput = false;
-    let servedCell: Parameters<Runtime["start"]>[0] | undefined;
     onServingRuntime = (runtime) => {
       const start = runtime.start.bind(runtime);
       runtime.start = async (cell, options) => {
         const started = await start(cell, options);
         if (!started) return false;
         starts += 1;
-        servedCell = cell;
         if (starts === 1) {
-          queueMicrotask(() => {
-            runtime.runner.stop(cell);
-            runtime.pieceStartCommitFailureObserver?.({
-              actionId: `piece-instantiate/${cell.sourceURI}`,
-              pieceRootId: cell.getAsNormalizedFullLink().id,
-              registrationRemoved: true,
-              retry: "on-input",
-              error: new Error("test asynchronous start failure"),
-            });
-            firstFailure.resolve();
+          runtime.runner.stop(cell);
+          runtime.pieceStartCommitFailureObserver?.({
+            actionId: `piece-instantiate/${cell.sourceURI}`,
+            pieceRootId: cell.getAsNormalizedFullLink().id,
+            registrationRemoved: true,
+            retry: "on-input",
+            error: new Error("test asynchronous start failure"),
           });
+          firstFailure.resolve();
         } else if (starts === 2) {
           retrySawFreshInput = freshInputStarted;
+          runtime.runner.stop(cell);
+          runtime.pieceStartCommitFailureObserver?.({
+            actionId: `piece-instantiate/${cell.sourceURI}`,
+            pieceRootId: cell.getAsNormalizedFullLink().id,
+            registrationRemoved: true,
+            retry: "immediate",
+            error: new Error("test stale-basis start failure"),
+          });
           retried.resolve();
         } else {
           conflictRetried.resolve();
@@ -703,27 +707,6 @@ describe("stage F serving loop", () => {
 
     expect(starts).toBe(2);
     expect(retrySawFreshInput).toBe(true);
-    expect(host.stats().structureLoadFailures).toBe(1);
-
-    const conflictInput = clientRuntime.edit();
-    conflictInput.writeValueOrThrow(
-      {
-        space,
-        id: "of:async-start-conflict-kick" as never,
-        scope: "space",
-        path: ["value"],
-      },
-      1,
-    );
-    expect((await conflictInput.commit()).error).toBeUndefined();
-    servingRuntime!.runner.stop(servedCell!);
-    servingRuntime!.pieceStartCommitFailureObserver?.({
-      actionId: `piece-instantiate/${servedCell!.sourceURI}`,
-      pieceRootId: servedCell!.getAsNormalizedFullLink().id,
-      registrationRemoved: true,
-      retry: "immediate",
-      error: new Error("test stale-basis start failure"),
-    });
     await conflictRetried.promise;
     expect(starts).toBe(3);
     expect(host.stats().structureLoadFailures).toBe(2);

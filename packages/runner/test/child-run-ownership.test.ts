@@ -10,7 +10,12 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
+import type {
+  IExtendedStorageTransaction,
+  TransactionSealDestination,
+} from "../src/storage/interface.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
 // Each drives the public API only: a parent pattern, a child reached through
@@ -31,6 +36,17 @@ describe("child run ownership", () => {
       cell.getAsNormalizedFullLink(),
       runtime.scopeKeyIdentity,
     );
+  }
+
+  async function useServerExecutionRuntime() {
+    await runtime.dispose();
+    await storageManager.close();
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { serverExecution: true },
+    });
   }
 
   beforeEach(() => {
@@ -372,6 +388,503 @@ describe("child run ownership", () => {
     expect(runtime.runner.cancels.has(key(result))).toBe(true);
     expect(pending.size).toBe(0);
     runtime.runner.stop(result);
+  });
+
+  it("rebuilds a commit-gated start after conflict catch-up", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start that catches up after a conflict",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const retryCommitted = Promise.withResolvers<void>();
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          startSeals++;
+          if (startSeals === 1) {
+            return {
+              error: Object.assign(new Error("test deferred-start conflict"), {
+                name: "ConflictError" as const,
+                transaction: {} as never,
+                conflict: {
+                  space,
+                  the: "application/json" as const,
+                  of: result.getAsNormalizedFullLink().id as never,
+                },
+                readyToRetry: () => {
+                  gateEntered.resolve();
+                  return readyToRetry.promise;
+                },
+              }),
+            };
+          }
+          const committed = await sealTx.tx.commit();
+          retryCommitted.resolve();
+          return committed;
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await gateEntered.promise;
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+
+    readyToRetry.resolve();
+    await retryCommitted.promise;
+    await runtime.idle();
+
+    expect(startSeals).toBe(2);
+    expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    expect(await result.pull()).toEqual({ doubled: 6 });
+    runtime.clearSealDestination();
+    runtime.runner.stop(result);
+  });
+
+  it("cancels conflict catch-up when a commit-gated start stops", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start stopped during conflict catch-up",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const gateSettled = Promise.withResolvers<void>();
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          startSeals++;
+          if (startSeals === 1) {
+            return {
+              error: Object.assign(new Error("test deferred-start conflict"), {
+                name: "ConflictError" as const,
+                transaction: {} as never,
+                conflict: {
+                  space,
+                  the: "application/json" as const,
+                  of: result.getAsNormalizedFullLink().id as never,
+                },
+                readyToRetry: async () => {
+                  gateEntered.resolve();
+                  await readyToRetry.promise;
+                  gateSettled.resolve();
+                },
+              }),
+            };
+          }
+          return await sealTx.tx.commit();
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await gateEntered.promise;
+    runtime.runner.stop(result);
+
+    readyToRetry.resolve();
+    await gateSettled.promise;
+    await Promise.resolve();
+
+    expect(startSeals).toBe(1);
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    runtime.clearSealDestination();
+  });
+
+  it("does not rebuild a commit-gated start after a second conflict", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start that conflicts twice",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const gateEntered = Promise.withResolvers<void>();
+    const readyToRetry = Promise.withResolvers<void>();
+    const secondConflict = Promise.withResolvers<void>();
+    let catchUpCalls = 0;
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          startSeals++;
+          const firstAttempt = startSeals === 1;
+          if (!firstAttempt) secondConflict.resolve();
+          return {
+            error: Object.assign(new Error("test deferred-start conflict"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: result.getAsNormalizedFullLink().id as never,
+              },
+              readyToRetry: () => {
+                catchUpCalls++;
+                if (firstAttempt) {
+                  gateEntered.resolve();
+                  return readyToRetry.promise;
+                }
+                return Promise.resolve();
+              },
+            }),
+          };
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await gateEntered.promise;
+    readyToRetry.resolve();
+    await secondConflict.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(startSeals).toBe(2);
+    expect(catchUpCalls).toBe(1);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(0);
+    runtime.clearSealDestination();
+    runtime.runner.stop(result);
+  });
+
+  it("does not rebuild a conflict without a catch-up gate", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start whose conflict has no catch-up gate",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const conflictReturned = Promise.withResolvers<void>();
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          startSeals++;
+          conflictReturned.resolve();
+          return {
+            error: Object.assign(new Error("test deferred-start conflict"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: result.getAsNormalizedFullLink().id as never,
+              },
+            }),
+          };
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await conflictReturned.promise;
+    await Promise.resolve();
+
+    expect(startSeals).toBe(1);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(0);
+    runtime.clearSealDestination();
+    runtime.runner.stop(result);
+  });
+
+  it("settles a commit-gated start after a nullish rejection", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start whose commit rejects without a reason",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const rejectionReturned = Promise.withResolvers<void>();
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          rejectionReturned.resolve();
+          return await Promise.reject(undefined);
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await rejectionReturned.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(
+      (runtime.runner as unknown as {
+        pendingDeferredStarts: Map<string, Set<unknown>>;
+      }).pendingDeferredStarts.size,
+    ).toBe(0);
+    runtime.clearSealDestination();
+  });
+
+  it("does not rebuild a commit-gated start when conflict catch-up fails", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start whose conflict catch-up fails",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const catchUpAttempted = Promise.withResolvers<void>();
+    let startSeals = 0;
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          startSeals++;
+          return {
+            error: Object.assign(new Error("test conflict catch-up failure"), {
+              name: "ConflictError" as const,
+              transaction: {} as never,
+              conflict: {
+                space,
+                the: "application/json" as const,
+                of: result.getAsNormalizedFullLink().id as never,
+              },
+              readyToRetry: () => {
+                catchUpAttempted.resolve();
+                return Promise.reject(new Error("test catch-up failure"));
+              },
+            }),
+          };
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    expect((await tx.commit()).error).toBeUndefined();
+    await catchUpAttempted.promise;
+    await Promise.resolve();
+
+    expect(startSeals).toBe(1);
+    runtime.clearSealDestination();
+    runtime.runner.stop(result);
+  });
+
+  it("settles a failed commit-gated start when cleanup throws", async () => {
+    await useServerExecutionRuntime();
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<{ doubled: number }>(
+      space,
+      "deferred start whose failed cleanup throws",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const runner = runtime.runner as unknown as {
+      startWithTx(...args: unknown[]): (() => void) | undefined;
+      cancels: Map<string, () => void>;
+      allCancels: Set<() => void>;
+    };
+    const originalStartWithTx = runner.startWithTx;
+    const cleanupCalled = Promise.withResolvers<void>();
+    runner.startWithTx = function (...args: unknown[]) {
+      const installedCancel = Reflect.apply(
+        originalStartWithTx,
+        runtime.runner,
+        args,
+      ) as (() => void) | undefined;
+      if (installedCancel === undefined) return undefined;
+      const throwingCancel = () => {
+        installedCancel();
+        cleanupCalled.resolve();
+        throw new Error("test cleanup failure");
+      };
+      runner.cancels.set(key(args[1] as Cell<unknown>), throwingCancel);
+      runner.allCancels.delete(installedCancel);
+      runner.allCancels.add(throwingCancel);
+      return throwingCancel;
+    };
+    runtime.installSealDestination(
+      {
+        seal: async (sealTx: IExtendedStorageTransaction) => {
+          const actionId = waveRunContextOf(sealTx)?.actionId;
+          if (!actionId?.startsWith("piece-start/")) {
+            return await sealTx.tx.commit();
+          }
+          return {
+            error: {
+              name: "StorageTransactionAborted" as const,
+              message: "test deferred-start failure",
+              reason: "test deferred-start failure",
+            },
+          };
+        },
+      } satisfies TransactionSealDestination,
+      {
+        runStamper: (sealTx, info) => {
+          stampWaveRunContext(sealTx, {
+            actionId: info.actionId,
+            kind: info.kind,
+          });
+        },
+      },
+    );
+
+    try {
+      expect((await tx.commit()).error).toBeUndefined();
+      await cleanupCalled.promise;
+      await runtime.idle();
+
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      runner.startWithTx = originalStartWithTx;
+      runtime.clearSealDestination();
+    }
   });
 
   it("stops tracking a commit-gated start when its transaction fails", async () => {

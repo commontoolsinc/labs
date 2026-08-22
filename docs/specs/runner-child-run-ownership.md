@@ -114,3 +114,11 @@ too, at the width the exception above describes. A launch whose child is
 still gated holds that child through the pending start and nothing else, so a
 release that passed it over would let the child start after the pattern that
 launched it is gone.
+
+The callback installs the registration while staging the start's own setup
+transaction. If that transaction conflicts, the callback removes only the
+registration it installed, waits for the conflict's `readyToRetry` catch-up
+gate, and constructs the start once more against the fresh state. A stop or
+release while the gate is pending prevents that reconstruction. A conflict
+without a catch-up gate, a non-conflict failure, or a second conflict settles
+the pending start without another attempt.
