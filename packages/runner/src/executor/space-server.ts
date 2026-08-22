@@ -1779,10 +1779,16 @@ export class SpaceServer implements TransactionSealDestination {
         // the CARRIAGE identity's instances — the same instances its
         // engine rows are annotated with below — so the demanded run's
         // instance sees the served result locally at verdict, not only
-        // through the wire. Residual, FLAGGED (not filled): the writeback
-        // transaction itself is unstamped, so its hash-guard READS resolve
-        // against the service's instances; a per-instance node's effect
-        // completion is unpinned in this stage.
+        // through the wire. Residual, FLAGGED (not filled), now scoped
+        // to the fetch*/generate* families: their writeback transactions
+        // are unstamped, so their hash-guard READS resolve against the
+        // service's instances and a per-instance node's effect
+        // completion is unpinned there. sqlite-query is CARVED OUT
+        // (OW53, 2026-08-22): its flush sets the requesting run's
+        // identity on every writeback transaction (the OW17 tx seam —
+        // sqlite-builtins.ts), so its guard reads and writes resolve
+        // the REQUESTING instance; pinned by the true-ON
+        // sqlite-read-clearance gate.
         const sealed = replica.sealNative(
           native,
           source,
