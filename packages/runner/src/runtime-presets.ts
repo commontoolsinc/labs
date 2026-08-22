@@ -58,6 +58,8 @@
  * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
+ * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
+ * |                            | reader fails closed on unknown versions          |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
@@ -153,6 +155,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcFlowLabels",
   "cfcWriteFloor",
   "cfcTriggerReadGating",
+  "cfcDecomposedEnvelopes",
   "cfcPolicyEvaluation",
   "cfcLabelMetadataProtection",
   "cfcDeclaredMonotonicity",
@@ -313,6 +316,7 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // lives once. Same value as the constructor default today.
     cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
+    // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
     // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor

@@ -46,6 +46,7 @@ import type {
   CfcAddress,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
+  CfcDecomposedEnvelopes,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -1456,6 +1457,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Anti-downgrade pinned: once enabled, disabling throws.
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
    * Anti-downgrade pinned: once `enforce`, weakening throws.

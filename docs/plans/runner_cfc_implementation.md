@@ -301,7 +301,7 @@ type IFCLabel = {
 };
 
 type CfcMetadata = {
-  version: 1;
+  version: 1 | 2;
   schemaHash: string;
   labelMap: {
     version: 1;
@@ -363,6 +363,16 @@ its argument and will freeze it directly.
 `schemaHash` is the persisted `SchemaAndHash.hashString` for the canonical
 merged schema envelope for the entity, not the hash of any one effective
 selector schema seen during prepare.
+
+The metadata `version` says which document `schemaHash` names. Version 1
+hashes the self-contained inline envelope schema. Version 2 — written when
+`RuntimeOptions.cfcDecomposedEnvelopes` is on — hashes a DECOMPOSED root
+document whose `$ref: cid:` closure completes the schema; readers recompose
+it (each member read from the space and content-verified), and the storage
+commit boundary validates the whole closure. Reading is version-agnostic;
+a version outside the union is an envelope the build cannot interpret, and
+every reader fails closed on it rather than treating the document as
+unlabeled.
 
 The corresponding deep-frozen canonical schema object is also persisted as a
 regular memory-v2 entity whose id is `cid:<hash>`. The canonical schema payload

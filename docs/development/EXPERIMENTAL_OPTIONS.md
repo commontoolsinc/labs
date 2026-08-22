@@ -40,6 +40,7 @@ was last checked against the code.
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating)                             | `RuntimeOptions.cfcTriggerReadGating`                                                                                                           | `false`                                                                              | Bernhard Seefeld (#4488)                              | move toward `true`                                                                                                                                                                                                                | implemented, staged rollout                                                     |
+| [`cfcDecomposedEnvelopes`](#cfcdecomposedenvelopes)                         | `RuntimeOptions.cfcDecomposedEnvelopes`                                                                                                         | `false`                                                                              | Robin McCollum (CT-2062)                              | move toward `true` once every deployed reader fails closed on unknown envelope versions                                                                                                                                           | implemented, off by default                                                     |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation)                               | `RuntimeOptions.cfcPolicyEvaluation`                                                                                                            | `off`                                                                                | Bernhard Seefeld (#4566)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity)                       | `RuntimeOptions.cfcDeclaredMonotonicity`                                                                                                        | `off`                                                                                | Bernhard Seefeld (#4647)                              | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships)                                                                                                                                               | implemented, off by default                                                     |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats)                     | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired)                                                                       | `false`                                                                              | Bernhard Seefeld (#4623)                              | stays a measurement opt-in; fold in or remove after Stage 0                                                                                                                                                                       | implemented, off by default, measurement only                                   |
@@ -668,6 +669,29 @@ the per-epic implementation notes).
 - **Path to removal.** Once the cost is acceptable (or metadata caching removes
   it), the default could flip to `true` and the gating could become
   unconditional, retiring the dial.
+
+### `cfcDecomposedEnvelopes`
+
+- **Toggle via.** `RuntimeOptions.cfcDecomposedEnvelopes` (a plain boolean).
+- **Added by.** Robin McCollum, in the CFC envelope → cid-system convergence
+  (CT-2062, 2026-08-22; rung 3 after PR #6199's rungs 1–2).
+- **Purpose.** When on, the envelope persist path writes version-2 CFC
+  metadata whose `schemaHash` names a DECOMPOSED root document: `$defs`
+  members become separate content-addressed documents, shared with the
+  link-schema document family and elided once the space's server confirms
+  them. Off writes the version-1 inline form. Reading is version-agnostic
+  in either setting, and the storage commit boundary validates the whole
+  closure either way.
+- **Current default and planned end state.** `false` by default. The target
+  is `true`, after which version 1 remains readable indefinitely.
+- **Status on 2026-08-22.** Implemented, off by default. The flip is gated
+  on deployment reach, not on code here: a runner that predates the
+  envelope version guard treats version-2 metadata as no metadata at all
+  (silent under-labeling), so every deployed reader must fail closed on
+  unknown envelope versions before any space sees a version-2 write.
+- **Path to removal.** Once the default flips and no version-1 writer
+  remains deployed, the dial retires and version 2 becomes the only
+  spelling the persist path emits.
 
 ### `cfcPolicyEvaluation`
 

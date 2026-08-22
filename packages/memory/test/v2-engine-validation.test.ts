@@ -745,3 +745,57 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
     );
   });
 });
+
+Deno.test("walks a CFC envelope's schema-document closure transitively", async () => {
+  await withEngine((engine) => {
+    // A version-2 envelope stores a DECOMPOSED root: the root document
+    // references its definitions as `$ref: cid:` members. The closure
+    // walk must follow those references — a root without its definition
+    // is the same broken closure as missing the root itself.
+    const childSchema = {
+      type: "string",
+      ifc: { confidentiality: ["decomposed"] },
+    } as const;
+    const childHash = internSchemaAsTaggedHashString(childSchema);
+    const rootSchema = {
+      type: "object",
+      properties: { secret: { $ref: `cid:${childHash}` } },
+    } as never;
+    const rootHash = internSchemaAsTaggedHashString(rootSchema);
+    const carrier = {
+      op: "set",
+      id: "of:decomposed-envelope-carrier",
+      value: {
+        value: { secret: "v" },
+        cfc: {
+          version: 2,
+          schemaHash: rootHash,
+          labelMap: { version: 1, entries: [] },
+        },
+      },
+    } as never;
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(30, {
+            operations: [carrier, setOp(`cid:${rootHash}`, rootSchema)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(31, {
+        operations: [
+          carrier,
+          setOp(`cid:${rootHash}`, rootSchema),
+          setOp(`cid:${childHash}`, childSchema),
+        ],
+      }),
+    });
+  });
+});

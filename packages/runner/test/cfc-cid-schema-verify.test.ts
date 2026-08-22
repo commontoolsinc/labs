@@ -137,4 +137,102 @@ describe("stored CFC envelope gathering", () => {
       expect(result.reason).toContain("hash mismatch");
     }
   });
+
+  // Version-2 metadata names a DECOMPOSED root; the gatherer recomposes
+  // the closure, verifying every member against its own address.
+  const decomposedFixture = () => {
+    const child = internSchema(
+      { type: "string", ifc: { confidentiality: ["sealed"] } } as JSONSchema,
+      true,
+    );
+    const root = internSchema(
+      {
+        type: "object",
+        properties: { secret: { $ref: `cid:${child.taggedHashString}` } },
+      } as JSONSchema,
+      true,
+    );
+    return { child, root };
+  };
+
+  const metadataV2 = (schemaHash: string) => ({
+    cfc: { version: 2, schemaHash, labelMap: { version: 1, entries: [] } },
+  });
+
+  it("recomposes a version-2 envelope's closure into one inline schema", () => {
+    const { child, root } = decomposedFixture();
+    const result = loadStoredCfcEnvelope(
+      fakeTxOverDocuments({
+        "of:doc": metadataV2(root.taggedHashString),
+        [`cid:${root.taggedHashString}`]: { value: root.schema },
+        [`cid:${child.taggedHashString}`]: { value: child.schema },
+      }),
+      envelopeTarget,
+    );
+
+    expect(result.status).toBe("loaded");
+    if (result.status === "loaded") {
+      const spelled = JSON.stringify(result.schema);
+      // Self-contained: the definition arrived inline, no reference left.
+      expect(spelled).not.toContain("cid:");
+      expect(spelled).toContain('"sealed"');
+    }
+  });
+
+  it("reports a version-2 envelope whose definition document is missing as unreadable", () => {
+    const { root } = decomposedFixture();
+    const result = loadStoredCfcEnvelope(
+      fakeTxOverDocuments({
+        "of:doc": metadataV2(root.taggedHashString),
+        [`cid:${root.taggedHashString}`]: { value: root.schema },
+      }),
+      envelopeTarget,
+    );
+
+    expect(result.status).toBe("unreadable");
+    if (result.status === "unreadable") {
+      expect(result.reason).toContain("missing or unreadable");
+    }
+  });
+
+  it("reports a version-2 envelope whose definition document is poisoned as unreadable", () => {
+    const { child, root } = decomposedFixture();
+    const poisoned = internSchema(
+      { type: "number" } as JSONSchema,
+      true,
+    ).schema;
+    const result = loadStoredCfcEnvelope(
+      fakeTxOverDocuments({
+        "of:doc": metadataV2(root.taggedHashString),
+        [`cid:${root.taggedHashString}`]: { value: root.schema },
+        [`cid:${child.taggedHashString}`]: { value: poisoned },
+      }),
+      envelopeTarget,
+    );
+
+    expect(result.status).toBe("unreadable");
+    if (result.status === "unreadable") {
+      expect(result.reason).toContain("hash mismatch");
+    }
+  });
+
+  it("reports metadata whose version this build postdates as unreadable", () => {
+    const result = loadStoredCfcEnvelope(
+      fakeTxOverDocuments({
+        "of:doc": {
+          cfc: {
+            version: 3,
+            schemaHash: "whatever-format-that-year-uses",
+            labelMap: { version: 1, entries: [] },
+          },
+        },
+      }),
+      envelopeTarget,
+    );
+
+    expect(result.status).toBe("unreadable");
+    if (result.status === "unreadable") {
+      expect(result.reason).toContain("not one this build interprets");
+    }
+  });
 });

@@ -345,7 +345,10 @@ export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
 export const canonicalizeCfcMetadata = (
   metadata: CfcMetadata,
 ): CfcMetadata => ({
-  version: 1,
+  // The version is content, not presentation: a version-1 and a version-2
+  // envelope naming the same hash are different stored forms, and SC-11
+  // must see them as such.
+  version: metadata.version,
   schemaHash: metadata.schemaHash,
   labelMap: {
     version: 1,

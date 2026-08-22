@@ -59,6 +59,7 @@ import {
   type CfcAddress,
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
+  type CfcDecomposedEnvelopes,
   type CfcDereferenceTrace,
   cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
@@ -77,6 +78,7 @@ import {
   type ConsultedPolicyManifest,
   type ConsumedRead,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
+  DEFAULT_CFC_DECOMPOSED_ENVELOPES,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
@@ -329,6 +331,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
+    decomposedEnvelopes: DEFAULT_CFC_DECOMPOSED_ENVELOPES,
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     labelMetadataProtectionMode: DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
     declaredMonotonicityMode: DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
@@ -654,6 +657,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (enabled) {
       this.#cfcTriggerReadGatingPinned = true;
     }
+  }
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void {
+    // A spelling dial, not an enforcement dial: either setting writes a
+    // sound envelope and no gate consumes the value, so there is no pin
+    // and no prepared-state invalidation to protect.
+    this.#cfcState.decomposedEnvelopes = enabled;
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
@@ -2694,6 +2704,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
     this.wrapped.setCfcTriggerReadGating(enabled);
+  }
+
+  setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void {
+    this.wrapped.setCfcDecomposedEnvelopes(enabled);
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
