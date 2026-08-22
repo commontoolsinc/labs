@@ -273,8 +273,14 @@ ON-built binary, posture probed; loads 5.8–6.5):
 **10/10 green — with the echo-drop occurring at its natural ~2/10
 rate in runs 9–10 and no longer failing the test.** That is the
 strongest available validation: the exact former red mechanism
-recurred under the fix and was absorbed. The file's skip entry is
-REMOVED.
+recurred under the fix and was absorbed. The OFF-posture control ran
+2/2 green on a DEFAULT-BUILT binary (fresh store, posture probed:
+`shellServerExecutionDefine` null, no `servingLoop`) — redone there
+because a first attempt against a source-run toolshed was invalid
+evidence: a source toolshed serves no built shell (the browser dies
+at "no x-root-view element" before the barrier is ever reached), the
+same mixed-posture trap the CI lanes exist to exclude. The file's
+skip entry is REMOVED.
 
 The canary function the flake was serving moves to a NAMED register
 record instead: the echo-drop product smell — the stream-action
