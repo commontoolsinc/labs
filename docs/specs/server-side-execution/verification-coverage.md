@@ -5154,8 +5154,10 @@ supply; OW29/OW32/OW34 closed):
   `tasks/server-execution-on-skips.ts` (at the gate: SIX file entries
   + TWO step-level entries; the skip-list test pins the CURRENT set —
   both step entries were lifted the same day, cellset-lww with OW47's
-  close and convergence-storm with OW52's, and the group-chat file
-  entry was lifted with OW59's close, leaving five file entries);
+  close and convergence-storm with OW52's, the group-chat file entry
+  was lifted with OW59's close, and default-app's file entry converted
+  to its OW45 reload-step entry with OW51's close, leaving four file
+  entries beside default-app's step entry);
   they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
