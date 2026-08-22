@@ -61,8 +61,9 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * test). `settleGateWhen` scopes the hold: the serving loop runs a
  * settle in EVERY cycle (empty ones included), so an unconditional gate
  * would catch some idle cycle already in flight and starve the drain
- * the test needs — the predicate lets exactly the cycle that SEALED the
- * watched state hang. Undefined everywhere else.
+ * the test needs. The predicate must become true before the intended
+ * cycle reaches the barrier; a flag set by the handler gives that cycle
+ * a causal name. Undefined everywhere else.
  *
  * The second seam, the drain's SYNC gate (`syncGate` / `syncGateWhen`,
  * the seal→outcome-window pin): the serving drain awaits the sidecar
@@ -2444,12 +2445,9 @@ describe("Phase 3 events-down (serving side)", () => {
 
       // Hold the wave open for the cycle that RUNS the copy: the handler
       // arms the gate as its first act, and that assignment is sequenced
-      // before the cycle's settle reaches its barrier — the hold catches
-      // the sealing cycle structurally, where a polled overlay read raced
-      // it (the settle could cross the barrier before either seal was
-      // visible, flush the wave, and a later, empty cycle hung instead —
-      // CT-2060). An idle settle already in flight still passes: nothing
-      // arms until the copy actually runs.
+      // before the cycle's settle reaches its barrier, so the hold catches
+      // the sealing cycle structurally. An idle settle already in flight
+      // still passes: nothing arms until the copy actually runs.
       servingManager!.settleGate = gate.promise;
       servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
