@@ -1700,24 +1700,39 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       return schema;
     });
-    const pending = [...hashes];
+    for (const hash of hashes) {
+      this.stageSchemaDocClosure(space, hash);
+    }
+  }
+
+  /**
+   * Stages `cid:<hash>` and every document its closure references into
+   * this transaction, from the realm registry: per-transaction dedupe,
+   * then the confirmed-persistence elision — a document the space's
+   * server already holds needs no re-delivery, and content addressing
+   * makes the confirmed copy immutable, so the skip cannot race a
+   * change. Server-CONFIRMED only: a pending local write is no evidence
+   * the server holds it, and the dedupe set stays per-transaction on
+   * purpose (sibling transactions never carry ordering dependencies on
+   * each other's uncommitted writes). A hash the registry cannot supply
+   * warns and is skipped; the commit boundary has the last word.
+   *
+   * Deliberately NOT gated on `contentAddressedSchemas`: the link scan
+   * above is the flag's surface, while direct callers — the CFC envelope
+   * store — need their documents delivered whatever the flag says.
+   */
+  stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
+    const pending = [rootHash];
     while (pending.length > 0) {
       const hash = pending.pop()!;
       const key = `${space}|${hash}`;
       if (this.#ensuredSchemaDocs.has(key)) continue;
       this.#ensuredSchemaDocs.add(key);
-      // Confirmed-persistence elision: a document the space's server
-      // already holds needs no re-delivery, and content addressing makes
-      // the confirmed copy immutable, so the skip cannot race a change.
-      // Server-CONFIRMED only — a pending local write is no evidence the
-      // server holds it — and per-space: the dedupe set above stays
-      // per-transaction on purpose (sibling transactions never carry
-      // ordering dependencies on each other's uncommitted writes).
       if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
         logger.warn("schema-doc-materialize", () => [
-          "A written link references a schema document the registry cannot supply:",
+          "A staged reference names a schema document the registry cannot supply:",
           `cid:${hash}`,
         ]);
         continue;

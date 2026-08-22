@@ -1362,6 +1362,14 @@ export interface TransactionSealDestination {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
+  /**
+   * Stages `cid:<rootHash>` and its referenced closure into this
+   * transaction from the realm registry, with per-transaction dedupe and
+   * the confirmed-persistence elision (see ExtendedStorageTransaction).
+   * Optional the way the other staging seams are; a caller without it
+   * falls back to writing the document itself.
+   */
+  stageSchemaDocClosure?(space: MemorySpace, rootHash: string): void;
   tx: IStorageTransaction;
 
   /**

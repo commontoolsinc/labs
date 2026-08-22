@@ -27,6 +27,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { registerSchemaDocument } from "../schema-registry.ts";
 import {
   isPrimitiveCellLink,
   isWriteRedirectLink,
@@ -4451,6 +4452,20 @@ const ensureSchemaDocument = (
     throw new Error(
       `cid schema document hash mismatch: claimed ${schemaHash}, actual ${actualHash}`,
     );
+  }
+  // The envelope document rides the SAME staging path as link-schema
+  // documents: registration makes it resolvable in-session (content
+  // re-verified against the hash), and the closure staging brings the
+  // per-transaction dedupe, the confirmed-persistence elision, and
+  // dependency recursion — inert while envelopes are stored inline, and
+  // what makes a decomposed envelope deliverable without a new write
+  // path. The read side stays `loadSchemaDocument`'s space-read with
+  // verification: a registry hit must never mask a document the SPACE
+  // does not hold.
+  registerSchemaDocument(schemaHash, schema);
+  if (tx.stageSchemaDocClosure !== undefined) {
+    tx.stageSchemaDocClosure(space, schemaHash);
+    return;
   }
   const id = `cid:${schemaHash}`;
   // Do not pre-read the content-addressed schema document here. A read-before-
