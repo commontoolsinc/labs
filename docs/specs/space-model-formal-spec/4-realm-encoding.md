@@ -2,9 +2,9 @@
 
 This document specifies the wire format used to carry `FabricValue`s between
 realms over a structured-clone transport — `structuredClone()` and
-`postMessage()` — including the outer envelope and its marker, the tagged
-form, per-type encodings, the ownership contract on decode, and what the
-format refuses.
+`postMessage()`, and a durable store one realm writes for a later one to read
+— including the outer envelope and its marker, the tagged form, per-type
+encodings, the ownership contract on decode, and what the format refuses.
 
 ## Status
 
