@@ -1,0 +1,225 @@
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run
+// UNTRACKED measurement instrument (flip-readiness dossier, OW33's named
+// residual): the resumed counter-click revert-window measurement.
+//
+// The at-floor-derived edge (ow33-arrival-witness-fork.md "Named residual"):
+// an event-handler echo on a RESUMED instance whose floor EQUALS the prior
+// session's wave-commit seq retires through the shared sweep gate's backstop
+// on that derived-class cover with no NEW consequence arrived - a
+// flash-revert window until the served consequence lands. Mechanism
+// demonstrated in review; reachability UNPROVEN. This instrument measures
+// from the OUTSIDE: session A creates a counter piece and clicks once
+// (served consequence lands, value 1); session B (fresh runtime, same
+// space; the resumed shape) attaches a value sink FIRST, then clicks as its
+// first interaction. A visible value sequence 2 -> 1 -> 2 after the click
+// IS the revert window (measured sink-to-sink); no revert across all
+// trials is a bounded reachability-negative at this head.
+//
+// Runs one trial per fresh space, TRIALS trials against one ON toolshed.
+// Client posture from env (experimentalOptionsFromEnv) - run with
+// EXPERIMENTAL_SERVER_EXECUTION=true against the ON-built binary.
+
+import { Identity, type Session } from "@commonfabric/identity";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import { env } from "@commonfabric/integration";
+import { PiecesController } from "@commonfabric/piece/ops";
+
+import { compileAndSavePattern, Runtime } from "../src/index.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+
+const { API_URL } = env;
+const TRIALS = Number.parseInt(Deno.env.get("ATFLOOR_TRIALS") ?? "8", 10);
+const QUIET_MS = 3000;
+
+const PATTERN_SRC = `
+import { Cell, Default, handler, NAME, pattern, Stream, UI } from "commonfabric";
+
+interface S { value: Default<number, 0>; }
+interface O { value: Default<number, 0>; increment: Stream<void>; }
+
+const increment = handler<void, { value: Cell<number> }>((_a, state) => {
+  state.value.set(state.value.get() + 1);
+});
+
+export default pattern<S, O>((state) => ({
+  [NAME]: "atfloor counter",
+  [UI]: <div>{state.value}</div>,
+  value: state.value,
+  increment: increment({ value: state.value }),
+}));
+`;
+
+const PIECE_SCHEMA = {
+  type: "object",
+  properties: {
+    value: { type: "number" },
+    increment: { asCell: ["stream"] },
+  },
+  required: ["value", "increment"],
+} as const;
+
+interface Obs {
+  t: number;
+  v: number | undefined;
+}
+
+async function makeRuntime(spaceName: string) {
+  const identity = await Identity.fromPassphrase(
+    `atfloor-${spaceName}`,
+    { implementation: "noble" },
+  );
+  const space = identity.did();
+  const session = {
+    isPrivate: false,
+    spaceName,
+    space,
+    as: identity,
+  } as Session;
+  const storageManager = StorageManager.open({
+    as: session.as,
+    memoryHost: new URL(API_URL),
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(API_URL),
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
+    storageManager,
+  });
+  const pieces = new PiecesController(session, runtime);
+  await pieces.ready;
+  return { runtime, storageManager, pieces, space, identity };
+}
+
+async function trial(n: number): Promise<string> {
+  const spaceName = `atfloor-${Date.now()}-${n}`;
+  const cause = `atfloor-instrument-${n}`;
+
+  // Session A: create, click once, settle, dispose.
+  const a = await makeRuntime(spaceName);
+  const pattern = await compileAndSavePattern(a.runtime, PATTERN_SRC, {
+    space: a.space,
+  });
+  const pieceA = (await a.pieces.runPersistent(pattern, {}, cause)).asSchema(
+    PIECE_SCHEMA,
+  );
+  await a.runtime.idle();
+  await a.storageManager.synced();
+  console.log(`trial ${n}: A initial get =`, JSON.stringify(pieceA.get()));
+  a.runtime.editWithRetry((tx) =>
+    pieceA.key("increment").withTx(tx).send({})
+  );
+  await a.runtime.idle();
+  await a.storageManager.synced();
+  // Wait until the durable value is 1 (the served consequence for ON).
+  const t0 = performance.now();
+  while (pieceA.get()?.value !== 1) {
+    if (performance.now() - t0 > 30000) {
+      throw new Error(`trial ${n}: session A never reached value 1`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    await pieceA.pull();
+  }
+  await a.storageManager.synced();
+  const entityId = JSON.parse(JSON.stringify(pieceA.entityId));
+  console.log(`trial ${n}: A settled at value 1; entityId =`, JSON.stringify(entityId));
+  await a.runtime.dispose();
+  await a.storageManager.close();
+
+  // Session B: fresh runtime, resume the SAME piece (same cause), sink
+  // first, then click as the first interaction.
+  const b = await makeRuntime(spaceName);
+  const pieceRaw = b.runtime.getCellFromEntityId(b.space, entityId);
+  await pieceRaw.sync();
+  await b.runtime.start(pieceRaw);
+  const pieceB = pieceRaw.asSchema(PIECE_SCHEMA);
+  const timeline: Obs[] = [];
+  const cancel = pieceB.sink((v) => {
+    timeline.push({
+      t: performance.now(),
+      v: (v as { value?: number } | undefined)?.value,
+    });
+  });
+  await b.runtime.idle();
+  await pieceB.sync();
+  await pieceB.pull();
+  // Bounded hydration wait: the resumed cell must read SOMETHING before the
+  // click (hydration time is itself recorded).
+  const h0 = performance.now();
+  while (pieceB.get()?.value === undefined) {
+    if (performance.now() - h0 > 15000) break;
+    await new Promise((r) => setTimeout(r, 100));
+    await pieceB.pull();
+  }
+  const hydrateMs = performance.now() - h0;
+  console.log(`trial ${n}: B hydrated in ${hydrateMs.toFixed(0)}ms`);
+  const preClick = pieceB.get()?.value;
+  console.log(`trial ${n}: B preClick get =`, JSON.stringify(pieceB.get()));
+  const clickT = performance.now();
+  timeline.push({ t: clickT, v: preClick }); // the pre-click reading
+  b.runtime.editWithRetry((tx) =>
+    pieceB.key("increment").withTx(tx).send({})
+  );
+  // Observe until value 2 has been quiet for QUIET_MS (or 30 s cap).
+  const tStart = performance.now();
+  while (true) {
+    await new Promise((r) => setTimeout(r, 100));
+    const last = timeline[timeline.length - 1];
+    const settled = last && last.v === 2 &&
+      performance.now() - last.t > QUIET_MS;
+    if (settled) break;
+    if (performance.now() - tStart > 30000) break;
+    await pieceB.pull();
+  }
+  await b.runtime.idle();
+  await b.storageManager.synced();
+  const finalV = pieceB.get()?.value;
+  cancel();
+  await b.runtime.dispose();
+  await b.storageManager.close();
+
+  // Analyze: post-click observations; a revert is any v<2 observed AFTER
+  // the first v=2 observation, with a later v=2.
+  const post = timeline.filter((o) => o.t >= clickT);
+  const seq = post.map((o) => o.v);
+  const firstTwo = post.findIndex((o) => o.v === 2);
+  let verdict = "no-echo-observed";
+  let windowMs = 0;
+  if (firstTwo >= 0) {
+    verdict = "clean";
+    let revertAt = -1;
+    for (let i = firstTwo + 1; i < post.length; i++) {
+      if ((post[i].v ?? 0) < 2 && revertAt < 0) revertAt = i;
+      else if (post[i].v === 2 && revertAt >= 0) {
+        verdict = "REVERT";
+        windowMs = post[i].t - post[revertAt].t;
+        break;
+      }
+    }
+    if (revertAt >= 0 && verdict !== "REVERT") verdict = "stuck-reverted";
+  }
+  return `trial ${n}: preClick=${preClick} final=${finalV} verdict=${verdict}` +
+    (windowMs ? ` windowMs=${windowMs.toFixed(0)}` : "") +
+    ` obs=[${seq.join(",")}] clickToFirstEcho=${
+      firstTwo >= 0 ? (post[firstTwo].t - clickT).toFixed(0) : "-"
+    }ms`;
+}
+
+const results: string[] = [];
+for (let i = 1; i <= TRIALS; i++) {
+  try {
+    const r = await trial(i);
+    console.log(r);
+    results.push(r);
+  } catch (e) {
+    const line = `trial ${i}: ERROR ${(e as Error).stack ?? e}`;
+    console.log(line);
+    results.push(line);
+  }
+}
+console.log("\n[atfloor-instrument] summary:");
+const reverts = results.filter((r) => r.includes("verdict=REVERT"));
+console.log(
+  `  trials=${results.length} reverts=${reverts.length} ` +
+    (reverts.length
+      ? `windows: ${reverts.map((r) => r.match(/windowMs=([0-9.]+)/)?.[1]).join(",")} ms`
+      : "reachability-negative at this head (no revert observed)"),
+);
