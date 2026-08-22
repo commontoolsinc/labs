@@ -115,6 +115,7 @@ import {
 } from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
+  isInternalVerifierRead,
   isMergeableOpRead,
   isReadExcludedFromConflict,
   isReadIgnoredForCommit,
@@ -3021,6 +3022,50 @@ class SpaceReplica implements ISpaceReplica {
     return this.visibleDocument(uri, scope, identity);
   }
 
+  /** ISpaceReplica.getNonSpeculativeDocument (RULED 2026-08-21;
+   * verification-coverage.md OW47, second producer): the doc's view
+   * over confirmed state plus only its DURABLE pending layers,
+   * skipping the client speculation overlay (#speculativeLocalSeqs).
+   * The value side of the blind-write verifier-read basis — the same
+   * layers `buildReads` names for such reads. */
+  getNonSpeculativeDocument(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined {
+    const record = this.#docs.get(
+      docKey(uri, this.instanceKey(scope, identity)),
+    );
+    if (!record) {
+      return undefined;
+    }
+    const hasSpeculative = record.pending.some((entry) =>
+      this.#speculativeLocalSeqs.has(entry.localSeq)
+    );
+    if (!hasSpeculative) {
+      // No speculation on this doc: the non-speculative view IS the
+      // visible view (served from the prefix cache).
+      return this.visibleDocument(uri, scope, identity);
+    }
+    // Fold only the durable pending layers over the confirmed base, in
+    // stack order. The durable subset is a SUBSEQUENCE of the pending
+    // array, not a prefix, so the prefix materialization cache does not
+    // apply; a doc carrying speculation is a bounded transient (the
+    // overlay destination retires it), so this stays a cold path.
+    let value = record.confirmed.value;
+    for (const entry of record.pending) {
+      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
+        continue;
+      }
+      value = applyPendingVersion(value, entry, {
+        space: this.#space,
+        id: uri,
+        scope,
+      });
+    }
+    return value;
+  }
+
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
@@ -4994,6 +5039,12 @@ class SpaceReplica implements ISpaceReplica {
     // unbounded for a never-served instance, so "the user typed while an
     // echo stood" is a routine state, not a race (rootcause §2b; the
     // cellset-lww end-to-end step; the group-chat messageDraft shape).
+    // The blind-write tx's SECOND layer-naming producer passes true too
+    // (RULED 2026-08-21; the name-draft triage): CFC prepare's
+    // internal-verifier read of the write-target doc, whose VALUE the
+    // transaction read path serves from the same non-speculative stack
+    // (v2-transaction.ts) — the verifier verifies durable policy state
+    // and names the durable basis, together.
     // The structural existence/shape precondition is evaluated against
     // durable state either way (basisSeq stays the true confirmed basis),
     // DURABLE in-flight layers stay named (dependency + CT-1910
@@ -5142,6 +5193,16 @@ class SpaceReplica implements ISpaceReplica {
         toCommitReadPath(read.path),
         read.nonRecursive === true,
         typeof read.meta?.seq === "number" ? read.meta.seq : undefined,
+        // A CFC internal-verifier read of a blind UI-input write tx
+        // bases on the doc's NON-speculative stack (RULED 2026-08-21;
+        // OW47's second producer — the name-draft triage): the read's
+        // VALUE was served from that stack (v2-transaction.ts read()),
+        // so the layers named here must be the same durable set —
+        // verify-durable and name-durable travel together. Confined to
+        // the blind-write tx shape: `structuralTarget` survives the
+        // unmark exactly so commit-time emission can recognize it, and
+        // a verifier read in any other tx keeps naming every layer.
+        structuralTarget !== undefined && isInternalVerifierRead(read.meta),
       );
     }
     // The blind UI-input write's single structural existence/shape precondition: a

@@ -41,12 +41,16 @@ import {
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
 import {
+  ignoreReadForScheduling,
+  internalVerifierRead,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
 import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -147,6 +151,30 @@ describe("Phase 2 speculation overlay", () => {
     "  ({ n }) => ({ total: computed(() => n * 7) }),",
     ");",
   ].join("\n");
+
+  // A draft cell whose field carries an authored confidentiality
+  // clause: writing through it marks the tx CFC-relevant
+  // (`recordRelevantSchemaWritePolicyInput`) and the authored write
+  // persists REAL stored CFC metadata — schemaHash included — onto the
+  // doc, so every later write into the doc runs CFC prepare and its
+  // internal-verifier read of the write-target doc fires (the
+  // name-draft triage's death site). The clause only labels; it gates
+  // nothing about the write.
+  const DRAFT_SCHEMA = {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        ifc: {
+          confidentiality: [{
+            type: "https://commonfabric.org/cfc/atom/Resource",
+            class: "did",
+            subject: aliceSigner.did(),
+          }],
+        },
+      },
+    },
+  } as const satisfies JSONSchema;
 
   it("a client derivation run diverts to the overlay: instant echo with NO client commit, then watermark-driven retirement to the store value once the server serves (speculation.md §1, §4; the by-construction gate)", async () => {
     // PHASE A — the echo, deterministically BEFORE any serving exists:
@@ -868,6 +896,341 @@ describe("Phase 2 speculation overlay", () => {
     // arrival-gated business (speculation.md §4).
     expect(overlay.entryCount(space)).toBe(echoEntries);
     cancelDemand();
+  });
+
+  it("a CFC-RELEVANT blind UI-input write into a doc carrying a speculative layer EXPORTS — the internal-verifier read bases on the non-speculative stack (verification-coverage.md OW47 second producer; the name-draft shape; RULED 2026-08-21)", async () => {
+    // The OW47 family's SECOND layer-naming producer (the name-draft
+    // own-write loss triage, docs/history/plans/server-execution-v2/
+    // optimize/name-draft-loss-triage.md): when the blind write's
+    // target is CFC-relevant, CFC prepare's internal-verifier read of
+    // the write-target doc (`storedMetadataFor`, path [], recursive,
+    // issued AFTER `unmarkUiInputBlindWriteTx` by design) entered the
+    // commit set with no exclusion, so under a standing own-echo the
+    // basis named the echo layer and the §6 export refusal killed the
+    // USER's typed input terminally — while the structural read (the
+    // test above) was already excluded. The ruled fix (arm (b),
+    // 2026-08-21): the blind-write tx's verifier reads base on the
+    // doc's NON-speculative stack — the value they verify AND the
+    // basis they contribute — so the verifier verifies exactly the
+    // durable policy state the server will enforce against. The
+    // refusal is UNTOUCHED for value-consuming and for non-blind
+    // transactions (the tests beside this one pin both directions).
+    //
+    // Shape: a plain draft cell whose field carries an authored
+    // confidentiality clause — the authored pre-write persists REAL
+    // stored CFC metadata (schemaHash included) onto the doc, so the
+    // later UI fill is CFC-relevant end to end. The standing echo is
+    // sealed onto the replica exactly as the overlay destination seals
+    // one (`sealNative`, speculative, verdict pending) — the layer
+    // state §6 and `buildReads` consult is identical to a pattern
+    // echo's.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "verifier-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+
+    // Setup guard: the authored labeled write persisted stored CFC
+    // metadata onto the draft doc — without it the fill below would
+    // not be CFC-relevant and the pin would be vacuous.
+    {
+      const guardTx = clientRuntime.edit();
+      expect(readStoredCfcMetadata(guardTx, draftLink)).toBeDefined();
+      await guardTx.commit();
+    }
+
+    // The standing seed echo: a SPECULATIVE overlay layer over the
+    // draft doc, verdict pending — the arrival-gated window the triage
+    // measured at a full served round trip.
+    const replica = clientManager.open(space).replica;
+    const durableDoc = replica.getDocument(draftLink.id, draftLink.scope);
+    expect(durableDoc).toBeDefined();
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: draftLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { name: "seed-echo" },
+          },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(draft.key("name").get()).toBe("seed-echo");
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    // The USER act, exactly handleCellSet's shape (runtime-processor.ts):
+    // mark the tx blind, thread the cell's PARENT as the structural
+    // precondition, set, unmark, prepare, commit.
+    const nameCell = draft.key("name");
+    const blindTx = clientRuntime.edit();
+    markUiInputBlindWriteTx(blindTx);
+    const link = nameCell.withTx(blindTx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    setBlindStructuralTarget(blindTx, {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: link.path.slice(0, -1),
+    });
+    nameCell.withTx(blindTx).set("typed-name");
+    unmarkUiInputBlindWriteTx(blindTx);
+    // Vacuity guard: the pin only pins the death site if CFC prepare
+    // actually runs on this tx.
+    expect(blindTx.getCfcState().relevant).toBe(true);
+    clientRuntime.prepareTxForCommit(blindTx);
+    const outcome = await blindTx.commit();
+
+    // The write exports — no SpeculativeBasisError, no silent drop.
+    expect(outcome.error).toBeUndefined();
+    await clientRuntime.storageManager.synced();
+
+    // Exactly ONE new engine commit: the fix re-issues nothing, so it
+    // cannot double-apply (the which-direction hazard both ways).
+    const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
+    expect(after.length).toBe(commitsBefore + 1);
+
+    // The DURABLE truth holds the typed value, read through a fresh
+    // overlay-free reader.
+    const readerManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerManager,
+    });
+    try {
+      const readerDraft = readerRuntime.getCell<{ name: string }>(
+        space,
+        "verifier-draft",
+        DRAFT_SCHEMA,
+      );
+      await readerDraft.sync();
+      await waitUntil(
+        () => readerDraft.key("name").get() === "typed-name",
+        "the typed value to be durable",
+      );
+    } finally {
+      await readerRuntime.dispose();
+      await readerManager.close();
+    }
+
+    // The echo is untouched — basis exclusion, never a withdrawal: the
+    // speculative layer still stands on the doc (its verdict is
+    // pending).
+    expect(
+      replica.speculationRetirementView!(draftLink.id, draftLink.scope)
+        .pendingLocalSeqs.length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("the SAME CFC-relevant write WITHOUT the blind mark is still refused over a standing echo — the verifier-read basis change is confined to the blind-write tx shape (speculation.md §6 stands)", async () => {
+    // The scoping reverse pin: identical doc, identical relevance,
+    // identical standing echo — only the blind UI-input marking
+    // differs. A non-blind set is read-modify-write: its own value
+    // read of the target doc is a REAL dependency on the echo, and
+    // the ruled §6 refusal must keep firing terminally (the
+    // verifier-read exclusion never reaches a transaction outside the
+    // `unmarkUiInputBlindWriteTx` family).
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const draft = clientRuntime.getCell<{ name: string }>(
+      space,
+      "nonblind-draft",
+      DRAFT_SCHEMA,
+    );
+    await draft.sync();
+    {
+      const tx = clientRuntime.edit();
+      draft.withTx(tx).set({ name: "durable-name" });
+      clientRuntime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const draftLink = draft.getAsNormalizedFullLink();
+
+    const replica = clientManager.open(space).replica;
+    const durableDoc = replica.getDocument(draftLink.id, draftLink.scope);
+    expect(durableDoc).toBeDefined();
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: draftLink.id,
+          type: "application/json",
+          value: {
+            ...(durableDoc as Record<string, unknown>),
+            value: { name: "seed-echo" },
+          },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(draft.key("name").get()).toBe("seed-echo");
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    const casTx = clientRuntime.edit();
+    draft.key("name").withTx(casTx).set("cas-name");
+    // Vacuity guard: the scoping claim needs CFC prepare on this tx too.
+    expect(casTx.getCfcState().relevant).toBe(true);
+    clientRuntime.prepareTxForCommit(casTx);
+    const outcome = await casTx.commit();
+
+    expect(outcome.error).toBeDefined();
+    expect(outcome.error!.name).toBe("SpeculativeBasisError");
+    expect(outcome.error!.message).toContain("speculative overlay layer");
+    expect(isTerminalRejection(outcome.error)).toBe(true);
+    // Nothing reached the wire.
+    expect(Engine.selectCommitsSince(engine, { fromSeq: 0 }).length).toBe(
+      commitsBefore,
+    );
+  });
+
+  it("under a standing overlay layer whose writes include /cfc, a blind-write tx's verifier-shaped read sees the DURABLE doc while an ordinary read sees the overlay — verify-durable and name-durable travel together (RULED 2026-08-21)", async () => {
+    // The consistency pin for the ruled arm (b): the value the
+    // verifier consumes must match the basis named for it. The echo
+    // CLASS writes `/cfc` (observed on save echoes in the triage), so
+    // overlay and durable policy state genuinely diverge; the ruling
+    // makes DURABLE the verifier's input for the blind-write tx —
+    // never verify-overlay + name-durable. Pinned at the transaction
+    // read seam, where the split is directly observable: a synthetic
+    // speculative layer rewrites the doc's value AND plants `/cfc`;
+    // the verifier-shaped read (internalVerifierRead meta, issued
+    // after the blind window closes, in a tx carrying the blind
+    // structural target) returns the durable doc, an ordinary read of
+    // the same doc in the same tx returns the overlay view, and the
+    // same verifier-shaped read in a tx WITHOUT the blind shape keeps
+    // today's overlay basis.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const doc = clientRuntime.getCell<{ total: number }>(
+      space,
+      "verifier-consistency-doc",
+      undefined,
+    );
+    await doc.sync();
+    {
+      const tx = clientRuntime.edit();
+      doc.withTx(tx).set({ total: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const docId = doc.getAsNormalizedFullLink().id;
+
+    // A standing SPECULATIVE layer that rewrites the value and plants
+    // /cfc — sealed onto the real replica exactly as the overlay
+    // destination seals an echo (speculative: true, verdict pending).
+    const replica = clientManager.open(space).replica;
+    const overlayCfc = {
+      version: 1,
+      labelMap: {
+        entries: [{ path: ["total"], label: {}, origin: "declared" }],
+      },
+    };
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: docId,
+          type: "application/json",
+          value: { value: { total: 42 }, cfc: overlayCfc },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    // The overlay view shows the layer.
+    expect(doc.key("total").get()).toBe(42);
+
+    const verifierMeta = {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    };
+    const address = (path: string[]) => ({
+      space,
+      id: docId,
+      type: "application/json" as const,
+      path,
+    });
+
+    // A tx WITHOUT the blind shape: the verifier-shaped read keeps
+    // today's overlay basis (the change is confined to the blind
+    // family).
+    {
+      const plainTx = clientRuntime.edit();
+      expect(plainTx.readOrThrow(address(["value", "total"]), verifierMeta))
+        .toBe(42);
+      expect(plainTx.readOrThrow(address(["cfc"]), verifierMeta))
+        .toEqual(overlayCfc);
+      await plainTx.commit();
+    }
+
+    // The blind-write tx shape (mark → structural target → unmark):
+    // verifier-shaped reads see the DURABLE doc; ordinary reads in the
+    // SAME tx see the overlay.
+    {
+      const blindTx = clientRuntime.edit();
+      markUiInputBlindWriteTx(blindTx);
+      const link = doc.withTx(blindTx).resolveAsCell()
+        .getAsNormalizedFullLink();
+      setBlindStructuralTarget(blindTx, {
+        id: link.id,
+        space: link.space,
+        scope: link.scope,
+        path: [],
+      });
+      unmarkUiInputBlindWriteTx(blindTx);
+      expect(blindTx.readOrThrow(address(["value", "total"]), verifierMeta))
+        .toBe(1);
+      expect(blindTx.readOrThrow(address(["cfc"]), verifierMeta))
+        .toBeUndefined();
+      expect(blindTx.readOrThrow(address(["value", "total"]))).toBe(42);
+      expect(blindTx.readOrThrow(address(["cfc"]))).toEqual(overlayCfc);
+      await blindTx.commit();
+    }
   });
 
   it("a handler that read a speculative echo runs ONCE — no convergence-retry loop against a dependency that is never coming (leg-C 1b; events-down diverts the write)", async () => {
