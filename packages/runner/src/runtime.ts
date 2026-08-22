@@ -810,6 +810,12 @@ export class Runtime {
   /** Optional pattern statement-coverage collector; see RuntimeOptions. */
   readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
+  // The runtime's trust revision — `<runtime id>` with the trust-config
+  // digest folded in when one is configured. The ONE composition site for
+  // every snapshot this runtime mints (the default provider and
+  // trustSnapshotForPrincipal), so a trust-config change invalidates
+  // per-run served snapshots exactly as it does ambient client ones.
+  readonly #trustRevision: string;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present with built-in defaults). */
   readonly experimental: ExperimentalOptions;
@@ -1317,14 +1323,11 @@ export class Runtime {
       // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
       this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
       const actingPrincipal = options.storageManager.as.did() as DID;
-      const trustRevision = this.cfcTrustConfig === undefined
+      this.#trustRevision = this.cfcTrustConfig === undefined
         ? this.id
         : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
-      this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
-        id: `principal:${actingPrincipal}`,
-        actingPrincipal,
-        revision: trustRevision,
-      }));
+      this.trustSnapshotProvider = options.trustSnapshotProvider ??
+        (() => this.trustSnapshotForPrincipal(actingPrincipal));
       this.userIdentityDID = options.storageManager.as.did() as DID;
       this.moduleRegistry = new ModuleRegistry(this);
       this.patternManager = new PatternManager(this);
@@ -2073,6 +2076,26 @@ export class Runtime {
     pieceRootIds: readonly string[],
   ): readonly ScopeKeyIdentity[] | undefined {
     return this.#serverRunDemanderResolver?.(pieceRootIds);
+  }
+
+  /**
+   * A trust snapshot for one acting principal (serving-loop.md §3c: a
+   * served run's CFC trust snapshot carries the run's ACTING principal,
+   * never the serving runtime's ambient identity). The SpaceServer's run
+   * stamper attaches these per transaction via `setCfcTrustSnapshot`, so
+   * the current-principal label mints, the mid-run grant writes, and the
+   * concept-floor evaluation of a served run all resolve against the
+   * principal the run acts as. `revision` is the runtime's own trust
+   * revision — the same composition the default provider uses — so a
+   * trust-config change invalidates per-run prepared digests exactly as
+   * it does ambient ones.
+   */
+  trustSnapshotForPrincipal(principal: string): TrustSnapshot {
+    return {
+      id: `principal:${principal}`,
+      actingPrincipal: principal,
+      revision: this.#trustRevision,
+    };
   }
 
   /**

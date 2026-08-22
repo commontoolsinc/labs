@@ -1440,6 +1440,12 @@ export class SpaceServer implements TransactionSealDestination {
     // `info.acting`/mints a capabilityRef is bypassed for it: the
     // carriage is the trigger's, never derived here.
     if (info.kind === "bookkeeping" && info.delegated !== undefined) {
+      // The carriage's trust snapshot (OW34-family; serving-loop.md §3c):
+      // the delegated writeback's CFC labels resolve against the
+      // delegated acting principal, matching the memory-plane carriage.
+      tx.setCfcTrustSnapshot(
+        this.#runtime!.trustSnapshotForPrincipal(info.delegated.acting.user),
+      );
       stampWaveRunContext(tx, {
         actionId: info.actionId,
         kind: info.kind,
@@ -1457,6 +1463,25 @@ export class SpaceServer implements TransactionSealDestination {
           : {}),
       }
       : undefined;
+    // The run's trust snapshot (OW34-family; serving-loop.md §3c): the
+    // acting principal the run carries — a handler's server-stamped
+    // `firedAt` actor (LT6-inherited pairs included), else a demanded
+    // derivation's demand-supplied principal (eager at stamp: labels mint
+    // at prepare, BEFORE the seal settles the memory-plane attribution
+    // from the discovered scope, and derivations cannot mint
+    // current-principal labels, so the divergence is consequence-free).
+    // An actor-less run keeps the ambient service snapshot edit()
+    // attached (protocol.md §1's "The SpaceServer's own writes"; RULED
+    // 2026-08-21) — set at most once here, before the run's first read,
+    // so prepare and the commit-time recheck see one value and the
+    // `trust-snapshot-changed` invalidation stays a dead tripwire.
+    const trustPrincipal = (info.acting ?? acting)?.user ??
+      (info.kind === "derivation" ? principal : undefined);
+    if (trustPrincipal !== undefined) {
+      tx.setCfcTrustSnapshot(
+        this.#runtime!.trustSnapshotForPrincipal(trustPrincipal),
+      );
+    }
     stampWaveRunContext(tx, {
       actionId: info.actionId,
       kind: info.kind,
