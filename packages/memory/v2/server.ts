@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricPlainObject } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
@@ -137,6 +138,15 @@ export { SessionRegistry } from "./session-registry.ts";
 // OTLP SDK installed. Spans created here are purely additive observability and
 // do not affect write/fan-out behavior.
 const tracer = trace.getTracer("memory-server", "1.0.0");
+
+/**
+ * Timing-only logger. It never logs — the statistics behind `time()` are
+ * recorded whether or not a logger is enabled, and `/api/health/stats`
+ * reports them as the `timingStats.memory` block — so the frames a
+ * connection handles are measurable on a deployed server without turning
+ * anything on.
+ */
+const timing = getLogger("memory", { enabled: false });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
@@ -594,11 +604,25 @@ class Connection {
 
   async receive(payload: string): Promise<void> {
     this.#pendingReceives += 1;
+    // A connection handles its frames one at a time, so a frame's cost has
+    // two halves that are fixed at opposite ends of the stack: how long it
+    // WAITED behind the frames already in flight (`memory/frame/queue`), and
+    // how long it took once it started (`memory/frame/handle`). Only the
+    // second is the frame's own work — a queue time that tracks the handle
+    // time of whatever precedes it is head-of-line blocking, and the fix is
+    // to make that other frame cheaper rather than this one.
+    const arrivedAt = performance.now();
     try {
       const previous = this.#receiving;
-      const current = previous.catch(() => undefined).then(() =>
-        this.receiveOrdered(payload)
-      );
+      const current = previous.catch(() => undefined).then(async () => {
+        const startedAt = performance.now();
+        timing.time(arrivedAt, startedAt, "memory", "frame", "queue");
+        try {
+          await this.receiveOrdered(payload);
+        } finally {
+          timing.time(startedAt, "memory", "frame", "handle");
+        }
+      });
       this.#receiving = current.then(() => undefined, () => undefined);
       return await current;
     } finally {
@@ -5036,13 +5060,26 @@ export class Server {
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
     this.cancelScheduledRefresh();
+    // The same waiting-against-working split the connection's receive keeps,
+    // one level coarser: a flush PASS, not a frame. `memory/flush/queue` is
+    // how long this pass waited for the flush in front of it,
+    // `memory/flush/refresh` how long its own evaluation and sending took —
+    // across every dirty space the pass selected and every frame those
+    // sessions were owed, so it is a batch cost and dividing it by anything
+    // to recover a per-frame one is unsound. What it does bound is how long
+    // a client's push can sit behind the server's own fan-out: push latency
+    // is at least the refresh delay plus these two.
+    const requestedAt = performance.now();
     const run = async () => {
       const refreshStart = Date.now();
+      const startedAt = performance.now();
+      timing.time(requestedAt, startedAt, "memory", "flush", "queue");
       try {
         await this.refreshLoop(
           spaces === undefined ? undefined : new Set(spaces),
         );
       } finally {
+        timing.time(startedAt, "memory", "flush", "refresh");
         this.#lastRefreshDurationMs = Math.max(
           0,
           Date.now() - refreshStart,
