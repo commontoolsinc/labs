@@ -17,6 +17,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -115,7 +116,9 @@ describe("UnknownValue", () => {
       describe("encode()", () => {
         it("returns the bare `state` (the tag is carried separately)", () => {
           const uv = new UnknownValue("Weird@7", { data: [1, 2, 3] });
-          expect(UnknownValue[CODEC].encode(uv)).toEqual({ data: [1, 2, 3] });
+          expect(UnknownValue[CODEC].encode(uv, NULL_LIVE_ENVIRONMENT)).toEqual(
+            { data: [1, 2, 3] },
+          );
         });
       });
 

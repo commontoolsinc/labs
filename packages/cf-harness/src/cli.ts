@@ -489,6 +489,8 @@ Options:
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
+                                (no default; select one here, through
+                                CF_HARNESS_MODEL_PROVIDER, or with config set)
   --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
   --compact-threshold <n>       Token threshold for server-side compaction
                                 (default: 75% of the model input budget; 0 disables)
@@ -2537,11 +2539,7 @@ const runCfHarnessConfigCommand = async (
     if (action === "inspect") {
       const state = await store.inspect();
       let effectiveProvider: HarnessModelProviderId | undefined;
-      let effectiveSource:
-        | "environment"
-        | "persistent"
-        | "default"
-        | undefined;
+      let effectiveSource: "environment" | "persistent" | undefined;
       const rawEnvironment = nonEmptyEnvValue(
         deps.env?.CF_HARNESS_MODEL_PROVIDER ??
           (deps.env === undefined
@@ -2558,16 +2556,9 @@ const runCfHarnessConfigCommand = async (
       if (environment !== undefined) {
         effectiveProvider = environment;
         effectiveSource = "environment";
-      } else if (
-        state.state === "configured" || state.state === "missing"
-      ) {
-        if (state.state === "configured") {
-          effectiveProvider = state.settings.modelProvider;
-          effectiveSource = "persistent";
-        } else {
-          effectiveProvider = "openai-compatible-gateway";
-          effectiveSource = "default";
-        }
+      } else if (state.state === "configured") {
+        effectiveProvider = state.settings.modelProvider;
+        effectiveSource = "persistent";
       }
       const result = {
         state: state.state,

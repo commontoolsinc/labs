@@ -61,8 +61,9 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * test). `settleGateWhen` scopes the hold: the serving loop runs a
  * settle in EVERY cycle (empty ones included), so an unconditional gate
  * would catch some idle cycle already in flight and starve the drain
- * the test needs — the predicate lets exactly the cycle that SEALED the
- * watched state hang. Undefined everywhere else.
+ * the test needs. The predicate must become true before the intended
+ * cycle reaches the barrier; a flag set by the handler gives that cycle
+ * a causal name. Undefined everywhere else.
  *
  * The second seam, the drain's SYNC gate (`syncGate` / `syncGateWhen`,
  * the seal→outcome-window pin): the serving drain awaits the sidecar
@@ -777,6 +778,126 @@ describe("Phase 3 events-down (serving side)", () => {
       });
       expect((doc?.value as { value?: number })?.value).toBe(1);
       expect(consequenceCommitsFor()).toBe(1);
+    }
+    cancelDemand();
+  });
+
+  it("rapid-fire coalescing under CONSTRUCTED queue depth (the RULED sx2-gate re-tensing, 2026-08-21 — owner: \"i like (3) as well\"): K events queued ahead of ONE drain yield K completed runs, each consequenced exactly once, in EXACTLY ONE consequence-carrying derived commit (D-v2-2's commit-level batching; testing.md §5 row 3's discriminating half)", async () => {
+    // The live sx2-events surface cannot assert a derived-commit ratio:
+    // its append queue serializes one commit round trip per event, so
+    // how many appends a wave finds queued is the ratio of round-trip
+    // time to wave time — a LOAD RATIO with no test lever (the census's
+    // item-4 flake; ow-sx2-coalescing-gate.md §1 claim 1). This pin
+    // CONSTRUCTS the criterion's premise instead: fire K with NO
+    // serving host (each append commits durably, nothing processes
+    // them), then bring the host up — the activation reprocess scan
+    // (serving-loop.md §6 step 4) finds all K pending at once and the
+    // wave takes the whole batch. With a flush deadline far above the
+    // batch's work there is no deadline cut to split it, so the
+    // batching contract is exact and load-independent: ONE derived
+    // commit consequences all K (a per-handler-run commit — the v1
+    // failure the criterion exists to catch — reads as K commits
+    // here, deterministically).
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "coalesce-arg",
+      result: "coalesce-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // Fire K with NO host: K durable, unconsequenced entries.
+    const K = 10;
+    for (let i = 0; i < K; i++) result.key("bump").send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the stream sidecar to exist",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return (value?.entries?.length ?? 0) === K;
+      },
+      "all K event appends to land durably",
+    );
+    const queued = Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue;
+    expect(queued.entries!.every((e) => e.consequenced === undefined)).toBe(
+      true,
+    );
+    const eventIds = queued.entries!.map((e) => e.eventId);
+    expect(new Set(eventIds).size).toBe(K);
+    const before = Engine.serverSeq(engine);
+
+    // The host comes up with a flush deadline far above the batch's
+    // work, so the wave cannot be deadline-cut mid-batch; the authored
+    // poke stands in for the reconnect that activates the space (the
+    // restart test's shape).
+    host = newHost({ flushDeadlineMs: 60_000, idleParkMs: 600_000 });
+    {
+      const poke = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "coalesce-activate", undefined)
+        .withTx(poke).set(1);
+      expect((await poke.commit()).error).toBeUndefined();
+    }
+
+    // All K non-idempotent effects apply exactly once: value === K.
+    await waitUntil(
+      () => {
+        const doc = Engine.read(engine, {
+          id: argument.getAsNormalizedFullLink().id,
+        });
+        return ((doc?.value as { value?: number })?.value ?? 0) === K;
+      },
+      "all K handler consequences to land",
+    );
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return value?.entries?.every((e) => e.consequenced === true) === true;
+      },
+      "every entry to be consequence-marked",
+    );
+
+    // Exactly-once per event AND the batching contract: the derived
+    // commits after `before` that carry consequence_of must consequence
+    // each of the K eventIds exactly once — and there must be EXACTLY
+    // ONE such commit (the wave took the whole constructed batch).
+    const carrying = engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE seq > :from_seq AND class = 'derived'
+         AND consequence_of IS NOT NULL`,
+    ).all({ from_seq: before }) as Array<
+      { seq: number; consequence_of: string }
+    >;
+    for (const eventId of eventIds) {
+      expect(
+        carrying.filter((row) => row.consequence_of.includes(eventId)).length,
+      ).toBe(1);
+    }
+    expect(carrying.length).toBe(1);
+
+    // Counters agree (testing.md §4): K appended, K processed — and the
+    // final value never overshoots (no double delivery hides in the
+    // batch).
+    const stats = host!.stats();
+    expect(stats.events.appended).toBe(K);
+    expect(stats.events.processed).toBe(K);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    {
+      const doc = Engine.read(engine, {
+        id: argument.getAsNormalizedFullLink().id,
+      });
+      expect((doc?.value as { value?: number })?.value).toBe(K);
     }
     cancelDemand();
   });
@@ -2284,11 +2405,18 @@ describe("Phase 3 events-down (serving side)", () => {
     try {
       const servingSeen = w.servingC;
       // The s2 handler records every tag; for the derivation's "ping" it
-      // ALSO commits the sibling tx inline (the intent half).
+      // ALSO commits the sibling tx inline (the intent half) — and ARMS
+      // the settle gate as its first act, so the arming is sequenced
+      // before this cycle's settle reaches its barrier (see the gate
+      // installation below).
+      let holdArmed = false;
       cancels.push(w.serving.scheduler.addEventHandler(
         (tx: IExtendedStorageTransaction, event: unknown) => {
           const tag = (event as { tag?: string })?.tag ?? "?";
-          if (tag === "ping") stampSibling(w.serving, tx, sideServing);
+          if (tag === "ping") {
+            holdArmed = true;
+            stampSibling(w.serving, tx, sideServing);
+          }
           const current = servingSeen.withTx(tx).get() as
             | { seen?: string[] }
             | undefined;
@@ -2315,15 +2443,13 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
       expect(sideView()).toBe(0);
 
-      // Hold the wave open once EITHER of the copy's two seals is visible
-      // through the sealed overlay. The seal chain runs emitter → sibling
-      // (committed inline by the handler) → the handler's own tx, so the
-      // sibling's write is the earliest event-handler seal the settle's
-      // barrier can observe — the same chain position the (α3) pin's
-      // handler seal holds; the handler's seal then joins the held wave.
+      // Hold the wave open for the cycle that RUNS the copy: the handler
+      // arms the gate as its first act, and that assignment is sequenced
+      // before the cycle's settle reaches its barrier, so the hold catches
+      // the sealing cycle structurally. An idle settle already in flight
+      // still passes: nothing arms until the copy actually runs.
       servingManager!.settleGate = gate.promise;
-      servingManager!.settleGateWhen = () =>
-        sideView() === 1 || seenView().includes("ping");
+      servingManager!.settleGateWhen = () => holdArmed;
       let released = false;
       try {
         await w.serving.scheduler.run(emitter as never);

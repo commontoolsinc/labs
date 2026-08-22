@@ -1,8 +1,8 @@
 /**
  * Null `LiveEnvironment`: a singleton whose `getCell()` always throws.
- * Useful as a default for decode paths that aren't expected to encounter
- * `Cell` references (e.g. storage-boundary reads of values known to be
- * structurally flat).
+ * Useful as a default for encode and decode paths that aren't expected to
+ * encounter `Cell` references (e.g. storage-boundary reads of values known to
+ * be structurally flat).
  */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
@@ -42,10 +42,9 @@ export class NullLiveEnvironment extends BaseLiveEnvironment {
 
 /**
  * Shared `NullLiveEnvironment` instance with `.shouldDeepFreeze ===
- * true` and whose `getCell()` always throws. Pass this when a decoder wants a
- * live environment but isn't expected to need cell decoding; if a cell ref
- * does turn up, the throw makes the unexpected decode obvious instead
- * of silent.
+ * true` and whose `getCell()` always throws. Pass this when a codec wants a
+ * live environment but isn't expected to need a cell; if a cell ref does turn
+ * up, the throw makes the unexpected lookup obvious instead of silent.
  */
 export const NULL_LIVE_ENVIRONMENT: LiveEnvironment = Object
   .freeze(new NullLiveEnvironment(true));

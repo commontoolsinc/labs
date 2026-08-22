@@ -167,8 +167,10 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
     try {
       tag = matched.tagForValue(value);
       state = (matched instanceof BaseTerminalCodec)
-        ? (matched as TerminalCodec<Encoded>).encode(value)
-        : this.encodeValue((matched as NonterminalCodec).encode(value));
+        ? (matched as TerminalCodec<Encoded>).encode(value, this.env)
+        : this.encodeValue(
+          (matched as NonterminalCodec).encode(value, this.env),
+        );
     } finally {
       // Left in a `finally` because `tagForValue()` and a codec's `encode()`
       // can both throw. The act outlives a throw -- it belongs to the call,

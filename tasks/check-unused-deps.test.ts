@@ -250,7 +250,7 @@ Deno.test("no unused import map entries in the repository", async () => {
   );
 });
 
-Deno.test("ALLOWLIST has no stale entries", async () => {
+Deno.test("the unused-import-map ALLOWLIST has no stale entries", async () => {
   const { allowlisted } = await scan();
   const live = new Set(
     allowlisted.map((entry) => `${entry.config}\t${entry.alias}`),

@@ -3,6 +3,7 @@ import { AssertionError } from "@std/assert";
 import { copy } from "@std/fs";
 import { parse as parseJsonc } from "@std/jsonc";
 import { decode } from "@commonfabric/utils/encoding";
+import { RECORDS_DIR_VARIABLE } from "@commonfabric/test-support/records";
 
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
@@ -232,6 +233,11 @@ export const runDenoWebTest = async (
     cwd: tmpProjectPath,
     env: {
       [STDERR_BOUNDARY_ENV]: stderrBoundary,
+      // The harness inside the child records one browser-kind record per
+      // test it runs. These projects are fixtures of the tests in this
+      // directory rather than tests of this repository, so the child is
+      // given no spool to write them to.
+      [RECORDS_DIR_VARIABLE]: "",
     },
   }).output().then((output) =>
     new HarnessRun(

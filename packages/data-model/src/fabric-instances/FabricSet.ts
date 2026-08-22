@@ -86,7 +86,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        *
        * Stub -- throws until `Set` support is implemented.
        */
-      encode(_value: FabricSet): FabricValue {
+      encode(_value: FabricSet, _env: LiveEnvironment): FabricValue {
         throw new Error("`FabricSet`: not yet implemented");
       }
 

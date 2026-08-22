@@ -267,7 +267,7 @@ async function main() {
     ));
   }
 
-  const replay = await replayAll(roots);
+  const replay = await replayAll(roots, { recordResults: true });
 
   if (Deno.args.includes("--capture-changed")) {
     emit(describeCaptureOutcome(

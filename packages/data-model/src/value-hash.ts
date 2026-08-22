@@ -22,7 +22,7 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
-import { codecOf } from "@/codec-common/index.ts";
+import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
@@ -316,7 +316,7 @@ function feedObjectValue(
       hasher.update(TAG_INSTANCE_BYTES);
       const codec = codecOf(fabInst);
       hasher.update(getStringRep(codec.tagForValue(fabInst)));
-      const state = codec.encode(fabInst);
+      const state = codec.encode(fabInst, NULL_LIVE_ENVIRONMENT);
       feedValue(hasher, state);
       return;
     }

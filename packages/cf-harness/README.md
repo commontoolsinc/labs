@@ -205,12 +205,18 @@ From [packages/cf-harness](.):
 
 ## CLI Example
 
+Every run selects a provider, and there is no default. The examples in this
+section pass `--model-provider` for one run; `CF_HARNESS_MODEL_PROVIDER` selects
+one for a shell and `config set` selects one for a machine, and the later
+examples in this document assume a provider selected one of those two ways.
+
 Standard bearer-auth mode:
 
 ```bash
 cd packages/cf-harness
 CF_HARNESS_API_KEY=... deno task run -- \
   --workspace ../.. \
+  --model-provider openai-compatible-gateway \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
 ```
@@ -221,6 +227,7 @@ No-auth gateway mode:
 cd packages/cf-harness
 deno task run -- \
   --workspace ../.. \
+  --model-provider openai-compatible-gateway \
   --gateway-auth-mode none \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
@@ -232,6 +239,7 @@ GPT-5.6 cache experiment:
 cd packages/cf-harness
 CF_HARNESS_API_KEY=... deno task run -- \
   --workspace ../.. \
+  --model-provider openai-compatible-gateway \
   --model gpt-5.6-terra \
   --reasoning-effort low \
   --prompt-cache-mode explicit \
@@ -297,14 +305,17 @@ ancestors concurrently. `cf-harness` never imports or shares
 `~/.codex/auth.json`. A failed refresh does not fall back to `OPENAI_API_KEY`,
 the Common Tools gateway, or unauthenticated mode.
 
-Direct runs resolve a provider from explicit CLI, environment, persistent
-preference, then the historical gateway default. Provider resolution does not
-resolve or rewrite model aliases. Resume retains the recorded provider and
-ignores the persistent preference; an explicit conflicting provider is a
-`provider-mismatch` failure. Structured config and auth commands use versioned
-JSON result envelopes. Login emits a versioned NDJSON authorization event before
-its terminal result. These responses expose connection health but no tokens,
-full account identifiers, expiries, or raw provider errors.
+Direct runs resolve a provider from explicit CLI, environment, then persistent
+preference. Every provider is opt-in: a run that names none through
+`--model-provider`, `CF_HARNESS_MODEL_PROVIDER`, or `config set` fails with
+`provider-configuration-required` rather than billing a route it never chose.
+Provider resolution does not resolve or rewrite model aliases. Resume retains
+the recorded provider and ignores the persistent preference; an explicit
+conflicting provider is a `provider-mismatch` failure. Structured config and
+auth commands use versioned JSON result envelopes. Login emits a versioned
+NDJSON authorization event before its terminal result. These responses expose
+connection health but no tokens, full account identifiers, expiries, or raw
+provider errors.
 
 Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
 keeps the recorded provider, model, exact credential owner, and encrypted
@@ -342,8 +353,9 @@ CF_HARNESS_HOME=/canonical/private/home \
 ```
 
 The entrypoint serves both execution shapes. It rejects missing or invalid
-provider configuration instead of applying the historical gateway default. Codex
-preflight reads bounded connection health without refreshing; an expired
+provider configuration, and reads only the persisted preference from that
+home—the environment and CLI selections direct runs accept are not consulted.
+Codex preflight reads bounded connection health without refreshing; an expired
 credential refreshes only in the serialized resolver immediately before model
 traffic. Disconnected and reconnect-required Codex configurations return
 `provider-auth-required` without contacting Codex or the gateway. Resumed runs

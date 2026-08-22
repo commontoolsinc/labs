@@ -60,11 +60,11 @@ describe("SymbolCodec", () => {
 
     describe("encode()", () => {
       it('encodes `Symbol.for("foo")` to its registry key', () => {
-        expect(codec.encode(Symbol.for("foo"))).toBe("foo");
+        expect(codec.encode(Symbol.for("foo"), env)).toBe("foo");
       });
 
       it('encodes `Symbol.for("")` (empty key)', () => {
-        expect(codec.encode(Symbol.for(""))).toBe("");
+        expect(codec.encode(Symbol.for(""), env)).toBe("");
       });
     });
 
@@ -82,7 +82,7 @@ describe("SymbolCodec", () => {
       it("round-trips an interned symbol to the same registry instance", () => {
         const result = codec.decode(
           expectedTag,
-          codec.encode(Symbol.for("hello")),
+          codec.encode(Symbol.for("hello"), env),
           env,
         );
         expect(typeof result).toBe("symbol");
@@ -93,7 +93,7 @@ describe("SymbolCodec", () => {
         const key = "café-☕-\u{1F600}";
         const result = codec.decode(
           expectedTag,
-          codec.encode(Symbol.for(key)),
+          codec.encode(Symbol.for(key), env),
           env,
         );
         expect(result).toBe(Symbol.for(key));

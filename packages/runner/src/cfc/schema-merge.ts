@@ -317,6 +317,66 @@ const branchContainsIfc = (schema: JSONSchema): boolean => {
   });
 };
 
+/**
+ * The two scalar `type` strings whose VALUE-sets overlap: every JSON-Schema
+ * integer is a number (the runner's own `schemaTypeMatchesValue` matches a
+ * concrete `5` against BOTH), so `integer` and `number` are NOT value-disjoint
+ * even though the strings differ. This is the ONLY such pair among the seven
+ * JSON types — {null, boolean, object, array, string} are mutually
+ * value-exclusive and each is exclusive with the numerics — so excluding this
+ * one pair makes {@link syntacticallyTypeDisjoint} sound by its own criterion
+ * (review F1 on PR #6178, 2026-08-21).
+ */
+const NUMERIC_TYPE_STRINGS: ReadonlySet<string> = new Set([
+  "integer",
+  "number",
+]);
+
+/**
+ * Syntactic, conservative type-disjointness (RULING 5, CFC owner,
+ * 2026-08-21): both branches carry an explicit scalar `type` string, the
+ * strings name VALUE-disjoint types, and NEITHER branch is itself a
+ * combinator at its root. Everything unprovable — a missing `type`, a type
+ * array, a boolean schema, a nested combinator, or the value-overlapping
+ * `integer`/`number` pair — is NOT disjoint: treating "cannot prove
+ * non-overlap" as disjoint would reopen the policy dodge (a labeled value
+ * also matching an unlabeled sibling and reading unlabeled), the second of
+ * #3263's two protected cases. Disjointness is decided over VALUE-sets, not
+ * type STRINGS (F1); no semantic subtyping reasoning beyond the one fixed
+ * numeric-subtype pair, by ruling.
+ */
+const syntacticallyTypeDisjoint = (
+  left: JSONSchema,
+  right: JSONSchema,
+): boolean => {
+  if (!isObjectOrArray(left) || !isObjectOrArray(right)) return false;
+  const leftObject = left as JSONSchemaObj;
+  const rightObject = right as JSONSchemaObj;
+  if (
+    leftObject.anyOf !== undefined || leftObject.oneOf !== undefined ||
+    leftObject.allOf !== undefined || rightObject.anyOf !== undefined ||
+    rightObject.oneOf !== undefined || rightObject.allOf !== undefined
+  ) {
+    return false;
+  }
+  if (
+    typeof leftObject.type !== "string" ||
+    typeof rightObject.type !== "string" ||
+    leftObject.type === rightObject.type
+  ) {
+    return false;
+  }
+  // The one value-set subtype pair: an `integer` value is also a `number`,
+  // so a concrete value can satisfy both branches — not disjoint.
+  if (
+    NUMERIC_TYPE_STRINGS.has(leftObject.type) &&
+    NUMERIC_TYPE_STRINGS.has(rightObject.type)
+  ) {
+    return false;
+  }
+  return true;
+};
+
 const assertNoDivergentIfcBranches = (
   schema: JSONSchema,
   path = "",
@@ -332,13 +392,31 @@ const assertNoDivergentIfcBranches = (
   ].filter((value) => value !== undefined);
 
   for (const [kind, branches] of branchGroups) {
-    if (branches.some(branchContainsIfc)) {
-      throw new Error(
-        `ifc inside divergent ${kind} branches is unsupported at ${
-          path || "/"
-        }`,
+    const ifcBranchCount = branches.filter(branchContainsIfc).length;
+    if (ifcBranchCount === 0) continue;
+    // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a
+    // SINGLE ifc-carrying branch whose every sibling is syntactically
+    // type-disjoint from it is the POLICY CARRIER of an anyOf/oneOf
+    // presence union — the wish builtin's optional-result shape,
+    // `anyOf[{type:"undefined"}, <ifc view>]` — and merges: there is no
+    // ambiguity (one carrier) and no dodge (no sibling a labeled value
+    // could also match). Everything else stays refused: more than one
+    // carrier is #3263's original ambiguity; a non-disjoint sibling is the
+    // policy dodge; and allOf is conjunctive — type-disjoint siblings are
+    // unsatisfiable-by-construction there, so no carrier reading exists.
+    // The recursion below still descends INTO the admitted carrier, so
+    // divergence nested deeper refuses exactly as before.
+    if (kind !== "allOf" && ifcBranchCount === 1) {
+      const carrierIndex = branches.findIndex(branchContainsIfc);
+      const carrier = branches[carrierIndex]!;
+      const siblingsDisjoint = branches.every((sibling, index) =>
+        index === carrierIndex || syntacticallyTypeDisjoint(carrier, sibling)
       );
+      if (siblingsDisjoint) continue;
     }
+    throw new Error(
+      `ifc inside divergent ${kind} branches is unsupported at ${path || "/"}`,
+    );
   }
 
   // Recurse over the shared keyword vocabulary so a divergent-ifc shape

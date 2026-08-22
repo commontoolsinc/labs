@@ -272,7 +272,7 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse sigil links to normalized links", () => {
+    it("should drop a redundant overwrite this when parsing sigil links", () => {
       const sigilLink = {
         "/": {
           [LINK_V1_TAG]: {
@@ -294,7 +294,7 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse sigil links with overwrite this to normalized links", () => {
+    it("should parse sigil links with overwrite redirect to normalized links", () => {
       const sigilLink = {
         "/": {
           [LINK_V1_TAG]: {

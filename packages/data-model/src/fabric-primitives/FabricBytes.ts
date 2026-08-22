@@ -153,7 +153,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       }
 
       /** @inheritDoc */
-      encode(value: FabricBytes): string {
+      encode(value: FabricBytes, _env: LiveEnvironment): string {
         return toUnpaddedBase64url(value.#bytes);
       }
     })(),
@@ -176,7 +176,7 @@ export class FabricBytes extends BaseFabricPrimitive {
        * mutating the encoded tree before it crosses cannot reach into this
        * instance.
        */
-      encode(value: FabricBytes): RealmCodecValue {
+      encode(value: FabricBytes, _env: LiveEnvironment): RealmCodecValue {
         return value.sliceBuffer();
       }
 

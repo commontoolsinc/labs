@@ -128,7 +128,7 @@ describe("FabricSet", () => {
 
       describe("encode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.encode(new FabricSet(new Set()))).toThrow(
+          expect(() => codec.encode(new FabricSet(new Set()), env)).toThrow(
             "not yet implemented",
           );
         });

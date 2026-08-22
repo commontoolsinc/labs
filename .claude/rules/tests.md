@@ -134,6 +134,12 @@ record on their own. Two consequences worth knowing while writing one:
   interpolated identifiers, which mint a new identity every time they
   shift; renames split history unless bridged in
   `tasks/test-identity-aliases.jsonl`.
+- The name has to be unique within its scope — the whole describe chain
+  plus the `it()` description, or the bare `Deno.test` name, across every
+  test file of the package. Two tests under one name are one identity, so
+  their outcomes and durations merge and neither can be tracked on its
+  own. A loop that generates names is the case to check twice: a
+  hand-written test beside it can land on one of them.
 - Every test must finish within sixty seconds in CI, not counting setup.
 
 A new test *surface* (a new CI job, script, or harness) does need wiring —

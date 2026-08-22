@@ -118,7 +118,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       }
 
       /** @inheritDoc */
-      encode(value: FabricLink): FabricPlainObject {
+      encode(value: FabricLink, _env: LiveEnvironment): FabricPlainObject {
         // The payload IS the encoded state; its nested values are recursively
         // encoded by the engine.
         return value.#payload;

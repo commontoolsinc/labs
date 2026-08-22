@@ -93,6 +93,8 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("md"), markdownLanguage);
   assertEquals(languageForName("json"), jsonLanguage);
   assertEquals(languageForName("jsonc"), jsonLanguage);
+  assertEquals(languageForName("jsonl"), jsonLanguage);
+  assertEquals(languageForName("ndjson"), jsonLanguage);
   assertEquals(languageForName("yaml"), yamlLanguage);
   assertEquals(languageForName("yml"), yamlLanguage);
   assertEquals(languageForName("python"), pythonLanguage);
@@ -121,6 +123,8 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "md",
     "json",
     "jsonc",
+    "jsonl",
+    "ndjson",
     "yaml",
     "yml",
     "python",

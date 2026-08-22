@@ -71,7 +71,7 @@ describe("$ref with default support", () => {
       expect(resolved).toHaveProperty("default", "outermost");
     });
 
-    it("should handle chained refs with defaults at each level (outermost wins)", () => {
+    it("should handle chained refs with defaults at each level and none at the ref site (outermost $defs level wins)", () => {
       const schema: JSONSchema = {
         $defs: {
           Level3: { type: "string", default: "level3" },

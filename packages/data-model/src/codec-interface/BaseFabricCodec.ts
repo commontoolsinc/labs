@@ -79,7 +79,7 @@ export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
    * What this codec emits is what it takes back: `State` is the same type
    * {@link #canDecode} narrows to and {@link #decode} is handed.
    */
-  abstract encode(value: FabricValue): State;
+  abstract encode(value: FabricValue, env: LiveEnvironment): State;
 
   //
   // Instance members

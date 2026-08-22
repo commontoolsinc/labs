@@ -217,21 +217,24 @@ Deno.test("scan tolerates a tracked file deleted from the working tree", async (
   }
 });
 
-Deno.test("main reports success and returns 0 on a clean tree", async () => {
-  const root = await fixtureRepo({
-    "packages/foo/build.ts": "export const x = 1;\n",
-  });
-  try {
-    let code = -1;
-    const { out } = await captureConsole(async () => {
-      code = await main(root);
+Deno.test(
+  "check-local-program main reports success and returns 0 on a clean tree",
+  async () => {
+    const root = await fixtureRepo({
+      "packages/foo/build.ts": "export const x = 1;\n",
     });
-    assertEquals(code, 0);
-    assert(out.includes("Local programs are built through one operation"));
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
+    try {
+      let code = -1;
+      const { out } = await captureConsole(async () => {
+        code = await main(root);
+      });
+      assertEquals(code, 0);
+      assert(out.includes("Local programs are built through one operation"));
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+);
 
 Deno.test("main reports the offender and the route to take instead", async () => {
   const root = await fixtureRepo({

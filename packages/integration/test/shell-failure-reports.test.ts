@@ -29,7 +29,7 @@ const SHELL_DOCUMENT = `<!DOCTYPE html>
 <body><x-root-view></x-root-view></body></html>`;
 
 // The same document with the shell already booted far enough to have published
-// itself, holding the home view and an identity.
+// itself, holding the home view and an identity named by its DID.
 const BOOTED_SHELL_DOCUMENT = `<!DOCTYPE html>
 <html><head><title>Common Fabric</title></head>
 <body><x-root-view></x-root-view>
@@ -37,7 +37,7 @@ const BOOTED_SHELL_DOCUMENT = `<!DOCTYPE html>
   globalThis.app = {
     serialize: () => ({
       view: { builtin: "home" },
-      identity: { privateKey: [1, 2, 3] },
+      identityDid: "did:key:zBootedShellFixture",
     }),
   };
 </script>
@@ -51,7 +51,7 @@ const REFUSING_SHELL_DOCUMENT = `<!DOCTYPE html>
 <script>
   globalThis.app = {
     state: () => ({}),
-    serialize: () => ({ view: { builtin: "home" }, identity: undefined }),
+    serialize: () => ({ view: { builtin: "home" }, identityDid: undefined }),
     setIdentity: () => { throw new Error("the key store is not open"); },
   };
 </script>
@@ -149,7 +149,7 @@ describe("shell-failure-reports", () => {
       const probe = await readShellPageProbe(page);
       expect(probe.app).toBe(true);
       expect(probe.view).toEqual({ builtin: "home" });
-      expect(probe.identity).toBe(true);
+      expect(probe.identityDid).toBe("did:key:zBootedShellFixture");
     });
 
     it("returns the console messages the page retained", async () => {
@@ -221,7 +221,8 @@ describe("shell-failure-reports", () => {
 
       const described = describeShellPage(await readShellPageProbe(page));
       expect(described).toContain(
-        'globalThis.app: present, holding view {"builtin":"home"} and an identity',
+        'globalThis.app: present, holding view {"builtin":"home"} and ' +
+          "did:key:zBootedShellFixture",
       );
       expect(described).toContain("x-root-view: present");
     });
@@ -262,8 +263,8 @@ describe("shell-failure-reports", () => {
         { view: { builtin: "home" }, identity: awaited },
         {
           view: { builtin: "home" },
-          identity: held,
-          apiUrl: new URL(origin),
+          identityDid: held.did(),
+          apiUrl: origin,
           config: {},
         },
       );

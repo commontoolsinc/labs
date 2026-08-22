@@ -142,7 +142,7 @@ declare const collection: {
     assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
-  it("recognizes fetchJson as a reactive origin call", () => {
+  it("recognizes a fetchJson call carrying a result argument as a reactive origin call", () => {
     const { call, checker } = getCallExpression(
       'fetchJson({ url: "https://example.com", result: [] })',
       {
