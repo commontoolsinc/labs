@@ -1137,7 +1137,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     scripted.destination.close();
   });
 
-  it("arrival-witness (B) fails CLOSED on an unknown class at the floor: a cover whose class the replica does not know (an OFF-arm or pre-predicate frame) does not witness at equality — the value-identical echo stands, never the undefined read; strictly above the floor it retires as always", async () => {
+  it("arrival-witness (B) fails CLOSED on an unknown class at the floor: a cover whose class the replica does not know (an OFF-arm or pre-predicate frame) does not witness at equality — the standing echo stands, never the undefined read; strictly above the floor it retires as always", async () => {
     const victim = "of:witness-unknown-victim";
     const scripted = scriptedWitnessOverlay({ floorSeq: 40 });
     scripted.setCover(victim, { confirmedSeq: 40 });
@@ -1227,6 +1227,68 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       const moved = view();
       expect(moved.confirmedSeq).toBe(6);
       expect(moved.coverClass).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
+  it("class threading: the arrival wake fires when a same-seq frame supplies the class LATE (undefined -> defined) — an entry failed closed at its floor under an unknown class is re-swept when the class arrives, not stranded until an unrelated commit", async () => {
+    const manager = StorageManager.emulate({ as: aliceSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const replica = runtime.storageManager.open(space).replica as unknown as {
+        applySessionSync(
+          sync: {
+            type: "sync";
+            fromSeq: number;
+            toSeq: number;
+            upserts: Array<Record<string, unknown>>;
+            removes: Array<Record<string, unknown>>;
+          },
+          type: "pull" | "integrate",
+        ): void;
+        speculationArrivalObserver:
+          | ((docs: Array<{ id: string; scope?: string }>) => void)
+          | undefined;
+      };
+      const upsert = (seq: number, coverClass?: CommitClass) => ({
+        branch: "",
+        id: "of:wake-doc",
+        scope: "space",
+        seq,
+        doc: { value: { n: seq } },
+        ...(coverClass === undefined ? {} : { coverClass }),
+      });
+      const sync = (up: Record<string, unknown>) =>
+        replica.applySessionSync({
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 5,
+          upserts: [up],
+          removes: [],
+        }, "integrate");
+      // The doc integrates classless BEFORE the observer exists (the
+      // mixed window: a pre-predicate frame, or one from before this
+      // client learned the class).
+      sync(upsert(5));
+      const wakes: Array<Array<{ id: string; scope?: string }>> = [];
+      replica.speculationArrivalObserver = (docs) => wakes.push(docs);
+      // A same-seq echo still without a class: nothing changed, no wake.
+      sync(upsert(5));
+      expect(wakes.length).toBe(0);
+      // The class arrives LATE at the SAME seq: the predicate's inputs
+      // changed, so the arrival wake fires (undefined -> defined).
+      sync(upsert(5, "derived"));
+      expect(wakes.length).toBe(1);
+      expect(wakes[0]).toEqual([{ id: "of:wake-doc", scope: "space" }]);
+      // Already known: a repeat carries nothing new, no second wake.
+      sync(upsert(5, "derived"));
+      expect(wakes.length).toBe(1);
     } finally {
       await runtime.dispose();
       await manager.close();

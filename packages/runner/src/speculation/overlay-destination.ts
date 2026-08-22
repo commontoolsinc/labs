@@ -1916,8 +1916,10 @@ export class SpeculationOverlayDestination
         // entry dropped 40-260 ms before the served value landed, and
         // the bare read saw undefined). A cover whose class the replica
         // does not know (an OFF-arm or pre-predicate frame) fails CLOSED
-        // at the floor — toward the standing, value-identical echo,
-        // never the undefined read. STRICTLY ABOVE the floor any
+        // at the floor — toward the standing echo (value-identical
+        // in the observed arms; an unknown-class foreign write at the
+        // floor may differ, and the next cover settles it), never the
+        // undefined read. STRICTLY ABOVE the floor any
         // confirmed cover witnesses, whatever its class: the store has
         // moved past everything this speculation consumed.
         let arrived = true;

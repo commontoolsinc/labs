@@ -209,9 +209,13 @@ not). Built in the same pass:
 - **The predicate** in the sweep's arrival gate
   (`overlay-destination.ts` `#sweep`): at `confirmedSeq === floor`,
   only a `coverClass === "derived"` cover witnesses; an unknown class
-  at the floor fails CLOSED (toward the standing, value-identical
-  echo, never the undefined read); strictly above the floor any
-  confirmed cover witnesses, unchanged.
+  at the floor fails CLOSED (toward the standing echo — value-identical
+  in the observed arms, though an unknown-class foreign cover may
+  differ — never the undefined read); a `system`-class cover at the
+  floor fails closed the same way (`!== "derived"` — the predicate
+  demands the derivation itself, not merely a server-side write;
+  conservative, converging on the next cover); strictly above the
+  floor any confirmed cover witnesses, unchanged.
 - **The class threading**, the equality arm's cost as assessed: the
   covering commit's class (an existing server-side fact —
   `revision.seq` IS `commit.seq`, one PK lookup) rides session frames
@@ -224,8 +228,10 @@ not). Built in the same pass:
   `speculationRetirementView` surfaces it to the sweep.
 - **Red-first pins for both arms** in
   `speculation-arrival-gate.test.ts`, replaying the decoded store
-  shapes (run 5's new-instance arm, run 1's resumed retire-at-seal
-  arm) — red at base, green with (B) — plus both-sides pins for the
+  shapes (run 5's new-instance arm; run 1's resumed arm, where the
+  base gate retired on the FIRST covering watermark after seal — the
+  pre-existing W — not literally at seal) — red at base, green with
+  (B) — plus both-sides pins for the
   elision posture (sub-question 1: (B) preserves the standing echo
   exactly), the legitimate at-floor derived retirement, and
   above-floor-any-class (sub-question 2, answered in the binding
@@ -235,6 +241,21 @@ not). Built in the same pass:
   gate serves both origins, so the event-handler backstop inherits
   the predicate; the consequence-mark path stays first-line and
   untouched.
+
+**Named residual (2026-08-22, flagged not built — owner to rule): the
+at-floor-derived edge.** An event-handler echo on a RESUMED instance
+whose floor EQUALS the prior session's wave-commit seq retires through
+the shared gate's backstop on that derived-class cover with no NEW
+consequence arrived — a flash-revert window until the served
+consequence lands. The independent review demonstrated the mechanism;
+reachability is unproven, and the edge is strictly less aggressive
+than the base gate (which retired on ANY cover at the floor).
+Confirming instrument: a resumed counter-click at the true ON
+topology — check whether the sealed echo's floor equals the target's
+confirmed cover, and measure the revert window. Disposition option on
+file (not built): hybrid (B)+(C) at equality — derived-class AND
+cover seq not in the entry's basis-seq set (the entry's own basis
+commits never witness, whatever their class).
 
 ## Acceptance evidence for whichever predicate is ruled
 

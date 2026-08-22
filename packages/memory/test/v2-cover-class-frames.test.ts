@@ -295,54 +295,72 @@ Deno.test("ON arm: session frames carry the covering commit's class — authored
 });
 
 Deno.test("OFF arm: the field never appears — the exact upsert key set is the pre-predicate wire shape, byte-identical", async () => {
-  await withSessions("cover-class-off", async (context) => {
-    const {
-      space,
-      writerSessionId,
-      watcherSessionId,
-      writer,
-      watcher,
-      writerMessages,
-      watcherMessages,
-    } = context;
-    await writer.receive(transact(writerSessionId, space, 1, "of:doc:a", 1));
-    nextResponse(writerMessages);
-    await watcher.receive(
-      watchSet(watcherSessionId, space, "watch-1", [
-        "of:doc:a",
-        "of:doc:absent",
-      ]),
-    );
-    const response = assertResponse<WatchSetOk>(shiftMessage(watcherMessages));
-    const authored = upsertFor(response.ok!.sync, "of:doc:a");
-    // The whole key set, pinned: the OFF wire carries exactly the
-    // pre-predicate fields, in the pre-predicate order.
-    assertEquals(Object.keys(authored), [
-      "branch",
-      "id",
-      "scope",
-      "seq",
-      "doc",
-    ]);
-    const absent = upsertFor(response.ok!.sync, "of:doc:absent");
-    assertEquals(Object.keys(absent), [
-      "branch",
-      "id",
-      "scope",
-      "seq",
-      "deleted",
-    ]);
-    // The push frame too.
-    await writer.receive(transact(writerSessionId, space, 2, "of:doc:a", 2));
-    nextResponse(writerMessages);
-    // Let the 0-delay refresh fan out (the watch-sync pin's pattern).
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const effect = watcherMessages
-      .filter((message) => message.type === "session/effect")
-      .map((message) => (message as SessionEffectMessage).effect)
-      .find((frame) => frame.upserts.some((entry) => entry.id === "of:doc:a"));
-    assertExists(effect, "no pushed frame carried of:doc:a");
-    const pushed = upsertFor(effect, "of:doc:a");
-    assertEquals(Object.keys(pushed), ["branch", "id", "scope", "seq", "doc"]);
-  });
+  // EXPLICITLY false, not merely ambient-unset: the pin must hold against
+  // the flag's declared OFF state, not against whatever the process
+  // happened to inherit.
+  setServerExecutionConfig(false);
+  try {
+    await withSessions("cover-class-off", async (context) => {
+      const {
+        space,
+        writerSessionId,
+        watcherSessionId,
+        writer,
+        watcher,
+        writerMessages,
+        watcherMessages,
+      } = context;
+      await writer.receive(transact(writerSessionId, space, 1, "of:doc:a", 1));
+      nextResponse(writerMessages);
+      await watcher.receive(
+        watchSet(watcherSessionId, space, "watch-1", [
+          "of:doc:a",
+          "of:doc:absent",
+        ]),
+      );
+      const response = assertResponse<WatchSetOk>(
+        shiftMessage(watcherMessages),
+      );
+      const authored = upsertFor(response.ok!.sync, "of:doc:a");
+      // The whole key set, pinned: the OFF wire carries exactly the
+      // pre-predicate fields, in the pre-predicate order.
+      assertEquals(Object.keys(authored), [
+        "branch",
+        "id",
+        "scope",
+        "seq",
+        "doc",
+      ]);
+      const absent = upsertFor(response.ok!.sync, "of:doc:absent");
+      assertEquals(Object.keys(absent), [
+        "branch",
+        "id",
+        "scope",
+        "seq",
+        "deleted",
+      ]);
+      // The push frame too.
+      await writer.receive(transact(writerSessionId, space, 2, "of:doc:a", 2));
+      nextResponse(writerMessages);
+      // Let the 0-delay refresh fan out (the watch-sync pin's pattern).
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const effect = watcherMessages
+        .filter((message) => message.type === "session/effect")
+        .map((message) => (message as SessionEffectMessage).effect)
+        .find((frame) =>
+          frame.upserts.some((entry) => entry.id === "of:doc:a")
+        );
+      assertExists(effect, "no pushed frame carried of:doc:a");
+      const pushed = upsertFor(effect, "of:doc:a");
+      assertEquals(Object.keys(pushed), [
+        "branch",
+        "id",
+        "scope",
+        "seq",
+        "doc",
+      ]);
+    });
+  } finally {
+    resetServerExecutionConfig();
+  }
 });

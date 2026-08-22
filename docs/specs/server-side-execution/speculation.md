@@ -383,8 +383,13 @@ class-blind gate retired first-run speculations on it 40–260 ms
 before the served value landed, the ruled sentence's own excluded
 class (the OW33 hole). A cover whose class the replica does not know
 (an OFF-arm or pre-predicate frame) does not witness at the floor
-either — fail toward the standing, value-identical echo, never the
-undefined read. The elision posture above is unchanged: no rewrite
+either — fail toward the standing echo (value-identical in the
+observed arms; an unknown-class cover at the floor could be a foreign
+write whose value differs, and the next cover settles it), never the
+undefined read. A `system`-class cover at the floor does not witness
+either: the predicate demands the derivation itself — `derived` — not
+merely a server-side write (`!== "derived"`, conservative, converging
+on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
 consulted. Carriage: the covering commit's class rides session-frame
 upserts as `coverClass` (populated only under the flag — the OFF wire

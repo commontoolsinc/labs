@@ -5510,6 +5510,7 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       const previousConfirmedSeq = record.confirmed.seq;
+      const previousCoverClass = record.confirmed.coverClass;
       // The covering commit's class (speculation.md §4's arrival-witness
       // predicate): the frame's annotation when it carries one; on a
       // SAME-SEQ re-upsert without one (a watch-refresh replay, an
@@ -5518,16 +5519,27 @@ class SpaceReplica implements ISpaceReplica {
       // class survives. A forward move without one is a different
       // commit — the stale class must not ride onto it.
       const coverClass = upsert.coverClass ??
-        (upsert.seq === previousConfirmedSeq
-          ? record.confirmed.coverClass
-          : undefined);
+        (upsert.seq === previousConfirmedSeq ? previousCoverClass : undefined);
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
         coverClass,
       );
       record.materialized = undefined;
-      if (arrived !== undefined && upsert.seq > previousConfirmedSeq) {
+      // The arrival wake fires on a FORWARD move — and on a same-seq
+      // frame whose class arrives LATE (undefined -> defined): an entry
+      // failed CLOSED at its floor under an unknown class (a mixed-window
+      // frame from a pre-predicate server, or one integrated before this
+      // client learned the class) is otherwise never re-swept — the
+      // predicate's inputs changed with no covering wake, and the entry
+      // stands until an unrelated commit sweeps it.
+      if (
+        arrived !== undefined &&
+        (upsert.seq > previousConfirmedSeq ||
+          (upsert.seq === previousConfirmedSeq &&
+            previousCoverClass === undefined &&
+            coverClass !== undefined))
+      ) {
         arrived.push({
           id: upsert.id as URI,
           scope: upsert.scope,

@@ -3122,7 +3122,9 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   adopted — a confirmed cover witnesses arrival STRICTLY ABOVE the
   entry's floor whatever its class, and AT the floor only when the
   covering commit is DERIVED-class; unknown class at the floor fails
-  CLOSED toward the standing, value-identical echo; seq-keyed (C)
+  CLOSED toward the standing echo (value-identical in the observed
+  arms — an unknown-class foreign cover may differ, and the next cover
+  settles it); seq-keyed (C)
   the ruled fallback, not needed — and BUILT (speculation.md §4's
   arrival-witness predicate sentence, binding): the sweep's gate in
   `overlay-destination.ts` consults the covering commit's class at
@@ -3136,7 +3138,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   replayed as deterministic scripted pins from the decoded store
   shapes (run 5's new arm — authored setup cover at floor 11,
   values-free advance, derived values at 13; run 1's resumed arm —
-  pre-existing watermark at 7, retire-at-seal), red at base
+  pre-existing watermark at 7 — the base gate retired on the first
+  covering watermark after seal, not literally at seal), red at base
   (entryCount 0 — the entry retired on the authored cover), green
   with (B); the elision posture, the legitimate at-floor derived
   retirement, and above-floor-any-class pinned both-sides;
@@ -3150,9 +3153,32 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   1-min loads 4.2–6.5; per-run stores show the loop serving — run
   7: 7 authored + 13 derived commits). Suites at the fix head:
   runner 1280 (7359 steps), memory 564 (274 steps), skips pins
-  17/17, repo typecheck/fmt/lint green. OW60 is NOT closed by this
+  17/17, repo typecheck/fmt/lint green. Posture notes: a
+  `system`-class cover at the floor fails closed via `!== "derived"`
+  (the predicate demands the derivation itself, not merely a
+  server-side write — conservative, converging on the next cover);
+  the `queryGraph`/`watch.set` snapshot surface also carries
+  `coverClass` under the flag (`EntitySnapshot`), and no query-result
+  reader consumes it today — the consumed surface is the session-frame
+  upsert into the replica's confirmed record; a same-seq frame whose
+  class arrives LATE (undefined to defined) fires the arrival re-sweep
+  (the mixed-window gap — an entry failed closed at its floor is not
+  stranded until an unrelated commit). OW60 is NOT closed by this
   predicate, as the fork memo said: a dropped echo run seals no
   overlay entry, so no witness predicate can reach it.**
+  **NAMED RESIDUAL (2026-08-22, flagged not built — owner to rule):
+  the at-floor-derived edge.** An event-handler echo on a RESUMED
+  instance whose floor EQUALS the prior session's wave-commit seq
+  retires through the shared gate's backstop on that derived-class
+  cover with no NEW consequence arrived — a flash-revert window until
+  the served consequence lands. Mechanism demonstrated in review;
+  reachability unproven; strictly less aggressive than the base gate
+  (which retired on ANY cover there). Confirming instrument: a
+  resumed counter-click at the true ON topology — check whether the
+  sealed echo's floor equals the target's confirmed cover, and
+  measure the revert window. Disposition option on file (not built):
+  hybrid (B)+(C) at equality — derived-class AND cover seq not in the
+  entry's basis-seq set. The owner rules whether to build it.**
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 

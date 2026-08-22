@@ -2875,13 +2875,18 @@ export const commitClassOfSeq = (
     `SELECT class FROM "commit" WHERE seq = :seq`,
   ).get({ seq }) as { class: CommitClass } | undefined;
   if (row === undefined) return undefined;
-  // "Immutable once admitted" holds for DURABLE rows only: inside an
-  // `applyCommit` transaction the same connection reads the staged,
-  // rollback-able commit row, and a rolled-back seq is re-minted by the
-  // retry (possibly under another class). Same discipline as the staged
-  // document cache: answer from the live read, memoize only outside a
-  // transaction.
-  if (engine.stagedDocumentCache === undefined) {
+  // "Immutable once admitted" holds for DURABLE rows only: inside a
+  // transaction the same connection reads the staged, rollback-able
+  // commit row, and a rolled-back seq is re-minted by the retry —
+  // possibly under another class (the wave path is exactly that
+  // re-mint). Same discipline as {@link cacheDocumentForRevision}'s
+  // in-transaction backstop, and for the same reason it is the
+  // connection state and not a caller marker: it holds for every
+  // transaction-wrapped caller — `applyCommit` AND `applyWaveCommit`,
+  // which opens its own transaction without staging — rather than for
+  // the one that remembered to set a flag. The mid-transaction read is
+  // still SERVED, just never memoized.
+  if (!engine.database.inTransaction) {
     if (memo.size >= COMMIT_CLASS_MEMO_MAX_ENTRIES) memo.clear();
     memo.set(seq, row.class);
   }
