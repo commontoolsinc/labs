@@ -36,12 +36,14 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The OW51 fix lifted this file's
-// FILE-level skip (the `splitDefinitions` crash is gone, ON 10/10 with zero
-// occurrences); the "should create a note" step — the served-instantiation
-// surface that recorded OW51 — runs ON, while the "persist and reload"
-// step stays guarded under OW45 (the reload-durability class the crash was
-// masking).
+// arm and an unlisted step always run. The "persist and reload" step stays
+// guarded under OW45: with the step's own interim-race trap fixed (its
+// assertions bind to the wait's approved summary), the remaining ON red is
+// a real client-side rehydration/readCell starvation after reload — sticky
+// undefined at the readCell surface while the store holds every append and
+// the reactive render path serves the same notes — measured 2026-08-22 at
+// the true ON topology on the FIXED step. The skip guards CI against that
+// product defect, not against the test.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
@@ -783,16 +785,52 @@ describe("default-app flow test", () => {
           "Expected final Create click to succeed",
         );
 
+        // The assertions bind to the summary a wait handed back — the state
+        // as it was at the instant the predicate approved it — never to a
+        // separate read taken after a wait. Under server execution the
+        // notebook's derived `noteCount` follows the ruled unresolved-read
+        // disposition (OW51): a re-derivation reads cleanly `undefined` and
+        // re-triggers, healing back to the settled value. That interim is
+        // correct product behavior, so a single-shot read between a wait and
+        // its assertion can catch it and fail a healthy run (the OW45
+        // register row's measured 1-in-10-quiet / 5-in-10-under-load flake);
+        // a wait on the value itself absorbs it, and a value that never
+        // reaches `expectedCount` — a genuinely lost note — still fails
+        // loudly at waitForCondition's stuck-condition net.
+        //
+        // The first wait orders the sync barrier after local convergence, so
+        // "synced" covers all seven notes' commits; the second wait is the
+        // assertion's authority, re-approving the state after that barrier.
+        // Its predicate reads the same cells the step has read all along, and
+        // any client read registers demand — this step verifies that the
+        // created notes' data and derived count converge and survive the sync
+        // barrier under serving, not that they materialize unobserved (the
+        // reload rehydration surface is integration/reload/
+        // default-app-notebook.test.ts's).
+        let summary:
+          | NotebookSourceSummary
+          | Awaited<ReturnType<typeof collectNotebookSourceState>>
+          | undefined;
         try {
           await waitForCondition(page, notebookSourceStateMatches, {
             args: [noteCreates],
           });
           await waitForRuntimeSynced(page);
-        } catch (_) {
-          // Keep the final assertions below so failures include diagnostics.
+          summary = await waitForCondition(page, notebookSourceStateMatches, {
+            args: [noteCreates],
+          });
+        } catch (error) {
+          // A wait's stuck-condition net fired: the state never converged.
+          // Name the failed wait, then fall through so the failure carries
+          // the diagnostics below.
+          console.log("Notebook regression wait failed:", error);
         }
 
-        const summary = await collectNotebookSourceState(page);
+        // Failure path only: no approved summary reached this point (a wait
+        // or the sync barrier failed at its net), so read once for the
+        // diagnostics the failing assertions print. This read is not the
+        // signal — the waits are — so its raciness is harmless.
+        summary ??= await collectNotebookSourceState(page);
         if (
           summary.argumentNotesLength !== noteCreates ||
           summary.noteCount !== noteCreates
@@ -1711,16 +1749,31 @@ async function collectNotebookSourceState(page: Page): Promise<{
   });
 }
 
+// The state notebookSourceStateMatches approves and hands back. Every field
+// is a defined, JSON-safe value by construction — the predicate answers only
+// when all of them hold — so the answer crosses the page boundary intact.
+type NotebookSourceSummary = {
+  notebookEntityId: string;
+  argumentNotesLength: number;
+  noteCount: number;
+  showNewNotePrompt: boolean;
+  usedCreateAnotherNote: boolean;
+};
+
 // Serialized into the page by waitForCondition: read the notebook's argument
 // and internal cells and report whether the rapidly created notes have all
 // landed — `expectedCount` notes present, the new-note prompt closed, and the
 // "create another" flag cleared. Inlines the collection that
 // collectNotebookSourceState performs so the wait resolves the instant the
-// source state converges rather than on a polling tick.
+// source state converges rather than on a polling tick. Answers the approved
+// summary rather than `true`, so the caller's assertions read the state as it
+// was when the condition held — a fresh read after the wait can instead land
+// in the ruled interim of a served re-derivation (`noteCount` cleanly
+// `undefined`, then re-triggered and healed) and fail a healthy run.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
-): Promise<boolean> => {
+): Promise<NotebookSourceSummary | false> => {
   const api = globalThis.commonfabric as {
     readCell?: (options: {
       id: string;
@@ -1793,10 +1846,21 @@ const notebookSourceStateMatches = async (
     showNewNotePrompt?: unknown;
     usedCreateAnotherNote?: unknown;
   };
-  return argumentNotesLength === expectedCount &&
+  if (
+    argumentNotesLength === expectedCount &&
     internal.noteCount === expectedCount &&
     internal.showNewNotePrompt === false &&
-    internal.usedCreateAnotherNote === false;
+    internal.usedCreateAnotherNote === false
+  ) {
+    return {
+      notebookEntityId,
+      argumentNotesLength,
+      noteCount: internal.noteCount,
+      showNewNotePrompt: internal.showNewNotePrompt,
+      usedCreateAnotherNote: internal.usedCreateAnotherNote,
+    };
+  }
+  return false;
 };
 
 async function collectHomeLoadSummaryFromFreshPage(

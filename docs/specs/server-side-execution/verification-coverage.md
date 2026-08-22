@@ -5216,7 +5216,11 @@ supply; OW29/OW32/OW34 closed):
   entries — the sqlite identity pair — beside default-app's step
   entry; then both sqlite entries fell with OW53's close and
   topics-navigation with the OW33 triage's review pass (both
-  2026-08-22), leaving default-app's step entry alone); they gate the
+  2026-08-22), leaving default-app's step entry alone — which STAYS
+  (2026-08-22): the test-side pass closed the step's own interim-race
+  half and ISOLATED the residue as the OW45 row's real arm-B client
+  starvation, so the entry now names that product charge, not a test
+  flake); they gate the
   FLIP — whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
@@ -5323,8 +5327,73 @@ supply; OW29/OW32/OW34 closed):
     n=10 — on a shared box at loads 3-16, every red the same
     `undefined`-vs-7 shape, and the warm request structurally INERT in
     this flow: `warmRequests` 0 in 10/10, the notebook stages no
-    foreign provisioning); an event-driven wait on `noteCount` is the
-    test-side close, this row's territory.
+    foreign provisioning). The test-side close RAN 2026-08-22 and
+    SPLIT that charge in two — the red population was BIMODAL and the
+    old single-shot shape structurally could not tell the halves
+    apart (both print undefined-vs-7 at one instant). (i) CLOSED —
+    the step's own interim race: its assertions now bind to the
+    summary the `waitForCondition` predicate approves and hands back
+    (taken at the instant the condition held, re-approved after the
+    sync barrier; the failure path's one-shot read is
+    diagnostics-only), absorbing the OW51-ruled
+    interim-undefined-then-retrigger disposition the old post-wait
+    single-shot read kept racing — the waiting-in-tests trap. Watched
+    red-first at the true ON topology (ON-built binary sha256
+    00fcf833…, deliberate load ~11-14): the old shape red in 20 s
+    with the failed read's own dump showing `noteCount` 7 beside
+    `argumentNotesLength` undefined and the RENDER fully healthy
+    (7/7/7) — the interim landing on one field of one read while the
+    product was correct. The fixed step then ran 16 greens across the
+    day's regimes (fix-loop battery 10/10 loads ~5-7; gate-attempt-1
+    g01-g04 4/4 loads 6-9; h02-h03 at 9.6-11.5). Mutation-checked:
+    suppressing the seventh create reds the fixed wait at its
+    stuck-condition net with the true 6-vs-7 state in the
+    diagnostics — the value-wait cannot vacuously green. (ii) OPEN,
+    and now ISOLATED, STORE-VERIFIED — the row's REMAINING charge,
+    the arm-B client starvation: on the FIXED step at the true ON
+    topology (rebuilt binary sha256 c724d7c6…, fresh store + posture
+    probe per run, shared box with a sibling train churning) the
+    value-wait itself starves — gate-attempt-2 red 3/5: h01 (ambient
+    ~7) and h05 (ambient 6.6) with the client's `readCell` of the
+    argument's redirect-linked `notes` sticky-`undefined` across the
+    FULL 5-minute net at the predicate's 500 ms re-read cadence
+    while `noteCount` (internal manifest) resolved 7 and the page's
+    reactive render path held ALL SEVEN notes (chips one short at
+    6/7 — the starved doc is the missing chip's own dependency); h04
+    (load spike ~20) the rf2 whole-piece shape — `isNotebook` false,
+    the piece never rehydrating post-reload, PERSISTING after load
+    fell back to 6. Store-verified in every red: all 7 `/value/notes`
+    appends present, event pipeline healthy (each `event-view-lag`
+    deferral drained in seconds during the create phase, none in the
+    wait window) — ZERO data loss, sticky client-side unresolved
+    reads. Candidate mechanism (recorded, not concluded): the OW51
+    disposition's re-trigger never lands for these reads — a first
+    read in the interim leaves the client cache permanently
+    `undefined` (a first-read lottery, explaining the load
+    sensitivity: wider interim window under load); a poll-retrigger
+    interaction (each 500 ms re-read re-opening the interim) is not
+    excluded, but rf2's OLD-shape saturation stall — the
+    piece-structure read never resolving over a 5-minute net with NO
+    polling predicate — shows the starvation predates the value-wait.
+    Retro-reading P-1: its 1/10-quiet and 5/10-loaded rates were a
+    MIXTURE of the two populations; and the same box ran 14 straight
+    greens before h-phase red 3/5 at the same nominal loadavg — the
+    starvation is environment-coupled beyond what loadavg captures.
+    The step's ON skip therefore STAYS, reworded to the isolated
+    charge (the in-file guard restored; the skips pin test pins the
+    single entry; h06-h10 of the gate incidentally proved the
+    restored guard skips loudly). OFF control on a default-built
+    binary at the same head, guard in place: 2/2 green (6 s steps).
+    Lift bar: the starvation closes and the FIXED step greens ON
+    10/10 quiet-and-loaded. Measurement-integrity note, recorded
+    because the artifacts are cited: gate-attempt-1 aborted
+    mid-flight when the shared box filled to 0 B and macOS's temp
+    purge deleted the gate workdir (g05 died to `database or disk is
+    full` wave-commit rejections — an environment fault, discarded);
+    attempt 2 re-ran uniformly on a rebuilt binary from a purge-safe
+    workdir, and its h06-h10 burner phase self-invalidated (the step
+    skipped) when the guard restoration landed in the worktree
+    mid-gate — the 3/5 rate is the five valid runs h01-h05.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

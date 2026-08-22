@@ -187,38 +187,43 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // The product smell the flake used to witness stays tracked as
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
-    // ---- First ON-lane CI gate entries (2026-08-21; skip-and-land) ----
     {
-      // OW51's FILE-level skip was LIFTED (2026-08-21, the optimize pass):
-      // the `splitDefinitions` undefined-read crash is FIXED (the RULED
-      // unresolved-input lift semantics — verification-coverage.md OW51
-      // CLOSED) and default-app runs ON, its "should create a note" step
-      // (the served-instantiation surface that recorded OW51) green ON
-      // 10/10 with ZERO occurrences. What remains is this ONE step, guarded
-      // under OW45 — see below.
+      // The step's own trap is FIXED, and the fix UNCOVERED the real
+      // charge. The 2026-08-22 test-side pass bound the step's assertions
+      // to the summary its waitForCondition predicate approves and hands
+      // back (taken at the instant the condition held, re-approved after
+      // the sync barrier), absorbing the OW51-ruled
+      // interim-undefined-then-retrigger disposition the old post-wait
+      // single-shot read kept racing (that race was the load-sensitive
+      // flake population: 1/10 quiet, 5/10 under load on main). On the
+      // FIXED step the residue is not a test artifact: at the true ON
+      // topology the value-wait itself starves — the client's readCell of
+      // the notebook argument's notes (a redirect-linked doc) stays
+      // `undefined` for the full 5-minute net at a 500ms re-read cadence
+      // (run h01, ambient load), or the whole piece never rehydrates
+      // after reload (run h04, load ~20; the rf2 shape) — while the
+      // server-side store holds every one of the 7 note appends and the
+      // page's own reactive render path serves the same notes. Zero data
+      // loss, sticky client-side unresolved reads: the
+      // verification-coverage.md OW45 row's arm-B starvation, now
+      // isolated and store-verified. Lifts when that client
+      // rehydration/readCell starvation closes and the FIXED step greens
+      // ON 10/10 quiet-and-loaded; the flip PR needs this list EMPTY.
       file: "integration/default-app.test.ts",
       step: "should persist and reload every rapidly created notebook note",
       phase: "phase-7",
-      reason: "The OW51 fix (RULED unresolved-input lift semantics, " +
-        "2026-08-21) LIFTED this file's FILE-level skip — the " +
-        "`splitDefinitions` crash is gone (ON 10/10, zero occurrences) and " +
-        "the 'should create a note' step runs ON. This REMAINING step " +
-        "stays skipped under OW45 (the reload-durability class): removing " +
-        "the OW51 crash UNMASKED an OW45-surface flake the crash had been " +
-        "hiding — after a rapid-create-and-RELOAD the reloaded notebook's " +
-        "`noteCount` derived value can read `undefined` past the step's " +
-        "`waitForCondition` (1/10 local ON: `assertEquals(summary." +
-        "noteCount, 7)` saw undefined; the OW51 fix's ruled disposition " +
-        "makes the unresolved reload read cleanly undefined + retrigger, " +
-        "and a slow runner reads the interim before the heal). Same " +
-        "reload-durability family as home-profile-reload-durability " +
-        "(verification-coverage.md OW45, seats S-B/S-C — client barriers " +
-        "and heal-on-read); an event-driven wait on `noteCount` is the " +
-        "test-side close, OW45's territory not OW51's. NOT a demand hole; " +
-        "OFF green. Evidence: docs/history/plans/server-execution-v2/" +
-        "optimize/ow51-build-report.md §5. Lifts when OW45 closes and the " +
-        "step greens ON; the flip PR needs this list EMPTY.",
+      reason: "Real ON-regime client defect, isolated by the 2026-08-22 " +
+        "test-side fix (assertions bind to the wait's approved summary; " +
+        "the old single-shot interim race is closed). Post-reload the " +
+        "client's readCell of the notebook argument's notes stays " +
+        "undefined for the full stuck-condition net at 500ms re-read " +
+        "cadence — or the piece never rehydrates at all — while the store " +
+        "holds all 7 appends and the reactive render path serves the same " +
+        "notes. Sticky unresolved client reads, no data loss " +
+        "(verification-coverage.md OW45, arm B). Lifts when the " +
+        "starvation closes and the fixed step greens ON 10/10.",
     },
+    //
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the
