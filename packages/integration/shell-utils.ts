@@ -387,6 +387,15 @@ export class ShellIntegration {
     // to be set after the page has an origin to store it against and before the
     // login below.
     await enablePatternCoverage(page);
+    // [NDT] triage aid: seed the worker-console host toggle before login so
+    // the worker runtime's console (where the storage taps live) reaches the
+    // page console — and, with PIPE_CONSOLE, the test output. Same
+    // read-at-runtime-creation contract as patternCoverage above.
+    if (Deno.env.get("FORWARD_WORKER_CONSOLE") === "1") {
+      await page.evaluate(() => {
+        globalThis.localStorage.setItem("forwardWorkerConsole", "true");
+      });
+    }
     await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
