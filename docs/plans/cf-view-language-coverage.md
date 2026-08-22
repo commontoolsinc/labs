@@ -1,13 +1,15 @@
 # `cf view` language and syntax coverage plan
 
-Status: In progress. Unknown named files and filename-free source without a
-recognized shebang use plain text, while filename-free transformed compiler
-output keeps its TypeScript default. Piped source can select a language directly
-or through a virtual filename. Declarative metadata can now describe extensions,
-exact names, compound patterns, explicit aliases, and direct interpreter
-shebangs. JSON Lines and NDJSON use the JSON tokenizer with independent lexical
-state for each record. Python files with recognized extensions now have syntax
-highlighting.
+Status: In progress.
+
+Unknown named files and filename-free source without a recognized shebang use
+plain text, while filename-free transformed compiler output keeps its TypeScript
+default. Piped source can select a language directly or through a virtual
+filename. Declarative metadata can now describe extensions, exact names,
+compound patterns, explicit aliases, and direct interpreter shebangs. JSON Lines
+and NDJSON use the JSON tokenizer with independent lexical state for each record.
+Python files with recognized extensions now have syntax highlighting.
+
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Recognized shebangs and transformed
 compiler headers remain explicit source selectors. Binary is a supported,
@@ -17,6 +19,7 @@ decoding. Interactive binary views use a bounded preview, while redirected
 output streams the complete dump. Text saves use the encoder paired with the
 decoded source, including preservation of a UTF-8 byte order mark. Binary files
 remain outside diff editing and semantic source loading.
+
 Parser-backed Python, Go, shell, and HTML implementations use Tree-sitter
 through a shared, language-neutral adapter and official grammar packages.
 The order is provisional because recent activity was measured in six of the 26
