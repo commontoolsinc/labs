@@ -307,14 +307,32 @@ run, which is the point at which resetting the copy stops being an option.
 Enough to start on, and no more than that.
 
 **The core is library code; the entry point is thin.** Enumerating, reading
-each piece's identity, emitting a plan, and consuming one are ordinary
-functions with no opinion about how they are invoked. They belong beside the
-other piece operations, where they can be tested without a command surface at
-all. Only a small wrapper on top has to decide whether this is spelled as a
-subcommand of an existing group, a group of its own, or something else — so
-that decision is genuinely deferred rather than quietly made, and the first
-increment does not wait on it. A decision made when the first *write*
-operation needs a home is made with more information than one made now.
+each piece's identity, emitting a plan, consuming one, applying a row, and
+restoring a retained revision are ordinary functions with no opinion about
+how they are invoked. They live in `packages/piece/src/ops/`, beside the
+piece and pieces controllers they call — the layer that owns piece
+operations, and one from which the runner's local-program resolution is
+importable, so turning a row's source into a program belongs there too.
+There they are tested on the package's own runtime fixtures, with no command
+surface at all. Only a small wrapper in the CLI has to decide whether this is
+spelled as a subcommand of an existing group, a group of its own, or
+something else — so that decision is genuinely deferred rather than quietly
+made, and the first increment does not wait on it. A decision made when the
+first *write* operation needs a home is made with more information than one
+made now.
+
+**Two selectors to start, and the collection one carries the order.** A
+selector is a value handed to the survey. `{kind: "collection", holder,
+path}` names a holder piece and the path to its collection, and emits the
+members followed by the holder as the last row — children first, parent last
+is a property of the selector, not a step the operator performs.
+`{kind: "list", pieces}` names pieces outright: the orphan the containment
+check found, or any other hand-picked set. A space-wide "every piece on
+identity X" is not a live selector — live, it could only come from the
+registry or from running every piece, and both are ruled out above — so it
+exists only as the third enumeration, offline, where a rehearsal clone's
+store can be read. Selectors that take a fixer or a validator arrive with
+their stages.
 
 **The plan is line-oriented JSON.** One header object, then one object per
 piece, and **line order is execution order** — the simplest encoding of a
@@ -323,8 +341,8 @@ running anything.
 
 ```text
 {"kind":"piece-plan","v":1,"space":"did:key:…","takenAt":"…","enumerated":{"collection":113,"registry":7,"registeredOutside":0}}
-{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","retained":true},"op":{"kind":"retarget","source":"topic.tsx","rev":"…","patternIdentity":"Xk3Lp…"}}
-{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":"main.tsx","rev":"…","patternIdentity":"Nq8Hw…"}}
+{"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"PB0Gum…","retained":true},"op":{"kind":"retarget","source":{"main":"topic.tsx"},"rev":"…","patternIdentity":"Xk3Lp…","allowIncompatible":true}}
+{"piece":"of:fid1:bbb…","phase":"board","expect":{"patternIdentity":"WpIRvA…","retained":true,"revisionId":"rev-bbb…"},"op":{"kind":"retarget","source":{"main":"main.tsx"},"rev":"…","patternIdentity":"Nq8Hw…","allowIncompatible":true}}
 ```
 
 and the rollback row derived from the first of those:
@@ -333,7 +351,7 @@ and the rollback row derived from the first of those:
 {"piece":"of:fid1:aaa…","phase":"topics","expect":{"patternIdentity":"Xk3Lp…"},"op":{"kind":"restore","patternIdentity":"PB0Gum…"}}
 ```
 
-Five things this buys, each of them a claim made earlier in this document
+What the encoding buys — most of it a claim made earlier in this document
 that would otherwise have no mechanism:
 
 - **`expect` and `op` together are enough to derive the rollback.** A retarget
@@ -368,6 +386,22 @@ that would otherwise have no mechanism:
   recording the collection count, the registry count, and how many registered
   in-scope pieces the collection lacks is what makes the check reviewable
   afterwards rather than only at run time.
+- **The identity is the pin; `rev` is a label.** A row's `source` names a
+  main file and, when the program has them, its root, tests, and data files,
+  and the apply resolves it through the runner's local-program resolution so
+  nothing attached is dropped. Before writing, the apply recomputes the
+  identity of the source it actually resolved and refuses the row if that
+  differs from `op.patternIdentity` — a different checkout or an uncommitted
+  edit cannot slip through, because the hash catches it. `rev` is recorded
+  for readers and for diffing two plans, and is never enforced: enforcing it
+  would add a second refusal for a condition the identity already proves,
+  and would tie the plan to a git checkout.
+- **The compatibility override is a field on the row, stamped at plan
+  time.** `op.allowIncompatible` is what the apply honors, and nothing else;
+  a flag on the plan command stamps it onto every row, or onto the rows a
+  selector picks. One operator decision, as a per-run flag would be — but
+  the plan shows exactly which rows ran with the gate open, a reviewer can
+  strip it from rows that should not, and the record afterwards is per row.
 - **`phase` labels rows; it does not sort them.** Order is already the line
   order. A phase is for grouping a report and for stopping between groups,
   which keeps one concept from doing two jobs.
@@ -381,6 +415,13 @@ emits complete rows. A survey given none emits rows with `expect` alone,
 which is the pre-state record the after-survey is compared against and a
 valid input to a later pass that adds the `op`. The two are one command with
 one optional argument, not two tools.
+
+**The validator is a schema.** A supplied validator is a JSON schema; the
+survey reads each piece under it and names the ones that fail, which is the
+question a broken holder read cannot answer. The canonical validator is the
+holder's own demanded schema, so the common case supplies no code at all.
+Code-shaped checking waits for the fixer, which is the same question asked
+of a transform.
 
 **The identity read returns the identity and nothing else.** One piece in,
 `{piece, patternIdentity, symbol}` out, no input document, no result, no link
@@ -424,6 +465,13 @@ not merely take a per-piece startup cost across a board-sized set — it fails
 outright well before finishing, which turns a survey into a partial answer
 that looks like a complete one.
 
+**Delivers:** the identity read; the survey, with its plan file, tally,
+containment result, and `retained` column — run against the live board on
+day one, it answers which pieces sit on which identity and whether anything
+registered sits outside the holder; the survey-diff, which compares a survey
+against a plan or an earlier survey and is the verification every later
+stage uses; and the drill skeleton.
+
 - [ ] Enumeration comes from the holder's collection, and the registry is
       compared against it by containment: a registered in-scope piece the
       collection lacks stops the run and is named. A silent subset is the
@@ -442,16 +490,23 @@ that looks like a complete one.
       planning later.
 - [ ] A tally accompanies it, so "do these pieces all agree?" is answered
       without reading every row.
-- [ ] A supplied validator selects the pieces that fail it, naming each one.
-      A collection whose read fails as a whole is diagnosable by this and by
-      nothing else in bulk.
+- [ ] A supplied validator — a JSON schema the survey reads each piece
+      under — selects the pieces that fail it, naming each one. A collection
+      whose read fails as a whole is diagnosable by this and by nothing else
+      in bulk.
+- [ ] The survey-diff: a survey compared against a plan or an earlier
+      survey, reporting per piece moved as planned, still outstanding, or
+      moved to something the plan did not ask for.
 
 ### 2. Repair, by a supplied fixer
 
 The caller supplies a **fixer** — a pure transform from a piece's stored
 document to the document it should hold — and the spine iterates it over the
 selected pieces. The tooling owns selection, ordering, the write, the stop,
-and resume; the fixer owns only what the change is.
+and resume; the fixer owns only what the change is. A fixer is a TypeScript
+module the run imports: typed against the document shape, unit-testable
+without a space, and checkable for the purity it has to have. Writing one is
+a repository-local task, which is the trade that buys those three.
 
 A vocabulary of built-in repairs is the wrong shape here. Every defect worth
 a bulk repair is particular, so a fixed vocabulary is permanently one defect
@@ -488,6 +543,11 @@ much later. A fixer either round-trips them untouched or the run refuses the
 document, and this is the constraint most likely to be discovered the
 expensive way.
 
+**Delivers:** the fixer runner; the dry-run per-piece document diff, which
+stands alone as a read-only "what would change" report; and the
+complete-document and links-intact refusals as library checks, which the
+Topics restore script hand-rolls today and should import instead.
+
 - [ ] A fixer is supplied by the caller, and adding a new kind of repair
       requires no change to the tooling.
 - [ ] Selection, resume, and verification all derive from the fixer being a
@@ -514,8 +574,19 @@ from, is the report of what the run did. What this stage adds is the
 requirement that applying never implies it — an apply that exits zero is not
 a verdict, and the two stay separate invocations.
 
+**Delivers:** the identity computed from a source, exposed where the plan
+command can call it and a person can check which identity current `main`
+produces; the plan consumer with grouped sessions; the stop report; per-piece
+timing, where the number from the first rehearsal run decides whether
+siblings may run concurrently and whether stage 5 is worth building; and the
+retarget drill. This is also the stage at which the entry point gets its
+spelling (decision 1).
+
 - [ ] A retarget of a seeded board runs to completion from a checked-in plan.
 - [ ] Preconditions are proved for every row before the first write.
+- [ ] The identity of each row's resolved source is recomputed before the
+      write and must equal `op.patternIdentity`; `rev` is never enforced.
+- [ ] The compatibility override is honored from the row field alone.
 - [ ] Every retarget row carries the identity its source produces, computed
       without compiling, and the precondition check classifies each piece as
       outstanding, landed, or moved elsewhere against that row alone.
@@ -543,6 +614,10 @@ a verdict, and the two stay separate invocations.
 The plan derived in the other direction — each row returning its piece to the
 revision the plan recorded it at, through the runtime's own restore of a
 retained revision rather than through a second retarget.
+
+**Delivers:** the restore seam — the first command in front of the runtime's
+retained-revision restore, useful on its own for any single piece; the
+rollback-plan derivation; and the rollback drill.
 
 - [ ] A completed retarget is fully reversed from its own plan, with no
       second artifact needed: each rollback row's precondition is the identity
@@ -573,6 +648,8 @@ sessions are stage 3's floor; this stage is only the step from a group to the
 whole run. Last, because it is an optimization over a spine that must exist
 first, and because it is the only stage gated on measurement.
 
+**Delivers:** a measurement, and nothing else unless the measurement says so.
+
 - [ ] Revisited only after the client's execution responsibilities settle.
       This stage optimizes work that may not stay here; see the scope section.
 - [ ] Measured at the piece count a real board carries, not a sample of it —
@@ -601,17 +678,25 @@ left to production: stopping a run midway and completing it by re-invocation
 is the property most likely to rot silently, because nothing else exercises
 it.
 
+The seeded board is a checked-in fixture pair — a trimmed "prior generation"
+pattern and a "current" one — deployed and then retargeted, not the Topics
+pattern at two revisions. That keeps the drill fast and stable, and it means
+the drill reds when bulk operations break and not when Topics changes; the
+Topics rehearsal remains the place where the real pattern is exercised.
+
 ## Open decisions
 
 Each is named with the stage that forces it, so none of them has to be
 settled before work starts.
 
-1. **How bulk is spelled** — *stage 1*. Whether the existing per-piece
-   commands grow a repeatable target, or bulk operations get their own verb,
+1. **How bulk is spelled** — *stage 3*. Whether the existing per-piece
+   commands grow a plan-file target, or bulk operations get their own group,
    decides whether the word for "one piece" stays consistent across the
    command surface. This interacts with
-   [CLI surface shape](cli-surface-shape.md), and it is the first decision
-   because every later stage inherits it.
+   [CLI surface shape](cli-surface-shape.md). It is deferred on purpose: the
+   core is library code, so nothing in stage 1 waits on it, and it is settled
+   when the first write operation needs a home. Until then the survey and
+   the identity read surface wherever the thin wrapper finds cheapest.
 2. ~~**Where preconditions are evaluated.**~~ **Resolved: over the API, and
    stage 1 builds the read.** A piece's pattern identity is readable from a
    live deployment without running the piece — the piece inspection path
@@ -621,11 +706,13 @@ settled before work starts.
    snapshot endpoint the offline path depends on refuses to mount in a
    production environment, so there is no offline option there to weigh.
    What does not yet exist is a read of the right *shape*: see stage 1.
-3. **Scope of a compatibility override** — *stage 1*. An override that lets
-   one refused piece through is a per-piece decision today. Applied to a
-   plan, one flag covering every row turns many decisions into one, which is
-   a different risk from the same flag used many times. Per-row or per-run is
-   a real choice, not a detail.
+3. ~~**Scope of a compatibility override.**~~ **Resolved: a field on the
+   row, stamped by a flag at plan time.** An override that lets one refused
+   piece through is a per-piece decision today; applied to a plan, one flag
+   covering every row turns many decisions into one, which is a different
+   risk from the same flag used many times. The row field keeps the record
+   per row and the plan-time flag keeps the decision single; the apply reads
+   only the row. See the plan encoding above.
 4. **Whether repair gets a narrow write** — *stage 2*. Two writes reach a
    piece's stored input today. One replaces the whole document and re-runs
    the piece against it. The other writes at a path inside the document, but
@@ -637,13 +724,14 @@ settled before work starts.
    freezing a stale schema into a live board. Either repair gets a path write
    that can be told to skip that validation, or the design accepts the wide
    one and says why.
-5. **How a fixer is supplied** — *stage 2*. A module the run imports and
-   calls can be type-checked against the document shape and can be tested
-   without a space; a program the run pipes a document through is
-   language-agnostic and matches how the surrounding operational scripts
-   already work. The choice decides whether writing a fixer is a
-   repository-local task or something an operator can do from anywhere, and
-   whether the purity a fixer has to have is enforced or merely asked for.
+5. ~~**How a fixer is supplied.**~~ **Resolved: a validator is a JSON
+   schema; a fixer is a TypeScript module the run imports.** A module can be
+   type-checked against the document shape, tested without a space, and
+   checked for the purity a fixer has to have; a program piped a document is
+   language-agnostic but can only be asked for those. The validator needs no
+   code at all, because the canonical one is the holder's demanded schema.
+   Writing a fixer is therefore a repository-local task, which is the trade
+   the choice makes.
 6. **Whether siblings may be applied concurrently** — *stage 3, and open
    until the first pass is measured.* Serial ordering exists because a parent
    recomputing over changing children is what storms, but the children of one
