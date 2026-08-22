@@ -561,6 +561,21 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     }
   }
 
+  /**
+   * Whether this badge is presenting a VERIFIED profile.
+   *
+   * The single answer the seal nodes, `data-state` and the cursor-sheen
+   * liveness all take, because they are one claim wearing three faces and a
+   * guard on only the nodes leaves the other two asserting it. Verification
+   * is derived from the resolved cell's label, which can arrive while no
+   * VALUE did — a badge showing a fallback name, or nothing, must not be in
+   * a verified state on the strength of a label alone.
+   */
+  private get _verified(): boolean {
+    return this._resolved && this._state === "verified" &&
+      this._seal !== undefined;
+  }
+
   protected override updated(changed: PropertyValues): void {
     super.updated(changed);
     // Reflect navigability to the host so `:host([data-navigable])` can draw the
@@ -569,8 +584,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // Register for cursor sheen only while actually verified + connected. The
     // shared controller manages reduced-motion (it won't run the loop while the
     // user prefers reduced motion, and tears it down live if they enable it).
-    const verified = this._state === "verified" && this._seal !== undefined;
-    this._setLiveness(verified && this.isConnected);
+    this._setLiveness(this._verified && this.isConnected);
   }
 
   private _setLiveness(on: boolean): void {
@@ -817,8 +831,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const presentedName = this._name ??
       (usingFallback ? this.fallbackName : undefined);
     const displayName = presentedName ?? "Unknown profile";
-    const verified = this._state === "verified" && this._seal !== undefined &&
-      !usingFallback;
+    const verified = this._verified;
     // The aura ring layer carries the DID-derived conic gradient plus a soft glow
     // in the identity's hue, so the fingerprint reads at badge scale.
     const hue = this._seal?.hue ?? 0;
@@ -860,7 +873,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         part="root"
         data-cf-profile-badge
         data-variant="${variant}"
-        data-state="${this._state}"
+        data-state="${verified ? "verified" : "presented"}"
         ?data-navigable="${this._navigable}"
         ?data-has-tooltip="${hasTooltip}"
         role="${this._navigable

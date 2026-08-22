@@ -2,7 +2,9 @@
 status: historical
 created: 2026-08-19
 archived: 2026-08-19
-reason: "Decision record for the lunch-poll identity contract break: display-name identity replaced by profile cells, approved in person 2026-08-18; the second accepted break in the pattern-update registries."
+reason: "Decision record for the lunch-poll identity contract break:
+  display-name identity replaced by profile cells, approved in person
+  2026-08-18; the second accepted break in the pattern-update registries."
 ---
 
 # Lunch-poll identity contract break
@@ -40,7 +42,7 @@ Stored state applies cleanly. The new identity fields (`users[].profile`,
 `votes[].voter`, visit snapshots' `voterProfile`) are optional — every row
 this pattern writes carries them, enforced by store-site gates that require
 the identity to read as present — and the new display field (`loggedByName`)
-carries a default. A piece holding name-keyed rows updates in place: legacy
+carries a default. A piece holding name-keyed rows keeps its data: legacy
 rows become display ghosts (they match no viewer, tally anonymously, and
 their people re-join with profiles as themselves). The Tier 2 state gate
 passes with two accepted-drop entries, recorded in
@@ -53,7 +55,20 @@ after its capture day. The stored votes themselves survive whole.
 
 ## Disposition of deployed pieces
 
-In-place update is possible and non-lossy, with the ghost-row cosmetics
-above. The recommended rollout for the team's populated poll remains a fresh
-piece; either way, participants create or pick a shared profile once (the
-join card's empty state is that surface).
+A fresh piece is required, not merely preferred. Two paths are accepted
+breaks against the epoch-1 contract — the removed `result.adminName`, and
+`argument.visits[]`, whose defaults are not stable under default insertion —
+and the root argument is exactly what `setPattern` checks, so `cf piece
+setsrc` refuses the swap on a populated piece. Only
+`--dangerously-allow-incompatible-schema` overrides that, which is not a step
+this change asks anyone to take.
+
+What that costs is the CHANNEL, not the data. The Tier 2 gate replays real
+stored state under this source and the visit log reads back whole; a piece
+that could be updated would keep its history. The refusal is a schema
+judgment made before any of that is consulted.
+
+So the team's populated poll moves to a fresh piece, carrying its state
+across with the copy procedure in `DEPLOY-AND-SHARE.md`, and participants
+create or pick a shared profile once (the join card's empty state is that
+surface).

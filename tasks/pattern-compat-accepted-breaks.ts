@@ -194,7 +194,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // ghosts) and the legacy display fields carry defaults.
     pattern: "lunch-poll/main.tsx",
     baselines: ["20260729T022742Z-5bjUubcOZ-gpvz7F"],
-    paths: ["argument.adminName", "result.adminName"],
+    paths: ["argument.visits[]", "result.adminName"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
       "`adminName` was the name-keyed admin surface — argument input and " +
       "published result — and cannot survive the removal of name-keyed " +
@@ -209,23 +209,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // profile-cell comparison.
     pattern: "lunch-poll/participant-identity-card.tsx",
     baselines: ["20260729T022742Z-KMaq_J9475tWtRxW"],
-    paths: ["argument.adminName", "result.me"],
+    paths: ["result.me"],
     reason: "Lunch-poll identity moved from display names to profile cells. " +
       "The card's name-keyed admin input and its published viewer-name " +
       "identity go with the model they keyed.",
-    record: "docs/history/lunch-poll-identity-break.md",
-  },
-  {
-    // Same decision, seen from the option card: `me` carried the viewer's
-    // display name so the card could mark their vote. The viewer is a
-    // profile cell now (`viewerProfile`), compared with equals(); the stored
-    // string a deployed piece holds under `me` is an unclaimed extra.
-    pattern: "lunch-poll/poll-option-card.tsx",
-    baselines: ["20260729T022742Z-FzI6KTHR_TQ4QStb"],
-    paths: ["argument.me"],
-    reason: "Lunch-poll identity moved from display names to profile cells. " +
-      "The option card's `me` was the viewer's display name; the viewer is " +
-      "now the `viewerProfile` cell, compared with equals().",
     record: "docs/history/lunch-poll-identity-break.md",
   },
 ];

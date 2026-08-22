@@ -160,8 +160,9 @@ describe("CFProfileBadge", () => {
     });
 
     it("does not carry the seal while presenting a fallback", () => {
-      // Belt and braces on the same boundary, from the other direction: even
-      // if a stale verified state survived, caller text may not wear it.
+      // Verification can be derived from a resolved cell's LABEL while no
+      // value arrived, so this is the state the component can really be in —
+      // not a contrived one.
       const el = new CFProfileBadge() as any;
       el._state = "verified";
       el._seal = identitySeal(OWNER_DID);
@@ -169,6 +170,28 @@ describe("CFProfileBadge", () => {
       const html = JSON.stringify(el.render());
       expect(html).toContain("Alex");
       expect(html).not.toContain(identitySeal(OWNER_DID).accent);
+    });
+
+    it("reports no verified state or liveness while presenting a fallback", () => {
+      // The seal is one claim wearing three faces — the seal nodes,
+      // `data-state` (which the verified CSS keys on), and the cursor-sheen
+      // liveness. Guarding only the nodes leaves the other two asserting it.
+      const el = new CFProfileBadge() as any;
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      el.fallbackName = "Alex";
+      expect(el._verified).toBe(false);
+      expect(JSON.stringify(el.render())).not.toContain('"verified"');
+    });
+
+    it("reports verified once a value and a label have both arrived", () => {
+      // The boundary must not swallow the real case it is protecting.
+      const el = new CFProfileBadge() as any;
+      el._applyValue({ name: "Ada" });
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+      expect(el._verified).toBe(true);
+      expect(JSON.stringify(el.render())).toContain("verified");
     });
 
     it("presents the fallback through every variant's name and avatar", () => {
