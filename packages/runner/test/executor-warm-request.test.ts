@@ -31,7 +31,11 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import {
+  stampWaveRunContext,
+  warmWritesOf,
+  type WaveSpaceCommit,
+} from "../src/executor/wave.ts";
 import {
   applyCommit,
   read as readDoc,
@@ -414,5 +418,90 @@ describe("executor-warm-request", () => {
     } finally {
       cancel();
     }
+  });
+});
+
+describe("warmWritesOf()", () => {
+  // The warm request's payload contract in isolation: which staged doc
+  // instances a foreign provisioning batch contributes as warm demand.
+  const batchWith = (
+    operations: WaveSpaceCommit["operations"],
+    delegated?: WaveSpaceCommit["delegated"],
+  ): WaveSpaceCommit => ({
+    space: homeSpace,
+    home: false,
+    basisSeq: 0,
+    rebasedHeads: [],
+    operations,
+    preconditions: [],
+    annotations: [],
+    consequenceOf: [],
+    basisInstances: [],
+    holder: undefined,
+    ...(delegated === undefined ? {} : { delegated }),
+  });
+  const setOp = (
+    id: string,
+    scope?: "space" | "user" | "session",
+  ): WaveSpaceCommit["operations"][number] =>
+    ({
+      op: "set",
+      id,
+      type: "application/json",
+      value: {},
+      ...(scope === undefined ? {} : { scope }),
+    }) as WaveSpaceCommit["operations"][number];
+
+  it("keys space-scope ops (explicit or default) as `space` and dedupes per (id, scopeKey)", () => {
+    const writes = warmWritesOf(batchWith([
+      setOp("of:a"),
+      setOp("of:a", "space"),
+      setOp("of:b", "space"),
+    ]));
+    expect(writes).toEqual([
+      { id: "of:a", scopeKey: "space" },
+      { id: "of:b", scopeKey: "space" },
+    ]);
+  });
+
+  it("resolves scoped ops against the batch's carried delegated identity — the same keying as the engine's delegated admission", () => {
+    const writes = warmWritesOf(batchWith(
+      [setOp("of:u", "user"), setOp("of:s", "session")],
+      {
+        actingPrincipal: "did:key:alice",
+        actingSession: "sess-1",
+        capabilityRef: "event-consequence:e",
+      },
+    ));
+    expect(writes.map((write) => write.id)).toEqual(["of:u", "of:s"]);
+    expect(writes[0].scopeKey.startsWith("user:")).toBe(true);
+    expect(writes[1].scopeKey.startsWith("session:")).toBe(true);
+  });
+
+  it("omits a scoped op the carried identity cannot name — a session-scope op with no acting session", () => {
+    const writes = warmWritesOf(batchWith(
+      [setOp("of:s", "session"), setOp("of:keep", "space")],
+      {
+        actingPrincipal: "did:key:alice",
+        capabilityRef: "event-consequence:e",
+      },
+    ));
+    expect(writes).toEqual([{ id: "of:keep", scopeKey: "space" }]);
+  });
+
+  it("omits scoped ops entirely when the batch carries no delegated identity", () => {
+    const writes = warmWritesOf(batchWith([
+      setOp("of:u", "user"),
+      setOp("of:keep", "space"),
+    ]));
+    expect(writes).toEqual([{ id: "of:keep", scopeKey: "space" }]);
+  });
+
+  it("omits folded sqlite ops — they carry no doc instance", () => {
+    const sqliteOp = {
+      op: "sqlite",
+    } as unknown as WaveSpaceCommit["operations"][number];
+    const writes = warmWritesOf(batchWith([sqliteOp, setOp("of:keep")]));
+    expect(writes).toEqual([{ id: "of:keep", scopeKey: "space" }]);
   });
 });
