@@ -173,6 +173,31 @@ const isArrayLengthChildPath = (
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";
 
+// [NDT] name-draft-loss triage instrumentation (triage branch only; never
+// merge). See runtime-processor.ts's twin helper; same registry, same
+// filter, console.warn so every realm's capture sees it.
+function ndtState(): { docs: Set<string>; seqs: Set<number> } {
+  const holder = globalThis as unknown as {
+    __NDT?: { docs: Set<string>; seqs: Set<number> };
+  };
+  holder.__NDT ??= { docs: new Set<string>(), seqs: new Set<number>() };
+  return holder.__NDT;
+}
+function ndtHot(text: string): boolean {
+  return text.includes("Grace Hopper") || text.includes("Countess") ||
+    text.includes("Ada Lovelace") || text.includes("Draft") ||
+    text.includes("editing");
+}
+function ndtLog(tag: string, data: unknown): void {
+  try {
+    console.warn(
+      `[NDT t=${Date.now() % 1000000}] ${tag} ${JSON.stringify(data)}`,
+    );
+  } catch {
+    console.warn(`[NDT] ${tag} unserializable`);
+  }
+}
+
 const logger = getLogger("storage.v2", {
   enabled: true,
   level: "error",
@@ -3790,6 +3815,43 @@ class SpaceReplica implements ISpaceReplica {
       // the pending layers before `settled` resolves, so removal here
       // never races a stack that still names the seq.
       this.#speculativeLocalSeqs.add(localSeq);
+      // [NDT] speculative layer lifecycle for draft-flow docs. The ops
+      // union includes sqlite ops without ids; treat them shape-agnostically.
+      {
+        const ndt = ndtState();
+        const ndtOps = (commit.operations ?? []) as ReadonlyArray<
+          { op?: string; id?: unknown; patches?: unknown; value?: unknown }
+        >;
+        const ndtOpsText = JSON.stringify(ndtOps) ?? "";
+        if (
+          ndtOps.some((operation) =>
+            typeof operation.id === "string" && ndt.docs.has(operation.id)
+          ) || ndtHot(ndtOpsText)
+        ) {
+          for (const operation of ndtOps) {
+            if (typeof operation.id === "string") ndt.docs.add(operation.id);
+          }
+          ndtLog("spec-layer-add", {
+            space: this.#space.slice(-8),
+            localSeq,
+            ops: ndtOps.map((operation) => ({
+              op: operation.op,
+              id: operation.id,
+              detail: (operation.op === "patch"
+                ? JSON.stringify(operation.patches)
+                : operation.op === "set"
+                ? JSON.stringify(operation.value)
+                : String(operation.op))?.slice(0, 160),
+            })),
+          });
+          settled.catch(() => {}).finally(() => {
+            ndtLog("spec-layer-drop", {
+              space: this.#space.slice(-8),
+              localSeq,
+            });
+          });
+        }
+      }
       settled.catch(() => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
       });
@@ -4226,6 +4288,41 @@ class SpaceReplica implements ISpaceReplica {
           : {}),
       }),
     );
+    // [NDT] trace draft-flow commits: which reads the built commit
+    // names (per-read layer lists) and the standing speculative set.
+    {
+      const ndt = ndtState();
+      const ndtOpsText = JSON.stringify(operations) ?? "";
+      if (
+        operations.some((operation) => ndt.docs.has(operation.id)) ||
+        ndtHot(ndtOpsText)
+      ) {
+        for (const operation of operations) ndt.docs.add(operation.id);
+        ndt.seqs.add(localSeq);
+        ndtLog("commit-build", {
+          space: this.#space.slice(-8),
+          localSeq,
+          ops: operations.map((operation) => ({
+            op: operation.op,
+            id: operation.id,
+            detail: (operation.op === "patch"
+              ? JSON.stringify(operation.patches)
+              : operation.op === "set"
+              ? JSON.stringify(operation.value)
+              : "delete")?.slice(0, 200),
+          })),
+          pending: commit.reads.pending.map((read) => ({
+            id: read.id,
+            path: read.path,
+            layers: read.localSeq,
+            nr: read.nonRecursive === true,
+            basis: read.basisSeq,
+          })),
+          confirmedReads: commit.reads.confirmed.length,
+          spec: [...this.#speculativeLocalSeqs],
+        });
+      }
+    }
     // The export refusal (server-execution v2 Phase 2, speculation.md
     // §6; RULED 2026-08-13): a commit basis naming a SPECULATIVE
     // overlay layer must not reach the wire — the layer exists only in
@@ -4241,6 +4338,19 @@ class SpaceReplica implements ISpaceReplica {
         commit,
         speculativeLayers,
       );
+      // [NDT] full refusal detail, unconditionally (refusals are rare).
+      ndtLog("REFUSAL", {
+        space: this.#space.slice(-8),
+        localSeq,
+        speculativeLayers: [...speculativeLayers],
+        ops: (JSON.stringify(operations) ?? "").slice(0, 400),
+        pending: commit.reads.pending.map((read) => ({
+          id: read.id,
+          path: read.path,
+          layers: read.localSeq,
+          nr: read.nonRecursive === true,
+        })),
+      });
       logger.error("speculative-basis-refused", () => [
         "commit refused before export: read basis names speculative " +
         "overlay layer(s) (speculation.md §6)",
@@ -4715,6 +4825,13 @@ class SpaceReplica implements ISpaceReplica {
         ) {
           const speculativeLayers = this.speculativeLayersOf(commit);
           if (speculativeLayers.length > 0) {
+            // [NDT] the leg-C belt fired: a speculative basis reached
+            // the wire — log unconditionally.
+            ndtLog("REFUSAL-WIRE", {
+              space: this.#space.slice(-8),
+              localSeq,
+              speculativeLayers: [...speculativeLayers],
+            });
             logger.error("speculative-basis-exported", () => [
               "a commit naming speculative overlay layer(s) reached the " +
               "wire (the build-time refusal should have caught this); " +
@@ -4882,6 +4999,15 @@ class SpaceReplica implements ISpaceReplica {
     rejection: StorageTransactionRejected,
     identity?: ScopeKeyIdentity,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // [NDT] rejection outcome for tracked draft-flow commits.
+    if (ndtState().seqs.has(localSeq)) {
+      ndtLog("push-rejected", {
+        space: this.#space.slice(-8),
+        localSeq,
+        name: rejection.name,
+        message: String(rejection.message ?? "").slice(0, 240),
+      });
+    }
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -5973,6 +6099,21 @@ class SpaceReplica implements ISpaceReplica {
     // confirm; a pushed commit's is the replica's own).
     identity?: ScopeKeyIdentity,
   ): void {
+    // [NDT] accept applied for tracked draft-flow commits/docs.
+    {
+      const ndt = ndtState();
+      if (
+        ndt.seqs.has(localSeq) ||
+        operations.some((operation) => ndt.docs.has(operation.id))
+      ) {
+        ndtLog("confirm", {
+          space: this.#space.slice(-8),
+          localSeq,
+          seq: applied.seq,
+          ids: operations.map((operation) => operation.id),
+        });
+      }
+    }
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
     this.resolveAppliedWaiter(localSeq);
@@ -6117,6 +6258,13 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private dropPending(localSeq: number): void {
+    // [NDT] pending layer dropped for tracked draft-flow commits.
+    if (ndtState().seqs.has(localSeq)) {
+      ndtLog("drop-pending", {
+        space: this.#space.slice(-8),
+        localSeq,
+      });
+    }
     // A drop can LIFT the shadow floor without a promotion (review
     // thread r3739416417): a rejected/rolled-back own write emptying a
     // shadowed doc's pending set makes the foreign value visible and

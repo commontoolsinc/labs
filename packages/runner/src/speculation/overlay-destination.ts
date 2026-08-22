@@ -99,6 +99,28 @@ import type { CommitError } from "../storage/interface.ts";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 import { CoalescedDocListener } from "./doc-notification-listener.ts";
 
+// [NDT] name-draft-loss triage instrumentation (triage branch only; never
+// merge). Twin of the helpers in storage/v2.ts and runtime-processor.ts.
+function ndtState(): { docs: Set<string>; seqs: Set<number> } {
+  const holder = globalThis as unknown as {
+    __NDT?: { docs: Set<string>; seqs: Set<number> };
+  };
+  holder.__NDT ??= { docs: new Set<string>(), seqs: new Set<number>() };
+  return holder.__NDT;
+}
+function ndtLog(tag: string, data: unknown): void {
+  try {
+    console.warn(
+      `[NDT t=${Date.now() % 1000000}] ${tag} ${JSON.stringify(data)}`,
+    );
+  } catch {
+    console.warn(`[NDT] ${tag} unserializable`);
+  }
+}
+// Per-entry sweep-hold log budget so a long-standing echo cannot flood the
+// console (the sweep re-runs on every watermark event).
+const ndtSweepBudget = new WeakMap<object, number>();
+
 const logger = getLogger("speculation-overlay", {
   enabled: true,
   level: "warn",
@@ -572,6 +594,12 @@ export class SpeculationOverlayDestination
       this.#noteJoblessIntent(context.eventId);
       this.#droppedLateEchoTxs.add(tx);
       this.#lateEchoDrops += 1;
+      // [NDT] a client handler echo's writes dropped at seal (late-echo
+      // rule) — always logged: this is a candidate loss shape.
+      ndtLog("late-echo-dropped", {
+        eventId: context.eventId,
+        parent: context.parentEventId,
+      });
       logger.debug("late-echo-dropped", () => [
         `late event echo ${context.eventId} dropped at seal: its intent ` +
         "(or its cascade parent's) already reached a terminal " +
@@ -690,6 +718,29 @@ export class SpeculationOverlayDestination
             }
             : {}),
         };
+        // [NDT] every event-handler echo, plus any echo touching a
+        // tracked draft-flow doc; the echo's own written docs join the
+        // tracked set so later taps follow them.
+        {
+          const ndt = ndtState();
+          if (
+            entry.eventId !== undefined ||
+            entry.writtenDocs.some((doc) => ndt.docs.has(doc.id))
+          ) {
+            for (const doc of entry.writtenDocs) ndt.docs.add(doc.id);
+            ndtLog("echo-seal", {
+              space: space.slice(-8),
+              localSeq: entry.localSeq,
+              eventId: entry.eventId,
+              parent: entry.parentEventId,
+              floor: entry.confirmedFloor,
+              origins: entry.originLocalSeqs,
+              wrote: entry.writtenDocs.map((doc) =>
+                `${doc.id}${doc.wholeDoc ? "#doc" : "#patch"}`
+              ),
+            });
+          }
+        }
         sealedSpaces.push({ space, entry });
         return Promise.resolve({ ok: {} });
       },
@@ -1516,6 +1567,14 @@ export class SpeculationOverlayDestination
       const own = entry.eventId === eventId;
       if (!own && !this.#cascadeReaches(entry, eventId)) continue;
       entries.delete(entry.localSeq);
+      // [NDT] consequence-driven echo retirement.
+      ndtLog("echo-retire-intent", {
+        space: space.slice(-8),
+        localSeq: entry.localSeq,
+        eventId: entry.eventId,
+        own,
+        byIntent: eventId,
+      });
       if (!own) {
         // A cascade descendant: jobless by its ancestor's consequence.
         this.#cascadeEchoRetirements += 1;
@@ -1628,6 +1687,17 @@ export class SpeculationOverlayDestination
       );
       if (!allCovered) continue;
       entries.delete(older.localSeq);
+      // [NDT] supersede-by-newer withdrawal.
+      {
+        const ndt = ndtState();
+        if (older.writtenDocs.some((doc) => ndt.docs.has(doc.id))) {
+          ndtLog("echo-supersede", {
+            olderSeq: older.localSeq,
+            newerSeq: entry.localSeq,
+            wrote: older.writtenDocs.map((doc) => doc.id),
+          });
+        }
+      }
       older.resolveVerdict({
         withdrawn: {
           message: "speculation superseded by a newer speculation of the " +
@@ -1790,6 +1860,34 @@ export class SpeculationOverlayDestination
    * unblock a chained one (a speculation that read another's overlay
    * value).
    */
+  // [NDT] budget-limited hold logging for interesting entries: every
+  // event-handler echo, plus any entry touching a tracked draft-flow doc.
+  #ndtSweepHold(
+    space: MemorySpace,
+    entry: OverlayEntry,
+    data: {
+      reason: string;
+      floor: number;
+      watermark: number;
+      doc?: string;
+      confirmedSeq?: number;
+    },
+  ): void {
+    const ndt = ndtState();
+    const interesting = entry.eventId !== undefined ||
+      entry.writtenDocs.some((doc) => ndt.docs.has(doc.id));
+    if (!interesting) return;
+    const used = ndtSweepBudget.get(entry) ?? 0;
+    if (used >= 20) return;
+    ndtSweepBudget.set(entry, used + 1);
+    ndtLog("sweep-hold", {
+      space: space.slice(-8),
+      localSeq: entry.localSeq,
+      eventId: entry.eventId,
+      ...data,
+    });
+  }
+
   #sweep(space: MemorySpace, watermark: number): void {
     if (watermark <= 0) return;
     const entries = this.#entries.get(space);
@@ -1834,6 +1932,8 @@ export class SpeculationOverlayDestination
         // list carries the entry.)
         let floor = entry.confirmedFloor;
         let blocked = false;
+        // [NDT] capture which doc blocked, for the hold log below.
+        let ndtBlockDoc: string | undefined;
         for (const origin of entry.originLocalSeqs) {
           const acked = ackedSeqOf(origin);
           if (acked !== undefined && acked > floor) floor = acked;
@@ -1851,10 +1951,19 @@ export class SpeculationOverlayDestination
             )
           ) {
             blocked = true;
+            ndtBlockDoc = doc.id;
             break;
           }
         }
-        if (blocked || watermark < floor) continue;
+        if (blocked || watermark < floor) {
+          this.#ndtSweepHold(space, entry, {
+            reason: blocked ? "blocked" : "floor",
+            floor,
+            watermark,
+            doc: ndtBlockDoc,
+          });
+          continue;
+        }
         // The ARRIVAL gate (speculation.md §4, RULED 2026-08-16): coverage
         // of the basis is necessary, not sufficient — every doc instance
         // this run wrote must hold a CONFIRMED value at seq ≥ floor, i.e.
@@ -1869,15 +1978,38 @@ export class SpeculationOverlayDestination
         // Backstop for the demand walk's coverage gaps (fan-out design
         // §E residual 4) and the first-demand transient (§E residual 1).
         let arrived = true;
+        // [NDT] capture which written doc has not arrived, and where its
+        // confirmed seq sits, for the hold log below.
+        let ndtUnarrivedDoc: string | undefined;
+        let ndtUnarrivedSeq: number | undefined;
         for (const doc of entry.writtenDocs) {
           const state = view(doc.id, doc.scope);
           if (state.confirmedSeq === 0 || state.confirmedSeq < floor) {
             arrived = false;
+            ndtUnarrivedDoc = doc.id;
+            ndtUnarrivedSeq = state.confirmedSeq;
             break;
           }
         }
-        if (!arrived) continue;
+        if (!arrived) {
+          this.#ndtSweepHold(space, entry, {
+            reason: "unarrived",
+            floor,
+            watermark,
+            doc: ndtUnarrivedDoc,
+            confirmedSeq: ndtUnarrivedSeq,
+          });
+          continue;
+        }
         entries.delete(entry.localSeq);
+        // [NDT] coverage+arrival (backstop) echo retirement.
+        ndtLog("echo-retire-sweep", {
+          space: space.slice(-8),
+          localSeq: entry.localSeq,
+          eventId: entry.eventId,
+          floor,
+          watermark,
+        });
         if (entry.eventId !== undefined) {
           // An intent-origin echo retired by W coverage — the BACKSTOP
           // (speculation.md §4; design (e) item 9): the consequence

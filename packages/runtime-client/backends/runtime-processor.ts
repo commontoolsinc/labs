@@ -187,6 +187,33 @@ import {
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 
+// [NDT] name-draft-loss triage instrumentation (triage branch only; never
+// merge): a process-global registry of "interesting" doc ids and localSeqs,
+// seeded by value/path matches on the profile-embed draft flow, plus a
+// console.warn logger every realm's console capture can see. Inert taps:
+// no control flow, no state the product reads.
+function ndtDocs(): Set<string> {
+  const holder = globalThis as unknown as {
+    __NDT?: { docs: Set<string>; seqs: Set<number> };
+  };
+  holder.__NDT ??= { docs: new Set<string>(), seqs: new Set<number>() };
+  return holder.__NDT.docs;
+}
+function ndtHot(text: string): boolean {
+  return text.includes("Grace Hopper") || text.includes("Countess") ||
+    text.includes("Ada Lovelace") || text.includes("Draft") ||
+    text.includes("editing");
+}
+function ndtLog(tag: string, data: unknown): void {
+  try {
+    console.warn(
+      `[NDT t=${Date.now() % 1000000}] ${tag} ${JSON.stringify(data)}`,
+    );
+  } catch {
+    console.warn(`[NDT] ${tag} unserializable`);
+  }
+}
+
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodecEngine();
 
@@ -1061,6 +1088,10 @@ export class RuntimeProcessor {
     const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
+    // [NDT] name-draft triage tap (triage branch only): trace every
+    // UI-input write whose value or resolved target is draft-flow-shaped,
+    // and follow its (otherwise fire-and-forget) commit outcome.
+    let ndtHotWrite = false;
     if (blind) {
       markUiInputBlindWriteTx(tx);
       // Renderer-input provenance that survives to commit, so the scheduler can
@@ -1076,13 +1107,45 @@ export class RuntimeProcessor {
         scope: link.scope,
         path: link.path.slice(0, -1),
       });
+      const ndtText = `${link.id} ${link.path.join("/")} ${
+        JSON.stringify(request.value) ?? ""
+      }`;
+      if (ndtHot(ndtText) || ndtDocs().has(link.id)) {
+        ndtHotWrite = true;
+        ndtDocs().add(link.id);
+        ndtLog("cellwrite", {
+          blind,
+          id: link.id,
+          space: link.space,
+          path: link.path,
+          value: (JSON.stringify(request.value) ?? "undefined").slice(0, 160),
+        });
+      }
     }
     cell.withTx(tx).set(value);
     if (blind) unmarkUiInputBlindWriteTx(tx);
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    const ndtCommit = tx.commit();
+    if (ndtHotWrite) {
+      // [NDT] observe the fire-and-forget outcome without changing it.
+      Promise.resolve(ndtCommit).then(
+        (outcome) =>
+          ndtLog("cellwrite-tx-outcome", {
+            ok: (outcome as { error?: { message?: string } })?.error ===
+              undefined,
+            error: String(
+              (outcome as { error?: { message?: string } })?.error?.message ??
+                "",
+            ).slice(0, 200),
+          }),
+        (thrown) =>
+          ndtLog("cellwrite-tx-threw", {
+            error: String(thrown).slice(0, 200),
+          }),
+      );
+    }
   }
 
   handleCellSend(request: CellSendRequest): void {

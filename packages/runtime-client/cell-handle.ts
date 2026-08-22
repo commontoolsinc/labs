@@ -175,6 +175,30 @@ export class CellHandle<T = unknown> {
     // TODO(danfuzz): constrain `T`, once those types are assignable.
     const serialized = CellHandle.serialize(value as ClientCellValue);
 
+    // [NDT] name-draft triage tap (triage branch only): DOM-side view of a
+    // draft-flow write leaving the page realm.
+    {
+      const ndtText = JSON.stringify(serialized) ?? "";
+      if (
+        ndtText.includes("Grace Hopper") || ndtText.includes("Countess") ||
+        ndtText.includes("Ada Lovelace")
+      ) {
+        try {
+          console.warn(
+            `[NDT t=${Date.now() % 1000000}] dom-set ${
+              JSON.stringify({
+                type: type === RequestType.CellPush ? "push" : "set",
+                value: ndtText.slice(0, 120),
+                cell: JSON.stringify(this.ref())?.slice(0, 200),
+              })
+            }`,
+          );
+        } catch {
+          // never let diagnostics break the write path
+        }
+      }
+    }
+
     this.#value = value;
 
     for (const callback of this.#callbacks.values()) {
