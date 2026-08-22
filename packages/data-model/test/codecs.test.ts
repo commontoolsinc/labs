@@ -115,7 +115,7 @@ describe("codecs", () => {
     expect(roundTrip(null)).toBe(null);
   });
 
-  it("JSON-safe primitives stringify normally (under the encoding prefix)", () => {
+  it("stringifies JSON-safe primitives normally (under the encoding prefix)", () => {
     expect(jsonFromFabricValue(42)).toBe("fvj1:42");
     expect(jsonFromFabricValue("hello")).toBe('fvj1:"hello"');
     expect(jsonFromFabricValue(true)).toBe("fvj1:true");
@@ -168,12 +168,12 @@ describe("codecs", () => {
       expect(roundTrip(value)).toEqual({ "/foo": "bar" });
     });
 
-    it("decoded objects are frozen", () => {
+    it("freezes decoded objects", () => {
       const value = { a: 1, b: "two" };
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
-    it("decoded arrays are frozen", () => {
+    it("freezes decoded arrays", () => {
       const value = [1, 2, 3];
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
@@ -220,12 +220,12 @@ describe("codecs", () => {
       expect(roundTrip(slashKeyed)).toEqual(slashKeyed);
     });
 
-    it("`$stream` marker passes through unchanged", () => {
+    it("passes the `$stream` marker through unchanged", () => {
       const value = { $stream: true };
       expect(roundTrip(value)).toEqual({ $stream: true });
     });
 
-    it("`@Error` marker passes through unchanged", () => {
+    it("passes the `@Error` marker through unchanged", () => {
       const value = {
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       };
@@ -249,7 +249,7 @@ describe("codecs", () => {
       });
     });
 
-    it("mixed value with fabric types and slash-keys round-trips", () => {
+    it("round-trips a mixed value with fabric types and slash-keys", () => {
       const value = {
         count: 42n,
         slashKeyed: { "/": { values: [1, 2, 3], note: "hello" } },
@@ -292,7 +292,7 @@ describe("codecs", () => {
       expect(fabricFromJsonValue('fvj1:{"\/BigInt@1":"Kg"}')).toBe(42n);
     });
 
-    it("explicit `undefined` runtime is equivalent to omission", () => {
+    it("treats an explicit `undefined` runtime as equivalent to omission", () => {
       expect(fabricFromJsonValue('fvj1:{"a":1}', undefined)).toEqual({ a: 1 });
     });
   });

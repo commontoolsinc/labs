@@ -1234,7 +1234,7 @@ describe("JsonCodecEngine", () => {
         expect(result["outer"]!["/inner"]).toBe(1);
       });
 
-      it("single-key `/`-prefixed object still routes through `#unwrapTag()` (no regression)", () => {
+      it("still routes a single-key `/`-prefixed object through `#unwrapTag()` (no regression)", () => {
         // Single-key `/Tag@N` objects are handled by `#unwrapTag()` rather than
         // the plain-object path, so they produce an `UnknownValue` for the
         // unrecognized tag and never reach the multi-key guard's
@@ -1247,7 +1247,7 @@ describe("JsonCodecEngine", () => {
         );
       });
 
-      it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
+      it("strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
         // The encoded form `{"/quote": {"/quote": "x"}}` is a `/quote`-wrapped
         // literal whose content happens to be `{"/quote": "x"}`. Decoding must
         // return that inner object as a frozen plain object, and must _not_
@@ -1588,7 +1588,7 @@ describe("JsonCodecEngine", () => {
       expect(result.error).toBe("boom");
     });
 
-    it("lenient mode wraps failed handler decoding", () => {
+    it("wraps failed handler decoding in lenient mode", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
 
@@ -1649,7 +1649,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient mode wraps failed class-registry decoding", () => {
+    it("wraps failed class-registry decoding in lenient mode", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
 
@@ -1672,21 +1672,21 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("freeze guarantees", () => {
-    it("decoded arrays are frozen", () => {
+    it("freezes decoded arrays", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("decoded objects are frozen", () => {
+    it("freezes decoded objects", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("mutation of a decoded array throws", () => {
+    it("throws on mutation of a decoded array", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
@@ -1695,7 +1695,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("mutation of a decoded object throws", () => {
+    it("throws on mutation of a decoded object", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
@@ -1704,7 +1704,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("nested decoded objects are frozen", () => {
+    it("freezes nested decoded objects", () => {
       const result = fromEncodedFormat(
         { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
@@ -1712,7 +1712,7 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
-    it("decoded `/object`-unwrapped objects are frozen", () => {
+    it("freezes decoded `/object`-unwrapped objects", () => {
       const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
       const result = fromEncodedFormat(data) as Record<
         string,
@@ -1726,7 +1726,7 @@ describe("JsonCodecEngine", () => {
     // `Object.isFrozen()`: an arm that froze only the value it built, and not
     // what it wrapped, would pass the shallow check.
 
-    it("an `UnknownValue` from an unrecognized tag is deep-frozen", () => {
+    it("deep-freezes an `UnknownValue` from an unrecognized tag", () => {
       const result = fromEncodedFormat(
         { "/Nope@1": { a: 1 } } as JsonCodecValue,
       );
@@ -1735,7 +1735,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("an `UnknownValue` is deep-frozen through its state", () => {
+    it("deep-freezes an `UnknownValue` through its state", () => {
       const result = fromEncodedFormat(
         { "/Nope@1": { inner: { deep: [1, 2] } } } as JsonCodecValue,
       ) as UnknownValue;
@@ -1746,7 +1746,7 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(state.inner.deep)).toBe(true);
     });
 
-    it("a `ProblematicValue` from a malformed tag is deep-frozen", () => {
+    it("deep-freezes a `ProblematicValue` from a malformed tag", () => {
       // `malformed`, because the wrap helper validates with a strict decode
       // and would otherwise reject the very payload this case is made of.
       const result = fromEncodedFormat(
@@ -1765,7 +1765,7 @@ describe("JsonCodecEngine", () => {
     // freeze. That holds of every other arm too, the unknown-tag fallback
     // included; the cases just above cover those.
 
-    it("codec-produced value is deep-frozen at the boundary", () => {
+    it("deep-freezes a codec-produced value at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // decoded FabricEpochNsec must be deep-frozen on return.
       const result = fromEncodedFormat(
@@ -1775,7 +1775,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient-mode `ProblematicValue` from a codec is deep-frozen", () => {
+    it("deep-freezes a lenient-mode `ProblematicValue` from a codec", () => {
       // `/BigInt@1` with non-string state fails codec validation; the
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
@@ -1793,7 +1793,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("codec round-trip yields a deep-frozen result", () => {
+    it("yields a deep-frozen result from a codec round-trip", () => {
       const result = roundTrip(
         new FabricEpochNsec(1704067200000000000n),
       );

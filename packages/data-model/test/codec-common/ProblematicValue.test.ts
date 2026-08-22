@@ -98,7 +98,7 @@ describe("ProblematicValue", () => {
 
   describe("instance members", () => {
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: recurses state, freezes in place", () => {
+      it("recurses state, freezes in place, via dispatch", () => {
         const child = { x: 1 };
         const pv = new ProblematicValue(
           "Bad@1",
@@ -112,7 +112,7 @@ describe("ProblematicValue", () => {
         expect(isValidDeepFrozenFabricValue(pv)).toBe(true);
       });
 
-      it("via direct member invocation: recurses state, freezes in place", () => {
+      it("recurses state, freezes in place, via direct member invocation", () => {
         const child = { x: 1 };
         const pv = new ProblematicValue(
           "Bad@1",
@@ -126,45 +126,45 @@ describe("ProblematicValue", () => {
         expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
     });
-  });
 
-  describe("equals()", () => {
-    it("returns `true` for an instance reporting the same fault", () => {
-      const state = { x: 1 };
+    describe("equals()", () => {
+      it("returns `true` for an instance reporting the same fault", () => {
+        const state = { x: 1 };
 
-      expect(new ProblematicValue("T@1", state, "boom").equals(
-        new ProblematicValue("T@1", state, "boom"),
-      )).toBe(true);
-    });
+        expect(new ProblematicValue("T@1", state, "boom").equals(
+          new ProblematicValue("T@1", state, "boom"),
+        )).toBe(true);
+      });
 
-    it("returns `false` when any of the three facts differs", () => {
-      const state = { x: 1 };
-      const pv = new ProblematicValue("T@1", state, "boom");
+      it("returns `false` when any of the three facts differs", () => {
+        const state = { x: 1 };
+        const pv = new ProblematicValue("T@1", state, "boom");
 
-      expect(pv.equals(new ProblematicValue("Other@1", state, "boom")))
-        .toBe(false);
-      expect(pv.equals(new ProblematicValue("T@1", { x: 1 }, "boom")))
-        .toBe(false);
-      expect(pv.equals(new ProblematicValue("T@1", state, "different")))
-        .toBe(false);
-    });
+        expect(pv.equals(new ProblematicValue("Other@1", state, "boom")))
+          .toBe(false);
+        expect(pv.equals(new ProblematicValue("T@1", { x: 1 }, "boom")))
+          .toBe(false);
+        expect(pv.equals(new ProblematicValue("T@1", state, "different")))
+          .toBe(false);
+      });
 
-    it("returns `false` for anything that is not a `ProblematicValue`", () => {
-      const pv = new ProblematicValue("T@1", "s", "boom");
+      it("returns `false` for anything that is not a `ProblematicValue`", () => {
+        const pv = new ProblematicValue("T@1", "s", "boom");
 
-      expect(pv.equals(undefined)).toBe(false);
-      expect(pv.equals(null)).toBe(false);
-      expect(pv.equals("T@1")).toBe(false);
-      expect(pv.equals({ wireTypeTag: "T@1", state: "s", error: "boom" }))
-        .toBe(false);
-    });
+        expect(pv.equals(undefined)).toBe(false);
+        expect(pv.equals(null)).toBe(false);
+        expect(pv.equals("T@1")).toBe(false);
+        expect(pv.equals({ wireTypeTag: "T@1", state: "s", error: "boom" }))
+          .toBe(false);
+      });
 
-    it("compares a non-string tag by the rendering it kept", () => {
-      // The tag is normalized on the way in, so two instances built from the
-      // same unusable tag agree.
-      expect(new ProblematicValue(42, "s", "boom").equals(
-        new ProblematicValue(42, "s", "boom"),
-      )).toBe(true);
+      it("compares a non-string tag by the rendering it kept", () => {
+        // The tag is normalized on the way in, so two instances built from the
+        // same unusable tag agree.
+        expect(new ProblematicValue(42, "s", "boom").equals(
+          new ProblematicValue(42, "s", "boom"),
+        )).toBe(true);
+      });
     });
   });
 

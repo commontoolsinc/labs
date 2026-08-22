@@ -1099,7 +1099,7 @@ describe("value-hash", () => {
     });
   });
 
-  describe("hashOf() caching", () => {
+  describe("`hashOf()` caching", () => {
     it("returns the same precomputed-constant object for `null`", () => {
       const a = hashOf(null);
       const b = hashOf(null);
@@ -1166,7 +1166,7 @@ describe("value-hash", () => {
     });
   });
 
-  describe("hashOf() native instances", () => {
+  describe("`hashOf()` native instances", () => {
     describe("Date", () => {
       it("hashes a native `Date` without throwing", () => {
         const date = new Date("2024-01-01T00:00:00Z");
@@ -1377,7 +1377,7 @@ describe("value-hash", () => {
   // self-tagged string-rep of `Symbol.keyFor(s)` (i.e., the same byte stream
   // that a plain string of that key would feed). Unique (uninterned) symbols
   // have no portable key and throw.
-  describe("hashOf() interned symbols", () => {
+  describe("`hashOf()` interned symbols", () => {
     it("takes the inline TAG_STRING path for a short key", () => {
       // utf8Length(3) <= MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
       // [TAG_STRING][len][utf8].
