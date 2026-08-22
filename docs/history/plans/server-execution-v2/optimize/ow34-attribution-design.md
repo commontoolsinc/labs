@@ -654,7 +654,10 @@ NAMED OUT, with its home:
 All seven questions are RULED 2026-08-21, each adopted as recommended; the
 per-question markers below record the binding reading. The aside's answer:
 yes — Q3 names the actor-less examples (structure loads, the watermark
-write, pattern-swap setup, factory-time loads), and §1b's structural note
+write, pattern-swap setup, factory-time loads; the drain's
+consequence-notice seal — `#sealEventConsequenceNotice`, the
+skip/error/drop notices — is the same actor-less bookkeeping shape, added
+to this list by the #6190 review's NOTE-7), and §1b's structural note
 names the one mint-capable actor-less path (setup/defaults materialization
 via the initial-schema-default carve-out).
 

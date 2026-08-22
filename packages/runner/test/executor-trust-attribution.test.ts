@@ -765,11 +765,21 @@ describe("executor-trust-attribution", () => {
           () => host!.spaceServer(space)?.active === true,
           "the space to re-activate",
         );
-        // Bounded settle for the negative (the events-down restart pin's
-        // carve-out): the loop gets a beat in which a wrong re-run WOULD
-        // land its second consequence commit; the count is the sharp
-        // observable, byte-identity of the labels the trust half.
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Ordered barrier for the negative: append a FRESH entry on the
+        // same stream and wait for ITS consequence — the drain processes
+        // entries in order, so a wrong re-run of the replayed entry
+        // would land its second consequence commit no later than the
+        // fresh entry's. Sharper than a settle beat: a late duplicate
+        // cannot slip in after the assertion.
+        result.key("bump").send(trustedPayload({ kind: "replay-barrier" }));
+        await clientRuntime!.idle();
+        await clientRuntime!.storageManager.synced();
+        await waitUntil(
+          () =>
+            entryByKind(engine, sidecarId, "replay-barrier")?.consequenced ===
+              true,
+          "the barrier entry to consequence on the re-activated loop",
+        );
         expect(consequenceCommitsFor()).toBe(1);
         const labelsAfter = JSON.stringify(
           (Engine.read(engine, { id: docId }) as { cfc?: unknown })?.cfc,
@@ -959,6 +969,26 @@ describe("executor-trust-attribution", () => {
         );
       } finally {
         await runtime.dispose();
+        await manager.close();
+      }
+    });
+
+    it("refuses to construct a SERVING runtime with a custom trustSnapshotProvider — the run stamper would silently bypass it for every acting run", async () => {
+      const manager = StorageManager.emulate({ as: serviceSigner });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager: manager,
+            servingPosture: true,
+            experimental: { serverExecution: true },
+            trustSnapshotProvider: () => ({
+              id: "custom-provider",
+              actingPrincipal: serviceSigner.did(),
+            }),
+          })
+        ).toThrow("custom trustSnapshotProvider");
+      } finally {
         await manager.close();
       }
     });

@@ -1326,6 +1326,23 @@ export class Runtime {
       this.#trustRevision = this.cfcTrustConfig === undefined
         ? this.id
         : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
+      // A serving runtime uses the DEFAULT provider — the run stamper
+      // attaches per-run snapshots via trustSnapshotForPrincipal
+      // (serving-loop.md §3c), whose revision is the runtime's own; a
+      // custom provider here would be silently bypassed for every acting
+      // run and would compose a revision the stamper does not know.
+      // Fail loud at construction instead.
+      if (
+        options.servingPosture === true &&
+        options.trustSnapshotProvider !== undefined
+      ) {
+        throw new Error(
+          "A serving runtime cannot take a custom trustSnapshotProvider: " +
+            "the run stamper attaches per-run trust snapshots composed on " +
+            "the runtime's own trust revision (serving-loop.md §3c), which " +
+            "would silently bypass the custom provider for acting runs.",
+        );
+      }
       this.trustSnapshotProvider = options.trustSnapshotProvider ??
         (() => this.trustSnapshotForPrincipal(actingPrincipal));
       this.userIdentityDID = options.storageManager.as.did() as DID;
@@ -2090,8 +2107,9 @@ export class Runtime {
    * trust-config change invalidates per-run prepared digests exactly as
    * it does ambient ones. On a runtime constructed with a CUSTOM
    * `trustSnapshotProvider` this still composes the RUNTIME's revision,
-   * not the provider's — the run stamper installs only on serving
-   * runtimes, which use the default provider.
+   * not the provider's — safe because a serving runtime refuses a custom
+   * provider at construction (the run stamper is the only caller, and it
+   * installs only on serving runtimes).
    */
   trustSnapshotForPrincipal(principal: string): TrustSnapshot {
     return {

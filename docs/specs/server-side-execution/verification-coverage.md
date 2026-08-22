@@ -2854,9 +2854,10 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Acceptance beyond the executor pins rides the PR's CI ON lanes and
   the flip train's live gates (the lunch/served-wish log criteria and
   the store dump), which stay the flip PR's bar; the
-  `home-profile-reload-durability` and `cfc-group-chat-demo` ON skips
-  stay listed — they lift jointly with OW45 and OW47 (+ the CFC
-  attribution residual above).
+  `home-profile-reload-durability` ON skip stays listed (it lifts
+  jointly with OW45), and the `cfc-group-chat-demo` skip was LIFTED
+  by OW59 (the OW34-family train closed the CFC-attribution residual
+  above and removed the entry on its green ON gate + store audit).
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -5299,9 +5300,9 @@ supply; OW29/OW32/OW34 closed):
     (true ON topology, lane-shaped toolshed) after 2/6-red pre-fix at
     the same tip; the `integration/cellset-lww.test.ts` step entry is
     REMOVED. The `integration/cfc-group-chat-demo.test.ts` file skip
-    REMAINS: its CI shape is OW31's §2b acting-identity carriage
-    (that train lifts it jointly; the OW47 half of its reason is
-    closed).
+    was subsequently LIFTED by OW59 (the OW34-family train): its
+    remaining CI shape was the per-run CFC trust attribution seam,
+    closed there — the OW47 half of its reason had closed here.
   - **OW48 — CLOSED 2026-08-21 (refuted premise; optimize-on-main
     served-wish seat,
     [`optimize/ow48-50-wish-path-report.md`](../../history/plans/server-execution-v2/optimize/ow48-50-wish-path-report.md)
@@ -5797,7 +5798,9 @@ supply; OW29/OW32/OW34 closed):
     leave the edit()-attached ambient snapshot untouched); INV-G
     revision-composition equality with and without a trust config.
     The `cfc-group-chat-demo` ON gate is this row's live lift
-    condition (the skip entry is removed by this train); the
+    condition (the skip entry is removed by this train; green 4/4 —
+    three fresh-store lift runs plus a quiet-machine solo run, every
+    run's store audited); the
     store-dump audit (zero authored-by / represents-principal atoms
     naming the service DID — INV-D) arbitrates Q3's flagged caveat:
     a serving-side system-pattern restage of an owner-gated pattern
@@ -5810,7 +5813,13 @@ supply; OW29/OW32/OW34 closed):
     identity-model decision — the per-run tx snapshot is the
     substrate a fix would re-point them at); label option (b)'s
     served-provenance mark (future, on product need, with its own
-    spec sentence).
+    spec sentence). OW53-adjacent note (the #6190 review's NOTE-6,
+    recorded not fixed): delegated READ sessions register their
+    demand under the PROCESS DID rather than the acting principal
+    (memory/v2/server.ts — the session-demand identity assembly,
+    `session.principal` into the demander identity) —
+    label-inert (no mint reads it) and operator-allowlisted; an
+    identity-model decision for OW53's family, not this row's.
 
 ## 4. Standing rule
 
