@@ -1332,6 +1332,20 @@ export async function dispatchQueuedEvent(state: {
   // originStatus() fallback ("confirmed") would let a descendant of a failed
   // origin run.
   const requeueForNameResolution = () => {
+    // The rebuilt entry does NOT carry `served`, and no served copy may
+    // reach this path: both served constructors (the drain's and cell.ts's
+    // LT1 emission) queue with retries: false, whose RetryImmediately
+    // branch drops instead of requeueing. Requeueing one anyway would
+    // silently shed the acting identity and the failure hook — and what a
+    // served RETRY even means (which wave owns it, who re-seals) is
+    // UNSTATED semantics that must be decided, not defaulted, if this
+    // assert ever fires.
+    if (queuedEvent.served !== undefined) {
+      throw new Error(
+        "requeueForNameResolution reached with a served event; served " +
+          "retry semantics are undecided (see the comment at this assert)",
+      );
+    }
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // The flag rides every requeue with the id it describes: dropping it
@@ -1367,6 +1381,18 @@ export async function dispatchQueuedEvent(state: {
     deadline: number,
     runAt: number,
   ) => {
+    // Same served-absence assert as the name-resolution requeue above:
+    // served copies queue with retries: false, so a stale-basis failure
+    // classifies give-up "opt-out" and never reaches the backoff window —
+    // the wave is a served copy's retry cadence. A served entry rebuilt
+    // here would silently shed the acting identity and the failure hook;
+    // served retry semantics are undecided, so fail loudly instead.
+    if (queuedEvent.served !== undefined) {
+      throw new Error(
+        "requeueForBackoff reached with a served event; served retry " +
+          "semantics are undecided (see the comment at this assert)",
+      );
+    }
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // Same as the name-resolution requeue above: the flag travels with the
