@@ -435,12 +435,13 @@ loop's duty).
   identically): the same rule as the throw above — the refusal IS the
   consequence. The entry carries the refusal message as its `error`,
   `eventWatermark` advances past it, and the unconditional
-  dropped-write report still fires (scheduler/events.ts, the served
-  give-up arm's discriminated `served.onFailure`). Every OTHER commit
-  refusal of a served event (transport, authorization, a handler
-  abort) seals nothing: the entry stays pending and the wave cadence
-  re-drains it — served copies opt out of scheduler-side backoff
-  because the wave IS their retry cadence (serving-loop.md §3d).
+  dropped-write report still fires; the seal is the served give-up
+  arm's discriminated `served.onFailure` (scheduler/events.ts). Every
+  OTHER commit refusal of a served event (transport, authorization, a
+  handler abort) seals nothing: the entry stays pending and the wave
+  cadence re-drains it — served copies opt out of scheduler-side
+  backoff because the wave IS their retry cadence (serving-loop.md
+  §3d).
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
   in fired order — PER STREAM: a stream's sidecar carries only that

@@ -173,13 +173,13 @@ scope-boundary pin above, green on base and after.
 All at the fixed head, one file per invocation (the runner test
 task's flags):
 
-- `executor-events-down.test.ts`: RED run on base (the pin's timeout,
-  20 other steps green — the two sibling (α3)-family steps included),
-  then at the fix: 4 full-file runs with clean verdicts, all
-  `1 passed (21 steps) | 0 failed`, plus 3 more runs verifying the
-  two "(α3) + a same-eventId SIBLING tx" steps green (OW57
-  corroboration: 8/8 observations of those steps green at/around
-  #6184's construction, zero holds lost).
+- `executor-events-down.test.ts`: two RED runs on base (the pin's
+  timeout; every other step green — the two sibling (α3)-family steps
+  included), then at the fix: 4 full-file runs with clean verdicts,
+  all `1 passed (21 steps) | 0 failed`, plus 3 more runs verifying
+  the two "(α3) + a same-eventId SIBLING tx" steps green (OW57
+  corroboration: 9/9 full-file observations of those steps green at
+  the #6184 construction — 2 base + 7 fixed-head — zero holds lost).
 - Neighbor suites, green per-file: `executor-serving-loop` (25
   steps), `executor-space-server` (15), `cfc-prepare-crash-surfacing`
   (15), `cfc-schema-merge` (58), and the give-up-path binders

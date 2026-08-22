@@ -5675,10 +5675,10 @@ supply; OW29/OW32/OW34 closed):
     before that cycle's settle reaches its `inputSynced` barrier — so
     the sealing cycle is held structurally while idle cycles pass
     (nothing arms until the copy actually runs). Corroboration (the
-    OW54 follow-on PR's runs, 2026-08-21): eight full-file runs of
-    `executor-events-down.test.ts` at and around the #6184
-    construction, both (α3)-family sibling steps green in all eight,
-    zero holds lost. A red of this step with the ping already durable
+    OW54 follow-on PR's runs, 2026-08-21): nine full-file runs of
+    `executor-events-down.test.ts` at the #6184 construction, both
+    (α3)-family sibling steps green in all nine, zero holds lost. A
+    red of this step with the ping already durable
     at the probe would now be a NEW defect, not this race. No lift
     trigger (test-harness item).
 
