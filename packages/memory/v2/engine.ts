@@ -4,6 +4,13 @@ import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+
+// The canonical tagged-hash spelling `taggedHashStringOf` produces: the
+// `fid1` algorithm tag ("Fabric ID, Version 1", SHA-256) and 43 chars of
+// unpadded base64url digest. The envelope-reference guard matches this
+// exactly — an unknown future tag is not validated rather than rejected,
+// the same fail-open-for-unreadable posture the guard's comment states.
+const TAGGED_HASH_PATTERN = /^fid1:[A-Za-z0-9_-]{43}$/;
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
@@ -3541,6 +3548,22 @@ const applyCommitTransaction = (
       return schema;
     });
   };
+  // A stored CFC envelope's `schemaHash` is a schema-document reference in
+  // everything but spelling: the read side assembles the label envelope
+  // through `cid:<schemaHash>`, so a commit that lands metadata without
+  // its document creates the same broken closure a dangling link `$ref`
+  // would. Only the reserved root `cfc` member is a metadata position —
+  // user data lives under `value` — and only a WELL-FORMED tagged hash is
+  // a reference: the reader fails closed on anything else, so a malformed
+  // string is unreadable rather than unbacked, and validating it would
+  // reject documents (test seeds among them) that never resolved anyway.
+  const collectCfcEnvelopeRef = (metadata: unknown): void => {
+    if (metadata === null || typeof metadata !== "object") return;
+    const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
+    if (typeof schemaHash !== "string") return;
+    if (!TAGGED_HASH_PATTERN.test(schemaHash)) return;
+    requiredSchemaRefs.add(schemaHash);
+  };
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (operation.op === "patch") {
@@ -3548,10 +3571,23 @@ const applyCommitTransaction = (
         if ("value" in patch) collectLinkSchemaRefs(patch.value);
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
+        // The envelope positions a patch can land metadata at: the whole
+        // `cfc` member, or its `schemaHash` directly.
+        if ("value" in patch && patch.path === "/cfc") {
+          collectCfcEnvelopeRef(patch.value);
+        }
+        if ("value" in patch && patch.path === "/cfc/schemaHash") {
+          collectCfcEnvelopeRef({ schemaHash: patch.value });
+        }
       }
     }
     if (!operation.id.startsWith("cid:")) {
-      if (operation.op === "set") collectLinkSchemaRefs(operation.value);
+      if (operation.op === "set") {
+        collectLinkSchemaRefs(operation.value);
+        collectCfcEnvelopeRef(
+          (operation.value as { cfc?: unknown } | null)?.cfc,
+        );
+      }
       continue;
     }
     if (operation.op === "delete" || operation.op === "patch") {

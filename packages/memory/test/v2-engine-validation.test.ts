@@ -626,3 +626,117 @@ Deno.test("a replayed eliding commit reports its elision again", async () => {
     assertEquals(replayed.revisions, []);
   });
 });
+
+Deno.test("validates the schema document a CFC envelope's schemaHash references", async () => {
+  await withEngine((engine) => {
+    const envelopeSchema = {
+      type: "object",
+      properties: { field: { type: "string" } },
+      ifc: { confidentiality: ["secret"] },
+    } as const;
+    const envelopeHash = internSchemaAsTaggedHashString(envelopeSchema);
+    const docWithMetadata = (schemaHash: string) =>
+      ({
+        op: "set",
+        id: "of:envelope-carrier",
+        value: {
+          value: { field: "v" },
+          cfc: {
+            version: 1,
+            schemaHash,
+            labelMap: { version: 1, entries: [] },
+          },
+        },
+      }) as never;
+
+    // Metadata naming a document nothing backs is rejected — the same
+    // broken closure a dangling link `$ref` would create, spelled as a
+    // bare hash at the reserved `cfc` position.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [docWithMetadata(envelopeHash)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The document included in the SAME commit is accepted...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          docWithMetadata(envelopeHash),
+          setOp(`cid:${envelopeHash}`, envelopeSchema),
+        ],
+      }),
+    });
+
+    // ...and once stored, it satisfies later metadata by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [docWithMetadata(envelopeHash)],
+      }),
+    });
+
+    // A `schemaHash` that is not a well-formed tagged hash is not a
+    // reference: the read side fails closed on it, so it is unreadable
+    // rather than unbacked, and rejecting it would break every seeded
+    // fixture that never resolved one.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        operations: [
+          {
+            op: "set",
+            id: "of:junk-envelope-carrier",
+            value: {
+              value: { field: "v" },
+              cfc: {
+                version: 1,
+                schemaHash: "seed-schema",
+                labelMap: { version: 1, entries: [] },
+              },
+            },
+          } as never,
+        ],
+      }),
+    });
+
+    // The patch spelling of the same landing is validated too.
+    const missingSchema = {
+      type: "object",
+      properties: { other: { type: "number" } },
+    } as const;
+    const missingHash = internSchemaAsTaggedHashString(missingSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(5, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:envelope-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "/cfc",
+                  value: {
+                    version: 1,
+                    schemaHash: missingHash,
+                    labelMap: { version: 1, entries: [] },
+                  },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+  });
+});
