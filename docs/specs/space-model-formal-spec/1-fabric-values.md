@@ -1264,9 +1264,9 @@ holding material is constructed from an algorithm name and the two keys' bytes,
 which it copies unless handed a `FabricBytes`, that being already immutable and
 sole-owned.
 
-**Only the material state is representable outside a live realm.** A
-`CryptoKey`'s material is reachable only through `SubtleCrypto.exportKey()`,
-which is asynchronous where a codec's `encode()` is synchronous, and which a
+**Only the material state has a byte representation.** A `CryptoKey`'s
+material is reachable only through `SubtleCrypto.exportKey()`, which is
+asynchronous where a codec's `encode()` is synchronous, and which a
 non-extractable key refuses outright. So:
 
 - The JSON encoding **refuses** a pair holding handles: encoding one throws
@@ -1280,9 +1280,21 @@ non-extractable key refuses outright. So:
   [4-realm-encoding.md](./4-realm-encoding.md)), which is what a transport
   preserving `CryptoKey` makes possible.
 
-The refusals are the point rather than a gap. The formats that persist and
-inspect a value are exactly the ones that must not be able to represent a key
-whose whole purpose is that its material cannot be extracted.
+The refusals are the point rather than a gap, and they follow from the key
+rather than from any policy about formats. A pair holding handles has no bytes
+for a synchronous `encode()` to reach, so a format writing bytes down has
+nothing to write; a pair holding material has them, and such a format uses
+them. Which state a key is in is settled where it is minted, and that is
+upstream of every format here: an algorithm Web Crypto does not implement has
+no handle to hold, and an implementation wanting its keys exportable mints
+them so.
+
+Carrying a handle is a third thing, and neither writes material down nor needs
+it: the key arrives with its extractability unchanged, and whoever reads it
+gains nothing a holder of the original did not have. That is what lets a pair
+holding handles reach a durable structured-clone store (Section 1.2 of
+[4-realm-encoding.md](./4-realm-encoding.md)) while staying unrepresentable in
+JSON.
 
 #### 1.4.12 `FabricLink`
 
