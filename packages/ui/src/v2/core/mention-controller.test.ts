@@ -134,6 +134,29 @@ describe("MentionController — filtering", () => {
     const ctrl = new MentionController(createMockHost());
     expect(ctrl.getFilteredMentions()).toEqual([]);
   });
+
+  it("skips degraded null holes and keeps loadable siblings (CT-1863)", () => {
+    // A member whose pattern can't load on this runtime is degraded to a null
+    // slot by MentionableArraySchema (rather than voiding the whole list). The
+    // controller must skip those holes — with an empty query especially, where
+    // the name check is short-circuited. Here the middle member is a hole.
+    const ctrl = new MentionController(createMockHost());
+    const items: MentionableArray = [
+      { [NAME]: "Alice" },
+      null,
+      { [NAME]: "Bob" },
+    ];
+    const cell = createMockCellHandle(items, {
+      id: "of:mentionables-with-hole" as any,
+      schema: { type: "array", items: { anyOf: [{ type: "null" }, { type: "object" }] } },
+    });
+    ctrl.setMentionable(cell);
+
+    const filtered = ctrl.getFilteredMentions();
+    expect(filtered.length).toBe(2);
+    expect(filtered[0].get()?.[NAME]).toBe("Alice");
+    expect(filtered[1].get()?.[NAME]).toBe("Bob");
+  });
 });
 
 // ---------------------------------------------------------------------------
