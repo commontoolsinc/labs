@@ -1902,10 +1902,32 @@ export class SpeculationOverlayDestination
         // same wave commit, so the watermark sink re-sweeps at arrival).
         // Backstop for the demand walk's coverage gaps (fan-out design
         // §E residual 4) and the first-demand transient (§E residual 1).
+        //
+        // The ARRIVAL-WITNESS predicate (speculation.md §4, RULED
+        // 2026-08-22 — candidate (B) of the OW33 fork memo): a cover AT
+        // exactly the floor witnesses arrival only when its covering
+        // commit is DERIVED-class — the legitimate at-floor arrival is a
+        // re-derivation whose run read the already-arrived value at that
+        // very seq. An authored-class cover at the floor is the entry's
+        // own basis commit — the setup write that created the computed
+        // docs' structure (the client's own for a new instance, a prior
+        // session's for a resumed one) — and never witnesses the
+        // derivation's arrival: retiring on it is the OW33 hole (the
+        // entry dropped 40-260 ms before the served value landed, and
+        // the bare read saw undefined). A cover whose class the replica
+        // does not know (an OFF-arm or pre-predicate frame) fails CLOSED
+        // at the floor — toward the standing, value-identical echo,
+        // never the undefined read. STRICTLY ABOVE the floor any
+        // confirmed cover witnesses, whatever its class: the store has
+        // moved past everything this speculation consumed.
         let arrived = true;
         for (const doc of entry.writtenDocs) {
           const state = view(doc.id, doc.scope);
           if (state.confirmedSeq === 0 || state.confirmedSeq < floor) {
+            arrived = false;
+            break;
+          }
+          if (state.confirmedSeq === floor && state.coverClass !== "derived") {
             arrived = false;
             break;
           }

@@ -1513,6 +1513,9 @@ export class WatchView {
             : {}),
           seq: upsert.seq,
           document: upsert.doc ?? null,
+          ...(upsert.coverClass !== undefined
+            ? { coverClass: upsert.coverClass }
+            : {}),
         },
       );
     }

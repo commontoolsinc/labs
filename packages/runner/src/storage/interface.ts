@@ -5,6 +5,7 @@ import type {
 } from "@commonfabric/api";
 import type {
   ClientCommit,
+  CommitClass,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
@@ -2359,11 +2360,21 @@ export interface ISpaceReplica extends ISpace {
    * promotion keeps the echo alive, exactly speculation.md §4 step 3's
    * "acked AND W ≥ that commit's seq" condition, evaluated on replica
    * state instead of tracked acks.
+   *
+   * `coverClass` is the covering commit's class where the replica knows
+   * it (the arrival-witness predicate, RULED 2026-08-22: a cover AT an
+   * entry's floor witnesses arrival only when derived-class). Undefined
+   * — an OFF-arm or pre-predicate frame, or a fake in tests — reads as
+   * "class unknown", which never witnesses arrival at the floor.
    */
   speculationRetirementView?(
     id: URI,
     scope?: CellScope,
-  ): { confirmedSeq: number; pendingLocalSeqs: number[] };
+  ): {
+    confirmedSeq: number;
+    coverClass?: CommitClass;
+    pendingLocalSeqs: number[];
+  };
 
   /**
    * The store seq a local commit's accept committed at (speculation.md
