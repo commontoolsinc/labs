@@ -1,3 +1,14 @@
+# POST-RUN ANNOTATION (2026-08-22, review round; entries below are verbatim as written during the runs):
+# - The two smoke0-* entries are instrument-validation smokes, never series data.
+#   smoke0-chat ran on the FIRST toolshed-off build (sha db152c149819e559) - a
+#   source-identical build from the same clean worktree at 0c0261df3, made
+#   BEFORE the COMMIT_SHA-baked rebuild, which is why its probe line reads
+#   gitSha=? (the first build served /api/meta gitSha=null). smoke0-lunch and
+#   every ledger series run below used the rebaked pair:
+#   toolshed-off f9ebb1b71038acde / toolshed-on b04a63d0298fb621.
+# - Lunch OFF store totals are 407 (l1a), 407 (l1b), 405 (l2b): the adjacent
+#   pair is byte-equal, the trailing rep is a -2 variant (principal space 401
+#   vs 403). The dossier's SS2d carries the corrected witness reading.
 == smoke0-chat
 start_utc=2026-08-22T21:52:50Z
 load_before={ 3.67 4.06 4.81 }

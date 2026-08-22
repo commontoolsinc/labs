@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-22
 archived: 2026-08-22
-reason: "Flip-readiness dossier + the OW38(ii) benchmark re-run at main 0c0261df3: four of the five enumerated flip gates hold (skip list = ONE step entry, OW45 arm B; OW31 BUILT; OW45-OW53 walked closed with OW49's closure-declaration formality outstanding; ON lanes green at head), and the W4 protocol re-run reads server settle all-inputs p50 22-37 ms (sub-second everywhere), chat arrival ON/OFF 1.2-1.9x (was 1.9-2.4x), the W4-failed sender-echo bar now AT PARITY on chat (ON 106/137 vs OFF 108-111 ms p50), note createToView ON below OFF and flat, lease.lost 0, {1:16}, OFF witness held. NEW: the at-floor-derived instrument fired - the resumed counter-click revert is REACHABLE (7/8 trials, 9-11 ms window on loopback; OFF control clean) - the OW33 named residual moves from reachability-unproven to measured-real. The ask to the owner is one decision: is this bar met for the flip?"
+reason: "Flip-readiness dossier + the OW38(ii) benchmark re-run at main 0c0261df3: four of the five enumerated flip gates hold (skip list = ONE step entry, OW45 arm B; OW31 BUILT; OW45-OW53 walked closed with OW49's closure-declaration formality outstanding; ON lanes green at head), and the W4 protocol re-run reads server settle all-inputs p50 22-37 ms (sub-second everywhere), chat arrival ON/OFF 1.2-1.9x (was 1.9-2.4x), the W4-failed sender-echo bar now AT PARITY on chat (ON 106/137 vs OFF 108-111 ms p50), note createToView ON below OFF at p50 and plateau-matched (both arms climb into the same list-size plateau; n=20 cannot separate warm-up from size growth), lease.lost 0, {1:16}, OFF witness held in substance (lunch 407/407/405, all authored-only). NEW: the at-floor-derived instrument fired - the resumed counter-click revert is REACHABLE (7/8 trials, 9-11 ms window on loopback; OFF control clean) - the OW33 named residual moves from reachability-unproven to measured-real. The ask to the owner is one decision: is this bar met for the flip?"
 ---
 
 # Server-execution v2 — flip-readiness dossier and the OW38(ii) benchmark
@@ -47,13 +47,18 @@ Against that wording, at this head:
   217/264; ON actionRuns 1.0–1.4× OFF vs W4's 2.8–2.9×). The one
   echo still above OFF is the lunch guest-veto (132–296 vs 36–52 ms;
   W4 saw the same residual at up to 181 ms).
-- **Note createToView flat and below OFF**: ON p50 991→**907** and
-  829→**525** ms; OFF 1 147–1 168 ms; both arms end at the same
-  plateau (last-10 medians ON 1 201–1 246 vs OFF 1 174–1 196).
+- **Note createToView below OFF at p50, ending at OFF's plateau**: ON
+  p50 991→**907** and 829→**525** ms; OFF 1 147–1 168 ms; both arms
+  END at the same plateau (last-10 medians ON 1 201–1 246 vs OFF
+  1 174–1 196) and both arms CLIMB into it — the workload's list-size
+  step, not an ON-specific slope; §2c carries the honest arithmetic
+  and the n=20 limit. The monotone 1→13.7 s growth witness stays gone.
 - **Invariants**: `lease.lost` 0 in 7/7 ON runs; consequence
   multiplicity **{1:16}** in all three lunch stores; no `walkRuns` key
-  anywhere; OFF byte-identity witness held (every OFF store
-  authored-only; lunch 407 = 407 = 407).
+  anywhere; OFF byte-identity witness held in substance (every OFF
+  store authored-only, zero derived/system rows; lunch **407 / 407 /
+  405** — the adjacent pair byte-equal, the trailing rep a −2 variant;
+  §2d).
 
 Two residuals ride beside the ruling, named and non-blocking unless
 elevated: (a) **OW45 arm B** (the one skip entry; the sibling seat's
@@ -336,8 +341,20 @@ above-OFF echo** (2.5–8.2× OFF, worse at the top than W4's max 181 ms
 | n2 | ON rep 2 | 20 | **525** / 1 874 / 246 / 2 852 | 471 → 1 201 | 829 |
 
 Raw series in `flip-dossier-raw/note-series.txt`. **ON below OFF at
-p50 in both reps and FLAT** — both arms end at the same plateau; the
-monotone growth witness stays gone. **Both ON note runs passed the
+p50 in both reps, and PLATEAU-MATCHED — read with the honest
+arithmetic, not a bare "flat":** both arms CLIMB into the same
+plateau. By first-10→last-10 medians the OFF arms rise 3.0–3.6×
+(325→1 174, 379→1 196, 397→1 184 — the workload's known list-size
+step: n1a's raw series jumps 256→1 166 at note 7) and the ON arms
+rise 1.66× and 2.55× (751→1 246, 471→1 201), ENDING at OFF's plateau
+(1 201–1 246 vs 1 174–1 196) with no ON-specific excess above it.
+What the bar's wording measures — a slope ≈ OFF's, no unbounded
+ON-side growth — holds: the re-benchmark's monotone 1→13.7 s witness
+stays gone, and the last-10 medians of the two arms coincide. What
+n=20 CANNOT do is separate warm-up from size-dependent growth within
+the series (the ON arms start higher and climb less; a longer-series
+leg is a cheap follow-up if the owner wants it before ruling — flagged,
+not filled). **Both ON note runs passed the
 browser-console gate** that failed rc=1 in W4 on the pre-existing
 `splitDefinitions` error — that error is extinct at head (OW51's
 build; the ON run's 10/10-zero-occurrences gate is the register's).
@@ -366,7 +383,7 @@ and advance-subtracted):
 |---|---|---|---|---|---|
 | chat c1 | **2.69** | **1.84** | ≤2 pure | 236 (64+172) | 611 / 609 / 611 |
 | chat c2 | **2.80** | **1.97** | ≤2 | 243 | |
-| lunch l1 | **2.07** | **1.70** | ≤2 | 83 (27+56) | 407 = 407 = 407 |
+| lunch l1 | **2.07** | **1.70** | ≤2 | 83 (27+56) | 407 / 407 / 405 |
 | lunch l2 | **2.15** | **1.78** | ≤2 | 85 | |
 | lunch l3 | **2.30** | **1.85** | ≤2 | 89 | |
 | note n1 | **3.00** | **2.31** | ≤3 effectful (acks 20) | 392 (113+279) | 953 / 989 / 989 |
@@ -378,13 +395,18 @@ store commits stay 2.5–4.6× BELOW OFF.
 
 **OFF byte-identity witness:** every OFF run's stats carry NO
 `servingLoop` key (pre and post, asserted per run); every OFF store is
-authored-only (zero derived/system rows). Lunch **407 = 407 = 407**
-byte-equal across reps (the W4-era recorded family was 398 — the
-workload itself moved by +9 commits somewhere in the intervening
-merges; the byte-equal-across-reps property is what the witness pins,
-and it holds). Chat 611/609/611 (W4: 608/612/612 — the same ±4
+authored-only (zero derived/system rows). Lunch **407 / 407 / 405**
+(per the committed ledger: l1a and l1b byte-equal at 407 with the
+principal space at 403; the trailing l2b a −2 variant at 405,
+principal space 401) — so the byte-equal-across-reps property held
+for the adjacent pair and NOT for the trailing rep, a run-to-run
+variance of the same kind the note family already shows; the W4-era
+recorded family was 398 ×3 (the workload itself moved in the
+intervening merges). Chat 611/609/611 (W4: 608/612/612 — the same ±4
 family). Note 953/989/989 (W4: 971/989/971 — 989 reproduced exactly
-twice; 953 a variant of the recorded bimodal kind). This seat did not
+twice; 953 a variant of the recorded bimodal kind). The witness's
+hard half — authored-only stores, no derived or system rows anywhere
+OFF — holds without exception. This seat did not
 re-run the OFF runner suites (§4 note 3) — the ON lanes and default
 lanes at head (gate 4) carry the suite-level witness.
 
@@ -442,7 +464,18 @@ internally verify the floor-equality (the sealed echo's floor vs the
 cover's seq), so a different retirement path producing the same
 visible revert is not excluded. The measured window is
 **arrival-bound**: 9–11 ms on quiet loopback ≈ the served settle+push
-gap, so it widens with real network latency. The register's
+gap, so it widens with real network latency. Two instrument
+limitations in the as-ran revision (both found in review, neither
+undermining the measured verdicts): the B-click's `editWithRetry`
+result was not awaited — it resolves `{ok}|{error}` rather than
+throwing, so a rejected click could in principle read as a false
+"no revert" — and a trial that threw skipped its dispose/close
+cleanup. Neither bit here: every counted trial's FINAL value was 2,
+which is the click's own consequence landing (a rejected click cannot
+produce it), and zero counted trials errored. The live worktree copy
+is hardened (awaited click with fail-on-error, try/finally
+lifetimes); the committed snapshot stays byte-verbatim as-ran with a
+marked annotation header. The register's
 "reachability unproven" no longer holds — the row should say
 **observed, 7/8 at head, window measured** — and the disposition
 option already on file (hybrid (B)+(C) at equality: derived-class AND
@@ -474,15 +507,28 @@ with the ruling.
    posture + store-class witness.
 4. **The instrumented per-note client `scheduler/run` pair (W4's
    n3p/n3pb) was not repeated**; bar-4 evidence here is the primary
-   series' flatness and ON-below-OFF p50s.
+   series' plateau match and ON-below-OFF p50s (§2c's arithmetic).
 5. **Percentiles** are nearest-rank (sorted[ceil(q·n)−1]) computed
-   from the dumped series; the in-test `[chat-series]` medians are
-   the harness's own.
-6. **Three chat ON micro-steps read 130–200 ms where W4 read 3–5 ms**
+   from the dumped settle series; the in-test `[chat-series]` and
+   `[sender-echo]` summary lines are the HARNESS's own statistics —
+   its n=2 p50 reads as the upper of the two samples (visible in the
+   lunch echo summaries), which is why §2b's lunch echo table quotes
+   the per-event values directly, and at n=20 (chat) the two
+   conventions coincide to within one rank.
+6. **The two instrument smokes ran on the FIRST binary pair** —
+   source-identical builds from the same clean worktree, made before
+   the `COMMIT_SHA`-baked rebuild (which is why smoke0-chat's ledger
+   entry records sha `db152c149819e559` and probe `gitSha=?`);
+   smoke0-lunch and every ledger series run used the rebaked pair
+   (`f9ebb1b7…` off / `b04a63d0…` on). Smokes are instrument
+   validation, never series data; the ledger records what actually
+   ran, so the entry stands with this annotation (also carried in
+   the ledger's header).
+7. **Three chat ON micro-steps read 130–200 ms where W4 read 3–5 ms**
    (message/lockdown/post-lockdown propagation) while the arrival
    medians improved — flagged in §2a with the (B)-predicate
    hypothesis, not isolated here.
-7. **The at-floor instrument** (§3) is this dossier's addition (the
+8. **The at-floor instrument** (§3) is this dossier's addition (the
    register's named instrument, run in external-observation form);
    its 8-trial ON run + 2-trial OFF control ran outside the ledger's
    triplet discipline, gate-checked at load 3.1, fresh spaces per

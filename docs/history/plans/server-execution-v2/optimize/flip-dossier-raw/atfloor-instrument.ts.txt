@@ -1,3 +1,16 @@
+// POST-RUN ANNOTATION (2026-08-22, review round). The code below is
+// byte-verbatim the revision that produced atfloor-instrument-on.log (8 ON
+// trials) and the 2-trial OFF control. Two hardening gaps found in review
+// are FIXED in the live worktree copy
+// (packages/runner/integration/atfloor-instrument.scratch.ts) but NOT here,
+// so the evidence snapshot stays as-ran:
+// (1) the B-click's editWithRetry result is not awaited (it resolves
+//     {ok}|{error: CommitError} rather than throwing), so a rejected click
+//     could in principle read as a false "no revert" - it did not bite in
+//     the measured runs: every counted trial's FINAL value was 2, the
+//     click's own consequence, which a rejected click cannot produce;
+// (2) a trial that throws skips its dispose/close cleanup (try/finally in
+//     the live copy) - zero counted trials errored in the measured runs.
 #!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run
 // UNTRACKED measurement instrument (flip-readiness dossier, OW33's named
 // residual): the resumed counter-click revert-window measurement.
