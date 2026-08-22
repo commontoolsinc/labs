@@ -5660,27 +5660,34 @@ supply; OW29/OW32/OW34 closed):
     pin's PR is not blamed when the lane first flakes; renumbered
     OW56 → OW57 pre-merge for the parallel-mint collision with the
     durability train's #6173, which keeps OW56 for server-owned
-    program compilation; tracked as CT-2060): CLOSED (2026-08-21,
-    #6184 — `c31397906`).** The race as filed: the
+    program compilation; tracked as CT-2060).** The
     "(α3) + a same-eventId SIBLING tx" step's held-wave construction
-    (#6096's W3 pins) set `settleGate`/`settleGateWhen` and then
-    probed `expect(entriesOf(sidecar)).toEqual([])` — asserting the
-    wave still HELD — but the when-predicate flipped only once a seal
-    was visible through the sealed overlay, so a commit whose settle
-    pass checked the gate BEFORE the flip could complete in that same
-    cycle, landing the ping before the probe (measured 2/15
-    full-suite reds at #6170's head). #6184 landed the hardened
-    construction the row owed: the gate now ARMS from the handler
-    itself — a flag set synchronously as the handler starts, ordered
-    before that cycle's settle reaches its `inputSynced` barrier — so
-    the sealing cycle is held structurally while idle cycles pass
-    (nothing arms until the copy actually runs). Corroboration (the
-    OW54 follow-on PR's runs, 2026-08-21): nine full-file runs of
-    `executor-events-down.test.ts` at the #6184 construction, both
-    (α3)-family sibling steps green in all nine, zero holds lost. A
-    red of this step with the ping already durable
-    at the probe would now be a NEW defect, not this race. No lift
-    trigger (test-harness item).
+    (#6096's W3 pins) sets `settleGate`/`settleGateWhen` and then
+    probes `expect(entriesOf(sidecar)).toEqual([])` — asserting the
+    wave is still HELD (its "ping" entry not yet durable). As
+    originally filed, the when-predicate flipped only once a seal was
+    visible through the sealed overlay, so a commit whose settle pass
+    checked the gate BEFORE the flip could complete in that same
+    cycle, landing the ping before the probe: measured 2/15
+    full-suite reds at #6170's head vs 0/10 on main's version (a pin
+    inserted ahead plausibly shifts timing into the window;
+    fresh-server-per-step rules out state coupling). #6184
+    (`c31397906`) landed a HARDENING: the gate now ARMS from the
+    handler itself — a flag set synchronously as the handler starts —
+    intending the sealing cycle to be held structurally while idle
+    cycles pass. The hardening REDUCED but did not eliminate the
+    race. Measured at the #6184 construction (the OW54 follow-on
+    PR's runs, 2026-08-21, with that PR's two tests inserted ahead
+    of the step): 14/15 full-file runs green, ONE red with the
+    identical signature — the ping durable AND consequenced at the
+    probe (`expect(...).toEqual([])` received the consequenced ping
+    entry) — on a loaded machine at `b775787b6`; five runs of plain
+    main's version at the same head were green. Owed, still: a
+    construction that holds under insertion-shifted timing (or an
+    owner call to accept-and-retry the step); until then a red of
+    THIS step with the ping already durable at the probe is this
+    race, not a product regression, and not the inserting PR's
+    defect. No lift trigger (test-harness item).
 
 ## 4. Standing rule
 

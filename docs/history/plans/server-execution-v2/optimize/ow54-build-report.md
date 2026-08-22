@@ -70,8 +70,11 @@ notice machinery lives.
 Docs in the same PR: events.md §5 gains the class (the refusal IS the
 consequence; every other served commit refusal keeps the wave-cadence
 re-drain), and the OW54 register row is CLOSED with the pin as lift
-evidence. OW57 is re-tensed CLOSED on #6184's handler-armed settle
-gate with this PR's runs as corroboration (below).
+evidence. An OW57 closure on #6184's handler-armed settle gate was
+drafted on early corroboration and then WITHDRAWN in the same PR: a
+post-rebase run observed the race at the hardened construction
+(§5 below) — the row instead records #6184 as a hardening that
+reduced but did not eliminate the race.
 
 ## 3. Red-first, watched
 
@@ -173,13 +176,25 @@ scope-boundary pin above, green on base and after.
 All at the fixed head, one file per invocation (the runner test
 task's flags):
 
-- `executor-events-down.test.ts`: two RED runs on base (the pin's
-  timeout; every other step green — the two sibling (α3)-family steps
-  included), then at the fix: 4 full-file runs with clean verdicts,
-  all `1 passed (21 steps) | 0 failed`, plus 3 more runs verifying
-  the two "(α3) + a same-eventId SIBLING tx" steps green (OW57
-  corroboration: 9/9 full-file observations of those steps green at
-  the #6184 construction — 2 base + 7 fixed-head — zero holds lost).
+- `executor-events-down.test.ts` at `ec6361782`: two RED runs on base
+  (the pin's timeout; every other step green — the two sibling
+  (α3)-family steps included), then at the fix: 4 full-file runs with
+  clean verdicts, all `1 passed (21 steps) | 0 failed`, plus 3 more
+  runs verifying the two "(α3) + a same-eventId SIBLING tx" steps
+  green — 9/9 sibling-step observations at that head.
+- `executor-events-down.test.ts` after the rebase onto `b775787b6`
+  (#6083, content-addressed schemas on by default): 8 full-file runs
+  — BOTH new OW54 pins green in all 8; the "(α3) + a same-eventId
+  SIBLING tx (M1)" step red ONCE (run 1, on a loaded machine) with
+  the exact CT-2060 signature: the ping entry durable AND
+  consequenced at the held-wave probe. Attribution runs: 5/5 green on
+  PLAIN origin/main at the same head (no inserted tests), matching
+  the row's original observation that tests inserted ahead shift
+  timing into the window. Consequence: the drafted OW57 closure was
+  withdrawn; the row records #6184 as a hardening that reduced but
+  did not eliminate the race, and keeps the don't-blame clause — a
+  red of that step with the ping already durable at the probe is
+  CT-2060, not this PR's defect.
 - Neighbor suites, green per-file: `executor-serving-loop` (25
   steps), `executor-space-server` (15), `cfc-prepare-crash-surfacing`
   (15), `cfc-schema-merge` (58), and the give-up-path binders
