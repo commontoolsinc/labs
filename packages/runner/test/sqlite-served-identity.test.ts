@@ -27,6 +27,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   sqliteDatabase,
   sqliteQuery,
+  sqliteRunActingPrincipal,
 } from "../src/builtins/sqlite-builtins.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 
@@ -47,7 +48,7 @@ const demandedStamp = (
   stampWaveRunContext(tx, {
     actionId: "test:ow53",
     kind: "derivation",
-    scopeKeyIdentity: { principal: principalDid, sessionId } as never,
+    scopeKeyIdentity: { principal: principalDid, sessionId },
     attributionFromScope: true,
   });
 
@@ -140,6 +141,23 @@ describe("sqlite-served-identity", () => {
     stampWaveRunContext(tx, { actionId: "test:ow53", kind: "derivation" });
     const handle = await driveMint(runtime, tx);
     expect(handle.owner).toBeUndefined();
+  });
+
+  it("fails loud when a stamped context carries a divergent acting/demanded pair (the undecided-identity tripwire)", () => {
+    // No context the stamper produces today can diverge (`acting` is
+    // derived FROM the demanded pair where both exist). If a future
+    // carriage ever splits them, the helper must surface the undecided
+    // identity-model question instead of silently picking whose rows a
+    // cleared read admits (flag, don't fill — see the helper's comment).
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "test:ow53-diverge",
+      kind: "derivation",
+      acting: { user: aliceSigner.did() },
+      scopeKeyIdentity: { principal: bobSigner.did(), sessionId: "sess-x" },
+    });
+    expect(() => sqliteRunActingPrincipal(runtime, tx)).toThrow(/diverge/);
+    tx.abort();
   });
 
   it("keeps the ambient provider as the owner source on an unstamped creation (client neutrality)", async () => {

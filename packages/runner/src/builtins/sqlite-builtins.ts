@@ -93,6 +93,26 @@ export function sqliteRunActingPrincipal(
 ): string | undefined {
   const context = waveRunContextOf(tx);
   if (context !== undefined) {
+    // Tripwire (flag, don't fill): every context the stamper produces
+    // today derives `acting` FROM the demanded pair where both exist
+    // (LT6-inherited handlers, non-attributed derivations), so the two
+    // can never disagree. A future carriage that split them would make
+    // this helper's answer decide WHOSE rows a cleared read admits and
+    // WHOSE partition the completion lands in — an identity-model
+    // decision nobody has made — so fail loud instead of picking one.
+    if (
+      context.acting?.user !== undefined &&
+      context.scopeKeyIdentity?.principal !== undefined &&
+      context.acting.user !== context.scopeKeyIdentity.principal
+    ) {
+      throw new Error(
+        "sqlite identity consumption: the run's stamped acting " +
+          `(${context.acting.user}) and demanded principal ` +
+          `(${context.scopeKeyIdentity.principal}) diverge — no ruling ` +
+          "says which one owns a db mint or clears a read " +
+          "(verification-coverage.md OW53); refusing to guess",
+      );
+    }
     return context.acting?.user ?? context.scopeKeyIdentity?.principal;
   }
   return runtime.trustSnapshotProvider()?.actingPrincipal;
@@ -853,8 +873,11 @@ export function sqliteQuery(
         };
         // The acting reader at flush time: the CAPTURED run principal for
         // a served request (the flush's own ambient is the service); the
-        // ambient provider read for an unstamped one (today's client/OFF
-        // path, byte for byte — including its read-at-flush-time timing).
+        // ambient provider read for an unstamped one (the client/OFF
+        // path — read once at flush START rather than per consumption
+        // site after the RPC: equivalent for a fixed-identity manager,
+        // and one coherent reader for the whole completion if an
+        // ambient identity ever rotated mid-flight).
         const flushActingPrincipal = servedRun
           ? actingReader
           : runtime.trustSnapshotProvider()?.actingPrincipal;

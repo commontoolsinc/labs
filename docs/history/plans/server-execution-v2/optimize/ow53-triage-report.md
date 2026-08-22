@@ -172,7 +172,7 @@ surface reaches this arm today (a creation demanded by nobody).
 
 Deliberately NOT determined here (flag, don't fill):
 
-- **llm-dialog's provider read** (`llm-dialog.ts:2371`) — the same
+- **llm-dialog's provider read** (`llm-dialog.ts:2426`) — the same
   family, named untouched by OW34 §7 and left untouched by this
   build: OW53's row and trigger are the sqlite pair; no ON surface
   pins llm-dialog's read today. Recorded in the register row as a

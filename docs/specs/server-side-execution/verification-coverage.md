@@ -5863,14 +5863,32 @@ supply; OW29/OW32/OW34 closed):
     `sqlite-read-clearance-multi-runtime` 5/5 (all 3 steps); BOTH ON
     skips LIFTED (this row's minted trigger). Residuals, recorded
     not closed: llm-dialog's direct provider read
-    (`llm-dialog.ts:2371` — same family, named untouched by OW34 §7
+    (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
     and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
-    label-inert, unchanged); and the per-instance effect-key gap for
-    NON-clearance user-scoped queries (a reader-blind hash by design
-    means one outbox key across instances — no live surface, the
-    OW17 flag's remaining scope; the fix direction is the instance
-    key joining the effect target key).
+    label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
+    writebacks — `fetch*`/`generate*` — whose hash-guard reads still
+    resolve the service's instances (the OW17 stage-A flag's
+    remaining scope after this row's sqlite carve-out; the
+    space-server.ts `#commitEffectCompletion` comment names the
+    split); the per-instance effect-key gap for NON-clearance
+    user-scoped queries (a reader-blind hash by design means one
+    outbox key across instances — no live surface; the fix direction
+    is the instance key joining the effect target key); and the
+    SESSION-scoped cleared-result collision variant (the #6194
+    review's find): `narrowestScope` legitimately resolves a cleared
+    result to SESSION scope when the db itself is session-scoped,
+    while `clearanceReader` and the effect key carry the USER
+    principal only — two sessions of one user on one serving runtime
+    then share hash + effect key across DISTINCT session instances,
+    and the second rides the in-flight dedupe (starvation until a
+    re-run; ON-only; arguably off-model against builtins.md §2's one
+    cell per (query, reader)). NOT clamped to exactly `user` here: a
+    session-scoped db's cleared result MUST stay session-scoped (a
+    user clamp would memo-collide two session dbs' results in one
+    cell); the undetermined piece is the SESSION joining the request
+    identity for sub-user-scoped cleared results — its own small
+    ruling, flagged not filled.
   - **OW54 — a served EVENT whose commit-prep crashes seals NO
     consequence (adversarial review of PR #6157, F1 —
     CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
