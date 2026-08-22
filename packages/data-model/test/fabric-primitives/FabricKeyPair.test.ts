@@ -272,7 +272,7 @@ describe("FabricKeyPair", () => {
 
       describe("encode()", () => {
         it("encodes material to an `{ algorithm, publicKey, privateKey }` object", () => {
-          expect(codec.encode(materialPair())).toEqual({
+          expect(codec.encode(materialPair(), env)).toEqual({
             algorithm: "ExampleAlgorithm",
             publicKey: "AQID",
             privateKey: "-vv8_Q",
@@ -282,7 +282,9 @@ describe("FabricKeyPair", () => {
         it("throws for an instance holding handles", async () => {
           const pair = new FabricKeyPair(await generatePair());
 
-          expect(() => codec.encode(pair)).toThrow(/no JSON representation/);
+          expect(() => codec.encode(pair, env)).toThrow(
+            /no JSON representation/,
+          );
         });
       });
 
@@ -342,7 +344,7 @@ describe("FabricKeyPair", () => {
         it("round-trips an instance holding material", () => {
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(materialPair()),
+            codec.encode(materialPair(), env),
             env,
           ) as FabricKeyPair;
 
@@ -361,7 +363,7 @@ describe("FabricKeyPair", () => {
 
       describe("encode()", () => {
         it("encodes material to transferable `ArrayBuffer`s", () => {
-          const state = codec.encode(materialPair()) as {
+          const state = codec.encode(materialPair(), env) as {
             algorithm: string;
             publicKey: ArrayBuffer;
             privateKey: ArrayBuffer;
@@ -381,7 +383,7 @@ describe("FabricKeyPair", () => {
 
         it("encodes handles to the `CryptoKey`s themselves", async () => {
           const source = await generatePair();
-          const state = codec.encode(new FabricKeyPair(source)) as {
+          const state = codec.encode(new FabricKeyPair(source), env) as {
             algorithm?: string;
             publicKey: CryptoKey;
             privateKey: CryptoKey;
@@ -397,11 +399,14 @@ describe("FabricKeyPair", () => {
 
       describe("canDecode()", () => {
         it("returns `true` for a material state", () => {
-          expect(codec.canDecode(codec.encode(materialPair()))).toBe(true);
+          expect(codec.canDecode(codec.encode(materialPair(), env))).toBe(true);
         });
 
         it("returns `true` for a handle state", async () => {
-          const state = codec.encode(new FabricKeyPair(await generatePair()));
+          const state = codec.encode(
+            new FabricKeyPair(await generatePair()),
+            env,
+          );
 
           expect(codec.canDecode(state)).toBe(true);
         });
@@ -450,7 +455,7 @@ describe("FabricKeyPair", () => {
 
       describe("decode()", () => {
         it("throws given a state whose buffers are already spent", () => {
-          const state = codec.encode(materialPair());
+          const state = codec.encode(materialPair(), env);
 
           codec.decode(expectedTag, state as never, env);
 
@@ -463,7 +468,7 @@ describe("FabricKeyPair", () => {
         it("round-trips an instance holding material", () => {
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(materialPair()) as never,
+            codec.encode(materialPair(), env) as never,
             env,
           ) as FabricKeyPair;
 
@@ -478,7 +483,7 @@ describe("FabricKeyPair", () => {
           const source = await generatePair();
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(new FabricKeyPair(source)) as never,
+            codec.encode(new FabricKeyPair(source), env) as never,
             env,
           ) as FabricKeyPair;
 

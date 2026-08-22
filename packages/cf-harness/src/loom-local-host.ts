@@ -370,7 +370,6 @@ export const createLoomLocalCfHarnessHost = async (
   const configuredProvider = async (): Promise<HarnessModelProviderId> =>
     (await resolveHarnessModelProviderPreference({
       store: providerStore,
-      strict: true,
     })).provider;
 
   const preflightCodex = async (): Promise<OpenAICodexCredentialResolver> => {

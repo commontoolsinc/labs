@@ -5,7 +5,8 @@ recognized shebang use plain text, while filename-free transformed compiler
 output keeps its TypeScript default. Piped source can select a language directly
 or through a virtual filename. Declarative metadata can now describe extensions,
 exact names, compound patterns, explicit aliases, and direct interpreter
-shebangs. Python files with recognized extensions now have syntax highlighting.
+shebangs. JSON Lines and NDJSON names use the JSON tokenizer. Python files with
+recognized extensions now have syntax highlighting.
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Recognized shebangs and transformed
 compiler headers remain explicit source selectors. Binary is a supported,
@@ -17,13 +18,13 @@ decoded source, including preservation of a UTF-8 byte order mark. Binary files
 remain outside diff editing and semantic source loading.
 Parser-backed Python, Go, shell, and HTML implementations use Tree-sitter
 through a shared, language-neutral adapter and official grammar packages.
-The order is provisional because recent activity was measured in six of the 24
+The order is provisional because recent activity was measured in six of the 26
 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
-JSON and JSONC, YAML, extension-based Python highlighting, and diff support to
-honest handling of every textual syntax in the active `commontoolsinc`
-repositories.
+JSON, JSONC, JSON Lines, YAML, extension-based Python highlighting, and diff
+support to honest handling of every textual syntax in the active
+`commontoolsinc` repositories.
 
 The frozen evidence is in the
 [July 2026 coverage survey](../history/packages/cli/cf-view-language-coverage-2026-07.md).
@@ -253,7 +254,13 @@ recorded with measurements.
 
 ## Stage 1: JSON aliases and line-oriented JSON
 
-- [ ] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
+The August 18, 2026 refresh found 43 `.jsonl` and `.ndjson` files across seven
+of the 26 active organization repositories. The six-repository history sample
+contains 40 path-change events on current JSON Lines paths since February 18,
+2026. This activity and the existing tokenizer reuse keep Stage 1 ahead of new
+grammar work.
+
+- [x] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
 - [ ] Isolate malformed lines so one line cannot affect the next.
 - [ ] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
   files, VS Code workspace files, and Swift `Package.resolved`.

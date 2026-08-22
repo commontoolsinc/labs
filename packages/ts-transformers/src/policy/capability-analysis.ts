@@ -19,7 +19,7 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { unwrapAssertCapture, unwrapExpression } from "../utils/expression.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
@@ -3092,7 +3092,16 @@ export function analyzeFunctionCapabilities(
           ts.isPropertyAccessExpression(node.expression) ||
           ts.isElementAccessExpression(node.expression)
         ) {
-          const directReceiver = resolveSourceRef(node.expression.expression);
+          // The expression the method is called on, with an `assert` body's
+          // operand recording read through. Recording the receiver of a method
+          // call puts a call where the member access the author wrote used to
+          // be, and both questions asked of it here — which source it was read
+          // from, and whether it is cell-like — are about the value the
+          // recording hands back rather than about the recording.
+          const receiverExpression = unwrapAssertCapture(
+            node.expression.expression,
+          );
+          const directReceiver = resolveSourceRef(receiverExpression);
           const receiver = directReceiver ??
             resolveConservativeCallReceiverRef(node);
           if (receiver) {
@@ -3106,7 +3115,7 @@ export function analyzeFunctionCapabilities(
               // like the unknown-named fallback below.
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               ) {
                 markUnverifiedCellUse(receiver.root);
               }
@@ -3209,7 +3218,7 @@ export function analyzeFunctionCapabilities(
               OPAQUE_DERIVATION_METHODS.has(methodName) &&
               (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               )
             ) {
               // These methods are available on opaque cells and return opaque
@@ -3232,7 +3241,7 @@ export function analyzeFunctionCapabilities(
               // write through the cell and stay reads.
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               ) {
                 markUnverifiedCellUse(receiver.root);
               }

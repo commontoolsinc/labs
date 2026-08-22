@@ -38,8 +38,13 @@ and apply one only to records older than its date
 (`deno task check-test-aliases` enforces the file's shape).
 
 A task-level record may coexist with the per-item records of the same run
-(`pattern-compat` beside `pattern-compat <key>`); the item records carry
-the task name as a prefix, and the two are distinct identities.
+(`pattern-compat` beside `pattern-compat <key>`, `integration.sh` beside
+`integration.sh <step>`); the item records carry the task name as a
+prefix, and the two are distinct identities. The task name is the task's
+own, never the label of the slice or section CI dispatched — a task-level
+record that took its name from the dispatch would both rename itself
+whenever the work is re-sliced and, where a section and an item share a
+label, report under that item's identity.
 
 ## Records and contexts
 
@@ -68,7 +73,9 @@ name (a constant owned by the repository's tooling, never derived from git
 remotes), the `commit` the tests ran against, a `dirty` flag, an optional
 `branch`, `env` (`ci` or `local`), the machine facts (`os`, `arch`,
 `denoVersion`), an ISO 8601 `startedAt` from the run's start, an optional
-opaque `agent` label from `CF_TEST_AGENT`, and for CI runs a `ci` block:
+opaque `agent` label — `CF_TEST_AGENT`, or the name of the harness the
+run was started under when that variable is unset — and for CI runs a
+`ci` block:
 `workflowRunId`, `runAttempt` (the attempt that produced the records),
 `workflow`, `job` (display name with matrix leg), optional `shard`,
 optional `headCommit` (the pull request's head; `commit` is the ephemeral
@@ -88,10 +95,22 @@ every read boundary (`parseRecordLine`, `parseContextLine`).
 
 Producers append record lines to their own ULID-named fragment file inside
 the directory named by `CF_TEST_RECORDS_DIR`; an unset variable disables
-recording everywhere, and that is the entire opt-out. Producers append
-line by line as results arrive, never share files, create the directory if
-it does not exist, and on any write failure warn once and stop; recording
-never fails a run.
+recording everywhere, and that is the entire opt-out.
+
+Producers append line by line as results arrive, never share files, create
+the directory if it does not exist, and on any write failure warn once and
+stop; recording never fails a run.
+
+A producer records the run it was asked for. Several are also libraries
+that this repository's own tests drive — the pattern runner behind
+`cf test`, the type-check task, the vintage gate's replay — and each takes
+the decision to record from its caller rather than from the environment
+alone. The entry point asks for records; a test driving the same function
+does not, because the files it hands over are that test's fixtures, and a
+fixture is data rather than a test of this repository. A test that drives
+such a harness as a child process hands it an empty
+`CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
+empty value is recording off, the same as an unset one.
 
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the

@@ -339,7 +339,7 @@ Deno.test("no un-allowlisted polling waitFor in integration tests", async () => 
   );
 });
 
-Deno.test("ALLOWLIST has no stale entries", async () => {
+Deno.test("the polling-waitFor ALLOWLIST has no stale entries", async () => {
   const { allowlisted } = await scan();
   const seen = new Set(allowlisted);
   const stale = [...ALLOWLIST].filter((path) => !seen.has(path)).sort();
@@ -354,22 +354,25 @@ Deno.test("ALLOWLIST has no stale entries", async () => {
 // The next two tests drive the command entry point over a temp fixture tree, so
 // they cover the clean and violation paths without depending on the real tree.
 
-Deno.test("main reports success and returns 0 on a clean tree", async () => {
-  const root = await fixtureTree(
-    "ok.test.ts",
-    'import { env } from "@commonfabric/integration";\n',
-  );
-  try {
-    let code = -1;
-    const { out } = await captureConsole(async () => {
-      code = await main(root);
-    });
-    assertEquals(code, 0);
-    assert(out.includes("No new polling waitFor"));
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
+Deno.test(
+  "check-no-waitfor main reports success and returns 0 on a clean tree",
+  async () => {
+    const root = await fixtureTree(
+      "ok.test.ts",
+      'import { env } from "@commonfabric/integration";\n',
+    );
+    try {
+      let code = -1;
+      const { out } = await captureConsole(async () => {
+        code = await main(root);
+      });
+      assertEquals(code, 0);
+      assert(out.includes("No new polling waitFor"));
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+);
 
 Deno.test("main reports the offender and returns 1 on a violation", async () => {
   const root = await fixtureTree(

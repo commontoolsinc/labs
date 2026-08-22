@@ -354,6 +354,16 @@ export interface TestRunnerOptions {
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
   /**
+   * Spool one test record per file run, named by the file's
+   * repository-relative path.
+   *
+   * The `cf test` command sets this: the files it was pointed at are the
+   * tests of a run. A caller inside another test leaves it unset, because
+   * the files it hands over are that test's fixtures, and a fixture is data
+   * rather than a test of this repository.
+   */
+  recordResults?: boolean;
+  /**
    * Emit a `performance.measure` per logger time span and write them here.
    *
    * The statistics a run prints are aggregates: they say a key was reached
@@ -2027,10 +2037,13 @@ export async function runTests(
 
   // One record per file, spooled with the file's final verdict — the one
   // that includes the runtime-error, console, and idempotence checks below,
-  // not just the assertion results. Inert unless CF_TEST_RECORDS_DIR is
-  // set; the integration orchestrator clears that variable for its cf
-  // children and records from its own clock instead.
-  const recordsFragment = FragmentWriter.openForRun();
+  // not just the assertion results. Written only for a caller that asked
+  // for records, and inert unless CF_TEST_RECORDS_DIR is set; the
+  // integration orchestrator clears that variable for its cf children and
+  // records from its own clock instead.
+  const recordsFragment = options.recordResults === true
+    ? FragmentWriter.openForRun()
+    : undefined;
   const recordFile = (testPath: string, failed: boolean, durationMs: number) =>
     recordsFragment?.append({
       line: "record",

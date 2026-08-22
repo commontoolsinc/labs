@@ -1,15 +1,16 @@
 /**
- * A small JSON / JSONC highlighter and structure builder for the pager. It is
- * hand-written — it shares nothing with the TypeScript parser — so a `.json` or
- * `.jsonc` file is colored as data (keys apart from string values, numbers,
- * `true`/`false`/`null`, rainbow brackets) rather than run through a TypeScript
- * parse that would misread a bare top-level `{…}` as a block and shred it.
+ * A small JSON, JSONC, and JSON Lines highlighter and structure builder for the
+ * pager. It is hand-written — it shares nothing with the TypeScript parser —
+ * so JSON data is colored with keys apart from string values, numbers,
+ * `true`/`false`/`null`, and rainbow brackets rather than run through a
+ * TypeScript parse that would misread a bare top-level `{…}` as a block and
+ * shred it.
  *
- * The tokeniser is lenient: it never throws on malformed input (an unterminated
+ * The tokenizer is lenient: it never throws on malformed input (an unterminated
  * string or comment simply runs to end of file) so the pager keeps coloring a
  * file the user is midway through editing. JSONC line and block comments and
- * trailing commas are colored, not rejected. Object keys become a navigation
- * tree, so `wasd`/Tab step through a document's structure.
+ * trailing commas are colored, not rejected. Object keys in a single top-level
+ * value become a navigation tree, so `wasd`/Tab step through its structure.
  */
 
 import type {
@@ -221,8 +222,9 @@ export function createJsonHighlighter(initial: string): Highlighter {
   };
 }
 
-/** A full JSON {@link Document}: colored lines, an object-key navigation tree,
- * and a name → declaration index over the keys. */
+/** Builds a full JSON {@link Document}. Every document has colored lines. A
+ * single top-level value can also contribute navigation and declaration
+ * entries for object keys and container array elements. */
 export function jsonDocument(text: string): Document {
   const lines = jsonHighlightLines(text);
   const definitions = new Map<string, Definition[]>();
@@ -276,6 +278,10 @@ function buildStructure(
   // Text with no significant tokens (empty, all whitespace, all comments) has no
   // first token, which `parseValue` reports as an empty value with no members.
   const root = parseValue(cur, 0, ctx);
+  if (cur.i < cur.toks.length) {
+    definitions.clear();
+    return [];
+  }
   // The nav tree is the top value's members/elements; a bare scalar has none.
   return root.children;
 }

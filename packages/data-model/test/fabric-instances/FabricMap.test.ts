@@ -144,7 +144,7 @@ describe("FabricMap", () => {
 
       describe("encode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.encode(new FabricMap(new Map()))).toThrow(
+          expect(() => codec.encode(new FabricMap(new Map()), env)).toThrow(
             "not yet implemented",
           );
         });

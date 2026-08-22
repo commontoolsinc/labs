@@ -90,7 +90,7 @@ describe("FabricEpochNsec", () => {
         it("encodes to a flat base64 string (epoch zero)", () => {
           const sn = new FabricEpochNsec(0n);
           // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
-          expect(codec.encode(sn)).toBe("AA");
+          expect(codec.encode(sn, env)).toBe("AA");
         });
       });
 
@@ -130,7 +130,7 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(0n);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
+            codec.encode(sn, env),
             env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -144,7 +144,7 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
+            codec.encode(sn, env),
             env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -156,7 +156,7 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
+            codec.encode(sn, env),
             env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -169,7 +169,7 @@ describe("FabricEpochNsec", () => {
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
             expectedTag,
-            codec.encode(sn),
+            codec.encode(sn, env),
             env,
           ) as unknown as FabricEpochNsec;
           expect(decoded.value).toBe(nsec);

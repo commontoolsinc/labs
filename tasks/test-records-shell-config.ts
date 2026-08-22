@@ -13,6 +13,7 @@
  */
 
 import { dirname, join } from "@std/path";
+import { replaceFile } from "./test-records-atomic-write.ts";
 import { type Environment, readEnv } from "@commonfabric/test-support/records";
 
 /** The comment that marks the lines this tool wrote. */
@@ -74,6 +75,12 @@ export function shellKind(env: Environment = Deno.env.get): ShellKind {
  * bash splits its startup between two files differently on macOS than on
  * Linux and a person whose terminal reads only one of them would
  * otherwise get a line that never runs.
+ *
+ * For zsh this is .zshenv rather than .zshrc. A test run started by
+ * something other than a person typing — an agent's shell, a script, an
+ * editor's task runner — is not an interactive shell, and .zshrc is
+ * only read by interactive ones. Recording has to survive that, so the
+ * export goes in the file every zsh reads.
  */
 export function profileCandidates(
   env: Environment = Deno.env.get,
@@ -82,11 +89,8 @@ export function profileCandidates(
   const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
   if (home === undefined || home.length === 0) return [];
   switch (shellKind(env)) {
-    case "zsh": {
-      const zdotdir = readEnv("ZDOTDIR", env);
-      const dir = zdotdir !== undefined && zdotdir.length > 0 ? zdotdir : home;
-      return [join(dir, ".zshrc")];
-    }
+    case "zsh":
+      return [join(zshDir(env, home), ".zshenv")];
     case "bash":
       return os === "darwin"
         ? [join(home, ".bash_profile"), join(home, ".bashrc")]
@@ -101,6 +105,27 @@ export function profileCandidates(
     case "posix":
       return [join(home, ".profile")];
   }
+}
+
+function zshDir(env: Environment, home: string): string {
+  const zdotdir = readEnv("ZDOTDIR", env);
+  return zdotdir !== undefined && zdotdir.length > 0 ? zdotdir : home;
+}
+
+/**
+ * Profiles that are not written but are read for a setting already
+ * there, because a shell reads them after the one written and what they
+ * say would win. A zsh reads .zshenv first and then, depending on how
+ * the shell was started, .zprofile, .zshrc, and .zlogin.
+ */
+export function profilesToInspect(
+  env: Environment = Deno.env.get,
+): string[] {
+  const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
+  if (home === undefined || home.length === 0) return [];
+  if (shellKind(env) !== "zsh") return [];
+  const dir = zshDir(env, home);
+  return [".zprofile", ".zshrc", ".zlogin"].map((name) => join(dir, name));
 }
 
 /** A path split at the home directory, when it sits under one. */
@@ -289,6 +314,20 @@ async function readIfPresent(path: string): Promise<string | undefined> {
   }
 }
 
+/** What a profile that already sets the variable amounts to. */
+function verdict(
+  path: string,
+  existing: ProfileSetting,
+  value: string,
+): ProfileUpdate {
+  if (existing.value !== value) {
+    return { path, outcome: "conflict", existing: existing.line };
+  }
+  return existing.exported
+    ? { path, outcome: "present" }
+    : { path, outcome: "unexported", existing: existing.line };
+}
+
 async function updateOne(
   path: string,
   name: string,
@@ -300,14 +339,7 @@ async function updateOne(
   const text = await readIfPresent(path);
   if (text === undefined && !create) return undefined;
   const existing = parseSetting(text ?? "", name, home);
-  if (existing !== undefined) {
-    if (existing.value !== value) {
-      return { path, outcome: "conflict", existing: existing.line };
-    }
-    return existing.exported
-      ? { path, outcome: "present" }
-      : { path, outcome: "unexported", existing: existing.line };
-  }
+  if (existing !== undefined) return verdict(path, existing, value);
   const separator = text === undefined || text.length === 0
     ? ""
     : text.endsWith("\n")
@@ -339,11 +371,18 @@ export async function exportFromProfiles(
   const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
   const line = exportLine(shellKind(env), name, value, home);
   const updates: ProfileUpdate[] = [];
+  for (const path of profilesToInspect(env)) {
+    const text = await readIfPresent(path);
+    if (text === undefined) continue;
+    const existing = parseSetting(text, name, home);
+    if (existing === undefined) continue;
+    updates.push(verdict(path, existing, value));
+  }
   for (const path of candidates) {
     const update = await updateOne(path, name, line, value, home, false);
     if (update !== undefined) updates.push(update);
   }
-  if (updates.length === 0) {
+  if (!updates.some((update) => candidates.includes(update.path))) {
     const created = await updateOne(
       candidates[0]!,
       name,
@@ -360,6 +399,84 @@ export async function exportFromProfiles(
     updates.unshift({ path: first, outcome: "absent" });
   }
   return updates;
+}
+
+/** What one profile file's removal did. */
+export type RemovalOutcome =
+  /** The line this tool wrote was taken out. */
+  | "removed"
+  /** The variable is set by a line this tool did not write. */
+  | "kept";
+
+export interface ProfileRemoval {
+  path: string;
+  outcome: RemovalOutcome;
+  /** The line left in place, for one this tool did not write. */
+  existing?: string;
+}
+
+/**
+ * Takes the marked block out of a profile's text. Only a block whose
+ * line is word for word the one this tool writes comes out: a marker
+ * over something a person has since edited names their line now,
+ * whatever the comment above it says. The blank line this tool put in
+ * front of the marker goes with it, so removing what was added leaves
+ * the file as it stood.
+ */
+export function stripMarkedBlock(
+  text: string,
+  written: string,
+): { text: string; removed: boolean } {
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  let removed = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const next = lines[index + 1];
+    if (
+      line.trim() === MARKER && next !== undefined && next.trim() === written
+    ) {
+      if (kept.length > 0 && kept[kept.length - 1]!.trim() === "") kept.pop();
+      index += 1;
+      removed = true;
+      continue;
+    }
+    kept.push(line);
+  }
+  return { text: kept.join("\n"), removed };
+}
+
+/**
+ * Takes this tool's export back out of every profile it writes or
+ * reads, returning what each file's removal did. A line setting the
+ * variable that this tool did not write is reported and left alone: it
+ * is a person's own, whatever it says.
+ */
+export async function unexportFromProfiles(
+  name: string,
+  value: string,
+  env: Environment = Deno.env.get,
+  os: string = Deno.build.os,
+): Promise<ProfileRemoval[]> {
+  const removals: ProfileRemoval[] = [];
+  const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
+  const written = exportLine(shellKind(env), name, value, home);
+  const paths = [...profileCandidates(env, os), ...profilesToInspect(env)];
+  for (const path of paths) {
+    const text = await readIfPresent(path);
+    if (text === undefined) continue;
+    const stripped = stripMarkedBlock(text, written);
+    if (stripped.removed) {
+      await replaceFile(path, stripped.text);
+      removals.push({ path, outcome: "removed" });
+      continue;
+    }
+    const existing = parseSetting(text, name);
+    if (existing !== undefined) {
+      removals.push({ path, outcome: "kept", existing: existing.line });
+    }
+  }
+  return removals;
 }
 
 /** The command that loads a profile into the shell already running. */

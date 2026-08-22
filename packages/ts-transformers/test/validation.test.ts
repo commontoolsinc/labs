@@ -1839,7 +1839,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     },
   );
 
-  await t.step("allows reading opaques inside computed()", async () => {
+  await t.step("allows reading a Cell inside computed()", async () => {
     const source =
       `      import { pattern, computed, Cell, h } from "commonfabric";
 
@@ -1857,7 +1857,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     assertEquals(
       errors.length,
       0,
-      "Reading opaques inside computed() should be allowed",
+      "Reading a Cell inside computed() should be allowed",
     );
   });
 

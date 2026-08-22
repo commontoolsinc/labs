@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { exists } from "@std/fs";
 import { Identity } from "@commonfabric/identity";
+import { recordsSpooledBy } from "@commonfabric/test-support/records";
 import {
   AUTO,
   AUTO_GENERATIONS_KEPT,
@@ -607,6 +608,38 @@ describe("the vintage gate, end to end", () => {
 
     expect(replayed).toBe(1);
     expect(failures).toEqual([]);
+  });
+
+  it("spools no records for a caller that did not ask for them", async () => {
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    const spooled = await recordsSpooledBy(() => replayAll(roots));
+
+    expect(spooled).toEqual([]);
+  });
+
+  it("spools one record per fixture for a caller that asked", async () => {
+    await captureMissing(
+      roots,
+      [TEST_KEY],
+      new Date("2026-07-29T12:00:00.000Z"),
+    );
+
+    const spooled = await recordsSpooledBy(() =>
+      replayAll(roots, { recordResults: true })
+    );
+
+    expect(spooled).toHaveLength(1);
+    expect(spooled[0].test.k).toBe("gate");
+    expect(spooled[0].test.s).toBe("repo");
+    expect(spooled[0].test.n).toBe(
+      `pattern-vintage ${TEST_KEY} ${PINNED} 2026-07-29T12-00-00.000Z`,
+    );
+    expect(spooled[0].outcome).toBe("pass");
   });
 
   it("FAILS when today's pattern requires an unbound new input", async () => {

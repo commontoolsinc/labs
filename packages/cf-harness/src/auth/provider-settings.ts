@@ -21,7 +21,7 @@ export type HarnessProviderSettingsState =
 
 export interface HarnessProviderResolution {
   provider: HarnessModelProviderId;
-  source: "explicit" | "environment" | "persistent" | "default";
+  source: "explicit" | "environment" | "persistent";
 }
 
 const detailOf = (error: unknown): string =>
@@ -364,12 +364,16 @@ const stateError = (
       : "Provider settings are invalid",
   );
 
-/** Resolves the provider with manual CLI precedence. */
+/**
+ * Resolves the provider a run bills against, from an explicit request, the
+ * environment, then the persistent preference. Neither provider is a default:
+ * a harness that configured none resolves to none, so a run is refused rather
+ * than routed to a billing route nobody named.
+ */
 export const resolveHarnessModelProviderPreference = async (options: {
   store: Pick<FileHarnessProviderSettingsStore, "inspect">;
   explicit?: HarnessModelProviderId;
   environment?: HarnessModelProviderId;
-  strict?: boolean;
 }): Promise<HarnessProviderResolution> => {
   if (options.explicit !== undefined) {
     return { provider: options.explicit, source: "explicit" };
@@ -381,13 +385,11 @@ export const resolveHarnessModelProviderPreference = async (options: {
   if (state.state === "configured") {
     return { provider: state.settings.modelProvider, source: "persistent" };
   }
-  if (state.state === "missing" && options.strict !== true) {
-    return { provider: "openai-compatible-gateway", source: "default" };
-  }
   if (state.state === "missing") {
     throw new HarnessControlError(
       "provider-configuration-required",
-      "A persistent model provider must be configured",
+      "No model provider is selected; choose one with --model-provider, " +
+        "CF_HARNESS_MODEL_PROVIDER, or `config set`",
     );
   }
   throw stateError(state);

@@ -1,7 +1,4 @@
-import {
-  fabricFromJsonValue,
-  jsonFromFabricValue,
-} from "@commonfabric/data-model/codecs";
+import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import { DID, Identity } from "@commonfabric/identity";
 import { AppView } from "@commonfabric/navigation";
@@ -47,8 +44,23 @@ export function isAppStateConfigKey(
   return false;
 }
 
+/**
+ * The application state as it crosses the integration-test page boundary,
+ * which carries only what JSON can express.
+ */
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
-  identity?: SerializedIdentity | null;
+  /**
+   * The DID of the identity the state holds, where it holds one.
+   *
+   * An identity appears here as its DID rather than as itself. That is what a
+   * reader on the far side wants -- it is what names an identity in a
+   * comparison and in a message -- and it is a public string, where the
+   * identity's key material is a secret that a key pair holding `CryptoKey`
+   * handles cannot produce at all.
+   */
+  identityDid?: DID;
+
+  /** The API URL, as a string, `URL` being no more JSON than an identity is. */
   apiUrl: string;
 };
 
@@ -87,20 +99,8 @@ export async function resolveIdentity(
 }
 
 /**
- * Renders an identity as the page boundary carries it, or `null` where it
- * cannot be written down: a key pair holding handles has no JSON encoding,
- * `CryptoKey` material being unreachable.
- */
-function serializeIdentity(
-  identity: Identity | undefined,
-): SerializedIdentity | null | undefined {
-  if (identity === undefined) return undefined;
-  const { keyPair } = identity;
-  return keyPair.hasMaterial ? jsonFromFabricValue(keyPair) : null;
-}
-
-/**
- * Decodes what {@link serializeIdentity} produced.
+ * Decodes a {@link SerializedIdentity}, which is what the integration harness
+ * sends a page to log it in.
  *
  * @throws If the encoding is well-formed and decodes to something other than a
  *   key pair.
@@ -148,17 +148,7 @@ export function serialize(
 ): AppStateSerialized {
   const { identity, apiUrl, ...other } = state;
   const out = other as unknown as AppStateSerialized;
-  out.identity = serializeIdentity(identity);
+  out.identityDid = identity?.did();
   out.apiUrl = apiUrl.toString();
-  return out;
-}
-
-export async function deserialize(
-  state: AppStateSerialized,
-): Promise<AppState> {
-  const { identity, apiUrl, ...other } = state;
-  const out = other as unknown as AppState;
-  out.identity = identity ? await resolveIdentity(identity) : undefined;
-  out.apiUrl = new URL(apiUrl);
   return out;
 }

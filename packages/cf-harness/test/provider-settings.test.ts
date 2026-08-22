@@ -219,7 +219,7 @@ file.close();`,
   });
 
   describe("resolveHarnessModelProviderPreference()", () => {
-    it("applies explicit, environment, persistent, and default precedence", async () => {
+    it("applies explicit, environment, and persistent precedence", async () => {
       const configured = {
         inspect: () =>
           Promise.resolve({
@@ -251,24 +251,34 @@ file.close();`,
       });
       expect(await resolveHarnessModelProviderPreference({ store: configured }))
         .toEqual({ provider: "openai-codex", source: "persistent" });
+    });
+
+    it("selects no provider when none was requested or configured", async () => {
+      const missing = {
+        inspect: () => Promise.resolve({ state: "missing" as const }),
+      };
+      await expect(resolveHarnessModelProviderPreference({ store: missing }))
+        .rejects.toMatchObject({
+          code: "provider-configuration-required",
+        });
       expect(
         await resolveHarnessModelProviderPreference({
-          store: { inspect: () => Promise.resolve({ state: "missing" }) },
+          store: missing,
+          explicit: "openai-compatible-gateway",
         }),
       ).toEqual({
         provider: "openai-compatible-gateway",
-        source: "default",
+        source: "explicit",
       });
+      expect(
+        await resolveHarnessModelProviderPreference({
+          store: missing,
+          environment: "openai-codex",
+        }),
+      ).toEqual({ provider: "openai-codex", source: "environment" });
     });
 
-    it("requires persistent configuration in strict mode", async () => {
-      const resolution = resolveHarnessModelProviderPreference({
-        store: { inspect: () => Promise.resolve({ state: "missing" }) },
-        strict: true,
-      });
-      await expect(resolution).rejects.toMatchObject({
-        code: "provider-configuration-required",
-      });
+    it("rejects unusable provider settings", async () => {
       await expect(
         resolveHarnessModelProviderPreference({
           store: {

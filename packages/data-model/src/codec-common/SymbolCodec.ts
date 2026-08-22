@@ -75,7 +75,7 @@ export class SymbolCodec<Encoded>
   }
 
   /** @inheritDoc */
-  encode(value: symbol): Encoded & string {
+  encode(value: symbol, _env: LiveEnvironment): Encoded & string {
     // `canEncode()` already verified the symbol has a registry key.
     return this.#keyAsEncoded(Symbol.keyFor(value)!);
   }

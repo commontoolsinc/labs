@@ -1945,7 +1945,14 @@ Deno.test("runCfHarnessCli registers and disposes signal handlers around a run",
   let registeredSignals: readonly string[] = [];
   let disposed = false;
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
     {
       io,
       env: {},
@@ -2017,6 +2024,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--focus-root",
@@ -2139,6 +2148,8 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       workspace,
       "--prompt",
@@ -2225,6 +2236,8 @@ Deno.test("runCfHarnessCli says so when the well-known grants cannot be establis
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2291,6 +2304,8 @@ Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async (
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--focus-root",
@@ -2366,6 +2381,10 @@ Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process e
   for (const name of projected) Deno.env.delete(name);
   Deno.env.set("CF_HARNESS_API_KEY", "test-key");
   Deno.env.set("CF_HARNESS_COMPACT_THRESHOLD", "9000");
+  // The projection is what this test is about, and provider selection reads it
+  // too: without a projected selection the run is refused before the threshold
+  // is ever consulted, on any machine whose harness home configured none.
+  Deno.env.set("CF_HARNESS_MODEL_PROVIDER", "openai-compatible-gateway");
   try {
     const { io } = createIoBuffers();
     let createdOptions: Record<string, unknown> | undefined;
@@ -2437,6 +2456,8 @@ Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async (
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       workspace,
       "--image",
@@ -2540,6 +2561,8 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
     let createdOptions: Record<string, unknown> | undefined;
     const exitCode = await runCfHarnessCli(
       [
+        "--model-provider",
+        "openai-compatible-gateway",
         "--workspace",
         "/tmp/project",
         "--prompt",
@@ -2607,6 +2630,8 @@ Deno.test("runCfHarnessCli passes Browser Access leases to the prompt loop", asy
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2675,6 +2700,8 @@ Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2748,6 +2775,8 @@ Deno.test("runCfHarnessCli passes a Loom run manifest and its prompt slot", asyn
   } as const;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2812,6 +2841,8 @@ Deno.test("runCfHarnessCli can stream transcript events as they happen", async (
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2917,6 +2948,8 @@ Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch m
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -2978,6 +3011,8 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
   const writes: Array<{ path: string; text: string }> = [];
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -3087,6 +3122,8 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -3186,6 +3223,8 @@ Deno.test("runCfHarnessCli exits nonzero when top-level structured result is inv
   const writes: Array<{ path: string; text: string }> = [];
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -3296,6 +3335,8 @@ Deno.test({
 
       const exitCode = await runCfHarnessCli(
         [
+          "--model-provider",
+          "openai-compatible-gateway",
           "--workspace",
           workspace,
           "--prompt",
@@ -3416,6 +3457,8 @@ Deno.test({
       let engine: CfHarnessEngine | undefined;
       const exitCode = await runCfHarnessCli(
         [
+          "--model-provider",
+          "openai-compatible-gateway",
           "--workspace",
           workspace,
           "--prompt",
@@ -3761,7 +3804,7 @@ Deno.test("runCfHarnessCli reports argument errors to stderr", async () => {
 Deno.test("runCfHarnessCli fails early when no API key is configured", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello"],
+    ["--model-provider", "openai-compatible-gateway", "--prompt", "hello"],
     { io, env: {} },
   );
 
@@ -3772,11 +3815,49 @@ Deno.test("runCfHarnessCli fails early when no API key is configured", async () 
   ]);
 });
 
+Deno.test("runCfHarnessCli refuses a run that selected no model provider", async () => {
+  // No store is injected, so the run reads the harness home the CLI resolves
+  // for itself — the one place an operator's persisted selection would be.
+  const home = await Deno.makeTempDir({ prefix: "cf-harness-no-provider-" });
+  try {
+    const { io, stdout, stderr } = createIoBuffers();
+    const exitCode = await runCfHarnessCli(
+      ["--prompt", "hello"],
+      {
+        io,
+        env: {
+          CF_HARNESS_HOME: home,
+          CF_HARNESS_API_KEY: "key-for-a-gateway-nobody-asked-for",
+        },
+        createModelClient: () => {
+          throw new Error("unselected provider must not reach a model client");
+        },
+      },
+    );
+
+    assertEquals(exitCode, 1);
+    assertEquals(stdout, []);
+    assertEquals(stderr, [
+      "No model provider is selected; choose one with --model-provider, " +
+      "CF_HARNESS_MODEL_PROVIDER, or `config set`\n",
+    ]);
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
 Deno.test("runCfHarnessCli allows no-auth gateway mode without an API key", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
-    ["--prompt", "hello", "--gateway-auth-mode", "none"],
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--prompt",
+      "hello",
+      "--gateway-auth-mode",
+      "none",
+    ],
     {
       io,
       env: {},
@@ -4458,6 +4539,8 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -4527,6 +4610,8 @@ Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", asy
   let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       workspace,
       "--prompt",
@@ -4598,6 +4683,8 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
     [
+      "--model-provider",
+      "openai-compatible-gateway",
       "--workspace",
       "/tmp/project",
       "--prompt",
@@ -4948,11 +5035,7 @@ Deno.test("structured config commands expose stable success and failure envelope
     version: 1,
     ok: true,
     command: "config.inspect",
-    result: {
-      state: "missing",
-      effectiveProvider: "openai-compatible-gateway",
-      effectiveSource: "default",
-    },
+    result: { state: "missing" },
   });
 
   const initialized = createIoBuffers();
@@ -4976,6 +5059,21 @@ Deno.test("structured config commands expose stable success and failure envelope
       0o600,
     );
   }
+
+  const persisted = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: persisted.io,
+      env,
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(persisted.stdout[0]).result, {
+    state: "configured",
+    configuredProvider: "openai-compatible-gateway",
+    effectiveProvider: "openai-compatible-gateway",
+    effectiveSource: "persistent",
+  });
 
   await Deno.writeTextFile(join(home, "config.json"), "{secret-corruption", {
     mode: 0o600,

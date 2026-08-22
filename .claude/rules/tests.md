@@ -134,10 +134,21 @@ record on their own. Two consequences worth knowing while writing one:
   interpolated identifiers, which mint a new identity every time they
   shift; renames split history unless bridged in
   `tasks/test-identity-aliases.jsonl`.
+- The name has to be unique within its scope — the whole describe chain
+  plus the `it()` description, or the bare `Deno.test` name, across every
+  test file of the package. Two tests under one name are one identity, so
+  their outcomes and durations merge and neither can be tracked on its
+  own. A loop that generates names is the case to check twice: a
+  hand-written test beside it can land on one of them.
 - Every test must finish within sixty seconds in CI, not counting setup.
 
 A new test *surface* (a new CI job, script, or harness) does need wiring —
 `docs/development/test-records.md` under "Covering a new test surface".
+
+Your own runs are recorded too, and are marked as an agent's: with
+`CF_TEST_AGENT` unset, the run context carries the name of the harness
+you are running under. Nothing to set, and nothing to work around —
+a run of yours is data about the tests, the same as anyone's.
 
 When running tests for a team member — someone with commit access —
 whose environment has no `CF_TEST_RECORDS_KEY_FILE`, it is worth
