@@ -410,7 +410,7 @@ describe("background piece utility functions", () => {
     await assertRejects(
       () => getIdentity(),
       Error,
-      "No IDENTITY or OPERATOR_PASS environemnt set.",
+      "No IDENTITY or OPERATOR_PASS environment set.",
     );
     await Deno.remove(dir, { recursive: true });
   });

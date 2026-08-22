@@ -140,10 +140,13 @@ export class AuthorizationError extends Error {
 //   https://caniuse.com/mdn-api_subtlecrypto_generatekey_ed25519
 // * [2] Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
 //   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993.
-// * [3] Deno carries a `CryptoKey` through structured cloning whole -- the clone
-//   is a `CryptoKey` with its extractability and algorithm intact, and it signs
-//   -- both within a realm and across a worker boundary. So the cloneability
-//   this checks is about Firefox, per [2], and not about Deno.
+// * [3] Deno carries a `CryptoKey` across one worker boundary whole: the clone
+//   is a `CryptoKey` with its extractability and algorithm intact, and it
+//   signs. A key that itself arrived that way does not survive a further
+//   crossing -- it degrades to a plain object -- so a relay through two workers
+//   loses what a single hop keeps. Cloning within a realm has no such limit,
+//   which is the cloning this function checks, and that check is about Firefox
+//   per [2].
 //   https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
 // * [4] Safari/Webkit generates randomized signatures as per `draft-irtf-cfrg-det-sigs-with-noise`
 //   https://datatracker.ietf.org/doc/draft-irtf-cfrg-det-sigs-with-noise/

@@ -30,10 +30,13 @@ export function isValidPieceId(id: string): boolean {
  * one means Web Crypto: the seed each form starts from is imported into a
  * non-extractable `CryptoKey` and then dropped, so what this service holds
  * afterwards -- and what it hands a worker realm, structured cloning carrying
- * a `CryptoKey` whole -- is a key handle.
+ * a `CryptoKey` whole -- is a key handle. For the keyfile form that is the
+ * whole of it; the passphrase form leaves `OPERATOR_PASS` in the environment,
+ * from which the key can be derived again, which is part of what makes it the
+ * insecure one.
  *
- * @throws If the key path names something unreadable, or if neither variable
- *   is set.
+ * @throws If the key path names something unreadable or unusable, or if
+ *   neither variable is set.
  */
 export async function getIdentity(
   identityPath?: string,
@@ -51,7 +54,7 @@ export async function getIdentity(
     console.warn("Using insecure passphrase identity.");
     return await Identity.fromPassphrase(operatorPass);
   }
-  throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
+  throw new Error("No IDENTITY or OPERATOR_PASS environment set.");
 }
 
 export async function setBGPiece({
