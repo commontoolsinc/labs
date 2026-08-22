@@ -461,6 +461,20 @@ const handlers: Record<
     }
   },
 
+  /**
+   * Re-issue every open space's tracked watch set as a pull. The
+   * recovery lever for a reader-side ARRIVAL gap — state the server
+   * holds durably that this session's replica missed: a subscription
+   * notification that never landed cannot be re-requested, an
+   * already-watched document's sync is a no-op (the superset dedupe),
+   * and the pull-kick memo suppresses re-pulls of a doc pulled once. A
+   * watch-set re-issue re-fetches exactly the missed state; state the
+   * server never held stays absent, so recovery cannot mask loss.
+   */
+  async refetchWatched() {
+    await controller().runtime.storageManager.refetchOpenSpaces?.();
+  },
+
   // Force an ordered-after round trip on every open space connection, so any
   // subscription fan-out the server has already sent has been received and
   // applied by this runtime before returning. The harness's cross-runtime

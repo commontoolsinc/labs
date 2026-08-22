@@ -494,6 +494,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Re-issue every open space's tracked watch set as a pull — recovers a
+   * reader whose subscription fan-out went missing (see the protocol
+   * type). Diagnostic and test-harness surface; product readers ride
+   * subscriptions.
+   */
+  async refetchWatched(): Promise<void> {
+    await this.#conn.request<RequestType.RefetchWatched>({
+      type: RequestType.RefetchWatched,
+    });
+  }
+
   async getGraphSnapshot(): Promise<SchedulerGraphSnapshot> {
     const res = await this.#conn.request<RequestType.GetGraphSnapshot>({
       type: RequestType.GetGraphSnapshot,

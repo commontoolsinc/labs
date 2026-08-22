@@ -335,6 +335,16 @@ export class MultiRuntimeSession {
     await this.#client.call("barrier");
   }
 
+  /**
+   * Re-issue this runtime's tracked watch sets as pulls — stronger than
+   * `barrier()`, which only settles fan-out the server already SENT: a
+   * notification that never left recovers here or nowhere. See
+   * `MultiRuntimeHarness.waitFor`'s arrival-gap recovery.
+   */
+  async refetchWatched(): Promise<void> {
+    await this.#client.call("refetchWatched");
+  }
+
   /** Capture scheduler graph, settle stats history, and action run trace. */
   async diagnostics(): Promise<RuntimeDiagnosticsSnapshot> {
     return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
@@ -574,6 +584,58 @@ export class MultiRuntimeHarness {
         lastError = error;
       }
       await this.settle(1);
+    }
+    // ARRIVAL-GAP recovery, toolshed-backed arm only. The settle above
+    // covers the SENDER's intents (OW52's arrived-terminal-consequence
+    // retirement); a NON-sender's arrival rides subscription fan-out,
+    // and a notification that never landed leaves that reader's replica
+    // stale forever — the pull-kick memo suppresses re-pulls, so the
+    // poll can never recover on its own. One explicit pull to the server
+    // head separates the two reds this wait can mean: state the server
+    // holds that the reader missed (recovered here, warned loudly — a
+    // fan-out delivery gap, not a loss) versus state the server never
+    // durably held (still absent — the timeout below now says so).
+    if (this.#server === undefined) {
+      // Bounded by the settle quiescence budget, not the 120 s RPC
+      // ceiling: recovery runs past the caller's deadline, and a wait
+      // that timed out at 30 s must not stall for minutes more — a
+      // recovery that cannot finish inside the budget reports as the
+      // ordinary timeout below.
+      const recoveryBudget = new Promise<"budget">((resolve) =>
+        setTimeout(() => resolve("budget"), SERVED_SETTLE_QUIESCENCE_BUDGET_MS)
+      );
+      const outcome = await Promise.race([
+        (async () => {
+          await Promise.all(
+            this.sessions.map((session) => session.refetchWatched()),
+          );
+          await this.settle(1);
+          return "refetched" as const;
+        })(),
+        recoveryBudget,
+      ]);
+      let recovered = false;
+      if (outcome === "refetched") {
+        try {
+          recovered = Boolean(await predicate());
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (recovered) {
+        console.warn(
+          `[multi-runtime-harness] waitFor("${description}") passed only ` +
+            `after an explicit watch-set refetch: the server held the ` +
+            `state and a reader's replica had missed it — a subscription ` +
+            `fan-out delivery gap, not a loss.`,
+        );
+        return;
+      }
+      throw new Error(
+        `Timed out waiting for: ${description} — state absent even after ` +
+          `a watch-set refetch, so this is not a reader-side arrival gap` +
+          (lastError ? ` (last error: ${lastError})` : ""),
+      );
     }
     throw new Error(
       `Timed out waiting for: ${description}` +

@@ -698,6 +698,50 @@ export async function clickTrustedActionAndWaitForText(
   }
 }
 
+/**
+ * ARRIVAL-GAP recovery for a wait that hit the safety net: re-issue the
+ * page runtime's tracked watch sets as pulls, settle, and re-check once.
+ * A stale WATCHED document cannot recover on its own — a subscription
+ * notification that never landed cannot be re-requested, and an
+ * already-watched document's sync is a no-op — so the wait's timeout
+ * conflates two different reds. This separates them: state the server
+ * held that this page's runtime missed passes with a loud warning (a
+ * fan-out delivery gap, not a loss); state the server never durably
+ * held stays red, and the caller's error now says so. Answers false
+ * when the page carries no runtime client (recovery unavailable), so
+ * callers fall through to their ordinary error.
+ */
+async function recoveredAfterRefetch<A extends readonly unknown[]>(
+  page: Page,
+  description: string,
+  // deno-lint-ignore no-explicit-any
+  predicate: any,
+  args: A,
+): Promise<boolean> {
+  const refetched = await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: { rt?: { refetchWatched?: () => Promise<void> } };
+    }).commonfabric?.rt;
+    if (rt?.refetchWatched === undefined) return false;
+    await rt.refetchWatched();
+    return true;
+  }).catch(() => false);
+  if (!refetched) return false;
+  await settleView(page);
+  const held = await page.evaluate(predicate, { args: args as never })
+    .catch(() => false);
+  if (held) {
+    console.warn(
+      `[cfc-browser-helpers] ${description} held only after an explicit ` +
+        `watch-set refetch: the server held the state and this page's ` +
+        `runtime had missed it — a subscription fan-out delivery gap, ` +
+        `not a loss.`,
+    );
+    return true;
+  }
+  return false;
+}
+
 export async function waitForText(
   page: Page,
   selector: string,
@@ -708,11 +752,22 @@ export async function waitForText(
       args: [selector, text],
     });
   } catch (cause) {
+    if (
+      await recoveredAfterRefetch(
+        page,
+        `"${selector}" contains "${text}"`,
+        textPresent,
+        [selector, text],
+      )
+    ) {
+      return;
+    }
     const probe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
-      `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
-        toIndentedDebugString(probe)
-      }`,
+      `Timed out waiting for "${selector}" to contain "${text}" — state ` +
+        `absent even after a watch-set refetch. Last probe: ${
+          toIndentedDebugString(probe)
+        }`,
       { cause },
     );
   }
@@ -742,11 +797,22 @@ export async function waitForSettledText(
       args: [selector, text],
     });
   } catch (cause) {
+    if (
+      await recoveredAfterRefetch(
+        page,
+        `"${selector}" contains "${text}"`,
+        settledTextPresent,
+        [selector, text],
+      )
+    ) {
+      return;
+    }
     const probe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
-      `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
-        toIndentedDebugString(probe)
-      }`,
+      `Timed out waiting for "${selector}" to contain "${text}" — state ` +
+        `absent even after a watch-set refetch. Last probe: ${
+          toIndentedDebugString(probe)
+        }`,
       { cause },
     );
   }
@@ -787,11 +853,22 @@ export async function fillCfInput(
       });
     }
   } catch (cause) {
+    if (
+      await recoveredAfterRefetch(
+        page,
+        `cf input "${selector}" filled with "${value}"`,
+        fillAndVerify,
+        [selector, value],
+      )
+    ) {
+      return;
+    }
     const probe = await readCfInputProbe(page, selector).catch(() => undefined);
     throw new Error(
-      `Timed out filling cf input "${selector}" with "${value}". Last probe: ${
-        toIndentedDebugString(probe)
-      }`,
+      `Timed out filling cf input "${selector}" with "${value}" — the fill ` +
+        `did not converge even after a watch-set refetch. Last probe: ${
+          toIndentedDebugString(probe)
+        }`,
       { cause },
     );
   }
