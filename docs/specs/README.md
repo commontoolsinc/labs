@@ -39,6 +39,7 @@ decision is reversed or superseded).
 
 ### Data, storage, and execution
 
+- [`cf` CLI daemon](cf-cli-daemon.md)
 - [JSON Schema](json_schema.md)
 - [Content-addressed schemas](content-addressed-schemas.md)
 - [Sigil data model](data-model/sigil.md)
