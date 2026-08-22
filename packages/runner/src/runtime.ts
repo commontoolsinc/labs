@@ -2088,7 +2088,10 @@ export class Runtime {
    * principal the run acts as. `revision` is the runtime's own trust
    * revision — the same composition the default provider uses — so a
    * trust-config change invalidates per-run prepared digests exactly as
-   * it does ambient ones.
+   * it does ambient ones. On a runtime constructed with a CUSTOM
+   * `trustSnapshotProvider` this still composes the RUNTIME's revision,
+   * not the provider's — the run stamper installs only on serving
+   * runtimes, which use the default provider.
    */
   trustSnapshotForPrincipal(principal: string): TrustSnapshot {
     return {
