@@ -38,12 +38,12 @@
 import {
   type AdmittedCommitNotice,
   type Server as MemoryServer,
-  toDirtyKey,
 } from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import type {
-  StreamEventEntry,
-  StreamEventsDocValue,
+import {
+  type StreamEventEntry,
+  type StreamEventsDocValue,
+  toDirtyKey,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 

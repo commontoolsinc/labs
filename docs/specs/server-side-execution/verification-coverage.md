@@ -5260,9 +5260,15 @@ supply; OW29/OW32/OW34 closed):
     rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
-    `noteCount` reads `undefined` past the step's wait (1/10 local ON);
-    an event-driven wait on `noteCount` is the test-side close, this
-    row's territory.
+    `noteCount` reads `undefined` past the step's wait (1/10 local ON
+    at the OW51 build; re-measured 2026-08-22 by the warm-request P-1
+    probe as heavily LOAD-SENSITIVE: 5/10 red on pure main and 7/10
+    red on the warm-request head — statistically indistinguishable at
+    n=10 — on a shared box at loads 3-16, every red the same
+    `undefined`-vs-7 shape, and the warm request structurally INERT in
+    this flow: `warmRequests` 0 in 10/10, the notebook stages no
+    foreign provisioning); an event-driven wait on `noteCount` is the
+    test-side close, this row's territory.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

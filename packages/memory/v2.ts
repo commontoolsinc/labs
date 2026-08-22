@@ -187,6 +187,20 @@ export const scopeOfScopeKey = (scopeKey: string): CellScope => {
 };
 
 /**
+ * The canonical (id, scope key) -> dirty/demand key encoding — the ONE
+ * identity every demand/dirtiness surface keys instances by (the memory
+ * server's dirty marking, the serving loop's demand registry, the warm
+ * request's staged-instance capture). Lives HERE, on the shared
+ * browser-safe vocabulary surface beside {@link resolveScopeKey}, so
+ * client-bundled modules (the runner's wave carriage among them) can
+ * key with it without importing any server-only module.
+ */
+export const toDirtyKey = (
+  id: string,
+  scopeKey: ScopeKey = "space",
+): string => `${scopeKey}\0${id}`;
+
+/**
  * Whether a scope key is in the APPLICABLE SET of the given identity
  * (protocol.md §3): `space`, `user:<me>`, `session:<me>:<sid>`. Push is
  * filtered per recipient by this predicate — a subscriber receives only

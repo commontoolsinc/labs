@@ -36,8 +36,8 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
   STREAM_ENTRIES_DOC_PREFIX,
+  toDirtyKey,
 } from "@commonfabric/memory/v2";
-import { toDirtyKey } from "@commonfabric/memory/v2/server";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type {
   CommitError,
