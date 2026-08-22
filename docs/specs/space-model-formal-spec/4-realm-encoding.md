@@ -22,8 +22,9 @@ owed interoperability, which is what lets the format be as narrow as it is.
 
 Worker IPC is the case it was written for: a value constructed, handed to a
 transport that clones it, decoded on the far side, and discarded. A durable
-store that a runtime writes and later reads back (Section 1.2) is the same
-boundary with time in it, and is the reason the format states its
+store that a runtime writes and later reads back is the same boundary with
+time in it, on the conditions Section 1.2 states, and is the reason the
+format states its
 requirements of a transport rather than of a mechanism. A value that crosses
 to another party, or that must be read through a transport not meeting
 Section 1.1, uses the JSON encoding.
@@ -84,20 +85,24 @@ The structured clone algorithm provides all three.
 
 Storage is the self-dealing boundary with time in it: a runtime writes a
 value to a durable store and reads it back later, with no other party in it.
-`IndexedDB` is the case in hand, and it qualifies by the same mechanism worker
-IPC does — that store serializes with the structured clone algorithm, so what
-satisfies Section 1.1 for `postMessage()` satisfies it here.
+`IndexedDB` is the case in hand. What it supplies is Section 1.1, by the same
+mechanism worker IPC does — that store serializes with the structured clone
+algorithm, so what satisfies those requirements for `postMessage()` satisfies
+them here — and Section 1.1 is the whole of what a medium can supply. Whether
+a given *use* of that store is self-dealing is a separate question, settled by
+the conditions below.
 
 What the time costs is Section 2.4. A durable payload can outlive the build
 that wrote it, so a reader must expect that refusal rather than treat it as
-unreachable. Three conditions follow, and a store meeting all three stays
-within this boundary:
+unreachable. Three conditions follow, and a use meeting all three stays within
+this boundary:
 
 1. **The stored value must be reconstructible from something the store does
    not hold.** This is the condition that decides the question, because it is
-   what makes a version bump a cache flush rather than data loss. A store
-   holding the only copy of anything is not self-dealing, whatever else is
-   true of it.
+   what makes a version bump a cache flush rather than data loss. A use whose
+   store holds the only copy of anything is outside this boundary, whatever
+   else is true of it, and the medium meeting Section 1.1 does not soften
+   that.
 2. **A reader must treat a refused payload as absent**, rather than report it
    as an error. A version bump refuses every stored payload at once, which is
    an expected path and has to be written as one.
