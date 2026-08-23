@@ -68,7 +68,7 @@ describe("FabricEpochNsec", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricEpochNsec[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
       const env = NULL_LIVE_ENVIRONMENT;

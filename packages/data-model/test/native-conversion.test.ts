@@ -448,46 +448,60 @@ describe("native-conversion", () => {
     const frozenCtx = new DummyLiveEnvironment(true);
     const mutableCtx = new DummyLiveEnvironment(false);
 
-    it("`FabricError`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = {
-        type: "Error",
-        name: null,
-        message: "boom",
-      };
-      const frozen = FabricError[CODEC].decode(
-        CODEC_TYPE_TAGS.Error,
-        state,
-        frozenCtx,
-      );
-      expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = FabricError[CODEC].decode(
-        CODEC_TYPE_TAGS.Error,
-        state,
-        mutableCtx,
-      );
-      expect(Object.isFrozen(mutable)).toBe(false);
+    describe("FabricError", () => {
+      it("is deep-frozen when `shouldDeepFreeze` is `true`, mutable when `false`", () => {
+        const state = {
+          type: "Error",
+          name: null,
+          message: "boom",
+        };
+        const frozen = FabricError[CODEC].decode(
+          CODEC_TYPE_TAGS.Error,
+          state,
+          frozenCtx,
+        );
+        expect(isDeepFrozen(frozen)).toBe(true);
+        const mutable = FabricError[CODEC].decode(
+          CODEC_TYPE_TAGS.Error,
+          state,
+          mutableCtx,
+        );
+        expect(Object.isFrozen(mutable)).toBe(false);
+      });
     });
 
-    it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      // Tag travels separately; the bare inner state is the codec payload,
-      // which for this class is a record of the three facts it preserves.
-      const state = { tag: "Bad@1", state: { x: 1 }, error: "oops" };
-      const frozen = ProblematicValue[CODEC].decode("Bad@1", state, frozenCtx);
-      expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = ProblematicValue[CODEC].decode(
-        "Bad@1",
-        state,
-        mutableCtx,
-      );
-      expect(Object.isFrozen(mutable)).toBe(false);
+    describe("ProblematicValue", () => {
+      it("is deep-frozen when `shouldDeepFreeze` is `true`, mutable when `false`", () => {
+        // Tag travels separately; the bare inner state is the codec payload,
+        // which for this class is a record of the three facts it preserves.
+        const state = { tag: "Bad@1", state: { x: 1 }, error: "oops" };
+        const frozen = ProblematicValue[CODEC].decode(
+          "Bad@1",
+          state,
+          frozenCtx,
+        );
+        expect(isDeepFrozen(frozen)).toBe(true);
+        const mutable = ProblematicValue[CODEC].decode(
+          "Bad@1",
+          state,
+          mutableCtx,
+        );
+        expect(Object.isFrozen(mutable)).toBe(false);
+      });
     });
 
-    it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = { y: 2 };
-      const frozen = UnknownValue[CODEC].decode("Fancy@3", state, frozenCtx);
-      expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = UnknownValue[CODEC].decode("Fancy@3", state, mutableCtx);
-      expect(Object.isFrozen(mutable)).toBe(false);
+    describe("UnknownValue", () => {
+      it("is deep-frozen when `shouldDeepFreeze` is `true`, mutable when `false`", () => {
+        const state = { y: 2 };
+        const frozen = UnknownValue[CODEC].decode("Fancy@3", state, frozenCtx);
+        expect(isDeepFrozen(frozen)).toBe(true);
+        const mutable = UnknownValue[CODEC].decode(
+          "Fancy@3",
+          state,
+          mutableCtx,
+        );
+        expect(Object.isFrozen(mutable)).toBe(false);
+      });
     });
   });
 
@@ -500,37 +514,47 @@ describe("native-conversion", () => {
   // clean fast throw, not a hang); `.not.toThrow()` is the discriminating
   // assertion.
   describe("cycle behavior via `[DEEP_FREEZE]`", () => {
-    it("`FabricError`: cycle through `error.cause` terminates", () => {
-      // Build a cycle: a plain-object wrapper holds the FabricError, and the
-      // FabricError's `error.cause` points back at the wrapper. When
-      // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
-      // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
-      // `deepFreeze()` -> the FabricError again -> ...
-      const err = new Error("cycle-cause");
-      const fe = FabricError.fromNativeError(err);
-      const wrapper: Record<string, unknown> = { fe };
-      err.cause = wrapper;
-      expect(() => deepFreeze(wrapper)).not.toThrow();
-      expect(Object.isFrozen(wrapper)).toBe(true);
-      expect(Object.isFrozen(fe)).toBe(true);
+    describe("FabricError", () => {
+      it("terminates on a cycle through `error.cause`", () => {
+        // Build a cycle: a plain-object wrapper holds the FabricError, and the
+        // FabricError's `error.cause` points back at the wrapper. When
+        // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
+        // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
+        // `deepFreeze()` -> the FabricError again -> ...
+        const err = new Error("cycle-cause");
+        const fe = FabricError.fromNativeError(err);
+        const wrapper: Record<string, unknown> = { fe };
+        err.cause = wrapper;
+        expect(() => deepFreeze(wrapper)).not.toThrow();
+        expect(Object.isFrozen(wrapper)).toBe(true);
+        expect(Object.isFrozen(fe)).toBe(true);
+      });
     });
 
-    it("`ProblematicValue`: cycle through `state` terminates", () => {
-      const cycle: Record<string, unknown> = { x: 1 };
-      const pv = new ProblematicValue("Cycle@1", cycle as FabricValue, "oops");
-      cycle.back = pv;
-      expect(() => deepFreeze(pv)).not.toThrow();
-      expect(Object.isFrozen(pv)).toBe(true);
-      expect(Object.isFrozen(cycle)).toBe(true);
+    describe("ProblematicValue", () => {
+      it("terminates on a cycle through `state`", () => {
+        const cycle: Record<string, unknown> = { x: 1 };
+        const pv = new ProblematicValue(
+          "Cycle@1",
+          cycle as FabricValue,
+          "oops",
+        );
+        cycle.back = pv;
+        expect(() => deepFreeze(pv)).not.toThrow();
+        expect(Object.isFrozen(pv)).toBe(true);
+        expect(Object.isFrozen(cycle)).toBe(true);
+      });
     });
 
-    it("`UnknownValue`: cycle through `state` terminates", () => {
-      const cycle: Record<string, unknown> = { y: 2 };
-      const uv = new UnknownValue("Cycle@1", cycle as FabricValue);
-      cycle.back = uv;
-      expect(() => deepFreeze(uv)).not.toThrow();
-      expect(Object.isFrozen(uv)).toBe(true);
-      expect(Object.isFrozen(cycle)).toBe(true);
+    describe("UnknownValue", () => {
+      it("terminates on a cycle through `state`", () => {
+        const cycle: Record<string, unknown> = { y: 2 };
+        const uv = new UnknownValue("Cycle@1", cycle as FabricValue);
+        cycle.back = uv;
+        expect(() => deepFreeze(uv)).not.toThrow();
+        expect(Object.isFrozen(uv)).toBe(true);
+        expect(Object.isFrozen(cycle)).toBe(true);
+      });
     });
 
     it("terminates on a cross-instance cycle (`FabricError` <-> `ProblematicValue`)", () => {

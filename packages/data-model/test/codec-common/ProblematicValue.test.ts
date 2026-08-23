@@ -98,32 +98,36 @@ describe("ProblematicValue", () => {
 
   describe("instance members", () => {
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("recurses state, freezes in place, via dispatch", () => {
-        const child = { x: 1 };
-        const pv = new ProblematicValue(
-          "Bad@1",
-          child,
-          "oops",
-        );
-        const result = deepFreeze(pv);
-        expect(result).toBe(pv);
-        expect(Object.isFrozen(pv)).toBe(true);
-        expect(Object.isFrozen(child)).toBe(true);
-        expect(isValidDeepFrozenFabricValue(pv)).toBe(true);
+      describe("via dispatch", () => {
+        it("recurses state, freezes in place", () => {
+          const child = { x: 1 };
+          const pv = new ProblematicValue(
+            "Bad@1",
+            child,
+            "oops",
+          );
+          const result = deepFreeze(pv);
+          expect(result).toBe(pv);
+          expect(Object.isFrozen(pv)).toBe(true);
+          expect(Object.isFrozen(child)).toBe(true);
+          expect(isValidDeepFrozenFabricValue(pv)).toBe(true);
+        });
       });
 
-      it("recurses state, freezes in place, via direct member invocation", () => {
-        const child = { x: 1 };
-        const pv = new ProblematicValue(
-          "Bad@1",
-          child,
-          "oops",
-        );
-        const result = pv[DEEP_FREEZE](subFreeze);
-        expect(result).toBe(pv);
-        expect(Object.isFrozen(pv)).toBe(true);
-        expect(Object.isFrozen(child)).toBe(true);
-        expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      describe("via direct member invocation", () => {
+        it("recurses state, freezes in place", () => {
+          const child = { x: 1 };
+          const pv = new ProblematicValue(
+            "Bad@1",
+            child,
+            "oops",
+          );
+          const result = pv[DEEP_FREEZE](subFreeze);
+          expect(result).toBe(pv);
+          expect(Object.isFrozen(pv)).toBe(true);
+          expect(Object.isFrozen(child)).toBe(true);
+          expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+        });
       });
     });
 

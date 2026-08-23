@@ -60,7 +60,7 @@ function expectEncodedFormat(value: FabricValue, expected: unknown): void {
 }
 
 describe("codecs", () => {
-  describe("`createDefaultJsonRegistry()`", () => {
+  describe("createDefaultJsonRegistry()", () => {
     it("returns a frozen registry", () => {
       expect(Object.isFrozen(createDefaultJsonRegistry())).toBe(true);
     });
@@ -83,22 +83,26 @@ describe("codecs", () => {
     expect(roundTrip(42n)).toBe(42n);
   });
 
-  it("`jsonFromFabricValue()` encodes `undefined` to tagged JSON", () => {
-    expectEncodedFormat(undefined, { "/Undefined@1": null });
+  describe("jsonFromFabricValue()", () => {
+    it("encodes `undefined` to tagged JSON", () => {
+      expectEncodedFormat(undefined, { "/Undefined@1": null });
+    });
+
+    it("encodes `bigint` to tagged JSON", () => {
+      expectEncodedFormat(42n, { "/BigInt@1": "Kg" });
+    });
   });
 
-  it("`jsonFromFabricValue()` encodes `bigint` to tagged JSON", () => {
-    expectEncodedFormat(42n, { "/BigInt@1": "Kg" });
-  });
+  describe("fabricFromJsonValue()", () => {
+    it("decodes tagged `undefined`", () => {
+      const json = 'fvj1:{"\/Undefined@1":null}';
+      expect(fabricFromJsonValue(json, mockRuntime)).toBe(undefined);
+    });
 
-  it("`fabricFromJsonValue()` decodes tagged `undefined`", () => {
-    const json = 'fvj1:{"\/Undefined@1":null}';
-    expect(fabricFromJsonValue(json, mockRuntime)).toBe(undefined);
-  });
-
-  it("`fabricFromJsonValue()` decodes tagged `bigint`", () => {
-    const json = 'fvj1:{"\/BigInt@1":"Kg"}';
-    expect(fabricFromJsonValue(json, mockRuntime)).toBe(42n);
+    it("decodes tagged `bigint`", () => {
+      const json = 'fvj1:{"\/BigInt@1":"Kg"}';
+      expect(fabricFromJsonValue(json, mockRuntime)).toBe(42n);
+    });
   });
 
   it("round-trips plain objects", () => {
