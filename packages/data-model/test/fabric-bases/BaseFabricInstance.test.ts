@@ -141,138 +141,143 @@ describe("BaseFabricInstance", () => {
     });
   });
 
-  describe("isInstance()", () => {
-    it("is `true` for a `BaseFabricInstance`", () => {
-      expect(BaseFabricInstance.isInstance(new Probe("t"))).toBe(true);
+  describe("instance members", () => {
+    describe("shallowClone()", () => {
+      describe("when `frozen` is `true`", () => {
+        it("returns `this` for an already-frozen instance (no clone call)", () => {
+          const probe = new Probe("t");
+          Object.freeze(probe);
+
+          const result = probe.shallowClone(true);
+
+          expect(result).toBe(probe);
+          expect(probe.counter.calls).toBe(0);
+        });
+
+        it("returns a new frozen instance for an unfrozen one", () => {
+          const probe = new Probe("t");
+
+          const result = probe.shallowClone(true);
+
+          expect(result).not.toBe(probe);
+          expect(result instanceof Probe).toBe(true);
+          expect((result as Probe).wireTypeTag).toBe("t");
+          expect(Object.isFrozen(result)).toBe(true);
+          // Original is left unfrozen.
+          expect(Object.isFrozen(probe)).toBe(false);
+          expect(probe.counter.calls).toBe(1);
+        });
+      });
+
+      describe("when `frozen` is `false`", () => {
+        it("returns a new unfrozen instance from a frozen original", () => {
+          const probe = new Probe("t");
+          Object.freeze(probe);
+
+          const result = probe.shallowClone(false);
+
+          expect(result).not.toBe(probe);
+          expect(result instanceof Probe).toBe(true);
+          expect((result as Probe).wireTypeTag).toBe("t");
+          expect(Object.isFrozen(result)).toBe(false);
+          // The identity-when-frozen optimization is `frozen===true` only;
+          // a `frozen===false` call always allocates.
+        });
+
+        it("returns a new unfrozen instance from an unfrozen original", () => {
+          const probe = new Probe("t");
+
+          const result = probe.shallowClone(false);
+
+          expect(result).not.toBe(probe);
+          expect(Object.isFrozen(result)).toBe(false);
+          expect(probe.counter.calls).toBe(1);
+        });
+      });
     });
 
-    it("is `false` for a `FabricValue` that is not a `BaseFabricInstance`", () => {
-      expect(BaseFabricInstance.isInstance(null)).toBe(false);
-      expect(BaseFabricInstance.isInstance(42)).toBe(false);
-      expect(BaseFabricInstance.isInstance("x")).toBe(false);
-      expect(BaseFabricInstance.isInstance({})).toBe(false);
-      expect(BaseFabricInstance.isInstance([])).toBe(false);
-    });
+    describe("deepClone()", () => {
+      describe("when `frozen` is `true`", () => {
+        it("returns `this` for an already-deep-frozen instance (no core call)", () => {
+          const probe = deepFreeze(new DeepProbe({ n: 1 }));
 
-    it("throws for a `FabricInstance` that is not a `BaseFabricInstance`", () => {
-      expect(() => BaseFabricInstance.isInstance(new RogueInstance())).toThrow(
-        "Shouldn't happen",
-      );
+          const result = probe.deepClone(true);
+
+          expect(result).toBe(probe);
+          expect(probe.counter.calls).toBe(0);
+        });
+
+        it("does NOT identity-return a merely-shallowly-frozen instance", () => {
+          // Frozen instance slot, still-mutable nested state: not deep-frozen,
+          // so the deep identity gate (`isDeepFrozen`, not `Object.isFrozen`)
+          // must allocate rather than alias.
+          const probe = new DeepProbe({ n: 1 });
+          Object.freeze(probe);
+
+          expect(Object.isFrozen(probe)).toBe(true);
+          expect(isDeepFrozen(probe)).toBe(false);
+          expect(probe.deepClone(true)).not.toBe(probe);
+          expect(probe.counter.calls).toBe(1);
+        });
+
+        it("returns a new deep-frozen instance for an unfrozen one", () => {
+          const probe = new DeepProbe({ n: 1 });
+
+          const result = probe.deepClone(true);
+
+          expect(result).not.toBe(probe);
+          expect(isDeepFrozen(result)).toBe(true);
+          // Original is left unfrozen.
+          expect(Object.isFrozen(probe)).toBe(false);
+          expect(probe.counter.calls).toBe(1);
+        });
+      });
+
+      describe("when `frozen` is `false`", () => {
+        it("returns a fresh mutable clone with independent nested state", () => {
+          const probe = new DeepProbe({ n: 1 });
+
+          const result = probe.deepClone(false) as DeepProbe;
+
+          expect(result).not.toBe(probe);
+          expect(Object.isFrozen(result)).toBe(false);
+          expect(result.state).not.toBe(probe.state);
+          result.state.n = 2;
+          expect(probe.state.n).toBe(1);
+        });
+
+        it("allocates even from a deep-frozen original (identity gate is `frozen===true` only)", () => {
+          const probe = deepFreeze(new DeepProbe({ n: 1 }));
+
+          const result = probe.deepClone(false);
+
+          expect(result).not.toBe(probe);
+          expect(Object.isFrozen(result)).toBe(false);
+          expect(probe.counter.calls).toBe(1);
+        });
+      });
     });
   });
 
-  describe("shallowClone()", () => {
-    describe("when `frozen` is `true`", () => {
-      it("returns `this` for an already-frozen instance (no clone call)", () => {
-        const probe = new Probe("t");
-        Object.freeze(probe);
-
-        const result = probe.shallowClone(true);
-
-        expect(result).toBe(probe);
-        expect(probe.counter.calls).toBe(0);
+  describe("static members", () => {
+    describe("isInstance()", () => {
+      it("is `true` for a `BaseFabricInstance`", () => {
+        expect(BaseFabricInstance.isInstance(new Probe("t"))).toBe(true);
       });
 
-      it("returns a new frozen instance for an unfrozen one", () => {
-        const probe = new Probe("t");
-
-        const result = probe.shallowClone(true);
-
-        expect(result).not.toBe(probe);
-        expect(result instanceof Probe).toBe(true);
-        expect((result as Probe).wireTypeTag).toBe("t");
-        expect(Object.isFrozen(result)).toBe(true);
-        // Original is left unfrozen.
-        expect(Object.isFrozen(probe)).toBe(false);
-        expect(probe.counter.calls).toBe(1);
-      });
-    });
-
-    describe("when `frozen` is `false`", () => {
-      it("returns a new unfrozen instance from a frozen original", () => {
-        const probe = new Probe("t");
-        Object.freeze(probe);
-
-        const result = probe.shallowClone(false);
-
-        expect(result).not.toBe(probe);
-        expect(result instanceof Probe).toBe(true);
-        expect((result as Probe).wireTypeTag).toBe("t");
-        expect(Object.isFrozen(result)).toBe(false);
-        // The identity-when-frozen optimization is `frozen===true` only;
-        // a `frozen===false` call always allocates.
+      it("is `false` for a `FabricValue` that is not a `BaseFabricInstance`", () => {
+        expect(BaseFabricInstance.isInstance(null)).toBe(false);
+        expect(BaseFabricInstance.isInstance(42)).toBe(false);
+        expect(BaseFabricInstance.isInstance("x")).toBe(false);
+        expect(BaseFabricInstance.isInstance({})).toBe(false);
+        expect(BaseFabricInstance.isInstance([])).toBe(false);
       });
 
-      it("returns a new unfrozen instance from an unfrozen original", () => {
-        const probe = new Probe("t");
-
-        const result = probe.shallowClone(false);
-
-        expect(result).not.toBe(probe);
-        expect(Object.isFrozen(result)).toBe(false);
-        expect(probe.counter.calls).toBe(1);
-      });
-    });
-  });
-
-  describe("deepClone()", () => {
-    describe("when `frozen` is `true`", () => {
-      it("returns `this` for an already-deep-frozen instance (no core call)", () => {
-        const probe = deepFreeze(new DeepProbe({ n: 1 }));
-
-        const result = probe.deepClone(true);
-
-        expect(result).toBe(probe);
-        expect(probe.counter.calls).toBe(0);
-      });
-
-      it("does NOT identity-return a merely-shallowly-frozen instance", () => {
-        // Frozen instance slot, still-mutable nested state: not deep-frozen,
-        // so the deep identity gate (`isDeepFrozen`, not `Object.isFrozen`)
-        // must allocate rather than alias.
-        const probe = new DeepProbe({ n: 1 });
-        Object.freeze(probe);
-
-        expect(Object.isFrozen(probe)).toBe(true);
-        expect(isDeepFrozen(probe)).toBe(false);
-        expect(probe.deepClone(true)).not.toBe(probe);
-        expect(probe.counter.calls).toBe(1);
-      });
-
-      it("returns a new deep-frozen instance for an unfrozen one", () => {
-        const probe = new DeepProbe({ n: 1 });
-
-        const result = probe.deepClone(true);
-
-        expect(result).not.toBe(probe);
-        expect(isDeepFrozen(result)).toBe(true);
-        // Original is left unfrozen.
-        expect(Object.isFrozen(probe)).toBe(false);
-        expect(probe.counter.calls).toBe(1);
-      });
-    });
-
-    describe("when `frozen` is `false`", () => {
-      it("returns a fresh mutable clone with independent nested state", () => {
-        const probe = new DeepProbe({ n: 1 });
-
-        const result = probe.deepClone(false) as DeepProbe;
-
-        expect(result).not.toBe(probe);
-        expect(Object.isFrozen(result)).toBe(false);
-        expect(result.state).not.toBe(probe.state);
-        result.state.n = 2;
-        expect(probe.state.n).toBe(1);
-      });
-
-      it("allocates even from a deep-frozen original (identity gate is `frozen===true` only)", () => {
-        const probe = deepFreeze(new DeepProbe({ n: 1 }));
-
-        const result = probe.deepClone(false);
-
-        expect(result).not.toBe(probe);
-        expect(Object.isFrozen(result)).toBe(false);
-        expect(probe.counter.calls).toBe(1);
+      it("throws for a `FabricInstance` that is not a `BaseFabricInstance`", () => {
+        expect(() => BaseFabricInstance.isInstance(new RogueInstance()))
+          .toThrow(
+            "Shouldn't happen",
+          );
       });
     });
   });

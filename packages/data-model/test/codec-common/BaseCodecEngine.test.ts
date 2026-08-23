@@ -510,7 +510,7 @@ describe("BaseCodecEngine", () => {
     });
   });
 
-  describe("`lenient`", () => {
+  describe("lenient", () => {
     // A codec rejects a state in one of three ways, and which it picks is the
     // codec author's business rather than a caller's. `lenient` is what
     // decides what a caller sees, so it has to settle ALL of them -- which is

@@ -79,43 +79,53 @@ describe("FabricMap", () => {
 
     // The protocol methods are unimplemented stubs that throw, which these
     // cases pin at both entry points: dispatch and direct invocation.
-    describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        expect(() => deepFreeze(fm)).toThrow(
-          "`FabricMap`: not yet implemented",
-        );
+    describe("[DEEP_FREEZE]", () => {
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          expect(() => deepFreeze(fm)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        Object.freeze(fm);
-        expect(() => isValidDeepFrozenFabricValue(fm)).toThrow(
-          "`FabricMap`: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
+      });
+    });
+
+    describe("[IS_DEEP_FROZEN]", () => {
+      describe("via dispatch", () => {
+        it("throws not-yet-implemented (via type guard)", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          Object.freeze(fm);
+          expect(() => isValidDeepFrozenFabricValue(fm)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
 
-      it("via direct member invocation: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
-          "`FabricMap`: not yet implemented",
-        );
-      });
-
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` throws not-yet-implemented", () => {
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
-        );
-        Object.freeze(fm);
-        expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
-          "`FabricMap`: not yet implemented",
-        );
+      describe("via direct member invocation", () => {
+        it("throws not-yet-implemented", () => {
+          const fm = new FabricMap(
+            new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+          );
+          Object.freeze(fm);
+          expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
+            "`FabricMap`: not yet implemented",
+          );
+        });
       });
     });
   });

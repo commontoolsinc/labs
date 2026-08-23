@@ -82,47 +82,51 @@ const CASES: readonly {
   },
 ];
 
-describe("schemaTypeOfFabricPrimitive()", () => {
-  it("maps an instance of each primitive class to its schema type name", () => {
-    for (const { make, name } of CASES) {
-      expect(schemaTypeOfFabricPrimitive(make())).toBe(name);
-    }
+describe("schema-type", () => {
+  describe("schemaTypeOfFabricPrimitive()", () => {
+    it("maps an instance of each primitive class to its schema type name", () => {
+      for (const { make, name } of CASES) {
+        expect(schemaTypeOfFabricPrimitive(make())).toBe(name);
+      }
+    });
+
+    it("matches the codec-class list exactly", () => {
+      // Set equality by constructor identity, both directions: a codec class
+      // without a table row (the production-throws case) fails here, as does a
+      // stale row for a class no longer registered.
+      const tableCtors = new Set<unknown>(CASES.map(({ ctor }) => ctor));
+      expect(tableCtors.size).toBe(CASES.length);
+      for (const cls of codecClasses()) {
+        expect(tableCtors.has(cls)).toBe(true);
+      }
+      expect(codecClasses().length).toBe(CASES.length);
+    });
+
+    it("matches the api schema-type vocabulary exactly", () => {
+      const tableNames = new Set(CASES.map(({ name }) => name));
+      expect(tableNames.size).toBe(CASES.length);
+      for (const name of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
+        expect(tableNames.has(name)).toBe(true);
+      }
+      expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBe(CASES.length);
+    });
+
+    it("throws on a FabricPrimitive subclass outside the mapping", () => {
+      // Death before confusion: a primitive class that reaches the mapping
+      // without a schema type name must fail loudly, not degrade to "object".
+      class RogueFabricPrimitive extends BaseFabricPrimitive {}
+      expect(() => schemaTypeOfFabricPrimitive(new RogueFabricPrimitive()))
+        .toThrow(/RogueFabricPrimitive/);
+    });
   });
 
-  it("matches the codec-class list exactly", () => {
-    // Set equality by constructor identity, both directions: a codec class
-    // without a table row (the production-throws case) fails here, as does a
-    // stale row for a class no longer registered.
-    const tableCtors = new Set<unknown>(CASES.map(({ ctor }) => ctor));
-    expect(tableCtors.size).toBe(CASES.length);
-    for (const cls of codecClasses()) {
-      expect(tableCtors.has(cls)).toBe(true);
-    }
-    expect(codecClasses().length).toBe(CASES.length);
-  });
-
-  it("matches the api schema-type vocabulary exactly", () => {
-    const tableNames = new Set(CASES.map(({ name }) => name));
-    expect(tableNames.size).toBe(CASES.length);
-    for (const name of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
-      expect(tableNames.has(name)).toBe(true);
-    }
-    expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBe(CASES.length);
-  });
-
-  it("throws on a FabricPrimitive subclass outside the mapping", () => {
-    // Death before confusion: a primitive class that reaches the mapping
-    // without a schema type name must fail loudly, not degrade to "object".
-    class RogueFabricPrimitive extends BaseFabricPrimitive {}
-    expect(() => schemaTypeOfFabricPrimitive(new RogueFabricPrimitive()))
-      .toThrow(/RogueFabricPrimitive/);
-  });
-
-  it("`isFabricPrimitiveSchemaType()` accepts exactly the vocabulary", () => {
-    for (const { name } of CASES) {
-      expect(isFabricPrimitiveSchemaType(name)).toBe(true);
-    }
-    expect(isFabricPrimitiveSchemaType("object")).toBe(false);
-    expect(isFabricPrimitiveSchemaType("FabricNope")).toBe(false);
+  describe("isFabricPrimitiveSchemaType()", () => {
+    it("accepts exactly the vocabulary", () => {
+      for (const { name } of CASES) {
+        expect(isFabricPrimitiveSchemaType(name)).toBe(true);
+      }
+      expect(isFabricPrimitiveSchemaType("object")).toBe(false);
+      expect(isFabricPrimitiveSchemaType("FabricNope")).toBe(false);
+    });
   });
 });

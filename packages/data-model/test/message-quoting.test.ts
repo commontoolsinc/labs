@@ -37,7 +37,7 @@ function instanceNamed(name: string): object {
 const HOSTILE = ["a`b", "a``b", "`lead", "trail`", "`", "``"];
 
 describe("message quoting", () => {
-  describe("`FabricHash.fromString()`", () => {
+  describe("FabricHash.fromString()", () => {
     it("hands back the source it refused, whatever backticks it held", () => {
       for (const source of HOSTILE) {
         let message = "";
@@ -53,7 +53,7 @@ describe("message quoting", () => {
     });
   });
 
-  describe("`hashOf()`", () => {
+  describe("hashOf()", () => {
     it("hands back the class name it refused", () => {
       for (const name of HOSTILE) {
         let message = "";
@@ -69,7 +69,7 @@ describe("message quoting", () => {
     });
   });
 
-  describe("`cloneIfNecessary()`", () => {
+  describe("cloneIfNecessary()", () => {
     it("hands back the class name it refused", () => {
       for (const name of HOSTILE) {
         let message = "";
@@ -83,7 +83,7 @@ describe("message quoting", () => {
     });
   });
 
-  describe("`JsonCodecEngine.decode()`", () => {
+  describe("JsonCodecEngine.decode()", () => {
     it("hands back the excerpt it refused", () => {
       const env = new NullLiveEnvironment(false);
       for (const data of HOSTILE) {
