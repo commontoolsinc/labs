@@ -1743,6 +1743,174 @@ describe("llmDialog", () => {
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
   });
 
+  it("should keep pattern-supplied tools out of its standing guidance", async () => {
+    const requests: any[] = [];
+
+    addMockResponse(
+      (req) => {
+        requests.push(req);
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Noted.",
+        id: "mock-guidance-scope-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const listRecentTool = pattern(
+      () => "recent",
+      { type: "object" },
+      { type: "string" },
+    );
+
+    // The dialog's own guidance describes what the dialog provides. A tool the
+    // pattern supplies is the pattern's to introduce, in the system prompt it
+    // passes — the dialog naming one would be guidance it cannot keep true.
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            listRecent: patternTool(
+              listRecentTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-guidance-scope-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Something vague." });
+
+    await waitForLlmMessages(runtime, result, 2);
+
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests[0].system).not.toContain("listRecent");
+    // The guidance for what the dialog does provide is unaffected.
+    expect(requests[0].system).toContain("# Link and Cell Model");
+  });
+
+  it("should advertise presentResult whenever a resultSchema is given", async () => {
+    let capturedRequest: any;
+
+    addMockResponse(
+      (req) => {
+        capturedRequest = req;
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "Noted.",
+        id: "mock-present-result-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const pingTool = pattern(
+      () => "pong",
+      { type: "object" },
+      { type: "string" },
+    );
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          // presentResult rides resultSchema, not this flag: with the six
+          // built-ins off it must still be advertised.
+          builtinTools: false,
+          resultSchema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+          },
+          tools: {
+            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-present-result-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Give me a structured answer." });
+
+    await waitForLlmMessages(runtime, result, 2);
+
+    expect(capturedRequest).toBeDefined();
+    expect(Object.keys(capturedRequest.tools ?? {}).sort()).toEqual([
+      "ping",
+      "presentResult",
+    ]);
+    expect(capturedRequest.tools.presentResult.inputSchema.properties.answer)
+      .toBeDefined();
+  });
+
   it("should omit built-in tools even when llmDialog params are cast to any", async () => {
     let capturedRequest: any;
 
