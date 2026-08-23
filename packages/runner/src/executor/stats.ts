@@ -319,8 +319,11 @@ export type ServingLoopStats = {
      * never completes. */
     drainInFlightSkips: number;
     /** OW45 arm-B round: entries stuck at the drain's PRE-QUEUE
-     * deferral barrier (a lagging sidecar view or a failing sidecar
-     * sync) for `EVENT_PREQUEUE_STUCK_AFTER` consecutive passes —
+     * deferral barrier (a lagging sidecar view, a failing sidecar
+     * sync, or a queue-time throw — the third under its own
+     * `queue\0`-prefixed streak key, since the view check clears the
+     * bare eventId before the queue attempt) for
+     * `EVENT_PREQUEUE_STUCK_AFTER` consecutive passes —
      * counted once at the crossing, per blocking key, mirroring
      * `structureLoadStuck`. Neither barrier arm reaches the queued
      * class's `#eventDeferrals`, so without this the only detection is

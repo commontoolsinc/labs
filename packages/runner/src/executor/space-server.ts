@@ -144,8 +144,8 @@ const timing = getLogger("executor", { enabled: false });
 export const STRUCTURE_LOAD_STUCK_AFTER = 8;
 
 /** Consecutive pre-queue drain deferrals (the arrival-order barrier's
- * view-lag and sidecar-sync-failure arms) after which the blocking key
- * counts as STUCK (`stats.events.preQueueDeferralStuck`, once per
+ * view-lag, sidecar-sync-failure, and queue-time-throw arms) after
+ * which the blocking key counts as STUCK (`stats.events.preQueueDeferralStuck`, once per
  * crossing) — the pre-queue mirror of `STRUCTURE_LOAD_STUCK_AFTER`.
  * Neither arm reaches the queued class's `#eventDeferrals`, so the §5
  * DROP hardening never applies before queueing; this counter is the
@@ -620,8 +620,11 @@ export class SpaceServer implements TransactionSealDestination {
    * arriving first promotes the owed scan immediately (#drainFeed). */
   #deferredRescanTimer: ReturnType<typeof setTimeout> | undefined;
   /** Consecutive pre-queue barrier deferrals per blocking key (the
-   * view-lagged entry's eventId; the failing sidecar's doc id). Cleared
-   * when the key passes its arm's check; see EVENT_PREQUEUE_STUCK_AFTER. */
+   * view-lagged entry's eventId; the failing sidecar's doc id; a
+   * queue-time thrower's `queue\0`-prefixed eventId — its own namespace,
+   * because the view check clears the bare eventId before the queue
+   * attempt). Cleared when the key passes ITS arm's check; see
+   * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
@@ -903,6 +906,9 @@ export class SpaceServer implements TransactionSealDestination {
     // per-stream eventWatermark — reprocess. The scan is the same
     // discovery the per-wave drain runs; activation only ARMS it.
     this.#eventDeferrals.clear();
+    // The pre-queue streaks reset with it: a stale streak from a prior
+    // tenure must not resume an obsolete count on a later re-block.
+    this.#preQueueDeferralStreaks.clear();
     const pendingEventDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingEventDocs.length > 0) {
       this.#eventScanOwed = true;
@@ -2595,6 +2601,7 @@ export class SpaceServer implements TransactionSealDestination {
             },
           );
           queued += 1;
+          this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the
           // add and the queue must not strand the entry until park).
@@ -2603,9 +2610,15 @@ export class SpaceServer implements TransactionSealDestination {
           // A queue-time throw is a deferral like the arms above, and
           // the same BARRIER applies: letting later arrivals queue in
           // this pass while an earlier arrival re-drains later is the
-          // ordering inversion this drain exists to prevent.
+          // ordering inversion this drain exists to prevent. The streak
+          // key carries its own namespace: the view check CLEARS the
+          // bare eventId key when it passes — before the queue attempt —
+          // so a shared key would oscillate 0→1 forever and the stuck
+          // crossing could never fire for exactly this arm. Each arm's
+          // streak clears when the key passes ITS OWN check: the queue
+          // arm's clears on a successful queue.
           this.#notePreQueueDeferral(
-            entry.eventId,
+            `queue\0${entry.eventId}`,
             () => `event ${entry.eventId} (queue-time throw)`,
           );
           this.#armDeferredRescan();
