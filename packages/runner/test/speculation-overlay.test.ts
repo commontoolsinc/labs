@@ -1123,6 +1123,34 @@ describe("Phase 2 speculation overlay", () => {
       properties: { name: { type: "string" } },
     } as const;
     const stagedHash = internSchemaAsTaggedHashString(stagedSchema);
+    // The covering install, FIRST: a commit either carries its closure or
+    // stands on the space already holding it (CT-2063; the memory boundary
+    // refuses metadata naming a document it cannot see). The store-proven
+    // live shape had the server holding the doc while the client's views
+    // lagged — this writer session is that covering install.
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const tx = writerRuntime.edit();
+        tx.writeOrThrow({
+          space,
+          id: `cid:${stagedHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: stagedSchema });
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
     {
       const seedTx = clientRuntime.edit();
       const docAddress = {
@@ -1279,6 +1307,34 @@ describe("Phase 2 speculation overlay", () => {
       registryOnlySchema,
     );
     registerSchemaDocument(registryOnlyHash, registryOnlySchema);
+    // The covering install, FIRST: a commit either carries its closure or
+    // stands on the space already holding it (CT-2063; the memory boundary
+    // refuses metadata naming a document it cannot see). The store-proven
+    // live shape had the server holding the doc while the client's views
+    // lagged — this writer session is that covering install.
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const tx = writerRuntime.edit();
+        tx.writeOrThrow({
+          space,
+          id: `cid:${registryOnlyHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: registryOnlySchema });
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
     {
       const seedTx = clientRuntime.edit();
       const docAddress = {
@@ -1424,6 +1480,39 @@ describe("Phase 2 speculation overlay", () => {
     } as const;
     const installedHash = internSchemaAsTaggedHashString(installedSchema);
     registerSchemaDocument(installedHash, installedSchema);
+    // A SECOND session installs the schema document in the ENGINE,
+    // FIRST — the doc's first revision row, in place before any commit
+    // references it (CT-2063: a commit either carries its closure or
+    // stands on the space already holding it). NOTE what the contract
+    // retires here: with the install preceding the reference, this
+    // harness's frames attach the installed doc, so the client replica
+    // may hold it and the original seq-0 registry-resolution premise is
+    // no longer constructible through commits — this pin is now an
+    // end-to-end net over the fill (the seq-half discriminator is
+    // CT-2063's conversation).
+    {
+      const writerManager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerManager,
+      });
+      try {
+        const tx = writerRuntime.edit();
+        tx.writeOrThrow({
+          space,
+          id: `cid:${installedHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: installedSchema });
+        expect((await tx.commit()).error).toBeUndefined();
+        await writerRuntime.storageManager.synced();
+      } finally {
+        await writerRuntime.dispose();
+        await writerManager.close();
+      }
+    }
     {
       const seedTx = clientRuntime.edit();
       const docAddress = {
@@ -1448,38 +1537,6 @@ describe("Phase 2 speculation overlay", () => {
       expect((await seedTx.commit()).error).toBeUndefined();
       await clientRuntime.storageManager.synced();
     }
-
-    // A SECOND session installs the schema document in the ENGINE —
-    // the doc's first revision row. This replica never pulls it (no
-    // watch names it), so its confirmed basis for the cid: doc stays 0.
-    {
-      const writerManager = EmulatedStorageManager.connectTo(server, {
-        as: aliceSigner,
-      });
-      const writerRuntime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: writerManager,
-      });
-      try {
-        const tx = writerRuntime.edit();
-        tx.writeOrThrow({
-          space,
-          id: `cid:${installedHash}` as never,
-          type: "application/json",
-          path: [],
-        }, { value: installedSchema });
-        expect((await tx.commit()).error).toBeUndefined();
-        await writerRuntime.storageManager.synced();
-      } finally {
-        await writerRuntime.dispose();
-        await writerManager.close();
-      }
-    }
-    expect(
-      clientManager.open(space).replica.getDocument(
-        `cid:${installedHash}` as never,
-      ),
-    ).toBeUndefined();
 
     // The standing echo, then the fill.
     const replica = clientManager.open(space).replica;
@@ -1605,9 +1662,14 @@ describe("Phase 2 speculation overlay", () => {
     const lateHash = internSchemaAsTaggedHashString(lateSchema);
     const replica = clientManager.open(space).replica;
 
-    // FRAME 1 (a second session): /cfc references the hash while the
-    // engine holds NO cid: doc — the reader's integrate kicks a pull
-    // that completes EMPTY.
+    // FRAME 1 (a second session): /cfc references the hash, and the
+    // cid: doc rides the SAME commit (CT-2063: a commit carries its
+    // closure — the reference-before-install ordering this pin
+    // originally seeded is no longer constructible through commits).
+    // With the install landing alongside, this pin is an end-to-end
+    // net over reference-arrives → document-resolves; the empty-pull
+    // re-arm's remaining constructible arms are covered below, and
+    // its discriminating bench stays the live ON gate (CT-2063).
     {
       const writerManager = EmulatedStorageManager.connectTo(server, {
         as: aliceSigner,
@@ -1631,6 +1693,12 @@ describe("Phase 2 speculation overlay", () => {
           type: "application/json" as const,
           path: [],
         };
+        seedTx.writeOrThrow({
+          space,
+          id: `cid:${lateHash}` as never,
+          type: "application/json",
+          path: [],
+        }, { value: lateSchema });
         const current = seedTx.readOrThrow(docAddress);
         const base = current && typeof current === "object" ? current : {};
         seedTx.writeOrThrow(docAddress, {
@@ -1660,15 +1728,16 @@ describe("Phase 2 speculation overlay", () => {
       "frame 1's metadata to integrate",
     );
     // The kick's pull joins the replica's inbound settle: after this,
-    // frame 1's EMPTY pull has fully completed — the ordering is
-    // deterministic, never a race with frame 2's install.
+    // frame 1's pull has fully completed. (The doc may already be at
+    // hand — frame delivery attaches installed refs in this harness —
+    // so no absence is asserted; the heal below is the net.)
     await (replica as unknown as { inputSynced(): Promise<void> })
       .inputSynced();
-    expect(replica.getDocument(`cid:${lateHash}` as never)).toBeUndefined();
 
-    // FRAME 2 (the stamper catches up): the cid: doc installs AND the
-    // draft doc updates again, so a fresh frame carries the same
-    // reference. The re-armed hook must re-kick and this time deliver.
+    // FRAME 2: the draft doc updates again, so a fresh frame carries
+    // the same reference (the cid: re-write is an idempotent blind
+    // install). Whatever frame 1 left unresolved, this frame's kick
+    // delivers.
     {
       const writerManager = EmulatedStorageManager.connectTo(server, {
         as: aliceSigner,
@@ -1722,14 +1791,14 @@ describe("Phase 2 speculation overlay", () => {
     // (instrumented line hits, not asserts — the loopback masks most
     // behavioral observables here):
     //
-    //  - the DEDUPE-HIT skip: the kick's dedupe `add` is SYNCHRONOUS
-    //    inside the upsert loop, so ONE writer commit stamping TWO
-    //    watched docs' metadata with the SAME fresh (uninstalled,
-    //    unregistered) hash makes the second upsert meet
-    //    `has() === true` deterministically — no in-flight race, no
-    //    "retained entry" premise (frame delivery attaches installed
-    //    refs in this harness, so a delivered hash is resolvable-
-    //    guarded, never dedupe-hit);
+    //  - the PAIR frame: ONE writer commit stamping TWO watched docs'
+    //    metadata with the SAME hash. The dedupe-hit construction this
+    //    originally pinned needed the hash UNINSTALLED — a commit shape
+    //    CT-2063's contract retires (the reference must ride with its
+    //    document or find it already stored), and a delivered hash is
+    //    resolvable-guarded, never dedupe-hit. The dedupe-hit skip's
+    //    line joins the doc-shape guard below as enumerated coverage
+    //    debt pending that conversation;
     //  - the string-shape guard: metadata WITHOUT a schemaHash, on
     //    its own frame.
     const writeDocFrame = async (
@@ -1813,6 +1882,11 @@ describe("Phase 2 speculation overlay", () => {
       draftBLink.scope,
     ) as Record<string, unknown>;
     await writeDocFrame([
+      {
+        id: `cid:${pairHash}`,
+        scope: "space",
+        value: { value: pairSchema },
+      },
       {
         id: draftLink.id,
         scope: draftLink.scope,
