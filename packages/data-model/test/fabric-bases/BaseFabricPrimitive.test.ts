@@ -44,32 +44,36 @@ describe("BaseFabricPrimitive", () => {
     });
   });
 
-  describe("isInstance()", () => {
-    it("is `true` for a `BaseFabricPrimitive`", () => {
-      expect(BaseFabricPrimitive.isInstance(new ProbePrimitive())).toBe(true);
-    });
-
-    it("is `false` for a `FabricValue` that is not a `BaseFabricPrimitive`", () => {
-      expect(BaseFabricPrimitive.isInstance(null)).toBe(false);
-      expect(BaseFabricPrimitive.isInstance(42)).toBe(false);
-      expect(BaseFabricPrimitive.isInstance("x")).toBe(false);
-      expect(BaseFabricPrimitive.isInstance({})).toBe(false);
-      expect(BaseFabricPrimitive.isInstance([])).toBe(false);
-    });
-
-    it("throws for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
-      expect(() => BaseFabricPrimitive.isInstance(new RoguePrimitive()))
-        .toThrow(
-          "Shouldn't happen",
+  describe("instance members", () => {
+    describe("`[EXAMPLE_METHOD]` (placeholder seed)", () => {
+      it("throws when invoked (unimplemented stub)", () => {
+        expect(() => new ProbePrimitive()[EXAMPLE_METHOD]()).toThrow(
+          "Not implemented",
         );
+      });
     });
   });
 
-  describe("`[EXAMPLE_METHOD]` (placeholder seed)", () => {
-    it("throws when invoked (unimplemented stub)", () => {
-      expect(() => new ProbePrimitive()[EXAMPLE_METHOD]()).toThrow(
-        "Not implemented",
-      );
+  describe("static members", () => {
+    describe("isInstance()", () => {
+      it("is `true` for a `BaseFabricPrimitive`", () => {
+        expect(BaseFabricPrimitive.isInstance(new ProbePrimitive())).toBe(true);
+      });
+
+      it("is `false` for a `FabricValue` that is not a `BaseFabricPrimitive`", () => {
+        expect(BaseFabricPrimitive.isInstance(null)).toBe(false);
+        expect(BaseFabricPrimitive.isInstance(42)).toBe(false);
+        expect(BaseFabricPrimitive.isInstance("x")).toBe(false);
+        expect(BaseFabricPrimitive.isInstance({})).toBe(false);
+        expect(BaseFabricPrimitive.isInstance([])).toBe(false);
+      });
+
+      it("throws for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
+        expect(() => BaseFabricPrimitive.isInstance(new RoguePrimitive()))
+          .toThrow(
+            "Shouldn't happen",
+          );
+      });
     });
   });
 });

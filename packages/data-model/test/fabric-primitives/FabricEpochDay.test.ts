@@ -62,7 +62,7 @@ describe("FabricEpochDay", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricEpochDay[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDay;
       const env = NULL_LIVE_ENVIRONMENT;

@@ -141,7 +141,7 @@ describe("FabricRegExp", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricRegExp[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.RegExp;
       const env = NULL_LIVE_ENVIRONMENT;
@@ -342,17 +342,23 @@ describe("FabricRegExp", () => {
   });
 
   describe("tag functions", () => {
-    it("`tagFromNativeValue()` returns the `RegExp` tag for `RegExp` instances", () => {
-      expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
+    describe("tagFromNativeValue()", () => {
+      it("returns the `RegExp` tag for `RegExp` instances", () => {
+        expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
+      });
     });
 
-    it("`tagFromNativeClass()` returns the `RegExp` tag for the `RegExp` constructor", () => {
-      expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
+    describe("tagFromNativeClass()", () => {
+      it("returns the `RegExp` tag for the `RegExp` constructor", () => {
+        expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
+      });
     });
 
-    it("`isValidFabricNativeObject()` returns `true` for `RegExp`", () => {
-      expect(isValidFabricNativeObject(/abc/)).toBe(true);
-      expect(isValidFabricNativeObject(new RegExp("test", "gi"))).toBe(true);
+    describe("isValidFabricNativeObject()", () => {
+      it("returns `true` for `RegExp`", () => {
+        expect(isValidFabricNativeObject(/abc/)).toBe(true);
+        expect(isValidFabricNativeObject(new RegExp("test", "gi"))).toBe(true);
+      });
     });
   });
 

@@ -252,7 +252,7 @@ describe("FabricKeyPair", () => {
   });
 
   describe("static members", () => {
-    describe("`[JSON_CODEC]`", () => {
+    describe("[JSON_CODEC]", () => {
       const codec = FabricKeyPair[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.KeyPair;
       const env = NULL_LIVE_ENVIRONMENT;
@@ -356,7 +356,7 @@ describe("FabricKeyPair", () => {
       });
     });
 
-    describe("`[REALM_CODEC]`", () => {
+    describe("[REALM_CODEC]", () => {
       const codec = FabricKeyPair[REALM_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.KeyPair;
       const env = NULL_LIVE_ENVIRONMENT;
