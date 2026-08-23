@@ -477,3 +477,164 @@ describe("a commit-gated start refused for a stale confirmed read", () => {
     }
   });
 });
+
+// The §3d question a re-attempt raises (serving-loop.md §3d, RULED
+// 2026-08-13): a flag-ON client's navigate-deferred start is stamped as a
+// SPECULATIVE CONSEQUENCE carrying its event's id, so a re-attempt must not
+// mint a SECOND consequence for one navigate or re-consume that eventId.
+//
+// The answer is structural rather than defensive, and these two pins are what
+// establish it. A start stamped `event-handler` DIVERTS into the speculation
+// overlay instead of committing, and the overlay's refusals are aborts — so a
+// stale confirmed read, which only the memory server produces, cannot reach a
+// consequence-stamped start at all. Only a `bookkeeping`-stamped start
+// commits to the store, and re-attempting one mints no consequence.
+//
+// FLAGGED, not settled here: §3d sanctions the stamp on the deferred start
+// but does not state the RE-ISSUE case in words. The implementation takes the
+// reading under which a second speculative consequence is unreachable — the
+// same consequence re-issued, never a new one — and the owner's ruling on
+// that sentence is owed (verification-coverage.md OW45 arm B).
+describe("a re-attempt and the §3d speculative-consequence stamp", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  function key(cell: Cell<unknown>) {
+    return entityKey(cell.getAsNormalizedFullLink(), runtime.scopeKeyIdentity);
+  }
+
+  function gatedTx() {
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    return tx;
+  }
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // EXPLICITLY flag-ON, and with no serving posture: a flag-ON CLIENT,
+    // which is the arm that carries the speculation overlay and the arm the
+    // OW45 arm-B defect was caught on.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { serverExecution: true },
+    });
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("diverts a consequence-stamped start to the overlay, where a stale confirmed read cannot reach it", async () => {
+    const tx = runtime.edit();
+    // Read AFTER the first edit(): the overlay is created lazily, when a
+    // transaction first asks the runtime for its seal destination.
+    const overlay = runtime.speculationOverlay;
+    expect(overlay).toBeDefined();
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "a speculative consequence's deferred start",
+      undefined,
+      tx,
+    );
+    const id = result.getAsNormalizedFullLink().id;
+
+    // A start transaction stamped exactly as the navigate-deferred start
+    // stamps its own under the flag (`startAfterSuccessfulCommit`: the
+    // piece-start action id, `event-handler` kind, the firing event's id).
+    // Routing is decided by that stamp alone, so this is the start's own
+    // disposition.
+    const consequence = runtime.edit();
+    runtime.stampServerRun(consequence, {
+      actionId: `piece-start/${id}`,
+      kind: "event-handler",
+      eventId: "event:one-navigate",
+    });
+    result.withTx(consequence).set({ doubled: 6 });
+    expect((await consequence.commit()).error).toBeUndefined();
+
+    // It DIVERTED: one event-handler seal, the overlay's, for the one
+    // navigate. A diverted transaction never reaches the memory server, and
+    // the overlay refuses only by aborting — so the server-produced stale
+    // confirmed read this fix re-attempts is unreachable for a
+    // consequence-stamped start, and a re-attempt can never mint a second
+    // consequence or re-consume the eventId.
+    expect(overlay!.eventEchoSealCount).toBe(1);
+
+    // The discrimination is the STAMP: the same transaction stamped
+    // `bookkeeping` — what every start without a speculative consequence
+    // carries — commits to the store instead, which is the arm that can be
+    // refused this way.
+    // Its own document: the diverted write above leaves a speculative layer
+    // over `result`, and a later authored read basis naming that layer is
+    // refused on its own grounds (speculation.md §6) — which would be a
+    // different story than the one this pin tells.
+    const otherTx = runtime.edit();
+    const other = runtime.getCell<{ doubled?: number }>(
+      space,
+      "a bookkeeping start's own document",
+      undefined,
+      otherTx,
+    );
+    otherTx.abort("only needed to mint the cell");
+    const bookkeeping = runtime.edit();
+    runtime.stampServerRun(bookkeeping, {
+      actionId: `piece-start/${other.getAsNormalizedFullLink().id}`,
+      kind: "bookkeeping",
+    });
+    other.withTx(bookkeeping).set({ doubled: 12 });
+    expect((await bookkeeping.commit()).error).toBeUndefined();
+    expect(overlay!.eventEchoSealCount).toBe(1);
+
+    tx.abort("unused setup transaction");
+  });
+
+  it("mints no speculative consequence when it re-attempts a bookkeeping start", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTx();
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "a bookkeeping start re-attempted under the flag",
+      undefined,
+      tx,
+    );
+    const overlay = runtime.speculationOverlay;
+    expect(overlay).toBeDefined();
+    const id = result.getAsNormalizedFullLink().id;
+    const injector = refuseDeferredStartCommits(runtime, {
+      name: "ConflictError",
+      message: `stale confirmed read: ${id} at seq 0 conflicted with seq 10`,
+    });
+    const installed = observeInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        installed.nth(2),
+        "the start's re-attempt installing the piece",
+      );
+      await runtime.runner.idleDeferredStartRetries();
+      await runtime.idle();
+
+      // The re-attempt ran and the piece is running — and not one
+      // event-handler seal was minted along the way.
+      expect(injector.refusals()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+      expect(overlay!.eventEchoSealCount).toBe(0);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+});
