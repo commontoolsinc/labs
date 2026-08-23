@@ -16,6 +16,59 @@ For a concise status and lifecycle-aware documentation map, start with
 claim is in [docs/IMPLEMENTATION_PROFILE.md](docs/IMPLEMENTATION_PROFILE.md);
 remaining work is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## The model: handles and patterns
+
+Two ideas carry this package, and nearly everything else in this document is one
+of them wearing different clothes.
+
+**An agent here holds handles, not values.** A handle names something in a
+Fabric space without carrying it. The model composes work out of these names —
+it can pass one to a tool, hand one to a subagent, publish one under a slug, ask
+what shape it has — and at no point does the thing itself have to enter the
+conversation. References render as short opaque tokens, results come back as
+fresh tokens, and a tool field that takes a value has a sibling that takes a
+handle instead.
+
+**Work happens by running patterns over those handles.** When an agent needs
+something computed, it does not fetch the data and compute in its own context;
+it writes a pattern, runs it in the space against references it holds, and
+receives a handle to the result. The computation goes to the data. This is why
+`run_pattern` is the central tool rather than one of many, and why a result is a
+piece a person can open rather than a paragraph in a transcript.
+
+Read the rest of this document through those two. Delegation gives a child a
+fresh context seeded with handles. `describe_handle` answers what a reference is
+shaped like without reading it. `assign_slug` names a piece the caller holds a
+handle to. Sealed positions in a structured result cross as their own addresses.
+The browser's `valueHandle` lets an action spend a value the model never sees.
+None of these is a separate mechanism; each is the same two ideas reaching a new
+surface.
+
+**This is not a confidentiality feature.** It would be a mistake to read the
+handle machinery as special handling for secrets, switched on when data is
+sensitive. It is how everything works here. Confidentiality is one thing that
+falls out of it — an agent cannot leak what it never held — but so do the
+properties that matter when nothing is secret at all: a transcript that stays
+small because it carries names rather than payloads, results that are durable
+objects instead of prose, work that composes because every step produces
+something the next step can refer to. Treating it as a special case for
+sensitive values is the surest way to write a tool that quietly breaks the model
+for everything else.
+
+**What this asks of you when extending the harness.** A new tool that accepts a
+reference should accept a handle. A new tool that produces something should
+produce a handle to it rather than its contents. A new field that takes a value
+should ask whether it also wants a handle sibling. The question to hold onto is
+not "is this data sensitive" but "does this make the agent hold something it
+could have merely named".
+
+The place the model is not yet fully realized is delegation: `delegate_task`
+passes its goal and context as free text, so what a parent tells a child is
+prose rather than bound references, and a parent can put in it anything it
+happens to know. Handles cross that boundary — a child resolves tokens its
+parent minted — but the brief around them does not. Closing that is live work,
+not a settled part of the design.
+
 ## Why This Exists
 
 Common Fabric needs an agent harness that can become CFC-aware without
@@ -581,11 +634,15 @@ report instead of being denied for missing trusted mediation metadata.
 
 ### Session-local address handles
 
+This is the mechanism behind the first half of
+[the model](#the-model-handles-and-patterns): how a reference is rendered so
+that naming something never means carrying it.
+
 Every run keeps a session-local handle table: short opaque tokens that stand in
 for cell addresses in model-visible text, so a transcript never has to carry a
 full LLM-friendly link. This is how the harness renders references — there is no
-flag or environment variable governing it. Artifacts retain the raw bytes for
-operators, and the table itself is run state.
+flag or environment variable governing it, because it is not a mode. Artifacts
+retain the raw bytes for operators, and the table itself is run state.
 
 An address token is `cfh:a:<suffix>`, where the suffix is exactly five
 characters drawn from a 30-character alphabet — the digits `2`–`9` and the
@@ -811,6 +868,10 @@ than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
 do not offer it.
 
 ### Running patterns against a Fabric space
+
+This is the second half of [the model](#the-model-handles-and-patterns): the
+agent sends a computation to the data rather than pulling the data into its own
+context, and gets a handle to the result.
 
 Three flags configure one trusted Fabric session, and all of them go together:
 
@@ -1147,7 +1208,9 @@ direction, so the child can neither point the browser elsewhere nor learn the
 host's topology, and a bare browser launch that would race the host's live
 browser profile has no verb to arrive through.
 
-A field that takes a value has a sibling that takes a handle: `valueHandle` for
+The browser is where [the model](#the-model-handles-and-patterns) meets a
+surface that genuinely needs a value: a form field has to receive text. So a
+field that takes a value has a sibling that takes a handle: `valueHandle` for
 `fill`, `type`, and `select`, and `urlHandle` for `open`. The handle is resolved
 trusted-side at the moment of use, so the model composes the action while
 holding only a reference and the value never enters the conversation. A
