@@ -28,22 +28,19 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  * * `bigint` and `undefined` appear directly, as do `-0`, `NaN` and `±Infinity`
  *   under `number`. Cloning carries each as itself.
  * * `ArrayBuffer` appears, because bytes cross as bytes. This is the whole
- *   point of a second format: JSON has to represent a `FabricBytes` as
- *   base64url text, and a receiver that wants bytes back has to rebuild them.
- *   The two forms are not interchangeable. Bytes travel as a bare `ArrayBuffer`
- *   rather than as a view onto one, that being what `postMessage()` can
- *   *transfer*, so a caller assembling a transfer list finds the transferable
- *   object in the tree rather than having to reach through a view and reason
- *   about its offset. Both byte-carrying classes do this: a `FabricBytes`
- *   encodes to one directly, and a `FabricHash` to one beside its algorithm
- *   tag. A bare `Uint8Array` is therefore not a form this format emits, and
- *   `decodeValue()` refuses one.
+ *   point of a second format: JSON reaches only `string`, so bytes have to be
+ *   written down as base64url text and rebuilt by a receiver that wants bytes
+ *   back. The two forms are not interchangeable. Bytes travel as a bare
+ *   `ArrayBuffer` rather than as a view onto one, that being what
+ *   `postMessage()` can *transfer*, so a caller assembling a transfer list
+ *   finds the transferable object in the tree rather than having to reach
+ *   through a view and reason about its offset. A bare `Uint8Array` is
+ *   therefore not a form this format emits, and `decodeValue()` refuses one.
  * * `CryptoKey` appears, because a key that cannot be exported can still be
  *   carried. Cloning preserves one whole, extractability and algorithm intact,
- *   which is what lets a `FabricKeyPair` holding handles cross at all -- and
- *   only here: no format that writes bytes down can represent it. Like
- *   `ArrayBuffer`, it reaches the transport only inside a terminal codec's
- *   state, so the walk never descends into one.
+ *   where a format that writes bytes down can carry only a key whose material
+ *   can be read. Like `ArrayBuffer`, it reaches the transport only inside a
+ *   terminal codec's state, so the walk never descends into one.
  * * An array is both the tagged form and the outer envelope -- see {@link
  *   RealmTaggedValue} and {@link RealmEncodedValue}. Neither is distinguishable
  *   by shape from a payload's own arrays, and neither is meant to be: what
