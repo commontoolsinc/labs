@@ -21,13 +21,21 @@ remaining work is in [docs/ROADMAP.md](docs/ROADMAP.md).
 Two ideas carry this package, and nearly everything else in this document is one
 of them wearing different clothes.
 
-**An agent here holds handles, not values.** A handle names something in a
-Fabric space without carrying it. The model composes work out of these names —
-it can pass one to a tool, hand one to a subagent, publish one under a slug, ask
-what shape it has — and at no point does the thing itself have to enter the
-conversation. References render as short opaque tokens, results come back as
-fresh tokens, and a tool field that takes a value has a sibling that takes a
-handle instead.
+**An agent here works in handles, and a schema decides what becomes a value.** A
+handle names something in a Fabric space without carrying it; the model composes
+work out of these names, passing one to a tool, handing one to a subagent,
+publishing one under a slug, asking what shape it has. What crosses as a value
+is not whatever the agent asked for — it is what a declared schema admits.
+`run_pattern` returns the fields its `resultSchema` models as inert (a number, a
+boolean, an enum or const string) as themselves, and everything else as a
+reference token addressing that position. So a total comes back as `42` and a
+free-text description comes back as something to point at.
+
+That is the useful shape of it: the declaration is the boundary, and it is a
+narrow one by construction. A field typed as one of three enum values can carry
+no more than those three values, whatever the data behind it turned out to be.
+Widening what crosses means widening a schema on purpose, in the open, rather
+than a value slipping through because nobody said it should not.
 
 **Work happens by running patterns over those handles.** When an agent needs
 something computed, it does not fetch the data and compute in its own context;
@@ -40,20 +48,21 @@ Read the rest of this document through those two. Delegation gives a child a
 fresh context seeded with handles. `describe_handle` answers what a reference is
 shaped like without reading it. `assign_slug` names a piece the caller holds a
 handle to. Sealed positions in a structured result cross as their own addresses.
-The browser's `valueHandle` lets an action spend a value the model never sees.
-None of these is a separate mechanism; each is the same two ideas reaching a new
-surface.
+The browser's `valueHandle` lets an action spend a value the model never held —
+though a page that receives one can hand it back to whatever reads that page
+next, which the browser section covers. None of these is a separate mechanism;
+each is the same two ideas reaching a new surface.
 
 **This is not a confidentiality feature.** It would be a mistake to read the
 handle machinery as special handling for secrets, switched on when data is
 sensitive. It is how everything works here. Confidentiality is one thing that
-falls out of it — an agent cannot leak what it never held — but so do the
-properties that matter when nothing is secret at all: a transcript that stays
-small because it carries names rather than payloads, results that are durable
-objects instead of prose, work that composes because every step produces
-something the next step can refer to. Treating it as a special case for
-sensitive values is the surest way to write a tool that quietly breaks the model
-for everything else.
+partly falls out of it — an agent cannot leak what it never held, though what a
+schema admits it does hold — but so do the properties that matter when nothing
+is secret at all: a transcript that stays small because it carries names rather
+than payloads, results that are durable objects instead of prose, work that
+composes because every step produces something the next step can refer to.
+Treating it as a special case for sensitive values is the surest way to write a
+tool that quietly breaks the model for everything else.
 
 **What this asks of you when extending the harness.** A new tool that accepts a
 reference should accept a handle. A new tool that produces something should
