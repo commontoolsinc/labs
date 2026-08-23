@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  ensureSchemaDocument,
   loadSchemaDocument,
   loadStoredCfcEnvelope,
 } from "../src/cfc/prepare.ts";
@@ -33,6 +34,21 @@ describe("cid schema document verification", () => {
       taggedHashString,
     );
     expect(result).toEqual(schema);
+  });
+
+  it("refuses to ensure a document whose claimed hash mismatches its content", () => {
+    const { schema } = internSchema(
+      { type: "object", properties: { a: { type: "string" } } } as JSONSchema,
+      true,
+    );
+    expect(() =>
+      ensureSchemaDocument(
+        {} as IExtendedStorageTransaction,
+        space,
+        "fid1:not-the-hash-of-that-schema",
+        schema as JSONSchema,
+      )
+    ).toThrow(/hash mismatch/);
   });
 
   it("throws when the stored content does not hash to the address (poisoned)", () => {
@@ -226,6 +242,19 @@ describe("stored CFC envelope gathering", () => {
     if (result.status === "unreadable") {
       expect(result.reason).toContain("hash mismatch");
     }
+  });
+
+  it("propagates a transaction read failure instead of classifying it", () => {
+    // An erroring TRANSACTION is the caller's operational failure, not a
+    // property of the document — it must not read as any envelope state.
+    const failingTx = {
+      readOrThrow: () => {
+        throw new Error("connection torn");
+      },
+    } as unknown as IExtendedStorageTransaction;
+    expect(() => loadStoredCfcEnvelope(failingTx, envelopeTarget)).toThrow(
+      "connection torn",
+    );
   });
 
   it("reports metadata whose version this build postdates as unreadable", () => {

@@ -836,6 +836,27 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
         ],
       }),
     });
+
+    // A cfc-touching sequence that cannot APPLY is not the validator's to
+    // judge: the closure scan skips it, and the commit's own application
+    // refuses it on its own terms.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(10, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-carrier",
+                patches: [{ op: "replace", path: "", value: 42 }],
+              } as never,
+            ],
+          }),
+        }),
+      Error,
+      "entity document",
+    );
   });
 });
 

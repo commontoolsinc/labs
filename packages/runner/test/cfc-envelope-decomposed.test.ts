@@ -4,6 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import {
+  decomposeEnvelopeRoot,
+  decomposeToSameRoot,
+} from "../src/cfc/prepare.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-envelope-decomposed");
@@ -137,35 +142,65 @@ describe("CFC decomposed envelopes", () => {
     }
   });
 
-  it("stores inline when the schema refuses decomposition", async () => {
+  it("falls back to the inline form on every undecomposable spelling", () => {
+    // Boolean and non-object schemas cannot decompose.
+    expect(decomposeEnvelopeRoot(true as unknown as JSONSchema))
+      .toBeUndefined();
+    // The deprecated `definitions` keyword refuses decomposition.
+    expect(decomposeEnvelopeRoot({
+      type: "object",
+      definitions: { Legacy: { type: "string" } },
+    } as JSONSchema)).toBeUndefined();
+    // A root that reduces to a cyclic `$defs` member decomposes to a
+    // FRAGMENT reference, which a bare document hash cannot carry.
+    expect(decomposeEnvelopeRoot({
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+      },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  it("treats undecomposable spellings as unequal roots and fails loudly otherwise", () => {
+    expect(decomposeToSameRoot(true as unknown as JSONSchema, {}))
+      .toBe(false);
+    expect(decomposeToSameRoot(
+      {
+        type: "object",
+        definitions: { Legacy: { type: "string" } },
+      } as JSONSchema,
+      { type: "object" } as JSONSchema,
+    )).toBe(false);
+    // A non-decomposition error is not a refusal: it propagates.
+    const hostile = new Proxy({}, {
+      ownKeys() {
+        throw new Error("hostile schema");
+      },
+    }) as JSONSchema;
+    expect(() => decomposeToSameRoot(hostile, {})).toThrow("hostile schema");
+    expect(() => decomposeEnvelopeRoot(hostile)).toThrow("hostile schema");
+  });
+
+  it("delegates the flag through the transaction wrapper", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
-      // The deprecated `definitions` keyword refuses decomposition, so the
-      // envelope stays in the self-contained inline spelling, flag or not.
       const tx = runtime.edit();
-      const cell = runtime.getCell(space, "undecomposable-target", {
-        type: "object",
-        properties: {
-          secret: { type: "string", ifc: { confidentiality: ["kept"] } },
-        },
-        required: ["secret"],
-        definitions: { Legacy: { type: "string" } },
-      } as JSONSchema, tx);
-      cell.set({ secret: "classified" });
-      tx.prepareCfc();
-      expect((await tx.commit()).ok).toBeDefined();
-      const targetId = cell.getAsNormalizedFullLink().id;
-      const stored = (runtime.storageManager.open(space).replica as unknown as {
-        getDocument(id: string): { cfc?: CfcMetadata } | undefined;
-      }).getDocument(targetId);
-      const envDoc = (runtime.storageManager.open(space).replica as unknown as {
-        getDocument(id: string): { value?: unknown } | undefined;
-      }).getDocument(`cid:${stored!.cfc!.schemaHash}`);
-      expect(JSON.stringify(envDoc?.value)).not.toContain('"cid:');
+      const wrapper = new TransactionWrapper(
+        tx as unknown as ConstructorParameters<typeof TransactionWrapper>[0],
+        {},
+      );
+      wrapper.setCfcDecomposedEnvelopes(false);
+      expect(tx.getCfcState().decomposedEnvelopes).toBe(false);
+      wrapper.setCfcDecomposedEnvelopes(true);
+      expect(tx.getCfcState().decomposedEnvelopes).toBe(true);
+      tx.abort();
     } finally {
-      await runtime.dispose();
-      await storageManager.close();
+      runtime.dispose();
+      storageManager.close();
     }
   });
 

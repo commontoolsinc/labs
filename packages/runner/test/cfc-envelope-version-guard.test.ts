@@ -123,6 +123,42 @@ describe("CFC envelope version guard", () => {
     }
   });
 
+  it("refuses an unknown version nested at the fallback metadata position", () => {
+    // The ["cfc"] read can return a record that is not itself metadata but
+    // carries an envelope-shaped member — the fallback position gets the
+    // same version refusal.
+    const tx = {
+      readOrThrow: () => ({
+        cfc: {
+          version: 3,
+          schemaHash: "future-format",
+          labelMap: { version: 1, entries: [] },
+        },
+      }),
+    } as unknown as Parameters<typeof readStoredCfcMetadata>[0];
+    expect(() => readStoredCfcMetadata(tx, { space, id: "of:nested" }))
+      .toThrow(UnknownCfcMetadataVersionError);
+  });
+
+  it("propagates a transaction failure from the applies-to-path probe", () => {
+    // Only the unknown-version refusal converts to the fail-closed
+    // "applies" answer; an erroring transaction stays the caller's
+    // operational failure.
+    const tx = {
+      readOrThrow: () => {
+        throw new Error("torn read");
+      },
+    } as unknown as Parameters<typeof storedCfcMetadataAppliesToPath>[0];
+    expect(() =>
+      storedCfcMetadataAppliesToPath(tx, {
+        space,
+        scope: "space",
+        id: "of:torn" as `${string}:${string}`,
+        path: [],
+      })
+    ).toThrow("torn read");
+  });
+
   it("keeps a link-write from an uninterpretable source CFC-relevant and refuses it", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

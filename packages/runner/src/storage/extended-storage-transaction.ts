@@ -1741,10 +1741,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       if (this.tx.isSchemaDocPersisted?.(space, hash) === true) continue;
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {
-        logger.warn("schema-doc-materialize", () => [
+        logger.warn(
+          "schema-doc-materialize",
           "A staged reference names a schema document the registry cannot supply:",
           `cid:${hash}`,
-        ]);
+        );
         continue;
       }
       this.#runPrivilegedSystemWrite(() => {

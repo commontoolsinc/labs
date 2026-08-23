@@ -4496,7 +4496,9 @@ const coalesceLabelEntries = (
  * unconditional. A spelling that refuses decomposition simply fails the
  * check and the caller falls through as before.
  */
-const decomposeToSameRoot = (
+// Exported for unit testing of the fallback arms; the persist loop's merge
+// is the one production caller.
+export const decomposeToSameRoot = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean => {
@@ -4511,7 +4513,9 @@ const decomposeToSameRoot = (
   }
 };
 
-const decomposeEnvelopeRoot = (
+// Exported for unit testing of the fallback arms; the metadata build is the
+// one production caller.
+export const decomposeEnvelopeRoot = (
   schema: JSONSchema,
 ): { rootHash: string; rootDocument: JSONSchema } | undefined => {
   if (!isObjectNotArray(schema)) return undefined;
@@ -4534,7 +4538,9 @@ const decomposeEnvelopeRoot = (
   return { rootHash: parsed.taggedHash, rootDocument };
 };
 
-const ensureSchemaDocument = (
+// Exported for unit testing of the S5 mismatch refusal; the persist loop is
+// the one production caller.
+export const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schemaHash: string,
