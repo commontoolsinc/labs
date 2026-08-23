@@ -146,6 +146,12 @@ export class GraphQueryWalk {
   readonly #context: TraversalContext;
   readonly #memo: SchemaMemo;
   readonly stats: GraphQueryWalkStats;
+  /** identity-derived key → the caller-supplied key a visit recorded
+   * under (a query root naming an explicit scope INSTANCE — protocol.md
+   * §2's read row). Miss attribution consults this so a miss recorded
+   * from inside such a root attributes to the key the refresh will
+   * later release, not to a session-resolved key nothing ever walks. */
+  readonly #keyOverrides = new Map<string, string>();
 
   constructor(options: GraphQueryWalkOptions) {
     this.#manager = options.manager;
@@ -167,15 +173,18 @@ export class GraphQueryWalk {
       // closure this read would have reached.
       onMissedDoc === undefined ? undefined : (link, _sourceSpace, source) => {
         if (link.space !== space) return;
+        const referrerKey = source === undefined
+          ? undefined
+          : schemaTrackerKey(space, source.id, source.scope, identity);
         onMissedDoc(
           schemaTrackerKey(space, link.id, link.scope, identity),
           internPathSelector({
             path: ["value", ...link.path],
             schema: link.schema ?? false,
           }),
-          source === undefined
+          referrerKey === undefined
             ? undefined
-            : schemaTrackerKey(space, source.id, source.scope, identity),
+            : this.#keyOverrides.get(referrerKey) ?? referrerKey,
         );
       },
     );
@@ -203,12 +212,16 @@ export class GraphQueryWalk {
       ? { ...selector, schema: false }
       : selector;
 
-    docKey ??= schemaTrackerKey(
+    const derivedKey = schemaTrackerKey(
       this.#space,
       document.address.id,
       document.address.scope,
       this.#identity,
     );
+    docKey ??= derivedKey;
+    if (docKey !== derivedKey) {
+      this.#keyOverrides.set(derivedKey, docKey);
+    }
     const internedSelector = internPathSelector(effectiveSelector);
     if (
       schemaTrackerCoversSelector(

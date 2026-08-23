@@ -1112,7 +1112,13 @@ export const refreshTrackedGraph = (
         stillAbsent,
       );
     }
-    if (state.tracker.has(key)) {
+    // Retirement is decided by THIS evaluation's own outcome — the
+    // throwaway sink received the key iff the doc was still absent. The
+    // tracker is no witness here: the same key can be an absent watch
+    // ROOT whose re-evaluation just re-added its seq-0 marker, and
+    // retiring the miss on that would lose the link-derived selector's
+    // closure when the doc is finally born.
+    if (!stillAbsent.has(key)) {
       retireMiss(state, key);
     }
   }

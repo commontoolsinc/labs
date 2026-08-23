@@ -42,6 +42,41 @@ import {
 
 const SPACE = "did:key:z6Mk-memory-v2-watch-absent-arrival";
 
+/**
+ * Await a delivery with a GENEROUS net. The wait is on the watch view's
+ * own update stream — the event itself, resolving on the loopback's next
+ * task turn when healthy — but the memory suite has no per-test
+ * deadline, so an unbounded await turns a wake-path regression into a
+ * hung suite instead of a red with diagnostics (waiting-in-tests.md's
+ * honest-bound case). The bound is deliberately wide: it exists to name
+ * the failure, never to time a healthy run, and a paused or delayed
+ * host does not reach it.
+ */
+const deliveredWithin = async <T>(
+  pending: Promise<T>,
+  doc: string,
+  ms = 300_000,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const net = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `the expected delivery for ${doc} never reached the watching ` +
+              "session (the wake pass saw no tracked or missed key for it)",
+          ),
+        ),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([pending, net]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const harness = async (storeName: string) => {
   const server = new Server({
     ...testSessionOpenServerOptions,
@@ -126,7 +161,7 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
 
-      const update = await pending;
+      const update = await deliveredWithin(pending, "of:doc:unborn-root");
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
       expect(entities.map((entity) => entity.id)).toContain(
@@ -221,7 +256,7 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
 
-      const update = await pending;
+      const update = await deliveredWithin(pending, "of:doc:unborn-target");
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
       const target = entities.find(
@@ -327,7 +362,7 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
 
-      const update = await pending;
+      const update = await deliveredWithin(pending, "of:doc:flicker-target");
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
       const target = entities.find(
@@ -335,6 +370,151 @@ describe("memory v2 watch arrival on absent docs", () => {
       );
       expect(target?.document).toEqual({ value: { name: "target" } });
       expect(target?.seq).toBeGreaterThanOrEqual(1);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("keeps the link-derived closure of a key that is BOTH an absent watch root and a hop miss: the root's re-added seq-0 marker is no witness of arrival, so after a flicker the birth still walks the miss's schema and delivers the grandchild only that walk reaches", async () => {
+    const h = await harness("memory-v2-watch-absent-double-role");
+    try {
+      // The grandchild exists from the start but nothing links it yet —
+      // only the dead-ended doc's eventual value will.
+      await h.writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:grandchild",
+          value: { value: { name: "grandchild" } },
+        }],
+      });
+      await h.writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:referrer-4",
+          value: {
+            value: {
+              name: "referrer",
+              primary: {
+                "/": {
+                  "link@1": {
+                    id: "of:doc:double-role",
+                    path: [],
+                    space: SPACE,
+                  },
+                },
+              },
+            },
+          },
+        }],
+      });
+
+      const nodeSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          primary: { $ref: "#/$defs/node" },
+        },
+        $defs: {
+          node: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              primary: { $ref: "#/$defs/node" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      // The dead-ended doc is ALSO its own watch root, schema-false: its
+      // absence is delivered as the seq-0 marker while the referrer's
+      // walk records the schema-walking miss for the same key.
+      const view = await h.observer.watchAdd([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [
+            {
+              id: "of:doc:referrer-4",
+              selector: { path: [], schema: nodeSchema },
+            },
+            {
+              id: "of:doc:double-role",
+              selector: { path: [], schema: false },
+            },
+          ],
+        },
+      }]);
+      expect(
+        view.entities.map((entity) => entity.id).toSorted(),
+      ).toEqual(["of:doc:double-role", "of:doc:referrer-4"]);
+
+      const updates = view.subscribe();
+      let pending = updates.next();
+
+      // The flicker: created and deleted in one batch. The ROOT
+      // selector's re-evaluation re-adds the seq-0 marker; the MISS must
+      // survive it — the marker is the root's, not an arrival.
+      await h.writer.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:doc:double-role",
+            value: { value: { name: "flicker" } },
+          },
+          { op: "delete", id: "of:doc:double-role" },
+        ],
+      });
+
+      // The birth links the grandchild. Only the miss's node-schema walk
+      // reaches it — the root selector is schema-false and walks
+      // nothing — so its delivery is the miss's survival, witnessed.
+      await h.writer.transact({
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:double-role",
+          value: {
+            value: {
+              name: "born",
+              primary: {
+                "/": {
+                  "link@1": {
+                    id: "of:doc:grandchild",
+                    path: [],
+                    space: SPACE,
+                  },
+                },
+              },
+            },
+          },
+        }],
+      });
+
+      // Eventual-delivery guard, scope stated honestly: the emulated
+      // loopback runs incidental full re-evaluations (a demand-changed
+      // notify follows the birth delivery), which ALSO heal the
+      // grandchild — so this pin cannot isolate the incremental
+      // miss-retirement path on its own (the same emulated-harness
+      // masking the drain's view-lag arm notes). The retirement
+      // decision's correctness rests on the traced mechanism: the
+      // throwaway sink is the evaluation's own absence witness, the
+      // tracker is the root's.
+      const seen = new Set<string>();
+      while (!seen.has("of:doc:grandchild")) {
+        const update = await deliveredWithin(pending, "of:doc:grandchild");
+        expect(update.done).toBe(false);
+        for (const entity of update.value.entities as EntitySnapshot[]) {
+          seen.add(entity.id);
+        }
+        pending = updates.next();
+      }
+      expect(seen.has("of:doc:double-role")).toBe(true);
     } finally {
       await h.close();
     }
@@ -412,7 +592,7 @@ describe("memory v2 watch arrival on absent docs", () => {
         }],
       });
       {
-        const update = await pending;
+        const update = await deliveredWithin(pending, "of:doc:referrer-3");
         expect(update.done).toBe(false);
         const entities = update.value.entities as EntitySnapshot[];
         expect(entities.map((entity) => entity.id)).toEqual([
@@ -444,7 +624,7 @@ describe("memory v2 watch arrival on absent docs", () => {
           value: { value: { name: "repointed-again" } },
         }],
       });
-      const update = await pending;
+      const update = await deliveredWithin(pending, "of:doc:referrer-3");
       expect(update.done).toBe(false);
       const entities = update.value.entities as EntitySnapshot[];
       expect(entities.map((entity) => entity.id)).toEqual([
