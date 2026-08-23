@@ -5713,12 +5713,32 @@ supply; OW29/OW32/OW34 closed):
     `renderedNoteChips: 6` — one chip's dependency starved while the
     piece is fully healthy). So (a) does not close the class, and the
     single-chain shape may not even share the client-start seat.
-    Instrumented follow-up (worker console forwarded, 6 burners): 3
-    runs, all GREEN, `tx-commit-error` 0 and exhaustion 0 in each —
-    consistent with healthy runs and therefore NOT discriminating; the
-    red was not re-caught under instrumentation, so whether (a)'s retry
-    FIRES, EXHAUSTS, or never sees a refusal in a red run is
-    **UNRESOLVED** and is the measurement the next pass owes.
+    **Instrumented follow-up: 5 runs (worker console forwarded, 6 CPU
+    burners), 4 GREEN and 1 RED — and the red is NOT an arm-B shape,
+    so the question it was meant to settle is STILL UNRESOLVED.**
+    `tx-commit-error` 0 and exhaustion 0 in all five, forwarding
+    VERIFIED live (50 forwarded worker lines carrying `[runner.*]` and
+    `[cell]` tags), so the zero is a real negative rather than a
+    capture failure. The red (load 11.72) reads
+    `isNotebook: true, noteCount: 6, notesLength: 6,
+    mentionableLength: 6, showNewNotePrompt: true` — internally
+    CONSISTENT at six notes, nothing sticky-undefined — and its
+    event diagnostics show `eventInvocationCount: 7` split **6 + 1
+    across two different notebook handler ids**: one of the seven
+    clicks was consequenced by a different handler while the new-note
+    prompt was showing. That is a UI-interaction race, not the
+    starvation: arm B's signature is the store holding all seven
+    appends while client reads stay undefined, and here the seventh
+    note was never created by the creating handler at all.
+    **Bench caveat, recorded so the next pass does not repeat it:** the
+    6-burner regime (load 11.72) sits ABOVE the 3–16 band the arm-B
+    reds were characterized in, and it induced this distinct failure
+    instead of the one under study — while the UNLOADED gate runs
+    (loads 9.49 and 7.03) reproduced both arm-B shapes. Deliberate
+    burner load is therefore the wrong instrument for this defect; the
+    honest bench is ambient load with many runs. Whether (a)'s retry
+    FIRES, EXHAUSTS, or never sees a refusal in a genuine arm-B red
+    remains the measurement owed.
     **A LIVENESS HAZARD IN (a) ITSELF, recorded because it would make
     the retry look like a fix while never firing**: the re-attempt
     awaits the conflict's `readyToRetry`, and for a WIRE-borne server
