@@ -97,6 +97,7 @@ const harness = async (storeName: string) => {
   return {
     writer,
     observer,
+    server,
     async close() {
       await writerClient.close();
       await observerClient.close();
@@ -244,6 +245,16 @@ describe("memory v2 watch arrival on absent docs", () => {
       const updates = view.subscribe();
       const pending = updates.next();
 
+      // Deterministic pending-batch flush (the adversarial round's HIGH-1):
+      // without it the setup commits' dirty batch can still be pending when
+      // the next commit lands, the batches coalesce, and the wake pass sees
+      // the REFERRER'S tracked id beside the target's — passing the touched
+      // gate even on pre-fix code and self-healing this pin. idle() is the
+      // server's explicit synchronization point: it drains the publication
+      // locks and runs the refresh loop to completion, so the next commit
+      // forms its own batch and the wake below rides the miss alone.
+      await h.server.idle();
+
       // The target is born; nothing ever touches the referrer again — the
       // quiet-space tail after a create-then-read flow.
       await h.writer.transact({
@@ -330,6 +341,16 @@ describe("memory v2 watch arrival on absent docs", () => {
       const updates = view.subscribe();
       const pending = updates.next();
 
+      // Deterministic pending-batch flush (the adversarial round's HIGH-1):
+      // without it the setup commits' dirty batch can still be pending when
+      // the next commit lands, the batches coalesce, and the wake pass sees
+      // the REFERRER'S tracked id beside the target's — passing the touched
+      // gate even on pre-fix code and self-healing this pin. idle() is the
+      // server's explicit synchronization point: it drains the publication
+      // locks and runs the refresh loop to completion, so the next commit
+      // forms its own batch and the wake below rides the miss alone.
+      await h.server.idle();
+
       // The target flickers: created and deleted in ONE batch, so the
       // dirty pass re-fires the query while the doc is STILL absent at
       // evaluation. The miss must stay a miss — routed back into the
@@ -347,6 +368,10 @@ describe("memory v2 watch arrival on absent docs", () => {
           { op: "delete", id: "of:doc:flicker-target" },
         ],
       });
+      // Flush the flicker's own batch too: coalesced with the creation
+      // below, the refresh would evaluate a PRESENT doc and the
+      // still-absent re-evaluation this pin exists for would never run.
+      await h.server.idle();
 
       // The REAL creation. The first update the subscription yields is
       // this one — resolving `pending`, which was registered BEFORE the
@@ -454,6 +479,12 @@ describe("memory v2 watch arrival on absent docs", () => {
       const updates = view.subscribe();
       let pending = updates.next();
 
+      // Deterministic pending-batch flush (the adversarial round's HIGH-1):
+      // separate the setup commits' dirty batch from the flicker's and the
+      // flicker's from the birth's, or the coalesced batch carries the
+      // REFERRER'S tracked id and the wake self-heals on pre-fix code.
+      await h.server.idle();
+
       // The flicker: created and deleted in one batch. The ROOT
       // selector's re-evaluation re-adds the seq-0 marker; the MISS must
       // survive it — the marker is the root's, not an arrival.
@@ -469,6 +500,7 @@ describe("memory v2 watch arrival on absent docs", () => {
           { op: "delete", id: "of:doc:double-role" },
         ],
       });
+      await h.server.idle();
 
       // The birth links the grandchild. Only the miss's node-schema walk
       // reaches it — the root selector is schema-false and walks

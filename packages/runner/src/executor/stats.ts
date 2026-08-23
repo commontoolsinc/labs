@@ -318,6 +318,18 @@ export type ServingLoopStats = {
      * that grows without `processed` settling names a drain copy that
      * never completes. */
     drainInFlightSkips: number;
+    /** OW45 arm-B round: entries stuck at the drain's PRE-QUEUE
+     * deferral barrier (a lagging sidecar view or a failing sidecar
+     * sync) for `EVENT_PREQUEUE_STUCK_AFTER` consecutive passes —
+     * counted once at the crossing, per blocking key, mirroring
+     * `structureLoadStuck`. Neither barrier arm reaches the queued
+     * class's `#eventDeferrals`, so without this the only detection is
+     * grepping warn logs. The streak also WARNs at each doubling. A
+     * §2-conforming hardening escape (a persistent streak becomes a
+     * DROP/ERROR notice IN ARRIVAL POSITION, lifting the barrier
+     * order-preserved — the §5 pattern the queued class has) is the
+     * register's owed follow-up on the OW45 row. */
+    preQueueDeferralStuck: number;
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
      * completed-run sentence: LT1 same-space in-process copies (`served
      * !== undefined && served.streamEntry === undefined`) the flush
@@ -422,6 +434,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     coalescedPerWaveMax: 0,
     skippedIdempotent: 0,
     drainInFlightSkips: 0,
+    preQueueDeferralStuck: 0,
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,

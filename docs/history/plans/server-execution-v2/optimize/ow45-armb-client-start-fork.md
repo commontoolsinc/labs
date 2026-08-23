@@ -151,8 +151,16 @@ client-side start is the defect. Candidates:
   root, register demand through the served closure) and starts
   nothing. Dissolves the race instead of retrying it — the
   serving-side start is the only starter, matching the ON execution
-  model. Larger change; touches the piece-open path for every ON
-  navigate; the OFF arm keeps today's behavior.
+  model. The ground already exists in canon: runtime-mapping.md's N62
+  row deleted the old observation-adoption feature precisely BECAUSE
+  under the flag "clients no longer run committed derivations at all
+  (reload is read-and-render, §3b)" — and serving-loop.md §3b states
+  that posture ("committed, so client reload is read-and-render").
+  (b) is that stated posture applied at the navigate/piece-open seam,
+  where the client-side deferred start is a remnant still running
+  against it — not a new mechanism.
+  Larger change; touches the piece-open path for every ON navigate;
+  the OFF arm keeps today's behavior.
 - **(c) Heal-on-read.** Keep the start's failure terminal but make
   the READ side re-demand: a piece whose client context is absent
   re-attempts the start when a read reaches it (the S-C shape the

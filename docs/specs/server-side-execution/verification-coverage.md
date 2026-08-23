@@ -5536,14 +5536,31 @@ supply; OW29/OW32/OW34 closed):
     leaving a stale wake and an unreachable delivery on birth
     (mutation-killed pin: "retires a miss when its referrer is
     repointed away") — and a dirtied-but-still-absent miss stays a
-    miss (never the tracker, whose entries reach the wire; pinned by
-    the coalesced create+delete flicker test). Disclosed
-    ripple: misses join `trackedIds` and therefore the (d′) demand
-    rows, so a dangling same-space `of:` link can park a structure
-    load until its target exists — bounded, OW46's
-    `structureLoadStuck` counter surfaces it, and the never-a-piece
-    id classes (computed:/cid:/watermark) stay excluded by the
-    serving loop's existing root filter. (iii) **run b04 — the flag-ON client's
+    miss, never the tracker whose entries reach the wire (the sink
+    routing's KILLING pin is the UNIT-isolation test in
+    `v2-query.test.ts`, driving `refreshTrackedGraph` against a bare
+    engine; the integration flicker test binds the no-frame contract
+    end to end). Disclosed
+    ripple (corrected by the adversarial round — the first wording
+    claimed a structure-load park, mechanically wrong: structure
+    loads iterate ROOT keys only and misses emit as NON-ROOT demand
+    rows, so the root filter never sees them and no park or OW46
+    count occurs): misses join `trackedIds` and therefore the (d′)
+    demand rows as non-root entries, whose actual effects are
+    `enterDemandedEntity` — the missing doc's WRITERS become demand
+    roots, mildly beneficial (the docs that would create it get
+    served) — plus a `rearmNotCurrentForDemander` per
+    (key, demander) and demand-union growth; all bounded by the live
+    misses. OWED FOLLOW-UP (recorded by the adversarial round, not
+    built here): the drain's PRE-QUEUE deferral barrier (view-lag,
+    sidecar-sync failure, queue-time throw) never reaches the queued
+    class's `#eventDeferrals`, so events.md §5's DROP hardening does
+    not apply before queueing — detection is the
+    `preQueueDeferralStuck` counter and its doubling warn (added
+    with the round). The §2-CONFORMING escape: a persistent
+    pre-queue streak hardens into a DROP/ERROR NOTICE IN ARRIVAL
+    POSITION — a consequence, so arrival order is preserved and the
+    barrier lifts — the same §5 pattern the queued class has. (iii) **run b04 — the flag-ON client's
     navigate-deferred piece start dies terminally on the
     first-hydration race (ISOLATED LIVE, FORKED — the remaining
     charge).** The h04 whole-piece shape reproduced with the worker
