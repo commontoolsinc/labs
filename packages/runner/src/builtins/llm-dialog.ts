@@ -1028,6 +1028,13 @@ const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
 /**
+ * A tool the system patterns conventionally supply. The dialog does not
+ * provide it and does not reserve it; it names it only to decide whether the
+ * standing guidance that mentions it is true of this dialog.
+ */
+const LIST_RECENT_TOOL_NAME = "listRecent";
+
+/**
  * The names the dialog itself answers to when built-in tools are enabled.
  */
 const BUILTIN_TOOL_NAMES: readonly string[] = [
@@ -1570,7 +1577,9 @@ function materializeDialogRequestSnapshot(
   const linkModelDocs = builtinTools
     ? "\n\n# Link and Cell Model\n\nThe system organizes all data and computation into cells. Use links to navigate between related data and compose tool operations."
     : "";
-  const listRecentHint = builtinTools
+  // `listRecent` is a tool patterns supply, not one the dialog provides, so
+  // the guidance is only true for a dialog that was given it.
+  const listRecentHint = LIST_RECENT_TOOL_NAME in toolCatalog.llmTools
     ? "\n\nIf the user's request is unclear or you need context about what they're referring to, call listRecent() to see recently viewed pieces."
     : "";
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs.docs +
@@ -3775,7 +3784,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 **Use links to navigate between related data and compose operations.**`
     : "";
 
-  const listRecentHint = builtinTools
+  // `listRecent` is a tool patterns supply, not one the dialog provides, so
+  // the guidance is only true for a dialog that was given it.
+  const listRecentHint = LIST_RECENT_TOOL_NAME in toolCatalog.llmTools
     ? "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
       "call listRecent() to see recently viewed pieces."
     : "";
