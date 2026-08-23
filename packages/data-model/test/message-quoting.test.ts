@@ -36,7 +36,7 @@ function instanceNamed(name: string): object {
 // leading backtick merges into the opening delimiter.
 const HOSTILE = ["a`b", "a``b", "`lead", "trail`", "`", "``"];
 
-describe("message quoting", () => {
+describe("message-quoting", () => {
   describe("FabricHash.fromString()", () => {
     it("hands back the source it refused, whatever backticks it held", () => {
       for (const source of HOSTILE) {
