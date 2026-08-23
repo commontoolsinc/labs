@@ -5686,6 +5686,65 @@ supply; OW29/OW32/OW34 closed):
     removed by the flip anyway. So OFF-arm behavior does change —
     exactly when a start commit is refused for a stale confirmed read,
     which today yields a piece with no client context.
+    **THE ON GATE FAILED (2026-08-23) — (a) DOES NOT LIFT THE SKIP,
+    which therefore STAYS.** Protocol as the lift bar requires: ON-built
+    binary (`shellServerExecutionDefine === "true"` and `servingLoop`
+    present, probed per run), fresh store per run, load recorded; the
+    fix VERIFIED present in the artifact (its exhaustion-log string is
+    baked in), so these are not a stale build. Result **5 PASS / 2 FAIL
+    in 7 runs** (the run aborted after the 10/10 bar was already
+    missed, to spend the remaining budget on root cause):
+
+    | run | verdict | load | secs |
+    | --- | --- | --- | --- |
+    | 1 | FAIL | 9.49 | 314 |
+    | 2 | FAIL | 7.03 | 320 |
+    | 3 | PASS | 5.71 | 18 |
+    | 4 | PASS | 7.52 | 17 |
+    | 5 | PASS | 8.56 | 13 |
+    | 6 | PASS | 7.54 | 30 |
+    | 7 | PASS | 8.26 | 28 |
+
+    BOTH arm-B shapes reproduced WITH the retry shipped: run 2 is the
+    WHOLE-PIECE shape this fix targets (`isNotebook: false`,
+    `noteCount: -1`, `notesLength: 0`, `storedUiNoteChips: 98`, 0
+    rendered — the b04 signature), and run 1 is the SINGLE-CHAIN shape
+    (`noteCount: 7`, `notesLength: 7`, `mentionableLength: 7`, but
+    `renderedNoteChips: 6` — one chip's dependency starved while the
+    piece is fully healthy). So (a) does not close the class, and the
+    single-chain shape may not even share the client-start seat.
+    Instrumented follow-up (worker console forwarded, 6 burners): 3
+    runs, all GREEN, `tx-commit-error` 0 and exhaustion 0 in each —
+    consistent with healthy runs and therefore NOT discriminating; the
+    red was not re-caught under instrumentation, so whether (a)'s retry
+    FIRES, EXHAUSTS, or never sees a refusal in a red run is
+    **UNRESOLVED** and is the measurement the next pass owes.
+    **A LIVENESS HAZARD IN (a) ITSELF, recorded because it would make
+    the retry look like a fix while never firing**: the re-attempt
+    awaits the conflict's `readyToRetry`, and for a WIRE-borne server
+    `ConflictError` that function is `waitForCaughtUpLocalSeq`
+    (attached at `memory/v2/client.ts`'s transact catch, gated on the
+    `retryAfterSeq` the server sets for every conflict), which resolves
+    only when a LATER sync arrives carrying a `caughtUpLocalSeq`. First
+    hydration is exactly the case where none need arrive — the flow
+    ends with a write followed by pure reads and the space goes quiet,
+    which is why the starvation is sticky at all. The shipped pins
+    cannot see this: they inject refusals with no gate attached. A
+    red-first probe for it exists and is described in the scoping memo
+    below rather than shipped, because the arm it would fix is not the
+    ruled one.
+    **A THIRD ARM IS NOW ON THE TABLE** (adversarial review,
+    2026-08-23): close this refusal by NARROWING the deferred start's
+    commit conflict set — the way two sibling rows in this register
+    already closed this exact refusal class (the `cid:` exclusion and
+    the CFC blind-write exclusion, both at `buildReads`) — instead of
+    retrying it. The b04 conflict names a `computed:`-kinded entity,
+    whose scheme means "re-derivable by the runtime that minted it" and
+    exists precisely to say what conflict policy may apply. Scope,
+    risks, and the measurements it needs first:
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-basis-narrowing-scope.md`.
+    It would SUPERSEDE (a) rather than refine it, so it needs the
+    owner's ruling of its own.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6721,8 +6780,11 @@ supply; OW29/OW32/OW34 closed):
     `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`
     (disposition (b), with the instrumented catch that motivates it).
     WHY POST-FLIP: it touches the piece-open path for every ON
-    navigate, and the flip's own bar is the ON skip list EMPTY — which
-    the shipped (a) reaches without moving that path. **The five
+    navigate. (This row first said the flip's empty-skip-list bar was
+    reached by (a) without moving that path. The live gate DISPROVED
+    that — see the arm-B gate evidence in OW45 — so which arm reaches
+    the bar is an OPEN question, not a settled one, and (b)'s
+    scheduling is the only claim this row still makes.) **The five
     pieces it still needs, none of them settled by this row:**
     (i) how the ADOPTED context is constructed client-side — what a
     client holds for a piece it did not start, and which of today's
