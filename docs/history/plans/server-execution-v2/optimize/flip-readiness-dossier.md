@@ -33,7 +33,7 @@ Against that wording, at this head:
 - **Server settle** (the owner's ruled comparator, measured explicitly
   via `waitForSettled`/`servingLoop.settle`): all-inputs coverage p50
   **22–37 ms** across all seven ON runs (chat 25/23, lunch 26/22/26,
-  note 22/37) — sub-second by 25–40×, and unchanged-to-slightly-wider
+  note 22/37) — sub-second by 27–45×, and unchanged-to-slightly-wider
   vs W4's 15–28 ms band on a busier box (§4 loads).
 - **The cross-user constant**: chat send→other-browser median ON
   376/568 ms vs adjacent OFF 258/303/305 ms — **1.2–1.9× OFF** (W4:
@@ -44,7 +44,9 @@ Against that wording, at this head:
   now reads **AT PARITY on chat** (ON p50 105.8/137.0 ms vs OFF
   108.0–111.3 ms; W4 had ON 1.5–2.4× OFF) — the client (e) term's cost
   collapsed (ON commitConflicts/commitReverts now 0 vs OFF's up to
-  217/264; ON actionRuns 1.0–1.4× OFF vs W4's 2.8–2.9×). The one
+  217/264; ON Alice actionRuns 1.34–1.40× OFF Alice's — W4 read
+  2.8–2.9× on the same Alice scoping — and ON Bob runs BELOW OFF
+  Bob's). The one
   echo still above OFF is the lunch guest-veto (132–296 vs 36–52 ms;
   W4 saw the same residual at up to 181 ms).
 - **Note createToView below OFF at p50, ending at OFF's plateau**: ON
@@ -236,8 +238,9 @@ Per-post raw in `flip-dossier-raw/chat-series.txt`. **The ON/OFF ratio
 is 1.2–1.9× (W4: 1.9–2.4×)**; ON medians straddle W4's (376 below
 both W4 reps; 568 above, with one 1 910 ms outlier post at its tail
 and q3 620). Both arms read higher-OFF than W4 on this box (§4
-loads). The mild per-post climb remains in both arms (ON first-five
-263–391 → last-five 441–853; OFF c1a 146–329 → 258–738).
+loads). The mild per-post climb remains in both arms (ON c1
+first-five 263–391 → last-five 650–853; c2 229–356 → 441–1 910, its
+tail carrying the one 1 910 ms outlier; OFF c1a 146–329 → 258–738).
 
 **Server settle (`servingLoop.settle`; the ruled comparator):**
 
@@ -267,7 +270,8 @@ at p50; W4 read 1.5–2.4×). The attribution W4 recorded — the client
 counters: ON `commitConflicts`/`commitReverts`/`scheduleRunErrors`
 **0 / 0 / 0** on every browser in both reps (OFF: up to 217 / 264 /
 264), ON `actionRuns` 1 305–1 340 (Alice) and 920–934 (Bob) vs OFF's
-920–1 348 — the 2.8–2.9× W4 excess is gone. `eventLostRaces` 0;
+957–1 348 (Alice 957–973, Bob 1 301–1 348) — the 2.8–2.9× W4 excess
+is gone. `eventLostRaces` 0;
 `overlayLateEchoDrops` 0 (W4: 1/run); `overlayCascadeEchoFlickers`
 **0** on every browser; `overlayArrivalSweeps` 75/37 (c1), 83/49 (c2).
 
@@ -283,9 +287,10 @@ counters: ON `commitConflicts`/`commitReverts`/`scheduleRunErrors`
 | post-lockdown message | 50 / 39 / 3 | 182 / 196 | 5 / 97 |
 | room propagation (first → all) | 10 / 3 / 3 | 21 / 291 | 12 / 537 |
 
-Flagged precisely (§4 note 7): three ON micro-steps W4 measured at
-3–5 ms now read 130–200 ms (message, lockdown, post-lockdown). The
-arrival MEDIANS (above) improved, so this is a step-level shape
+Flagged precisely (§4 note 7): two ON micro-steps W4 measured at
+3–5 ms now read 130–200 ms (message and lockdown propagation;
+post-lockdown, which W4 already read at 5/97 ms, now reads 182/196).
+The arrival MEDIANS (above) improved, so this is a step-level shape
 change, not a journey regression; the candidate mechanism — the
 arrival-witness (B) predicate landed the day before head
 (`03d1a22da`) makes retirement wait for a strictly-above-floor or
@@ -314,8 +319,15 @@ growth-to-landing p50 286 / 310 / 232 (W4 258–520). `settleAdvances`
 (1 purged, 1 drain-skip)** — the (α) machinery visible, W4's shape.
 Consequence multiplicity **{1:16} in all three ON stores** (verified
 per store from `consequence_of`; zero MULTI rows). Flickers: host
-**0 / 1 / 0**, guest 0 / 0 / 0 — the W4 floor reading, ms-class.
+**0 / 0 / 0**, guest **0 / 1 / 0** — l2's one flicker sits in Bob's
+(the GUEST's) counter block, a role W4 never saw flicker (W4's were
+host-side 1/1/0); ms-class, and the F4 instrument-bias note applies
+as ever (nonzero = real, zero not proof).
 `lease.lost` 0/0/0.
+
+The OFF column's l2b is the TRAILING OFF rep (W4's own ledger
+shape): it ran 23 minutes after l3, load-gate-separated — adjacent to
+nothing; l1a/l1b bracket l1 as the adjacent pair.
 
 **Sender echo per event (ms; ON l1/l2/l3 vs OFF l1a/l1b/l2b):**
 
@@ -392,7 +404,7 @@ and advance-subtracted):
 
 **The bound holds on the advance-subtracted reading in every run**
 (W4's c1 read a hair over at 2.16; every run here is under). Total ON
-store commits stay 2.5–4.6× BELOW OFF.
+store commits stay 2.4–4.9× BELOW OFF (n1 2.43× … l1 4.90×).
 
 **OFF byte-identity witness:** every OFF run's stats carry NO
 `servingLoop` key (pre and post, asserted per run); every OFF store is
@@ -444,8 +456,22 @@ the revert window, sink-to-sink.
 
 | arm | trials | reverts | windows (ms) | click→first-echo (ms) | hydration |
 |---|---|---|---|---|---|
-| ON (`toolshed-on`, posture verified) | 8 | **7** | 9, 10, 10, 10, 11, 11, 11 | 7–10 | 0 ms ×8 |
-| OFF control (`toolshed-off`) | 2 | 0 (obs `[1,2]`, clean) | — | 6–8 | 0 ms ×2 |
+| ON (`toolshed-on`, posture verified) | 8 | **7** | 9, 10, 10, 10, 11, 11, 11 | 7–10 (the 7 revert trials; trial 8: 29) | 0 ms ×8 |
+| OFF control (re-run, committed: [`atfloor-instrument-off-control.log`](flip-dossier-raw/atfloor-instrument-off-control.log)) | 2 | 0 (obs `[1,2]`, clean) | — | 7–8 | 0 ms ×2 |
+
+The OFF row is a RE-RUN with captured evidence (the fix round's F2):
+the session's original OFF control reported the same clean 2/2 but its
+output was never retained, and its store directory holds four trial
+spaces across two server boots (it was shared with the earlier
+broken-resume debugging iterations) — so it is superseded, not cited.
+The committed re-run: one server boot, one fresh store, OFF posture
+probed pre and post (define `null`, no `servingLoop` key), the
+HARDENED instrument revision (its source committed beside the log as
+`atfloor-instrument-hardened.ts.txt`; hardening = awaited clicks +
+try/finally, measurement semantics unchanged), binary rebuilt from a
+tree whose `packages/` + `tasks/` diff against `0c0261df3` is EMPTY
+(sha256 `7b0094b9…`, gitSha bake confirmed via `/api/meta`) — full
+provenance in the log's header.
 
 Seven of eight ON trials observed `[1, 2, 1, 2]`: the echo lands in
 7–10 ms, retires ~9–11 ms later back to 1, and the served consequence
@@ -489,8 +515,11 @@ with the ruling.
 1. **Loads.** W4 quoted no latency above 1-min load 5. This box's
    ambient (a resident ~100%-CPU daemon pair) sat at 4.2–5.8 all
    session; in-test 1-min maxima ran 4.5–8.5 (worst: n1a's 8.48; the
-   note runs 5.2–8.5, chat 4.5–6.9, lunch 4.6–5.6). The gate held
-   run STARTS below 5 (it absorbed spikes to 11.9 between groups);
+   note runs 5.2–8.5, chat 4.5–6.9, lunch 4.6–5.6). The gate ran
+   before every triplet and rep-group, never mid-group (the §2
+   recipe's discipline), absorbing spikes to 11.9 between groups;
+   within a group, runs start back-to-back at whatever load the prior
+   run left, so 7 of 16 runs started above 5 (worst: n1 at 7.05);
    both arms of every adjacent pair ran in the same band, so the
    ON-vs-OFF comparisons stand; the W4-absolute comparisons carry
    this load handicap — which makes the improvements conservative,
@@ -525,10 +554,11 @@ with the ruling.
    validation, never series data; the ledger records what actually
    ran, so the entry stands with this annotation (also carried in
    the ledger's header).
-7. **Three chat ON micro-steps read 130–200 ms where W4 read 3–5 ms**
-   (message/lockdown/post-lockdown propagation) while the arrival
-   medians improved — flagged in §2a with the (B)-predicate
-   hypothesis, not isolated here.
+7. **Two chat ON micro-steps read 130–200 ms where W4 read 3–5 ms**
+   (message and lockdown propagation; W4's post-lockdown already read
+   5/97 ms and now reads 182/196) while the arrival medians improved —
+   flagged in §2a with the (B)-predicate hypothesis, not isolated
+   here.
 8. **The at-floor instrument** (§3) is this dossier's addition (the
    register's named instrument, run in external-observation form);
    its 8-trial ON run + 2-trial OFF control ran outside the ledger's
@@ -540,7 +570,7 @@ with the ruling.
 | item | row / cite | state | blocking? |
 |---|---|---|---|
 | OW45 arm B — default-app first-hydration starvation | OW45 (5289); the ONE skip entry | OPEN; sibling seat in flight; store-verified zero data loss | **YES — the skip-list-EMPTY gate hangs on it** |
-| OW58 — consequence-notice resolved-error guard wedge | OW58 (6354) | OPEN; probe-confirmed, pre-existing since Phase 3; code fix owed its own (α)-critical pass | no (owner: next seal pass or first live sighting) |
+| OW58 — consequence-notice resolved-error guard wedge | OW58 (6354) | OPEN; probe-confirmed, pre-existing since Phase 3; code fix owed its own (α)-critical pass | no (row trigger: the next (α)-critical seal pass or first live sighting) |
 | OW57 — the α3 gate-race test construction | OW57 (6320), CT-2060 | OPEN; #6184 hardened, reduced-not-eliminated (14/15 + 1 identical red) | no (test-harness class) |
 | Served-terminal RowLabelCommitError seal | inside OW54 (6199) | VERIFIED sibling, deliberately out of scope: wave-rejected arm requeues + re-drains (two paths, one fate); the direct-commit arm alone terminal-classifies | no |
 | Byte-binding / compiled-cache integrity | OW56 finding 1 (~6266) | OPEN; owner ruled FOLLOW-UP ("we're not in prod yet"); recommended small fix = bind the bytes | no (owner-ruled follow-up) |
@@ -562,7 +592,9 @@ with the ruling.
   per-ON-run `settle-series` / `settle-advances` / `demand-block`
   JSON (7 runs), `run-ledger.txt`, `chat-series.txt`,
   `lunch-steps.txt`, `note-series.txt`, the at-floor instrument's ON
-  log + source snapshot.
+  log + as-ran source snapshot, the OFF control's committed re-run log
+  + the hardened source snapshot that produced it, and the working
+  multiplicity checker (`multiplicity.py.txt`).
 - Big artifacts (worktree, untracked, not committed): per-run dirs
   with `test.log`, `toolshed.log`, `meta.json`, `stats-pre/post.json`,
   `load-samples.txt`, and every run's sqlite store, under

@@ -1,0 +1,17 @@
+# The WORKING consequence-multiplicity checker (produced the {1:16} claim;
+# the first-draft copy that crashed on the stores' fvj1: JSON prefix was
+# replaced by this in the same session - the committed claim was computed
+# with THIS logic, run as a heredoc; committed here for reproducibility).
+# Usage: python3 multiplicity.py <runs-root> <run> [<run>...]
+import re, collections, glob, json, sqlite3, sys
+root = sys.argv[1]
+for run in sys.argv[2:]:
+    counts = collections.Counter()
+    for f in glob.glob(f"{root}/{run}/srv/cache/memory/**/*.sqlite", recursive=True):
+        con = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+        for (cj,) in con.execute('SELECT consequence_of FROM "commit" WHERE consequence_of IS NOT NULL'):
+            for eid in json.loads(re.sub(r'^fvj1:', '', cj)):
+                counts[eid] += 1
+        con.close()
+    hist = collections.Counter(counts.values())
+    print(run, "multiplicity histogram:", dict(sorted(hist.items())), "distinct events:", len(counts))
