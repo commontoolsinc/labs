@@ -1,0 +1,96 @@
+[l1a] [lunch-poll vote] step timings (total 5017ms):
+[l1a]        566ms  navigate + login both
+[l1a]       1899ms  both active space roots ready
+[l1a]       1374ms  both runtimes idle
+[l1a]         15ms  host name filled
+[l1a]         55ms  host joined (name in roster)
+[l1a]         39ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l1a]         38ms  option A propagates to both
+[l1a]        773ms  both cast green concurrently
+[l1a]         11ms  both browsers see 2 love it (merge)
+[l1a]          1ms  both voters' swatches visible on both browsers
+[l1a]        246ms  option B vote lands (3 votes); option A unchanged
+[l1a] [sender-echo] ctx=lunch host arm=OFF n=2 p50=228.4ms p95=228.4ms min=71.8ms max=228.4ms abandoned=0
+[l1a] [sender-echo] per-event ms: 71.8 228.4
+[l1a] [sender-echo] ctx=lunch guest arm=OFF n=2 p50=92.5ms p95=92.5ms min=47.0ms max=92.5ms abandoned=0
+[l1a] [sender-echo] per-event ms: 92.5 47.0
+[l1] [lunch-poll vote] step timings (total 4060ms):
+[l1]       1850ms  navigate + login both
+[l1]       1090ms  both active space roots ready
+[l1]        218ms  both runtimes idle
+[l1]         20ms  host name filled
+[l1]          9ms  host joined (name in roster)
+[l1]        253ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l1]         33ms  option A propagates to both
+[l1]        130ms  both cast green concurrently
+[l1]        309ms  both browsers see 2 love it (merge)
+[l1]          1ms  both voters' swatches visible on both browsers
+[l1]        147ms  option B vote lands (3 votes); option A unchanged
+[l1] [sender-echo] ctx=lunch host arm=ON n=2 p50=115.2ms p95=115.2ms min=80.6ms max=115.2ms abandoned=0
+[l1] [sender-echo] per-event ms: 80.6 115.2
+[l1] [sender-echo] ctx=lunch guest arm=ON n=2 p50=131.9ms p95=131.9ms min=80.3ms max=131.9ms abandoned=0
+[l1] [sender-echo] per-event ms: 80.3 131.9
+[l1b] [lunch-poll vote] step timings (total 3651ms):
+[l1b]        485ms  navigate + login both
+[l1b]        933ms  both active space roots ready
+[l1b]       1418ms  both runtimes idle
+[l1b]         15ms  host name filled
+[l1b]         31ms  host joined (name in roster)
+[l1b]         20ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l1b]          9ms  option A propagates to both
+[l1b]        612ms  both cast green concurrently
+[l1b]         10ms  both browsers see 2 love it (merge)
+[l1b]          1ms  both voters' swatches visible on both browsers
+[l1b]        117ms  option B vote lands (3 votes); option A unchanged
+[l1b] [sender-echo] ctx=lunch host arm=OFF n=2 p50=89.1ms p95=89.1ms min=60.3ms max=89.1ms abandoned=0
+[l1b] [sender-echo] per-event ms: 60.3 89.1
+[l1b] [sender-echo] ctx=lunch guest arm=OFF n=2 p50=52.4ms p95=52.4ms min=39.7ms max=52.4ms abandoned=0
+[l1b] [sender-echo] per-event ms: 39.7 52.4
+[l2] [lunch-poll vote] step timings (total 4367ms):
+[l2]       2095ms  navigate + login both
+[l2]       1034ms  both active space roots ready
+[l2]        131ms  both runtimes idle
+[l2]         20ms  host name filled
+[l2]         12ms  host joined (name in roster)
+[l2]        254ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l2]         14ms  option A propagates to both
+[l2]        133ms  both cast green concurrently
+[l2]        436ms  both browsers see 2 love it (merge)
+[l2]          1ms  both voters' swatches visible on both browsers
+[l2]        237ms  option B vote lands (3 votes); option A unchanged
+[l2] [sender-echo] ctx=lunch host arm=ON n=2 p50=114.3ms p95=114.3ms min=76.5ms max=114.3ms abandoned=0
+[l2] [sender-echo] per-event ms: 76.5 114.3
+[l2] [sender-echo] ctx=lunch guest arm=ON n=2 p50=251.8ms p95=251.8ms min=70.1ms max=251.8ms abandoned=0
+[l2] [sender-echo] per-event ms: 70.1 251.8
+[l3] [lunch-poll vote] step timings (total 5022ms):
+[l3]       1998ms  navigate + login both
+[l3]       1179ms  both active space roots ready
+[l3]        214ms  both runtimes idle
+[l3]         18ms  host name filled
+[l3]         13ms  host joined (name in roster)
+[l3]        255ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l3]        534ms  option A propagates to both
+[l3]        245ms  both cast green concurrently
+[l3]        445ms  both browsers see 2 love it (merge)
+[l3]          1ms  both voters' swatches visible on both browsers
+[l3]        120ms  option B vote lands (3 votes); option A unchanged
+[l3] [sender-echo] ctx=lunch host arm=ON n=2 p50=120.9ms p95=120.9ms min=77.9ms max=120.9ms abandoned=0
+[l3] [sender-echo] per-event ms: 77.9 120.9
+[l3] [sender-echo] ctx=lunch guest arm=ON n=2 p50=296.3ms p95=296.3ms min=82.5ms max=296.3ms abandoned=0
+[l3] [sender-echo] per-event ms: 82.5 296.3
+[l2b] [lunch-poll vote] step timings (total 3843ms):
+[l2b]        458ms  navigate + login both
+[l2b]       1141ms  both active space roots ready
+[l2b]       1275ms  both runtimes idle
+[l2b]         15ms  host name filled
+[l2b]        159ms  host joined (name in roster)
+[l2b]          9ms  both join lands (confirmed roster: exactly {Alice, Bob} on both)
+[l2b]         43ms  option A propagates to both
+[l2b]        572ms  both cast green concurrently
+[l2b]          9ms  both browsers see 2 love it (merge)
+[l2b]          1ms  both voters' swatches visible on both browsers
+[l2b]        161ms  option B vote lands (3 votes); option A unchanged
+[l2b] [sender-echo] ctx=lunch host arm=OFF n=2 p50=89.0ms p95=89.0ms min=54.2ms max=89.0ms abandoned=0
+[l2b] [sender-echo] per-event ms: 54.2 89.0
+[l2b] [sender-echo] ctx=lunch guest arm=OFF n=2 p50=39.6ms p95=39.6ms min=35.8ms max=39.6ms abandoned=0
+[l2b] [sender-echo] per-event ms: 39.6 35.8

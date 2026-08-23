@@ -1,0 +1,20 @@
+[c1a] [chat-series] arm=OFF n=20 median=258ms q1=192ms q3=376ms min=146ms max=738ms delay=2000ms load1/5/15=5.44/5.62/5.47
+[c1a] [chat-series] per-post ms: 329 195 146 176 185 190 202 181 269 196 192 239 301 260 376 648 567 395 258 738
+[c1a] [sender-echo] ctx=chat-series sender arm=OFF n=20 p50=108.0ms p95=261.5ms min=66.8ms max=261.5ms abandoned=0
+[c1a] [sender-echo] per-event ms: 164.1 66.8 70.8 76.0 73.2 73.2 72.0 84.8 108.3 82.1 83.5 86.8 115.0 108.0 134.6 252.5 219.7 187.6 119.8 261.5
+[c1] [chat-series] arm=ON n=20 median=376ms q1=316ms q3=650ms min=263ms max=853ms delay=2000ms load1/5/15=5.80/5.74/5.53
+[c1] [chat-series] per-post ms: 391 264 281 263 273 316 332 307 333 347 360 376 584 581 582 710 709 853 735 650
+[c1] [sender-echo] ctx=chat-series sender arm=ON n=20 p50=105.8ms p95=271.5ms min=64.5ms max=271.5ms abandoned=0
+[c1] [sender-echo] per-event ms: 133.0 67.9 74.8 64.5 70.2 76.5 80.3 88.4 89.2 89.6 105.8 101.5 183.8 151.0 160.3 228.4 203.8 271.5 265.4 214.4
+[c1b] [chat-series] arm=OFF n=20 median=303ms q1=195ms q3=333ms min=176ms max=483ms delay=2000ms load1/5/15=5.83/5.84/5.59
+[c1b] [chat-series] per-post ms: 483 193 176 193 217 195 187 191 329 333 264 303 399 328 435 309 315 264 404 274
+[c1b] [sender-echo] ctx=chat-series sender arm=OFF n=20 p50=111.3ms p95=232.1ms min=74.3ms max=232.1ms abandoned=0
+[c1b] [sender-echo] per-event ms: 232.1 75.5 74.3 91.7 81.6 74.6 84.9 91.8 138.4 119.2 100.3 121.9 177.5 122.6 176.6 132.4 125.0 102.9 111.3 100.6
+[c2] [chat-series] arm=ON n=20 median=568ms q1=337ms q3=620ms min=229ms max=1910ms delay=2000ms load1/5/15=4.16/5.53/5.84
+[c2] [chat-series] per-post ms: 356 229 262 285 305 389 337 305 432 704 620 700 573 573 578 770 610 1910 568 441
+[c2] [sender-echo] ctx=chat-series sender arm=ON n=20 p50=137.0ms p95=219.2ms min=52.5ms max=219.2ms abandoned=0
+[c2] [sender-echo] per-event ms: 114.7 52.5 74.6 70.5 64.5 85.3 78.5 84.4 111.3 191.0 219.2 197.0 158.0 153.9 156.7 190.9 167.2 140.7 137.0 112.2
+[c2b] [chat-series] arm=OFF n=20 median=305ms q1=234ms q3=347ms min=173ms max=494ms delay=2000ms load1/5/15=4.40/5.34/5.74
+[c2b] [chat-series] per-post ms: 226 234 204 234 173 189 236 310 347 311 266 374 283 305 339 256 494 346 406 394
+[c2b] [sender-echo] ctx=chat-series sender arm=OFF n=20 p50=110.5ms p95=165.3ms min=76.6ms max=165.3ms abandoned=0
+[c2b] [sender-echo] per-event ms: 119.2 98.0 91.0 101.1 76.6 82.4 96.8 120.5 111.6 103.1 109.1 152.5 110.5 146.2 106.6 108.8 165.3 149.1 155.8 130.7
