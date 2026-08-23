@@ -180,7 +180,7 @@ describe("FabricEpochNsec", () => {
 
   // Exercises the free `shallowFabricFromNativeValue()` rather than a member
   // of the class, so it lives directly under the class `describe()`.
-  describe("shallowFabricFromNativeValue() integration", () => {
+  describe("`shallowFabricFromNativeValue()` integration", () => {
     it("passes through unchanged even with `freeze=false`", () => {
       const nsec = new FabricEpochNsec(123n);
       // freeze=false should still return the same instance (not a copy).

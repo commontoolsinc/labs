@@ -89,7 +89,7 @@ describe("schemaTypeOfFabricPrimitive()", () => {
     }
   });
 
-  it("the case table exactly matches the codec-class list", () => {
+  it("matches the codec-class list exactly", () => {
     // Set equality by constructor identity, both directions: a codec class
     // without a table row (the production-throws case) fails here, as does a
     // stale row for a class no longer registered.
@@ -101,7 +101,7 @@ describe("schemaTypeOfFabricPrimitive()", () => {
     expect(codecClasses().length).toBe(CASES.length);
   });
 
-  it("the case table exactly matches the api schema-type vocabulary", () => {
+  it("matches the api schema-type vocabulary exactly", () => {
     const tableNames = new Set(CASES.map(({ name }) => name));
     expect(tableNames.size).toBe(CASES.length);
     for (const name of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
@@ -118,7 +118,7 @@ describe("schemaTypeOfFabricPrimitive()", () => {
       .toThrow(/RogueFabricPrimitive/);
   });
 
-  it("isFabricPrimitiveSchemaType() accepts exactly the vocabulary", () => {
+  it("`isFabricPrimitiveSchemaType()` accepts exactly the vocabulary", () => {
     for (const { name } of CASES) {
       expect(isFabricPrimitiveSchemaType(name)).toBe(true);
     }
