@@ -114,6 +114,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import {
   isConflictRejection,
+  isStaleConfirmedReadConflict,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
 
@@ -182,6 +183,16 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
  * reached only by a pattern churning through results it will not revisit.
  */
 const RESULT_SHORTCUT_LIMIT = 4096;
+
+/**
+ * How many times a commit-gated start re-attempts a transaction the server
+ * refused for a stale confirmed read. The rationale for the size is in
+ * `Runner.reattemptDeferredStartOnStaleRead`, which owns the whole policy:
+ * one re-attempt lands after the birth writes this start lost its basis to,
+ * and the second is headroom for a serving loop that commits a birth across
+ * more than one wave.
+ */
+const DEFERRED_START_CONFLICT_RETRIES = 2;
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -1245,6 +1256,14 @@ export class Runner {
   // so tests can synchronize deterministically under the frozen-clock
   // preload, where wall-clock polling cannot observe this work.
   private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
+  // In-flight re-attempts of a commit-gated start whose transaction lost its
+  // basis to the serving side's own first-hydration writes (see
+  // `reattemptDeferredStartOnStaleRead`). NEVER awaited by dispose(), for the
+  // same reason as the watcher loads above: the readiness gate they await is
+  // a session catch-up, which a closing runtime may never reach, and a
+  // cancelled ownership already tombstones the work. Tracked solely so tests
+  // can synchronize deterministically.
+  private pendingDeferredStartRetries = new Set<Promise<unknown>>();
   // Both maps record that this runner prepared or stopped a result, so a later
   // start of the same result can reuse the cells it already assembled instead
   // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
@@ -3385,16 +3404,17 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
-        // The callback that would install this start is the one running now,
-        // so a failed transaction leaves nothing to reach the pending entry
-        // later. Settle it here, which also drops it from the index of starts
-        // pending under this result's key.
-        ownership.cancel();
-        return;
-      }
-      if (ownership.isCancelled()) return;
+    // ONE attempt at the gated start, written to be re-runnable: a refusal
+    // that names a stale confirmed read earns a bounded re-attempt against
+    // fresh confirmed state (`reattemptDeferredStartOnStaleRead`). Each
+    // attempt mints its own transaction and its own ownership token, and
+    // installs at most once — the previous attempt's install is torn down by
+    // its own `cancel()` before the next one is scheduled.
+    const attempt = (
+      attemptOwnership: DeferredCancelOwnership,
+      attemptsLeft: number,
+    ): void => {
+      if (attemptOwnership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — by definition outside any
@@ -3437,7 +3457,7 @@ export class Runner {
       );
       try {
         if (
-          ownership.markInstalled(
+          attemptOwnership.markInstalled(
             this.startWithTx(
               startTx,
               committedResultCell,
@@ -3452,7 +3472,18 @@ export class Runner {
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            ownership.cancel();
+            attemptOwnership.cancel();
+            if (
+              this.reattemptDeferredStartOnStaleRead(
+                error,
+                resultCell,
+                attemptsLeft,
+                attempt,
+                "start",
+              )
+            ) {
+              return;
+            }
             logger.error(
               "tx-commit-error",
               "Error committing deferred start transaction",
@@ -3460,11 +3491,11 @@ export class Runner {
             );
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
+          if (pullOnceAfterStart && !attemptOwnership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
-          ownership.cancel();
+          attemptOwnership.cancel();
           logger.error(
             "tx-commit-error",
             "Deferred start transaction commit rejected",
@@ -3473,12 +3504,128 @@ export class Runner {
         });
       } catch (error) {
         startTx.abort(error);
-        ownership.cancel();
+        attemptOwnership.cancel();
         logger.error("runner-start", "Deferred start failed", error);
         throw error;
       }
+    };
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        // The callback that would install this start is the one running now,
+        // so a failed transaction leaves nothing to reach the pending entry
+        // later. Settle it here, which also drops it from the index of starts
+        // pending under this result's key.
+        ownership.cancel();
+        return;
+      }
+      attempt(ownership, DEFERRED_START_CONFLICT_RETRIES);
     });
     return ownership.cancel;
+  }
+
+  /**
+   * The bounded re-attempt a commit-gated start earns when its transaction is
+   * refused for a STALE CONFIRMED READ, and the seat of the OW45 arm-B fix
+   * (server-execution v2; verification-coverage.md). Returns whether a
+   * re-attempt was scheduled — `false` leaves the caller's terminal arm to
+   * run exactly as it does for every other refusal.
+   *
+   * WHY a start earns one at all. Under the server-execution flag a piece is
+   * materialized SERVER-side, and the client's navigate-deferred start reads
+   * that piece's computed documents to base its own transaction on. At first
+   * hydration those two acts race by construction: the serving loop's derived
+   * commits for the just-born piece are in flight exactly while the client
+   * reads their targets as absent, so the client's basis is stale the moment
+   * the interleaving is tight — the EXPECTED shape, not an exceptional one.
+   * Terminating there is what made the race fatal: `startWithTx` has already
+   * installed the client-side piece inside the transaction when the refusal
+   * lands, the error arm's cancel tears that install down, and nothing
+   * re-attempts it — so the piece has no client context for the rest of the
+   * session and every read that depends on it resolves to nothing, while the
+   * store holds every append. A transient refusal must not be terminal.
+   *
+   * WHAT stays terminal. Only a stale confirmed read is re-attempted
+   * ({@link isStaleConfirmedReadConflict}). Every other refusal keeps today's
+   * behavior exactly: a CFC or speculative-basis refusal, an authorization
+   * denial, a precondition failure, a row-label violation — none of them
+   * describe a basis that a fresh read repairs, so re-running recomputes the
+   * same refusal and each doomed attempt costs a round trip.
+   *
+   * THE BOUND is small on purpose. The conflict this closes is a birth race
+   * against writes that are already in flight: the readiness gate advances
+   * the session past the conflicting commit and pulls the named document, so
+   * one re-attempt lands after the materialization it lost to, and the second
+   * is headroom for a serving loop that commits its birth in more than one
+   * wave. A basis still stale after that is not this race — it is sustained
+   * contention on the piece's own documents, where continuing to re-run would
+   * install and tear down a piece context per attempt — so the budget ends
+   * and the caller's terminal arm reports it, with the exhaustion named
+   * distinctly here so it is never confused with a first-attempt refusal.
+   *
+   * RE-ENTRANCY. Each re-attempt takes a FRESH ownership token, registered
+   * under the result's key before the readiness gate is awaited, so a stop,
+   * a release, a runtime teardown, or a navigation away during that window
+   * tombstones the pending retry through the same path that already
+   * tombstones a pending first attempt (`cancelPendingDeferredStarts`) — the
+   * retry then observes the tombstone and installs nothing. The previous
+   * attempt's `cancel()` has already run when this is called, so the two
+   * tokens never hold an install at the same time.
+   *
+   * THE §3d STAMP rides the re-attempt unchanged, because a re-attempt is the
+   * SAME consequence re-issued rather than a second one: `attempt` re-derives
+   * the stamp from the same `speculativeConsequence` and the same originating
+   * run context. Note that a stamp carrying an eventId cannot reach here at
+   * all — on a flag-ON client an event-handler-kind start transaction diverts
+   * into the speculation overlay instead of committing (serving-loop.md §3d's
+   * boundary sentence; `SpeculationOverlayDestination.seal`), and the
+   * overlay's refusals are aborts, never a stale confirmed read. Only a
+   * `bookkeeping`-stamped start commits to the store and can be refused this
+   * way. That the spec does not state the re-issue case EXPLICITLY is flagged
+   * for the owner rather than settled here; the implementation takes the one
+   * reading under which a second speculative consequence is unreachable.
+   */
+  private reattemptDeferredStartOnStaleRead<T>(
+    error: { name?: string; message?: string },
+    resultCell: Cell<T>,
+    attemptsLeft: number,
+    attempt: (
+      ownership: DeferredCancelOwnership,
+      attemptsLeft: number,
+    ) => void,
+    label: string,
+  ): boolean {
+    if (!isStaleConfirmedReadConflict(error)) return false;
+    if (attemptsLeft <= 0) {
+      logger.error(
+        "deferred-start-conflict-exhausted",
+        `Deferred ${label} transaction still lost its basis after ` +
+          `${DEFERRED_START_CONFLICT_RETRIES} re-attempts against fresh ` +
+          "confirmed state; the piece has no client-side context",
+        error,
+      );
+      return false;
+    }
+    // Registered BEFORE the readiness gate is awaited: this token is what a
+    // concurrent stop or teardown cancels to keep the re-attempt from firing
+    // into a piece that is no longer wanted.
+    const retryOwnership = this.createDeferredStartOwnership(resultCell);
+    const retry = this.runtime.awaitCommitRetryReadiness(error).then(() => {
+      if (retryOwnership.isCancelled()) return;
+      attempt(retryOwnership, attemptsLeft - 1);
+    }).catch((cause) => {
+      // `attempt` rethrows a synchronous start failure to its caller; on a
+      // re-attempt that caller is this promise, so surface it here rather
+      // than as an unhandled rejection. Loud in every arm, per
+      // serving-loop.md §3d's piece-start surfacing rule.
+      logger.error(
+        "runner-start",
+        `Deferred ${label} re-attempt failed`,
+        cause,
+      );
+    });
+    this.pendingDeferredStartRetries.add(retry);
+    retry.finally(() => this.pendingDeferredStartRetries.delete(retry));
+    return true;
   }
 
   private runPatternAfterSuccessfulCommit<T = any>(
@@ -3492,15 +3639,15 @@ export class Runner {
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
-    tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
-        // Settled here for the same reason as the start above: this callback
-        // is the only thing that reaches the pending entry, so a failed
-        // transaction would otherwise strand it under the result's key.
-        ownership.cancel();
-        return;
-      }
-      if (ownership.isCancelled()) return;
+    // Re-runnable for the same reason as the deferred start above, and
+    // through the same bounded re-attempt: this arm mints the OTHER
+    // navigate-deferred start (a handler result pattern whose own result is
+    // still undefined), so it meets the identical first-hydration race.
+    const attempt = (
+      attemptOwnership: DeferredCancelOwnership,
+      attemptsLeft: number,
+    ): void => {
+      if (attemptOwnership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — outside any scheduler run;
@@ -3534,7 +3681,7 @@ export class Runner {
       );
       try {
         if (
-          ownership.markInstalled(
+          attemptOwnership.markInstalled(
             this.runWithStartOwnership(
               startTx,
               pattern,
@@ -3554,7 +3701,18 @@ export class Runner {
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            ownership.cancel();
+            attemptOwnership.cancel();
+            if (
+              this.reattemptDeferredStartOnStaleRead(
+                error,
+                resultCell,
+                attemptsLeft,
+                attempt,
+                "cross-space pattern",
+              )
+            ) {
+              return;
+            }
             logger.error(
               "tx-commit-error",
               "Error committing deferred cross-space pattern transaction",
@@ -3562,11 +3720,11 @@ export class Runner {
             );
             return;
           }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
+          if (pullOnceAfterStart && !attemptOwnership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
-          ownership.cancel();
+          attemptOwnership.cancel();
           logger.error(
             "tx-commit-error",
             "Deferred cross-space pattern transaction rejected",
@@ -3575,7 +3733,7 @@ export class Runner {
         });
       } catch (error) {
         startTx.abort(error);
-        ownership.cancel();
+        attemptOwnership.cancel();
         logger.error(
           "runner-start",
           "Deferred cross-space pattern failed",
@@ -3583,6 +3741,16 @@ export class Runner {
         );
         throw error;
       }
+    };
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        // Settled here for the same reason as the start above: this callback
+        // is the only thing that reaches the pending entry, so a failed
+        // transaction would otherwise strand it under the result's key.
+        ownership.cancel();
+        return;
+      }
+      attempt(ownership, DEFERRED_START_CONFLICT_RETRIES);
     });
     return ownership.cancel;
   }
@@ -4610,6 +4778,20 @@ export class Runner {
         ...this.pendingWatcherPatternLoads,
         ...this.pendingPointerCommits,
       ]);
+    }
+  }
+
+  /**
+   * TESTS ONLY: settle in-flight re-attempts of commit-gated starts (see
+   * `reattemptDeferredStartOnStaleRead`). Loops because an attempt that
+   * conflicts again schedules the next one from inside this chain. Never
+   * called from dispose(): the readiness gate a re-attempt awaits is a
+   * session catch-up, which a closing runtime need never reach — a cancelled
+   * ownership is what stops the work there.
+   */
+  async idleDeferredStartRetries(): Promise<void> {
+    while (this.pendingDeferredStartRetries.size > 0) {
+      await Promise.allSettled([...this.pendingDeferredStartRetries]);
     }
   }
 
