@@ -36,6 +36,11 @@ export function isPermanentRejection(
  *   before storage ever saw the commit (`rejectCommitBeforeStorage` in
  *   extended-storage-transaction.ts). Carries the prepare refusal reasons
  *   as a structured `reasons` array. Never crosses the wire either.
+ *   A VERDICT only: when prepare could not evaluate — an input it needed
+ *   was unavailable in that transaction — the refusal keeps the retryable
+ *   `StorageTransactionAborted` name instead, because the identical re-run
+ *   decides once the input loads. The two are told apart by a token the
+ *   reason carries from its source (`cfc/unevaluable-reason.ts`).
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",

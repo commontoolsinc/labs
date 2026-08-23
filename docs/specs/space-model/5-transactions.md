@@ -185,7 +185,7 @@ outcome:
 | `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
 | `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
 | `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
-| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`), which a fresh attempt prepares against the current inputs. A re-run is a genuinely new attempt, and costs no round-trip. |
+| `StorageTransactionAborted` | The attempt was discarded before storage, and a re-run is a genuinely new attempt that costs no round-trip. Three producers: the callback called `tx.abort()`; a prepared CFC transaction's inputs drifted before the verdict (`cfc-prepared-digest-mismatch`); or CFC prepare could not EVALUATE, because an input it needed was unavailable in that transaction (`cfc-unevaluable-prepare-input` — a link's source metadata, a schema's write-policy input, an unreadable stored envelope). The last clears once the referenced document loads. |
 | `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
 
 Everything else is **terminal on the first attempt**: a `ProtocolError` (the
@@ -193,7 +193,10 @@ server refused the commit's shape), an unmarked `AuthorizationError` (the server
 evaluated the request and denied it), a `PreconditionFailedError` (permanent by
 definition — the client must not retry), a `RowLabelCommitError` (a commit-time
 rule refused the data), a `CfcCommitRefusalError` (the client-side CFC boundary
-refused the transaction's own reads and writes before storage saw them), a
+evaluated the transaction's own reads and writes and refused them before
+storage saw them — a VERDICT; a prepare that could not evaluate is the
+retryable case above, and the two are told apart by a token the reason carries
+from its source, `cfc/unevaluable-reason.ts`), a
 `StoreError`, or the generic `TransactionError`. Those
 are deterministic with respect to the committed data: a re-run recomputes the
 identical refused write, and each doomed attempt costs a server round-trip plus

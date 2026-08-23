@@ -87,6 +87,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { unevaluableReason } from "./unevaluable-reason.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
@@ -4353,9 +4354,13 @@ const derivePersistedLinkLabel = (
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
-      reason: `missing link source metadata for ${input.target.id} at /${
-        input.target.path.join("/")
-      }`,
+      // Not a verdict: the source document's metadata is not available in
+      // this transaction. It loads, and the identical re-run decides.
+      reason: unevaluableReason(
+        `missing link source metadata for ${input.target.id} at /${
+          input.target.path.join("/")
+        }`,
+      ),
     };
   }
   if (
@@ -4596,9 +4601,13 @@ export const loadStoredCfcEnvelope = (
   } catch (error) {
     return {
       status: "unreadable",
-      reason: error instanceof Error
-        ? error.message
-        : `schema load failed for ${target.id}`,
+      // A LOAD failure, not a verdict on the stored envelope: the schema
+      // document could not be read in this transaction.
+      reason: unevaluableReason(
+        error instanceof Error
+          ? error.message
+          : `schema load failed for ${target.id}`,
+      ),
     };
   }
 };
@@ -5293,7 +5302,11 @@ export const prepareBoundaryCommit = (
       continue;
     }
     reasons.push(
-      `missing schema write-policy input for ${target.id}`,
+      // Not a verdict: the schema's write-policy input is not available in
+      // this transaction yet.
+      unevaluableReason(
+        `missing schema write-policy input for ${target.id}`,
+      ),
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);

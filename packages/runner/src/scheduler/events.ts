@@ -1581,36 +1581,36 @@ export async function dispatchQueuedEvent(state: {
         telemetryFailure = { error };
       }
 
+      // A served event's DETERMINISTIC CFC pre-storage refusal seals an
+      // error consequence (events.md §5: the error IS the consequence — the
+      // same honesty as the throw arm in `finalize` above). Without one the
+      // durable entry stays unconsequenced and every wave re-drains it into
+      // the identical refusal. Scoped to exactly the class
+      // `reportDroppedCfcRejectedWrite` reports: every other non-retried
+      // outcome (transport, authorization, a handler abort, opt-out) leaves
+      // the entry pending for the wave cadence to re-drain. Called before the
+      // commit callback on both paths that carry a refusal, so the drain's
+      // in-flight guard sees the staged notice ("marked") rather than
+      // releasing the still-"queued" copy.
+      const sealCfcRefusalConsequence = (): void => {
+        if (served === undefined || !isCfcRejectedCommitError(error)) return;
+        try {
+          served.onFailure?.({ kind: "error", message: error.message });
+        } catch (callbackError) {
+          logger.error(
+            "schedule-error",
+            "Error in served event failure callback:",
+            callbackError,
+          );
+        }
+      };
+
       switch (disposition.kind) {
         case "success":
           runFinalCommitCallback();
           break;
         case "give-up":
-          // A served event's DETERMINISTIC CFC pre-storage refusal seals an
-          // error consequence (events.md §5: the error IS the consequence —
-          // the same honesty as the throw arm in `finalize` above). Without
-          // one the durable entry stays unconsequenced and every wave
-          // re-drains it into the identical refusal. Scoped to exactly the
-          // class `reportDroppedCfcRejectedWrite` reports below: every other
-          // give-up (transport, authorization, a handler abort, opt-out)
-          // leaves the entry pending for the wave cadence to re-drain.
-          // Ordered before the commit callback so the drain's in-flight
-          // guard sees the staged notice ("marked") rather than releasing
-          // the still-"queued" copy.
-          if (served !== undefined && isCfcRejectedCommitError(error)) {
-            try {
-              served.onFailure?.({
-                kind: "error",
-                message: error.message,
-              });
-            } catch (callbackError) {
-              logger.error(
-                "schedule-error",
-                "Error in served event failure callback:",
-                callbackError,
-              );
-            }
-          }
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
@@ -1643,11 +1643,15 @@ export async function dispatchQueuedEvent(state: {
           // handleError — the rejection is observable via the commit telemetry
           // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
           // a scheduler error here is reserved for non-deterministic failures.
+          // A CFC boundary refusal is classified terminal rather than
+          // give-up, so both of the give-up path's CFC obligations have to
+          // hold here too: seal the served entry's error consequence, and
+          // report the dropped write. Neither is optional — see
+          // `sealCfcRefusalConsequence` for what an unconsequenced entry
+          // costs, and `reportDroppedCfcRejectedWrite` for why the
+          // `logger.warn` below is not enough on its own.
+          sealCfcRefusalConsequence();
           runFinalCommitCallback();
-          // A CFC-refused write is silent data loss of user intent whichever
-          // disposition carries it, and the `logger.warn` below is the opt-in
-          // scheduler logger, disabled in deployed workers. Report it here for
-          // the same reason the give-up path does.
           reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
             "scheduler",

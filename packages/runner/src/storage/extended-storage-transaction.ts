@@ -99,6 +99,7 @@ import {
   type WritePolicyInput,
 } from "../cfc/mod.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
+import { hasUnevaluableReason } from "../cfc/unevaluable-reason.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -2397,11 +2398,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ? this.#cfcState.prepare.reasons
           : [];
         const detail = reasons.length > 0 ? `: ${reasons[0]}` : "";
+        const message =
+          `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`;
+        // A refusal is terminal only when it is a VERDICT on this
+        // transaction's data. When any reason says prepare could not evaluate
+        // — an input it needed was not available here — a fresh attempt can
+        // decide differently once that input loads, so the rejection keeps
+        // the retryable discarded-attempt name. Marking that at the reason's
+        // source is what keeps this decision out of prose-matching; see
+        // cfc/unevaluable-reason.ts, including its note on the default.
+        if (hasUnevaluableReason(reasons)) {
+          return this.rejectCommitBeforeStorage({
+            error: {
+              name: "StorageTransactionAborted",
+              message,
+              reason: new Error("cfc-unevaluable-prepare-input"),
+            },
+          });
+        }
         return this.rejectCommitBeforeStorage({
           error: {
             name: "CfcCommitRefusalError",
-            message:
-              `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
+            message,
             reasons,
           },
         });
