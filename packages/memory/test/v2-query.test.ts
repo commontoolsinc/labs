@@ -6,6 +6,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import type { JSONSchema } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { encodeMemoryBoundary } from "../v2.ts";
 import {
@@ -2012,6 +2013,133 @@ Deno.test("memory v2 selector validation meets a shared dependency once and reje
       Error,
       "did not verify in this space",
     );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 refreshTrackedGraph double-role retirement: a key that is both an absent watch ROOT and a link-hop MISS survives a flicker AS A MISS — the root's re-added seq-0 marker is no arrival witness — and its birth delivers the miss-walked closure (unit isolation: no sessions, no incidental full re-evaluation can mask this path; mutation: retiring on tracker membership reds both asserts)", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-double-role";
+  const nodeSchema = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      primary: { "$ref": "#/$defs/node" },
+    },
+    "$defs": {
+      node: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          primary: { "$ref": "#/$defs/node" },
+        },
+      },
+    },
+  } as const satisfies JSONSchema;
+  const linkTo = (id: string) => ({
+    "/": { "link@1": { id, path: [], space } },
+  });
+
+  try {
+    // The grandchild exists but nothing links it yet; the referrer's
+    // `primary` dead-ends on the absent double-role doc.
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:double-role-grandchild",
+          value: { value: { name: "grandchild" } },
+        }, {
+          op: "set",
+          id: "of:double-role-referrer",
+          value: {
+            value: {
+              name: "referrer",
+              primary: linkTo("of:double-role-doc"),
+            },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [
+        {
+          id: "of:double-role-referrer",
+          selector: { path: [], schema: nodeSchema },
+        },
+        { id: "of:double-role-doc", selector: { path: [], schema: false } },
+      ],
+    });
+    const state = tracked.state;
+    const missKey = toDocKey(space, "of:double-role-doc", "space", {});
+    assert(
+      state.missed.has(missKey),
+      "the referrer's dead-end registers the miss beside the root marker",
+    );
+
+    // The flicker: created and deleted in ONE commit, so the refresh
+    // re-evaluates while the doc is still absent. The ROOT selector
+    // re-adds its marker; the MISS must survive it.
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:double-role-doc",
+          value: { value: { name: "flicker" } },
+        }, { op: "delete", id: "of:double-role-doc" }],
+      },
+    });
+    const dirty = new Set([toDirtyKey("of:double-role-doc", "space")]);
+    refreshTrackedGraph(space, engine, state, dirty);
+    assert(
+      state.missed.has(missKey),
+      "a still-absent flicker keeps the miss: the root's re-added marker " +
+        "is the root's, not an arrival",
+    );
+
+    // The birth links the grandchild. Only the miss's node-schema walk
+    // reaches it — the root selector is schema-false and walks nothing.
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:double-role-doc",
+          value: {
+            value: {
+              name: "born",
+              primary: linkTo("of:double-role-grandchild"),
+            },
+          },
+        }],
+      },
+    });
+    const birth = refreshTrackedGraph(space, engine, state, dirty);
+    assertExists(birth);
+    const bornIds = [...birth.updates.keys()].map((key) => fromDocKey(key).id);
+    assert(
+      bornIds.includes("of:double-role-doc"),
+      "the born document itself is delivered",
+    );
+    assert(
+      bornIds.includes("of:double-role-grandchild"),
+      "the miss's schema walk delivers the grandchild only it reaches",
+    );
+    assertEquals(state.missed.has(missKey), false);
   } finally {
     close(engine);
     await Deno.remove(path);
