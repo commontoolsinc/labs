@@ -178,6 +178,23 @@ with the Phase-7 flip work, and would retire (a)'s retry as dead code
 ruled disposition on evidence the ruling did not have; surface that
 evidence to the owner rather than building against the ruling.
 
+**RULED 2026-08-22 (owner Berni) — the recommendation is adopted as
+stated.**
+
+> ok, let's do (a) and record (b) as a post-flip task — owner,
+> 2026-08-22
+
+(a) is BUILT at the seat named above: a stale-confirmed-read refusal
+of a commit-gated start earns a bounded re-attempt against fresh
+confirmed state, every other refusal class stays terminal exactly as
+it is today, and exhaustion keeps that terminal arm under a
+distinctly-named log. (b) is RECORDED as a POST-FLIP task carrying
+this memo as its design seed — verification-coverage.md **OW61**,
+which also holds the pieces (b) needs before it can be built and its
+duty to retire (a)'s retry when it lands. (c) stands as written: the
+S-C ruling's closed-loss-window premise is disproven for the notebook
+flow, recorded for the owner, and not built against.
+
 ## Residuals flagged beside the fork (recorded, not owed here)
 
 - The scheduler-level event deferral (`outcome.kind === "deferred"`,

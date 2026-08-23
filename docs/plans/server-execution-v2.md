@@ -38,7 +38,36 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-22 (this PR): OW45 arm B triaged on an instrumented
+**Delta 2026-08-23 (this PR): the OW45 arm-B client-start fork RULED
+(a) and BUILT — a transient refusal of a piece start is no longer
+terminal.** The owner adopted the memo's recommendation as stated
+("ok, let's do (a) and record (b) as a post-flip task", 2026-08-22).
+BUILT: a commit-gated start refused for a STALE CONFIRMED READ
+re-attempts against fresh confirmed state — bounded at 2, on both
+deferred-start arms, each attempt taking a fresh ownership token
+REGISTERED before the readiness gate so a stop, a release, or a
+teardown tombstones the pending re-attempt through the path that
+already tombstones a pending first attempt. Every other refusal class
+stays terminal exactly as today, and exhaustion keeps that terminal
+arm under a distinctly-named log. The §3d question a re-run raises is
+answered STRUCTURALLY: a consequence-stamped start diverts into the
+speculation overlay and never reaches the memory server, so only a
+`bookkeeping` start can be refused this way and no re-attempt can mint
+a second speculative consequence — with the spec's silence on the
+RE-ISSUE case FLAGGED for the owner rather than filled. Red-first: the
+re-attempt and budget pins watched red against the pre-fix terminal
+arm, and each obligation pin watched red against a deliberately-broken
+variant of the fix (no ownership dedupe; an unregistered retry
+ownership; retrying every conflict class; a re-attempt that re-stamps
+a fresh consequence). RECORDED, not built: (b) adopt-not-start as the
+model's destination, POST-FLIP, with its five open pieces and its duty
+to retire (a)'s retry — verification-coverage.md **OW61**. Disclosed
+ripple for the review round: the fix is NOT flag-gated, because the
+terminal arm it corrects is shared with the OFF arm, where the same
+refusal produces the same dead piece. Full evidence:
+verification-coverage.md OW45's arm-B block.
+
+**Delta 2026-08-22 (#6202): OW45 arm B triaged on an instrumented
 client — the starvation family is THREE defects: two FIXED red-first,
 one isolated live and FORKED to the owner; the last skip entry STAYS.**
 The instrumented bench (worker console forwarded, fresh store per run,

@@ -5589,6 +5589,103 @@ supply; OW29/OW32/OW34 closed):
     old-shape stall is the die-off at the front; b01's shape hid
     inside the population as "the product not answering" with the
     client blameless.
+    **ARM-B CLIENT-START — RULED (a) AND BUILT 2026-08-23.** The fork
+    went to the owner and came back adopted as recommended: "ok, let's
+    do (a) and record (b) as a post-flip task" (owner Berni,
+    2026-08-22). (b) — adopt-not-start under ON — is RECORDED as the
+    model's destination in **OW61** below, POST-FLIP, carrying the
+    memo as its design seed; (c)'s evidence stays recorded and
+    unbuilt-against. The build, at the seat the triage named: a
+    commit-gated start refused for a STALE CONFIRMED READ re-attempts
+    against fresh confirmed state, bounded, and every other refusal
+    class is untouched. Its three parts:
+    - **The discriminator.** `isStaleConfirmedReadConflict`
+      (`storage/rejection.ts`, beside the rest of the shared rejection
+      vocabulary): a `ConflictError` whose message names a stale
+      confirmed read. The OTHER `ConflictError` shape — `pending
+      dependency not resolved`, this session's own unresolved commit —
+      is deliberately EXCLUDED (a fresh read is not what settles it),
+      as is every non-conflict refusal: a CFC or speculative-basis
+      abort, an authorization denial, a precondition failure, a
+      row-label violation. Discriminated by MESSAGE, the way
+      `toRejectedError` already recovers the conflicted entity from
+      one — `Error` fields do not survive the wire, the message does.
+    - **The bound: 2 re-attempts**, because the readiness gate
+      advances the session past the conflicting commit and pulls the
+      named doc, so ONE re-attempt lands after the materialization it
+      lost to and the second is headroom for a birth committed across
+      more than one wave. A basis still stale after that is not this
+      race but sustained contention on the piece's own docs, where
+      re-running would install and tear down a piece context per
+      attempt. Exhaustion keeps TODAY's terminal arm and adds a
+      distinctly-named log (`deferred-start-conflict-exhausted`), so
+      exhaustion is never read as a first-attempt refusal —
+      serving-loop.md §3d's piece-start surfacing rule, honored in
+      every arm.
+    - **Re-entrancy.** Each attempt takes a FRESH ownership token
+      REGISTERED under the result's key before the readiness gate is
+      awaited, so a stop, a release, a teardown, or a navigation away
+      during that window tombstones the pending re-attempt through
+      the same `cancelPendingDeferredStarts` path that already
+      tombstones a pending first attempt. The previous attempt's
+      cancel has already run when the next is scheduled, so two
+      installs never coexist. Both deferred-start arms carry it —
+      `startAfterSuccessfulCommit` AND the sibling
+      `runPatternAfterSuccessfulCommit`, which mints the OTHER
+      navigate-deferred start and meets the identical race.
+    **The §3d stamp on a re-run — ANSWERED STRUCTURALLY, with the
+    spec's silence FLAGGED.** A re-attempt re-derives the stamp from
+    the same `speculativeConsequence` and the same originating run
+    context: the same consequence RE-ISSUED, never a second one. And a
+    consequence-stamped start cannot reach this retry at all — on a
+    flag-ON client an `event-handler`-kind start tx DIVERTS into the
+    speculation overlay instead of committing (§3d's boundary
+    sentence; `SpeculationOverlayDestination.seal`), and the overlay
+    refuses only by aborting, so the server-produced stale confirmed
+    read is unreachable for it. Only a `bookkeeping`-stamped start
+    commits to the store and can be refused this way. FLAGGED for the
+    owner rather than settled here: §3d sanctions the stamp on the
+    deferred start but does not state the RE-ISSUE case in words; the
+    implementation takes the one reading under which a second
+    speculative consequence is unreachable.
+    **The pattern-load-error path (`runner.ts` ~2860) needs no arm of
+    its own** (traced, recorded): both of its sites sit inside
+    `setupPatternWatcher`, which is armed only AFTER a successful
+    instantiate, and both report a pattern-LOAD verdict — a
+    `loadPatternByIdentity` promise, no transaction and no
+    `ConflictError` — so the retry contract has no meaning there. In
+    the b04 trace it is DOWNSTREAM of the dead start: with the start
+    re-attempted the piece is instantiated and the watcher runs
+    against a live piece. Its own pre-existing question — the thrown
+    arm logs a load error its neighboring comment calls possibly
+    transient, and stops — is RECORDED, not opened by this arc.
+    **Red-first evidence.** Pins in
+    `packages/runner/test/deferred-start-conflict-retry.test.ts`,
+    refusing the START transaction specifically (recognized by the
+    runner handing it to `startWithTx`) in the shape `toRejectedError`
+    produces from the wire. Watched RED against the pre-fix terminal
+    arm: the re-attempt pin and the budget pin. The obligation pins
+    are watched red against DELIBERATELY-BROKEN variants of the fix,
+    since "no retry at all" makes them vacuous: a retry without the
+    ownership dedupe reds the double-install pin (two installs live at
+    once), an UNREGISTERED retry ownership reds the zombie pin (a
+    re-attempt fires after the piece was stopped), retrying every
+    conflict class reds the terminal-class pin (the pending-dependency
+    refusal re-attempted), and a re-attempt that re-stamps itself a
+    fresh consequence reds the §3d pin (one event-handler seal where
+    there must be none). A harness note that mattered: an observer
+    that WRAPPED `startWithTx`'s return value suppressed every
+    teardown, because the runner compares that exact cancel against
+    its registry to decide ownership — it manufactured the very
+    concurrency it claimed to measure, so liveness is read from the
+    runner's own registry instead.
+    **DISCLOSED RIPPLE (for the review round): the fix is NOT
+    flag-gated.** The terminal arm it corrects is shared with the OFF
+    arm, where the same transient refusal produces the same dead
+    piece; gating would ship a knowingly-broken OFF path and would be
+    removed by the flip anyway. So OFF-arm behavior does change —
+    exactly when a start commit is refused for a stale confirmed read,
+    which today yields a piece with no client context.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -6605,6 +6702,53 @@ supply; OW29/OW32/OW34 closed):
     dropped echo's missing cover is user-visible (the OW33
     arrival-witness fork's fix would NOT close this — a dropped
     run seals no overlay entry at all).**
+  - **OW61 — adopt-not-start: the piece-open seam is where the ON
+    execution model's "one starter per piece" has to land. POST-FLIP
+    (RULED 2026-08-22, owner: "ok, let's do (a) and record (b) as a
+    post-flip task").** The destination the OW45 arm-B fork named (b),
+    recorded rather than built: a flag-ON client whose navigate lands
+    on a piece the SERVER materialized does not run a deferred start
+    of its own at all — it ADOPTS the served instance (sync the root,
+    register demand through the served closure) and starts nothing.
+    That DISSOLVES the first-hydration race instead of re-attempting
+    it, and it is the posture canon already states rather than a new
+    mechanism: runtime-mapping.md's N62 row deleted the old
+    observation-adoption feature precisely BECAUSE under the flag
+    "clients no longer run committed derivations at all (reload is
+    read-and-render, §3b)", and serving-loop.md §3b states that
+    posture. The client-side deferred start is the remnant still
+    running against it at the navigate/piece-open seam. Design seed:
+    `../../history/plans/server-execution-v2/optimize/ow45-armb-client-start-fork.md`
+    (disposition (b), with the instrumented catch that motivates it).
+    WHY POST-FLIP: it touches the piece-open path for every ON
+    navigate, and the flip's own bar is the ON skip list EMPTY — which
+    the shipped (a) reaches without moving that path. **The five
+    pieces it still needs, none of them settled by this row:**
+    (i) how the ADOPTED context is constructed client-side — what a
+    client holds for a piece it did not start, and which of today's
+    start-walk products (node wiring, the cancel registration, the
+    demand registration) it keeps; (ii) the BIRTH-adoption flow — a
+    navigate that arrives BEFORE the server has materialized the
+    piece has nothing to adopt, so the seam needs a defined wait or a
+    defined fallback; (iii) whether §3d's speculative-consequence
+    stamp SURVIVES at all once no client start transaction exists —
+    §3d's sanction is written for the deferred start, and adoption
+    deletes the thing it sanctions, so that sentence needs
+    restatement, not inference; (iv) the UNMATERIALIZED-piece
+    fallback, i.e. whether the OFF-arm start path is retained as a
+    fallback under ON and under exactly which predicate; (v) the
+    first-hydration UX gates — what the user sees between navigate
+    and adoption, which is today covered by the client's own start
+    rendering immediately. **Its landing DUTY: retire (a)'s retry.**
+    With no client start transaction there is no start commit to be
+    refused, so `reattemptDeferredStartOnStaleRead` and the
+    `isStaleConfirmedReadConflict` predicate become dead code on the
+    ON arm and must be removed with it (the OFF arm keeps them while
+    the OFF path exists — see the OW45 row's disclosed ripple: the
+    fix is deliberately not flag-gated). Trigger: the post-flip soak,
+    or any ON surface where a re-attempted start is observed
+    exhausting its budget in real usage
+    (`deferred-start-conflict-exhausted`), whichever comes first.**
 
 ## 4. Standing rule
 
