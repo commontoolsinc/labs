@@ -238,6 +238,22 @@ because at commit-apply time they are the same commit. Whatever the
 server does with this commit, it does uniformly to both. The red/green
 difference lives downstream of the refusal, not in it.
 
+### The rest of the commit envelope
+
+Uniform across every capture, and worth recording because the spec's
+phase-3 lineage question turns on it:
+
+- `preconditions`: **none** (empty).
+- `eventAppends`: **0**.
+- `reads.pending`: **0** — the commit is based **entirely on confirmed
+  state**, with no optimistic layer beneath it.
+- `branch`: default.
+
+So the "descendant built from a dropped optimistic value" hazard the spec
+flags as PROVISIONAL does not arise *within* this commit — it has no
+pending basis of its own. It says nothing about commits built on top of
+*it*, which is where that hazard would live.
+
 ## 6. The composition is invariant
 
 Across every capture the commit is bit-stable: 50 operations
