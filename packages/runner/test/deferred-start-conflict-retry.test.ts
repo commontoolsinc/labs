@@ -57,6 +57,11 @@ function refuseDeferredStartCommits(
   runtime: Runtime,
   error: { name: string; message: string },
   count = 1,
+  /** Runs synchronously as the refusal is delivered — BEFORE the runner's
+   * commit continuation observes it. That is the only way a test can place
+   * an event inside the window between the refusal and the re-attempt's
+   * scheduling. */
+  onRefusal?: () => void,
 ): {
   refusalsReach(n: number): Promise<void>;
   refusals(): number;
@@ -85,6 +90,7 @@ function refuseDeferredStartCommits(
     (tx as unknown as { commit: typeof tx.commit }).commit = (() => {
       if (refusals >= count || !startTransactions.has(tx)) return commit();
       refusals++;
+      onRefusal?.();
       for (const [at, waiter] of waiters) {
         if (at <= refusals) waiter.resolve(undefined);
       }
@@ -368,6 +374,56 @@ describe("a commit-gated start refused for a stale confirmed read", () => {
       await runtime.runner.idleDeferredStartRetries();
       await runtime.idle();
 
+      expect(installed.installs()).toBe(1);
+      expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    } finally {
+      installed.restore();
+      injector.restore();
+    }
+  });
+
+  it("schedules no re-attempt once the runtime has been torn down", async () => {
+    // The teardown window the ownership token alone does not cover. A
+    // re-attempt cancels its predecessor and registers a FRESH token under
+    // the result's key — but `stopAll()` cancels the tokens it can SEE and
+    // clears that map, so a teardown landing before the refusal's
+    // continuation runs leaves nothing to cancel the token minted after it.
+    // Without a lifecycle check the re-attempt then installs a piece onto a
+    // runner that has been explicitly torn down.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = gatedTx();
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "torn down before the re-attempt was scheduled",
+      undefined,
+      tx,
+    );
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      staleConfirmedReadOf(result),
+      1,
+      // Inside the window: the runner is torn down while the refusal is in
+      // flight, so the teardown cannot see a token that does not exist yet.
+      () => runtime.runner.stopAll(),
+    );
+    const installed = observeInstalls(
+      runtime,
+      (cell) => key(cell) === key(result),
+      () => runtime.runner.cancels.has(key(result)),
+    );
+    try {
+      runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await runtime.runner.idleDeferredStartRetries();
+      await runtime.idle();
+
+      // The refused attempt is the only one that ever installed, and the
+      // torn-down runner holds no registration for the piece.
+      expect(injector.refusals()).toBe(1);
       expect(installed.installs()).toBe(1);
       expect(runtime.runner.cancels.has(key(result))).toBe(false);
     } finally {

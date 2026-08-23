@@ -3403,6 +3403,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     // ONE attempt at the gated start, written to be re-runnable: a refusal
     // that names a stale confirmed read earns a bounded re-attempt against
@@ -3480,6 +3481,7 @@ export class Runner {
                 attemptsLeft,
                 attempt,
                 "start",
+                startLifecycleEpoch,
               )
             ) {
               return;
@@ -3593,8 +3595,17 @@ export class Runner {
       attemptsLeft: number,
     ) => void,
     label: string,
+    scheduledLifecycleEpoch: number,
   ): boolean {
     if (!isStaleConfirmedReadConflict(error)) return false;
+    // The teardown window a token cannot cover. `stopAll()` cancels the
+    // pending starts it can SEE and clears their index, so a teardown that
+    // lands before this continuation runs leaves nothing to cancel a token
+    // minted afterwards — and the re-attempt would install a piece onto a
+    // runner that no longer exists. The lifecycle epoch is what every other
+    // asynchronous continuation here checks for exactly this reason; a
+    // re-attempt is one more of them.
+    if (scheduledLifecycleEpoch !== this.lifecycleEpoch) return false;
     if (attemptsLeft <= 0) {
       logger.error(
         "deferred-start-conflict-exhausted",
@@ -3610,7 +3621,10 @@ export class Runner {
     // into a piece that is no longer wanted.
     const retryOwnership = this.createDeferredStartOwnership(resultCell);
     const retry = this.runtime.awaitCommitRetryReadiness(error).then(() => {
-      if (retryOwnership.isCancelled()) return;
+      if (
+        retryOwnership.isCancelled() ||
+        scheduledLifecycleEpoch !== this.lifecycleEpoch
+      ) return;
       attempt(retryOwnership, attemptsLeft - 1);
     }).catch((cause) => {
       // `attempt` rethrows a synchronous start failure to its caller; on a
@@ -3638,6 +3652,7 @@ export class Runner {
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.lifecycleEpoch;
     const ownership = this.createDeferredStartOwnership(resultCell);
     // Re-runnable for the same reason as the deferred start above, and
     // through the same bounded re-attempt: this arm mints the OTHER
@@ -3709,6 +3724,7 @@ export class Runner {
                 attemptsLeft,
                 attempt,
                 "cross-space pattern",
+                startLifecycleEpoch,
               )
             ) {
               return;
