@@ -218,6 +218,26 @@ fix validated only against the step's red/green verdict is therefore
 measuring a coarser and noisier signal than the mechanism itself; the
 refusal is directly observable on every run and is the better bench.
 
+### The red's commit is indistinguishable from the greens'
+
+Comparing the full stale sets doc-by-doc between the red (c03) and the
+greens (c02, c04):
+
+| run | verdict | head | stale docs | computed | `of:` | docs read at seq 0 | conflict frontiers |
+|---|---|---|---|---|---|---|---|
+| c02 | green | 9→12 | 40 | 23 | 17 | 27 | 11, 12 |
+| c02 | green | 9→11 | 40 | 23 | 17 | 27 | 11 |
+| **c03** | **RED** | 0→11 | 40 | 23 | 17 | 27 | 11, 12 |
+| c04 | green | 0→11 | 40 | 23 | 17 | 27 | 11, 12 |
+| c04 | green | 0→11 | 40 | 23 | 17 | 27 | 11 |
+
+**The refused commit carries no signal about whether the run will red.**
+This bounds what any server-side commit-classification rule can achieve
+here: the server cannot tell the harmful refusal from the benign one,
+because at commit-apply time they are the same commit. Whatever the
+server does with this commit, it does uniformly to both. The red/green
+difference lives downstream of the refusal, not in it.
+
 ## 6. The composition is invariant
 
 Across every capture the commit is bit-stable: 50 operations
