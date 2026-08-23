@@ -104,12 +104,44 @@ content-addressed module/schema documents — not a recompute of computed
 output cells. It is exactly the case the spec's own sentence carves OUT of
 phase 2.
 
-> A note the owner may want, flagged not filled: the 19 `cid:` ops are
-> **content-addressed** documents, whose value is a function of their id.
-> Whether that class could ever be treated as non-conflicting is a
-> separate question from computed-kind drop, and this census does not
-> settle it — it only records that today they parse as no-kind and so make
-> the commit strict.
+### What the three schemes actually are
+
+Read from the operation payloads, this is a whole-piece instantiation:
+
+- **19 `cid:` ops — content-addressed SCHEMA documents.** Bodies are JSON
+  Schema fragments: `{"value":{"type":"number"}}`,
+  `{"value":{"type":"string","default":""}}`,
+  `{"value":{"type":"array","items":{"$ref":"cid:fid1:1RS1Hg…"}}}`.
+- **15 `of:` ops — the piece's authoritative STRUCTURE docs**: the
+  argument/result wiring, e.g.
+  `{"result":{"/":{"link@1":{…,"id":"of:fid1:heLjgID8…","overwrite":"redirect"}}},"value":…}`,
+  plus the piece's own `{"schema":{…}}` document.
+- **16 `computed:` ops** — the piece's computed output cells. All 4
+  `patch` ops are here, each an `add /value` pointing at an `of:`
+  structure doc.
+
+So the commit writes the piece's authoritative structure, its schema
+registry, and its computed outputs in one atomic transaction. That is
+categorically not the "pure recompute transaction" the spec expects to be
+the common all-computed case.
+
+### And the content-addressed exemption does not rescue it
+
+A tempting sub-arm is that `cid:` writes are content-addressed — their
+value is a function of their id, so a "conflict" on one is semantically
+vacuous — and could be exempted from the classification. Measured, that
+sub-arm still fails:
+
+- The 19 `cid:` documents are **written but never read**: the commit has
+  **zero** `cid:` confirmed reads, and no `cid:` document appears anywhere
+  in the stale set.
+- **Exempting all 19 still leaves 31 semantic ops of which 15 are
+  non-computed `of:`** — genuine authoritative state. The commit is
+  **still MIXED**.
+
+The read/write shape overall: 50 written docs, of which 31 are also read
+(read-modify-write) and 19 are write-only (all `cid:`). Of the 40 stale
+documents, 31 are also written by this commit and 9 are read-only.
 
 ## 2. The confirmed-read set — 40 distinct stale documents, not one
 
