@@ -183,19 +183,49 @@ Consequence for the arm choice: **any rule keyed on the reported read's
 seq or kind is keyed on an artifact.** The commit must be classified by
 its whole composition, which is what the tables above give.
 
-## 4. The refusal also occurs on GREEN runs
+## 4. The single-chain shape shares the mechanism
 
-Run c02 **passed** the step (`ok (16s)`) and still contained **two**
-deferred-start refusals, both `localSeq 5`, both MIXED, both with 95/143
-stale reads. So the client-start die-off is **not sufficient** for the
-arm-B red — the starvation needs the die-off *and* something further.
-That widens the defect's population beyond the red runs and means a fix
-validated only against red/green step verdicts would be measuring a
-coarser signal than the mechanism.
+Run **c03 reproduced the h01/h05 single-chain shape exactly** —
+`isNotebook: true, noteCount: 7, notesLength: 7, mentionableLength: 7,
+storedUiNoteChips: 12, renderedNoteChips: 6` — failing on the 300 s
+`waitForCondition` timeout (`packages/integration/utils.ts:569`).
 
-## Runs, loads, and what did NOT reproduce
+In that red the deferred-start refusal is present, and it is **the same
+mechanism and the same commit**: `localSeq 5`, 50 operations
+(16 `computed:` / 15 `of:` / 19 `cid:`), 143 confirmed reads, 95 stale
+across 40 distinct documents, MIXED — and its first conflict carries the
+fork memo's exact signature, `computed:… at seq 0 conflicted with seq 11`.
 
-See the run table at the end of this document.
+So the answer to "does the single-chain shape share this mechanism, or is
+its conflicted entity different, or is there no start refusal at all" is:
+**it shares it.** There is a start refusal, its conflicted entity is a
+`computed:` document read at seq 0, and its commit composition is
+indistinguishable from every other capture.
+
+## 5. The refusal is NOT sufficient for the red — and does not even correlate
+
+Every green run carried refusals too:
+
+- c02 (green, step `ok`): **2** refusals.
+- c04 (green): **2** refusals. c05 (green): **2**.
+- c03 (**red**): **1** refusal.
+
+So the client-start die-off is **not sufficient** for the arm-B red, and
+refusal *count* does not track redness in the naive direction — the red
+had fewer than the greens. Nor does the first-conflict seq track it: c04
+is green with two `seq 0 → 11` heads, the same head the red carries. Any
+fix validated only against the step's red/green verdict is therefore
+measuring a coarser and noisier signal than the mechanism itself; the
+refusal is directly observable on every run and is the better bench.
+
+## 6. The composition is invariant
+
+Across every capture the commit is bit-stable: 50 operations
+(16 / 15 / 19 by scheme), 143 confirmed reads, 0 pending reads, and 95
+stale reads over 40 distinct documents (one capture measured 91/36). This
+is a structural property of the navigate-deferred piece start, not a
+race-dependent shape — only *which* read sits at the array head varies,
+and that is the artifact described in §3.
 
 ## What the preserved h-run stores can and cannot settle
 
