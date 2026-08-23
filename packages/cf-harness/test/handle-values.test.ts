@@ -277,6 +277,42 @@ describe("handle-values", () => {
       );
     });
 
+    it("returns an error naming the failure when the value cannot be read", async () => {
+      // `get()` reads through the schema, so a required value that never
+      // materialized throws there rather than at `sync()`. That is a refusal,
+      // not a thrown tool call, and the cause is named while the value is not.
+      const ref = await seedRef("traveller-name", "Ada Lovelace");
+      const handleTable = await tableHolding(ref);
+      const originalGetCellFromLink = pieces.runtime.getCellFromLink.bind(
+        pieces.runtime,
+      );
+      let readFailures = 0;
+      pieces.runtime.getCellFromLink = ((
+        ...args: Parameters<Runtime["getCellFromLink"]>
+      ) => {
+        const cell = originalGetCellFromLink(...args);
+        (cell as unknown as { get: () => unknown }).get = () => {
+          readFailures += 1;
+          throw new Error("required value did not materialize");
+        };
+        return cell;
+      }) as unknown as Runtime["getCellFromLink"];
+
+      const resolution = await resolveHandleValue(
+        context(handleTable),
+        ref,
+        "browser valueHandle",
+      );
+      pieces.runtime.getCellFromLink = originalGetCellFromLink;
+
+      expect(readFailures).toBe(1);
+      expect(resolution.value).toBeUndefined();
+      expect(resolution.error).toBe(
+        "browser valueHandle could not read the referenced value: required value did not materialize",
+      );
+      expect(resolution.error).not.toContain("Ada Lovelace");
+    });
+
     it("returns an error naming the failure, not the value, when the referent cannot be loaded", async () => {
       // A storage or connection failure while loading the referent is the
       // resolution's answer to give, not an exception to escape with.
