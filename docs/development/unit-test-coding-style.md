@@ -72,8 +72,10 @@ Use the BDD functions from `@std/testing/bdd` — `describe()`, `it()`,
 Every test file has a single top-level `describe()` call containing everything
 else. Its title is the name of the file under test without the source suffix:
 `describe("donut-weight", ...)` for `donut-weight.ts`. As a special case, when
-the source file exists only to export one class, the title names that class:
-`describe("DonutWeight", ...)`.
+the file tests only one class, function, or other export, the title names that
+export: `describe("DonutWeight", ...)` for a class, and
+`describe("eatDonut()", ...)` for a function. That is the same condition under
+which the file itself is named for the export rather than for a source file.
 
 There is one carve-out. When a file parameterizes the same test body across a
 fixed set of implementations — typically one `describe()` per implementation,
@@ -142,7 +144,8 @@ describe("DonutWeight", () => {
 ### Describing a function
 
 A top-level function gets a `describe()` of its own, holding a sequence of
-`it()`s, in the same shape as a method's block above.
+`it()`s, in the same shape as a method's block above. Where the file tests only
+that function, that block is the file's single top-level `describe()`.
 
 ### Writing the description strings
 
