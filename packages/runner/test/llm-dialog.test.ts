@@ -1743,7 +1743,7 @@ describe("llmDialog", () => {
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
   });
 
-  it("should mention listRecent only to a dialog that has it", async () => {
+  it("should keep pattern-supplied tools out of its standing guidance", async () => {
     const requests: any[] = [];
 
     addMockResponse(
@@ -1754,85 +1754,7 @@ describe("llmDialog", () => {
       {
         role: "assistant",
         content: "Noted.",
-        id: "mock-list-recent-hint-response",
-      },
-    );
-
-    const resultSchema = {
-      type: "object",
-      properties: {
-        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
-        pending: { type: "boolean" },
-        error: { type: "object", additionalProperties: true },
-        messages: {
-          type: "array",
-          items: { type: "object", additionalProperties: true },
-        },
-      },
-      required: ["addMessage"],
-    } as const satisfies JSONSchema;
-
-    const pingTool = pattern(
-      () => "pong",
-      { type: "object" },
-      { type: "string" },
-    );
-
-    // The built-ins are on, but this pattern supplies no listRecent, so the
-    // standing guidance must not tell the model to call one.
-    const testPattern = pattern(
-      () => {
-        const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
-          messages,
-          tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
-          },
-        });
-        return {
-          addMessage: dialog.addMessage,
-          pending: dialog.pending,
-          error: dialog.error,
-          messages,
-        };
-      },
-      false,
-      resultSchema,
-    );
-
-    const resultCell = runtime.getCell(
-      space,
-      "llmDialog-list-recent-hint-test",
-      resultSchema,
-      tx,
-    );
-
-    const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
-
-    const addMessage = await result.key("addMessage").pull();
-    addMessage.send({ role: "user", content: "Something vague." });
-
-    await waitForLlmMessages(runtime, result, 2);
-
-    expect(requests.length).toBeGreaterThan(0);
-    expect(requests[0].system).not.toContain("listRecent()");
-    // The rest of the built-in guidance is unaffected.
-    expect(requests[0].system).toContain("# Link and Cell Model");
-  });
-
-  it("should mention listRecent to a dialog that supplies it", async () => {
-    const requests: any[] = [];
-
-    addMockResponse(
-      (req) => {
-        requests.push(req);
-        return true;
-      },
-      {
-        role: "assistant",
-        content: "Noted.",
-        id: "mock-list-recent-present-response",
+        id: "mock-guidance-scope-response",
       },
     );
 
@@ -1856,6 +1778,9 @@ describe("llmDialog", () => {
       { type: "string" },
     );
 
+    // The dialog's own guidance describes what the dialog provides. A tool the
+    // pattern supplies is the pattern's to introduce, in the system prompt it
+    // passes — the dialog naming one would be guidance it cannot keep true.
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
@@ -1880,7 +1805,7 @@ describe("llmDialog", () => {
 
     const resultCell = runtime.getCell(
       space,
-      "llmDialog-list-recent-present-test",
+      "llmDialog-guidance-scope-test",
       resultSchema,
       tx,
     );
@@ -1894,7 +1819,9 @@ describe("llmDialog", () => {
     await waitForLlmMessages(runtime, result, 2);
 
     expect(requests.length).toBeGreaterThan(0);
-    expect(requests[0].system).toContain("listRecent()");
+    expect(requests[0].system).not.toContain("listRecent");
+    // The guidance for what the dialog does provide is unaffected.
+    expect(requests[0].system).toContain("# Link and Cell Model");
   });
 
   it("should advertise presentResult whenever a resultSchema is given", async () => {
