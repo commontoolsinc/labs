@@ -71,14 +71,11 @@ export const httpOriginOf = (url: string): string | undefined => {
  * number or an object is refused rather than stringified, because a coerced
  * rendering is the value by another name.
  *
- * Materializing a value obliges the caller to keep it out of what the model
- * reads: record it in the run's resolved-value register before use, and check
- * that the fields your tool's output carries it back through are covered by
- * `SCRUBBED_PAYLOAD_TEXT_FIELDS`. Today only the browser tool materializes,
- * and its text fields are covered; a tool that echoes its own arguments — the
- * `argv` and `args` a skill-script result carries, say — would need those
- * fields added the day it starts resolving handles, because they are
- * deliberately off the list while nothing puts a secret in them.
+ * What a caller does with the value afterwards is its own problem: nothing
+ * here keeps a materialized value from returning through whatever the tool
+ * later reads. A page holds what was typed into it, so a snapshot of that page
+ * carries it back. Governing that is the labels' job on the read side, and it
+ * is not yet wired.
  */
 export const resolveHandleValue = async (
   context: HandleValueResolutionContext,
@@ -145,7 +142,20 @@ export const resolveHandleValue = async (
       }`,
     };
   }
-  const value = cell.get();
+  // `get()` reads through the schema, so a required value that never
+  // materialized throws here rather than at `sync()`. That is an ordinary
+  // outcome for a reference into a space still settling, and it belongs in
+  // the refusal channel like every other way a read can fail.
+  let value;
+  try {
+    value = cell.get();
+  } catch (error) {
+    return {
+      error: `${label} could not read the referenced value: ${
+        errorMessage(error)
+      }`,
+    };
+  }
   if (value === undefined) {
     return { error: `${label} names an address that holds nothing` };
   }
