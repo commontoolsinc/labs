@@ -1610,7 +1610,7 @@ describe("Phase 2 speculation overlay", () => {
     }
   });
 
-  it("a hydration kick that completes EMPTY re-arms — the next frame carrying the reference re-kicks and heals (the review's kick-before-install ordering)", async () => {
+  it("a frame's schema reference resolves end to end — kick, pull, install (the empty-pull re-arm's committable remainder; CT-2063)", async () => {
     // The dedupe's contract half: `#kickedCfcSchemaPulls` was cleared on
     // a pull ERROR only, so a pull that SUCCEEDS without delivering — the
     // document not yet installed server-side, a legal state — retained

@@ -743,6 +743,99 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
       ProtocolError,
       "neither included in the commit nor stored in the space",
     );
+
+    // A ROOT-level replace smuggles the same landing inside a whole
+    // document value.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(6, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:envelope-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "",
+                  value: {
+                    value: { field: "v" },
+                    cfc: {
+                      version: 1,
+                      schemaHash: missingHash,
+                      labelMap: { version: 1, entries: [] },
+                    },
+                  },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // A MOVE converts plain document data into a metadata reference: the
+    // installed value exists only post-patch, so only the post-patch scan
+    // sees it.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(7, {
+        operations: [{
+          op: "set",
+          id: "of:move-carrier",
+          value: { value: { hoard: missingHash } },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(8, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-carrier",
+                patches: [{
+                  op: "add",
+                  path: "/cfc",
+                  value: { version: 1, labelMap: { version: 1, entries: [] } },
+                }, {
+                  op: "move",
+                  from: "/value/hoard",
+                  path: "/cfc/schemaHash",
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The same move with the document backing it lands.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(9, {
+        operations: [
+          setOp(`cid:${missingHash}`, missingSchema),
+          {
+            op: "patch",
+            id: "of:move-carrier",
+            patches: [{
+              op: "add",
+              path: "/cfc",
+              value: { version: 1, labelMap: { version: 1, entries: [] } },
+            }, {
+              op: "move",
+              from: "/value/hoard",
+              path: "/cfc/schemaHash",
+            }],
+          } as never,
+        ],
+      }),
+    });
   });
 });
 

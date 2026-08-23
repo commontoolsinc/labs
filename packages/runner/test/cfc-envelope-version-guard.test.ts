@@ -123,6 +123,41 @@ describe("CFC envelope version guard", () => {
     }
   });
 
+  it("keeps a link-write from an uninterpretable source CFC-relevant and refuses it", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedWithVersion(runtime, "version-guard-link-source", 3);
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        "version-guard-link-source",
+        undefined,
+        tx,
+      );
+      const target = runtime.getCell(
+        space,
+        "version-guard-link-target",
+        undefined,
+        tx,
+      );
+      // The link write's source-relevance probe cannot interpret the
+      // stored envelope; fail closed means the write records as
+      // CFC-relevant and prepare meets the same unreadable envelope.
+      target.key("ref").set(source.getAsLink() as never);
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("not one this build interprets");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("loads an envelope whose stored root references its definition", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

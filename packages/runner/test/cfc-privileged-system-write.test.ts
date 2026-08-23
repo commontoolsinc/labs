@@ -56,6 +56,9 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      // Backed here too: the S18 gate must be the ONLY thing that can
+      // reject this transaction, never the storage boundary's closure check.
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Forge the label map directly at the document's ["cfc"] path.
       tx.writeOrThrow({
         space: signer.did(),
@@ -198,6 +201,9 @@ describe("CFC privileged system write (S18)", () => {
         tx,
       );
       const id = target.getAsNormalizedFullLink().id as URI;
+      // Backed here too: the S18 gate must be the ONLY thing that can
+      // reject this transaction, never the storage boundary's closure check.
+      writeSeedEnvelopeDoc(tx, signer.did());
       // Forge the label map while the transaction is still disabled.
       tx.writeOrThrow({
         space: signer.did(),

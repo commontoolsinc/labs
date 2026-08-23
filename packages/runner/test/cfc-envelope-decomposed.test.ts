@@ -137,6 +137,38 @@ describe("CFC decomposed envelopes", () => {
     }
   });
 
+  it("stores inline when the schema refuses decomposition", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime(storageManager);
+    try {
+      // The deprecated `definitions` keyword refuses decomposition, so the
+      // envelope stays in the self-contained inline spelling, flag or not.
+      const tx = runtime.edit();
+      const cell = runtime.getCell(space, "undecomposable-target", {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["kept"] } },
+        },
+        required: ["secret"],
+        definitions: { Legacy: { type: "string" } },
+      } as JSONSchema, tx);
+      cell.set({ secret: "classified" });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+      const targetId = cell.getAsNormalizedFullLink().id;
+      const stored = (runtime.storageManager.open(space).replica as unknown as {
+        getDocument(id: string): { cfc?: CfcMetadata } | undefined;
+      }).getDocument(targetId);
+      const envDoc = (runtime.storageManager.open(space).replica as unknown as {
+        getDocument(id: string): { value?: unknown } | undefined;
+      }).getDocument(`cid:${stored!.cfc!.schemaHash}`);
+      expect(JSON.stringify(envDoc?.value)).not.toContain('"cid:');
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps the version-1 inline form with the flag off", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

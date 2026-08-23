@@ -28,35 +28,42 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
     });
-
-    // A source doc whose stored metadata carries the authoritative label —
-    // the link-write below then derives and persists an envelope on its
-    // target (the same seeding shape cfc-label-metadata-persist uses).
-    const sourceId = parseLink(
-      runtime.getCell(space, "cfc-envelope-staging-source").getAsLink(),
-    ).id!;
-    const seed = runtime.edit();
-    writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({
-      space,
-      scope: "space",
-      id: sourceId,
-      path: [],
-    }, {
-      value: { secret: "classified" },
-      cfc: {
-        version: 1,
-        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-        labelMap: {
+    // A seeding failure below never reaches the caller's `finally`, so the
+    // resources are released here before it propagates.
+    try {
+      // A source doc whose stored metadata carries the authoritative label —
+      // the link-write below then derives and persists an envelope on its
+      // target (the same seeding shape cfc-label-metadata-persist uses).
+      const sourceId = parseLink(
+        runtime.getCell(space, "cfc-envelope-staging-source").getAsLink(),
+      ).id!;
+      const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, space);
+      seed.writeOrThrow({
+        space,
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "classified" },
+        cfc: {
           version: 1,
-          entries: [
-            { path: [], label: { confidentiality: ["source-root"] } },
-          ],
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [
+              { path: [], label: { confidentiality: ["source-root"] } },
+            ],
+          },
         },
-      },
-    });
-    expect((await seed.commit()).ok).toBeDefined();
-    return { storageManager, runtime, sourceId };
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+      return { storageManager, runtime, sourceId };
+    } catch (error) {
+      await runtime.dispose();
+      await storageManager.close();
+      throw error;
+    }
   };
 
   /**
@@ -102,6 +109,25 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
     }).getDocument(targetId);
     return { cidWrites, schemaHash: stored?.cfc?.schemaHash };
   };
+
+  it("stages nothing for a hash the realm registry cannot supply", async () => {
+    const { storageManager, runtime } = await setup();
+    try {
+      const tx = runtime.edit();
+      tx.stageSchemaDocClosure?.(
+        space,
+        "fid1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      );
+      const cidWrites = [...tx.getWriteDetails?.(space) ?? []]
+        .map((detail) => detail.address.id)
+        .filter((id) => id.startsWith("cid:"));
+      expect(cidWrites).toEqual([]);
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 
   it("stages the envelope once, registers it, and elides the confirmed repeat", async () => {
     const { storageManager, runtime, sourceId } = await setup();

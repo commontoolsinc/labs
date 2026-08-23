@@ -10,6 +10,7 @@ import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
   emptyEntityDocument,
+  PatchApplyError,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
@@ -3616,13 +3617,38 @@ const applyCommitTransaction = (
         if ("value" in patch) collectLinkSchemaRefs(patch.value);
         if ("add" in patch) collectLinkSchemaRefs(patch.add);
         if ("values" in patch) collectLinkSchemaRefs(patch.values);
-        // The envelope positions a patch can land metadata at: the whole
-        // `cfc` member, or its `schemaHash` directly.
-        if ("value" in patch && patch.path === "/cfc") {
-          collectCfcEnvelopeRef(patch.value);
-        }
-        if ("value" in patch && patch.path === "/cfc/schemaHash") {
-          collectCfcEnvelopeRef({ schemaHash: patch.value });
+      }
+      // The envelope position a patch sequence can land metadata at —
+      // directly (`/cfc`, `/cfc/schemaHash`), through a root-level value,
+      // or by MOVING document content into the reserved member. The forms
+      // compose in sequence, so the only complete answer is the
+      // post-patch document: when any pointer in the sequence can reach
+      // `cfc`, replay the sequence over the stored document and validate
+      // what the reserved member holds afterwards. A sequence that cannot
+      // apply is skipped here — the commit's own application refuses it.
+      const touchesCfc = (operation.patches ?? []).some((patch) => {
+        const pointers = [
+          patch.path,
+          "from" in patch ? patch.from : undefined,
+        ];
+        return pointers.some((pointer) =>
+          pointer !== undefined &&
+          (pointer === "" || pointer === "/cfc" ||
+            pointer.startsWith("/cfc/"))
+        );
+      });
+      if (touchesCfc) {
+        const state = readState(engine, { id: operation.id, branch });
+        try {
+          const patched = applyPatchToDocument(
+            (state?.document ?? undefined) as
+              | Parameters<typeof applyPatchToDocument>[0]
+              | undefined,
+            operation.patches ?? [],
+          );
+          collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
+        } catch (error) {
+          if (!(error instanceof PatchApplyError)) throw error;
         }
       }
     }
