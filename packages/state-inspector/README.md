@@ -222,11 +222,12 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   applies.
 - **Not every gap is a cap.** A scan that enumerates an entity it cannot
   reconstruct reports it as `extent.unreadable` rather than folding it into
-  `truncated`, because raising `--limit` does not recover one. `entities` never
-  has any: it returns a row for an unreadable entity rather than dropping it.
-  The HTML explorer banners both, because a generated page is a file that
-  outlives the stderr notice — it gets opened later and shared with someone who
-  never ran the command.
+  `truncated`, because raising `--limit` does not recover one. An unfiltered
+  `entities` never has any — it returns a row for an unreadable entity rather
+  than dropping it — but `entities --kind` counts what the filter had to drop
+  for want of a kind it could not determine. The HTML explorer banners both,
+  because a generated page is a file that outlives the stderr notice — it gets
+  opened later and shared with someone who never ran the command.
 - **A scan sees what a read sees.** `visibleRevisionRows` is the one enumeration
   of what a branch can see, attributing each (scope, entity) to the nearest
   branch holding it; `visibleEntityRows`, `listScopes`, `scopeOverlay`, the HTML

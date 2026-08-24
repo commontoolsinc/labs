@@ -757,6 +757,113 @@ describe("scan-extent", () => {
     });
   });
 
+  describe("a `kind` scan meeting a row it cannot classify", () => {
+    it("counts the unclassifiable row it dropped, so strictness can refuse", async () => {
+      await withSeeded(
+        [
+          {
+            id: "of:piece-1",
+            document: {
+              value: { $NAME: "Topic" },
+              patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+            },
+            revisions: 1,
+          },
+          { id: "of:bad", document: UNDECODABLE, revisions: 1 },
+        ],
+        [{ name: "" }],
+        (space) => {
+          // The filter drops the undecodable row because its kind cannot be
+          // determined — which is precisely why the omission has to be
+          // reported. `topics-export.ts` runs this exact scan under
+          // `--require-complete` to guard a rollback payload.
+          const listing = listEntityModels(space, { kind: "piece" });
+          expect(listing.entities.map((e) => e.id)).toEqual(["of:piece-1"]);
+          expect(listing.extent.unreadable).toBe(1);
+          expect(isCompleteScan(listing.extent)).toBe(false);
+
+          // Unfiltered keeps it, modeled `unknown`, so nothing is missing.
+          const all = listEntityModels(space);
+          expect(all.entities.map((e) => e.id).sort()).toEqual([
+            "of:bad",
+            "of:piece-1",
+          ]);
+          expect(isCompleteScan(all.extent)).toBe(true);
+        },
+      );
+    });
+
+    it("does not count a tombstone the filter dropped, which is no error", async () => {
+      await withSeeded(
+        [
+          {
+            id: "of:piece-1",
+            document: {
+              value: { $NAME: "Topic" },
+              patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+            },
+            revisions: 1,
+          },
+          {
+            id: "of:gone",
+            document: { value: "was here" },
+            revisions: 1,
+            deleted: true,
+          },
+        ],
+        [{ name: "" }],
+        (space) => {
+          // A deleted entity is definitively not a piece. Only a row whose kind
+          // could not be DETERMINED is a gap in the answer.
+          const listing = listEntityModels(space, { kind: "piece" });
+          expect(listing.entities.map((e) => e.id)).toEqual(["of:piece-1"]);
+          expect(listing.extent.unreadable).toBe(0);
+          expect(isCompleteScan(listing.extent)).toBe(true);
+        },
+      );
+    });
+  });
+
+  describe("a detail pass over a branch's own and inherited entities", () => {
+    /** `of:kept` inherited untouched; `of:override` rewritten on the child. */
+    const forked = (run: (space: SpaceDb) => void) =>
+      withSeeded(
+        [
+          { id: "of:kept", document: { value: "p1" }, revisions: 2 },
+          { id: "of:override", document: { value: "parent" }, revisions: 1 },
+          {
+            id: "of:override",
+            document: { value: "child" },
+            revisions: 1,
+            branch: "kid",
+          },
+        ],
+        [{ name: "" }, { name: "kid", parent: "", forkSeq: 3 }],
+        run,
+      );
+
+    it("reports only the overriding branch's history for an entity the child rewrote", async () => {
+      await forked((space) => {
+        const detail = buildAllDetails(space, { branch: "kid" }).details
+          .find((d) => d.id === "of:override");
+        // The value came from the child alone — `reconstructWithinBranch` never
+        // composes across the fork — so crediting this entity with the parent's
+        // writes would report revisions no read from here can reach.
+        expect(detail?.versions.map((v) => v.seq)).toEqual([4]);
+        expect(detail?.revisions).toBe(1);
+      });
+    });
+
+    it("reports the parent's history for an entity the child only inherited", async () => {
+      await forked((space) => {
+        const detail = buildAllDetails(space, { branch: "kid" }).details
+          .find((d) => d.id === "of:kept");
+        expect(detail?.versions.map((v) => v.seq)).toEqual([1, 2]);
+        expect(detail?.revisions).toBe(2);
+      });
+    });
+  });
+
   describe("the standalone HTML explorer", () => {
     it("marks a page missing an entity it could not reconstruct, not only a capped one", async () => {
       await withSeeded(

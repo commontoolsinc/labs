@@ -25,7 +25,7 @@ import {
   parseSigilLink,
   summarize,
 } from "./decode.ts";
-import { branchReadChain, reconstructDocument } from "./reconstruct.ts";
+import { reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
@@ -543,11 +543,14 @@ export function buildAllDetails(
 
   const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
 
-  // Pass 3: per-entity detail + version log. The log spans the same branch
-  // ancestry the rows came from — an entity a child branch INHERITED has its
-  // writes on the parent, and reading only local rows would describe it with an
-  // empty history.
-  const chain = branchReadChain(space, branch);
+  // Pass 3: per-entity detail + version log, read from the branch that OWNS the
+  // entity's visible row. An entity a child branch INHERITED has its writes on
+  // the parent, so local-only rows would describe it with no history at all;
+  // one the child OVERRODE has a parent log the child's value never came
+  // through, and reporting it would credit this entity with revisions no read
+  // from here can reach. Both are the same rule — nearest branch wins — which
+  // `visibleEntityRows` already resolved, so each row carries its own link.
+  const ownerOf = new Map(scanned.map((r) => [r.id, r.link]));
   const versionStmt = space.db.prepare(
     `SELECT r.seq, r.op, c.session_id, c.created_at
      FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
@@ -556,13 +559,10 @@ export function buildAllDetails(
   );
   const out: EntityDetail[] = [];
   for (const [id, doc] of docs) {
-    const versions = chain
-      .flatMap((link) =>
-        versionStmt.all<
-          { seq: number; op: string; session_id: string; created_at: string }
-        >(link.branch, id, scope, link.atSeq)
-      )
-      .sort((a, b) => a.seq - b.seq)
+    const owner = ownerOf.get(id);
+    const versions = (owner === undefined ? [] : versionStmt.all<
+      { seq: number; op: string; session_id: string; created_at: string }
+    >(owner.branch, id, scope, owner.atSeq))
       .map((v) => ({
         seq: v.seq,
         op: v.op,

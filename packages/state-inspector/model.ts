@@ -57,6 +57,7 @@ import type { SpaceDb } from "./db.ts";
 import { countLinks, parseSigilLink, summarize } from "./decode.ts";
 import {
   branchReadChain,
+  type BranchReadLink,
   reconstructDocument,
   visibleRevisionRows,
 } from "./reconstruct.ts";
@@ -511,6 +512,12 @@ export function isCompleteScan(extent: ScanExtent): boolean {
 export interface EntityScanRow {
   id: string;
   revisions: number;
+  /**
+   * The chain link that owns the visible row. A pass describing an entity's
+   * history has to read THIS branch and no other: nearest-branch ownership
+   * hides a parent's log exactly as it hides the parent's value.
+   */
+  link: BranchReadLink;
 }
 
 /**
@@ -581,7 +588,7 @@ export function visibleEntityRows(
 
   return rows
     .filter((r) => !gone.has(`${r.link.branch}\u0000${r.id}`))
-    .map((r) => ({ id: r.id, revisions: r.revisions }))
+    .map((r) => ({ id: r.id, revisions: r.revisions, link: r.link }))
     .sort((a, b) =>
       b.revisions - a.revisions || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
     );
@@ -671,25 +678,42 @@ export function listEntityModels(
       moduleIndex.set(v.identity, { id, filename: v.filename, kind: v.kind });
     }
   };
-  const read = (id: string): EntityDocument | undefined => {
+  // A throw and a tombstone both yield no document, and only one of them is an
+  // error: a deleted entity is definitively not a `piece`, while an entity that
+  // would not decode might have been one. A `kind` filter drops both, so the
+  // two have to stay distinguishable or the dropped error goes unreported.
+  const read = (
+    id: string,
+  ): { doc: EntityDocument | undefined; failed: boolean } => {
     try {
-      return reconstructDocument(space, { id, branch, scope });
+      return {
+        doc: reconstructDocument(space, { id, branch, scope }),
+        failed: false,
+      };
     } catch {
-      return undefined;
+      return { doc: undefined, failed: true };
     }
   };
 
   const kept: EntityScanRow[] = [];
   let truncated = false;
   let scanned = 0;
+  // Rows a `kind` filter dropped BECAUSE they would not reconstruct. An
+  // unfiltered listing keeps every row it reaches — an unreadable one included,
+  // modeled `unknown` — so it never has any; a filtered one silently omits what
+  // it cannot classify, and `--require-complete` has to hear about it.
+  let unreadable = 0;
   // Collect: one entity past the limit is kept and dropped, because HOLDING it
   // is what proves more remain — truncation is never inferred from a count that
   // happened to land on the cap.
   for (; scanned < rows.length; scanned++) {
     const r = rows[scanned];
-    const doc = read(r.id);
+    const { doc, failed } = read(r.id);
     indexModule(r.id, doc);
-    if (kind !== undefined && kindOf(doc) !== kind) continue;
+    if (kind !== undefined && kindOf(doc) !== kind) {
+      if (failed) unreadable++;
+      continue;
+    }
     if (kept.length === limit) {
       truncated = true;
       scanned++;
@@ -724,7 +748,7 @@ export function listEntityModels(
   // The walk ends the moment nothing is still wanted.
   for (; wanted.size > 0 && scanned < rows.length; scanned++) {
     const r = rows[scanned];
-    const doc = read(r.id);
+    const { doc } = read(r.id);
     indexModule(r.id, doc);
     const v = doc?.value;
     // A `source` entity supersedes a `compiled` one, so a want is only settled
@@ -770,10 +794,7 @@ export function listEntityModels(
       limit,
       total: rows.length,
       truncated,
-      // A listing returns a row for every entity it reached: one that would not
-      // decode is modeled `unknown` rather than dropped, so nothing is missing
-      // from the result for this pass to report.
-      unreadable: 0,
+      unreadable,
     },
   };
 }

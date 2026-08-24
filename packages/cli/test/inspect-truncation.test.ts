@@ -291,6 +291,39 @@ describe("cf inspect capped listings", () => {
     });
   });
 
+  it("refuses a `--kind` scan that dropped a row it could not classify", async () => {
+    await withStore(async (path) => {
+      const db = new Database(path);
+      db.prepare(
+        `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+         VALUES ('of:corrupt', 9002, 0, 'set', '<<<not a document>>>', 1)`,
+      ).run();
+      db.close();
+
+      // The shape `scripts/topics-export.ts` runs to guard a rollback payload.
+      // A filtered scan drops what it cannot classify, so the omission has to
+      // reach the exit code — the notice alone never reaches `cfJson`.
+      const refused = await cf(
+        `inspect entities ${path} --kind piece --require-complete --json`,
+      );
+      expect(refused.code).not.toBe(0);
+      expect(refused.stdout.join("").trim()).toBe("");
+      expect(stripAnsi(refused.stderr.join("\n"))).toContain(
+        "could not be reconstructed",
+      );
+
+      // Unfiltered, the same store is complete: the row is returned `unknown`.
+      const kept = await cf(
+        `inspect entities ${path} --require-complete --json`,
+      );
+      expect(kept.code).toBe(0);
+      expect(
+        (JSON.parse(kept.stdout.join("\n")) as { id: string }[])
+          .some((e) => e.id === "of:corrupt"),
+      ).toBe(true);
+    });
+  });
+
   it("rejects a fractional `--limit` rather than applying a cap no count can reach", async () => {
     await withStore(async (path) => {
       const result = await cf(`inspect entities ${path} --limit 1.5`);
