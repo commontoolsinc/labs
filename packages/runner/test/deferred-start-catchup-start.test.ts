@@ -537,6 +537,110 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     }
   });
 
+  it("never binds the parent's token to a COMPETING start's registration", async () => {
+    // Cubic's P1 on the in-claim hand-off, confirmed in code: the
+    // recovery's own entry stop EMPTIES the registry, so a fresh
+    // competing start (a second navigate's public start()) can install
+    // during the walk's real awaits WITHOUT any stop — no generation
+    // bump, nothing for the claim's checks to see. The walk's mid-resume
+    // re-check then reports "already started" as success for a
+    // registration THIS attempt never created, and an identity-blind
+    // hand-off would bind the parent's token to the competitor's run —
+    // whose lifecycle the parent does not own: a later parent cancel
+    // would tear down the user's independent navigate (the token's
+    // registry-guarded stop is authoritative and bypasses the
+    // independent-start shield that releaseChild honors). The hand-off
+    // must be EXACT: only the registration the walk's own attempt
+    // created, still current.
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const harness = runtime.runner as unknown as {
+      runWithStartOwnership(
+        tx: unknown,
+        pattern: unknown,
+        argument: unknown,
+        resultCell: unknown,
+        options?: unknown,
+      ): { cancelDeferredStart?: () => void };
+      syncCellsForRunningPattern(...args: unknown[]): Promise<unknown>;
+      locallyStoppedResults: { delete(key: string): void };
+      locallyPreparedResults: { delete(key: string): void };
+    };
+    const tx = gatedTxOn(runtime);
+    const result = runtime.getCell<{ doubled?: number }>(
+      space,
+      "a competing start claims the piece mid-walk",
+      undefined,
+      tx,
+    );
+    // The refusal carries a readiness gate that runs AFTER the recovery's
+    // entry (whose teardown re-arms the local-assembly shortcuts) and
+    // BEFORE the walk: clearing the shortcuts there forces the walk onto
+    // the RESUME path, whose dependency-sync await is the real-world
+    // interleaving window (a cold resume looks exactly like this).
+    const refusal = {
+      ...staleConfirmedReadOf(result),
+      readyToRetry: () => {
+        harness.locallyStoppedResults.delete(key(result));
+        harness.locallyPreparedResults.delete(key(result));
+        return Promise.resolve();
+      },
+    };
+    const injector = refuseDeferredStartCommits(runtime, refusal);
+    // The competitor: a second, independent public start of the same
+    // result (the navigate landing flow), fired inside the recovery
+    // walk's dependency-sync await.
+    const originalSync = harness.syncCellsForRunningPattern;
+    let competitorRan = false;
+    harness.syncCellsForRunningPattern = async function (...args: unknown[]) {
+      if (
+        !competitorRan &&
+        key((args[0] as Cell<unknown>)) === key(result)
+      ) {
+        competitorRan = true;
+        // The entry-stop cleared these too late for the injector hook
+        // above to matter to the competitor; make the competitor's own
+        // walk take whatever path it finds — it installs either way.
+        await runtime.runner.start(result);
+      }
+      return Reflect.apply(originalSync, runtime.runner, args);
+    };
+    try {
+      const { cancelDeferredStart } = harness.runWithStartOwnership(
+        tx,
+        trustExecutable(runtime, Piece),
+        { value: 3 },
+        result.withTx(tx),
+      );
+      expect(cancelDeferredStart).toBeDefined();
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+
+      await waitForSignal(
+        injector.refusalsReach(1),
+        "the start's transaction being refused",
+      );
+      await runtime.runner.idleDeferredStartCatchUps();
+      await runtime.idle();
+
+      // The competitor ran and owns the piece.
+      expect(competitorRan).toBe(true);
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+
+      // The parent's handle must NOT reach the competitor's run: its
+      // token was never bound to a registration this attempt did not
+      // create, so this cancel is a tombstone, and the user's
+      // independently started piece keeps running.
+      cancelDeferredStart!();
+      expect(runtime.runner.cancels.has(key(result))).toBe(true);
+    } finally {
+      harness.syncCellsForRunningPattern = originalSync;
+      injector.restore();
+    }
+  });
+
   it("lets a parent cancel landing MID-WALK stop the recovered run", async () => {
     // The delta review's D1, watched red at the pre-fix head (the
     // reviewer's probe: `registered-after-parent-cancel: true`). The
