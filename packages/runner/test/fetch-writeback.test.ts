@@ -1,25 +1,27 @@
 /// <reference path="./clock.d.ts" />
-// The completion writeback is the last step of a fetch: the response has
-// arrived, and `tryWriteResult()` puts it in the result cell. It has three
-// outcomes, and the two that do not write are DISTINCT for the caller
-// (fetch-utils.ts's own note on the function). Inputs that moved mean the
-// request was SUPERSEDED: the new inputs' own request owns the cells and there
-// is nothing left to do. A commit the storage layer REFUSED means the
-// opposite -- the claim is still durably pending and this response was the
-// only completion it will ever get, so `fetch.ts` must not retire the effect
-// as fulfilled. It converts the refusal into an error-shaped result instead,
-// and propagates when even that cannot commit.
-//
-// The refusal arm and both of `fetch.ts`'s conversions of it otherwise run
-// only where some suite happened to tear a runtime down while a writeback was
-// in flight. One pattern-integration shard reached the refusal's five lines
-// once, on one `main` run; no artifact in the next run reached them at all,
-// and they read downstream as coverage debt on a pull request that never
-// touched this code. Each case here constructs the refusal it wants instead,
-// so the lines run on every suite run and under every shard layout.
-//
-// docs/development/COVERAGE.md ("Failure reports reached only when the
-// operation fails") carries the reasoning.
+
+/**
+ * What the fetch builtins report when a completion writeback cannot be
+ * written, which is two different things.
+ *
+ * The writeback is the last step of a fetch: the response has arrived, and
+ * `tryWriteResult()` puts it in the result cell. Its two "did not write"
+ * outcomes are _distinct_ for the caller. Inputs that moved mean the request
+ * was superseded, so the new inputs' own request owns the cells and there is
+ * nothing left to do. A commit the storage layer refused means the opposite —
+ * the claim is still durably pending and this response was the only completion
+ * it will ever get, so `fetch.ts` must not retire the effect as fulfilled. It
+ * converts that refusal into an error-shaped result instead, and propagates
+ * when even that cannot commit.
+ *
+ * Those failure reports run nowhere except where a writeback's commit actually
+ * fails, which nothing in the suites asks for and only a runtime torn down
+ * around one produces, so left to the suites they flip between covered and
+ * uncovered across identical CI runs. Each case here constructs the refusal it
+ * wants, which is what makes the reports run on every suite run and under
+ * every shard layout. `docs/development/COVERAGE.md` ("Failure reports reached
+ * only when the operation fails") carries the reasoning.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -216,7 +218,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
         },
       );
 
-      // `written: false` with NO `commitError`: the inputs moved, the action
+      // `written: false` and no `commitError`: the inputs moved, the action
       // never ran, and the request that owns the cells now is someone else's.
       expect(written).toEqual({ written: false });
       expect(written.commitError).toBeUndefined();
@@ -237,10 +239,10 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
         (writeTx) => result.withTx(writeTx).set({ from: "the response" }),
       );
 
-      // The other "did not write" shape. Here the hash DID match and the
-      // action DID run, so a caller reading only `written` could not tell this
-      // from the superseded case above -- and retiring the effect on it would
-      // leave the claim pending with nothing left to complete it.
+      // The other "did not write" shape. Here the hash matched and the action
+      // ran, so a caller reading only `written` could not tell this from the
+      // superseded case above — and retiring the effect on it would leave the
+      // claim pending with nothing left to complete it.
       expect(refused()).toBe(1);
       expect(written.written).toBe(false);
       expect(written.commitError).toBe(REFUSAL);
@@ -316,7 +318,7 @@ describe("fetch builtins: a completion writeback the storage layer refuses", () 
 
       // The writeback is the transaction that carries the response into the
       // builtin's result document. The error writeback that follows does not
-      // write it -- it clears a result that is already absent -- so naming the
+      // write it — it clears a result that is already absent — so naming the
       // document refuses the completion write and nothing else.
       const refused = refuseCommits(
         (written) => written.includes(resultDocument),
