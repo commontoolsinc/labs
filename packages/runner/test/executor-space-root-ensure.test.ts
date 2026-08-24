@@ -477,9 +477,14 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // frames (pre-containment: unhandled rejection in consumeUpdates,
     // nothing after this point runs) and the mention-carrying computed
     // doc is QUARANTINED, not applied: fail-closed for the doc.
+    let quarantinedId: string | undefined;
     await waitUntil(
-      () =>
-        [...computedSeen].some((id) => replica.getDocument(id) === undefined),
+      () => {
+        quarantinedId = [...computedSeen].find((id) =>
+          replica.getDocument(id) === undefined
+        );
+        return quarantinedId !== undefined;
+      },
       "a cid-mentioning computed doc held in quarantine (not applied)",
     );
 
@@ -490,6 +495,27 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // consume loop (the unhandled rejection is retained by the test
     // harness, so death is otherwise silent here — the round-3
     // review's R2), and this wait times out: the discriminator.
+    // A stall anywhere in the writer path must FAIL with its name, not
+    // hang the suite ahead of the named liveness wait below (Cubic P2 on
+    // this PR). These are event-completions, not polls — the deadline
+    // only converts a hang into a named failure, matching the suite's
+    // waitUntil discipline.
+    const named = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`timed out waiting for ${label}`)),
+              20_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
     {
       const writer = clientRuntime(spaceSigner);
       const writerLiveness = writer.getCell<{ n?: number }>(
@@ -497,11 +523,15 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
         "ow61-containment-liveness",
         undefined,
       );
-      await writerLiveness.sync();
+      await named(writerLiveness.sync(), "the writer's liveness-cell sync");
       const tx = writer.edit();
       writerLiveness.withTx(tx).set({ n: 2 });
-      expect((await tx.commit()).error).toBeUndefined();
-      await writer.storageManager.synced();
+      expect((await named(tx.commit(), "the writer's liveness commit")).error)
+        .toBeUndefined();
+      await named(
+        writer.storageManager.synced(),
+        "the writer's post-commit sync barrier",
+      );
     }
     await waitUntil(
       () => (liveness.get() as { n?: number } | undefined)?.n === 2,
@@ -517,8 +547,12 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
         id: string,
         selector: { path: string[]; schema: boolean },
       ): Promise<{ error?: unknown }>;
-    }).sync([...computedSeen][0], { path: [], schema: false });
+    }).sync(quarantinedId!, { path: [], schema: false });
     expect(lateSync.error).toBeUndefined();
+    // The request path exercised the exact quarantined doc, and the
+    // quarantine held through it (its cid rode the response and was
+    // dropped by the simulated defect again).
+    expect(replica.getDocument(quarantinedId!)).toBeUndefined();
     const witness = reader.getCell<{ n?: number }>(
       space,
       "ow61-containment-witness",
