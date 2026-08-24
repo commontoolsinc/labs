@@ -175,16 +175,36 @@ function resolvePieceContext(line: CompletionLine): PieceConfig | null {
 }
 
 /**
- * Pieces in the line's space, as `id` with the piece's name as annotation.
+ * What the `--piece` slot accepts: every slug the space's index records, then
+ * every piece id.
  *
- * A piece that failed to load still lists — its id is exactly what an operator
- * reaches for completion to recover.
+ * Both are values the flag takes, and the slug is the readable half of that
+ * vocabulary — so it leads, and the opaque id follows.
  */
 async function pieceCandidates(line: CompletionLine): Promise<ProviderResult> {
   const config = resolveSpaceContext(line);
   if (!config) return NOTHING;
-  const { listPieces } = await import("../piece.ts");
-  return values(shapePieceCandidates(await listPieces(config)));
+  const { listPieces, listSpaceSlugs } = await import("../piece.ts");
+  const [pieces, slugs] = await Promise.all([
+    listPieces(config),
+    listSpaceSlugs(config),
+  ]);
+  return values([
+    ...shapeSlugCandidates(slugs, pieces),
+    ...shapePieceCandidates(pieces),
+  ]);
+}
+
+/** Just the slugs, for the positional that takes one and nothing else. */
+async function slugCandidates(line: CompletionLine): Promise<ProviderResult> {
+  const config = resolveSpaceContext(line);
+  if (!config) return NOTHING;
+  const { listPieces, listSpaceSlugs } = await import("../piece.ts");
+  const [pieces, slugs] = await Promise.all([
+    listPieces(config),
+    listSpaceSlugs(config),
+  ]);
+  return values(shapeSlugCandidates(slugs, pieces));
 }
 
 /** Listing shape used by `shapePieceCandidates`, structural so tests need no runtime. */
@@ -192,6 +212,12 @@ export interface PieceListingLike {
   readonly id: string;
   readonly name?: string;
   readonly patternRef?: { readonly symbol?: string } | null;
+}
+
+/** Listing shape used by `shapeSlugCandidates`, structural for the same reason. */
+export interface SlugListingLike {
+  readonly slug: string;
+  readonly piece?: string;
 }
 
 /**
@@ -207,6 +233,31 @@ export function shapePieceCandidates(
     value: piece.id,
     description: piece.name ?? piece.patternRef?.symbol ?? undefined,
   }));
+}
+
+/**
+ * Label slugs so they are not read as ids. The annotation says what the value
+ * is and, where the slug resolves to a piece the listing named, what it points
+ * at — which is the question a caller choosing between two slugs is asking.
+ *
+ * A slug whose target failed to resolve still lists: it is a name the space
+ * records and the flag accepts, and completion is not the surface that decides
+ * whether it still points anywhere.
+ */
+export function shapeSlugCandidates(
+  slugs: readonly SlugListingLike[],
+  pieces: readonly PieceListingLike[],
+): Candidate[] {
+  const named = new Map(
+    pieces.map((piece) => [piece.id, piece.name ?? piece.patternRef?.symbol]),
+  );
+  return slugs.map((entry) => {
+    const name = entry.piece ? named.get(entry.piece) : undefined;
+    return {
+      value: entry.slug,
+      description: name ? `slug for ${name}` : "slug",
+    };
+  });
 }
 
 /** Callables (handlers and streams) exposed by the line's `--piece`. */
@@ -313,6 +364,182 @@ export function splitPathPrefix(
 }
 
 /**
+ * Commands whose `--select`/`--schema` names positions in the value at the
+ * target the line already gives.
+ *
+ * `call` and `exec` shape a VERB's result instead, whose vocabulary is the
+ * verb's `outputSchema` rather than the piece's root — reading the root there
+ * would offer plausible names for a different value, which is worse than
+ * offering none. `wish` shapes what its query resolved to, and resolving a
+ * wish commits a cell to the space: a Tab must not write.
+ */
+const PROJECTION_SOURCE_COMMANDS: ReadonlySet<string> = new Set([
+  "piece get",
+  "get",
+]);
+
+/**
+ * Field paths into the value a read returns, for `--select` and `--schema`.
+ *
+ * The grammar is its own and is not the cell-path grammar: a list splits on
+ * `,` and a path on `.`, where a cell path walks `/`. A segment ending in `@`
+ * asks for that position's address rather than its value, and a bare `@` asks
+ * the read for its own — so both spellings of a position are offered.
+ *
+ * The vocabulary needs no request the slot does not already have: the value
+ * being projected is the one at the piece and path the line names, which is
+ * what `cf get` would read.
+ */
+function projectionFieldCandidates(
+  flag: "select" | "schema",
+): (line: CompletionLine) => Promise<ProviderResult> {
+  return async (line) => {
+    if (!PROJECTION_SOURCE_COMMANDS.has(line.path.join(" "))) return NOTHING;
+    // `--schema` reads a JSON Schema or an `@file` as well as this list, and
+    // both are recognized by their first character. Neither is a field path.
+    if (flag === "schema" && /^[@{]/.test(line.word)) return NOTHING;
+
+    const config = resolvePieceContext(line);
+    if (!config) return NOTHING;
+
+    const { list, path, prefix, atElementStart } = splitSelectPrefix(line.word);
+    const { getCellValue } = await import("../piece.ts");
+    const { parseCellPath } = await import("@commonfabric/runner");
+    const value = await getCellValue(
+      config,
+      [
+        ...(config.piecePath ?? []),
+        ...(line.positionals[0] ? parseCellPath(line.positionals[0]) : []),
+      ],
+      { input: line.flags.has("input") || config.pieceInput === true },
+    );
+
+    const candidates = shapeProjectionCandidates(
+      descendProjection(value, path),
+      `${list}${prefix}`,
+      // A path that is only the suffix names the position the read is already
+      // at, which no field path reaches. `--schema` does not accept it: a
+      // leading `@` there names a file.
+      { self: flag === "select" && atElementStart && list.length === 0 },
+    );
+    if (candidates.length === 0) return NOTHING;
+    // A field path continues with `.` or `,`, so hold the cursor in place the
+    // way a cell path does.
+    return { candidates, directives: [{ kind: "nospace" }] };
+  };
+}
+
+/**
+ * Split the projection word being typed into the part each candidate must
+ * carry back and the path already closed within the element being typed.
+ *
+ * `notes@,settings.the` is one closed element, then `settings.` closed within
+ * the element under the cursor: the candidates are `notes@,settings.theme` and
+ * its address spelling, because the shell replaces the whole word.
+ */
+export function splitSelectPrefix(typed: string): {
+  /** Elements already closed, trailing comma included. */
+  list: string;
+  /** Segments already closed within the element being typed. */
+  path: string[];
+  /** Those segments as written, trailing dot included. */
+  prefix: string;
+  /** Whether nothing has been typed yet in this element. */
+  atElementStart: boolean;
+} {
+  const comma = typed.lastIndexOf(",");
+  const list = comma === -1 ? "" : typed.slice(0, comma + 1);
+  const element = typed.slice(list.length);
+  const dot = element.lastIndexOf(".");
+  const prefix = dot === -1 ? "" : element.slice(0, dot + 1);
+  return {
+    list,
+    path: prefix ? prefix.slice(0, -1).split(".") : [],
+    prefix,
+    atElementStart: element.length === 0,
+  };
+}
+
+/**
+ * The value a projection path names, read the way a projection reads it: a
+ * list is element-wise across an array, so a segment below one names a field
+ * of each element rather than an index. `--select items.0.title` is refused
+ * for exactly that reason.
+ */
+export function descendProjection(
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  let current = value;
+  for (const name of path) {
+    if (Array.isArray(current)) {
+      current = current.map((element) =>
+        element && typeof element === "object"
+          ? (element as Record<string, unknown>)[name]
+          : undefined
+      );
+      continue;
+    }
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[name];
+  }
+  return current;
+}
+
+/**
+ * A name a concise field path can carry. `parseConciseSegment` holds a segment
+ * to an identifier grammar, and a trailing `@` in a name would be read as the
+ * address suffix — the escape that writes one needs shell quoting to survive,
+ * so such a key is left out rather than offered in a form that does not work.
+ */
+function isWritableFieldName(name: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$@-]*$/.test(name) && !name.endsWith("@");
+}
+
+/**
+ * The positions one level below a projection path: an array contributes its
+ * elements' fields rather than its indices, and a leaf contributes nothing.
+ */
+export function projectionKeys(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    const seen: string[] = [];
+    for (const element of value) {
+      for (const key of projectionKeys(element)) {
+        if (!seen.includes(key)) seen.push(key);
+      }
+    }
+    return seen;
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>);
+  }
+  return [];
+}
+
+/**
+ * Both spellings of every position below `value`, each carrying `prefix` so
+ * the shell replaces the whole word.
+ */
+export function shapeProjectionCandidates(
+  value: unknown,
+  prefix: string,
+  options: { self?: boolean } = {},
+): Candidate[] {
+  const candidates: Candidate[] = [];
+  if (options.self) {
+    candidates.push({ value: "@", description: "the read source's address" });
+  }
+  for (const key of projectionKeys(value).filter(isWritableFieldName)) {
+    candidates.push({ value: `${prefix}${key}` });
+    candidates.push({
+      value: `${prefix}${key}@`,
+      description: "its address",
+    });
+  }
+  return candidates;
+}
+
+/**
  * `pieceId/path/to/field` endpoints for `cf piece link`.
  *
  * Before the `/` the candidates are piece ids; after it they are that piece's
@@ -408,6 +635,8 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
   piece: pieceCandidates,
+  select: projectionFieldCandidates("select"),
+  schema: projectionFieldCandidates("schema"),
   space: () => spaceCandidates(),
   "api-url": () => Promise.resolve(apiUrlCandidates()),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
@@ -449,6 +678,9 @@ const ARGUMENT_PROVIDERS: Readonly<
   "set:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
   "piece link:target": linkEndpointCandidates,
+  // Naming an existing slug re-points it, which is the case completion helps
+  // with; a slug being coined for the first time is a word nothing can offer.
+  "piece set-slug:slug": slugCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,
   "check:files": patternFiles,

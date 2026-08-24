@@ -972,15 +972,25 @@ source <(cf completion bash)
 Completion covers the command tree — subcommands, flags, and enumerated values
 such as `--log-level` — plus live values read from the fabric:
 
-| Slot                            | Completes to                                |
-| ------------------------------- | ------------------------------------------- |
-| `--piece`                       | piece ids, annotated with each piece's name |
-| `cf call <callable>`            | the piece's callables, as `cf piece verbs`  |
-| `cf get`/`cf set <path>`        | cell keys, one path segment at a time       |
-| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
-| `--space`                       | space DIDs of local memory-v2 stores        |
-| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
-| `--datafile`                    | any file, via the shell                     |
+| Slot                            | Completes to                                   |
+| ------------------------------- | ---------------------------------------------- |
+| `--piece`                       | the space's slugs, then its piece ids          |
+| `cf call <callable>`            | the piece's callables, as `cf piece verbs`     |
+| `cf get`/`cf set <path>`        | cell keys, one path segment at a time          |
+| `cf get --select`/`--schema`    | field paths into the value, and their `@` form |
+| `piece set-slug <slug>`         | the space's slugs                              |
+| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints              |
+| `--space`                       | space DIDs of local memory-v2 stores           |
+| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell         |
+| `--datafile`                    | any file, via the shell                        |
+
+A projection's grammar is its own and not the cell path's: a list splits on `,`
+and a path on `.`, a trailing `@` asks for a position's address rather than its
+value, and a bare `@` asks the read for its own. A path below an array names a
+field of each element, because that is what the projection does with one.
+`cf call`'s and `cf exec`'s projections shape a verb's result rather than the
+piece's root, and are not completed from it; `cf wish`'s resolution writes to
+the space, and a Tab must not.
 
 An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the

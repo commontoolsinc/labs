@@ -852,13 +852,69 @@ function fullFlagUsage(flagName: string, schema: JSONSchema): string {
   return primaryFlagUsage(flagName, schema);
 }
 
-function specificFlagLines(schema: JSONSchema): string[] {
-  if (isSchemaLessHandlerInput(schema)) {
-    return [];
+/** One flag the schema-derived parser accepts for a verb's declared input. */
+export interface DeclaredVerbFlag {
+  /** The flag's long name, without dashes — `flagNameForKey`'s mapping. */
+  readonly name: string;
+  /** The declared field it fills; absent for a non-object input's own flags. */
+  readonly key?: string;
+  /** That field's schema, for a caller rendering a placeholder or a type. */
+  readonly schema?: JSONSchema;
+  /** Whether the payload door owes this field. */
+  readonly required: boolean;
+  /** Whether `--no-<name>` is accepted beside it. */
+  readonly negatable: boolean;
+}
+
+/**
+ * Every flag the schema-derived parser accepts for `inputSchema`, in
+ * declaration order — the order the help page lists them and the order the
+ * payload door names them in.
+ *
+ * The generic flags (`--json`, `--help`, and their `-file` forms) are not
+ * here: they are the same for every verb and belong to the command rather than
+ * to what the verb declared.
+ *
+ * The vocabulary rather than a rendering of it, so that a second surface
+ * naming these flags — shell completion is one — reads the same enumeration
+ * the help page does. Two readers of one schema is how a flag comes to be
+ * accepted by the parser and named by neither, or the reverse.
+ */
+export function declaredVerbFlags(inputSchema: JSONSchema): DeclaredVerbFlag[] {
+  if (isSchemaLessHandlerInput(inputSchema)) return [];
+
+  const properties = objectProperties(inputSchema);
+  if (!properties) {
+    // A non-object input is written whole, so its flags name the value rather
+    // than any field of one.
+    return [
+      {
+        name: "value",
+        schema: inputSchema,
+        required: true,
+        negatable: false,
+      },
+      { name: "value-file", required: false, negatable: false },
+    ];
   }
 
-  const properties = objectProperties(schema);
-  if (!properties) {
+  const required = requiredEventFieldsOwed(inputSchema);
+  return Object.entries(properties).map(([key, propertySchema]) => ({
+    name: flagNameForKey(key),
+    key,
+    schema: propertySchema,
+    required: required.has(key),
+    negatable: schemaType(propertySchema) === "boolean",
+  }));
+}
+
+function specificFlagLines(schema: JSONSchema): string[] {
+  const flags = declaredVerbFlags(schema);
+  if (flags.length === 0) return [];
+
+  // A non-object input is written whole, so its two flags name the value
+  // rather than any field, and their padding is fixed rather than fitted.
+  if (flags[0].key === undefined) {
     return [
       `  ${`--value ${valuePlaceholder(schema)}`.padEnd(20)}  Required.`,
       `  ${
@@ -867,42 +923,39 @@ function specificFlagLines(schema: JSONSchema): string[] {
     ];
   }
 
-  const required = requiredEventFieldsOwed(schema);
-  const descriptors = Object.entries(properties).map(
-    ([key, propertySchema]) => {
-      const flagName = flagNameForKey(key);
-      const parts: string[] = [];
-      if (key === "help") {
-        parts.push('Optional input field named "help".');
-      } else {
-        parts.push(required.has(key) ? "Required." : "Optional.");
-      }
-      const type = schemaType(propertySchema);
-      if (key === "help" && type === "boolean") {
-        parts.push("Boolean. Use --help=true or --no-help.");
-      } else if (type === "boolean") {
-        parts.push(
-          `Boolean. Use --${flagName} for true or --no-${flagName} for false.`,
-        );
-      }
-      const enumSummary = schemaEnumSummary(propertySchema);
-      if (enumSummary) {
-        parts.push(`Allowed: ${enumSummary}.`);
-      }
-      const defaultSummary = schemaDefaultSummary(propertySchema);
-      if (defaultSummary !== undefined) {
-        parts.push(`Default: ${defaultSummary}.`);
-      }
-      const description = schemaDescription(propertySchema);
-      if (description) {
-        parts.push(description);
-      }
-      return {
-        usage: fullFlagUsage(flagName, propertySchema),
-        detail: parts.join(" "),
-      };
-    },
-  );
+  const descriptors = flags.map((flag) => {
+    const key = flag.key!;
+    const propertySchema = flag.schema!;
+    const parts: string[] = [];
+    if (key === "help") {
+      parts.push('Optional input field named "help".');
+    } else {
+      parts.push(flag.required ? "Required." : "Optional.");
+    }
+    if (key === "help" && flag.negatable) {
+      parts.push("Boolean. Use --help=true or --no-help.");
+    } else if (flag.negatable) {
+      parts.push(
+        `Boolean. Use --${flag.name} for true or --no-${flag.name} for false.`,
+      );
+    }
+    const enumSummary = schemaEnumSummary(propertySchema);
+    if (enumSummary) {
+      parts.push(`Allowed: ${enumSummary}.`);
+    }
+    const defaultSummary = schemaDefaultSummary(propertySchema);
+    if (defaultSummary !== undefined) {
+      parts.push(`Default: ${defaultSummary}.`);
+    }
+    const description = schemaDescription(propertySchema);
+    if (description) {
+      parts.push(description);
+    }
+    return {
+      usage: fullFlagUsage(flag.name, propertySchema),
+      detail: parts.join(" "),
+    };
+  });
 
   const maxUsage = descriptors.reduce(
     (width, descriptor) => Math.max(width, descriptor.usage.length),

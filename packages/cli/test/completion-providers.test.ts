@@ -1,13 +1,18 @@
 import { assert, assertEquals } from "@std/assert";
 import { resolveCompletionLine } from "../lib/completion/line.ts";
 import {
+  descendProjection,
   keysOf,
   linkEndpointPrefix,
   liveCandidates,
+  projectionKeys,
   resolveSpaceContext,
   shapePieceCandidates,
+  shapeProjectionCandidates,
+  shapeSlugCandidates,
   shapeVerbCandidates,
   splitPathPrefix,
+  splitSelectPrefix,
 } from "../lib/completion/providers.ts";
 import { tokenizeLine } from "../lib/completion/mod.ts";
 import { main } from "../commands/main.ts";
@@ -361,6 +366,103 @@ Deno.test("shaping: callables are annotated by kind", () => {
       { value: "addItem", description: "handler" },
       { value: "search", description: "tool" },
     ],
+  );
+});
+
+Deno.test("shaping: a slug is labeled apart from the ids beside it", () => {
+  // Both are `--piece` values, so a candidate list mixing them has to say
+  // which is which — and where the slug resolves to a piece the listing named,
+  // what it points at is the question a caller is actually asking.
+  assertEquals(
+    shapeSlugCandidates(
+      [
+        { slug: "board", piece: "fid1:a" },
+        { slug: "orphan", piece: "fid1:missing" },
+        { slug: "unresolved" },
+      ],
+      [{ id: "fid1:a", name: "Completion fixture" }],
+    ),
+    [
+      { value: "board", description: "slug for Completion fixture" },
+      { value: "orphan", description: "slug" },
+      { value: "unresolved", description: "slug" },
+    ],
+  );
+});
+
+Deno.test("shaping: a projection word splits into the part carried back and the path", () => {
+  // The shell replaces the whole word, so a candidate has to carry every
+  // element already closed and every segment already typed in this one.
+  assertEquals(splitSelectPrefix(""), {
+    list: "",
+    path: [],
+    prefix: "",
+    atElementStart: true,
+  });
+  assertEquals(splitSelectPrefix("settings."), {
+    list: "",
+    path: ["settings"],
+    prefix: "settings.",
+    atElementStart: false,
+  });
+  assertEquals(splitSelectPrefix("items@,settings.the"), {
+    list: "items@,",
+    path: ["settings"],
+    prefix: "settings.",
+    atElementStart: false,
+  });
+  assertEquals(splitSelectPrefix("revision,"), {
+    list: "revision,",
+    path: [],
+    prefix: "",
+    atElementStart: true,
+  });
+});
+
+Deno.test("shaping: a projection path reads an array element-wise", () => {
+  // `--select items.title` projects each element; `--select items.0.title` is
+  // refused. Offering an index would name a path the command rejects.
+  assertEquals(
+    projectionKeys(descendProjection(
+      { items: [{ title: "a" }, { title: "b", pinned: true }] },
+      ["items"],
+    )),
+    ["title", "pinned"],
+  );
+  assertEquals(projectionKeys([{ a: 1 }, { b: 2 }]), ["a", "b"]);
+  assertEquals(projectionKeys({ a: 1 }), ["a"]);
+  for (const leaf of ["text", 42, true, null, undefined]) {
+    assertEquals(projectionKeys(leaf), [], String(leaf));
+  }
+});
+
+Deno.test("shaping: both spellings of a position are offered, each carrying the prefix", () => {
+  assertEquals(
+    shapeProjectionCandidates({ theme: "dark" }, "settings."),
+    [
+      { value: "settings.theme" },
+      { value: "settings.theme@", description: "its address" },
+    ],
+  );
+});
+
+Deno.test("shaping: the bare address suffix is offered only where it is asked for", () => {
+  const withSelf = shapeProjectionCandidates({ a: 1 }, "", { self: true });
+  assertEquals(withSelf[0].value, "@");
+  assertEquals(
+    shapeProjectionCandidates({ a: 1 }, "").map((c) => c.value),
+    ["a", "a@"],
+  );
+});
+
+Deno.test("shaping: a key the concise grammar cannot carry is not offered", () => {
+  // `parseConciseSegment` holds a segment to an identifier grammar, and a
+  // trailing `@` in a name reads as the address suffix. Offering either would
+  // name a path the command refuses.
+  assertEquals(
+    shapeProjectionCandidates({ "ok": 1, "not ok": 2, "trailing@": 3 }, "")
+      .map((candidate) => candidate.value),
+    ["ok", "ok@"],
   );
 });
 
