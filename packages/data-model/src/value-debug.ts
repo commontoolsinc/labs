@@ -1,11 +1,13 @@
 /** Debugging-ish helpers for `FabricValue`s. */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
+  FabricValue
 } from "./interface.ts";
 // Imported from its own module rather than the package barrel, deliberately:
 // the barrel pulls in every codec, and three of those import
@@ -16,6 +18,7 @@ import {
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -200,6 +203,136 @@ class DebugStringifier {
 }
 
 /**
+ * Helper class for converting values to their valid `FabricValue` debug
+ * representations.
+ */
+class DebugConverter {
+  #value: any;
+  #maxDepth: number;
+  #nestingStack = new Map<object, number>();
+
+  /**
+   * Constructs an instance.
+   */
+  constructor(
+    /** Value to convert. */
+    value: unknown,
+    /** Maxiumum nesting depth. */
+    maxDepth: number) {
+    this.#value = value;
+    this.#maxDepth = maxDepth;
+  }
+
+  /**
+   * Converts the configured value. This method must never be called more than
+   * once per instance of this class.
+   */
+  convert(): FabricValue {
+    try {
+      return this.#convertSubvalue(this.#value, 0);
+    } catch (e) {
+      const message = (() => {
+        if (e instanceof Error) {
+          const msg = e.message;
+          if (typeof msg === "string") {
+            return msg;
+          }
+        }
+        return String(e);
+      })();
+      return { "/unconvertible": message };
+    }
+  }
+
+  /**
+   * Converts the given value, which is known to be at the indicated nesting
+   * depth.
+   */
+  #convertSubvalue(value: any, depth: number): FabricValue {
+    // Handle all the straightforward cases.
+    switch (typeof value) {
+      case "bigint":
+      case "boolean":
+      case "number":
+      case "string":
+      case "undefined": {
+        return value;
+      }
+
+      case "symbol": {
+        const key = Symbol.keyFor(value);
+        if (key === undefined) {
+          // Unique (uninterned) symbol.
+          return { "/uniqueSymbol": value };
+        } else {
+          // Interned symbol.
+          return value;
+        }
+      }
+
+      case "function": {
+        const name = value.name;
+        const content = (name && (name !== undefined))
+          ? `${name}(...)`
+          : "<anonymous>(...)";
+        return { "/function": content };
+      }
+
+      case "object": {
+        if (value === null) {
+          return null;
+        }
+        break;
+      }
+
+      default: {
+        throw new Error(`Shouldn't happen: unknown type \`${typeof value}\``);
+      }
+    }
+
+    // We have a non-null object of some sort.
+
+    const nestedAt = this.#nestingStack.get(value);
+    if (nestedAt !== undefined) {
+      return { "/circle": nestedAt };
+    }
+
+    if (depth >= this.#maxDepth) {
+      return { "/...": toDebugKindString(value) };
+    }
+
+    if (value instanceof FabricPrimitive) {
+      return value;
+    }
+
+    this.#nestingStack.set(value, depth);
+
+    try {
+      if (value instanceof FabricInstance) {
+        const codec = codecOf(value);
+        const tag = codec.tagForValue(value);
+        const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
+        return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
+      } else if (Array.isArray(value)) {
+        return value.map((item, _index): FabricValue => this.#convertSubvalue(item, depth + 1));
+      } else if (isPlainObject(value)) {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, value]): [string, FabricValue] => [key, this.#convertSubvalue(value, depth + 1)])
+        );
+      } else {
+        // General instance.
+        const className =
+          (value as { constructor?: { name?: string } }).constructor?.name ??
+            "<anonymous>";
+        return { [`/${className}`]: value.toString() };
+      }
+    } finally {
+      this.#nestingStack.delete(value);
+    }
+  }
+}
+
+/**
  * Renders the debug-string form of the given value with optional indentation.
  */
 function renderDebugString(value: unknown, indent?: number) {
@@ -309,4 +442,56 @@ export function toDebugKindString(value: unknown): string {
   }
   if (isPlainObject(value)) return "object";
   return value.constructor?.name ?? "object";
+}
+
+/**
+ * Produces a valid `FabricValue` meant to represent the given value as
+ * accurately as possible, suitable for use in debugging, including rendering as
+ * a debug string or including in a structured debug log. All valid
+ * `FabricValue`s are self-represented in the result. Beyond that, no specific
+ * guarantees are made as to the exact nature of the conversion. The general aim
+ * is to represent non-`FabricValue` results in a way reminiscent of the
+ * `codec-json` encoding form, and with as little chance for ambiguity as can
+ * be reasonably achieved.
+ *
+ * If the given `maxDepth` is specified, that is the nesting limit of the
+ * result. Any items which would require further nesting are instead converted
+ * into a form suggestive of the elided information.
+ *
+ * If the conversion could not be completed (stack overflow, object
+ * `toJSON()` conversion error, etc.), this function returns the literal value
+ * `{ "/unconvertible": "<errorMessage>" }`.
+ *
+ * @throws {Error} if given an invalid value for `maxDepth`.
+ */
+export function toStructuredDebugValue(
+  /** Value to convert. */
+  value: any,
+  /**
+   * Maximum depth of result nesting. Must be a positive integer if
+   * specified.
+   */
+  maxDepth?: number): FabricValue {
+
+  // Validate `maxDepth` and transform as necessary.
+  maxDepth = (() => {
+    switch (typeof maxDepth) {
+      case "number": {
+        if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
+          return maxDepth;
+        }
+        break;
+      }
+      case "undefined": {
+        return Infinity;
+      }
+    }
+
+    const badDepth = backtickQuote(toCompactDebugString(maxDepth, 20));
+    throw new Error(`\`maxDepth\` must be an integer or \`undefined\`; got ${badDepth}`);
+  })();
+
+  // We subtract one from `maxDepth` because the "suggestive forms" for elided
+  // data all use one layer of depth.
+  return new DebugConverter(value, maxDepth - 1).convert();
 }
