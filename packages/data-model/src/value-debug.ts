@@ -125,10 +125,12 @@ class DebugStringifier {
           return marked("Infinity");
         } else if (value === -Infinity) {
           return marked("-Infinity");
-        } else {
-          // Shouldn't happen; there aren't any other non-finite possibilites.
-          return marked(`<non-finite ${value}>`);
         }
+
+        // Shouldn't happen; there aren't any other non-finite possibilites.
+        // deno-coverage-ignore-start
+        return marked(`<non-finite ${value}>`);
+        // deno-coverage-ignore-stop
       }
 
       case "object": {
