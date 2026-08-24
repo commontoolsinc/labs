@@ -130,8 +130,8 @@ class DebugStringifier {
         // Shouldn't happen; there aren't any other non-finite possibilites.
         // deno-coverage-ignore-start
         return marked(`<non-finite ${value}>`);
-        // deno-coverage-ignore-stop
       }
+      // deno-coverage-ignore-stop
 
       case "object": {
         if (value === null) {
