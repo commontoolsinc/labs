@@ -356,42 +356,44 @@ class DebugConverter {
 
     // We have a non-null object of some sort.
 
-    if (value instanceof FabricPrimitive) {
-      // These can in effect require an additional layer of nesting to convert,
-      // by the time they actually hit _some_ real transports. We hereby accept
-      // the fact that there can be an arguable inconsistency between intended
-      // and actual maximum nesting when these are converted "at the edge."
-      return value;
-    }
-
-    const nestedAt = this.#nestingStack.get(value);
-    if (nestedAt !== undefined) {
-      return { "/circle": nestedAt };
-    }
-
-    if (depth >= this.#maxDepth) {
-      return { "/...": toDebugKindString(value) };
-    }
-
-    this.#nestingStack.set(value, depth);
-
     try {
-      if (value instanceof FabricInstance) {
-        const codec = codecOf(value);
-        const tag = codec.tagForValue(value);
-        const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
-        return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
-      } else if (Array.isArray(value)) {
-        return this.#convertArray(value, depth);
-      } else if (isPlainObject(value)) {
-        return this.#convertPlainObject(value, depth);
-      } else {
-        return this.#convertInstance(value, depth);
+      if (value instanceof FabricPrimitive) {
+        // These can in effect require an additional layer of nesting to convert,
+        // by the time they actually hit _some_ real transports. We hereby accept
+        // the fact that there can be an arguable inconsistency between intended
+        // and actual maximum nesting when these are converted "at the edge."
+        return value;
+      }
+
+      const nestedAt = this.#nestingStack.get(value);
+      if (nestedAt !== undefined) {
+        return { "/circle": nestedAt };
+      }
+
+      if (depth >= this.#maxDepth) {
+        return { "/...": toDebugKindString(value) };
+      }
+
+      this.#nestingStack.set(value, depth);
+
+      try {
+        if (value instanceof FabricInstance) {
+          const codec = codecOf(value);
+          const tag = codec.tagForValue(value);
+          const contents = codec.encode(value, NULL_LIVE_ENVIRONMENT);
+          return { [`/${tag}`]: this.#convertSubvalue(contents, depth + 1) };
+        } else if (Array.isArray(value)) {
+          return this.#convertArray(value, depth);
+        } else if (isPlainObject(value)) {
+          return this.#convertPlainObject(value, depth);
+        } else {
+          return this.#convertInstance(value, depth);
+        }
+      } finally {
+        this.#nestingStack.delete(value);
       }
     } catch (e) {
       return DebugConverter.#makeErrorResult(e);
-    } finally {
-      this.#nestingStack.delete(value);
     }
   }
 
