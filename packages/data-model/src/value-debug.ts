@@ -418,13 +418,13 @@ class DebugConverter {
    */
   static #makeErrorResult(error: any) {
     const message = (() => {
-      if (error instanceof Error) {
-        const msg = error.message;
-        if (typeof msg === "string") {
-          return msg;
-        }
-      }
       try {
+        if (error instanceof Error) {
+          const msg = error.message;
+          if (typeof msg === "string") {
+            return msg;
+          }
+        }
         return String(error);
       } catch {
         return "/unconvertibleError";
