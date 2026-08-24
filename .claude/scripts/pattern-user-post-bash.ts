@@ -618,9 +618,8 @@ function suggestionForCommandSegment(words: string[]): string {
   const normalizedWords = words.map((word) =>
     word.replace(/^\(+/, "").replace(/\)+$/, "")
   );
-  // `get`, `set` and `call` are spelled both ways until the `cf piece` forms
-  // retire, and an agent that has moved to the top-level spelling still wants
-  // the guidance. Everything else on `piece` has only the nested spelling.
+  // The data commands are spelled either way: `cf get` and `cf piece get` name
+  // one command. Every other verb is reached only through `piece`.
   const TOP_LEVEL_DATA_COMMANDS = new Set(["get", "set", "call"]);
   const cfIndex = normalizedWords.findIndex((word, index) =>
     word === "cf" &&
@@ -630,8 +629,8 @@ function suggestionForCommandSegment(words: string[]): string {
   if (cfIndex < 0) return "";
 
   const commandWords = normalizedWords.slice(cfIndex);
-  // The verb sits one word later when `piece` is present. Reading it by name
-  // rather than by position is what lets both spellings reach the same branch.
+  // An optional `piece` segment shifts the verb one word along, so the verb is
+  // located by what precedes it rather than by a fixed index.
   const pieceCommand = commandWords[1] === "piece"
     ? commandWords[2]
     : commandWords[1];

@@ -346,17 +346,17 @@ describe("pattern-user-post-bash", () => {
       ).toContain("Run 'cf piece step'");
     });
 
-    it("gives the same guidance under the top-level data spellings", () => {
-      // `cf get`/`set`/`call` are the spellings that survive the retirement of
-      // the `cf piece` forms. Keying on the word after `cf` alone would find
-      // no verb here and return nothing, so an agent that had moved to the new
-      // spelling would silently stop being guided.
+    it("gives the same guidance whether or not a data command names piece", () => {
+      // `set` is the only data command carrying guidance, so it is the only
+      // one whose two spellings can be compared for anything. Asserting the
+      // text as well as the equality keeps the comparison from holding
+      // because both sides are empty.
+      const nested = suggestionForPatternUserCommand(
+        "cf piece set --piece ID title",
+      );
+      expect(nested).toContain("Run 'cf piece step'");
       expect(suggestionForPatternUserCommand("cf set --piece ID title"))
-        .toContain("Run 'cf piece step'");
-      expect(suggestionForPatternUserCommand("cf call --piece ID handler"))
-        .toBe(suggestionForPatternUserCommand("cf piece call --piece ID handler"));
-      expect(suggestionForPatternUserCommand("cf get --piece ID title"))
-        .toBe(suggestionForPatternUserCommand("cf piece get --piece ID title"));
+        .toBe(nested);
     });
 
     it("still ignores a bare cf whose next word names no data command", () => {
