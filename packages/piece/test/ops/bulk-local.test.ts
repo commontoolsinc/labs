@@ -116,8 +116,10 @@ describe("bulk-local", () => {
         });
         expect(op.symbol).toBe("default");
         // The op the codec accepts is the op the apply performs: the empty
-        // export is gone, not carried as text the resolver would drop.
-        expect(op.source.mainExport).toBeUndefined();
+        // export is gone, not carried as text the resolver would drop. The
+        // key itself must be absent — present-but-undefined would survive
+        // an undefined-tolerant serializer as text saying "".
+        expect(Object.hasOwn(op.source, "mainExport")).toBe(false);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }

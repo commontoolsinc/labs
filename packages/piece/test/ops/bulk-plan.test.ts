@@ -170,18 +170,54 @@ describe("bulk-plan", () => {
       ).toThrow("row 1");
       // The resolver drops a falsy export and runs the default, so a row
       // saying "" would execute something its text does not say.
+      // The symbol here is the one an empty export would resolve to, so the
+      // refusal this case exercises is the export's, not the symbol's.
       const emptyExport = {
         ...plan.rows[0],
         op: {
           kind: "retarget",
           source: { main: "topic.tsx", mainExport: "" },
           patternIdentity: "x",
-          symbol: "",
+          symbol: "default",
         },
       };
       expect(() =>
         decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(emptyExport))
       ).toThrow("row 1");
+    });
+
+    it("throws for an empty revision, on a restore op and on an expectation", () => {
+      const plan = retargetPlan();
+      const emptyRestore = {
+        ...plan.rows[0],
+        op: {
+          kind: "restore",
+          patternIdentity: "x",
+          symbol: "default",
+          revisionId: "",
+        },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(emptyRestore))
+      ).toThrow("row 1");
+      const emptyExpect = {
+        ...plan.rows[0],
+        op: undefined,
+        expect: { ...plan.rows[0].expect, revisionId: "" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(emptyExpect))
+      ).toThrow("row 1");
+    });
+
+    it("throws for an enumeration count that no selection can produce", () => {
+      for (const collection of [-1, 2.5, Number.NaN]) {
+        const bad = {
+          ...header,
+          enumerated: { ...header.enumerated, collection },
+        };
+        expect(() => decodePlan(JSON.stringify(bad) + "\n")).toThrow("header");
+      }
     });
 
     it("throws for a restore op whose revision is not a string", () => {

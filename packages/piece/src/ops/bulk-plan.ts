@@ -333,6 +333,20 @@ function isOptionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
 }
 
+/**
+ * An optional field that names something — absent, or a nonempty string.
+ * An empty name would round-trip through the codec but resolve nothing.
+ */
+function isOptionalName(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === "string" && value !== "");
+}
+
+/** An enumeration count: a selection size no real selection can exceed. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= 0;
+}
+
 function isOptionalStringArray(
   value: unknown,
 ): value is readonly string[] | undefined {
@@ -349,9 +363,8 @@ function isPlanHeader(value: unknown): value is PiecePlanHeader {
     typeof value.space !== "string" || typeof value.takenAt !== "string" ||
     (value.selector !== "collection" && value.selector !== "list") ||
     !isRecord(enumerated) ||
-    typeof enumerated.collection !== "number" ||
-    typeof enumerated.registry !== "number" ||
-    typeof enumerated.registeredOutside !== "number" ||
+    !isCount(enumerated.collection) || !isCount(enumerated.registry) ||
+    !isCount(enumerated.registeredOutside) ||
     !(value.problems === undefined ||
       (Array.isArray(value.problems) && value.problems.every(isProblem))) ||
     !(value.outside === undefined ||
@@ -389,7 +402,7 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
     expect.patternIdentity === "" ||
     typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
-    !isOptionalString(expect.revisionId)
+    !isOptionalName(expect.revisionId)
   ) return false;
   if (value.op === undefined) return true;
   if (!isPieceOp(value.op)) return false;
@@ -407,7 +420,7 @@ function isPieceOp(value: unknown): value is PieceOp {
     value.patternIdentity === "" ||
     typeof value.symbol !== "string" || value.symbol === ""
   ) return false;
-  if (value.kind === "restore") return isOptionalString(value.revisionId);
+  if (value.kind === "restore") return isOptionalName(value.revisionId);
   if (value.kind !== "retarget") return false;
   const source = value.source;
   if (!isRecord(source) || typeof source.main !== "string") return false;
