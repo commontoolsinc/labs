@@ -1318,7 +1318,7 @@ export class Runner {
   // still current. Entries are removed when their attempt settles; a stale
   // entry (stop moved the doc's generation, or the epoch changed) is
   // overwritten by the fresh attempt that replaces it.
-  private inFlightStartsByDoc = new Map<string, StartAttempt>();
+  #inFlightStartsByDoc = new Map<string, StartAttempt>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -2308,7 +2308,7 @@ export class Runner {
     options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
-    const inFlight = this.inFlightStartsByDoc.get(startKey);
+    const inFlight = this.#inFlightStartsByDoc.get(startKey);
     if (
       inFlight?.settled !== undefined && this.isStartAttemptCurrent(inFlight)
     ) {
@@ -2347,7 +2347,7 @@ export class Runner {
           this.finishStartAttempt(attempt);
         });
       attempt.settled = settled;
-      this.inFlightStartsByDoc.set(startKey, attempt);
+      this.#inFlightStartsByDoc.set(startKey, attempt);
       return settled;
     } catch (error) {
       this.finishStartAttempt(attempt);
@@ -4576,8 +4576,8 @@ export class Runner {
   private finishStartAttempt(attempt: StartAttempt): void {
     this.activeStartAttempts.delete(attempt);
     for (const key of attempt.generationsByDoc.keys()) {
-      if (this.inFlightStartsByDoc.get(key) === attempt) {
-        this.inFlightStartsByDoc.delete(key);
+      if (this.#inFlightStartsByDoc.get(key) === attempt) {
+        this.#inFlightStartsByDoc.delete(key);
       }
       const active = this.activeStartAttemptsByDoc.get(key);
       if (!active?.delete(attempt)) continue;
@@ -4662,7 +4662,7 @@ export class Runner {
     this.lifecycleEpoch++;
     // The epoch change already makes every held attempt non-current, so no
     // later start can join one; dropping the index releases the attempts too.
-    this.inFlightStartsByDoc.clear();
+    this.#inFlightStartsByDoc.clear();
     this.independentlyStartedResults.clear();
     for (const key of [...this.pendingDeferredStarts.keys()]) {
       this.cancelPendingDeferredStarts(key);

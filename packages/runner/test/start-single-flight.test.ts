@@ -61,11 +61,19 @@ describe("start()", () => {
 
   it("returns the in-flight attempt's outcome to a concurrent start of the same doc", async () => {
     const resultCell = await stoppedPiece("single flight join");
+    // Independently obtained handles for the same doc — a fresh cell from the
+    // same address, and a subpath cell into it. The join is keyed by doc, so
+    // both join the first attempt; object identity plays no part.
+    const freshHandle = runtime.getCell<{ doubled: number }>(
+      space,
+      "single flight join",
+    );
     const first = runtime.runner.start(resultCell);
-    const second = runtime.runner.start(resultCell);
-    expect(second).toBe(first);
+    const viaFreshHandle = runtime.runner.start(freshHandle);
+    const viaSubpath = runtime.runner.start(resultCell.key("doubled"));
+    expect(viaFreshHandle).toBe(first);
+    expect(viaSubpath).toBe(first);
     expect(await first).toBe(true);
-    expect(await second).toBe(true);
     await resultCell.pull();
     await runtime.idle();
     expect(resultCell.key("doubled").getAsQueryResult()).toBe(6);
