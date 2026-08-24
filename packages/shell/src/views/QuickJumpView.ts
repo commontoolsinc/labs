@@ -1,7 +1,5 @@
 import type { DID } from "@commonfabric/identity";
 import { navigate } from "@commonfabric/navigation";
-import { PageHandle } from "@commonfabric/runtime-client";
-import { Task } from "@lit/task";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 
@@ -114,40 +112,8 @@ export class XQuickJumpView extends BaseView {
 
   private inputEl?: HTMLInputElement | null;
 
-  private _pieces = new Task(this, {
-    task: async ([rt, space]) => {
-      if (!rt || !space) return undefined;
-      await rt.synced(space);
-
-      const piecesListCell = await rt.getPiecesListCell(space);
-      await piecesListCell.sync();
-
-      const piecesList = piecesListCell.get() as any[];
-      if (!piecesList) return [];
-
-      // @TODO(runtime-worker-refactor)
-      /*
-      const handles: PageHandle[] = [];
-      for (const pieceData of piecesList) {
-        const id = isCellHandle(pieceData) ? pieceData.id() : pieceData?.$ID;
-        if (id) {
-          const piece = await rt.getPattern(id);
-          if (piece) {
-            handles.push(piece);
-          }
-        }
-      }
-      */
-      return [];
-    },
-    args: () => [this.rt, this.space],
-  });
-
   override updated(changed: Map<string, unknown>) {
     super.updated(changed);
-    if (changed.has("rt")) {
-      this._pieces.run();
-    }
     if (changed.has("visible") && this.visible) {
       // Focus input when opened
       this.updateComplete.then(() => {
@@ -168,12 +134,12 @@ export class XQuickJumpView extends BaseView {
     });
   }
 
+  // @TODO(runtime-worker-refactor): the palette lists no pieces yet. Piece
+  // handles come back with that refactor; until then nothing here fetches, so
+  // opening the palette costs nothing. `rt` and `space` stay as properties for
+  // that revival and for the parent bindings that already set them.
   private getItems(): PieceItem[] {
-    const list = this._pieces.value || [];
-    return list.map((c: PageHandle) => ({
-      id: c.id(),
-      name: c.name() ?? "Untitled Piece",
-    }));
+    return [];
   }
 
   private containsInsensitive(a: string, b: string): boolean {
