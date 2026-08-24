@@ -1,8 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
+import type { Identity } from "@commonfabric/identity";
 import {
   DEFAULT_MAX_OUTSTANDING_EFFECTS,
   serverExecutionPolicyFromEnv,
+  startServerExecutionHost,
 } from "@/lib/server-execution.ts";
 
 // The Phase-6 env knobs (serving-loop.md §5) are the production
@@ -91,5 +94,51 @@ describe("serverExecutionPolicyFromEnv", () => {
     expect(warnings.length).toBe(2);
     expect(warnings[0]).toContain("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
     expect(warnings[1]).toContain("SERVER_EXECUTION_EGRESS_RATE_PER_S");
+  });
+});
+
+// The OFF witness for the serving-loop bootstrap (OW45 arm-B
+// server-ensure stage 1's explicit pin; the arc's OFF byte-identity
+// bar): with the flag OFF — unset (the first-party default is OFF until
+// the flip PR) or explicitly "false" — `startServerExecutionHost`
+// returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
+// built, and the server-side space-root ensure path added by stage 1
+// (the SpaceServer activation owed-step) structurally does not exist
+// OFF. The seat's only reachability chain is toolshed bootstrap →
+// ExecutorHost → SpaceServer.activate, and it severs at its first link.
+//
+// The options are untouchable fakes on purpose: the flag check is the
+// function's FIRST act, so the OFF arm must touch neither the server
+// nor the identity — any use throws and fails the pin.
+describe("startServerExecutionHost OFF witness", () => {
+  const untouchable = <T extends object>(label: string): T =>
+    new Proxy({} as T, {
+      get(_target, property) {
+        throw new Error(
+          `${label}.${String(property)} touched on the OFF arm — the ` +
+            "flag check must precede any use",
+        );
+      },
+    });
+
+  it("is inert with the flag unset (the first-party default: OFF until the flip PR)", () => {
+    const host = startServerExecutionHost({
+      server: untouchable<MemoryServer>("server"),
+      identity: untouchable<Identity>("identity"),
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: () => undefined,
+    });
+    expect(host).toBeUndefined();
+  });
+
+  it("is inert with the flag explicitly false", () => {
+    const host = startServerExecutionHost({
+      server: untouchable<MemoryServer>("server"),
+      identity: untouchable<Identity>("identity"),
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: (name) =>
+        name === "EXPERIMENTAL_SERVER_EXECUTION" ? "false" : undefined,
+    });
+    expect(host).toBeUndefined();
   });
 });
