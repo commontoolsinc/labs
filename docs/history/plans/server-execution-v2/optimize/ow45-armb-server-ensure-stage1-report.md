@@ -197,6 +197,36 @@ start. Both recorded as the ruling's coverage, not extended.
   direction today; a dedicated knob-ON second-server lane step remains
   the named option if binary-true ON coverage is wanted in CI.
 
+## Board notes (the merge window)
+
+- **OW57/CT-2060 recurring** — the final head's first board redded
+  `Runner Tests (1/8)` on the `(α3) + a same-eventId SIBLING tx` step
+  of `executor-events-down.test.ts` with exactly the registered
+  signature (one `consequenced: true` server-fired `ping` entry
+  durable at the probe where zero were expected — the held-wave
+  settle-gate race the OW57 row itself says "is this race, not a
+  product regression"). Recorded here as a RECURRENCE of the
+  registered flake, citing the row (verification-coverage.md OW57,
+  tracked CT-2060; #6184's hardening measured reduced-not-eliminated;
+  fix in flight as PR #6177) rather than as a new diagnosis. The
+  attribution ritual ran before the identification closed it:
+  identical product+test code green on the previous run (a 65-line
+  docs-only delta between the heads), 8/8 local green at head AND base
+  including two concurrent-pressure runs, and the honest reachability
+  note that this PR's ensure is inert in those fixture spaces (no ACL
+  → one synchronous read + the latch; no transaction, no wave).
+  Cleared green on the failed-jobs re-run at the same head.
+- **Coverage-gate measurement noise, observed on the re-run**: the
+  re-measured board then reported `packages/memory +3` with the gate's
+  own attribution line — "Regression not attributable to this PR's
+  added lines: 3 line(s) across 1 unchanged file(s) that the baseline
+  run covered" — i.e., nondeterministic execution in an unchanged
+  memory file across runs, not this PR's lines (the runner group's
+  accepted +16 was read and honored). Disposition: no acceptance
+  marker minted for noise pre-emptively; the fresh board re-measures,
+  and only a recurrence gets the gate's own copy-paste line with this
+  note as its justification.
+
 ## Flagged, not filled
 
 - **OW55's self-pin (design open question 9).** The ensure's fetch
