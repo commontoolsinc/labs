@@ -401,13 +401,22 @@ the same work wins the race.
 
 Stated as gaps rather than inferred:
 
-- **Which piece each of commits 1–4 belongs to, by name.** Their compositions,
-  their document sets, their disjointness and their piece-root counts are
-  measured; the mapping from each commit to a named pattern/piece in the default
-  app is not. In particular I did **not** establish that commit 4 is the setup
-  half of the *same* piece commit 5 instantiates — their `cid:` sets are
-  disjoint, which points at different patterns. The chain is a descent through a
-  piece graph; its exact parentage was not resolved.
+- **The TRIGGER of commits 1–4, and which piece each belongs to.** This is the
+  half of the brief's question 1 that is not settled. Commit 5's trigger is
+  established — it is the deferred start tx minted in
+  `startAfterSuccessfulCommit`'s commit callback, identified by composition
+  match with the census and by the `tx-commit-error … Error committing deferred
+  start transaction` signature. Commits 1–4 are characterized only by *what they
+  contain* (composition, document sets, disjointness, piece-root counts), not by
+  which code path issued them. Each could be another deferred start, an
+  `editWithRetry` originating tx, or one of `startCore`'s self-minted
+  fire-and-forget `piece-instantiate/…` transactions
+  (`runner.ts:2507-2582`); the server-side tap cannot tell these apart, and I
+  did not add the client-side instrumentation that could. Relatedly I did **not**
+  establish that commit 4 is the setup half of the *same* piece commit 5
+  instantiates — their `cid:` sets are disjoint, which points at different
+  patterns. The chain is a descent through a piece graph; its exact parentage
+  was not resolved.
 - ~~Whether the four piece roots are the navigated piece or its children.~~
   **Resolved** — they are children (`BacklinksIndex`, `SummaryIndex`, and two
   `Grid View` instances of one pattern). What is still *not* established is
