@@ -337,8 +337,10 @@ Counts at the final tree (one file per invocation):
 - `packages/toolshed` `lib/server-execution.test.ts` — 6/6 steps (the
   OFF witness pins included).
 - Neighboring executor suites at the final tree:
-  `executor-space-server.test.ts`, `executor-warm-request.test.ts`,
-  `executor-trust-attribution.test.ts` — see the PR's test plan for
-  the counts of the final run.
+  `executor-space-server.test.ts` 15/15 steps,
+  `executor-warm-request.test.ts` 8/8 steps,
+  `executor-trust-attribution.test.ts` 17/17 steps; and
+  `v2-server-acl.test.ts` 39/39 (the memory server's ACL machinery
+  around the new read API).
 - The live gate: the measurement ledger above (r02–r06 5/5 green with
   the step running; r01 the served-inert control).
