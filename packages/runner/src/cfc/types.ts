@@ -587,8 +587,10 @@ export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
  * Whether the envelope persist path stores the DECOMPOSED spelling: the
  * metadata's `schemaHash` names a root document whose `$defs` members are
  * separate content-addressed documents (see {@link CfcMetadata}). Off
- * stores the self-contained inline form. Reading resolves references
- * whenever the stored root carries them, in either setting. Ships behind
+ * preserves the merged schema's interned spelling — which may itself
+ * carry references a reference-form declared schema left. Reading
+ * resolves references whenever the stored root carries them, in either
+ * setting. Ships behind
  * a flag because a runner that predates reference resolution walks a
  * decomposed root's `$ref: cid:` members as inert schema content and
  * silently under-labels: every deployed reader must resolve (or fail

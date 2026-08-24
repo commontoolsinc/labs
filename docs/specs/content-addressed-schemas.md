@@ -334,9 +334,11 @@ not deletions.
 The commit boundary also validates the closure a commit's content
 references: every schema ref introduced by a set's document, a patch's
 own values, an installed schema document's own refs, or the
-`cfc.schemaHash` a document's stored CFC envelope names (in a set's
-value, or in the post-patch document of any patch sequence whose
-pointers can reach the reserved `cfc` member) must be backed —
+`cfc.schemaHash` a document's stored CFC envelope names (in a
+non-`cid:` set's value, or in the post-patch document of any patch
+sequence whose pointers can reach the reserved `cfc` member — a `cid:`
+document's own `cfc` member is deliberately not a metadata position and
+is never collected) must be backed —
 in the same commit or already stored in the space — by a document whose
 content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content

@@ -857,6 +857,85 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
       Error,
       "entity document",
     );
+
+    // A SCOPED patch replays over the document at its OWN scope — the
+    // space-scoped instance (absent here) is not the document a
+    // user-scoped patch lands on, and validating against it would let a
+    // scoped envelope be re-pointed at an unbacked hash.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      principal: "did:key:scoped-author",
+      commit: commit(11, {
+        operations: [{
+          op: "set",
+          id: "of:scoped-envelope-carrier",
+          scope: "user",
+          value: {
+            value: { field: "v" },
+            cfc: {
+              version: 1,
+              schemaHash: envelopeHash,
+              labelMap: { version: 1, entries: [] },
+            },
+          },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          principal: "did:key:scoped-author",
+          commit: commit(12, {
+            operations: [{
+              op: "patch",
+              id: "of:scoped-envelope-carrier",
+              scope: "user",
+              patches: [{
+                op: "replace",
+                path: "/cfc/schemaHash",
+                value: "fid1:scoped-unbacked-hash",
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // Operations in ONE commit compose: a set stages the base a later
+    // patch rewrites, so the patch validates against what THIS commit
+    // leaves, never against durable pre-commit state alone.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(13, {
+            operations: [{
+              op: "set",
+              id: "of:intra-commit-carrier",
+              value: {
+                value: { field: "v" },
+                cfc: {
+                  version: 1,
+                  schemaHash: "",
+                  labelMap: { version: 1, entries: [] },
+                },
+              },
+            } as never, {
+              op: "patch",
+              id: "of:intra-commit-carrier",
+              patches: [{
+                op: "replace",
+                path: "/cfc/schemaHash",
+                value: "fid1:intra-commit-unbacked",
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
   });
 });
 

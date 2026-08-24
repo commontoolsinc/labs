@@ -4472,17 +4472,6 @@ const coalesceLabelEntries = (
 };
 
 /**
- * The version-2 spelling of an envelope schema: its decomposed root
- * document, ready to ensure. `undefined` keeps the version-1 inline form —
- * decomposition refused the input, or the root reduced to a `$defs`
- * fragment reference, which `CfcMetadata.schemaHash` (a bare document
- * hash) cannot carry. Registering the closure makes every member
- * resolvable in-session; ensuring the root then stages the whole closure
- * through the shared schema-document staging, so the documents ride the
- * same transaction as the metadata that references them (the write-side
- * delivery guarantee the commit boundary enforces).
- */
-/**
  * Whether two envelope spellings decompose to the SAME root document —
  * equality over the content-addressed form, where authored `$defs` names
  * (which recomposition does not preserve) are matching-inert. This is the
@@ -4513,8 +4502,18 @@ export const decomposeToSameRoot = (
   }
 };
 
-// Exported for unit testing of the fallback arms; the metadata build is the
-// one production caller.
+/**
+ * The decomposed spelling of an envelope schema: its root document, ready
+ * to ensure. `undefined` keeps the inline spelling — decomposition
+ * refused the input, or the root reduced to a `$defs` fragment reference,
+ * which `CfcMetadata.schemaHash` (a bare document hash) cannot carry.
+ * Registering the closure makes every member resolvable in-session;
+ * ensuring the root then stages the whole closure through the shared
+ * schema-document staging, so the documents ride the same transaction as
+ * the metadata that references them (the write-side delivery guarantee
+ * the commit boundary enforces). Exported for unit testing of the
+ * fallback arms; the metadata build is the one production caller.
+ */
 export const decomposeEnvelopeRoot = (
   schema: JSONSchema,
 ): { rootHash: string; rootDocument: JSONSchema } | undefined => {

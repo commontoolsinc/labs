@@ -523,9 +523,10 @@ export interface RuntimeOptions {
    * Defaults to `false`. When true, the envelope persist path stores the
    * decomposed spelling: the metadata's `schemaHash` names a root document
    * whose `$defs` members are separate content-addressed documents, shared
-   * with the link-schema family. Off stores the self-contained inline
-   * form. Reading resolves references whenever the stored root carries
-   * them, in either setting.
+   * with the link-schema family. Off preserves the merged schema's
+   * interned spelling, which may itself carry references. Reading
+   * resolves references whenever the stored root carries them, in either
+   * setting.
    */
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
   /**

@@ -679,7 +679,9 @@ the per-epic implementation notes).
   spelling: the metadata's `schemaHash` names a root document whose
   `$defs` members are separate content-addressed documents, shared with
   the link-schema document family and elided once the space's server
-  confirms them. Off stores the self-contained inline form. Reading is
+  confirms them. Off preserves the merged schema's interned spelling —
+  which may itself carry references a reference-form declared schema
+  left, as the same section notes. Reading is
   the same either way — every `$ref: cid:` member a stored root carries
   resolves (space-first, content-verified, with the hash-verified realm
   registry supplying what the space does not hold) or the envelope is

@@ -1368,8 +1368,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Stages `cid:<rootHash>` and its referenced closure into this
    * transaction from the realm registry, with per-transaction dedupe and
    * the confirmed-persistence elision (see ExtendedStorageTransaction).
-   * Optional the way the other staging seams are; a caller without it
-   * falls back to writing the document itself.
+   * Required: every schema-document write rides this seam, so the
+   * dedupe, the elision, and the closure recursion cannot be bypassed by
+   * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
   tx: IStorageTransaction;

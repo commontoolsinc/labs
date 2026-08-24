@@ -54,15 +54,17 @@ const isCfcMetadata = (value: unknown): value is CfcMetadata =>
   Array.isArray(value.labelMap.entries);
 
 /**
- * Throws for an envelope-shaped record carrying a `version` outside
- * {@link KNOWN_CFC_METADATA_VERSIONS}. A record with no `version` at all is
- * not an envelope and stays invisible, exactly as before.
+ * Throws for a record at the reserved metadata position carrying a
+ * `version` outside {@link KNOWN_CFC_METADATA_VERSIONS}. The position is
+ * what qualifies the record, never its field names — a future format may
+ * rename every field except the version, and requiring today's members
+ * would read exactly those envelopes as unlabeled. A record with no
+ * `version` at all is not an envelope and stays invisible, as before.
  */
 const refuseUnknownMetadataVersion = (value: unknown): void => {
   if (
     isObjectNotArray(value) && "version" in value &&
-    !isKnownMetadataVersion(value.version) &&
-    ("schemaHash" in value || "labelMap" in value)
+    !isKnownMetadataVersion(value.version)
   ) {
     throw new UnknownCfcMetadataVersionError(value.version);
   }

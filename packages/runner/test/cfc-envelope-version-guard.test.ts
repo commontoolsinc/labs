@@ -124,6 +124,46 @@ describe("CFC envelope version guard", () => {
     }
   });
 
+  it("fails closed on an unknown version whose format renamed every field", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      // The reserved position is what qualifies the record, never its
+      // field names: a future format that renamed schemaHash and labelMap
+      // must refuse exactly like one that kept them — no schemaHash means
+      // the commit boundary has nothing to back, so the seed lands.
+      const id = parseLink(
+        runtime.getCell(space, "version-guard-renamed").getAsLink(),
+      ).id!;
+      const seed = runtime.edit();
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { secret: "sealed" },
+        cfc: { version: 2, payload: { labels: [] } },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
+        UnknownCfcMetadataVersionError,
+      );
+      expect(() =>
+        cfcLabelViewForDereference(
+          tx,
+          { space, scope: "space", id, path: [] },
+          { space, scope: "space", id, path: [] },
+        )
+      ).toThrow(UnknownCfcMetadataVersionError);
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("refuses an unknown version nested at the fallback metadata position", () => {
     // The ["cfc"] read can return a record that is not itself metadata but
     // carries an envelope-shaped member — the fallback position gets the
