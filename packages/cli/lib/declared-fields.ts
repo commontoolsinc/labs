@@ -104,9 +104,10 @@ export interface DeclaredFields {
  * missing a member is refusing a field that was declared, and the cost of an
  * extra member is accepting one that would have been dropped.
  *
- * A disjunction anywhere inside makes the whole position honor everything: a
- * branch the value was meant for may name a field the others do not, and
- * choosing among branches is the caller's, not this reader's.
+ * A disjunction makes the whole position honor everything, whether it sits at
+ * the position or inside a conjunction member: a branch the value was meant
+ * for may name a field the others do not, and choosing among branches is the
+ * caller's, not this reader's.
  *
  * `followed` breaks reference cycles, and it records the REFERENCE rather than
  * the schema it resolved to — the same key `localRefTarget` cycles on, and the
@@ -148,6 +149,12 @@ export function declaredFieldsAt(
     for (const name of node.required as unknown[]) {
       if (typeof name === "string") into.required.add(name);
     }
+  }
+  // A disjunction AT the position, read here rather than left to each caller
+  // to guard: a branch the value was meant for may name a field the others do
+  // not, and this reader is the one that says whether a position judges.
+  if (node.anyOf !== undefined || node.oneOf !== undefined) {
+    into.honorsUndeclared = true;
   }
   if (!Array.isArray(node.allOf)) return into;
   for (const member of node.allOf as JSONSchema[]) {

@@ -388,26 +388,29 @@ source remains the ordinary successful `null` CLI response, as does a valid
 projected null.
 
 **A field list names positions of the source, so the source's schema decides
-whether a name can be there at all.** A path the schema proves nothing can
-appear at is refused before the read, naming the position, the vocabulary that
-position declares, and — where the vocabulary holds a name close enough — the
-one the path is a typo of. Three shapes are proven: a field a position neither
-declares nor admits, a field named below a scalar, and a field named below a
-verb, which dispatches rather than holding a value. A field that is merely
-absent is a different fact and still returns nothing at exit 0 — an optional
-field nobody has written, an interface an item does not implement, a link that
-has not synced. The refusal therefore fires only where the schema settles the
-question, and a position it does not settle reads as it always did: an open
-`additionalProperties`, a `patternProperties` map that names a pattern, a
-disjunction, an untyped position, a position that only may hold an array
-(untyped beside an `items`, or typed as both an array and an object), a
-tuple-shaped array, whose `prefixItems` give its elements no one vocabulary, a
-reference site that declares fields of its own, and a name several `allOf`
-members declare. A reference that does not resolve is passed over as well, and
-what the caller then reads is the read's own report of the reference rather than
-anything about the field. A JSON `--schema` states a shape of its own rather
-than naming the source's fields and is not held to the source's vocabulary,
-which is the spelling for reading a position the source does not declare.
+whether a name can be there at all.** A position states its vocabulary by
+carrying a `properties` map, so one declaring no fields (`properties: {}`)
+refuses every name while a position with no map declares nothing and refuses
+none. A path the schema proves nothing can appear at is refused before the read,
+naming the position, the vocabulary that position declares, and — where the
+vocabulary holds a name close enough — the one the path is a typo of. Three
+shapes are proven: a field a position neither declares nor admits, a field named
+below a scalar, and a field named below a verb, which dispatches rather than
+holding a value. A field that is merely absent is a different fact and still
+returns nothing at exit 0 — an optional field nobody has written, an interface
+an item does not implement, a link that has not synced. The refusal therefore
+fires only where the schema settles the question, and a position it does not
+settle reads as it always did: an open `additionalProperties`, a
+`patternProperties` map that names a pattern, a disjunction, an untyped
+position, a position that only may hold an array (untyped beside an `items`, or
+typed as both an array and an object), a tuple-shaped array, whose `prefixItems`
+give its elements no one vocabulary, a reference site that declares fields of
+its own, and a name several `allOf` members declare. A reference that does not
+resolve is passed over as well, and what the caller then reads is the read's own
+report of the reference rather than anything about the field. A JSON `--schema`
+states a shape of its own rather than naming the source's fields and is not held
+to the source's vocabulary, which is the spelling for reading a position the
+source does not declare.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 When the declared source schema fixes the root container shape, the pattern
