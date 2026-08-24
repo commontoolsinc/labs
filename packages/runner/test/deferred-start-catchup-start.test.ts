@@ -836,8 +836,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     replica.commitNative = function (...args: unknown[]) {
       const candidate = args[1] as { tx?: object } | object;
       const inner = (candidate as { tx?: object }).tx ?? candidate;
-      if (startTransactions.has(candidate as object) ||
-        startTransactions.has(inner as object)) {
+      if (
+        startTransactions.has(candidate as object) ||
+        startTransactions.has(inner as object)
+      ) {
         refusals++;
         refusalWaiter.resolve();
         return Promise.resolve({ error });
