@@ -41,7 +41,15 @@ describe("CellBridge", () => {
         await expect(bridge.connectSpace("home")).rejects.toThrow(
           'Could not connect to "http://toolshed.test/".',
         );
-        expect(requested).toEqual(["http://toolshed.test/_health"]);
+        // The deployment's experimental posture first, because it decides
+        // how the runtime is constructed; then the health probe that decides
+        // whether to connect at all. The stub answers 503 to both, and a
+        // non-OK posture response is read as an absent posture, which is why
+        // the bridge goes on to the health probe and fails there.
+        expect(requested).toEqual([
+          "http://toolshed.test/api/meta",
+          "http://toolshed.test/_health",
+        ]);
       });
 
       it("throws when the identity file is not readable", async () => {

@@ -36,7 +36,7 @@ import {
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
-  experimentalOptionsFromEnv,
+  experimentalOptionsForDeployedClient,
   formatFabricRef,
   getCellOrThrow,
   getMetaLink,
@@ -494,10 +494,22 @@ export async function loadPieces(
   config: SpaceConfig,
 ): Promise<PiecesController> {
   setLLMUrl(config.apiUrl);
-  const session = await timeCliPhase(
-    "loadPieces.makeSession",
-    () => makeSession(config),
-  );
+  // The deployment's own flag posture, with this process's explicit
+  // EXPERIMENTAL_* still winning per flag: a cf binary is installed
+  // independently of the server it talks to, so left to the environment alone
+  // it drifts (docs/development/EXPERIMENTAL_OPTIONS.md). Fetched alongside
+  // the session rather than before it — neither needs the other.
+  const [session, experimental] = await Promise.all([
+    timeCliPhase("loadPieces.makeSession", () => makeSession(config)),
+    timeCliPhase(
+      "loadPieces.serverExperimental",
+      () =>
+        experimentalOptionsForDeployedClient({
+          apiUrl: new URL(config.apiUrl),
+          env: Deno.env.get,
+        }),
+    ),
+  ]);
   // A `--space` given as a name has only now resolved to a DID; this is the
   // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
   // performs at parse time for a DID-configured space.
@@ -519,7 +531,7 @@ export async function loadPieces(
             memoryHost: new URL(config.apiUrl),
             spaceIdentity: session.spaceIdentity,
           }),
-          experimental: experimentalOptionsFromEnv(Deno.env.get),
+          experimental,
           errorHandlers: [
             (error) => {
               runtimeErrors.push({

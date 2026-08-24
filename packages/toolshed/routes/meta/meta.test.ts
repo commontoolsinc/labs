@@ -1,7 +1,13 @@
 import { assertEquals } from "@std/assert";
+import {
+  experimentalOptionsForDeployedClient,
+  SERVER_EXPERIMENTAL_PATH,
+} from "@commonfabric/runner";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
+import { publishExperimentalPosture } from "@/lib/experimental-posture.ts";
 import router from "@/routes/meta/meta.index.ts";
+import * as routes from "@/routes/meta/meta.routes.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -24,5 +30,70 @@ Deno.test("meta routes", async (t) => {
     // A source run has no compiled marker: the shell's baked
     // server-execution define is unknown (null), like gitSha.
     assertEquals(json.shellServerExecutionDefine, null);
+  });
+
+  await t.step(
+    "GET /api/meta reports no posture until one is published",
+    async () => {
+      // The state of a server whose Runtime does not exist yet. Set here
+      // rather than assumed: the posture is module state, and another test
+      // file in the same process publishes one.
+      publishExperimentalPosture(null);
+      const json = await (await app.request("/api/meta")).json();
+      assertEquals(json.experimental, null);
+    },
+  );
+
+  await t.step(
+    "GET /api/meta reports the Runtime's resolved flags",
+    async () => {
+      publishExperimentalPosture({
+        modernCellRep: false,
+        serverExecution: true,
+      });
+      try {
+        const json = await (await app.request("/api/meta")).json();
+        assertEquals(json.experimental, {
+          modernCellRep: false,
+          serverExecution: true,
+        });
+      } finally {
+        publishExperimentalPosture(null);
+      }
+    },
+  );
+
+  await t.step("serves the document clients read their posture from", () => {
+    // The client half names this path as a constant it cannot see the route
+    // from; moving the route without moving the constant would leave every
+    // deployed client silently back on its own environment.
+    assertEquals(SERVER_EXPERIMENTAL_PATH, routes.index.path);
+  });
+
+  await t.step("a client resolves its posture from this response", async () => {
+    // The two halves meet only in the shape of this document: the route
+    // decides the field, `experimentalOptionsForDeployedClient` reads it, and
+    // nothing else would notice one of them renaming it. Driven through the
+    // real handler rather than a fixture, for exactly that reason.
+    publishExperimentalPosture({
+      modernCellRep: true,
+      lazyMaterialization: false,
+    });
+    try {
+      const adopted = await experimentalOptionsForDeployedClient({
+        apiUrl: new URL("http://toolshed.test"),
+        // An explicit override still outranks what the server publishes.
+        env: (name) =>
+          name === "EXPERIMENTAL_MODERN_CELL_REP" ? "false" : undefined,
+        fetch: async (input) =>
+          await app.request(new URL(String(input)).pathname),
+      });
+      assertEquals(adopted, {
+        modernCellRep: false,
+        lazyMaterialization: false,
+      });
+    } finally {
+      publishExperimentalPosture(null);
+    }
   });
 });
