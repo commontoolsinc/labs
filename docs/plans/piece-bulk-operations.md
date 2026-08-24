@@ -518,10 +518,9 @@ compiling; and the drill.
 - [x] The survey-diff: a survey compared against a plan or an earlier
       survey, reporting per piece moved as planned, still outstanding, or
       moved to something the plan did not ask for.
-- [ ] The survey and the pin read are invocable from `cf`
+- [x] The survey and the pin read are invocable from `cf`
       (`cf piece survey`, `cf piece inspect --pattern-identity`),
-      provisionally spelled per decision 1. Ticked by the stacked change
-      that lands them.
+      provisionally spelled per decision 1.
 - [ ] The stage-1 drill runs in continuous integration, under the CLI
       integration suite's `piece-call` section. Ticked by the stacked
       change that lands it.
